@@ -77,6 +77,36 @@
         "Illiquid options chain - only 2 alerts"
       ],
       "notes": "Dark pool flow indistinguishable from random. Colombian oil ADR with thin options liquidity makes convex structuring impractical even if edge existed."
+    },
+    {
+      "id": 4,
+      "date": "2026-02-28",
+      "time": "11:43:00",
+      "ticker": "MSFT",
+      "ticker_verified": true,
+      "validation_method": "dark_pool_activity",
+      "current_price": 394.30,
+      "action": "NO_TRADE",
+      "decision": "REJECTED",
+      "failing_gate": "EDGE",
+      "gates_evaluated": ["EDGE"],
+      "edge_analysis": {
+        "dp_buy_ratio_aggregate": 0.4592,
+        "flow_direction": "NEUTRAL",
+        "flow_strength": 0,
+        "num_prints": 2498,
+        "trading_days_checked": ["2026-02-27", "2026-02-26", "2026-02-25", "2026-02-24", "2026-02-23"],
+        "daily_pattern": "4 days ACCUMULATION then MASSIVE DISTRIBUTION on Friday",
+        "friday_distribution": "0.8% buy ratio, 8.7M shares sold vs 72K bought",
+        "options_flow": "NO_DATA"
+      },
+      "rejection_reasons": [
+        "Flow not sustained - reversed massively on day 5 (Friday)",
+        "Friday showed 98.4% distribution strength after 4 days of accumulation",
+        "Aggregate NEUTRAL (45.9% buy ratio, 0 strength)",
+        "Pattern suggests completed institutional trade (accumulated then exited)"
+      ],
+      "notes": "Institutional dark pool flow shows 4 days of accumulation (02-23 to 02-26) followed by extreme distribution on 02-27. Friday's selling (8.7M shares) nearly offset the entire week's buying. This is NOT a sustained signal - it's a completed round-trip trade. No edge for either direction."
     }
   ]
 }

@@ -1,0 +1,41 @@
+{
+  "last_updated": "2026-02-28",
+  "tickers": {
+    "MSFT": {
+      "company_name": "Microsoft Corporation",
+      "sector": "Technology/Software"
+    },
+    "IGV": {
+      "company_name": "iShares Expanded Tech-Software Sector ETF",
+      "sector": "Technology/Software ETF"
+    },
+    "PLTR": {
+      "company_name": "Palantir Technologies",
+      "sector": "Technology/Software"
+    },
+    "EC": {
+      "company_name": "Ecopetrol S.A.",
+      "sector": "Energy/Oil & Gas"
+    },
+    "SOFI": {
+      "company_name": "SoFi Technologies",
+      "sector": "Fintech"
+    },
+    "MU": {
+      "company_name": "Micron Technology",
+      "sector": "Semiconductors"
+    },
+    "ANET": {
+      "company_name": "Arista Networks",
+      "sector": "Networking"
+    },
+    "XLU": {
+      "company_name": "Utilities Select Sector SPDR Fund",
+      "sector": "Utilities ETF"
+    },
+    "AAPL": {
+      "company_name": "Apple Inc.",
+      "sector": "Technology/Consumer Electronics"
+    }
+  }
+}

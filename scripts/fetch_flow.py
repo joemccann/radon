@@ -12,6 +12,53 @@ from urllib.error import HTTPError, URLError
 
 BASE_URL = "https://api.unusualwhales.com/api"
 
+# US Market holidays for 2026 (NYSE/NASDAQ)
+MARKET_HOLIDAYS_2026 = {
+    "2026-01-01",  # New Year's Day
+    "2026-01-19",  # MLK Day
+    "2026-02-16",  # Presidents Day
+    "2026-04-03",  # Good Friday
+    "2026-05-25",  # Memorial Day
+    "2026-07-03",  # Independence Day (observed)
+    "2026-09-07",  # Labor Day
+    "2026-11-26",  # Thanksgiving
+    "2026-12-25",  # Christmas
+}
+
+
+def is_market_open(date: datetime) -> bool:
+    """Check if the market is open on a given date."""
+    if date.weekday() >= 5:  # Saturday = 5, Sunday = 6
+        return False
+    date_str = date.strftime("%Y-%m-%d")
+    if date_str in MARKET_HOLIDAYS_2026:
+        return False
+    return True
+
+
+def get_last_n_trading_days(n: int, from_date: datetime = None) -> List[str]:
+    """Get the last N trading days (market open days)."""
+    if from_date is None:
+        from_date = datetime.now()
+    
+    trading_days = []
+    current = from_date
+    
+    # Start from yesterday if today's market hasn't closed or it's not a trading day
+    if not is_market_open(current) or current.hour < 16:
+        current = current - timedelta(days=1)
+    
+    while len(trading_days) < n:
+        if is_market_open(current):
+            trading_days.append(current.strftime("%Y-%m-%d"))
+        current = current - timedelta(days=1)
+        
+        # Safety limit
+        if len(trading_days) == 0 and (from_date - current).days > 14:
+            break
+    
+    return trading_days
+
 
 def _get_token() -> str:
     token = os.environ.get("UW_TOKEN")
@@ -197,18 +244,19 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
 def fetch_flow(ticker: str, lookback_days: int = 5) -> Dict:
     """Full flow analysis: dark pool prints + options flow alerts.
 
-    Fetches dark pool data for each of the last N days and aggregates,
+    Fetches dark pool data for each of the last N TRADING days and aggregates,
     plus recent options flow alerts.
     """
     ticker = ticker.upper()
 
-    # Fetch dark pool data for recent days
+    # Fetch dark pool data for recent TRADING days (skip weekends/holidays)
     all_dp_trades = []
     daily_signals = []
     today = datetime.now()
+    
+    trading_days = get_last_n_trading_days(lookback_days, today)
 
-    for i in range(lookback_days):
-        date = (today - timedelta(days=i)).strftime("%Y-%m-%d")
+    for date in trading_days:
         trades = fetch_darkpool(ticker, date)
         if isinstance(trades, list):
             day_analysis = analyze_darkpool(trades)
@@ -241,7 +289,8 @@ def fetch_flow(ticker: str, lookback_days: int = 5) -> Dict:
     return {
         "ticker": ticker,
         "fetched_at": today.isoformat(),
-        "lookback_days": lookback_days,
+        "lookback_trading_days": lookback_days,
+        "trading_days_checked": trading_days,
         "dark_pool": {
             "aggregate": aggregate_dp,
             "daily": daily_signals,
@@ -254,7 +303,7 @@ def fetch_flow(ticker: str, lookback_days: int = 5) -> Dict:
 if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Fetch dark pool + options flow from Unusual Whales")
     p.add_argument("ticker", help="Stock ticker")
-    p.add_argument("--days", type=int, default=5, help="Lookback days for dark pool data (default 5)")
+    p.add_argument("--days", type=int, default=5, help="Lookback trading days for dark pool data (default 5)")
     p.add_argument("--min-premium", type=int, default=50000,
                    help="Min premium filter for options flow alerts (default $50k)")
     args = p.parse_args()
