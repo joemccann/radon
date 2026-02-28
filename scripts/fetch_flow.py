@@ -31,7 +31,8 @@ def _api_get(path: str, params: Optional[Dict] = None) -> Dict:
 
     req = Request(url, headers={
         "Accept": "application/json",
-        "Authorization": _get_token(),
+        "Authorization": f"Bearer {_get_token()}",
+        "User-Agent": "convex-scavenger/1.0",
     })
     try:
         with urlopen(req, timeout=30) as resp:

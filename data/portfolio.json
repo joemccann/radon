@@ -1,8 +1,25 @@
 {
   "bankroll": 100000,
   "peak_value": 100000,
-  "positions": [],
-  "total_deployed_pct": 0,
-  "max_positions": null,
-  "avg_kelly_optimal": null
+  "positions": [
+    {
+      "id": 1,
+      "ticker": "IGV",
+      "structure": "Bull Call Spread $85/$92",
+      "expiry": "2026-03-20",
+      "contracts": 26,
+      "entry_date": "2026-02-28",
+      "entry_cost": 2470,
+      "max_risk": 2470,
+      "max_reward": 15730,
+      "kelly_optimal": 15.04,
+      "target": "IGV $88-90",
+      "stop": "IGV < $78 or -50%"
+    }
+  ],
+  "total_deployed_pct": 2.47,
+  "total_deployed_dollars": 2470,
+  "remaining_capacity_pct": 97.53,
+  "max_positions": 6,
+  "avg_kelly_optimal": 15.04
 }

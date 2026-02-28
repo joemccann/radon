@@ -1,1 +1,82 @@
-{"trades": []}
+{
+  "trades": [
+    {
+      "id": 1,
+      "date": "2026-02-28",
+      "time": "11:23:00",
+      "ticker": "IGV",
+      "action": "OPEN",
+      "structure": "Bull Call Spread: Buy Mar 20 $85C / Sell Mar 20 $92C",
+      "cost_per_contract": 0.95,
+      "num_contracts": 26,
+      "total_risk": 2470,
+      "max_reward": 15730,
+      "pct_of_bankroll": 2.47,
+      "edge_signal": "79.8% DP buy ratio over 5 days, $1.49B premium, flow strength 59.6/100, ACCUMULATION on 4 of 5 days",
+      "p_itm_estimate": 0.38,
+      "odds_ratio": 2.7,
+      "expected_value_per_dollar": 0.19,
+      "kelly_optimal_pct": 15.04,
+      "kelly_fractional_pct": 3.76,
+      "convexity_ratio": 2.16,
+      "gates_passed": ["EDGE", "CONVEXITY", "RISK_MGMT"],
+      "target_exit": "IGV $88-90 or 100% gain on spread",
+      "stop_loss": "IGV below $78 or spread loses 50%",
+      "notes": "Strong institutional dark pool accumulation not yet reflected in price. 4 of 5 days show sustained buying with 79.8% aggregate buy ratio. Full Kelly at 15% indicates strong edge; sized at 2.5% cap. Defined-risk spread captures upside with 2.16x+ convexity."
+    },
+    {
+      "id": 2,
+      "date": "2026-02-28",
+      "time": "11:28:00",
+      "ticker": "PLTR",
+      "ticker_verified": false,
+      "company_name_assumed": "Palantir Technologies",
+      "action": "NO_TRADE",
+      "decision": "REJECTED",
+      "failing_gate": "EDGE",
+      "gates_evaluated": ["EDGE"],
+      "edge_analysis": {
+        "dp_buy_ratio_aggregate": 0.6141,
+        "flow_direction": "ACCUMULATION",
+        "flow_strength": 22.8,
+        "daily_pattern": "INCONSISTENT - alternating accumulation/distribution",
+        "today_direction": "DISTRIBUTION (31.9% buy ratio)",
+        "options_flow": "NO_DATA"
+      },
+      "rejection_reasons": [
+        "Flow not sustained - alternating direction daily",
+        "Today shows distribution (31.9%) reversing prior accumulation",
+        "Weak aggregate flow strength (22.8)",
+        "No options flow confirmation"
+      ],
+      "notes": "Aggregate 5-day shows 61.4% buy ratio but daily breakdown reveals choppy pattern. Feb 26-27 showed strong accumulation (86.5%, 79.9%) but Feb 28 reversed to 31.9% distribution. Signal may have already moved price and smart money is exiting."
+    },
+    {
+      "id": 3,
+      "date": "2026-02-28",
+      "time": "11:29:00",
+      "ticker": "EC",
+      "ticker_verified": false,
+      "company_name_assumed": "Ecopetrol S.A.",
+      "action": "NO_TRADE",
+      "decision": "REJECTED",
+      "failing_gate": "EDGE",
+      "gates_evaluated": ["EDGE"],
+      "edge_analysis": {
+        "dp_buy_ratio_aggregate": 0.5067,
+        "flow_direction": "NEUTRAL",
+        "flow_strength": 0,
+        "num_prints": 40,
+        "daily_pattern": "ALTERNATING - no sustained direction",
+        "options_flow": "NO_DATA (2 alerts only)"
+      },
+      "rejection_reasons": [
+        "Neutral aggregate buy ratio (50.67%) - statistical noise",
+        "Zero flow strength - no institutional conviction",
+        "Insufficient prints (40) for statistical significance",
+        "Illiquid options chain - only 2 alerts"
+      ],
+      "notes": "Dark pool flow indistinguishable from random. Colombian oil ADR with thin options liquidity makes convex structuring impractical even if edge existed."
+    }
+  ]
+}

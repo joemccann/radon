@@ -19,7 +19,7 @@ def scan():
         # Call fetch_flow for each ticker
         try:
             out = subprocess.check_output(
-                ["python", "scripts/fetch_flow.py", ticker],
+                ["python3", "scripts/fetch_flow.py", ticker],
                 text=True, timeout=30
             )
             flow = json.loads(out)

@@ -1,6 +1,7 @@
 {
-  "last_updated": null,
+  "last_updated": "2026-02-28",
   "tickers": [
+    {"ticker": "IGV", "sector": "Technology/Software", "notes": "OPEN POSITION - Bull call spread $85/$92 Mar 20. Strong DP accumulation 79.8% buy ratio."},
     {"ticker": "MU", "sector": "Semiconductors", "notes": "Historical DP buy signal at support"},
     {"ticker": "ANET", "sector": "Networking", "notes": "Watching for distribution pattern"},
     {"ticker": "XLU", "sector": "Utilities", "notes": "Potential sector rotation signal"}
