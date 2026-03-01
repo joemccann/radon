@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LEAP IV Mispricing Scan | 2026-02-28</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #050505; --panel: #0A0A0A; --border: #1C1C1C; --text: #F0F0F0; --muted: #666; --green: #22C55E; --red: #EF4444; }
+    [data-theme="light"] { --bg: #F5F5F5; --panel: #FFF; --border: #D9D9D9; --text: #0A0A0A; --muted: #6B6B6B; }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg); color: var(--text); font-family: 'JetBrains Mono', monospace; font-size: 12px; padding: 20px; }
+    h1 { font-size: 14px; margin-bottom: 20px; text-transform: uppercase; letter-spacing: 0.1em; }
+    .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border); margin-bottom: 20px; }
+    .summary-card { background: var(--panel); padding: 16px; }
+    .summary-label { font-size: 10px; color: var(--muted); text-transform: uppercase; margin-bottom: 8px; }
+    .summary-value { font-size: 24px; font-weight: 700; }
+    .section { background: var(--panel); border: 1px solid var(--border); margin-bottom: 20px; }
+    .section-header { padding: 12px 16px; border-bottom: 1px solid var(--border); font-size: 11px; text-transform: uppercase; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 16px; text-align: left; border-bottom: 1px solid var(--border); }
+    th { font-size: 10px; color: var(--muted); text-transform: uppercase; }
+    .right { text-align: right; }
+    .green { color: var(--green); }
+    .red { color: var(--red); }
+    .pill { display: inline-block; padding: 2px 6px; border: 1px solid; font-size: 10px; }
+    .pill.green { border-color: var(--green); color: var(--green); }
+    .pill.red { border-color: var(--red); color: var(--red); }
+    .toggle { position: fixed; top: 20px; right: 20px; background: var(--panel); border: 1px solid var(--border); color: var(--text); padding: 8px 12px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">◐</button>
+  
+  <h1>LEAP IV Mispricing Scanner</h1>
+  
+  <div class="summary">
+    <div class="summary-card">
+      <div class="summary-label">Tickers Scanned</div>
+      <div class="summary-value">7</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">LEAP Contracts</div>
+      <div class="summary-value">194</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Mispriced (Gap ≥10.0%)</div>
+      <div class="summary-value green">4</div>
+    </div>
+    <div class="summary-card">
+      <div class="summary-label">Best Gap</div>
+      <div class="summary-value">45.1%</div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="section-header">🔥 Mispriced Opportunities</div>
+    <table>
+      <tr>
+        <th>Ticker</th>
+        <th class="right">Price</th>
+        <th class="right">HV20</th>
+        <th class="right">HV60</th>
+        <th class="right">Avg LEAP IV</th>
+        <th class="right">Gap</th>
+        <th class="right">IV Rank</th>
+      </tr>
+
+      <tr>
+        <td><strong>COIN</strong></td>
+        <td class="right">$175.85</td>
+        <td class="right">115.3%</td>
+        <td class="right">75.4%</td>
+        <td class="right">79.8%</td>
+        <td class="right green">+45.1%</td>
+        <td class="right">44.5</td>
+      </tr>
+
+      <tr>
+        <td><strong>MSTR</strong></td>
+        <td class="right">$129.50</td>
+        <td class="right">129.7%</td>
+        <td class="right">89.6%</td>
+        <td class="right">95.8%</td>
+        <td class="right green">+44.8%</td>
+        <td class="right">48.1</td>
+      </tr>
+
+      <tr>
+        <td><strong>AMD</strong></td>
+        <td class="right">$200.21</td>
+        <td class="right">89.4%</td>
+        <td class="right">61.9%</td>
+        <td class="right">65.7%</td>
+        <td class="right green">+30.3%</td>
+        <td class="right">41.0</td>
+      </tr>
+
+      <tr>
+        <td><strong>PLTR</strong></td>
+        <td class="right">$137.19</td>
+        <td class="right">70.8%</td>
+        <td class="right">52.3%</td>
+        <td class="right">61.6%</td>
+        <td class="right green">+10.8%</td>
+        <td class="right">23.7</td>
+      </tr>
+
+    </table>
+  </div>
+
+  <div class="section">
+    <div class="section-header">All Tickers</div>
+    <table>
+      <tr>
+        <th>Ticker</th>
+        <th class="right">Price</th>
+        <th class="right">HV20</th>
+        <th class="right">HV60</th>
+        <th class="right">HV252</th>
+        <th class="right">Current IV</th>
+        <th class="right">IV Rank</th>
+        <th class="right">LEAPs</th>
+        <th class="right">Status</th>
+      </tr>
+
+      <tr>
+        <td><strong>TSLA</strong></td>
+        <td class="right">$402.51</td>
+        <td class="right">33.9%</td>
+        <td class="right">36.7%</td>
+        <td class="right">60.4%</td>
+        <td class="right">43.0%</td>
+        <td class="right">4.1</td>
+        <td class="right">9</td>
+        <td class="right"><span class="pill">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>NVDA</strong></td>
+        <td class="right">$177.19</td>
+        <td class="right">45.8%</td>
+        <td class="right">34.8%</td>
+        <td class="right">44.1%</td>
+        <td class="right">50.7%</td>
+        <td class="right">47.3</td>
+        <td class="right">28</td>
+        <td class="right"><span class="pill">OK</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>AMD</strong></td>
+        <td class="right">$200.21</td>
+        <td class="right">89.4%</td>
+        <td class="right">61.9%</td>
+        <td class="right">62.9%</td>
+        <td class="right">58.0%</td>
+        <td class="right">41.0</td>
+        <td class="right">29</td>
+        <td class="right"><span class="pill green">MISPRICED</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>COIN</strong></td>
+        <td class="right">$175.85</td>
+        <td class="right">115.3%</td>
+        <td class="right">75.4%</td>
+        <td class="right">75.2%</td>
+        <td class="right">71.2%</td>
+        <td class="right">44.5</td>
+        <td class="right">23</td>
+        <td class="right"><span class="pill green">MISPRICED</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>MSTR</strong></td>
+        <td class="right">$129.50</td>
+        <td class="right">129.7%</td>
+        <td class="right">89.6%</td>
+        <td class="right">78.9%</td>
+        <td class="right">83.2%</td>
+        <td class="right">48.1</td>
+        <td class="right">18</td>
+        <td class="right"><span class="pill green">MISPRICED</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>PLTR</strong></td>
+        <td class="right">$137.19</td>
+        <td class="right">70.8%</td>
+        <td class="right">52.3%</td>
+        <td class="right">60.9%</td>
+        <td class="right">57.2%</td>
+        <td class="right">23.7</td>
+        <td class="right">18</td>
+        <td class="right"><span class="pill green">MISPRICED</span></td>
+      </tr>
+
+      <tr>
+        <td><strong>SOFI</strong></td>
+        <td class="right">$17.76</td>
+        <td class="right">59.6%</td>
+        <td class="right">51.4%</td>
+        <td class="right">63.2%</td>
+        <td class="right">66.6%</td>
+        <td class="right">29.4</td>
+        <td class="right">69</td>
+        <td class="right"><span class="pill">OK</span></td>
+      </tr>
+
+    </table>
+  </div>
+  
+  <div class="section">
+    <div class="section-header" style="color: var(--muted)">
+      Generated 2026-02-28 18:53:36 | HV from Yahoo Finance | IV from Unusual Whales
+    </div>
+  </div>
+</body>
+</html>

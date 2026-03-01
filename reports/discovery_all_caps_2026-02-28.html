@@ -1,0 +1,2115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Convex Scavenger — Full Discovery Report | Feb 28, 2026</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-blue: #58a6ff;
+            --accent-purple: #a371f7;
+            --accent-cyan: #39d353;
+            --accent-orange: #f0883e;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding: 2rem;
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+            position: relative;
+            overflow: hidden;
+        }
+
+        header::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: linear-gradient(90deg, var(--accent-green), var(--accent-blue), var(--accent-purple));
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent-cyan) 0%, var(--accent-blue) 50%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        header .filter-badge {
+            display: inline-block;
+            margin-top: 1rem;
+            padding: 0.5rem 1.5rem;
+            background: linear-gradient(135deg, var(--accent-purple), var(--accent-blue));
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 1rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+            transition: transform 0.2s, border-color 0.2s;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            border-color: var(--accent-blue);
+        }
+
+        .stat-card .value {
+            font-size: 2.2rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-top: 0.5rem;
+        }
+
+        .stat-card.green .value { color: var(--accent-green); }
+        .stat-card.yellow .value { color: var(--accent-yellow); }
+        .stat-card.red .value { color: var(--accent-red); }
+        .stat-card.purple .value { color: var(--accent-purple); }
+        .stat-card.cyan .value { color: var(--accent-cyan); }
+        .stat-card.orange .value { color: var(--accent-orange); }
+
+        section {
+            margin-bottom: 3rem;
+        }
+
+        section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        section h2 .icon {
+            font-size: 1.3rem;
+        }
+
+        .chart-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .chart-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(450px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .chart-full {
+            grid-column: 1 / -1;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+            font-size: 0.9rem;
+        }
+
+        th, td {
+            padding: 0.875rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            position: sticky;
+            top: 0;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .ticker {
+            font-weight: 700;
+            font-size: 1rem;
+            color: var(--accent-blue);
+        }
+
+        .score {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 45px;
+            height: 32px;
+            border-radius: 6px;
+            font-weight: 700;
+            font-size: 0.9rem;
+        }
+
+        .score.high { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .score.medium { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .score.low { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+
+        .badge {
+            display: inline-block;
+            padding: 0.2rem 0.6rem;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge.accumulation { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .badge.distribution { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+        .badge.neutral { background: rgba(139, 148, 158, 0.2); color: var(--text-secondary); }
+        .badge.bullish { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .badge.bearish { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+        .badge.mixed { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .badge.yes { background: rgba(63, 185, 80, 0.3); color: var(--accent-green); border: 1px solid var(--accent-green); }
+        .badge.no { background: rgba(248, 81, 73, 0.1); color: var(--accent-red); }
+        .badge.etf { background: rgba(88, 166, 255, 0.2); color: var(--accent-blue); }
+        .badge.stock { background: rgba(163, 113, 247, 0.2); color: var(--accent-purple); }
+
+        .progress-bar {
+            width: 100%;
+            height: 6px;
+            background: var(--bg-tertiary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-bar .fill.green { background: linear-gradient(90deg, var(--accent-green), var(--accent-cyan)); }
+        .progress-bar .fill.red { background: linear-gradient(90deg, var(--accent-red), var(--accent-orange)); }
+        .progress-bar .fill.yellow { background: linear-gradient(90deg, var(--accent-yellow), var(--accent-orange)); }
+
+        .signal-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            transition: border-color 0.2s;
+        }
+
+        .signal-card:hover {
+            border-color: var(--accent-blue);
+        }
+
+        .signal-card.top-pick {
+            border-left: 4px solid var(--accent-green);
+        }
+
+        .signal-card h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .signal-card h3 .ticker-large {
+            font-size: 1.4rem;
+            color: var(--accent-blue);
+        }
+
+        .signal-card h3 .sector {
+            color: var(--text-secondary);
+            font-weight: 400;
+            font-size: 0.95rem;
+        }
+
+        .signal-card .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .signal-card .metric {
+            text-align: center;
+            padding: 0.75rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .signal-card .metric .value {
+            font-size: 1.3rem;
+            font-weight: 700;
+        }
+
+        .signal-card .metric .label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-top: 0.2rem;
+        }
+
+        .signal-card .analysis {
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        .signal-card .analysis p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .recommendation {
+            background: linear-gradient(135deg, rgba(63, 185, 80, 0.1) 0%, rgba(88, 166, 255, 0.1) 100%);
+            border: 1px solid var(--accent-green);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .recommendation h3 {
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+        }
+
+        .recommendation ol {
+            margin-left: 1.5rem;
+        }
+
+        .recommendation li {
+            margin-bottom: 0.75rem;
+        }
+
+        .recommendation code {
+            background: var(--bg-tertiary);
+            padding: 0.2rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            color: var(--accent-purple);
+            font-size: 0.85rem;
+        }
+
+        .tier-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .tier-section {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .tier-section h4 {
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tier-section.tier-1 { border-top: 3px solid var(--accent-green); }
+        .tier-section.tier-2 { border-top: 3px solid var(--accent-yellow); }
+        .tier-section.tier-3 { border-top: 3px solid var(--accent-red); }
+
+        .mini-table {
+            width: 100%;
+        }
+
+        .mini-table td {
+            padding: 0.5rem;
+            border: none;
+            background: transparent;
+        }
+
+        .mini-table tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.85rem;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .heatmap-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+            gap: 0.5rem;
+        }
+
+        .heatmap-cell {
+            aspect-ratio: 1;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            transition: transform 0.2s;
+        }
+
+        .heatmap-cell:hover {
+            transform: scale(1.1);
+            z-index: 1;
+        }
+
+        .heatmap-cell .score-val {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .scroll-table {
+            max-height: 500px;
+            overflow-y: auto;
+        }
+
+        @media (max-width: 768px) {
+            body { padding: 1rem; }
+            header h1 { font-size: 1.8rem; }
+            .chart-grid { grid-template-columns: 1fr; }
+            th, td { padding: 0.5rem; font-size: 0.8rem; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Convex Scavenger</h1>
+            <p class="subtitle">Full Market Discovery Report — Saturday, February 28, 2026 @ 5:29 PM PST</p>
+            <div class="filter-badge">🌐 ALL MARKET CAPS</div>
+        </header>
+
+        <!-- Summary Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">200</div>
+                <div class="label">Options Alerts Analyzed</div>
+            </div>
+            <div class="stat-card cyan">
+                <div class="value">42</div>
+                <div class="label">Candidates Found</div>
+            </div>
+            <div class="stat-card green">
+                <div class="value">12</div>
+                <div class="label">With Confluence ✓</div>
+            </div>
+            <div class="stat-card yellow">
+                <div class="value">8</div>
+                <div class="label">Strong DP Signal</div>
+            </div>
+            <div class="stat-card purple">
+                <div class="value">$76.8M</div>
+                <div class="label">Total Premium Flow</div>
+            </div>
+            <div class="stat-card orange">
+                <div class="value">56.9</div>
+                <div class="label">Top Score (TLT)</div>
+            </div>
+        </div>
+
+        <!-- Score Heatmap -->
+        <section>
+            <h2><span class="icon">🔥</span> Score Heatmap — All 42 Candidates</h2>
+            <div class="chart-container">
+                <div class="heatmap-container" id="heatmap"></div>
+            </div>
+        </section>
+
+        <!-- Charts Section -->
+        <section>
+            <h2><span class="icon">📊</span> Visual Analytics</h2>
+            <div class="chart-grid">
+                <div class="chart-container">
+                    <canvas id="topScoresChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="dpStrengthChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="confluenceChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="sectorChart"></canvas>
+                </div>
+                <div class="chart-container chart-full">
+                    <canvas id="scatterChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Tiered Candidates -->
+        <section>
+            <h2><span class="icon">🏆</span> Candidate Tiers</h2>
+            <div class="tier-grid">
+                <div class="tier-section tier-1">
+                    <h4 style="color: var(--accent-green);">🥇 Tier 1: Strong Edge (Score 50+)</h4>
+                    <table class="mini-table">
+                        <tr>
+                            <td><span class="ticker">TLT</span></td>
+                            <td><span class="score high">56.9</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">WDC</span></td>
+                            <td><span class="score high">53.8</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">GLD</span></td>
+                            <td><span class="score high">52.6</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td><span class="badge no">✗</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">KKR</span></td>
+                            <td><span class="score high">52.3</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="tier-section tier-2">
+                    <h4 style="color: var(--accent-yellow);">🥈 Tier 2: Moderate Edge (Score 40-49)</h4>
+                    <table class="mini-table">
+                        <tr>
+                            <td><span class="ticker">NVDA</span></td>
+                            <td><span class="score medium">46.1</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td><span class="badge no">✗</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">C</span></td>
+                            <td><span class="score medium">43.2</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">JNJ</span></td>
+                            <td><span class="score medium">42.6</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">EOSE</span></td>
+                            <td><span class="score medium">42.6</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">ZS</span></td>
+                            <td><span class="score medium">41.4</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">AMZN</span></td>
+                            <td><span class="score medium">40.4</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge no">✗</span></td>
+                        </tr>
+                    </table>
+                </div>
+                <div class="tier-section tier-3">
+                    <h4 style="color: var(--accent-red);">🥉 Tier 3: Weak/Monitor (Score &lt;40)</h4>
+                    <table class="mini-table">
+                        <tr>
+                            <td><span class="ticker">AVGO</span></td>
+                            <td><span class="score low">38.7</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">INSM</span></td>
+                            <td><span class="score low">37.5</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">AAPL</span></td>
+                            <td><span class="score low">37.2</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge no">✗</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">IAU</span></td>
+                            <td><span class="score low">33.3</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td><span class="ticker">XYZ</span></td>
+                            <td><span class="score low">30.9</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                        </tr>
+                        <tr>
+                            <td colspan="4" style="color: var(--text-secondary); font-size: 0.8rem;">+ 27 more below threshold</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- Confluence Candidates Table -->
+        <section>
+            <h2><span class="icon">✅</span> All Candidates WITH Confluence (12 Total)</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">Dark pool flow direction aligns with options flow bias — strongest edge potential.</p>
+            <div class="scroll-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Ticker</th>
+                            <th>Type</th>
+                            <th>Score</th>
+                            <th>DP Direction</th>
+                            <th>DP Strength</th>
+                            <th>Buy Ratio</th>
+                            <th>Sustained</th>
+                            <th>Options</th>
+                            <th>Premium</th>
+                            <th>Sweeps</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1</td>
+                            <td><span class="ticker">TLT</span><br><small style="color: var(--text-secondary);">20+ Yr Treasury ETF</small></td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score high">56.9</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>54.5</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 54.5%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">77.3%</strong></td>
+                            <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$15.96M</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>2</td>
+                            <td><span class="ticker">WDC</span><br><small style="color: var(--text-secondary);">Western Digital</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score high">53.8</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>72.8</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 72.8%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">86.4%</strong></td>
+                            <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$1.05M</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>3</td>
+                            <td><span class="ticker">KKR</span><br><small style="color: var(--text-secondary);">KKR & Co</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score high">52.3</span></td>
+                            <td><span class="badge distribution">DISTRIBUTION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>31.0</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill red" style="width: 31%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span style="color: var(--accent-red);">34.5%</span></td>
+                            <td>2 days</td>
+                            <td><span class="badge bearish">BEARISH</span></td>
+                            <td>$512K</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>4</td>
+                            <td><span class="ticker">C</span><br><small style="color: var(--text-secondary);">Citigroup</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score medium">43.2</span></td>
+                            <td><span class="badge distribution">DISTRIBUTION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>25.7</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill red" style="width: 25.7%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span style="color: var(--accent-red);">37.2%</span></td>
+                            <td>2 days</td>
+                            <td><span class="badge bearish">BEARISH</span></td>
+                            <td>$721K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>5</td>
+                            <td><span class="ticker">JNJ</span><br><small style="color: var(--text-secondary);">Johnson & Johnson</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score medium">42.6</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>35.3</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 35.3%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">67.6%</strong></td>
+                            <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$788K</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>6</td>
+                            <td><span class="ticker">EOSE</span><br><small style="color: var(--text-secondary);">Eos Energy</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score medium">42.6</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>23.6</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 23.6%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">61.8%</strong></td>
+                            <td>2 days</td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$638K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>7</td>
+                            <td><span class="ticker">ZS</span><br><small style="color: var(--text-secondary);">Zscaler</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score medium">41.4</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>21.1</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 21.1%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">60.6%</strong></td>
+                            <td>1 day</td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$539K</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>8</td>
+                            <td><span class="ticker">AVGO</span><br><small style="color: var(--text-secondary);">Broadcom</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score low">38.7</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>35.6</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 35.6%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">67.8%</strong></td>
+                            <td>2 days</td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$1.33M</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>9</td>
+                            <td><span class="ticker">INSM</span><br><small style="color: var(--text-secondary);">Insmed Inc</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score low">37.5</span></td>
+                            <td><span class="badge distribution">DISTRIBUTION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>29.0</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill red" style="width: 29%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><span style="color: var(--accent-red);">35.5%</span></td>
+                            <td>1 day</td>
+                            <td><span class="badge bearish">BEARISH</span></td>
+                            <td>$2.10M</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>10</td>
+                            <td><span class="ticker">IAU</span><br><small style="color: var(--text-secondary);">iShares Gold Trust</small></td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">33.3</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>17.7</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 17.7%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">58.8%</strong></td>
+                            <td>2 days</td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$881K</td>
+                            <td>0</td>
+                        </tr>
+                        <tr>
+                            <td>11</td>
+                            <td><span class="ticker">XYZ</span><br><small style="color: var(--text-secondary);">Block Inc</small></td>
+                            <td><span class="badge stock">STOCK</span></td>
+                            <td><span class="score low">30.9</span></td>
+                            <td><span class="badge accumulation">ACCUMULATION</span></td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                    <span>10.0</span>
+                                    <div class="progress-bar" style="width: 50px;">
+                                        <div class="fill green" style="width: 10%;"></div>
+                                    </div>
+                                </div>
+                            </td>
+                            <td><strong style="color: var(--accent-green);">55.0%</strong></td>
+                            <td>0 days</td>
+                            <td><span class="badge bullish">BULLISH</span></td>
+                            <td>$8.24M</td>
+                            <td>0</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Full Candidate List -->
+        <section>
+            <h2><span class="icon">📋</span> Complete Candidate List (All 42)</h2>
+            <div class="scroll-table">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>#</th>
+                            <th>Ticker</th>
+                            <th>Sector</th>
+                            <th>Type</th>
+                            <th>Score</th>
+                            <th>DP Dir</th>
+                            <th>DP Str</th>
+                            <th>Buy %</th>
+                            <th>Days</th>
+                            <th>Options</th>
+                            <th>Confluence</th>
+                            <th>Premium</th>
+                            <th>Alerts</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1</td>
+                            <td><span class="ticker">TLT</span></td>
+                            <td>Treasury</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score high">56.9</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>54.5</td>
+                            <td style="color: var(--accent-green);">77.3%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$15.96M</td>
+                            <td>10</td>
+                        </tr>
+                        <tr>
+                            <td>2</td>
+                            <td><span class="ticker">WDC</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score high">53.8</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>72.8</td>
+                            <td style="color: var(--accent-green);">86.4%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$1.05M</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td>3</td>
+                            <td><span class="ticker">GLD</span></td>
+                            <td>Gold</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score high">52.6</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td>48.6</td>
+                            <td style="color: var(--accent-red);">25.7%</td>
+                            <td>2</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$6.03M</td>
+                            <td>4</td>
+                        </tr>
+                        <tr>
+                            <td>4</td>
+                            <td><span class="ticker">KKR</span></td>
+                            <td>Financial</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score high">52.3</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td>31.0</td>
+                            <td style="color: var(--accent-red);">34.5%</td>
+                            <td>2</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$512K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>5</td>
+                            <td><span class="ticker">NVDA</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score medium">46.1</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td>68.3</td>
+                            <td style="color: var(--accent-red);">15.8%</td>
+                            <td>2</td>
+                            <td><span class="badge mixed">MIX</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$25.34M</td>
+                            <td>26</td>
+                        </tr>
+                        <tr>
+                            <td>6</td>
+                            <td><span class="ticker">C</span></td>
+                            <td>Financial</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score medium">43.2</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td>25.7</td>
+                            <td style="color: var(--accent-red);">37.2%</td>
+                            <td>2</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$721K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>7</td>
+                            <td><span class="ticker">JNJ</span></td>
+                            <td>Healthcare</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score medium">42.6</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>35.3</td>
+                            <td style="color: var(--accent-green);">67.6%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$788K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>8</td>
+                            <td><span class="ticker">EOSE</span></td>
+                            <td>Industrials</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score medium">42.6</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>23.6</td>
+                            <td style="color: var(--accent-green);">61.8%</td>
+                            <td>2</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$638K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>9</td>
+                            <td><span class="ticker">ZS</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score medium">41.4</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>21.1</td>
+                            <td style="color: var(--accent-green);">60.6%</td>
+                            <td>1</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$539K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>10</td>
+                            <td><span class="ticker">AMZN</span></td>
+                            <td>Consumer</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score medium">40.4</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>69.5</td>
+                            <td style="color: var(--accent-green);">84.7%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge mixed">MIX</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$1.15M</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td>11</td>
+                            <td><span class="ticker">AVGO</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">38.7</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>35.6</td>
+                            <td style="color: var(--accent-green);">67.8%</td>
+                            <td>2</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$1.33M</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td>12</td>
+                            <td><span class="ticker">DIS</span></td>
+                            <td>Communication</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">38.5</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td>38.3</td>
+                            <td style="color: var(--accent-red);">30.8%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$1.55M</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td>13</td>
+                            <td><span class="ticker">INSM</span></td>
+                            <td>Healthcare</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">37.5</span></td>
+                            <td><span class="badge distribution">DIST</span></td>
+                            <td>29.0</td>
+                            <td style="color: var(--accent-red);">35.5%</td>
+                            <td>1</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$2.10M</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>14</td>
+                            <td><span class="ticker">AAPL</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">37.2</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>83.9</td>
+                            <td style="color: var(--accent-green);">91.9%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$1.50M</td>
+                            <td>2</td>
+                        </tr>
+                        <tr>
+                            <td>15</td>
+                            <td><span class="ticker">HSY</span></td>
+                            <td>Consumer</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">36.7</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>32.2</td>
+                            <td style="color: var(--accent-green);">66.1%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$703K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>16</td>
+                            <td><span class="ticker">NKE</span></td>
+                            <td>Consumer</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">34.7</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>15.7</td>
+                            <td style="color: var(--accent-green);">57.9%</td>
+                            <td>0</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$1.83M</td>
+                            <td>3</td>
+                        </tr>
+                        <tr>
+                            <td>17</td>
+                            <td><span class="ticker">IAU</span></td>
+                            <td>Gold</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">33.3</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>17.7</td>
+                            <td style="color: var(--accent-green);">58.8%</td>
+                            <td>2</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$881K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>18</td>
+                            <td><span class="ticker">CVX</span></td>
+                            <td>Energy</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">31.6</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>65.3</td>
+                            <td style="color: var(--accent-green);">82.7%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge bearish">BEAR</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$656K</td>
+                            <td>1</td>
+                        </tr>
+                        <tr>
+                            <td>19</td>
+                            <td><span class="ticker">XYZ</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">30.9</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>10.0</td>
+                            <td style="color: var(--accent-green);">55.0%</td>
+                            <td>0</td>
+                            <td><span class="badge bullish">BULL</span></td>
+                            <td><span class="badge yes">✓</span></td>
+                            <td>$8.24M</td>
+                            <td>4</td>
+                        </tr>
+                        <tr>
+                            <td>20</td>
+                            <td><span class="ticker">AMD</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">30.8</span></td>
+                            <td><span class="badge accumulation">ACCUM</span></td>
+                            <td>62.7</td>
+                            <td style="color: var(--accent-green);">81.3%</td>
+                            <td style="color: var(--accent-green);">3</td>
+                            <td><span class="badge mixed">MIX</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>$5.14M</td>
+                            <td>5</td>
+                        </tr>
+                        <tr>
+                            <td>21</td>
+                            <td><span class="ticker">META</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">30.1</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge mixed">MIX</span></td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>22</td>
+                            <td><span class="ticker">FSLR</span></td>
+                            <td>Energy</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">29.6</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>23</td>
+                            <td><span class="ticker">RKLB</span></td>
+                            <td>Aerospace</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">28.9</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>24</td>
+                            <td><span class="ticker">KRE</span></td>
+                            <td>Financial</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">27.3</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>25</td>
+                            <td><span class="ticker">RDDT</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">26.8</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>26</td>
+                            <td><span class="ticker">TFC</span></td>
+                            <td>Financial</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">26.5</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>27</td>
+                            <td><span class="ticker">TEAM</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">25.7</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>28</td>
+                            <td><span class="ticker">TSLA</span></td>
+                            <td>Consumer</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">25.4</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>29</td>
+                            <td><span class="ticker">EUFN</span></td>
+                            <td>Financial</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">21.8</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>30</td>
+                            <td><span class="ticker">CCL</span></td>
+                            <td>Consumer</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">21.8</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>31</td>
+                            <td><span class="ticker">CRWV</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">17.4</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>32</td>
+                            <td><span class="ticker">SLV</span></td>
+                            <td>Silver</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">15.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>33</td>
+                            <td><span class="ticker">AFRM</span></td>
+                            <td>Financial</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">15.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>34</td>
+                            <td><span class="ticker">ITB</span></td>
+                            <td>Real Estate</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">15.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>35</td>
+                            <td><span class="ticker">DHI</span></td>
+                            <td>Real Estate</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">15.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>36</td>
+                            <td><span class="ticker">ZETA</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">11.5</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>37</td>
+                            <td><span class="ticker">LQD</span></td>
+                            <td>Bonds</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">10.2</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>38</td>
+                            <td><span class="ticker">NVDL</span></td>
+                            <td>Leveraged</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">8.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>39</td>
+                            <td><span class="ticker">BABA</span></td>
+                            <td>Consumer</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">4.7</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>40</td>
+                            <td><span class="ticker">NBIS</span></td>
+                            <td>Technology</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">4.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>41</td>
+                            <td><span class="ticker">UNH</span></td>
+                            <td>Healthcare</td>
+                            <td><span class="badge stock">STK</span></td>
+                            <td><span class="score low">4.0</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                        <tr>
+                            <td>42</td>
+                            <td><span class="ticker">IBIT</span></td>
+                            <td>Crypto</td>
+                            <td><span class="badge etf">ETF</span></td>
+                            <td><span class="score low">0.2</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td>—</td>
+                            <td><span class="badge no">✗</span></td>
+                            <td>—</td>
+                            <td>—</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
+        <!-- Top Picks Detailed Analysis -->
+        <section>
+            <h2><span class="icon">🔬</span> Top Picks — Detailed Analysis</h2>
+            
+            <div class="signal-card top-pick">
+                <h3>
+                    <span class="ticker-large">TLT</span>
+                    <span class="sector">— iShares 20+ Year Treasury Bond ETF</span>
+                    <span class="badge etf" style="margin-left: auto;">ETF</span>
+                    <span class="badge accumulation">ACCUMULATION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">77.3%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">54.5</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">3</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$15.96M</div>
+                        <div class="label">Call Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">56.9</div>
+                        <div class="label">Score</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Massive institutional accumulation in long-duration treasuries with $15.96M in bullish call premium — highest premium flow of any candidate. 3 consecutive days of sustained buying with 77.3% buy ratio. Classic "risk-off" positioning ahead of potential market turbulence or Fed pivot expectations.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Thesis:</strong> Institutions positioning for lower rates / flight to safety. TLT benefits from falling yields.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-green); font-weight: 700;">🎯 TOP PICK — EVALUATE IMMEDIATELY</span></p>
+                </div>
+            </div>
+
+            <div class="signal-card top-pick">
+                <h3>
+                    <span class="ticker-large">WDC</span>
+                    <span class="sector">— Western Digital | Technology / Storage</span>
+                    <span class="badge stock" style="margin-left: auto;">STOCK</span>
+                    <span class="badge accumulation">ACCUMULATION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">86.4%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">72.8</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">3</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$1.05M</div>
+                        <div class="label">Call Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">53.8</div>
+                        <div class="label">Score</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Strongest dark pool strength (72.8) with exceptional 86.4% buy ratio sustained over 3 days. Aggressive institutional accumulation in storage sector. Options flow confirms with bullish call buying.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Thesis:</strong> Storage sector rotation / AI data center demand driving hardware plays. WDC positioned as beneficiary of continued data growth.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-green); font-weight: 700;">🎯 TOP PICK — EVALUATE IMMEDIATELY</span></p>
+                </div>
+            </div>
+
+            <div class="signal-card top-pick">
+                <h3>
+                    <span class="ticker-large">KKR</span>
+                    <span class="sector">— KKR & Co | Financial Services / PE</span>
+                    <span class="badge stock" style="margin-left: auto;">STOCK</span>
+                    <span class="badge distribution">DISTRIBUTION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-red);">34.5%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">31.0</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">2</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$512K</div>
+                        <div class="label">Put Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">52.3</div>
+                        <div class="label">Score</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Institutional distribution in private equity giant with bearish put confirmation. High Vol/OI ratio (23.38x) indicates unusual positioning. 2 days sustained selling pressure.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Thesis:</strong> PE/alternative asset managers vulnerable to rising rate environment or credit concerns. Distribution pattern suggests smart money reducing exposure.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-green); font-weight: 700;">🎯 TOP PICK (BEARISH) — EVALUATE FOR PUTS</span></p>
+                </div>
+            </div>
+
+            <div class="signal-card">
+                <h3>
+                    <span class="ticker-large">EOSE</span>
+                    <span class="sector">— Eos Energy Enterprises | Industrials / Energy Storage</span>
+                    <span class="badge stock" style="margin-left: auto;">STOCK</span>
+                    <span class="badge accumulation">ACCUMULATION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">61.8%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">23.6</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">2</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$638K</div>
+                        <div class="label">Call Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">42.6</div>
+                        <div class="label">Score</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Small-cap energy storage play with call sweep (urgency signal) and confluence. Lower DP strength but sweep adds conviction. Battery/grid storage exposure.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Caution:</strong> Small cap = higher volatility, wider spreads. Check options liquidity carefully.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-yellow); font-weight: 700;">⚠️ WORTH EVALUATION — CHECK LIQUIDITY</span></p>
+                </div>
+            </div>
+
+            <div class="signal-card">
+                <h3>
+                    <span class="ticker-large">ZS</span>
+                    <span class="sector">— Zscaler | Technology / Cybersecurity</span>
+                    <span class="badge stock" style="margin-left: auto;">STOCK</span>
+                    <span class="badge accumulation">ACCUMULATION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">60.6%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">21.1</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">1</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$539K</div>
+                        <div class="label">Call Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">41.4</div>
+                        <div class="label">Score</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Cybersecurity leader showing early accumulation signal with confluence. Only 1 day sustained — needs monitoring for continuation. High Vol/OI ratio (2.95x) suggests unusual activity.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-yellow); font-weight: 700;">⚠️ EARLY STAGE — MONITOR FOR 2+ DAYS</span></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recommendation -->
+        <section>
+            <div class="recommendation">
+                <h3>🎯 Recommended Actions — Priority Order</h3>
+                <ol>
+                    <li><code>evaluate TLT</code> — <strong>Highest score (56.9)</strong>, $15.96M call premium, 3-day sustained accumulation, rate/safety play</li>
+                    <li><code>evaluate WDC</code> — <strong>Strongest DP (72.8)</strong>, 86.4% buy ratio, storage/AI data center play</li>
+                    <li><code>evaluate KKR</code> — <strong>Bearish setup</strong>, distribution + put confluence, PE sector weakness</li>
+                    <li><code>evaluate JNJ</code> — Defensive healthcare, 3-day accumulation, mega-cap stability</li>
+                    <li><code>evaluate EOSE</code> — Small-cap energy storage, sweep urgency, check liquidity first</li>
+                </ol>
+                <p style="margin-top: 1rem; padding: 1rem; background: var(--bg-tertiary); border-radius: 8px;">
+                    <strong>🔴 High-Conviction Shorts:</strong> KKR, C (Citigroup), INSM — all showing distribution + bearish options confluence
+                </p>
+                <p style="margin-top: 1rem; color: var(--text-secondary);">
+                    <strong>Monitor (Strong DP, No Confluence):</strong> AMZN (84.7% buy), AAPL (91.9% buy), AMD (81.3% buy), CVX (82.7% buy) — waiting for options alignment
+                </p>
+            </div>
+        </section>
+
+        <footer>
+            <p><strong>Convex Scavenger</strong> — Autonomous Options Trading System</p>
+            <p style="margin-top: 0.5rem;">Generated: Saturday, February 28, 2026 @ 5:29 PM PST</p>
+            <p style="margin-top: 1rem; font-size: 0.9rem; color: var(--accent-yellow);">⚠️ Markets closed (Saturday). Flow data reflects Friday's session.</p>
+            <div class="legend" style="margin-top: 1.5rem;">
+                <div class="legend-item"><div class="legend-dot" style="background: var(--accent-green);"></div> Score 50+ (Strong)</div>
+                <div class="legend-item"><div class="legend-dot" style="background: var(--accent-yellow);"></div> Score 40-49 (Moderate)</div>
+                <div class="legend-item"><div class="legend-dot" style="background: var(--accent-red);"></div> Score &lt;40 (Weak)</div>
+            </div>
+        </footer>
+    </div>
+
+    <script>
+        // Color palette
+        const colors = {
+            green: '#3fb950',
+            red: '#f85149',
+            yellow: '#d29922',
+            blue: '#58a6ff',
+            purple: '#a371f7',
+            cyan: '#39d353',
+            orange: '#f0883e',
+            bg: '#21262d',
+            border: '#30363d',
+            text: '#8b949e'
+        };
+
+        // Heatmap data
+        const heatmapData = [
+            { ticker: 'TLT', score: 56.9 },
+            { ticker: 'WDC', score: 53.8 },
+            { ticker: 'GLD', score: 52.6 },
+            { ticker: 'KKR', score: 52.3 },
+            { ticker: 'NVDA', score: 46.1 },
+            { ticker: 'C', score: 43.2 },
+            { ticker: 'JNJ', score: 42.6 },
+            { ticker: 'EOSE', score: 42.6 },
+            { ticker: 'ZS', score: 41.4 },
+            { ticker: 'AMZN', score: 40.4 },
+            { ticker: 'AVGO', score: 38.7 },
+            { ticker: 'DIS', score: 38.5 },
+            { ticker: 'INSM', score: 37.5 },
+            { ticker: 'AAPL', score: 37.2 },
+            { ticker: 'HSY', score: 36.7 },
+            { ticker: 'NKE', score: 34.7 },
+            { ticker: 'IAU', score: 33.3 },
+            { ticker: 'CVX', score: 31.6 },
+            { ticker: 'XYZ', score: 30.9 },
+            { ticker: 'AMD', score: 30.8 },
+            { ticker: 'META', score: 30.1 },
+            { ticker: 'FSLR', score: 29.6 },
+            { ticker: 'RKLB', score: 28.9 },
+            { ticker: 'KRE', score: 27.3 },
+            { ticker: 'RDDT', score: 26.8 },
+            { ticker: 'TFC', score: 26.5 },
+            { ticker: 'TEAM', score: 25.7 },
+            { ticker: 'TSLA', score: 25.4 },
+            { ticker: 'EUFN', score: 21.8 },
+            { ticker: 'CCL', score: 21.8 },
+            { ticker: 'CRWV', score: 17.4 },
+            { ticker: 'SLV', score: 15.0 },
+            { ticker: 'AFRM', score: 15.0 },
+            { ticker: 'ITB', score: 15.0 },
+            { ticker: 'DHI', score: 15.0 },
+            { ticker: 'ZETA', score: 11.5 },
+            { ticker: 'LQD', score: 10.2 },
+            { ticker: 'NVDL', score: 8.0 },
+            { ticker: 'BABA', score: 4.7 },
+            { ticker: 'NBIS', score: 4.0 },
+            { ticker: 'UNH', score: 4.0 },
+            { ticker: 'IBIT', score: 0.2 }
+        ];
+
+        // Generate heatmap
+        const heatmapContainer = document.getElementById('heatmap');
+        heatmapData.forEach(item => {
+            const cell = document.createElement('div');
+            cell.className = 'heatmap-cell';
+            
+            let bgColor;
+            if (item.score >= 50) {
+                bgColor = `rgba(63, 185, 80, ${0.3 + (item.score / 100) * 0.5})`;
+            } else if (item.score >= 40) {
+                bgColor = `rgba(210, 153, 34, ${0.3 + (item.score / 100) * 0.5})`;
+            } else if (item.score >= 25) {
+                bgColor = `rgba(248, 81, 73, ${0.2 + (item.score / 100) * 0.3})`;
+            } else {
+                bgColor = `rgba(139, 148, 158, ${0.1 + (item.score / 100) * 0.2})`;
+            }
+            
+            cell.style.background = bgColor;
+            cell.innerHTML = `
+                <span style="font-size: 0.75rem; color: var(--text-primary);">${item.ticker}</span>
+                <span class="score-val">${item.score}</span>
+            `;
+            heatmapContainer.appendChild(cell);
+        });
+
+        // Top Scores Chart
+        const topScoresCtx = document.getElementById('topScoresChart').getContext('2d');
+        new Chart(topScoresCtx, {
+            type: 'bar',
+            data: {
+                labels: ['TLT', 'WDC', 'GLD', 'KKR', 'NVDA', 'C', 'JNJ', 'EOSE', 'ZS', 'AMZN', 'AVGO', 'DIS'],
+                datasets: [{
+                    label: 'Composite Score',
+                    data: [56.9, 53.8, 52.6, 52.3, 46.1, 43.2, 42.6, 42.6, 41.4, 40.4, 38.7, 38.5],
+                    backgroundColor: [
+                        colors.green, colors.green, colors.green, colors.green,
+                        colors.yellow, colors.yellow, colors.yellow, colors.yellow, colors.yellow, colors.yellow,
+                        colors.red, colors.red
+                    ],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Top 12 Candidates by Score',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: colors.border },
+                        ticks: { color: colors.text }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: colors.text, font: { weight: 'bold' } }
+                    }
+                }
+            }
+        });
+
+        // DP Strength Chart
+        const dpCtx = document.getElementById('dpStrengthChart').getContext('2d');
+        new Chart(dpCtx, {
+            type: 'bar',
+            data: {
+                labels: ['AAPL', 'WDC', 'AMZN', 'NVDA', 'CVX', 'AMD', 'TLT', 'GLD', 'DIS', 'AVGO'],
+                datasets: [{
+                    label: 'DP Strength',
+                    data: [83.9, 72.8, 69.5, 68.3, 65.3, 62.7, 54.5, 48.6, 38.3, 35.6],
+                    backgroundColor: [
+                        colors.green, colors.green, colors.green, colors.red, colors.green,
+                        colors.green, colors.green, colors.red, colors.red, colors.green
+                    ],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Dark Pool Strength (Top 10)',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: colors.border },
+                        ticks: { color: colors.text }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: colors.text, font: { weight: 'bold' } }
+                    }
+                }
+            }
+        });
+
+        // Confluence Chart
+        const confCtx = document.getElementById('confluenceChart').getContext('2d');
+        new Chart(confCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['With Confluence (12)', 'No Confluence (30)'],
+                datasets: [{
+                    data: [12, 30],
+                    backgroundColor: [colors.green, colors.red],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Confluence Distribution',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: colors.text, padding: 20 }
+                    }
+                }
+            }
+        });
+
+        // Sector Chart
+        const sectorCtx = document.getElementById('sectorChart').getContext('2d');
+        new Chart(sectorCtx, {
+            type: 'pie',
+            data: {
+                labels: ['Technology (14)', 'Financial (6)', 'ETFs (8)', 'Consumer (5)', 'Healthcare (3)', 'Energy (3)', 'Other (3)'],
+                datasets: [{
+                    data: [14, 6, 8, 5, 3, 3, 3],
+                    backgroundColor: [
+                        colors.blue, colors.green, colors.purple, colors.yellow, 
+                        colors.cyan, colors.orange, colors.text
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Sector Distribution',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: {
+                        position: 'bottom',
+                        labels: { color: colors.text, padding: 15, font: { size: 11 } }
+                    }
+                }
+            }
+        });
+
+        // Scatter Chart - Score vs DP Strength
+        const scatterCtx = document.getElementById('scatterChart').getContext('2d');
+        new Chart(scatterCtx, {
+            type: 'scatter',
+            data: {
+                datasets: [
+                    {
+                        label: 'With Confluence',
+                        data: [
+                            { x: 54.5, y: 56.9, ticker: 'TLT' },
+                            { x: 72.8, y: 53.8, ticker: 'WDC' },
+                            { x: 31.0, y: 52.3, ticker: 'KKR' },
+                            { x: 25.7, y: 43.2, ticker: 'C' },
+                            { x: 35.3, y: 42.6, ticker: 'JNJ' },
+                            { x: 23.6, y: 42.6, ticker: 'EOSE' },
+                            { x: 21.1, y: 41.4, ticker: 'ZS' },
+                            { x: 35.6, y: 38.7, ticker: 'AVGO' },
+                            { x: 29.0, y: 37.5, ticker: 'INSM' },
+                            { x: 17.7, y: 33.3, ticker: 'IAU' },
+                            { x: 10.0, y: 30.9, ticker: 'XYZ' }
+                        ],
+                        backgroundColor: colors.green,
+                        pointRadius: 10
+                    },
+                    {
+                        label: 'No Confluence',
+                        data: [
+                            { x: 48.6, y: 52.6, ticker: 'GLD' },
+                            { x: 68.3, y: 46.1, ticker: 'NVDA' },
+                            { x: 69.5, y: 40.4, ticker: 'AMZN' },
+                            { x: 38.3, y: 38.5, ticker: 'DIS' },
+                            { x: 83.9, y: 37.2, ticker: 'AAPL' },
+                            { x: 32.2, y: 36.7, ticker: 'HSY' },
+                            { x: 15.7, y: 34.7, ticker: 'NKE' },
+                            { x: 65.3, y: 31.6, ticker: 'CVX' },
+                            { x: 62.7, y: 30.8, ticker: 'AMD' }
+                        ],
+                        backgroundColor: colors.red,
+                        pointRadius: 10
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Score vs Dark Pool Strength — Quadrant Analysis',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: {
+                        position: 'top',
+                        labels: { color: colors.text }
+                    },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return `${context.raw.ticker}: Score ${context.raw.y}, DP ${context.raw.x}`;
+                            }
+                        }
+                    }
+                },
+                scales: {
+                    x: {
+                        title: {
+                            display: true,
+                            text: 'Dark Pool Strength',
+                            color: colors.text
+                        },
+                        min: 0,
+                        max: 100,
+                        grid: { color: colors.border },
+                        ticks: { color: colors.text }
+                    },
+                    y: {
+                        title: {
+                            display: true,
+                            text: 'Composite Score',
+                            color: colors.text
+                        },
+                        min: 0,
+                        max: 70,
+                        grid: { color: colors.border },
+                        ticks: { color: colors.text }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

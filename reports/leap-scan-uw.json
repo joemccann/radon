@@ -1,0 +1,138 @@
+{
+  "scan_time": "2026-02-28T18:52:58.767294",
+  "min_gap": 15,
+  "results": [
+    {
+      "ticker": "XLB",
+      "price": 53.40999984741211,
+      "hv_20": 21.05,
+      "hv_60": 17.08,
+      "hv_252": 20.58,
+      "current_iv": 22.08,
+      "iv_rank": 28.5276,
+      "leap_count": 42,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLC",
+      "price": 118.05000305175781,
+      "hv_20": 13.92,
+      "hv_60": 12.3,
+      "hv_252": 18.67,
+      "current_iv": 17.64,
+      "iv_rank": 21.1503,
+      "leap_count": 70,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLE",
+      "price": 55.91999816894531,
+      "hv_20": 23.01,
+      "hv_60": 22.03,
+      "hv_252": 25.45,
+      "current_iv": 29.07,
+      "iv_rank": 32.4795,
+      "leap_count": 55,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLF",
+      "price": 51.43000030517578,
+      "hv_20": 22.26,
+      "hv_60": 17.22,
+      "hv_252": 19.82,
+      "current_iv": 22.89,
+      "iv_rank": 31.963,
+      "leap_count": 57,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLI",
+      "price": 177.13999938964844,
+      "hv_20": 14.81,
+      "hv_60": 14.81,
+      "hv_252": 19.04,
+      "current_iv": 20.89,
+      "iv_rank": 25.4389,
+      "leap_count": 23,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLK",
+      "price": 138.75999450683594,
+      "hv_20": 28.15,
+      "hv_60": 21.73,
+      "hv_252": 27.28,
+      "current_iv": 27.589999999999996,
+      "iv_rank": 28.4378,
+      "leap_count": 49,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLP",
+      "price": 90.01000213623047,
+      "hv_20": 14.59,
+      "hv_60": 12.85,
+      "hv_252": 14.03,
+      "current_iv": 17.83,
+      "iv_rank": 36.8171,
+      "leap_count": 48,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLRE",
+      "price": 43.84000015258789,
+      "hv_20": 14.1,
+      "hv_60": 12.18,
+      "hv_252": 16.47,
+      "current_iv": 13.209999999999999,
+      "iv_rank": 7.7373,
+      "leap_count": 25,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLU",
+      "price": 47.72999954223633,
+      "hv_20": 16.65,
+      "hv_60": 14.66,
+      "hv_252": 15.95,
+      "current_iv": 21.48,
+      "iv_rank": 45.0787,
+      "leap_count": 88,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLV",
+      "price": 160.1999969482422,
+      "hv_20": 13.57,
+      "hv_60": 13.26,
+      "hv_252": 17.38,
+      "current_iv": 16.619999999999997,
+      "iv_rank": 26.6931,
+      "leap_count": 43,
+      "best_gap": 0,
+      "is_mispriced": false
+    },
+    {
+      "ticker": "XLY",
+      "price": 116.86000061035156,
+      "hv_20": 15.35,
+      "hv_60": 15.37,
+      "hv_252": 23.91,
+      "current_iv": 23.549999999999997,
+      "iv_rank": 20.8338,
+      "leap_count": 39,
+      "best_gap": 0,
+      "is_mispriced": false
+    }
+  ]
+}

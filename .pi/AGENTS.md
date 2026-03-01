@@ -9,6 +9,8 @@
 | `evaluate [TICKER]` | Full 7-milestone evaluation |
 | `portfolio` | Current positions, exposure, capacity |
 | `journal` | View recent trade log entries |
+| `sync` | Pull live portfolio from Interactive Brokers |
+| `leap-scan [TICKERS]` | Scan for LEAP IV mispricing opportunities |
 
 ## Evaluation Milestones
 
@@ -40,6 +42,57 @@ Always follow in order. Stop immediately if a gate fails.
 | `scripts/scanner.py` | Scan watchlist, rank by signal strength |
 | `scripts/discover.py` | Market-wide flow scanner for new candidates |
 | `scripts/kelly.py` | Kelly criterion calculator |
+| `scripts/ib_sync.py` | Sync live portfolio from Interactive Brokers |
+| `scripts/leap_iv_scanner.py` | LEAP IV mispricing scanner (IB connection required) |
+| `scripts/leap_scanner_uw.py` | LEAP IV scanner using UW + Yahoo Finance (no IB needed) |
+
+## Interactive Brokers Integration
+
+```bash
+# Display live portfolio (requires TWS/Gateway running)
+python3 scripts/ib_sync.py
+
+# Sync to portfolio.json
+python3 scripts/ib_sync.py --sync
+
+# Connect to different ports
+python3 scripts/ib_sync.py --port 7496   # TWS Live
+python3 scripts/ib_sync.py --port 7497   # TWS Paper (default)
+python3 scripts/ib_sync.py --port 4001   # IB Gateway Live
+python3 scripts/ib_sync.py --port 4002   # IB Gateway Paper
+```
+
+**Setup:**
+1. Install: `pip install ib_insync`
+2. In TWS: Configure → API → Settings → Enable "ActiveX and Socket Clients"
+3. Ensure "Read-Only API" is unchecked if you want order capability later
+
+## LEAP IV Mispricing Scanner
+
+Identifies long-dated options where implied volatility diverges from realized volatility.
+
+```bash
+# Scan specific tickers
+python3 scripts/leap_iv_scanner.py AAPL MSFT NVDA EWY
+
+# Use presets
+python3 scripts/leap_iv_scanner.py --preset sectors    # State Street sector ETFs
+python3 scripts/leap_iv_scanner.py --preset mag7       # Magnificent 7
+python3 scripts/leap_iv_scanner.py --preset semis      # Semiconductors
+python3 scripts/leap_iv_scanner.py --preset emerging   # Emerging market ETFs
+
+# Custom parameters
+python3 scripts/leap_iv_scanner.py --min-gap 20 --years 2027 2028
+
+# Scan portfolio holdings for IV opportunities
+python3 scripts/leap_iv_scanner.py --portfolio
+```
+
+**Available Presets:** `sectors`, `mag7`, `semis`, `financials`, `energy`, `china`, `emerging`
+
+**Output:** HTML report at `reports/leap-iv-scan.html`
+
+See `docs/strategies.md` for full methodology.
 
 ## Data Files
 
@@ -58,6 +111,7 @@ Always follow in order. Stop immediately if a gate fails.
 | `docs/plans.md` | Milestone workflow with validation steps |
 | `docs/implement.md` | Execution runbook |
 | `docs/status.md` | Current state, recent decisions, audit log |
+| `docs/strategies.md` | Trading strategies (Dark Pool Flow, LEAP IV Mispricing) |
 
 ## Tools Available
 

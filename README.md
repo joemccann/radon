@@ -329,3 +329,44 @@ The watchlist scanner (`scanner.py`) uses a simpler additive scoring:
 | `data/trade_log.json` | Append-only journal of every trade decision — opens, closes, and skips with full rationale |
 | `data/watchlist.json` | Tickers under active surveillance with sector tags and notes |
 | `data/ticker_cache.json` | Local cache of ticker symbols to company names and sectors |
+
+## Web UI Console
+
+A Next.js chat interface wraps the PI workflow and exposes the same command surface used in TUI mode.
+
+### Run the web app
+
+```bash
+cd web
+npm install
+npm run dev
+```
+
+Visit `http://localhost:3000` and use slash commands in chat.
+
+### Quick checks
+
+```bash
+cd web
+npm run lint
+npm run build
+```
+
+### API helper route
+
+`/api/chat` accepts `POST` with JSON body:
+
+```json
+{ "message": "/scan --top 20" }
+```
+
+It returns normalized command payloads used by the UI to render summaries, details, and command outputs.
+
+### Command coverage
+
+- `/scan` → executes `scripts/scanner.py`
+- `/discover` → executes `scripts/discover.py`
+- `/evaluate TICKER` → executes `scripts/fetch_ticker.py`, `scripts/fetch_flow.py`, and `scripts/fetch_options.py`
+- `/portfolio` → reads `data/portfolio.json`
+- `/journal [--limit N]` → reads `data/trade_log.json`
+- `/watchlist add|remove|list` → reads/writes `data/watchlist.json`

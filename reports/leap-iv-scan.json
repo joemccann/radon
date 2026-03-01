@@ -1,0 +1,150 @@
+{
+  "scan_time": "2026-02-28T18:48:14.679002",
+  "parameters": {
+    "target_years": [
+      2027,
+      2028
+    ],
+    "target_deltas": [
+      0.5,
+      0.3,
+      0.2,
+      0.1
+    ],
+    "min_gap": 15
+  },
+  "results": [
+    {
+      "ticker": "XLB",
+      "sector": "Materials",
+      "price": 53.41,
+      "hv_20": 21.05,
+      "hv_60": 17.07,
+      "hv_252": 20.59,
+      "hv_756": null,
+      "avg_hv": 19.570000000000004,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLC",
+      "sector": "Communication Services",
+      "price": 118.05,
+      "hv_20": 13.92,
+      "hv_60": 12.3,
+      "hv_252": 18.67,
+      "hv_756": null,
+      "avg_hv": 14.963333333333333,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLE",
+      "sector": "Energy",
+      "price": 55.92,
+      "hv_20": 23.01,
+      "hv_60": 22.04,
+      "hv_252": 25.46,
+      "hv_756": null,
+      "avg_hv": 23.50333333333333,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLF",
+      "sector": "Financials",
+      "price": 51.43,
+      "hv_20": 22.26,
+      "hv_60": 17.22,
+      "hv_252": 19.82,
+      "hv_756": null,
+      "avg_hv": 19.76666666666667,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLI",
+      "sector": "Industrials",
+      "price": 177.14,
+      "hv_20": 14.81,
+      "hv_60": 14.81,
+      "hv_252": 19.04,
+      "hv_756": null,
+      "avg_hv": 16.22,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLK",
+      "sector": "Technology",
+      "price": 138.76,
+      "hv_20": 28.15,
+      "hv_60": 21.72,
+      "hv_252": 27.28,
+      "hv_756": null,
+      "avg_hv": 25.71666666666667,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLP",
+      "sector": "Consumer Staples",
+      "price": 90.01,
+      "hv_20": 14.59,
+      "hv_60": 12.85,
+      "hv_252": 14.03,
+      "hv_756": null,
+      "avg_hv": 13.823333333333332,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLRE",
+      "sector": "Real Estate",
+      "price": 43.84,
+      "hv_20": 14.1,
+      "hv_60": 12.18,
+      "hv_252": 16.47,
+      "hv_756": null,
+      "avg_hv": 14.25,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLU",
+      "sector": "Utilities",
+      "price": 47.73,
+      "hv_20": 16.65,
+      "hv_60": 14.66,
+      "hv_252": 15.94,
+      "hv_756": null,
+      "avg_hv": 15.75,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLV",
+      "sector": "Health Care",
+      "price": 160.2,
+      "hv_20": 13.57,
+      "hv_60": 13.26,
+      "hv_252": 17.38,
+      "hv_756": null,
+      "avg_hv": 14.736666666666665,
+      "mispriced_count": 0,
+      "options": []
+    },
+    {
+      "ticker": "XLY",
+      "sector": "Consumer Discretionary",
+      "price": 116.86,
+      "hv_20": 15.35,
+      "hv_60": 15.37,
+      "hv_252": 23.91,
+      "hv_756": null,
+      "avg_hv": 18.209999999999997,
+      "mispriced_count": 0,
+      "options": []
+    }
+  ]
+}

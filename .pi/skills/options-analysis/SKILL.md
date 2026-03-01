@@ -1,3 +1,7 @@
+---
+description: On-demand options pricing and structure analysis for the Convex Scavenger trading agent
+---
+
 # Options Analysis Skill
 
 ## Description

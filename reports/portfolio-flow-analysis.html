@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Portfolio Flow Analysis | Convex Scavenger</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    @import url('https://api.fontshare.com/v2/css?f[]=satoshi@400,500,700&display=swap');
+
+    /* Theme Tokens */
+    :root {
+      --sidebar-width: 220px;
+      --header-height: 48px;
+      --font-sans: 'Satoshi', -apple-system, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg-base: #050505;
+      --bg-panel: #0A0A0A;
+      --bg-hover: #141414;
+      --border-dim: #1C1C1C;
+      --border-focus: #333333;
+      --text-primary: #F0F0F0;
+      --text-muted: #666666;
+      --accent-bg: #FFFFFF;
+      --accent-text: #000000;
+      --scrollbar-track: #050505;
+      --scrollbar-thumb: #333333;
+    }
+
+    [data-theme="light"] {
+      --bg-base: #F5F5F5;
+      --bg-panel: #FFFFFF;
+      --bg-hover: #F0F0F0;
+      --border-dim: #D9D9D9;
+      --border-focus: #A3A3A3;
+      --text-primary: #0A0A0A;
+      --text-muted: #6B6B6B;
+      --accent-bg: #000000;
+      --accent-text: #FFFFFF;
+      --scrollbar-track: #F5F5F5;
+      --scrollbar-thumb: #A3A3A3;
+    }
+
+    /* Reset */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    /* Scrollbar */
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: var(--scrollbar-track);
+    }
+    ::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 0;
+    }
+
+    /* Base */
+    html, body {
+      height: 100%;
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.5;
+    }
+
+    /* Layout */
+    .app {
+      display: flex;
+      height: 100vh;
+    }
+
+    /* Sidebar */
+    .sidebar {
+      width: var(--sidebar-width);
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border-dim);
+      display: flex;
+      flex-direction: column;
+      flex-shrink: 0;
+    }
+
+    .sidebar-header {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-dim);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .logo-icon {
+      width: 12px;
+      height: 12px;
+      background: var(--text-primary);
+    }
+
+    .logo-text {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .sidebar-nav {
+      flex: 1;
+      padding: 8px 0;
+    }
+
+    .nav-item {
+      padding: 10px 16px;
+      font-size: 13px;
+      color: var(--text-muted);
+      cursor: pointer;
+      transition: all 150ms ease-in-out;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .nav-item:hover {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .nav-item.active {
+      background: var(--bg-hover);
+      color: var(--text-primary);
+    }
+
+    .nav-icon {
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-mono);
+      font-size: 10px;
+    }
+
+    .sidebar-footer {
+      padding: 16px;
+      border-top: 1px solid var(--border-dim);
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+    }
+
+    .status-row {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 6px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--text-primary);
+      border-radius: 0;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Main Content */
+    .main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* Header */
+    .header {
+      height: var(--header-height);
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 20px;
+      flex-shrink: 0;
+    }
+
+    .breadcrumb {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .breadcrumb span {
+      color: var(--text-primary);
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .search-input {
+      width: 256px;
+      height: 28px;
+      background: var(--bg-base);
+      border: 1px solid var(--border-dim);
+      color: var(--text-primary);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding: 4px 12px 4px 32px;
+      outline: none;
+      transition: border-color 150ms ease-in-out;
+    }
+
+    .search-input::placeholder {
+      color: var(--text-muted);
+    }
+
+    .search-input:focus {
+      border-color: var(--border-focus);
+    }
+
+    .theme-toggle {
+      width: 28px;
+      height: 28px;
+      background: transparent;
+      border: 1px solid var(--border-dim);
+      color: var(--text-primary);
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 14px;
+      transition: all 150ms ease-in-out;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-focus);
+    }
+
+    /* Content */
+    .content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 20px;
+    }
+
+    /* Metrics Grid */
+    .metrics-grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 0;
+      margin-bottom: 20px;
+    }
+
+    .metric-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-dim);
+      margin-right: -1px;
+      margin-bottom: -1px;
+      padding: 16px;
+    }
+
+    .metric-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 24px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+
+    .metric-change {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-dim);
+    }
+
+    .metric-change.positive { color: #22C55E; }
+    .metric-change.negative { color: #EF4444; }
+    .metric-change.neutral { color: var(--text-muted); }
+
+    /* Section */
+    .section {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-dim);
+      margin-bottom: 20px;
+    }
+
+    .section-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .section-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section-icon {
+      font-size: 14px;
+    }
+
+    .section-body {
+      padding: 0;
+    }
+
+    /* Tables */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      text-align: left;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      font-weight: 500;
+    }
+
+    th.right { text-align: right; }
+
+    td {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      vertical-align: middle;
+    }
+
+    td.right { text-align: right; }
+
+    tr:hover {
+      background: var(--bg-hover);
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    /* Pills / Badges */
+    .pill {
+      display: inline-block;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      padding: 3px 6px;
+      border: 1px solid var(--border-dim);
+      background: transparent;
+    }
+
+    .pill.accum {
+      border-color: #22C55E;
+      color: #22C55E;
+    }
+
+    .pill.distrib {
+      border-color: #EF4444;
+      color: #EF4444;
+    }
+
+    .pill.neutral {
+      border-color: var(--text-muted);
+      color: var(--text-muted);
+    }
+
+    .pill.defined {
+      border-color: #22C55E;
+      color: #22C55E;
+    }
+
+    .pill.undefined {
+      border-color: #F59E0B;
+      color: #F59E0B;
+    }
+
+    .pill.equity {
+      border-color: #3B82F6;
+      color: #3B82F6;
+    }
+
+    /* Signal Strength Bar */
+    .strength-bar {
+      width: 60px;
+      height: 4px;
+      background: var(--border-dim);
+      position: relative;
+    }
+
+    .strength-fill {
+      height: 100%;
+      background: var(--text-primary);
+    }
+
+    .strength-value {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
+
+    /* Alert Box */
+    .alert-box {
+      padding: 16px;
+      border-left: 2px solid #EF4444;
+      background: var(--bg-hover);
+      margin: 16px;
+    }
+
+    .alert-title {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: #EF4444;
+      margin-bottom: 8px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .alert-item {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      margin-bottom: 8px;
+      padding-left: 16px;
+      position: relative;
+    }
+
+    .alert-item::before {
+      content: "›";
+      position: absolute;
+      left: 0;
+      color: var(--text-muted);
+    }
+
+    .alert-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .alert-ticker {
+      font-weight: 700;
+    }
+
+    /* Report Timestamp */
+    .report-meta {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      padding: 16px;
+      border-bottom: 1px solid var(--border-dim);
+    }
+
+    /* Two Column Layout */
+    .two-col {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 20px;
+    }
+
+    @media (max-width: 1200px) {
+      .two-col {
+        grid-template-columns: 1fr;
+      }
+      .metrics-grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+    }
+
+    @media (max-width: 768px) {
+      .sidebar {
+        display: none;
+      }
+      .metrics-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <!-- Sidebar -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-icon"></div>
+        <span class="logo-text">Convex Scavenger</span>
+      </div>
+      <nav class="sidebar-nav">
+        <div class="nav-item">
+          <span class="nav-icon">⌘</span>
+          Dashboard
+        </div>
+        <div class="nav-item active">
+          <span class="nav-icon">◉</span>
+          Flow Analysis
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">▤</span>
+          Portfolio
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">⚡</span>
+          Scanner
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">◎</span>
+          Discover
+        </div>
+        <div class="nav-item">
+          <span class="nav-icon">☰</span>
+          Journal
+        </div>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="status-row">
+          <span>IB Gateway</span>
+          <span style="display: flex; align-items: center; gap: 6px;">
+            <span class="status-dot"></span>
+            CONNECTED
+          </span>
+        </div>
+        <div class="status-row">
+          <span>Last Sync</span>
+          <span>18:04:20</span>
+        </div>
+        <div class="status-row">
+          <span>Port</span>
+          <span>4001</span>
+        </div>
+      </div>
+    </aside>
+
+    <!-- Main Content -->
+    <main class="main">
+      <!-- Header -->
+      <header class="header">
+        <div class="breadcrumb">
+          WORKSPACE / <span>FLOW ANALYSIS</span>
+        </div>
+        <div class="header-actions">
+          <input type="text" class="search-input" placeholder="CMD+K to search...">
+          <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
+            ◐
+          </button>
+        </div>
+      </header>
+
+      <!-- Content -->
+      <div class="content">
+        <!-- Metrics Grid -->
+        <div class="metrics-grid">
+          <div class="metric-card">
+            <div class="metric-label">Net Liquidation</div>
+            <div class="metric-value">$981,353</div>
+            <div class="metric-change neutral">BANKROLL</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Positions</div>
+            <div class="metric-value">19</div>
+            <div class="metric-change neutral">7 DEFINED / 12 UNDEFINED</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Flow Aligned</div>
+            <div class="metric-value">6</div>
+            <div class="metric-change positive">↑ SUPPORTED</div>
+          </div>
+          <div class="metric-card">
+            <div class="metric-label">Flow Against</div>
+            <div class="metric-value">2</div>
+            <div class="metric-change negative">↓ REVIEW NEEDED</div>
+          </div>
+        </div>
+
+        <!-- Action Items Alert -->
+        <div class="section">
+          <div class="alert-box">
+            <div class="alert-title">
+              ⚠ ACTION ITEMS
+            </div>
+            <div class="alert-item">
+              <span class="alert-ticker">BRZE</span> — Long calls expiring Mar 20 (20 days) with 42% distribution flow. Consider exit or reduced exposure.
+            </div>
+            <div class="alert-item">
+              <span class="alert-ticker">RR</span> — Sustained distribution. Review thesis for continued hold.
+            </div>
+            <div class="alert-item">
+              <span class="alert-ticker">MSFT</span> — $469K position saw massive Friday selling (0.8% buy ratio). Monitor Monday.
+            </div>
+          </div>
+        </div>
+
+        <!-- Flow Supports Position -->
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <span class="section-icon">✓</span>
+              Flow Supports Position
+            </div>
+            <span class="pill defined">6 POSITIONS</span>
+          </div>
+          <div class="section-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Position</th>
+                  <th>Flow</th>
+                  <th>Strength</th>
+                  <th>Signal</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>IGV</strong></td>
+                  <td>Long Calls + Risk Rev</td>
+                  <td><span class="pill accum">72% ACCUM</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 44.2%"></div></div>
+                    <div class="strength-value">44.2</div>
+                  </td>
+                  <td>Strong institutional buying</td>
+                </tr>
+                <tr>
+                  <td><strong>NFLX</strong></td>
+                  <td>Long Stock</td>
+                  <td><span class="pill accum">60% ACCUM</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 20.5%"></div></div>
+                    <div class="strength-value">20.5</div>
+                  </td>
+                  <td>Friday 93% buy ratio</td>
+                </tr>
+                <tr>
+                  <td><strong>PLTR</strong></td>
+                  <td>Risk Reversal</td>
+                  <td><span class="pill accum">61% ACCUM</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 22.2%"></div></div>
+                    <div class="strength-value">22.2</div>
+                  </td>
+                  <td>Friday 80% buy ratio</td>
+                </tr>
+                <tr>
+                  <td><strong>EWY</strong></td>
+                  <td>Bear Put Spread</td>
+                  <td><span class="pill distrib">42% DISTRIB</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 16.6%"></div></div>
+                    <div class="strength-value">16.6</div>
+                  </td>
+                  <td>Flow confirms bearish bet</td>
+                </tr>
+                <tr>
+                  <td><strong>EC</strong></td>
+                  <td>Long Stock</td>
+                  <td><span class="pill accum">58% ACCUM</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 15.3%"></div></div>
+                    <div class="strength-value">15.3</div>
+                  </td>
+                  <td>Modest accumulation</td>
+                </tr>
+                <tr>
+                  <td><strong>SOFI</strong></td>
+                  <td>Long Calls</td>
+                  <td><span class="pill accum">56% ACCUM</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 11.7%"></div></div>
+                    <div class="strength-value">11.7</div>
+                  </td>
+                  <td>Weak but directional</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Flow Against Position -->
+        <div class="section">
+          <div class="section-header">
+            <div class="section-title">
+              <span class="section-icon">⚠</span>
+              Flow Against Position
+            </div>
+            <span class="pill distrib">2 POSITIONS</span>
+          </div>
+          <div class="section-body">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ticker</th>
+                  <th>Position</th>
+                  <th>Flow</th>
+                  <th>Strength</th>
+                  <th>Concern</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><strong>BRZE</strong></td>
+                  <td>Long 300x Calls (Mar 20)</td>
+                  <td><span class="pill distrib">29% DISTRIB</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 42.2%"></div></div>
+                    <div class="strength-value">42.2</div>
+                  </td>
+                  <td>Institutions selling, you're long. Near-term expiry.</td>
+                </tr>
+                <tr>
+                  <td><strong>RR</strong></td>
+                  <td>Long 10K shares</td>
+                  <td><span class="pill distrib">36% DISTRIB</span></td>
+                  <td>
+                    <div class="strength-bar"><div class="strength-fill" style="width: 27.6%"></div></div>
+                    <div class="strength-value">27.6</div>
+                  </td>
+                  <td>Sustained distribution pattern</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <!-- Watch Closely -->
+          <div class="section">
+            <div class="section-header">
+              <div class="section-title">
+                <span class="section-icon">⚡</span>
+                Watch Closely
+              </div>
+              <span class="pill undefined">2 POSITIONS</span>
+            </div>
+            <div class="section-body">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Position</th>
+                    <th>Flow</th>
+                    <th>Note</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td><strong>MSFT</strong></td>
+                    <td>Long 1K shares ($469K)</td>
+                    <td><span class="pill distrib">Fri 0.8%</span></td>
+                    <td>Massive single-day distribution</td>
+                  </tr>
+                  <tr>
+                    <td><strong>BKD</strong></td>
+                    <td>Bear Put Spread</td>
+                    <td><span class="pill accum">Fri 65%</span></td>
+                    <td>Recent day bullish, against bearish spread</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <!-- Neutral / Low Signal -->
+          <div class="section">
+            <div class="section-header">
+              <div class="section-title">
+                <span class="section-icon">—</span>
+                Neutral / Low Signal
+              </div>
+              <span class="pill neutral">8 POSITIONS</span>
+            </div>
+            <div class="section-body">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ticker</th>
+                    <th>Flow</th>
+                    <th class="right">Prints</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr>
+                    <td>AAOI</td>
+                    <td><span class="pill neutral">50%</span></td>
+                    <td class="right">992</td>
+                  </tr>
+                  <tr>
+                    <td>BAP</td>
+                    <td><span class="pill neutral">51%</span></td>
+                    <td class="right">216</td>
+                  </tr>
+                  <tr>
+                    <td>ETHA</td>
+                    <td><span class="pill neutral">54%</span></td>
+                    <td class="right">699</td>
+                  </tr>
+                  <tr>
+                    <td>ILF</td>
+                    <td><span class="pill neutral">53%</span></td>
+                    <td class="right">251</td>
+                  </tr>
+                  <tr>
+                    <td>NAK</td>
+                    <td><span class="pill accum">55%</span></td>
+                    <td class="right">19</td>
+                  </tr>
+                  <tr>
+                    <td>TSLL</td>
+                    <td><span class="pill neutral">49%</span></td>
+                    <td class="right">1,827</td>
+                  </tr>
+                  <tr>
+                    <td>URTY</td>
+                    <td><span class="pill neutral">45%</span></td>
+                    <td class="right">257</td>
+                  </tr>
+                  <tr>
+                    <td>USAX</td>
+                    <td><span class="pill accum">100%</span></td>
+                    <td class="right">3</td>
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <!-- Report Meta -->
+        <div class="section">
+          <div class="report-meta">
+            Report Generated: 2026-02-28 18:12:12 PST • Source: IB Gateway (4001) • Dark Pool Lookback: 5 Trading Days
+          </div>
+        </div>
+
+      </div>
+    </main>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      const next = current === 'dark' ? 'light' : 'dark';
+      html.setAttribute('data-theme', next);
+      localStorage.setItem('theme', next);
+    }
+
+    // Load saved theme
+    const savedTheme = localStorage.getItem('theme');
+    if (savedTheme) {
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    }
+
+    // CMD+K search focus
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        document.querySelector('.search-input').focus();
+      }
+    });
+  </script>
+</body>
+</html>

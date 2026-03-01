@@ -1,0 +1,955 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Convex Scavenger — Discovery Report | Feb 28, 2026</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-green: #3fb950;
+            --accent-red: #f85149;
+            --accent-yellow: #d29922;
+            --accent-blue: #58a6ff;
+            --accent-purple: #a371f7;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            padding: 2rem;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+
+        header {
+            text-align: center;
+            margin-bottom: 3rem;
+            padding: 2rem;
+            background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+            border-radius: 16px;
+            border: 1px solid var(--border-color);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            background: linear-gradient(135deg, var(--accent-blue) 0%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        header .subtitle {
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 3rem;
+        }
+
+        .stat-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .stat-card .value {
+            font-size: 2.5rem;
+            font-weight: 700;
+            color: var(--accent-blue);
+        }
+
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+        }
+
+        .stat-card.green .value { color: var(--accent-green); }
+        .stat-card.yellow .value { color: var(--accent-yellow); }
+        .stat-card.red .value { color: var(--accent-red); }
+        .stat-card.purple .value { color: var(--accent-purple); }
+
+        section {
+            margin-bottom: 3rem;
+        }
+
+        section h2 {
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        section h2 .icon {
+            font-size: 1.3rem;
+        }
+
+        .chart-container {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 2rem;
+        }
+
+        .chart-row {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+            gap: 1.5rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-secondary);
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border-color);
+        }
+
+        th, td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        th {
+            background: var(--bg-tertiary);
+            font-weight: 600;
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+        }
+
+        tr:hover {
+            background: var(--bg-tertiary);
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .ticker {
+            font-weight: 700;
+            font-size: 1.1rem;
+            color: var(--accent-blue);
+        }
+
+        .score {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 50px;
+            height: 50px;
+            border-radius: 50%;
+            font-weight: 700;
+            font-size: 1rem;
+        }
+
+        .score.high { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .score.medium { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .score.low { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .badge.accumulation { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .badge.distribution { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+        .badge.bullish { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .badge.bearish { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+        .badge.mixed { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .badge.yes { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .badge.no { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+
+        .progress-bar .fill.green { background: var(--accent-green); }
+        .progress-bar .fill.red { background: var(--accent-red); }
+        .progress-bar .fill.yellow { background: var(--accent-yellow); }
+
+        .signal-detail {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        .signal-detail h3 {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 1rem;
+        }
+
+        .signal-detail h3 .ticker-large {
+            font-size: 1.5rem;
+            color: var(--accent-blue);
+        }
+
+        .signal-detail h3 .sector {
+            color: var(--text-secondary);
+            font-weight: 400;
+            font-size: 1rem;
+        }
+
+        .signal-detail .metrics {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+        }
+
+        .signal-detail .metric {
+            text-align: center;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }
+
+        .signal-detail .metric .value {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+
+        .signal-detail .metric .label {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-top: 0.25rem;
+        }
+
+        .signal-detail .analysis {
+            margin-top: 1rem;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            border-left: 3px solid var(--accent-blue);
+        }
+
+        .signal-detail .analysis p {
+            color: var(--text-secondary);
+        }
+
+        .recommendation {
+            background: linear-gradient(135deg, rgba(63, 185, 80, 0.1) 0%, rgba(88, 166, 255, 0.1) 100%);
+            border: 1px solid var(--accent-green);
+            border-radius: 12px;
+            padding: 1.5rem;
+        }
+
+        .recommendation h3 {
+            color: var(--accent-green);
+            margin-bottom: 1rem;
+        }
+
+        .recommendation ol {
+            margin-left: 1.5rem;
+        }
+
+        .recommendation li {
+            margin-bottom: 0.75rem;
+        }
+
+        .recommendation code {
+            background: var(--bg-tertiary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            font-family: 'SF Mono', 'Fira Code', monospace;
+            color: var(--accent-purple);
+        }
+
+        footer {
+            text-align: center;
+            margin-top: 3rem;
+            padding-top: 2rem;
+            border-top: 1px solid var(--border-color);
+            color: var(--text-secondary);
+        }
+
+        .legend {
+            display: flex;
+            justify-content: center;
+            gap: 2rem;
+            margin-top: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.9rem;
+        }
+
+        .legend-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+        }
+
+        .legend-dot.green { background: var(--accent-green); }
+        .legend-dot.red { background: var(--accent-red); }
+        .legend-dot.yellow { background: var(--accent-yellow); }
+        .legend-dot.blue { background: var(--accent-blue); }
+
+        @media (max-width: 768px) {
+            body { padding: 1rem; }
+            header h1 { font-size: 1.8rem; }
+            .chart-row { grid-template-columns: 1fr; }
+            th, td { padding: 0.75rem 0.5rem; font-size: 0.9rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🎯 Convex Scavenger</h1>
+            <p class="subtitle">Discovery Report — Saturday, February 28, 2026 @ 5:06 PM PST</p>
+            <p class="subtitle" style="margin-top: 0.5rem; color: var(--accent-yellow);">Filter: Top 100 Market Cap</p>
+        </header>
+
+        <!-- Summary Stats -->
+        <div class="stats-grid">
+            <div class="stat-card">
+                <div class="value">42</div>
+                <div class="label">Candidates Scanned</div>
+            </div>
+            <div class="stat-card green">
+                <div class="value">3</div>
+                <div class="label">With Confluence</div>
+            </div>
+            <div class="stat-card yellow">
+                <div class="value">6</div>
+                <div class="label">Strong DP, No Confluence</div>
+            </div>
+            <div class="stat-card purple">
+                <div class="value">$25.3M</div>
+                <div class="label">NVDA Premium Flow</div>
+            </div>
+        </div>
+
+        <!-- Charts Section -->
+        <section>
+            <h2><span class="icon">📊</span> Signal Visualization</h2>
+            <div class="chart-row">
+                <div class="chart-container">
+                    <canvas id="scoreChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="dpStrengthChart"></canvas>
+                </div>
+            </div>
+            <div class="chart-row">
+                <div class="chart-container">
+                    <canvas id="buyRatioChart"></canvas>
+                </div>
+                <div class="chart-container">
+                    <canvas id="premiumChart"></canvas>
+                </div>
+            </div>
+        </section>
+
+        <!-- Confluence Candidates Table -->
+        <section>
+            <h2><span class="icon">✅</span> Top 100 Candidates WITH Confluence</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">These candidates have aligned dark pool flow AND options flow — strongest edge potential.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Rank</th>
+                        <th>Ticker</th>
+                        <th>Score</th>
+                        <th>DP Direction</th>
+                        <th>DP Strength</th>
+                        <th>Sustained</th>
+                        <th>Options Bias</th>
+                        <th>Confluence</th>
+                        <th>Premium</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td><span class="ticker">JNJ</span><br><small style="color: var(--text-secondary);">Healthcare</small></td>
+                        <td><span class="score high">42.6</span></td>
+                        <td><span class="badge accumulation">ACCUMULATION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>35.3</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill green" style="width: 35.3%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                        <td><span class="badge bullish">BULLISH</span></td>
+                        <td><span class="badge yes">✓ YES</span></td>
+                        <td>$788K</td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td><span class="ticker">C</span><br><small style="color: var(--text-secondary);">Financials</small></td>
+                        <td><span class="score high">43.2</span></td>
+                        <td><span class="badge distribution">DISTRIBUTION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>25.7</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill red" style="width: 25.7%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>2 days</td>
+                        <td><span class="badge bearish">BEARISH</span></td>
+                        <td><span class="badge yes">✓ YES</span></td>
+                        <td>$721K</td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td><span class="ticker">AVGO</span><br><small style="color: var(--text-secondary);">Semiconductors</small></td>
+                        <td><span class="score medium">38.7</span></td>
+                        <td><span class="badge accumulation">ACCUMULATION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>35.6</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill green" style="width: 35.6%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td>2 days</td>
+                        <td><span class="badge bullish">BULLISH</span></td>
+                        <td><span class="badge yes">✓ YES</span></td>
+                        <td>$1.33M</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Strong DP No Confluence Table -->
+        <section>
+            <h2><span class="icon">⚠️</span> Top 100 Candidates — Strong DP, No Confluence</h2>
+            <p style="color: var(--text-secondary); margin-bottom: 1rem;">Powerful dark pool signals, but options flow is mixed or contradictory. Monitor for alignment.</p>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Ticker</th>
+                        <th>Score</th>
+                        <th>DP Direction</th>
+                        <th>DP Strength</th>
+                        <th>Buy Ratio</th>
+                        <th>Sustained</th>
+                        <th>Options</th>
+                        <th>Issue</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td><span class="ticker">AMZN</span><br><small style="color: var(--text-secondary);">Consumer Cyclical</small></td>
+                        <td><span class="score high">40.4</span></td>
+                        <td><span class="badge accumulation">ACCUMULATION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>69.5</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill green" style="width: 69.5%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><strong style="color: var(--accent-green);">84.7%</strong></td>
+                        <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                        <td><span class="badge mixed">MIXED</span></td>
+                        <td style="color: var(--text-secondary);">Options split 1C/1P</td>
+                    </tr>
+                    <tr>
+                        <td><span class="ticker">AAPL</span><br><small style="color: var(--text-secondary);">Technology</small></td>
+                        <td><span class="score medium">37.2</span></td>
+                        <td><span class="badge accumulation">ACCUMULATION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>83.9</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill green" style="width: 83.9%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><strong style="color: var(--accent-green);">91.9%</strong></td>
+                        <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                        <td><span class="badge bearish">BEARISH</span></td>
+                        <td style="color: var(--accent-red);">Options contradict DP</td>
+                    </tr>
+                    <tr>
+                        <td><span class="ticker">NVDA</span><br><small style="color: var(--text-secondary);">Technology</small></td>
+                        <td><span class="score high">46.1</span></td>
+                        <td><span class="badge distribution">DISTRIBUTION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>68.3</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill red" style="width: 68.3%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span style="color: var(--accent-red);">15.8%</span></td>
+                        <td>2 days</td>
+                        <td><span class="badge mixed">MIXED</span></td>
+                        <td style="color: var(--text-secondary);">Options 15C/11P mixed</td>
+                    </tr>
+                    <tr>
+                        <td><span class="ticker">AMD</span><br><small style="color: var(--text-secondary);">Technology</small></td>
+                        <td><span class="score low">30.8</span></td>
+                        <td><span class="badge accumulation">ACCUMULATION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>62.7</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill green" style="width: 62.7%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><strong style="color: var(--accent-green);">81.3%</strong></td>
+                        <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                        <td><span class="badge mixed">MIXED</span></td>
+                        <td style="color: var(--text-secondary);">Options 2C/3P mixed</td>
+                    </tr>
+                    <tr>
+                        <td><span class="ticker">CVX</span><br><small style="color: var(--text-secondary);">Energy</small></td>
+                        <td><span class="score low">31.6</span></td>
+                        <td><span class="badge accumulation">ACCUMULATION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>65.3</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill green" style="width: 65.3%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><strong style="color: var(--accent-green);">82.7%</strong></td>
+                        <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                        <td><span class="badge bearish">BEARISH</span></td>
+                        <td style="color: var(--accent-red);">Options contradict DP</td>
+                    </tr>
+                    <tr>
+                        <td><span class="ticker">DIS</span><br><small style="color: var(--text-secondary);">Communication Services</small></td>
+                        <td><span class="score medium">38.5</span></td>
+                        <td><span class="badge distribution">DISTRIBUTION</span></td>
+                        <td>
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <span>38.3</span>
+                                <div class="progress-bar" style="width: 60px;">
+                                    <div class="fill red" style="width: 38.3%;"></div>
+                                </div>
+                            </div>
+                        </td>
+                        <td><span style="color: var(--accent-red);">30.8%</span></td>
+                        <td><strong style="color: var(--accent-green);">3 days ✓</strong></td>
+                        <td><span class="badge bullish">BULLISH</span></td>
+                        <td style="color: var(--accent-red);">Options contradict DP</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+
+        <!-- Detailed Signal Analysis -->
+        <section>
+            <h2><span class="icon">🔬</span> Detailed Signal Analysis</h2>
+            
+            <div class="signal-detail">
+                <h3>
+                    <span class="ticker-large">JNJ</span>
+                    <span class="sector">— Johnson & Johnson | Healthcare</span>
+                    <span class="badge accumulation" style="margin-left: auto;">ACCUMULATION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">67.6%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">35.3</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">3</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$788K</div>
+                        <div class="label">Call Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Defensive healthcare mega-cap showing sustained institutional accumulation over 3 consecutive trading days. Options flow confirms with bullish call buying. Classic "flight to quality" pattern often seen during market uncertainty.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-green);">WORTH FULL EVALUATION</span></p>
+                </div>
+            </div>
+
+            <div class="signal-detail">
+                <h3>
+                    <span class="ticker-large">C</span>
+                    <span class="sector">— Citigroup | Financial Services</span>
+                    <span class="badge distribution" style="margin-left: auto;">DISTRIBUTION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-red);">37.2%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">25.7</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">2</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$721K</div>
+                        <div class="label">Put Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> Major bank showing institutional distribution with bearish put sweep (urgency signal). Put sweep indicates someone paying up for downside protection. 2 days of sustained selling pressure in dark pools.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-green);">WORTH FULL EVALUATION — Bearish setup</span></p>
+                </div>
+            </div>
+
+            <div class="signal-detail">
+                <h3>
+                    <span class="ticker-large">AVGO</span>
+                    <span class="sector">— Broadcom | Semiconductors</span>
+                    <span class="badge accumulation" style="margin-left: auto;">ACCUMULATION</span>
+                </h3>
+                <div class="metrics">
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">67.8%</div>
+                        <div class="label">Buy Ratio</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-blue);">35.6</div>
+                        <div class="label">DP Strength</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-yellow);">2</div>
+                        <div class="label">Days Sustained</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-purple);">$1.33M</div>
+                        <div class="label">Call Premium</div>
+                    </div>
+                    <div class="metric">
+                        <div class="value" style="color: var(--accent-green);">✓</div>
+                        <div class="label">Confluence</div>
+                    </div>
+                </div>
+                <div class="analysis">
+                    <p><strong>Signal:</strong> AI/semiconductor leader with institutional accumulation and aligned bullish options flow. $1.33M in call premium shows conviction. Key beneficiary of continued AI infrastructure buildout.</p>
+                    <p style="margin-top: 0.5rem;"><strong>Status:</strong> <span style="color: var(--accent-green);">WORTH FULL EVALUATION</span></p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Recommendation -->
+        <section>
+            <div class="recommendation">
+                <h3>🎯 Recommended Actions</h3>
+                <p style="margin-bottom: 1rem;">Evaluate in order of signal quality:</p>
+                <ol>
+                    <li><code>evaluate JNJ</code> — Best confluence score among mega-caps, 3-day sustained accumulation, defensive sector</li>
+                    <li><code>evaluate C</code> — Bearish setup with put sweep (urgency), 2-day distribution</li>
+                    <li><code>evaluate AVGO</code> — Semi accumulation, AI exposure, confluence present</li>
+                </ol>
+                <p style="margin-top: 1rem; color: var(--text-secondary);"><strong>Monitor:</strong> AMZN, AAPL, AMD show strong DP signals (80%+ buy ratios) but options flow hasn't confirmed. Watch for alignment.</p>
+            </div>
+        </section>
+
+        <!-- Scoring Methodology -->
+        <section>
+            <h2><span class="icon">📐</span> Scoring Methodology</h2>
+            <div class="chart-container">
+                <canvas id="weightChart"></canvas>
+            </div>
+            <div class="legend">
+                <div class="legend-item"><div class="legend-dot green"></div> DP Strength (30%)</div>
+                <div class="legend-item"><div class="legend-dot blue"></div> DP Sustained (20%)</div>
+                <div class="legend-item"><div class="legend-dot yellow"></div> Confluence (20%)</div>
+                <div class="legend-item"><div class="legend-dot" style="background: var(--accent-purple);"></div> Vol/OI Ratio (15%)</div>
+                <div class="legend-item"><div class="legend-dot red"></div> Sweeps (15%)</div>
+            </div>
+        </section>
+
+        <footer>
+            <p>Convex Scavenger — Autonomous Options Trading System</p>
+            <p style="margin-top: 0.5rem;">Generated: Saturday, February 28, 2026 @ 5:11 PM PST</p>
+            <p style="margin-top: 1rem; font-size: 0.9rem;">⚠️ Markets closed (Saturday). Flow data reflects Friday's session.</p>
+        </footer>
+    </div>
+
+    <script>
+        // Color palette
+        const colors = {
+            green: '#3fb950',
+            red: '#f85149',
+            yellow: '#d29922',
+            blue: '#58a6ff',
+            purple: '#a371f7',
+            bg: '#21262d',
+            border: '#30363d',
+            text: '#8b949e'
+        };
+
+        // Score Chart - Top 100 candidates
+        const scoreCtx = document.getElementById('scoreChart').getContext('2d');
+        new Chart(scoreCtx, {
+            type: 'bar',
+            data: {
+                labels: ['NVDA', 'C', 'JNJ', 'AMZN', 'AVGO', 'DIS', 'AAPL', 'CVX', 'AMD'],
+                datasets: [{
+                    label: 'Composite Score',
+                    data: [46.1, 43.2, 42.6, 40.4, 38.7, 38.5, 37.2, 31.6, 30.8],
+                    backgroundColor: [
+                        colors.yellow, colors.green, colors.green, colors.yellow, 
+                        colors.green, colors.yellow, colors.yellow, colors.yellow, colors.red
+                    ],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Discovery Scores — Top 100 Market Cap',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: colors.border },
+                        ticks: { color: colors.text }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: colors.text, font: { weight: 'bold' } }
+                    }
+                }
+            }
+        });
+
+        // DP Strength Chart
+        const dpCtx = document.getElementById('dpStrengthChart').getContext('2d');
+        new Chart(dpCtx, {
+            type: 'bar',
+            data: {
+                labels: ['AAPL', 'AMZN', 'NVDA', 'CVX', 'AMD', 'DIS', 'AVGO', 'JNJ', 'C'],
+                datasets: [{
+                    label: 'DP Strength',
+                    data: [83.9, 69.5, 68.3, 65.3, 62.7, 38.3, 35.6, 35.3, 25.7],
+                    backgroundColor: [
+                        colors.green, colors.green, colors.red, colors.green, 
+                        colors.green, colors.red, colors.green, colors.green, colors.red
+                    ],
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                indexAxis: 'y',
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Dark Pool Strength (0-100)',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    x: {
+                        beginAtZero: true,
+                        max: 100,
+                        grid: { color: colors.border },
+                        ticks: { color: colors.text }
+                    },
+                    y: {
+                        grid: { display: false },
+                        ticks: { color: colors.text, font: { weight: 'bold' } }
+                    }
+                }
+            }
+        });
+
+        // Buy Ratio Chart
+        const buyCtx = document.getElementById('buyRatioChart').getContext('2d');
+        new Chart(buyCtx, {
+            type: 'doughnut',
+            data: {
+                labels: ['AAPL (91.9%)', 'AMZN (84.7%)', 'CVX (82.7%)', 'AMD (81.3%)', 'JNJ (67.6%)', 'AVGO (67.8%)'],
+                datasets: [{
+                    data: [91.9, 84.7, 82.7, 81.3, 67.6, 67.8],
+                    backgroundColor: [
+                        colors.green, colors.blue, colors.purple, 
+                        colors.yellow, colors.green, colors.blue
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Dark Pool Buy Ratios (Accumulation)',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: {
+                        position: 'right',
+                        labels: { color: colors.text }
+                    }
+                }
+            }
+        });
+
+        // Premium Chart
+        const premiumCtx = document.getElementById('premiumChart').getContext('2d');
+        new Chart(premiumCtx, {
+            type: 'bar',
+            data: {
+                labels: ['NVDA', 'DIS', 'AAPL', 'AVGO', 'AMZN', 'JNJ', 'C'],
+                datasets: [{
+                    label: 'Premium ($M)',
+                    data: [25.34, 1.55, 1.50, 1.33, 1.15, 0.79, 0.72],
+                    backgroundColor: colors.purple,
+                    borderRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Options Premium Flow ($M)',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        grid: { color: colors.border },
+                        ticks: { 
+                            color: colors.text,
+                            callback: function(value) { return '$' + value + 'M'; }
+                        }
+                    },
+                    x: {
+                        grid: { display: false },
+                        ticks: { color: colors.text, font: { weight: 'bold' } }
+                    }
+                }
+            }
+        });
+
+        // Scoring Weights Chart
+        const weightCtx = document.getElementById('weightChart').getContext('2d');
+        new Chart(weightCtx, {
+            type: 'polarArea',
+            data: {
+                labels: ['DP Strength', 'DP Sustained', 'Confluence', 'Vol/OI Ratio', 'Sweeps'],
+                datasets: [{
+                    data: [30, 20, 20, 15, 15],
+                    backgroundColor: [
+                        'rgba(63, 185, 80, 0.7)',
+                        'rgba(88, 166, 255, 0.7)',
+                        'rgba(210, 153, 34, 0.7)',
+                        'rgba(163, 113, 247, 0.7)',
+                        'rgba(248, 81, 73, 0.7)'
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    title: {
+                        display: true,
+                        text: 'Scoring Weight Distribution',
+                        color: '#e6edf3',
+                        font: { size: 16, weight: 'bold' }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    r: {
+                        grid: { color: colors.border },
+                        ticks: { 
+                            color: colors.text,
+                            backdropColor: 'transparent'
+                        }
+                    }
+                }
+            }
+        });
+    </script>
+</body>
+</html>

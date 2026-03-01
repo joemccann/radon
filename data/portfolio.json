@@ -1,25 +1,605 @@
 {
-  "bankroll": 100000,
-  "peak_value": 100000,
+  "bankroll": 981353.19,
+  "peak_value": 981353.19,
+  "last_sync": "2026-02-28T18:09:15.837290",
   "positions": [
     {
       "id": 1,
-      "ticker": "IGV",
-      "structure": "Bull Call Spread $85/$92",
+      "ticker": "AAOI",
+      "structure": "Stock (750.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 750,
+      "direction": "LONG",
+      "entry_cost": 65516.25,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 750,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 65516.25,
+          "avg_cost": 87.355,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 2,
+      "ticker": "BAP",
+      "structure": "Long Call",
+      "structure_type": "Long Call",
+      "risk_profile": "defined",
+      "expiry": "2026-05-15",
+      "contracts": 1,
+      "direction": "LONG",
+      "entry_cost": 424.25,
+      "max_risk": 424.25,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 1,
+          "type": "Call",
+          "strike": 380.0,
+          "entry_cost": 424.25,
+          "avg_cost": 424.2488,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 3,
+      "ticker": "BKD",
+      "structure": "Bear Put Spread $11.0/$15.0",
+      "structure_type": "Bear Put Spread",
+      "risk_profile": "defined",
+      "expiry": "2026-04-17",
+      "contracts": 100,
+      "direction": "DEBIT",
+      "entry_cost": 13834.68,
+      "max_risk": 13834.68,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "SHORT",
+          "contracts": 100,
+          "type": "Put",
+          "strike": 11.0,
+          "entry_cost": 1878.2,
+          "avg_cost": 18.78196,
+          "market_price": null,
+          "market_value": null
+        },
+        {
+          "direction": "LONG",
+          "contracts": 100,
+          "type": "Put",
+          "strike": 15.0,
+          "entry_cost": 11956.48,
+          "avg_cost": 119.56475,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 4,
+      "ticker": "BRZE",
+      "structure": "Long Call",
+      "structure_type": "Long Call",
+      "risk_profile": "defined",
       "expiry": "2026-03-20",
-      "contracts": 26,
-      "entry_date": "2026-02-28",
-      "entry_cost": 2470,
-      "max_risk": 2470,
-      "max_reward": 15730,
-      "kelly_optimal": 15.04,
-      "target": "IGV $88-90",
-      "stop": "IGV < $78 or -50%"
+      "contracts": 300,
+      "direction": "LONG",
+      "entry_cost": 29409.63,
+      "max_risk": 29409.63,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 300,
+          "type": "Call",
+          "strike": 22.5,
+          "entry_cost": 29409.63,
+          "avg_cost": 98.03208335,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 5,
+      "ticker": "EC",
+      "structure": "Stock (5000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 5000,
+      "direction": "LONG",
+      "entry_cost": 61862.5,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 5000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 61862.5,
+          "avg_cost": 12.3725,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 6,
+      "ticker": "ETHA",
+      "structure": "Long Call",
+      "structure_type": "Long Call",
+      "risk_profile": "defined",
+      "expiry": "2026-06-18",
+      "contracts": 200,
+      "direction": "LONG",
+      "entry_cost": 58879.74,
+      "max_risk": 58879.74,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 200,
+          "type": "Call",
+          "strike": 15.0,
+          "entry_cost": 58879.74,
+          "avg_cost": 294.3987,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 7,
+      "ticker": "EWY",
+      "structure": "Bear Put Spread $140.0/$148.0",
+      "structure_type": "Bear Put Spread",
+      "risk_profile": "defined",
+      "expiry": "2026-03-13",
+      "contracts": 60,
+      "direction": "DEBIT",
+      "entry_cost": 61199.8,
+      "max_risk": 61199.8,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "SHORT",
+          "contracts": 60,
+          "type": "Put",
+          "strike": 140.0,
+          "entry_cost": 22337.73,
+          "avg_cost": 372.29546,
+          "market_price": null,
+          "market_value": null
+        },
+        {
+          "direction": "LONG",
+          "contracts": 60,
+          "type": "Put",
+          "strike": 148.0,
+          "entry_cost": 38862.07,
+          "avg_cost": 647.70125,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 8,
+      "ticker": "IGV",
+      "structure": "Long Call",
+      "structure_type": "Long Call",
+      "risk_profile": "defined",
+      "expiry": "2026-03-20",
+      "contracts": 50,
+      "direction": "LONG",
+      "entry_cost": 7460.06,
+      "max_risk": 7460.06,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 50,
+          "type": "Call",
+          "strike": 93.0,
+          "entry_cost": 7460.06,
+          "avg_cost": 149.20125,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 9,
+      "ticker": "IGV",
+      "structure": "Risk Reversal (P$90.0/C$90.0)",
+      "structure_type": "Risk Reversal",
+      "risk_profile": "undefined",
+      "expiry": "2026-05-15",
+      "contracts": 40,
+      "direction": "COMBO",
+      "entry_cost": 55519.87,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 40,
+          "type": "Call",
+          "strike": 90.0,
+          "entry_cost": 17988.05,
+          "avg_cost": 449.70125,
+          "market_price": null,
+          "market_value": null
+        },
+        {
+          "direction": "SHORT",
+          "contracts": 40,
+          "type": "Put",
+          "strike": 90.0,
+          "entry_cost": 37531.82,
+          "avg_cost": 938.29546,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 10,
+      "ticker": "ILF",
+      "structure": "Stock (2000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 2000,
+      "direction": "LONG",
+      "entry_cost": 74364.88,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 2000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 74364.88,
+          "avg_cost": 37.18244,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 11,
+      "ticker": "MSFT",
+      "structure": "Stock (1000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 1000,
+      "direction": "LONG",
+      "entry_cost": 468505.27,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 1000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 468505.27,
+          "avg_cost": 468.50527,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 12,
+      "ticker": "NAK",
+      "structure": "Stock (18628.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 18628,
+      "direction": "LONG",
+      "entry_cost": 56672.45,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 18628,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 56672.45,
+          "avg_cost": 3.04232595,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 13,
+      "ticker": "NFLX",
+      "structure": "Stock (4500.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 4500,
+      "direction": "LONG",
+      "entry_cost": 400838.26,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 4500,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 400838.26,
+          "avg_cost": 89.0751689,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 14,
+      "ticker": "PLTR",
+      "structure": "Risk Reversal (P$130.0/C$145.0)",
+      "structure_type": "Risk Reversal",
+      "risk_profile": "undefined",
+      "expiry": "2026-03-27",
+      "contracts": 100,
+      "direction": "COMBO",
+      "entry_cost": 104199.67,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 100,
+          "type": "Call",
+          "strike": 145.0,
+          "entry_cost": 45870.12,
+          "avg_cost": 458.70125,
+          "market_price": null,
+          "market_value": null
+        },
+        {
+          "direction": "SHORT",
+          "contracts": 100,
+          "type": "Put",
+          "strike": 130.0,
+          "entry_cost": 58329.55,
+          "avg_cost": 583.29546,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 15,
+      "ticker": "RR",
+      "structure": "Stock (10000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 10000,
+      "direction": "LONG",
+      "entry_cost": 44300.0,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 10000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 44300.0,
+          "avg_cost": 4.43,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 16,
+      "ticker": "SOFI",
+      "structure": "Long Call",
+      "structure_type": "Long Call",
+      "risk_profile": "defined",
+      "expiry": "2027-01-15",
+      "contracts": 300,
+      "direction": "LONG",
+      "entry_cost": 44383.38,
+      "max_risk": 44383.38,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 300,
+          "type": "Call",
+          "strike": 45.0,
+          "entry_cost": 44383.38,
+          "avg_cost": 147.94460835,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 17,
+      "ticker": "TSLL",
+      "structure": "Stock (5000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 5000,
+      "direction": "LONG",
+      "entry_cost": 91575.0,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 5000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 91575.0,
+          "avg_cost": 18.315,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 18,
+      "ticker": "URTY",
+      "structure": "Stock (2000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 2000,
+      "direction": "LONG",
+      "entry_cost": 127270.0,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 2000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 127270.0,
+          "avg_cost": 63.635,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
+    },
+    {
+      "id": 19,
+      "ticker": "USAX",
+      "structure": "Stock (1000.0 shares)",
+      "structure_type": "Stock",
+      "risk_profile": "equity",
+      "expiry": "N/A",
+      "contracts": 1000,
+      "direction": "LONG",
+      "entry_cost": 46680.0,
+      "max_risk": null,
+      "market_value": null,
+      "legs": [
+        {
+          "direction": "LONG",
+          "contracts": 1000,
+          "type": "Stock",
+          "strike": 0.0,
+          "entry_cost": 46680.0,
+          "avg_cost": 46.68,
+          "market_price": null,
+          "market_value": null
+        }
+      ],
+      "kelly_optimal": null,
+      "target": null,
+      "stop": null,
+      "entry_date": "2026-02-28"
     }
   ],
-  "total_deployed_pct": 2.47,
-  "total_deployed_dollars": 2470,
-  "remaining_capacity_pct": 97.53,
-  "max_positions": 6,
-  "avg_kelly_optimal": 15.04
+  "total_deployed_pct": 184.73,
+  "total_deployed_dollars": 1812895.69,
+  "remaining_capacity_pct": -84.73,
+  "position_count": 19,
+  "defined_risk_count": 7,
+  "undefined_risk_count": 12,
+  "avg_kelly_optimal": null
 }
