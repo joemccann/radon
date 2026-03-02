@@ -1,8 +1,79 @@
 import type { ExtensionAPI } from "@mariozechner/pi-coding-agent";
 import { Type } from "@sinclair/typebox";
 import { execSync } from "child_process";
+import { existsSync } from "fs";
+import { join } from "path";
 
-const BROWSER_PATH = "/Users/joemccann/.nvm/versions/node/v22.12.0/bin/agent-browser";
+/**
+ * Locate agent-browser executable.
+ * Priority:
+ * 1. `which agent-browser` (in PATH)
+ * 2. Common NVM locations
+ * 3. Global npm bin
+ * 4. Fallback to `npx agent-browser`
+ */
+function findAgentBrowser(): string {
+  // Try PATH first
+  try {
+    const whichResult = execSync("which agent-browser", { encoding: "utf-8" }).trim();
+    if (whichResult && existsSync(whichResult)) {
+      return whichResult;
+    }
+  } catch {
+    // Not in PATH, continue searching
+  }
+
+  const home = process.env.HOME || process.env.USERPROFILE || "";
+  
+  // Common locations to check
+  const candidates = [
+    // NVM paths (try to find any installed node version)
+    join(home, ".nvm/versions/node"),
+    // Global npm bin
+    join(home, ".npm-global/bin/agent-browser"),
+    join(home, ".npm/bin/agent-browser"),
+    // Homebrew on macOS
+    "/usr/local/bin/agent-browser",
+    "/opt/homebrew/bin/agent-browser",
+  ];
+
+  // Check NVM directory for any node version
+  const nvmPath = join(home, ".nvm/versions/node");
+  try {
+    if (existsSync(nvmPath)) {
+      const { readdirSync } = require("fs");
+      const versions = readdirSync(nvmPath).sort().reverse(); // Latest first
+      for (const version of versions) {
+        const binPath = join(nvmPath, version, "bin/agent-browser");
+        if (existsSync(binPath)) {
+          return binPath;
+        }
+      }
+    }
+  } catch {
+    // Continue to other candidates
+  }
+
+  // Check other candidate paths
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate;
+    }
+  }
+
+  // Fallback: use npx (will download if needed)
+  return "npx agent-browser";
+}
+
+// Cache the path after first lookup
+let cachedBrowserPath: string | null = null;
+
+function getBrowserPath(): string {
+  if (!cachedBrowserPath) {
+    cachedBrowserPath = findAgentBrowser();
+  }
+  return cachedBrowserPath;
+}
 
 export default function (pi: ExtensionAPI) {
   pi.registerTool({
@@ -16,18 +87,20 @@ export default function (pi: ExtensionAPI) {
       json: Type.Optional(Type.Boolean({ description: "Return JSON output" })),
     }),
     async execute({ command, session, headed, json }) {
+      const browserPath = getBrowserPath();
       const args: string[] = [];
       if (session) args.push(`--session "${session}"`);
       if (headed) args.push("--headed");
       if (json) args.push("--json");
       
-      const fullCommand = `${BROWSER_PATH} ${args.join(" ")} ${command}`;
+      const fullCommand = `${browserPath} ${args.join(" ")} ${command}`;
       
       try {
         const output = execSync(fullCommand, { 
           encoding: "utf-8",
           timeout: 60000,
           maxBuffer: 10 * 1024 * 1024,
+          env: { ...process.env, PATH: process.env.PATH },
         });
         return output;
       } catch (err: any) {

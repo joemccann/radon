@@ -6,8 +6,6 @@ allowed-tools: Bash(agent-browser:*)
 
 # Browser Automation with agent-browser
 
-**Tool Location:** `/Users/joemccann/.nvm/versions/node/v22.12.0/bin/agent-browser`
-
 ## Core Workflow
 
 Every browser automation follows this pattern:
