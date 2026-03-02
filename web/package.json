@@ -5,11 +5,14 @@
   "description": "Embedded Convex Scavenger dashboard with a conversational Claude-powered interface.",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "concurrently -n next,ib -c cyan,yellow \"next dev\" \"python3 ../scripts/ib_realtime_server.py\"",
+    "dev:next": "next dev",
+    "dev:prices": "python3 ../scripts/ib_realtime_server.py",
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "NODE_ENV=test ASSISTANT_MOCK=1 tsx --test tests/**/*.test.ts"
+    "test": "NODE_ENV=test ASSISTANT_MOCK=1 tsx --test tests/**/*.test.ts",
+    "test:ib": "python3 ../scripts/test_ib_realtime.py"
   },
   "dependencies": {
     "lucide-react": "^0.544.0",
@@ -26,6 +29,7 @@
     "@types/react-dom": "^19.0.0",
     "@types/ws": "^8.18.1",
     "autoprefixer": "^10.4.20",
+    "concurrently": "^9.2.1",
     "postcss": "^8.4.47",
     "tailwindcss": "^3.4.17",
     "tsx": "^4.20.0",
