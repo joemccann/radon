@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Convex Scavenger PI Web Embedding Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Satoshi:wght@500;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --sidebar-width: 220px;
+      --font-sans: "Satoshi", -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg-base: #050505;
+      --bg-panel: #0a0a0a;
+      --bg-hover: #141414;
+      --border-dim: #1c1c1c;
+      --border-focus: #333333;
+      --text-primary: #f0f0f0;
+      --text-muted: #666666;
+      --accent-bg: #ffffff;
+      --accent-text: #000000;
+      --scrollbar-track: #050505;
+      --scrollbar-thumb: #333333;
+    }
+
+    [data-theme="light"] {
+      --bg-base: #f5f5f5;
+      --bg-panel: #ffffff;
+      --bg-hover: #f0f0f0;
+      --border-dim: #d9d9d9;
+      --border-focus: #a3a3a3;
+      --text-primary: #0a0a0a;
+      --text-muted: #6b6b6b;
+      --accent-bg: #000000;
+      --accent-text: #ffffff;
+      --scrollbar-track: #f5f5f5;
+      --scrollbar-thumb: #a3a3a3;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--scrollbar-track); }
+    ::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 0;
+    }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      font-size: 13px;
+      line-height: 1.45;
+    }
+
+    .report-shell {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 18px;
+    }
+
+    .header {
+      border-bottom: 1px solid var(--border-dim);
+      padding-bottom: 14px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .title {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      font-weight: 700;
+      font-family: var(--font-sans);
+    }
+
+    .meta {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .theme-toggle {
+      background: transparent;
+      border: 1px solid var(--border-dim);
+      color: var(--text-primary);
+      font-size: 10px;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+      letter-spacing: 0.08em;
+      padding: 5px 10px;
+      cursor: pointer;
+      transition: all 150ms ease-in-out;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-focus);
+    }
+
+    .panel {
+      border: 1px solid var(--border-dim);
+      background: var(--bg-panel);
+      margin-bottom: 16px;
+    }
+
+    .panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .panel-body {
+      padding: 14px;
+    }
+
+    .panel-body p {
+      margin-bottom: 8px;
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      max-width: 1100px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 1px;
+      background: var(--border-dim);
+      margin-bottom: 16px;
+      border: 1px solid var(--border-dim);
+    }
+
+    .metric {
+      padding: 12px 14px;
+      background: var(--bg-panel);
+    }
+
+    .metric-label {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.1em;
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .metric-change {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-dim);
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      text-align: left;
+      border-bottom: 1px solid var(--border-dim);
+      padding: 10px 12px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-weight: 500;
+    }
+
+    td {
+      border-bottom: 1px solid var(--border-dim);
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      vertical-align: top;
+    }
+
+    td.right {
+      text-align: right;
+    }
+
+    tbody tr:hover {
+      background: var(--bg-hover);
+    }
+
+    .pill {
+      display: inline-block;
+      border: 1px solid var(--border-dim);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.09em;
+      padding: 2px 6px;
+      font-family: var(--font-mono);
+    }
+
+    .pill.ok {
+      color: #22c55e;
+      border-color: #22c55e;
+    }
+
+    .pill.warn {
+      color: #f59e0b;
+      border-color: #f59e0b;
+    }
+
+    .pill.info {
+      color: var(--text-muted);
+      border-color: var(--text-muted);
+    }
+
+    @media (max-width: 1200px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+    }
+
+    @media (max-width: 768px) {
+      .grid-2 {
+        grid-template-columns: 1fr;
+      }
+
+      .metrics { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="report-shell">
+    <header class="header">
+      <div>
+        <div class="title">Convex Scavenger • PI Web Embedding Report</div>
+        <div class="meta">Scope: Standalone Next.js conversational UI + embedded PI command layer</div>
+      </div>
+      <div class="meta" style="justify-content: flex-end;">
+        <span>Generated: 2026-03-02 09:34:00 PST</span>
+        <button class="theme-toggle" type="button" onclick="toggleTheme()">◐ THEME</button>
+      </div>
+    </header>
+
+    <section class="panel">
+      <div class="panel-header">Executive Summary</div>
+      <div class="panel-body">
+        <p>
+          This report confirms migration from CLI-only PI operation into a production-ready web control plane. The UI remains visually aligned
+          to the Terminal dashboard language and now dispatches slash-style commands directly to a new server route (`/api/pi`).
+        </p>
+        <p>
+          Conversational interactions are preserved: natural language prompts still use Claude-backed `/api/assistant`, while command-style prompts
+          are executed through the embedded PI workflow engine for `scan`, `discover`, `evaluate`, `portfolio`, `journal`, `sync`, and `leap-scan`.
+        </p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">Delivery State (Snapshot)</div>
+      <div class="panel-body">
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-label">Report ID</div>
+            <div class="metric-value">PI-WEB-2026-03-02</div>
+            <div class="metric-change">Embedded command path added</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Portfolio Size</div>
+            <div class="metric-value">19</div>
+            <div class="metric-change">Open positions loaded</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Bankroll</div>
+            <div class="metric-value">$981,353.19</div>
+            <div class="metric-change">From local data/portfolio.json</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Trade Log Volume</div>
+            <div class="metric-value">7</div>
+            <div class="metric-change">1 OPEN / 6 NO_TRADE</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid-2">
+      <section class="panel">
+        <div class="panel-header">Implemented Components</div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Component</th>
+                <th>Status</th>
+                <th class="right">File</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>PI API Route</td>
+                <td><span class="pill ok">Implemented</span></td>
+                <td class="right">web/app/api/pi/route.ts</td>
+              </tr>
+              <tr>
+                <td>Conversation Command Routing</td>
+                <td><span class="pill ok">Implemented</span></td>
+                <td class="right">web/app/page.tsx</td>
+              </tr>
+              <tr>
+                <td>Environment Template</td>
+                <td><span class="pill ok">Updated</span></td>
+                <td class="right">web/.env.example</td>
+              </tr>
+              <tr>
+                <td>Integration Tests</td>
+                <td><span class="pill ok">Added</span></td>
+                <td class="right">web/tests/integration.test.ts</td>
+              </tr>
+              <tr>
+                <td>Documentation</td>
+                <td><span class="pill ok">Updated</span></td>
+                <td class="right">web/README.md</td>
+              </tr>
+              <tr>
+                <td>Theme Alignment</td>
+                <td><span class="pill warn">UI shell unchanged</span></td>
+                <td class="right">web/app/globals.css</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">PI Command Matrix</div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Command</th>
+                <th>Type</th>
+                <th class="right">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>/help</td>
+                <td>Static command reference</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/portfolio</td>
+                <td>local JSON snapshot</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/journal --limit N</td>
+                <td>local JSON slice</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/scan</td>
+                <td>Python scanner</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/discover</td>
+                <td>Python discover</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/evaluate TICKER</td>
+                <td>3-script PI pipeline</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/sync</td>
+                <td>IB sync wrapper</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+              <tr>
+                <td>/leap-scan</td>
+                <td>UW + scanner</td>
+                <td class="right"><span class="pill ok">available</span></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-header">Risk / Environment Notes</div>
+      <div class="panel-body">
+        <p>
+          Unusual Whales access remains required for flow-driven commands through `UW_TOKEN`. Commands are strict-whitelisted and reject unknown or
+          positional injection patterns for production safety. Command execution is bounded by a timeout and outputs are normalized to avoid unbounded payloads.
+        </p>
+        <p>
+          Claude API keys remain supported through multiple env aliases for compatibility (`ANTHROPIC_API_KEY`, `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`).
+          These are used by `/api/assistant`, while `/api/pi` performs local command dispatch.
+        </p>
+        <p>
+          Next step recommended before go-live: run `ASSISTANT_MOCK=1 npm test` and a live smoke test of `/api/pi` for `/portfolio`, `/scan --top 1`, and `/journal --limit 1`.
+        </p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    }
+  </script>
+</body>
+</html>

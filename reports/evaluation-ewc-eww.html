@@ -1,0 +1,781 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Evaluation Report: EWC & EWW</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #050505;
+      --bg-panel: #0A0A0A;
+      --bg-hover: #141414;
+      --border-dim: #1C1C1C;
+      --border-focus: #333333;
+      --text-primary: #F0F0F0;
+      --text-muted: #666666;
+      --accent-bg: #FFFFFF;
+      --accent-text: #000000;
+      --positive: #22c55e;
+      --negative: #ef4444;
+      --warning: #f59e0b;
+    }
+    
+    [data-theme="light"] {
+      --bg-base: #F5F5F5;
+      --bg-panel: #FFFFFF;
+      --bg-hover: #F0F0F0;
+      --border-dim: #D9D9D9;
+      --border-focus: #A3A3A3;
+      --text-primary: #0A0A0A;
+      --text-muted: #6B6B6B;
+      --accent-bg: #000000;
+      --accent-text: #FFFFFF;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    
+    body {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.5;
+      background: var(--bg-base);
+      color: var(--text-primary);
+    }
+
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      border-bottom: 1px solid var(--border-dim);
+      padding-bottom: 16px;
+      margin-bottom: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .title {
+      font-size: 14px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .timestamp {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1px;
+      background: var(--border-dim);
+      border: 1px solid var(--border-dim);
+      margin-bottom: 24px;
+    }
+
+    .metric {
+      background: var(--bg-panel);
+      padding: 16px;
+    }
+
+    .metric-label {
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 24px;
+      font-weight: 500;
+      letter-spacing: -0.02em;
+    }
+
+    .metric-change {
+      font-size: 11px;
+      color: var(--text-muted);
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border-dim);
+    }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-dim);
+      margin-bottom: 16px;
+    }
+
+    .panel-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--text-muted);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th {
+      font-size: 10px;
+      font-weight: 500;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--text-muted);
+      text-align: left;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+    }
+
+    td {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border-dim);
+    }
+
+    tr:hover {
+      background: var(--bg-hover);
+    }
+
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .text-muted { color: var(--text-muted); }
+    .text-positive { color: var(--positive); }
+    .text-negative { color: var(--negative); }
+    .text-warning { color: var(--warning); }
+
+    .pill {
+      display: inline-block;
+      padding: 2px 8px;
+      border: 1px solid var(--border-dim);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+    }
+
+    .pill-pass {
+      background: var(--positive);
+      color: #000;
+      border-color: var(--positive);
+    }
+
+    .pill-fail {
+      background: var(--negative);
+      color: #fff;
+      border-color: var(--negative);
+    }
+
+    .pill-monitor {
+      background: var(--warning);
+      color: #000;
+      border-color: var(--warning);
+    }
+
+    .pill-accent {
+      background: var(--accent-bg);
+      color: var(--accent-text);
+      border-color: var(--accent-bg);
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--accent-bg);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    .theme-toggle {
+      background: transparent;
+      border: 1px solid var(--border-dim);
+      color: var(--text-primary);
+      padding: 4px 12px;
+      font-family: inherit;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 150ms ease-in-out;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-focus);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .section-title {
+      font-size: 18px;
+      font-weight: 600;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid var(--border-focus);
+    }
+
+    .ticker-badge {
+      font-size: 32px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+
+    .flow-bar {
+      height: 8px;
+      background: var(--border-dim);
+      position: relative;
+      margin-top: 8px;
+    }
+
+    .flow-bar-fill {
+      height: 100%;
+      position: absolute;
+      left: 0;
+      top: 0;
+    }
+
+    .flow-bar-fill.accumulation {
+      background: var(--positive);
+    }
+
+    .flow-bar-fill.distribution {
+      background: var(--negative);
+    }
+
+    .flow-bar-fill.neutral {
+      background: var(--text-muted);
+    }
+
+    .summary-box {
+      background: var(--bg-hover);
+      border: 1px solid var(--border-focus);
+      padding: 16px;
+      margin-top: 16px;
+    }
+
+    .summary-box h4 {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.15em;
+      color: var(--text-muted);
+      margin-bottom: 8px;
+    }
+
+    .divider {
+      height: 1px;
+      background: var(--border-dim);
+      margin: 32px 0;
+    }
+
+    ::-webkit-scrollbar { width: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: var(--border-focus); }
+
+    @media print {
+      body { background: white; color: black; }
+      .theme-toggle { display: none; }
+      .panel { border-color: #ccc; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="header">
+      <h1 class="title">Ticker Evaluation Report: EWC & EWW</h1>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <span class="timestamp">Generated: 2026-03-01 21:33 PST</span>
+        <button class="theme-toggle" onclick="toggleTheme()">◐ THEME</button>
+      </div>
+    </header>
+
+    <!-- Summary Metrics -->
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-label">Tickers Evaluated</div>
+        <div class="metric-value">2</div>
+        <div class="metric-change">EWC, EWW</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Trades Executed</div>
+        <div class="metric-value">0</div>
+        <div class="metric-change">No edge found</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Added to Watchlist</div>
+        <div class="metric-value">1</div>
+        <div class="metric-change">EWW — monitor</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Status</div>
+        <div class="metric-value">
+          <span class="status"><span class="status-dot"></span> COMPLETE</span>
+        </div>
+        <div class="metric-change">All gates evaluated</div>
+      </div>
+    </div>
+
+    <!-- EWC EVALUATION -->
+    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+      <span><span class="ticker-badge">EWC</span> — iShares MSCI Canada ETF</span>
+      <span class="pill pill-fail">NO TRADE</span>
+    </div>
+
+    <!-- EWC Validation -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Milestone 1: Ticker Validation</span>
+        <span class="pill pill-pass">PASS</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <tr>
+            <td class="text-muted" style="width: 200px;">Price</td>
+            <td><strong>$57.98</strong></td>
+          </tr>
+          <tr>
+            <td class="text-muted">3-Day DP Volume</td>
+            <td>842,312 shares</td>
+          </tr>
+          <tr>
+            <td class="text-muted">3-Day DP Premium</td>
+            <td>$48,755,213</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Options Available</td>
+            <td><span class="pill pill-pass">YES</span></td>
+          </tr>
+          <tr>
+            <td class="text-muted">Liquidity</td>
+            <td>HIGH — Active dark pool trading</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- EWC Dark Pool Flow -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Milestone 2: Dark Pool Flow Analysis</span>
+        <span class="pill">5-DAY</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="text-right">Volume</th>
+            <th class="text-right">Buy Ratio</th>
+            <th>Direction</th>
+            <th class="text-right">Strength</th>
+            <th>Visual</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>02-27</td>
+            <td class="text-right">574,874</td>
+            <td class="text-right text-negative"><strong>12.7%</strong></td>
+            <td><span class="pill pill-fail">DISTRIBUTION</span></td>
+            <td class="text-right"><strong>74.7</strong></td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill distribution" style="width: 12.7%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-26</td>
+            <td class="text-right">178,332</td>
+            <td class="text-right">52.2%</td>
+            <td><span class="pill">NEUTRAL</span></td>
+            <td class="text-right text-muted">0</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill neutral" style="width: 52.2%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-25</td>
+            <td class="text-right">89,106</td>
+            <td class="text-right">53.1%</td>
+            <td><span class="pill">NEUTRAL</span></td>
+            <td class="text-right text-muted">0</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill neutral" style="width: 53.1%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-24</td>
+            <td class="text-right">157,719</td>
+            <td class="text-right">48.8%</td>
+            <td><span class="pill">NEUTRAL</span></td>
+            <td class="text-right text-muted">0</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill neutral" style="width: 48.8%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-23</td>
+            <td class="text-right">59,582</td>
+            <td class="text-right text-positive">73.1%</td>
+            <td><span class="pill pill-pass">ACCUMULATION</span></td>
+            <td class="text-right">46.3</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill accumulation" style="width: 73.1%;"></div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="panel-body">
+        <div class="summary-box">
+          <h4>Aggregate Analysis</h4>
+          <p>Buy Ratio: <strong>32.1%</strong> | Direction: <span class="text-negative">DISTRIBUTION</span> | Strength: <strong>35.8</strong> | Prints: 148</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- EWC Edge Determination -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Milestone 4: Edge Determination</span>
+        <span class="pill pill-fail">FAIL</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <tr>
+            <td class="text-muted" style="width: 250px;">Sustained direction (3+ days)</td>
+            <td><span class="pill pill-fail">FAIL</span> — 1 distribution, 3 neutral, 1 accumulation</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Flow strength >50 agg or >70 recent</td>
+            <td><span class="pill pill-monitor">PARTIAL</span> — Aggregate 35.8, but Friday 74.7</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Options flow confirms</td>
+            <td><span class="pill">NO DATA</span></td>
+          </tr>
+        </table>
+        <div class="summary-box" style="border-color: var(--negative);">
+          <h4>Rejection Reason</h4>
+          <p>Choppy, directionless flow. Friday's distribution spike is a <strong>single-day event</strong>, not a sustained signal. The prior 3 days were neutral, and 02-23 was accumulation. This is noise, not edge.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- EWW EVALUATION -->
+    <div class="section-title" style="display: flex; justify-content: space-between; align-items: center;">
+      <span><span class="ticker-badge">EWW</span> — iShares MSCI Mexico ETF</span>
+      <span class="pill pill-monitor">MONITOR</span>
+    </div>
+
+    <!-- EWW Validation -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Milestone 1: Ticker Validation</span>
+        <span class="pill pill-pass">PASS</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <tr>
+            <td class="text-muted" style="width: 200px;">Price</td>
+            <td><strong>$80.94</strong></td>
+          </tr>
+          <tr>
+            <td class="text-muted">3-Day DP Volume</td>
+            <td>1,441,129 shares</td>
+          </tr>
+          <tr>
+            <td class="text-muted">3-Day DP Premium</td>
+            <td>$116,881,958</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Options Available</td>
+            <td><span class="pill pill-pass">YES</span></td>
+          </tr>
+          <tr>
+            <td class="text-muted">Liquidity</td>
+            <td>HIGH — Active dark pool trading</td>
+          </tr>
+        </table>
+      </div>
+    </div>
+
+    <!-- EWW Dark Pool Flow -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Milestone 2: Dark Pool Flow Analysis</span>
+        <span class="pill">5-DAY</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th class="text-right">Volume</th>
+            <th class="text-right">Buy Ratio</th>
+            <th>Direction</th>
+            <th class="text-right">Strength</th>
+            <th>Visual</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr style="background: rgba(34, 197, 94, 0.1);">
+            <td>02-27</td>
+            <td class="text-right"><strong>1,209,638</strong></td>
+            <td class="text-right text-positive"><strong>93.6%</strong></td>
+            <td><span class="pill pill-pass">ACCUMULATION</span></td>
+            <td class="text-right"><strong>87.3</strong></td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill accumulation" style="width: 93.6%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr style="background: rgba(34, 197, 94, 0.05);">
+            <td>02-26</td>
+            <td class="text-right">87,467</td>
+            <td class="text-right text-positive"><strong>77.4%</strong></td>
+            <td><span class="pill pill-pass">ACCUMULATION</span></td>
+            <td class="text-right"><strong>54.8</strong></td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill accumulation" style="width: 77.4%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-25</td>
+            <td class="text-right">144,024</td>
+            <td class="text-right text-negative">33.2%</td>
+            <td><span class="pill pill-fail">DISTRIBUTION</span></td>
+            <td class="text-right">33.6</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill distribution" style="width: 33.2%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-24</td>
+            <td class="text-right">699,055</td>
+            <td class="text-right text-negative">15.0%</td>
+            <td><span class="pill pill-fail">DISTRIBUTION</span></td>
+            <td class="text-right">70.1</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill distribution" style="width: 15%;"></div>
+              </div>
+            </td>
+          </tr>
+          <tr>
+            <td>02-23</td>
+            <td class="text-right">593,841</td>
+            <td class="text-right text-negative">11.7%</td>
+            <td><span class="pill pill-fail">DISTRIBUTION</span></td>
+            <td class="text-right">76.6</td>
+            <td>
+              <div class="flow-bar">
+                <div class="flow-bar-fill distribution" style="width: 11.7%;"></div>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="panel-body">
+        <div class="summary-box">
+          <h4>Aggregate Analysis</h4>
+          <p>Buy Ratio: <strong>52.0%</strong> | Direction: <span class="text-muted">NEUTRAL</span> | Strength: <strong>0</strong> | Prints: 199</p>
+          <p style="margin-top: 12px; color: var(--warning);">⚠️ <strong>Notable:</strong> Sharp reversal from distribution to accumulation on 02-26/02-27</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- EWW Edge Determination -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Milestone 4: Edge Determination</span>
+        <span class="pill pill-monitor">WEAK — MONITOR</span>
+      </div>
+      <div class="panel-body">
+        <table>
+          <tr>
+            <td class="text-muted" style="width: 250px;">Sustained direction (3+ days)</td>
+            <td><span class="pill pill-fail">FAIL</span> — Only 2 days accumulation (need 3+)</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Flow strength >50 agg or >70 recent</td>
+            <td><span class="pill pill-pass">PASS</span> — Friday 87.3, Thursday 54.8</td>
+          </tr>
+          <tr>
+            <td class="text-muted">Options flow confirms</td>
+            <td><span class="pill">NO DATA</span></td>
+          </tr>
+        </table>
+        <div class="summary-box" style="border-color: var(--warning);">
+          <h4>Analysis</h4>
+          <p><strong>Friday 02-27:</strong> 1.13M shares accumulated, $98M premium, 93.6% buy ratio, strength 87.3</p>
+          <p style="margin-top: 8px;"><strong>Pattern:</strong> Heavy distribution 02-23 to 02-25 → Sharp reversal to strong accumulation</p>
+          <p style="margin-top: 8px;"><strong>Interpretation:</strong> Could indicate institutional repositioning / bottom fishing after selloff</p>
+          <p style="margin-top: 12px; color: var(--warning);">⚠️ <strong>Action:</strong> Add to watchlist. Re-evaluate if Monday 03-02 shows continued accumulation (3+ days triggers re-evaluation)</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Friday Signal Detail -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Friday Signal Deep Dive</span>
+        <span class="pill pill-accent">SIGNIFICANT</span>
+      </div>
+      <div class="panel-body">
+        <div class="grid-2">
+          <div class="metric" style="border: 1px solid var(--positive);">
+            <div class="metric-label">Friday Buy Volume</div>
+            <div class="metric-value text-positive">1.13M</div>
+            <div class="metric-change">shares accumulated</div>
+          </div>
+          <div class="metric" style="border: 1px solid var(--positive);">
+            <div class="metric-label">Friday Premium</div>
+            <div class="metric-value text-positive">$98M</div>
+            <div class="metric-change">institutional capital</div>
+          </div>
+          <div class="metric" style="border: 1px solid var(--positive);">
+            <div class="metric-label">Buy Ratio</div>
+            <div class="metric-value text-positive">93.6%</div>
+            <div class="metric-change">extremely one-sided</div>
+          </div>
+          <div class="metric" style="border: 1px solid var(--positive);">
+            <div class="metric-label">Flow Strength</div>
+            <div class="metric-value text-positive">87.3</div>
+            <div class="metric-change">out of 100</div>
+          </div>
+        </div>
+        <p style="margin-top: 16px; color: var(--text-muted);">This is one of the strongest single-day accumulation signals observed. However, single-day signals require confirmation before trading.</p>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- IV Context from LEAP Scan -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>IV Context (from LEAP Scan)</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th class="text-right">HV20</th>
+            <th class="text-right">HV60</th>
+            <th class="text-right">LEAP IV (ATM)</th>
+            <th class="text-right">Gap vs HV20</th>
+            <th>Assessment</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>EWC</td>
+            <td class="text-right">23.1%</td>
+            <td class="text-right">15.5%</td>
+            <td class="text-right">18.3%</td>
+            <td class="text-right text-positive">+4.8%</td>
+            <td><span class="text-muted">IV slightly below HV20 (potential underpricing)</span></td>
+          </tr>
+          <tr>
+            <td>EWW</td>
+            <td class="text-right">30.3%</td>
+            <td class="text-right">22.2%</td>
+            <td class="text-right">23.4%</td>
+            <td class="text-right text-positive">+7.0%</td>
+            <td><span class="text-muted">IV below HV20 (potential underpricing)</span></td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="panel-body">
+        <p class="text-muted">Neither ticker met the 15% IV mispricing threshold, but EWW's LEAP IV (23.4%) is notably lower than recent realized volatility (30.3% HV20), which could provide favorable entry if edge confirms.</p>
+      </div>
+    </div>
+
+    <!-- Final Decisions -->
+    <div class="panel">
+      <div class="panel-header">
+        <span>Final Decisions</span>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Ticker</th>
+            <th>Decision</th>
+            <th>Failing Gate</th>
+            <th>Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>EWC</strong></td>
+            <td><span class="pill pill-fail">NO TRADE</span></td>
+            <td>EDGE — Choppy flow, single-day distribution spike</td>
+            <td>No further action</td>
+          </tr>
+          <tr>
+            <td><strong>EWW</strong></td>
+            <td><span class="pill pill-monitor">NO TRADE (MONITOR)</span></td>
+            <td>EDGE — Only 2 days sustained (need 3+)</td>
+            <td>Add to watchlist, re-evaluate Monday</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- Footer -->
+    <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border-dim); color: var(--text-muted); font-size: 11px;">
+      <p>Convex Scavenger | Evaluation Report | Methodology: 7-Milestone Gate System</p>
+      <p style="margin-top: 4px;">Current Portfolio: $100,000 bankroll | 2.47% deployed | 1/6 positions open</p>
+    </div>
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Web UI Spin-up Instructions Report</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="anonymous" />
+  <link
+    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Satoshi:wght@500;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --font-sans: "Satoshi", -apple-system, sans-serif;
+      --font-mono: "JetBrains Mono", monospace;
+    }
+
+    [data-theme="dark"] {
+      --bg-base: #050505;
+      --bg-panel: #0a0a0a;
+      --bg-hover: #141414;
+      --border-dim: #1c1c1c;
+      --border-focus: #333333;
+      --text-primary: #f0f0f0;
+      --text-muted: #666666;
+      --accent-bg: #ffffff;
+      --accent-text: #000000;
+      --scrollbar-track: #050505;
+      --scrollbar-thumb: #333333;
+    }
+
+    [data-theme="light"] {
+      --bg-base: #f5f5f5;
+      --bg-panel: #ffffff;
+      --bg-hover: #f0f0f0;
+      --border-dim: #d9d9d9;
+      --border-focus: #a3a3a3;
+      --text-primary: #0a0a0a;
+      --text-muted: #6b6b6b;
+      --accent-bg: #000000;
+      --accent-text: #ffffff;
+      --scrollbar-track: #f5f5f5;
+      --scrollbar-thumb: #a3a3a3;
+    }
+
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: var(--scrollbar-track);
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--scrollbar-thumb);
+      border-radius: 0;
+    }
+
+    body {
+      background: var(--bg-base);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      line-height: 1.45;
+      font-size: 13px;
+    }
+
+    .report {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      border-bottom: 1px solid var(--border-dim);
+      padding-bottom: 14px;
+      margin-bottom: 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 14px;
+    }
+
+    .title {
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.11em;
+      font-weight: 700;
+      margin-bottom: 4px;
+      font-family: var(--font-sans);
+    }
+
+    .timestamp {
+      font-family: var(--font-mono);
+      color: var(--text-muted);
+      font-size: 11px;
+    }
+
+    .theme-toggle {
+      border: 1px solid var(--border-dim);
+      color: var(--text-primary);
+      background: transparent;
+      padding: 5px 10px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-family: var(--font-mono);
+      cursor: pointer;
+      transition: all 150ms ease-in-out;
+    }
+
+    .theme-toggle:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-focus);
+    }
+
+    .panel {
+      border: 1px solid var(--border-dim);
+      background: var(--bg-panel);
+      margin-bottom: 16px;
+    }
+
+    .panel-header {
+      border-bottom: 1px solid var(--border-dim);
+      padding: 12px 16px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-size: 10px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .panel-body {
+      padding: 14px 16px;
+    }
+
+    .panel-body p,
+    .panel-body li {
+      font-size: 12px;
+      margin-bottom: 8px;
+    }
+
+    .muted {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      margin-bottom: 12px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 1px;
+      background: var(--border-dim);
+      border: 1px solid var(--border-dim);
+      margin: 0 0 16px;
+    }
+
+    .metric {
+      background: var(--bg-panel);
+      padding: 12px;
+    }
+
+    .metric-label {
+      color: var(--text-muted);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-family: var(--font-mono);
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-family: var(--font-mono);
+      font-size: 20px;
+      line-height: 1.1;
+      margin-bottom: 6px;
+    }
+
+    .metric-note {
+      border-top: 1px solid var(--border-dim);
+      padding-top: 6px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    ol {
+      padding-left: 20px;
+      margin: 0;
+    }
+
+    li::marker {
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .step {
+      border-left: 1px solid var(--border-dim);
+      padding-left: 12px;
+      margin-bottom: 12px;
+    }
+
+    .cmd {
+      font-family: var(--font-mono);
+      color: var(--accent-text);
+      background: var(--accent-bg);
+      padding: 2px 6px;
+      display: inline-block;
+    }
+
+    .note {
+      margin-top: 10px;
+      border-left: 1px solid var(--border-dim);
+      padding-left: 12px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11px;
+    }
+
+    .pill {
+      border: 1px solid var(--border-dim);
+      padding: 2px 6px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-family: var(--font-mono);
+      display: inline-block;
+      margin-left: 6px;
+    }
+
+    .pill.ok {
+      border-color: #22c55e;
+      color: #22c55e;
+    }
+
+    .pill.warn {
+      border-color: #f59e0b;
+      color: #f59e0b;
+    }
+
+    @media (max-width: 900px) {
+      .metrics {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="report">
+    <header class="header">
+      <div>
+        <h1 class="title">Web UI Spin-up Instructions Report</h1>
+        <div class="timestamp">Generated: 2026-03-02 10:00:00 PST • Source: Convex Scavenger project workspace</div>
+      </div>
+      <button class="theme-toggle" type="button" onclick="toggleTheme()">◐ Theme</button>
+    </header>
+
+    <section class="panel">
+      <div class="panel-header">Purpose</div>
+      <div class="panel-body">
+        <p>This report captures the step-by-step instructions to start and verify the standalone Next.js web UI for Convex Scavenger.</p>
+        <p class="muted">The UI includes the assistant chat and embedded PI command surface via the <span class="cmd">/api/pi</span> route.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">Readiness Metrics</div>
+      <div class="panel-body">
+        <div class="metrics">
+          <div class="metric">
+            <div class="metric-label">Scope</div>
+            <div class="metric-value">Local /dev + API Key Driven</div>
+            <div class="metric-note">Uses `web/.env` for secrets</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Endpoints</div>
+            <div class="metric-value">/api/assistant, /api/pi</div>
+            <div class="metric-note">Command and conversational split</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Default Port</div>
+            <div class="metric-value">3000</div>
+            <div class="metric-note">Next.js dev server</div>
+          </div>
+          <div class="metric">
+            <div class="metric-label">Test Harness</div>
+            <div class="metric-value">ASSISTANT_MOCK=1 npm test</div>
+            <div class="metric-note">Verifies assistant + PI route checks</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">Step-by-step Instructions</div>
+      <div class="panel-body">
+        <ol>
+          <li class="step">
+            Open terminal and change to the project root:
+            <p><span class="cmd">cd /Users/joemccann/dev/apps/finance/convex-scavenger</span></p>
+          </li>
+          <li class="step">
+            Go into the web app directory:
+            <p><span class="cmd">cd web</span></p>
+          </li>
+          <li class="step">
+            Install dependencies:
+            <p><span class="cmd">npm install</span></p>
+          </li>
+          <li class="step">
+            Create environment file:
+            <p><span class="cmd">cp .env.example .env</span></p>
+          </li>
+          <li class="step">
+            Set required keys in <span class="cmd">web/.env</span>:
+            <ul>
+              <li>Set one Anthropic key: <span class="cmd">ANTHROPIC_API_KEY</span> or <span class="cmd">CLAUDE_CODE_API_KEY</span> or <span class="cmd">CLAUDE_API_KEY</span></li>
+              <li>Set <span class="cmd">UW_TOKEN</span> for UW-backed PI commands</li>
+              <li>Optional: <span class="cmd">ANTHROPIC_MODEL</span>, <span class="cmd">ANTHROPIC_API_URL</span></li>
+            </ul>
+          </li>
+          <li class="step">
+            Start development server:
+            <p><span class="cmd">npm run dev</span></p>
+          </li>
+          <li class="step">
+            Open UI in browser:
+            <p><span class="cmd">http://localhost:3000</span></p>
+          </li>
+          <li class="step">
+            (Optional) Validate with tests:
+            <p><span class="cmd">ASSISTANT_MOCK=1 npm test</span></p>
+          </li>
+          <li class="step">
+            (Optional) Production start:
+            <p><span class="cmd">npm run build</span></p>
+            <p><span class="cmd">npm run start</span></p>
+          </li>
+        </ol>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">Common PI Chat Commands</div>
+      <div class="panel-body">
+        <p>Use these inside the web chat input to trigger embedded PI execution:</p>
+        <p><span class="cmd">/scan --top 20</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/discover --min-premium 500000</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/evaluate AAPL</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/portfolio</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/journal --limit 5</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/sync --sync</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/leap-scan --preset sectors</span> <span class="pill ok">implemented</span></p>
+        <p><span class="cmd">/help</span> <span class="pill ok">implemented</span></p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">Operational Checklist</div>
+      <div class="panel-body">
+        <p class="note">Before first real run: confirm <span class="cmd">UW_TOKEN</span> is valid and accessible in the same shell context as Next.js.</p>
+        <p class="note">If commands fail immediately in assistant mode, confirm AI keys and API route connectivity in <span class="cmd">web/.env</span>.</p>
+        <p class="note">If Python command route is expected to work, confirm scripts are present and executable from repo root via the server process working directory.</p>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">Quality Note</div>
+      <div class="panel-body">
+        <p>This report reflects the current web implementation in this workspace and should be treated as the source-of-record operating guide for onboarding and QA.</p>
+        <p class="pill warn" style="margin-top: 8px;">Keep key files in source control (`web/.env` must remain untracked).</p>
+      </div>
+    </section>
+  </main>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const current = html.getAttribute('data-theme');
+      html.setAttribute('data-theme', current === 'dark' ? 'light' : 'dark');
+    }
+  </script>
+</body>
+</html>

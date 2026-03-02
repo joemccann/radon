@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EWW LEAP IV Analysis</title>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #050505; --bg-panel: #0A0A0A; --bg-hover: #141414;
+      --border-dim: #1C1C1C; --border-focus: #333;
+      --text-primary: #F0F0F0; --text-muted: #666;
+      --positive: #22c55e; --negative: #ef4444; --warning: #f59e0b;
+    }
+    [data-theme="light"] {
+      --bg-base: #F5F5F5; --bg-panel: #FFF; --bg-hover: #F0F0F0;
+      --border-dim: #D9D9D9; --border-focus: #A3A3A3;
+      --text-primary: #0A0A0A; --text-muted: #6B6B6B;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: var(--bg-base); color: var(--text-primary); font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.5; padding: 24px; }
+    .container { max-width: 1200px; margin: 0 auto; }
+    .header { border-bottom: 1px solid var(--border-dim); padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; }
+    .title { font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; }
+    .timestamp { font-size: 11px; color: var(--text-muted); }
+    .metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1px; background: var(--border-dim); border: 1px solid var(--border-dim); margin-bottom: 24px; }
+    .metric { background: var(--bg-panel); padding: 16px; }
+    .metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 8px; }
+    .metric-value { font-size: 24px; font-weight: 500; }
+    .metric-value.positive { color: var(--positive); }
+    .metric-value.negative { color: var(--negative); }
+    .metric-value.warning { color: var(--warning); }
+    .panel { background: var(--bg-panel); border: 1px solid var(--border-dim); margin-bottom: 16px; }
+    .panel-header { padding: 12px 16px; border-bottom: 1px solid var(--border-dim); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); }
+    .panel-body { padding: 16px; }
+    table { width: 100%; border-collapse: collapse; }
+    th { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); text-align: left; padding: 12px 16px; border-bottom: 1px solid var(--border-dim); }
+    td { padding: 12px 16px; border-bottom: 1px solid var(--border-dim); }
+    tr:hover { background: var(--bg-hover); }
+    .text-right { text-align: right; }
+    .text-muted { color: var(--text-muted); }
+    .text-positive { color: var(--positive); }
+    .text-negative { color: var(--negative); }
+    .text-warning { color: var(--warning); }
+    .pill { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-dim); font-size: 10px; text-transform: uppercase; }
+    .pill-warning { background: var(--warning); color: #000; border-color: var(--warning); }
+    .pill-negative { background: var(--negative); color: #fff; border-color: var(--negative); }
+    .alert { padding: 16px; margin-bottom: 16px; border-left: 3px solid; }
+    .alert-warning { background: rgba(245, 158, 11, 0.1); border-color: var(--warning); }
+    .alert-danger { background: rgba(239, 68, 68, 0.1); border-color: var(--negative); }
+    .conclusion { background: var(--bg-hover); border: 2px solid var(--border-focus); padding: 20px; margin-top: 24px; }
+    .toggle { position: fixed; top: 20px; right: 20px; background: var(--bg-panel); border: 1px solid var(--border-dim); color: var(--text-primary); padding: 8px 12px; cursor: pointer; font-family: inherit; font-size: 11px; }
+  </style>
+</head>
+<body>
+  <button class="toggle" onclick="document.documentElement.dataset.theme = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'">◐</button>
+  
+  <div class="container">
+    <header class="header">
+      <h1 class="title">EWW LEAP IV Analysis — Mid-Point Pricing</h1>
+      <span class="timestamp">Generated: 2026-03-01 21:45 PST</span>
+    </header>
+
+    <!-- Key Metrics -->
+    <div class="metrics">
+      <div class="metric">
+        <div class="metric-label">Spot Price</div>
+        <div class="metric-value">$80.94</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">HV20 (Recent Vol)</div>
+        <div class="metric-value">30.3%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">LEAP IV (OTM, Last)</div>
+        <div class="metric-value positive">~15-17%</div>
+      </div>
+      <div class="metric">
+        <div class="metric-label">Theoretical Gap</div>
+        <div class="metric-value positive">+13-15%</div>
+      </div>
+    </div>
+
+    <!-- Critical Finding -->
+    <div class="alert alert-danger">
+      <strong>⚠️ CRITICAL: OPTION CHAIN IS ILLIQUID</strong><br>
+      Mid-point pricing analysis reveals the EWW LEAP chain is essentially untradeable:
+      <ul style="margin-top: 8px; margin-left: 20px;">
+        <li>ITM options show <strong>negative time value</strong> (quotes are stale/inverted)</li>
+        <li>ATM options ($75-85) have <strong>no active bids</strong></li>
+        <li>OTM options show theoretical mispricing but <strong>cannot be executed</strong></li>
+      </ul>
+    </div>
+
+    <!-- Option Chain Analysis -->
+    <div class="panel">
+      <div class="panel-header">Jan 2027 Call Option Chain — Mid-Point Analysis</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Strike</th>
+            <th class="text-right">Bid</th>
+            <th class="text-right">Ask</th>
+            <th class="text-right">Mid</th>
+            <th class="text-right">Intrinsic</th>
+            <th class="text-right">Time Value</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>$45</td>
+            <td class="text-right">$18.00</td>
+            <td class="text-right">$23.00</td>
+            <td class="text-right">$20.50</td>
+            <td class="text-right">$35.94</td>
+            <td class="text-right text-negative">-$15.44</td>
+            <td><span class="pill pill-negative">STALE</span></td>
+          </tr>
+          <tr>
+            <td>$50</td>
+            <td class="text-right">$24.50</td>
+            <td class="text-right">$28.50</td>
+            <td class="text-right">$26.50</td>
+            <td class="text-right">$30.94</td>
+            <td class="text-right text-negative">-$4.44</td>
+            <td><span class="pill pill-negative">STALE</span></td>
+          </tr>
+          <tr>
+            <td>$65</td>
+            <td class="text-right">$15.50</td>
+            <td class="text-right">$20.50</td>
+            <td class="text-right">$18.00</td>
+            <td class="text-right">$15.94</td>
+            <td class="text-right text-positive">+$2.06</td>
+            <td><span class="pill pill-warning">WIDE</span></td>
+          </tr>
+          <tr class="text-muted">
+            <td>$75</td>
+            <td class="text-right">—</td>
+            <td class="text-right">—</td>
+            <td class="text-right">$9.80 (last)</td>
+            <td class="text-right">$5.94</td>
+            <td class="text-right">+$3.86</td>
+            <td><span class="pill">NO BID</span></td>
+          </tr>
+          <tr class="text-muted">
+            <td>$80 (ATM)</td>
+            <td class="text-right">—</td>
+            <td class="text-right">—</td>
+            <td class="text-right">$7.20 (last)</td>
+            <td class="text-right">$0.94</td>
+            <td class="text-right">+$6.26</td>
+            <td><span class="pill">NO BID</span></td>
+          </tr>
+          <tr class="text-muted">
+            <td>$85</td>
+            <td class="text-right">—</td>
+            <td class="text-right">—</td>
+            <td class="text-right">$5.60 (last)</td>
+            <td class="text-right">$0.00</td>
+            <td class="text-right">+$5.60</td>
+            <td><span class="pill">NO BID</span></td>
+          </tr>
+          <tr class="text-muted">
+            <td>$90</td>
+            <td class="text-right">—</td>
+            <td class="text-right">—</td>
+            <td class="text-right">$3.49 (last)</td>
+            <td class="text-right">$0.00</td>
+            <td class="text-right">+$3.49</td>
+            <td><span class="pill">NO BID</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- IV Analysis -->
+    <div class="panel">
+      <div class="panel-header">Implied Volatility (from Last Prices — OTM Only)</div>
+      <table>
+        <thead>
+          <tr>
+            <th>Strike</th>
+            <th class="text-right">Last Price</th>
+            <th class="text-right">Implied Vol</th>
+            <th class="text-right">vs HV20 (30.3%)</th>
+            <th class="text-right">vs HV60 (22.2%)</th>
+            <th>Assessment</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>$80 (ATM)</td>
+            <td class="text-right">$7.20</td>
+            <td class="text-right">14.8%</td>
+            <td class="text-right text-positive">+15.5%</td>
+            <td class="text-right text-positive">+7.4%</td>
+            <td class="text-positive">Underpriced vs HV</td>
+          </tr>
+          <tr>
+            <td>$85</td>
+            <td class="text-right">$5.60</td>
+            <td class="text-right">14.7%</td>
+            <td class="text-right text-positive">+15.6%</td>
+            <td class="text-right text-positive">+7.5%</td>
+            <td class="text-positive">Underpriced vs HV</td>
+          </tr>
+          <tr>
+            <td>$90</td>
+            <td class="text-right">$3.49</td>
+            <td class="text-right">16.9%</td>
+            <td class="text-right text-positive">+13.4%</td>
+            <td class="text-right text-positive">+5.3%</td>
+            <td class="text-positive">Underpriced vs HV</td>
+          </tr>
+          <tr>
+            <td>$95</td>
+            <td class="text-right">$2.45</td>
+            <td class="text-right">19.0%</td>
+            <td class="text-right text-positive">+11.3%</td>
+            <td class="text-right text-positive">+3.2%</td>
+            <td class="text-positive">Underpriced vs HV</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="panel-body">
+        <p class="text-muted">⚠️ These IVs are calculated from LAST traded prices, which may be days/weeks old. No active bids exist to validate current pricing.</p>
+      </div>
+    </div>
+
+    <!-- Conclusion -->
+    <div class="conclusion">
+      <h3 style="margin-bottom: 16px; font-size: 14px; text-transform: uppercase; letter-spacing: 0.1em;">Final Assessment</h3>
+      
+      <p style="margin-bottom: 16px;"><strong>Theoretical Finding:</strong> EWW LEAP IV (~15-17%) is significantly below recent realized volatility (HV20 = 30.3%), suggesting a +13-15% volatility mispricing.</p>
+      
+      <p style="margin-bottom: 16px;"><strong>Practical Reality:</strong> The option chain is <span class="text-negative">ILLIQUID</span> and <span class="text-negative">UNTRADEABLE</span>:</p>
+      
+      <ul style="margin-left: 20px; margin-bottom: 16px;">
+        <li>ITM options have inverted quotes (mid < intrinsic) — stale data</li>
+        <li>ATM/OTM options have <strong>zero bids</strong> — cannot sell to close</li>
+        <li>Last trade dates are weeks/months old — prices are stale</li>
+        <li>Open interest is minimal (0-34 contracts) — no liquidity</li>
+      </ul>
+
+      <p style="margin-bottom: 16px;"><strong>Decision:</strong> <span class="pill pill-negative">NO TRADE</span></p>
+      
+      <p><strong>Reason:</strong> Even if theoretical IV mispricing exists, the lack of active markets makes execution impossible. Any attempt to buy would require crossing a massive spread (if one exists) or posting a limit order that may never fill.</p>
+      
+      <p style="margin-top: 16px;"><strong>Alternative:</strong> If the dark pool accumulation signal confirms Monday (3rd consecutive day), consider:</p>
+      <ul style="margin-left: 20px; margin-top: 8px;">
+        <li>Direct EWW stock position (no convexity but executable)</li>
+        <li>Shorter-dated options (Mar/Jun 2026) which may have better liquidity</li>
+        <li>Revisit LEAPs if liquidity improves after sustained flow</li>
+      </ul>
+    </div>
+
+    <div style="margin-top: 24px; padding-top: 16px; border-top: 1px solid var(--border-dim); font-size: 11px; color: var(--text-muted);">
+      Convex Scavenger | LEAP IV Analysis | Methodology: Black-Scholes IV from mid-point (or last) prices
+    </div>
+  </div>
+</body>
+</html>
