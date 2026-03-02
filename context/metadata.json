@@ -1,0 +1,42 @@
+{
+  "version": "1.0.0",
+  "created": "2026-03-02T05:15:56Z",
+  "governance": {
+    "history": {
+      "retention": "permanent",
+      "compression": { "after": "30d", "method": "summarize", "keepOriginal": true }
+    },
+    "episodic": {
+      "retention": "1y",
+      "pruneWhen": "count > 1000",
+      "pruneStrategy": "merge_similar"
+    },
+    "scratchpad": {
+      "retention": "session",
+      "archiveTo": "history",
+      "autoDelete": "7d"
+    },
+    "fact": {
+      "retention": "permanent",
+      "deduplication": "semantic_similarity > 0.95",
+      "conflictResolution": "most_recent_wins"
+    },
+    "human": {
+      "retention": "permanent",
+      "priority": "overrides_model_output"
+    }
+  },
+  "accessControl": {
+    "defaultScope": "all_agents",
+    "agentScopes": {}
+  },
+  "tokenBudget": {
+    "systemPrompt": 0.08,
+    "memoryFacts": 0.20,
+    "episodicSummaries": 0.10,
+    "taskContext": 0.30,
+    "conversationHistory": 0.12,
+    "toolDefinitions": 0.05,
+    "outputReserve": 0.25
+  }
+}
