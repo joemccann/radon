@@ -128,6 +128,7 @@ Skills are loaded on-demand when tasks match their descriptions.
 |-------|----------|---------|
 | `options-analysis` | `.pi/skills/options-analysis/SKILL.md` | Options pricing and structure analysis |
 | `web-fetch` | `.pi/skills/web-fetch/SKILL.md` | Fetch and extract content from websites |
+| `html-report` | `.pi/skills/html-report/SKILL.md` | Generate styled HTML reports (Terminal theme) |
 
 ### Web Fetch Quick Reference
 ```bash
