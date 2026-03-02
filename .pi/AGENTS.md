@@ -1,5 +1,20 @@
 # Convex Scavenger — Project Instructions
 
+## ⚠️ Data Fetching Priority (ALWAYS follow this order)
+
+When fetching ANY market data (quotes, options, fundamentals, analyst ratings, etc.):
+
+| Priority | Source | When to Use |
+|----------|--------|-------------|
+| **1st** | Interactive Brokers | Always try first if TWS/Gateway available |
+| **2nd** | Unusual Whales | Flow data, dark pools, options activity |
+| **3rd** | Yahoo Finance | Only if IB and UW unavailable/don't have the data |
+| **4th** | Web Search/Scrape | Last resort only |
+
+**Never skip to Yahoo Finance or web scraping without trying IB/UW first.**
+
+---
+
 ## Workflow Commands
 
 | Command | Action |
@@ -13,6 +28,7 @@
 | `leap-scan [TICKERS]` | Scan for LEAP IV mispricing opportunities |
 | `seasonal [TICKERS]` | Seasonality assessment for one or more tickers |
 | `x-scan [@ACCOUNT]` | Fetch latest tweets and extract ticker sentiment |
+| `analyst-ratings [TICKERS]` | Fetch analyst ratings, changes, and price targets |
 
 ## Evaluation Milestones
 
@@ -20,6 +36,7 @@ Always follow in order. Stop immediately if a gate fails.
 
 1. **Validate Ticker** → `python3 scripts/fetch_ticker.py [TICKER]`
 1B. **Seasonality** → Fetch & analyze (does not affect score, but report in analysis)
+1C. **Analyst Ratings** → `python3 scripts/fetch_analyst_ratings.py [TICKER]` (context, not a gate)
 2. **Dark Pool Flow** → `python3 scripts/fetch_flow.py [TICKER]`
 3. **Options Flow** → `python3 scripts/fetch_options.py [TICKER]`
 4. **Edge Decision** → PASS/FAIL with reasoning (stop if FAIL)
@@ -76,6 +93,84 @@ python3 scripts/fetch_x_watchlist.py --dry-run
 
 ---
 
+## Analyst Ratings Command
+
+Fetch analyst ratings, recent rating changes, and price targets.
+
+**Data Sources (following standard priority):**
+1. Interactive Brokers (`RESC` fundamental data) - requires Reuters subscription
+2. Yahoo Finance - fallback if IB unavailable (rate limited)
+3. Web scrape - last resort
+
+*Note: Unusual Whales does NOT have analyst ratings data. UW focuses on flow data (dark pools, options, institutional).*
+
+```bash
+# Scan specific tickers (auto-detects IB, falls back to Yahoo)
+python3 scripts/fetch_analyst_ratings.py AAPL MSFT NVDA
+
+# Scan all watchlist tickers
+python3 scripts/fetch_analyst_ratings.py --watchlist
+
+# Scan all portfolio positions
+python3 scripts/fetch_analyst_ratings.py --portfolio
+
+# Scan both watchlist and portfolio
+python3 scripts/fetch_analyst_ratings.py --all
+
+# Only show tickers with recent changes (upgrades/downgrades)
+python3 scripts/fetch_analyst_ratings.py --portfolio --changes-only
+
+# Update watchlist.json with analyst rating data
+python3 scripts/fetch_analyst_ratings.py --watchlist --update-watchlist
+
+# Force specific data source
+python3 scripts/fetch_analyst_ratings.py AAPL --source yahoo
+python3 scripts/fetch_analyst_ratings.py AAPL --source ib
+
+# Custom IB port
+python3 scripts/fetch_analyst_ratings.py --portfolio --port 7497
+
+# Bypass cache
+python3 scripts/fetch_analyst_ratings.py AAPL --no-cache
+
+# Output raw JSON
+python3 scripts/fetch_analyst_ratings.py AAPL --json
+```
+
+**Output Includes:**
+- Recommendation (Strong Buy → Sell)
+- Buy/Hold/Sell percentage breakdown
+- Analyst count (confidence indicator)
+- Mean price target and upside/downside %
+- Recent rating distribution changes
+- Upgrade/downgrade history (firm, action, date)
+
+**Signal Interpretation:**
+
+| Buy % | Direction | Notes |
+|-------|-----------|-------|
+| ≥70% | BULLISH | Strong consensus |
+| 50-69% | LEAN_BULLISH | Positive bias |
+| 30-49% | LEAN_BEARISH | Negative bias |
+| <30% | BEARISH | Strong negative consensus |
+
+| Analyst Count | Confidence |
+|---------------|------------|
+| ≥20 | HIGH |
+| 10-19 | MEDIUM |
+| <10 | LOW |
+
+**Changes Signal:**
+- `UPGRADING` — Net increase in Buy/Strong Buy ratings
+- `DOWNGRADING` — Net increase in Sell/Strong Sell ratings
+
+Analyst ratings are CONTEXT, not a gate. Use for:
+- Confirming or questioning flow signals
+- Identifying contrarian opportunities (strong flow vs. weak ratings)
+- Monitoring positions for sentiment shifts
+
+---
+
 ## Seasonal Command
 
 Usage: `seasonal [TICKER]` or `seasonal [TICKER1] [TICKER2] ...`
@@ -109,6 +204,7 @@ Usage: `seasonal [TICKER]` or `seasonal [TICKER1] [TICKER2] ...`
 | `scripts/fetch_ticker.py` | Validate ticker via dark pool activity |
 | `scripts/fetch_flow.py` | Fetch dark pool + options flow data |
 | `scripts/fetch_options.py` | Options chain data (stub) |
+| `scripts/fetch_analyst_ratings.py` | Fetch analyst ratings, changes, and price targets |
 | `scripts/scanner.py` | Scan watchlist, rank by signal strength |
 | `scripts/discover.py` | Market-wide flow scanner for new candidates |
 | `scripts/kelly.py` | Kelly criterion calculator |
@@ -173,6 +269,7 @@ See `docs/strategies.md` for full methodology.
 | `data/portfolio.json` | Open positions, entry prices, Kelly sizes, expiry dates |
 | `data/trade_log.json` | Executed trades only (append-only) |
 | `data/ticker_cache.json` | Local cache of ticker → company name mappings |
+| `data/analyst_ratings_cache.json` | Cached analyst ratings data |
 
 ## Documentation
 
@@ -184,20 +281,39 @@ See `docs/strategies.md` for full methodology.
 | `docs/status.md` | Current state, recent decisions, audit log |
 | `docs/strategies.md` | Trading strategies (Dark Pool Flow, LEAP IV Mispricing) |
 
-## Data Source Priority
+## Data Source Priority (Detailed)
 
-When fetching live pricing data (quotes, options chains), use sources in this order:
+**ALWAYS use sources in this order. Never skip ahead.**
 
 | Priority | Source | Use Case | Notes |
 |----------|--------|----------|-------|
-| **1** | Interactive Brokers | Real-time quotes, options chains | Requires TWS/Gateway running |
-| **2** | Unusual Whales | Flow data, options activity | API key in UW_TOKEN env var |
-| **3** | Yahoo Finance | Fallback for quotes/chains | Rate limited, use as last resort |
+| **1** | Interactive Brokers | Real-time quotes, options chains, analyst ratings, fundamentals | Requires TWS/Gateway running |
+| **2** | Unusual Whales | Dark pool flow, options activity, institutional flow | API key in UW_TOKEN env var |
+| **3** | Yahoo Finance | Quotes, analyst ratings when IB unavailable | Rate limited, can be delayed |
+| **4** | Web Search/Scrape | Only when no API has the data | Use `agent-browser` skill |
 
-**Rationale:**
-- IB provides the most accurate real-time data with tight spreads
-- UW excels at flow/activity data but options chain access requires higher tier
-- Yahoo Finance is free but rate-limited and data can be delayed
+**What each source provides:**
+
+| Data Type | IB | UW | Yahoo | Web |
+|-----------|----|----|-------|-----|
+| Real-time quotes | ✅ | ❌ | ⚠️ delayed | ❌ |
+| Options chains | ✅ | ⚠️ higher tier | ✅ | ❌ |
+| Dark pool flow | ❌ | ✅ | ❌ | ❌ |
+| Options flow/sweeps | ❌ | ✅ | ❌ | ❌ |
+| Analyst ratings | ✅ (subscription) | ❌ | ✅ | ✅ |
+| Fundamentals | ✅ (subscription) | ❌ | ✅ | ✅ |
+| News/Events | ❌ | ❌ | ❌ | ✅ |
+| Seasonality charts | ❌ | ❌ | ❌ | ✅ EquityClock |
+
+**IB Fundamental Data** (requires Reuters Fundamentals subscription):
+- `ReportsFinSummary` - Financial summary
+- `ReportsOwnership` - Company ownership
+- `ReportSnapshot` - Financial overview
+- `ReportsFinStatements` - Financial statements
+- `RESC` - **Analyst Estimates & Ratings**
+- `CalendarReport` - Company calendar
+
+*Note: Error 10358 "Fundamentals data is not allowed" means IB fundamentals subscription is not active. Scripts will auto-fallback to next available source.*
 
 ## Tools Available
 

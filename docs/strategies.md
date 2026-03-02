@@ -170,13 +170,18 @@ Vega on 30Δ 2-year call ≈ 0.30-0.50 per 1% IV
 - Mature, stable business entering low-vol period
 - Mean-reversion after spike with no new catalysts
 
-### Data Source Priority for Options Pricing
+### Data Source Priority
 
-When fetching live options data, use sources in this order:
+When fetching any market data, **ALWAYS** use sources in this priority order:
 
-1. **Interactive Brokers** — Most accurate real-time data (requires TWS/Gateway)
-2. **Unusual Whales** — Flow data, activity signals (options chain requires higher tier)
-3. **Yahoo Finance** — Fallback only (rate limited, can be delayed)
+| Priority | Source | Best For | Limitations |
+|----------|--------|----------|-------------|
+| **1st** | Interactive Brokers | Real-time quotes, options chains, analyst ratings, fundamentals | Requires TWS/Gateway connection |
+| **2nd** | Unusual Whales | Dark pool flow, options activity, institutional signals | No analyst/fundamental data |
+| **3rd** | Yahoo Finance | Quotes, analyst ratings when IB unavailable | Aggressive rate limits, delayed data |
+| **4th** | Web Search/Scrape | News, events, data not in APIs | Last resort only |
+
+**Never skip to Yahoo Finance or web scraping without trying IB/UW first.**
 
 ### Scripts
 
