@@ -118,6 +118,33 @@ See `docs/strategies.md` for full methodology.
 - `bash` — Run Python scripts in ./scripts/
 - `read`/`write`/`edit` — Manage data and documentation files
 - `kelly_calc` — Built-in fractional Kelly calculator
+- `agent-browser` — Web browsing and scraping (see web-fetch skill)
+
+## Skills
+
+Skills are loaded on-demand when tasks match their descriptions.
+
+| Skill | Location | Purpose |
+|-------|----------|---------|
+| `options-analysis` | `.pi/skills/options-analysis/SKILL.md` | Options pricing and structure analysis |
+| `web-fetch` | `.pi/skills/web-fetch/SKILL.md` | Fetch and extract content from websites |
+
+### Web Fetch Quick Reference
+```bash
+# Open and snapshot a page
+agent-browser open "https://example.com"
+agent-browser snapshot -i -c
+
+# Extract text from element (use @refs from snapshot)
+agent-browser get text @e5
+
+# Screenshot
+agent-browser screenshot page.png
+
+# Interactive: fill form and click
+agent-browser fill @e3 "value"
+agent-browser click @e5
+```
 
 ## Discovery Scoring (0-100 Scale)
 
