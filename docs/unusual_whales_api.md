@@ -335,6 +335,22 @@ The `UW_TOKEN` environment variable should contain your API key.
 
 ---
 
+## Script → Endpoint Mapping
+
+Which scripts use which UW endpoints:
+
+| Script | Endpoints Used |
+|--------|----------------|
+| `fetch_ticker.py` | `/api/darkpool/{ticker}` (validation via activity) |
+| `fetch_flow.py` | `/api/darkpool/{ticker}`, `/api/option-trades/flow-alerts` |
+| `fetch_options.py` | `/api/stock/{ticker}/option-contracts`, `/api/option-trades/flow-alerts` |
+| `fetch_analyst_ratings.py` | `/api/screener/analysts` |
+| `scanner.py` | `/api/darkpool/{ticker}`, `/api/option-trades/flow-alerts` |
+| `discover.py` | `/api/darkpool/recent`, `/api/option-trades/flow-alerts` |
+| `leap_scanner_uw.py` | `/api/stock/{ticker}/volatility/stats` |
+
+---
+
 ## Full API Spec
 
 See `docs/unusual_whales_api_spec.yaml` for complete OpenAPI specification.

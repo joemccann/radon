@@ -32,6 +32,38 @@ Large institutional players accumulate or distribute positions through dark pool
 | Options confirmation | Call/put flow alignment | Preferred |
 | Price lag | Signal NOT yet reflected in price | Required |
 
+### Options Flow Confirmation
+
+Use `fetch_options.py` to confirm or contradict dark pool signals:
+
+```bash
+python3 scripts/fetch_options.py [TICKER]
+```
+
+**Chain Analysis:**
+| Put/Call Ratio | Signal |
+|----------------|--------|
+| >2.0x | BEARISH (confirms distribution) |
+| 1.2-2.0x | LEAN_BEARISH |
+| 0.8-1.2x | NEUTRAL |
+| 0.5-0.8x | LEAN_BULLISH |
+| <0.5x | BULLISH (confirms accumulation) |
+
+**Flow Alerts Analysis:**
+- **Sweeps**: Urgency signal — aggressive buying/selling across exchanges
+- **Bid-side dominant**: Selling pressure (closing longs or opening shorts)
+- **Ask-side dominant**: Buying pressure (opening longs)
+
+**Confluence Check:**
+| DP Flow | Options Signal | Action |
+|---------|----------------|--------|
+| Accumulation | BULLISH/LEAN_BULLISH | ✅ Strong confirm |
+| Accumulation | NEUTRAL | ⚠️ Proceed with caution |
+| Accumulation | BEARISH | ❌ Conflict — reduce size or pass |
+| Distribution | BEARISH/LEAN_BEARISH | ✅ Strong confirm |
+| Distribution | NEUTRAL | ⚠️ Proceed with caution |
+| Distribution | BULLISH | ❌ Conflict — reduce size or pass |
+
 ### Position Structure
 
 - **Bullish signal**: ATM/OTM calls, bull call spreads
@@ -61,8 +93,14 @@ python3 scripts/scanner.py
 # Discover new candidates market-wide
 python3 scripts/discover.py
 
-# Full evaluation of specific ticker
+# Fetch dark pool flow (5-day)
 python3 scripts/fetch_flow.py [TICKER]
+
+# Fetch options chain + flow analysis
+python3 scripts/fetch_options.py [TICKER]
+
+# Full evaluation output (JSON)
+python3 scripts/fetch_options.py [TICKER] --json
 ```
 
 ---

@@ -10,6 +10,7 @@ import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
 import { useToast } from "@/lib/useToast";
 import { usePrices } from "@/lib/usePrices";
+import { type OptionContract, portfolioLegToContract } from "@/lib/pricesProtocol";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import ChatPanel from "@/components/ChatPanel";
@@ -36,8 +37,21 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
     [portfolio],
   );
 
+  const portfolioContracts = useMemo<OptionContract[]>(() => {
+    const contracts: OptionContract[] = [];
+    for (const pos of portfolio?.positions ?? []) {
+      if (pos.structure_type === "Stock") continue;
+      for (const leg of pos.legs) {
+        const c = portfolioLegToContract(pos.ticker, pos.expiry, leg);
+        if (c) contracts.push(c);
+      }
+    }
+    return contracts;
+  }, [portfolio]);
+
   const { prices, connected: wsConnected, ibConnected } = usePrices({
     symbols: portfolioSymbols,
+    contracts: portfolioContracts,
   });
 
   const prevIbConnectedRef = useRef<boolean | null>(null);

@@ -18,8 +18,13 @@ Autonomous options trading via convex, edge-driven bets sized by fractional Kell
 
 ## Deliverables (per evaluation)
 - [ ] Ticker validation (confirm company, sector, liquidity)
+- [ ] Seasonality analysis (context, not a gate)
+- [ ] Analyst ratings (context, not a gate)
 - [ ] Dark pool flow analysis (5-day minimum)
-- [ ] Options flow analysis (if available)
+- [ ] Options flow analysis (chain + institutional flow alerts)
+  - Chain: Put/call ratio, premium, volume, OI, bias
+  - Flow: Alerts, sweeps, bid/ask side, flow strength
+  - Combined: Synthesized bias with conflict detection
 - [ ] Edge determination (PASS/FAIL with reasoning)
 - [ ] Structure proposal (if edge exists)
 - [ ] Convexity calculation (R:R ratio)

@@ -60,6 +60,58 @@ export type WSMessage =
   | WSPongMessage
   | WSStatusMessage;
 
+/* ─── Option contract types & helpers ─────────────────── */
+
+export type OptionContract = {
+  symbol: string;
+  expiry: string; // YYYYMMDD
+  strike: number;
+  right: "C" | "P";
+};
+
+/** Build composite key for an option contract: SYMBOL_YYYYMMDD_STRIKE_RIGHT */
+export function optionKey(c: OptionContract): string {
+  return `${c.symbol}_${c.expiry}_${c.strike}_${c.right}`;
+}
+
+/** Stable hash for a list of option contracts (for memoization change detection) */
+export function contractsKey(contracts: OptionContract[]): string {
+  return contracts
+    .map(optionKey)
+    .sort()
+    .join(",");
+}
+
+/**
+ * Convert a portfolio leg into an IB-ready OptionContract descriptor.
+ * Returns null for Stock legs, null/0 strikes, or missing data.
+ */
+export function portfolioLegToContract(
+  ticker: string,
+  expiry: string,
+  leg: { type: string; strike: number | null },
+): OptionContract | null {
+  if (leg.type === "Stock") return null;
+  if (leg.strike == null || leg.strike === 0) return null;
+  if (!expiry || expiry === "N/A") return null;
+
+  const right = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
+  if (!right) return null;
+
+  // Convert YYYY-MM-DD → YYYYMMDD
+  const expiryClean = expiry.replace(/-/g, "");
+  if (expiryClean.length !== 8) return null;
+
+  return {
+    symbol: ticker.toUpperCase(),
+    expiry: expiryClean,
+    strike: leg.strike,
+    right,
+  };
+}
+
+/* ─── Symbol helpers ──────────────────────────────────── */
+
 export function normalizeSymbolList(symbols: string[]): string[] {
   return [...symbols]
     .map((symbol) => symbol.trim().toUpperCase())

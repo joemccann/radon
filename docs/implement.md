@@ -56,5 +56,31 @@ If a script fails:
 | Validate ticker | `python3 scripts/fetch_ticker.py [TICKER]` |
 | Fetch dark pool flow | `python3 scripts/fetch_flow.py [TICKER]` |
 | Fetch options data | `python3 scripts/fetch_options.py [TICKER]` |
+| Fetch options (JSON) | `python3 scripts/fetch_options.py [TICKER] --json` |
+| Fetch options (force UW) | `python3 scripts/fetch_options.py [TICKER] --source uw` |
+| Fetch analyst ratings | `python3 scripts/fetch_analyst_ratings.py [TICKER]` |
 | Calculate Kelly | `python3 scripts/kelly.py --prob P --odds O --bankroll B` |
+| Sync IB portfolio | `python3 scripts/ib_sync.py --sync` |
 | Validate JSON | `python3 -m json.tool data/[file].json` |
+
+## Options Flow Analysis
+
+The `fetch_options.py` script provides comprehensive options analysis:
+
+```bash
+# Full analysis with formatted report
+python3 scripts/fetch_options.py AAPL
+
+# JSON output for programmatic use
+python3 scripts/fetch_options.py AAPL --json
+
+# Force specific data source
+python3 scripts/fetch_options.py AAPL --source uw   # Unusual Whales
+python3 scripts/fetch_options.py AAPL --source ib   # Interactive Brokers
+python3 scripts/fetch_options.py AAPL --source yahoo # Yahoo Finance
+```
+
+**Output includes:**
+- Chain: Premium, volume, OI, bid/ask volume, P/C ratio, bias
+- Flow: Institutional alerts, sweeps, bid/ask side premium, flow strength
+- Combined: Synthesized bias with conflict detection and confidence rating

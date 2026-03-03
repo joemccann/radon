@@ -50,16 +50,38 @@ python3 scripts/fetch_flow.py [TICKER]
 ---
 
 ## Milestone 3: Options Flow Analysis
-**Action**: Fetch options flow alerts and premium data
+**Action**: Fetch options chain activity and institutional flow alerts
 **Validation**:
 ```bash
 python3 scripts/fetch_options.py [TICKER]
 ```
+**Data Sources**: IB (spot price) → UW (chain + flow) → Yahoo (fallback)
+
 **Acceptance Criteria**:
 - Call/put premium ratio calculated
-- Bias determined
+- Chain bias determined (BULLISH/LEAN_BULLISH/NEUTRAL/LEAN_BEARISH/BEARISH)
+- Flow alerts analyzed (if available)
+- Flow bias and strength quantified (0-100)
+- Combined bias synthesized with confidence rating
 - Chain liquidity assessed (bid-ask spreads, OI)
+
+**Key Metrics**:
+| Metric | Source | Purpose |
+|--------|--------|---------|
+| Put/Call Ratio | UW chain | Directional sentiment |
+| Bid/Ask Volume | UW chain | Buyer vs seller pressure |
+| Flow Alerts | UW flow | Institutional activity |
+| Sweep Premium | UW flow | Urgency signal |
+| Combined Bias | Calculated | Final options signal |
+
+**Interpretation**:
+- P/C ratio >2.0x = BEARISH, <0.5x = BULLISH
+- Bid-side dominant = selling pressure
+- Ask-side dominant = buying pressure
+- Sweeps = urgency, often predictive
+
 **Stop Condition**: If illiquid (spreads >10%, OI <100) → FLAG structure risk
+**Conflict Flag**: If chain bias contradicts flow bias → reduce confidence, note in analysis
 
 ---
 

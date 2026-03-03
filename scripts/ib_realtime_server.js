@@ -56,6 +56,31 @@ function normalizeSymbols(raw) {
     .filter((symbol) => symbol.length > 0);
 }
 
+/** Build composite key for an option contract: SYMBOL_YYYYMMDD_STRIKE_RIGHT */
+function optionKey(c) {
+  return `${c.symbol}_${c.expiry}_${c.strike}_${c.right}`;
+}
+
+/**
+ * Validate and normalize a raw contracts array from client messages.
+ * Each contract must have symbol (string), expiry (8-digit string),
+ * strike (positive number), and right ("C" or "P").
+ */
+function normalizeContracts(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c) => {
+      if (typeof c !== "object" || c === null) return null;
+      const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
+      const expiry = typeof c.expiry === "string" ? c.expiry.trim() : null;
+      const strike = typeof c.strike === "number" && Number.isFinite(c.strike) && c.strike > 0 ? c.strike : null;
+      const right = c.right === "C" || c.right === "P" ? c.right : null;
+      if (!symbol || !expiry || expiry.length !== 8 || !strike || !right) return null;
+      return { symbol, expiry, strike, right };
+    })
+    .filter(Boolean);
+}
+
 function normalizeNumber(value) {
   if (typeof value !== "number" || !Number.isFinite(value)) {
     return null;
@@ -168,7 +193,8 @@ function parseActionMessage(raw) {
   }
 
   const symbols = Array.isArray(payload.symbols) ? normalizeSymbols(payload.symbols) : [];
-  return { action, symbols };
+  const contracts = Array.isArray(payload.contracts) ? normalizeContracts(payload.contracts) : [];
+  return { action, symbols, contracts };
 }
 
 const cli = parseArgs(process.argv.slice(2));
@@ -252,16 +278,15 @@ function completeSnapshot(symbol, requestId) {
   }
 }
 
-function startLiveSubscription(symbol) {
+function startLiveSubscription(key, ibContract) {
   if (!ibConnected) return;
 
-  const existing = symbolStates.get(symbol);
+  const existing = symbolStates.get(key);
   const nextTickerId = nextRequestId += 1;
-  const contract = ib.contract.stock(symbol, "SMART", "USD");
   const state = existing ?? {
     tickerId: null,
-    contract,
-    data: createPriceData(symbol),
+    contract: ibContract,
+    data: createPriceData(key),
   };
 
   if (state.tickerId != null) {
@@ -274,14 +299,14 @@ function startLiveSubscription(symbol) {
   }
 
   try {
-    ib.reqMktData(nextTickerId, contract, "233", false, false);
+    ib.reqMktData(nextTickerId, ibContract, "233", false, false);
     state.tickerId = nextTickerId;
-    state.contract = contract;
+    state.contract = ibContract;
     state.data.timestamp = nowIso();
-    symbolStates.set(symbol, state);
-    requestIdToSymbol.set(nextTickerId, symbol);
+    symbolStates.set(key, state);
+    requestIdToSymbol.set(nextTickerId, key);
   } catch (error) {
-    console.error(`Failed to subscribe symbol ${symbol}:`, error);
+    console.error(`Failed to subscribe ${key}:`, error);
   }
 }
 
@@ -478,14 +503,17 @@ function onTickSnapshotEnd(tickerId) {
 }
 
 function restoreSubscriptions() {
-  const symbols = [...symbolSubscribers.keys()];
-  for (const symbol of symbols) {
-    startLiveSubscription(symbol);
-    const state = symbolStates.get(symbol);
+  const keys = [...symbolSubscribers.keys()];
+  for (const key of keys) {
+    const existing = symbolStates.get(key);
+    // Use stored contract if available (option contracts), otherwise build stock contract
+    const ibContract = existing?.contract ?? ib.contract.stock(key, "SMART", "USD");
+    startLiveSubscription(key, ibContract);
+    const state = symbolStates.get(key);
     if (state) {
-      sendToSymbolSubscribers(symbol, {
+      sendToSymbolSubscribers(key, {
         type: "price",
-        symbol,
+        symbol: key,
         data: state.data,
       });
     }
@@ -500,13 +528,16 @@ async function handleClientMessage(client, data) {
   }
 
   const symbols = message.symbols;
+  const contracts = message.contracts;
   switch (message.action) {
     case "subscribe": {
       const subscribed = [];
+      // Stock subscriptions (backward compatible)
       for (const symbol of symbols) {
         subscribeClientToSymbol(client, symbol);
         if (ibConnected) {
-          startLiveSubscription(symbol);
+          const ibContract = ib.contract.stock(symbol, "SMART", "USD");
+          startLiveSubscription(symbol, ibContract);
           const state = symbolStates.get(symbol);
           if (state) {
             sendMessage(client, {
@@ -516,6 +547,24 @@ async function handleClientMessage(client, data) {
             });
           }
           subscribed.push(symbol);
+        }
+      }
+      // Option contract subscriptions
+      for (const c of contracts) {
+        const key = optionKey(c);
+        subscribeClientToSymbol(client, key);
+        if (ibConnected) {
+          const ibContract = ib.contract.option(c.symbol, c.expiry, c.strike, c.right);
+          startLiveSubscription(key, ibContract);
+          const state = symbolStates.get(key);
+          if (state) {
+            sendMessage(client, {
+              type: "price",
+              symbol: key,
+              data: state.data,
+            });
+          }
+          subscribed.push(key);
         }
       }
       sendSubscribedConfirmation(client, subscribed);

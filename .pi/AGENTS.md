@@ -93,6 +93,72 @@ python3 scripts/fetch_x_watchlist.py --dry-run
 
 ---
 
+## Options Flow Command
+
+Fetch options chain activity and institutional flow alerts.
+
+**Data Sources (following standard priority):**
+1. Interactive Brokers - spot price, expirations, strikes
+2. Unusual Whales - chain volume/premium, flow alerts, sweeps (primary)
+3. Yahoo Finance - fallback for basic chain data
+
+```bash
+# Standard analysis
+python3 scripts/fetch_options.py RMBS
+
+# JSON output for programmatic use
+python3 scripts/fetch_options.py RMBS --json
+
+# Force specific data source
+python3 scripts/fetch_options.py RMBS --source uw
+python3 scripts/fetch_options.py RMBS --source ib
+python3 scripts/fetch_options.py RMBS --source yahoo
+
+# Custom IB port
+python3 scripts/fetch_options.py RMBS --port 7497
+
+# Filter by DTE
+python3 scripts/fetch_options.py RMBS --dte-min 14 --dte-max 60
+```
+
+**Output Includes:**
+
+*Chain Activity:*
+- Call/Put premium breakdown
+- Volume and open interest
+- Bid-side vs ask-side volume (buyer/seller pressure)
+- Top active contracts with IV
+- Put/Call ratio and chain bias
+
+*Institutional Flow Alerts:*
+- Recent flow alerts (sweeps, blocks, unusual activity)
+- Bid-side (selling) vs ask-side (buying) premium
+- Sweep premium (urgency indicator)
+- Flow bias and strength score (0-100)
+
+*Combined Analysis:*
+- Chain bias + Flow bias synthesis
+- Conflict detection (when signals disagree)
+- Confidence rating: HIGH / MEDIUM / LOW
+
+**Bias Interpretation:**
+
+| Put/Call Ratio | Bias |
+|----------------|------|
+| >2.0x | BEARISH |
+| 1.2-2.0x | LEAN_BEARISH |
+| 0.8-1.2x | NEUTRAL |
+| 0.5-0.8x | LEAN_BULLISH |
+| <0.5x | BULLISH |
+
+**Flow Side Meaning:**
+- **Bid-side dominant**: Trades at/below mid = selling pressure (closing longs OR opening shorts)
+- **Ask-side dominant**: Trades at/above mid = buying pressure (opening longs)
+
+Options flow is used to CONFIRM or CONTRADICT dark pool signals. Conflicting chain/flow signals reduce confidence.
+
+---
+
 ## Analyst Ratings Command
 
 Fetch analyst ratings, recent rating changes, and price targets.
@@ -203,7 +269,7 @@ Usage: `seasonal [TICKER]` or `seasonal [TICKER1] [TICKER2] ...`
 |--------|---------|
 | `scripts/fetch_ticker.py` | Validate ticker via dark pool activity |
 | `scripts/fetch_flow.py` | Fetch dark pool + options flow data |
-| `scripts/fetch_options.py` | Options chain data (stub) |
+| `scripts/fetch_options.py` | Options chain + institutional flow analysis (IB/UW/Yahoo) |
 | `scripts/fetch_analyst_ratings.py` | Fetch analyst ratings, changes, and price targets |
 | `scripts/scanner.py` | Scan watchlist, rank by signal strength |
 | `scripts/discover.py` | Market-wide flow scanner for new candidates |
@@ -344,8 +410,10 @@ See `docs/strategies.md` for full methodology.
 |-----------|----|----|-------|-----|
 | Real-time quotes | ✅ | ❌ | ⚠️ delayed | ❌ |
 | Options chains | ✅ | ✅ | ✅ | ❌ |
+| Options premium/volume | ⚠️ limited | ✅ | ⚠️ limited | ❌ |
 | Dark pool flow | ❌ | ✅ | ❌ | ❌ |
 | Options flow/sweeps | ❌ | ✅ | ❌ | ❌ |
+| Bid/Ask side analysis | ❌ | ✅ | ❌ | ❌ |
 | Analyst ratings | ✅ (subscription) | ✅ | ✅ | ✅ |
 | Fundamentals | ✅ (subscription) | ❌ | ✅ | ✅ |
 | News/Events | ❌ | ✅ | ❌ | ✅ |

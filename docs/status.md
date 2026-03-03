@@ -1,7 +1,7 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-02T14:11:17-08:00
+2026-03-03T09:52:00-08:00
 
 ## Recent Commits
 - 2026-03-02 14:11:17 -0800 — `f0f50e4` Add persistent price direction arrows with flash indicators
@@ -59,7 +59,7 @@ See `reports/portfolio-evaluation-2026-03-02.html`
 
 ## Known Issues
 1. ~~`fetch_ticker.py` implemented but Yahoo Finance rate-limited~~ **FIXED** — Now uses UW dark pool API for validation
-2. `fetch_options.py` returns placeholder data ("REPLACE WITH REAL DATA SOURCE")
+2. ~~`fetch_options.py` returns placeholder data~~ **FIXED 2026-03-03** — Now fetches chain + flow from UW with IB fallback
 3. Previous evaluations (PLTR, EC) used training data for company identification (not verified)
 4. Scripts now correctly skip weekends/holidays (trading day logic added 2026-02-28)
 
@@ -69,8 +69,8 @@ See `reports/portfolio-evaluation-2026-03-02.html`
 - **Startup Protocol Extension** (`.pi/extensions/startup-protocol.ts`): Loads docs/* into context
 
 ## Follow-ups
-- [ ] Implement `fetch_ticker.py` with live data source
-- [ ] Connect `fetch_options.py` to real options API
+- [x] ~~Implement `fetch_ticker.py` with live data source~~ (Done - uses UW dark pool)
+- [x] ~~Connect `fetch_options.py` to real options API~~ (Done 2026-03-03 - uses UW + IB)
 - [ ] Re-evaluate any watchlist additions with proper validation
 
 ---
@@ -82,3 +82,12 @@ See `reports/portfolio-evaluation-2026-03-02.html`
 | 2026-02-28 | PLTR | NO_TRADE | EDGE | Choppy flow |
 | 2026-02-28 | EC | NO_TRADE | EDGE | Neutral/illiquid |
 | 2026-02-28 | MSFT | NO_TRADE | EDGE | Friday distribution after 4-day accumulation |
+
+### RMBS - 2026-03-03
+- **Decision**: NO_TRADE
+- **Failing Gate**: EDGE
+- **Reason**: Alternating accumulation/distribution pattern over 5 days. 02-26 saw massive one-time distribution (400K shares, 7.4% buy, 85.2 strength) that dominates aggregate. But 03-02 reversed to accumulation (73.6% buy). Pattern is choppy, not sustained. Aggregate strength 42.0 (need >50). Only 1 day of recent accumulation — insufficient for edge confirmation.
+- **Seasonality**: FAVORABLE (March 65% win rate, +5.1% avg)
+- **Analyst Rating**: BULLISH (87.5% buy, $119 PT = +32.4%)
+- **Ticker Verified**: YES (via dark pool activity)
+- **Watchlist**: Monitor for sustained accumulation

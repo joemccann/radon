@@ -4,8 +4,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type WSMessage,
   type PriceData,
+  type OptionContract,
   normalizeSymbolList,
   symbolKey,
+  contractsKey,
 } from "./pricesProtocol";
 
 export type PriceUpdate = {
@@ -15,8 +17,10 @@ export type PriceUpdate = {
 };
 
 export type UsePricesOptions = {
-  /** Symbols to subscribe to */
+  /** Symbols to subscribe to (stock tickers) */
   symbols: string[];
+  /** Option contracts to subscribe to */
+  contracts?: OptionContract[];
   /** Enable real-time streaming (default: true) */
   enabled?: boolean;
   /** Callback when a price updates */
@@ -46,6 +50,7 @@ export type UsePricesReturn = {
 export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const {
     symbols,
+    contracts = [],
     enabled = true,
     onPriceUpdate,
     onConnectionChange,
@@ -61,9 +66,14 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const mountedRef = useRef(true);
 
   const symbolHash = symbolKey(symbols);
+  const contractHash = contractsKey(contracts);
   const normalizedSymbols = useMemo(
     () => normalizeSymbolList(symbols),
     [symbolHash],
+  );
+  const normalizedContracts = useMemo(
+    () => contracts,
+    [contractHash],
   );
 
   const socketUrl =
@@ -72,7 +82,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     "ws://localhost:8765";
 
   const connect = useCallback(() => {
-    if (!enabled || normalizedSymbols.length === 0) return;
+    if (!enabled || (normalizedSymbols.length === 0 && normalizedContracts.length === 0)) return;
 
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -96,6 +106,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         JSON.stringify({
           action: "subscribe",
           symbols: normalizedSymbols,
+          ...(normalizedContracts.length > 0 ? { contracts: normalizedContracts } : {}),
         }),
       );
     };
@@ -144,10 +155,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       setConnected(false);
       onConnectionChange?.(false);
 
-      if (!enabled || normalizedSymbols.length === 0) return;
+      if (!enabled || (normalizedSymbols.length === 0 && normalizedContracts.length === 0)) return;
 
       reconnectTimeoutRef.current = setTimeout(() => {
-        if (mountedRef.current && enabled && normalizedSymbols.length > 0) {
+        if (mountedRef.current && enabled && (normalizedSymbols.length > 0 || normalizedContracts.length > 0)) {
           connect();
         }
       }, 5000);
@@ -160,7 +171,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       onConnectionChange?.(false);
       ws.close();
     };
-  }, [enabled, normalizedSymbols, onConnectionChange, onPriceUpdate, socketUrl, symbolHash]);
+  }, [enabled, normalizedSymbols, normalizedContracts, onConnectionChange, onPriceUpdate, socketUrl, symbolHash, contractHash]);
 
   const reconnect = useCallback(() => {
     connect();
@@ -199,7 +210,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   useEffect(() => {
     mountedRef.current = true;
 
-    if (enabled && normalizedSymbols.length > 0) {
+    if (enabled && (normalizedSymbols.length > 0 || normalizedContracts.length > 0)) {
       connect();
     } else {
       if (wsRef.current) {
@@ -223,7 +234,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         reconnectTimeoutRef.current = null;
       }
     };
-  }, [connect, enabled, onConnectionChange, symbolHash, normalizedSymbols.length]);
+  }, [connect, enabled, onConnectionChange, symbolHash, contractHash, normalizedSymbols.length, normalizedContracts.length]);
 
   return {
     prices,
