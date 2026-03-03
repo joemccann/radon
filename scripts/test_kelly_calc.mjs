@@ -32,7 +32,9 @@ function assert(condition, msg) {
 
 /** Mirrors the execute() logic in .pi/extensions/trading-tools.ts */
 function kellyCalc({ prob_win, odds, fraction = 0.25, bankroll }) {
-  if (odds <= 0) {
+  if (typeof prob_win !== "number" || !Number.isFinite(prob_win) ||
+      typeof odds !== "number" || !Number.isFinite(odds) ||
+      odds <= 0) {
     const result = {
       full_kelly_pct: 0,
       fractional_kelly_pct: 0,
@@ -99,6 +101,43 @@ test("valid input still works: 60% prob, 2:1 odds", () => {
   assert(r.edge_exists === true, "should have edge");
   assert(r.full_kelly_pct > 0, "full_kelly_pct should be positive");
   assert(r.recommendation !== "DO NOT BET", "should recommend a bet");
+});
+
+console.log("\n── kelly_calc tool (undefined/null param guard) ──");
+
+test("undefined odds does not throw", () => {
+  const r = kellyCalc({ prob_win: 0.5, odds: undefined });
+  assert(r.recommendation === "DO NOT BET", `expected 'DO NOT BET', got '${r.recommendation}'`);
+  assert(r.edge_exists === false, "edge_exists should be false");
+});
+
+test("null odds does not throw", () => {
+  const r = kellyCalc({ prob_win: 0.5, odds: null });
+  assert(r.recommendation === "DO NOT BET", `expected 'DO NOT BET', got '${r.recommendation}'`);
+});
+
+test("undefined prob_win does not throw", () => {
+  const r = kellyCalc({ prob_win: undefined, odds: 2.0 });
+  assert(r.recommendation === "DO NOT BET", `expected 'DO NOT BET', got '${r.recommendation}'`);
+  assert(r.edge_exists === false, "edge_exists should be false");
+});
+
+test("null prob_win does not throw", () => {
+  const r = kellyCalc({ prob_win: null, odds: 2.0 });
+  assert(r.recommendation === "DO NOT BET", `expected 'DO NOT BET', got '${r.recommendation}'`);
+});
+
+test("empty object does not throw", () => {
+  const r = kellyCalc({});
+  assert(r.recommendation === "DO NOT BET", `expected 'DO NOT BET', got '${r.recommendation}'`);
+});
+
+test("undefined/null params result has no NaN or Infinity", () => {
+  const r = kellyCalc({ prob_win: undefined, odds: undefined });
+  const json = JSON.stringify(r);
+  assert(!json.includes("NaN"), "result contains NaN");
+  assert(!json.includes("Infinity"), "result contains Infinity");
+  assert(!json.includes("null"), "result contains null from NaN serialization");
 });
 
 // ============================================================================

@@ -15,7 +15,9 @@ export default function (pi: ExtensionAPI) {
     }),
     async execute({ prob_win, odds, fraction = 0.25, bankroll }) {
       // Guard against invalid inputs that would cause division by zero or nonsensical results
-      if (odds <= 0) {
+      if (typeof prob_win !== "number" || !Number.isFinite(prob_win) ||
+          typeof odds !== "number" || !Number.isFinite(odds) ||
+          odds <= 0) {
         const result: Record<string, any> = {
           full_kelly_pct: 0,
           fractional_kelly_pct: 0,
