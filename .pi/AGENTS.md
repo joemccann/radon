@@ -102,7 +102,7 @@ Fetch analyst ratings, recent rating changes, and price targets.
 2. Yahoo Finance - fallback if IB unavailable (rate limited)
 3. Web scrape - last resort
 
-*Note: Unusual Whales does NOT have analyst ratings data. UW focuses on flow data (dark pools, options, institutional).*
+*Note: Unusual Whales HAS analyst ratings via `/api/screener/analysts` endpoint. See `docs/unusual_whales_api.md` for details.*
 
 ```bash
 # Scan specific tickers (auto-detects IB, falls back to Yahoo)
@@ -324,6 +324,8 @@ See `docs/strategies.md` for full methodology.
 | `docs/implement.md` | Execution runbook |
 | `docs/status.md` | Current state, recent decisions, audit log |
 | `docs/strategies.md` | Trading strategies (Dark Pool Flow, LEAP IV Mispricing) |
+| `docs/unusual_whales_api.md` | **Unusual Whales API quick reference** |
+| `docs/unusual_whales_api_spec.yaml` | **Full OpenAPI spec for UW API** |
 
 ## Data Source Priority (Detailed)
 
@@ -341,13 +343,18 @@ See `docs/strategies.md` for full methodology.
 | Data Type | IB | UW | Yahoo | Web |
 |-----------|----|----|-------|-----|
 | Real-time quotes | ✅ | ❌ | ⚠️ delayed | ❌ |
-| Options chains | ✅ | ⚠️ higher tier | ✅ | ❌ |
+| Options chains | ✅ | ✅ | ✅ | ❌ |
 | Dark pool flow | ❌ | ✅ | ❌ | ❌ |
 | Options flow/sweeps | ❌ | ✅ | ❌ | ❌ |
-| Analyst ratings | ✅ (subscription) | ❌ | ✅ | ✅ |
+| Analyst ratings | ✅ (subscription) | ✅ | ✅ | ✅ |
 | Fundamentals | ✅ (subscription) | ❌ | ✅ | ✅ |
-| News/Events | ❌ | ❌ | ❌ | ✅ |
-| Seasonality charts | ❌ | ❌ | ❌ | ✅ EquityClock |
+| News/Events | ❌ | ✅ | ❌ | ✅ |
+| Seasonality | ❌ | ✅ | ❌ | ✅ EquityClock |
+| Greek exposure (GEX) | ❌ | ✅ | ❌ | ❌ |
+| Institutional ownership | ❌ | ✅ | ✅ | ✅ |
+| Short interest | ❌ | ✅ | ✅ | ❌ |
+| Congress trades | ❌ | ✅ | ❌ | ❌ |
+| Insider trades | ❌ | ✅ | ❌ | ✅ |
 
 **IB Fundamental Data** (requires Reuters Fundamentals subscription):
 - `ReportsFinSummary` - Financial summary
@@ -358,6 +365,57 @@ See `docs/strategies.md` for full methodology.
 - `CalendarReport` - Company calendar
 
 *Note: Error 10358 "Fundamentals data is not allowed" means IB fundamentals subscription is not active. Scripts will auto-fallback to next available source.*
+
+---
+
+## Unusual Whales API Reference
+
+**Full documentation:** `docs/unusual_whales_api.md`
+**OpenAPI spec:** `docs/unusual_whales_api_spec.yaml`
+
+**Base URL:** `https://api.unusualwhales.com`
+**Auth:** `Authorization: Bearer {UW_TOKEN}`
+
+### Key Endpoints for Convex Scavenger
+
+| Endpoint | Purpose |
+|----------|---------|
+| `GET /api/darkpool/{ticker}` | Dark pool trades (primary edge source) |
+| `GET /api/option-trades/flow-alerts` | Options flow alerts (sweeps, blocks) |
+| `GET /api/stock/{ticker}/info` | Ticker validation, company info |
+| `GET /api/stock/{ticker}/option-contracts` | Options chain data |
+| `GET /api/stock/{ticker}/greek-exposure` | GEX data |
+| `GET /api/screener/analysts` | Analyst ratings |
+| `GET /api/seasonality/{ticker}/monthly` | Monthly seasonality |
+| `GET /api/shorts/{ticker}/interest-float/v2` | Short interest data |
+
+### Dark Pool Flow (Edge Detection)
+```bash
+# Fetch dark pool trades for ticker
+curl -H "Authorization: Bearer $UW_TOKEN" \
+  "https://api.unusualwhales.com/api/darkpool/AAPL?date=2026-03-03"
+```
+
+### Options Flow Alerts
+```bash
+# Fetch flow alerts with filters
+curl -H "Authorization: Bearer $UW_TOKEN" \
+  "https://api.unusualwhales.com/api/option-trades/flow-alerts?ticker_symbol=AAPL&is_sweep=true&min_premium=50000"
+```
+
+### WebSocket Streaming (Advanced tier)
+```
+wss://api.unusualwhales.com/socket?token={UW_TOKEN}
+
+Channels:
+- option_trades / option_trades:{TICKER}
+- flow-alerts
+- price:{TICKER}
+- gex:{TICKER}
+- off_lit_trades (dark pool)
+```
+
+**Always consult `docs/unusual_whales_api.md` for endpoint details and response schemas.**
 
 ## Tools Available
 

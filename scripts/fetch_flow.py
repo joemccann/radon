@@ -3,6 +3,13 @@
 
 Requires UW_TOKEN environment variable (Unusual Whales API key).
 Set it via: export UW_TOKEN="your-api-key"
+
+API Reference: docs/unusual_whales_api.md
+Full Spec: docs/unusual_whales_api_spec.yaml
+
+Key endpoints used:
+  - GET /api/darkpool/{ticker} - Dark pool trades for a ticker
+  - GET /api/option-trades/flow-alerts - Options flow alerts
 """
 import argparse, json, os, sys
 from datetime import datetime, timedelta

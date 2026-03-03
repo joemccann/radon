@@ -7,6 +7,14 @@ Unusual Whales for LEAP option IV data.
 
 No IB connection required.
 
+API Reference: docs/unusual_whales_api.md
+Full Spec: docs/unusual_whales_api_spec.yaml
+
+Key endpoints used:
+  - GET /api/stock/{ticker}/option-contracts - Options chain with IV
+  - GET /api/stock/{ticker}/volatility/realized - IV vs realized volatility
+  - GET /api/stock/{ticker}/info - Ticker metadata
+
 Usage:
   python3 scripts/leap_scanner_uw.py XLK XLE XLF
   python3 scripts/leap_scanner_uw.py --preset sectors

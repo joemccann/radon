@@ -6,6 +6,14 @@ Finds tickers with unusual options flow and validates with dark pool data.
 Scoring: Normalized 0-100 scale based on edge quality, not dollar size.
 
 Requires UW_TOKEN environment variable.
+
+API Reference: docs/unusual_whales_api.md
+Full Spec: docs/unusual_whales_api_spec.yaml
+
+Key endpoints used:
+  - GET /api/option-trades/flow-alerts - Market-wide flow alerts
+  - GET /api/darkpool/{ticker} - Dark pool validation
+  - GET /api/stock/{ticker}/info - Ticker metadata
 """
 
 import argparse

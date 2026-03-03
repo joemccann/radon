@@ -4,10 +4,11 @@ Fetch analyst ratings and rating changes for tickers.
 
 Data Source Priority:
   1. Interactive Brokers (reqFundamentalData 'RESC') - Most reliable, requires subscription
-  2. Yahoo Finance - Fallback (rate limited)
+  2. Unusual Whales (GET /api/screener/analysts) - Has ratings data (see docs/unusual_whales_api.md)
+  3. Yahoo Finance - Fallback (rate limited)
   
-Note: Unusual Whales does NOT have analyst ratings endpoints.
-      UW focuses on flow data (dark pools, options, institutional).
+API Reference: docs/unusual_whales_api.md for UW endpoint details
+Full Spec: docs/unusual_whales_api_spec.yaml
 
 Usage:
     python3 scripts/fetch_analyst_ratings.py AAPL MSFT NVDA

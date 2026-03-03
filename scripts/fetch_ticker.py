@@ -5,6 +5,13 @@ Validates ticker exists by checking for dark pool activity.
 Caches company names locally to reduce API calls.
 
 Requires UW_TOKEN environment variable.
+
+API Reference: docs/unusual_whales_api.md
+Full Spec: docs/unusual_whales_api_spec.yaml
+
+Key endpoints used:
+  - GET /api/darkpool/{ticker} - Validates ticker and returns activity
+  - GET /api/stock/{ticker}/info - Company info (if needed)
 """
 
 import json
