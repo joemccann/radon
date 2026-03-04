@@ -359,6 +359,89 @@ python3 scripts/trade_blotter/test_integration.py
 
 ---
 
+## Monitor Daemon Service
+
+A single extensible daemon that handles all background monitoring tasks.
+
+### Handlers
+
+| Handler | Interval | Purpose |
+|---------|----------|---------|
+| `fill_monitor` | 60s | Detect order fills, send notifications |
+| `exit_orders` | 300s | Place pending exit orders when IB accepts them |
+
+### Commands
+
+```bash
+# Status
+python3 -m monitor_daemon.run --status
+
+# Run once (for testing)
+python3 -m monitor_daemon.run --once
+
+# Run as daemon
+python3 -m monitor_daemon.run --daemon
+
+# List available handlers
+python3 -m monitor_daemon.run --list-handlers
+```
+
+### Service Management
+
+```bash
+# Install launchd service (runs every 60s during market hours)
+./scripts/setup_monitor_daemon.sh install
+
+# Check status
+./scripts/setup_monitor_daemon.sh status
+
+# View logs
+./scripts/setup_monitor_daemon.sh logs
+
+# Test run
+./scripts/setup_monitor_daemon.sh test
+
+# Uninstall
+./scripts/setup_monitor_daemon.sh uninstall
+```
+
+### Adding New Handlers
+
+1. Create `scripts/monitor_daemon/handlers/my_handler.py`
+2. Inherit from `BaseHandler`
+3. Implement `execute()` method
+4. Register in `run.py` `create_daemon()`
+
+Example:
+```python
+from monitor_daemon.handlers.base import BaseHandler
+
+class MyHandler(BaseHandler):
+    name = "my_handler"
+    interval_seconds = 120  # Run every 2 minutes
+    
+    def execute(self) -> dict:
+        # Your monitoring logic here
+        return {"status": "ok", "data": {...}}
+```
+
+### State Persistence
+
+Handler state (last run times, known orders) is saved to:
+```
+data/daemon_state.json
+```
+
+### Logs
+
+```
+logs/monitor-daemon.log      # Main daemon log
+logs/monitor-daemon.out.log  # launchd stdout
+logs/monitor-daemon.err.log  # launchd stderr
+```
+
+---
+
 ## Flex Query Setup (Historical Trades)
 
 The real-time IB API only provides **today's fills**. To calculate P&L for positions opened/closed on previous days, you need to set up IB Flex Query for historical data.
@@ -540,8 +623,8 @@ See `.pi/skills/html-report/SKILL.md` for full template documentation.
 | `scripts/leap_iv_scanner.py` | LEAP IV mispricing scanner (IB connection required) |
 | `scripts/leap_scanner_uw.py` | LEAP IV scanner using UW + Yahoo Finance (no IB needed) |
 | `scripts/fetch_x_watchlist.py` | Fetch X account tweets and extract ticker sentiment |
-| `scripts/exit_order_service.py` | Place pending exit orders when IB accepts them |
-| `scripts/ib_fill_monitor.py` | Monitor orders for fills |
+| `scripts/monitor_daemon/run.py` | **Extensible monitoring daemon** (replaces exit_order_service) |
+| `scripts/ib_fill_monitor.py` | Monitor orders for fills (standalone, use daemon instead) |
 | `scripts/portfolio_report.py` | Generate HTML portfolio report and open in browser |
 
 ## Interactive Brokers Integration

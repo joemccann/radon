@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.convex-scavenger.monitor-daemon</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/usr/bin/python3</string>
+        <string>-m</string>
+        <string>monitor_daemon.run</string>
+        <string>--once</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>/Users/joemccann/dev/apps/finance/convex-scavenger/scripts</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PYTHONPATH</key>
+        <string>/Users/joemccann/dev/apps/finance/convex-scavenger/scripts</string>
+    </dict>
+    
+    <!-- Run every 60 seconds (handlers manage their own intervals) -->
+    <key>StartInterval</key>
+    <integer>60</integer>
+    
+    <!-- Also run at load -->
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <!-- Logging -->
+    <key>StandardOutPath</key>
+    <string>/Users/joemccann/dev/apps/finance/convex-scavenger/logs/monitor-daemon.out.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/Users/joemccann/dev/apps/finance/convex-scavenger/logs/monitor-daemon.err.log</string>
+    
+    <!-- Keep alive during failures -->
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    
+    <!-- Process limits -->
+    <key>ProcessType</key>
+    <string>Background</string>
+    
+    <key>Nice</key>
+    <integer>10</integer>
+</dict>
+</plist>
