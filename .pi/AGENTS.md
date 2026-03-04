@@ -9,9 +9,11 @@ When fetching ANY market data (quotes, options, fundamentals, analyst ratings, e
 | **1st** | Interactive Brokers | Always try first if TWS/Gateway available |
 | **2nd** | Unusual Whales | Flow data, dark pools, options activity |
 | **3rd** | Yahoo Finance | Only if IB and UW unavailable/don't have the data |
-| **4th** | Web Search/Scrape | Last resort only |
+| **4th** | Exa (web search) | Web search, company research, code/docs lookup |
+| **5th** | agent-browser | Only for interactive pages, screenshots, JS-rendered content |
 
-**Never skip to Yahoo Finance or web scraping without trying IB/UW first.**
+**Never skip to Yahoo Finance or web search without trying IB/UW first.**
+**For web search/fetch: always use Exa first, agent-browser only as fallback.**
 
 ---
 
@@ -981,7 +983,8 @@ See `docs/strategies.md` for full methodology.
 | **1** | Interactive Brokers | Real-time quotes, options chains, analyst ratings, fundamentals | Requires TWS/Gateway running |
 | **2** | Unusual Whales | Dark pool flow, options activity, institutional flow | API key in UW_TOKEN env var |
 | **3** | Yahoo Finance | Quotes, analyst ratings when IB unavailable | Rate limited, can be delayed |
-| **4** | Web Search/Scrape | Only when no API has the data | Use `agent-browser` skill |
+| **4** | Exa (web search) | Web search, company research, code/docs lookup | API key in EXA_API_KEY env var |
+| **5** | agent-browser | Only for interactive pages, screenshots, JS-rendered content | Fallback when Exa insufficient |
 
 **What each source provides:**
 
@@ -1069,7 +1072,8 @@ Channels:
 - `bash` — Run Python scripts in ./scripts/
 - `read`/`write`/`edit` — Manage data and documentation files
 - `kelly_calc` — Built-in fractional Kelly calculator
-- `agent-browser` — Web browsing and scraping (see web-fetch skill)
+- `exa` — Web search, company research, code/docs lookup (Exa MCP — primary)
+- `agent-browser` — Browser automation for interactive pages (fallback)
 
 ## Skills
 
@@ -1078,24 +1082,26 @@ Skills are loaded on-demand when tasks match their descriptions.
 | Skill | Location | Purpose |
 |-------|----------|---------|
 | `options-analysis` | `.pi/skills/options-analysis/SKILL.md` | Options pricing and structure analysis |
-| `web-fetch` | `.pi/skills/web-fetch/SKILL.md` | Fetch and extract content from websites |
+| `web-fetch` | `.pi/skills/web-fetch/SKILL.md` | Web search (Exa primary) + browser automation (fallback) |
 | `browser-use-cloud` | `.pi/skills/browser-use-cloud/SKILL.md` | AI browser agent for autonomous web tasks |
 | `html-report` | `.pi/skills/html-report/SKILL.md` | Generate styled HTML reports (Terminal theme) |
 | `context-engineering` | `.pi/skills/context-engineering/SKILL.md` | Persistent memory, context pipelines, token budget management |
 
 ### Web Fetch Quick Reference
+
+**Exa (default for search/fetch):**
+```
+web_search_exa("NVDA dark pool activity March 2026")
+company_research_exa("Rambus Inc semiconductor IP")
+get_code_context_exa("ib_insync placeOrder clientId")
+```
+
+**agent-browser (fallback for interactive pages):**
 ```bash
-# Open and snapshot a page
 agent-browser open "https://example.com"
 agent-browser snapshot -i -c
-
-# Extract text from element (use @refs from snapshot)
 agent-browser get text @e5
-
-# Screenshot
 agent-browser screenshot page.png
-
-# Interactive: fill form and click
 agent-browser fill @e3 "value"
 agent-browser click @e5
 ```
