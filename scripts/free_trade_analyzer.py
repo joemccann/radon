@@ -456,11 +456,81 @@ def get_startup_summary(analyses: list[PositionAnalysis], threshold: float = 50.
     return " | ".join(parts)
 
 
+def format_table(analyses: list[PositionAnalysis]) -> str:
+    """Format analyses as an ASCII table for terminal output.
+    
+    Shows ALL qualifying multi-leg positions regardless of progress percentage.
+    """
+    if not analyses:
+        return "No multi-leg positions found."
+    
+    from datetime import datetime, date
+    
+    # Calculate DTE for each position
+    today = date.today()
+    
+    lines = []
+    lines.append("💰 FREE TRADE PROGRESS")
+    lines.append("=" * 70)
+    lines.append(f"{'Ticker':<8} {'Structure':<28} {'Expiry':<8} {'DTE':>4} {'Progress':>10} {'Status':<10}")
+    lines.append("-" * 70)
+    
+    for a in analyses:
+        if not a.suggestions:
+            continue
+        
+        s = a.suggestions[0]
+        
+        # Calculate DTE
+        try:
+            expiry_date = datetime.strptime(a.expiry, "%Y-%m-%d").date()
+            dte = (expiry_date - today).days
+        except:
+            dte = 0
+        
+        # Format structure (truncate if needed)
+        structure_short = a.structure[:26] + ".." if len(a.structure) > 28 else a.structure
+        
+        # Format expiry (just month/day)
+        try:
+            expiry_short = datetime.strptime(a.expiry, "%Y-%m-%d").strftime("%b %d")
+        except:
+            expiry_short = a.expiry[:8]
+        
+        # Determine status icon
+        if s.is_free:
+            status = "🎉 FREE"
+            pct_str = "100%"
+        elif s.pct_to_free >= 50:
+            status = "⚡ Near"
+            pct_str = f"{s.pct_to_free:.0f}%"
+        elif s.pct_to_free >= 25:
+            status = "🔄 Progress"
+            pct_str = f"{s.pct_to_free:.0f}%"
+        else:
+            status = "⏳ Early"
+            pct_str = f"{s.pct_to_free:.0f}%"
+        
+        lines.append(f"{a.ticker:<8} {structure_short:<28} {expiry_short:<8} {dte:>4} {pct_str:>10} {status:<10}")
+    
+    lines.append("-" * 70)
+    
+    # Add legend
+    free_count = sum(1 for a in analyses if any(s.is_free for s in a.suggestions))
+    near_count = sum(1 for a in analyses if 50 <= a.best_opportunity_pct < 100)
+    
+    if free_count > 0 or near_count > 0:
+        lines.append(f"🎉 {free_count} FREE | ⚡ {near_count} Near (≥50%)")
+    
+    return "\n".join(lines)
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze positions for free trade opportunities")
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     parser.add_argument("--ticker", type=str, help="Filter by ticker")
     parser.add_argument("--summary", action="store_true", help="Brief summary for notifications")
+    parser.add_argument("--table", action="store_true", help="Compact table format (for startup)")
     args = parser.parse_args()
     
     analyses = analyze_portfolio(ticker_filter=args.ticker)
@@ -471,6 +541,10 @@ def main():
             print(summary)
         else:
             print("No free trade opportunities found.")
+        return
+    
+    if args.table:
+        print(format_table(analyses))
         return
     
     print_analysis(analyses, json_output=args.json)

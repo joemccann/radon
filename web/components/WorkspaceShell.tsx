@@ -9,7 +9,7 @@ import { resolveSectionFromPath } from "@/lib/chat";
 import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
 import { useToast } from "@/lib/useToast";
-import { useCancelOrders } from "@/lib/CancelOrdersContext";
+import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
 import { usePreviousClose } from "@/lib/usePreviousClose";
 import { type OptionContract, portfolioLegToContract } from "@/lib/pricesProtocol";
@@ -67,8 +67,8 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
     prevIbConnectedRef.current = ibConnected;
   }, [ibConnected, addToast]);
 
-  // Bridge cancel-orders context → toasts & orders updater
-  const { drainNotifications, setOrdersUpdater } = useCancelOrders();
+  // Bridge order-actions context → toasts & orders updater
+  const { drainNotifications, setOrdersUpdater } = useOrderActions();
 
   const isOrdersPage = activeSection === "orders";
   const { data: orders, syncing: ordersSyncing, error: ordersError, lastSync: ordersLastSync, syncNow: ordersSyncNow, updateData: updateOrdersData } = useOrders(isOrdersPage);
@@ -155,7 +155,7 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
           {activeSection !== "dashboard" ? <MetricCards portfolio={portfolio} /> : null}
 
           {activeSection !== "dashboard" ? (
-            <WorkspaceSections section={activeSection} portfolio={portfolio} orders={orders} prices={prices} addToast={addToast} syncNow={ordersSyncNow} onOrdersUpdate={updateOrdersData} />
+            <WorkspaceSections section={activeSection} portfolio={portfolio} orders={orders} prices={prices} />
           ) : null}
         </div>
       </main>

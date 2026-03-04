@@ -67,7 +67,7 @@ const runScript = (
 const runSync = (root: string): Promise<void> => {
   return new Promise((resolve) => {
     const scriptPath = path.join("scripts", "ib_orders.py");
-    const proc = spawn("python3", [scriptPath, "--sync", "--port", "4001"], {
+    const proc = spawn("python3", [scriptPath, "--sync", "--port", "4001", "--client-id", "11"], {
       cwd: root,
       env: process.env,
       stdio: ["ignore", "pipe", "pipe"],

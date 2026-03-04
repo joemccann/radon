@@ -22,19 +22,21 @@ interface NotifyUI {
 /**
  * StartupTracker - Tracks and displays progress of all startup processes
  * 
- * Shows a numbered progress indicator for each check and a final summary.
+ * Collects all process results and shows a single batched notification
+ * at the end with all progress lines. This avoids TUI notification coalescence.
  */
 export class StartupTracker {
   private processes: Map<string, { status: "pending" | "success" | "warning" | "error"; message?: string }> = new Map();
   private ui: NotifyUI;
   private total: number;
   private completionOrder: string[] = [];
+  private messages: string[] = [];
   
   constructor(ui: NotifyUI, processNames: string[]) {
     this.ui = ui;
     this.total = processNames.length;
     processNames.forEach(name => this.processes.set(name, { status: "pending" }));
-    this.ui.notify(`🚀 Startup: Running ${this.total} checks...`, "info");
+    // Don't notify yet - we'll batch everything at the end
   }
   
   /**
@@ -52,32 +54,45 @@ export class StartupTracker {
     
     const completed = this.completionOrder.length;
     const icon = status === "success" ? "✓" : status === "warning" ? "⚠️" : "❌";
-    const level = status === "error" ? "error" : status === "warning" ? "warning" : "info";
     
-    this.ui.notify(`[${completed}/${this.total}] ${icon} ${message}`, level);
+    // Collect message instead of notifying immediately
+    this.messages.push(`[${completed}/${this.total}] ${icon} ${message}`);
     
     // Check if all done
     if (completed === this.total) {
-      this.showSummary();
+      this.showBatchedSummary();
     }
   }
   
   /**
-   * Show final summary of all startup processes
+   * Show all collected messages as a single batched notification
    */
-  private showSummary() {
+  private showBatchedSummary() {
     const statuses = Array.from(this.processes.values());
     const successes = statuses.filter(s => s.status === "success").length;
     const warnings = statuses.filter(s => s.status === "warning").length;
     const errors = statuses.filter(s => s.status === "error").length;
     
+    // Build final summary line
+    let summaryLine: string;
+    let level: "info" | "warning" | "error";
+    
     if (errors > 0) {
-      this.ui.notify(`❌ Startup complete (${successes}/${this.total} passed, ${errors} failed)`, "error");
+      summaryLine = `❌ Startup complete (${successes}/${this.total} passed, ${errors} failed)`;
+      level = "error";
     } else if (warnings > 0) {
-      this.ui.notify(`⚠️ Startup complete (${successes}/${this.total} passed, ${warnings} warnings)`, "warning");
+      summaryLine = `⚠️ Startup complete (${successes}/${this.total} passed, ${warnings} warnings)`;
+      level = "warning";
     } else {
-      this.ui.notify(`✅ Startup complete (${this.total}/${this.total} passed)`, "info");
+      summaryLine = `✅ Startup complete (${this.total}/${this.total} passed)`;
+      level = "info";
     }
+    
+    // Combine header + all messages + summary into single notification
+    const header = `🚀 Startup: Running ${this.total} checks...`;
+    const fullOutput = [header, ...this.messages, summaryLine].join("\n");
+    
+    this.ui.notify(fullOutput, level);
   }
   
   /**
@@ -340,8 +355,8 @@ END ALWAYS-ON SKILLS
       return;
     }
     
-    // Spawn Python process in background
-    const proc = spawn("python3", [scriptPath, "--summary"], {
+    // Spawn Python process in background with --table for full table output
+    const proc = spawn("python3", [scriptPath, "--table"], {
       cwd,
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
@@ -362,12 +377,49 @@ END ALWAYS-ON SKILLS
       if (code === 0) {
         const result = output.trim();
         
-        // If no opportunities, script returns "No free trade opportunities found."
-        if (result.includes("No free trade opportunities")) {
-          tracker.complete("free_trade", "success", "No free trade opportunities");
+        // Check if no positions found
+        if (result.includes("No multi-leg positions")) {
+          tracker.complete("free_trade", "success", "No multi-leg positions to analyze");
         } else {
-          // Has opportunities - show them
-          tracker.complete("free_trade", "success", `💰 ${result.slice(0, 50)}`);
+          // Has positions - show the full table
+          // Format: extract key info for notification
+          const lines = result.split("\n");
+          const dataLines = lines.filter(l => 
+            l.trim() && 
+            !l.startsWith("=") && 
+            !l.startsWith("-") && 
+            !l.startsWith("💰") &&
+            !l.startsWith("Ticker") &&
+            !l.startsWith("🎉 0")  // Skip "0 FREE" summary
+          );
+          
+          // Build compact table for notification
+          if (dataLines.length > 0) {
+            // Extract just ticker + progress + status from each line
+            const summaryLines = dataLines.map(line => {
+              const parts = line.trim().split(/\s+/);
+              if (parts.length >= 6) {
+                const ticker = parts[0];
+                // Find progress (ends with %)
+                const progressIdx = parts.findIndex(p => p.endsWith("%"));
+                const progress = progressIdx >= 0 ? parts[progressIdx] : "";
+                // Status is usually last 1-2 tokens
+                const statusParts = parts.slice(-2);
+                const status = statusParts.join(" ");
+                return `  ${ticker}: ${progress} ${status}`;
+              }
+              return null;
+            }).filter(Boolean);
+            
+            if (summaryLines.length > 0) {
+              const tableOutput = "Free Trade Progress:\n" + summaryLines.join("\n");
+              tracker.complete("free_trade", "success", tableOutput);
+            } else {
+              tracker.complete("free_trade", "success", "No free trade opportunities");
+            }
+          } else {
+            tracker.complete("free_trade", "success", "No free trade opportunities");
+          }
         }
       } else {
         // Only notify on actual errors, not empty results
@@ -384,9 +436,9 @@ END ALWAYS-ON SKILLS
   };
 
   // Check X account scan status
-  const checkXScanStatus = (cwd: string): { account: string; needsScan: boolean; lastScan: string | null }[] => {
+  const checkXScanStatus = (cwd: string): { account: string; needsScan: boolean; lastScan: string | null; hoursSince: number | null }[] => {
     const watchlistPath = path.join(cwd, "data/watchlist.json");
-    const results: { account: string; needsScan: boolean; lastScan: string | null }[] = [];
+    const results: { account: string; needsScan: boolean; lastScan: string | null; hoursSince: number | null }[] = [];
     
     if (!fs.existsSync(watchlistPath)) {
       return results;
@@ -403,15 +455,16 @@ END ALWAYS-ON SKILLS
           
           // Check if scan is needed (more than 12 hours old or never scanned)
           let needsScan = !lastScan;
+          let hoursSince: number | null = null;
           
           if (lastScan) {
             const lastScanDate = new Date(lastScan);
             const now = new Date();
-            const hoursSinceLastScan = (now.getTime() - lastScanDate.getTime()) / (1000 * 60 * 60);
-            needsScan = hoursSinceLastScan > 12;
+            hoursSince = (now.getTime() - lastScanDate.getTime()) / (1000 * 60 * 60);
+            needsScan = hoursSince > 12;
           }
           
-          results.push({ account, needsScan, lastScan });
+          results.push({ account, needsScan, lastScan, hoursSince });
         }
       }
     } catch (e) {
@@ -464,18 +517,31 @@ END ALWAYS-ON SKILLS
     proc.unref();
   };
 
+  // Format hours ago as human-readable string
+  const formatHoursAgo = (hours: number): string => {
+    if (hours < 1) {
+      const mins = Math.round(hours * 60);
+      return `${mins}m ago`;
+    } else if (hours < 24) {
+      return `${hours.toFixed(1)}h ago`;
+    } else {
+      const days = Math.floor(hours / 24);
+      return `${days}d ago`;
+    }
+  };
+
   // Notify on session start
   pi.on("session_start", async (_event, ctx) => {
     const docs = loadProjectDocs(ctx.cwd);
     const skills = loadAlwaysOnSkills(ctx.cwd);
     const xScans = checkXScanStatus(ctx.cwd);
-    const pendingScans = xScans.filter(s => s.needsScan);
     
     // Build list of processes to track
+    // Always include X accounts if any exist
     const processNames: string[] = ["docs", "ib", "daemon", "free_trade"];
     
-    // Add X scans if any are pending
-    for (const scan of pendingScans) {
+    // Add ALL X accounts to process list (not just pending scans)
+    for (const scan of xScans) {
       processNames.push(`x_${scan.account}`);
     }
     
@@ -490,8 +556,8 @@ END ALWAYS-ON SKILLS
       tracker.complete("docs", "warning", "No project docs found");
     }
     
-    // Run pending X scans (async)
-    for (const scan of pendingScans) {
+    // Run X account scans - always scan on startup
+    for (const scan of xScans) {
       runXScan(ctx.cwd, scan.account, tracker);
     }
     

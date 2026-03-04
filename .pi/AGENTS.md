@@ -90,7 +90,10 @@ python3 scripts/free_trade_analyzer.py
 # Filter by ticker
 python3 scripts/free_trade_analyzer.py --ticker EWY
 
-# Brief summary (used by startup protocol)
+# Compact table format (used by startup protocol)
+python3 scripts/free_trade_analyzer.py --table
+
+# Brief one-line summary
 python3 scripts/free_trade_analyzer.py --summary
 
 # JSON output
@@ -110,10 +113,18 @@ python3 scripts/free_trade_analyzer.py --json
 - **Progress to Free**: Percentage of core cost covered by hedge profit
 - **Breakeven Close Price**: Price to close hedge to make core free
 
+**Progress Status Icons:**
+| Icon | Status | Progress |
+|------|--------|----------|
+| 🎉 FREE | Position is free | 100% |
+| ⚡ Near | Near free | ≥50% |
+| 🔄 Progress | Making progress | 25-49% |
+| ⏳ Early | Early stage | <25% |
+
 **Startup Integration:**
 - Runs automatically on Pi startup
-- Notifies if any position is ≥50% to free
-- Shows 🎉 for FREE positions, ⚡ for near-free
+- Shows ALL multi-leg positions in compact table format
+- Table includes: Ticker, Progress %, Status icon
 
 | `blotter-history` | Historical trades via Flex Query (requires setup) |
 | `leap-scan [TICKERS]` | Scan for LEAP IV mispricing opportunities |
@@ -172,9 +183,9 @@ python3 scripts/fetch_x_watchlist.py --dry-run
 **Requires:** `BROWSER_USE_API_KEY` environment variable
 
 **Startup Protocol:**
-- Extension checks watchlist for X account subcategories
-- If last scan >12 hours ago, **automatically runs scan** (non-blocking)
-- Notifies user when scan starts and completes
+- Scans **every startup** for all X accounts in watchlist subcategories
+- Runs asynchronously (non-blocking)
+- Shows ticker count when complete: `@account: N tickers`
 
 **Output:**
 - Extracts tickers mentioned in tweets
@@ -711,13 +722,23 @@ When Pi starts, the startup extension (`.pi/extensions/startup-protocol.ts`) run
 
 **Example output:**
 ```
-🚀 Startup: Running 4 checks...
-[1/4] ✓ Loaded: Spec, Plans, Runbook, Status, Context Engineering
-[2/4] ✓ IB trades in sync
-[3/4] ✓ Monitor daemon running
-[4/4] ✓ No free trade opportunities
-✅ Startup complete (4/4 passed)
+🚀 Startup: Running 5 checks...
+[1/5] ✓ Loaded: Spec, Plans, Runbook, Status, Context Engineering
+[2/5] ✓ IB trades in sync
+[3/5] ✓ Monitor daemon running
+[4/5] ✓ Free Trade Progress:
+       AAOI: 57% ⚡ Near
+       EWY: 52% ⚡ Near
+       IGV: 49% 🔄 Progress
+       BKD: 16% ⏳ Early
+       GOOG: 1% ⏳ Early
+[5/5] ✓ @aleabitoreddit: scanned 0.7h ago
+✅ Startup complete (5/5 passed)
 ```
+
+**X Account Scan:**
+- Runs automatically on **every startup**
+- Output: `@account: N tickers` — Number of tickers found in recent tweets
 
 **Processes tracked:**
 
@@ -726,7 +747,7 @@ When Pi starts, the startup extension (`.pi/extensions/startup-protocol.ts`) run
 | `docs` | sync | Load project docs + always-on skills |
 | `ib` | async | IB trade reconciliation |
 | `daemon` | sync | Monitor daemon status check |
-| `free_trade` | async | Free trade opportunity scan |
+| `free_trade` | async | Free trade opportunity scan (shows ALL multi-leg positions) |
 | `x_{account}` | async | X account scans (if >12h stale) |
 
 **Status indicators:**
@@ -743,7 +764,7 @@ When Pi starts, the startup extension (`.pi/extensions/startup-protocol.ts`) run
 
 **Test the startup protocol:**
 ```bash
-npx tsx .pi/extensions/startup-protocol.test.ts
+npx tsx .pi/tests/startup-protocol.test.ts
 ```
 
 ### Startup Reconciliation (Automatic)

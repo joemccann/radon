@@ -1,6 +1,12 @@
 import { describe, it, before } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { NextRequest } from "next/server";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 /**
  * Tests for order cancel/modify functionality.
@@ -375,5 +381,47 @@ describe("Executed count includes cancelled", () => {
   it("exec count label is plural for 0 or many", () => {
     assert.equal(0 === 1 ? "ENTRY" : "ENTRIES", "ENTRIES");
     assert.equal(5 === 1 ? "ENTRY" : "ENTRIES", "ENTRIES");
+  });
+});
+
+// =============================================================================
+// IB clientId collision prevention
+// =============================================================================
+
+describe("IB clientId collision prevention", () => {
+  it("ib_orders uses a dedicated clientId, not master (0)", async () => {
+    const filePath = path.resolve(__dirname, "../../scripts/utils/ib_connection.py");
+    const content = await readFile(filePath, "utf8");
+    const match = content.match(/"ib_orders":\s*(\d+)/);
+    assert.ok(match, "Should find ib_orders in CLIENT_IDS registry");
+    const clientId = parseInt(match[1], 10);
+    assert.notEqual(clientId, 0, "ib_orders must NOT use clientId 0 (master) — causes collision with ib_order_manage");
+  });
+
+  it("orders sync route passes --client-id to ib_orders.py", async () => {
+    const filePath = path.resolve(__dirname, "../app/api/orders/route.ts");
+    const content = await readFile(filePath, "utf8");
+    assert.ok(
+      content.includes("--client-id"),
+      "orders route must pass --client-id to ib_orders.py to avoid master clientId collision",
+    );
+  });
+
+  it("cancel route sync passes --client-id to ib_orders.py", async () => {
+    const filePath = path.resolve(__dirname, "../app/api/orders/cancel/route.ts");
+    const content = await readFile(filePath, "utf8");
+    assert.ok(
+      content.includes("--client-id"),
+      "cancel route must pass --client-id to ib_orders.py to avoid master clientId collision",
+    );
+  });
+
+  it("modify route sync passes --client-id to ib_orders.py", async () => {
+    const filePath = path.resolve(__dirname, "../app/api/orders/modify/route.ts");
+    const content = await readFile(filePath, "utf8");
+    assert.ok(
+      content.includes("--client-id"),
+      "modify route must pass --client-id to ib_orders.py to avoid master clientId collision",
+    );
   });
 });

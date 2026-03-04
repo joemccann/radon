@@ -19,7 +19,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { ExecutedOrder, OpenOrder, OrdersData, PortfolioData, PortfolioPosition, WorkspaceSection } from "@/lib/types";
-import { useCancelOrders, type CancelledOrder } from "@/lib/CancelOrdersContext";
+import { useOrderActions, type CancelledOrder } from "@/lib/OrderActionsContext";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { against, neutralRows, supports, watchRows } from "@/lib/data";
@@ -831,17 +831,11 @@ const execOrderExtract = (item: ExecutedOrder, key: ExecOrderKey): string | numb
 function OrdersSections({
   orders,
   prices,
-  addToast,
-  syncNow,
-  onOrdersUpdate,
 }: {
   orders: OrdersData | null;
   prices?: Record<string, PriceData>;
-  addToast?: (type: "error" | "warning" | "success", message: string, duration?: number) => void;
-  syncNow?: () => void;
-  onOrdersUpdate?: (data: OrdersData) => void;
 }) {
-  const { pendingCancels, cancelledOrders, requestCancel } = useCancelOrders();
+  const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
   const openSort = useSort(orders?.open_orders ?? [], openOrderExtract);
 
   const [cancelTarget, setCancelTarget] = useState<OpenOrder | null>(null);
@@ -859,27 +853,10 @@ function OrdersSections({
   const handleModify = useCallback(async (newPrice: number) => {
     if (!modifyTarget) return;
     setActionLoading(true);
-    try {
-      const res = await fetch("/api/orders/modify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: modifyTarget.orderId, permId: modifyTarget.permId, newPrice }),
-      });
-      const json = await res.json();
-      if (!res.ok) {
-        addToast?.("error", json.error || "Modify failed");
-      } else {
-        addToast?.("success", json.message || "Order modified");
-        if (json.orders) onOrdersUpdate?.(json.orders);
-        else syncNow?.();
-      }
-    } catch {
-      addToast?.("error", "Modify request failed");
-    } finally {
-      setActionLoading(false);
-      setModifyTarget(null);
-    }
-  }, [modifyTarget, addToast, syncNow, onOrdersUpdate]);
+    await requestModify(modifyTarget, newPrice);
+    setActionLoading(false);
+    setModifyTarget(null);
+  }, [modifyTarget, requestModify]);
 
   // Merge cancelled orders into executed list for display
   const allExecutedRows = useMemo(() => {
@@ -964,11 +941,13 @@ function OrdersSections({
               <tbody>
                 {openSort.sorted.map((o, i) => {
                   const isPendingCancel = pendingCancels.has(o.permId);
+                  const isPendingModify = pendingModifies.has(o.permId);
+                  const isPending = isPendingCancel || isPendingModify;
                   return (
-                    <tr key={`${o.orderId}-${i}`} className={isPendingCancel ? "row-pending-cancel" : undefined}>
+                    <tr key={`${o.orderId}-${i}`} className={isPendingCancel ? "row-pending-cancel" : isPendingModify ? "row-pending-modify" : undefined}>
                       <td>
                         <strong>{o.symbol}</strong>
-                        {isPendingCancel && <Loader2 size={12} className="cancel-spinner" />}
+                        {isPending && <Loader2 size={12} className="cancel-spinner" />}
                       </td>
                       <td>
                         <span className={`pill ${o.action === "BUY" ? "accum" : "distrib"}`}>
@@ -977,17 +956,25 @@ function OrdersSections({
                       </td>
                       <td>{o.orderType}</td>
                       <td className="right">{o.totalQuantity}</td>
-                      <td className="right">{o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"}</td>
+                      <td className="right">
+                        {isPendingModify ? (
+                          <span className="status-modifying">Modifying...</span>
+                        ) : (
+                          o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"
+                        )}
+                      </td>
                       <td>
                         {isPendingCancel ? (
                           <span className="status-cancelling">Cancelling...</span>
+                        ) : isPendingModify ? (
+                          <span className="status-modifying">Modifying...</span>
                         ) : (
                           o.status
                         )}
                       </td>
                       <td>{o.tif}</td>
                       <td className="actions-cell">
-                        {isPendingCancel ? (
+                        {isPending ? (
                           <span className="cancel-pending-label">PENDING</span>
                         ) : (
                           <>
@@ -1090,12 +1077,9 @@ type WorkspaceSectionsProps = {
   portfolio?: PortfolioData | null;
   orders?: OrdersData | null;
   prices?: Record<string, PriceData>;
-  addToast?: (type: "error" | "warning" | "success", message: string, duration?: number) => void;
-  syncNow?: () => void;
-  onOrdersUpdate?: (data: OrdersData) => void;
 };
 
-export default function WorkspaceSections({ section, portfolio, orders, prices, addToast, syncNow, onOrdersUpdate }: WorkspaceSectionsProps) {
+export default function WorkspaceSections({ section, portfolio, orders, prices }: WorkspaceSectionsProps) {
   switch (section) {
     case "dashboard":
       return null;
@@ -1104,7 +1088,7 @@ export default function WorkspaceSections({ section, portfolio, orders, prices, 
     case "portfolio":
       return <PortfolioSections portfolio={portfolio ?? null} prices={prices} />;
     case "orders":
-      return <OrdersSections orders={orders ?? null} prices={prices} addToast={addToast} syncNow={syncNow} onOrdersUpdate={onOrdersUpdate} />;
+      return <OrdersSections orders={orders ?? null} prices={prices} />;
     case "scanner":
       return <ScannerSections />;
     case "discover":

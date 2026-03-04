@@ -24,7 +24,7 @@ from ib_insync import IB
 CLIENT_IDS: dict = {
     "ib_order_manage": 0,   # Master — cancel/modify any order
     "ib_sync": 0,           # Master — needs full position visibility
-    "ib_orders": 0,         # Master — needs to see all orders
+    "ib_orders": 11,        # Dedicated — concurrent with ib_order_manage
     "ib_reconcile": 0,      # Master — needs full account access
     "ib_order": 2,          # Unique — order placement (tags orders)
     "ib_fill_monitor": 52,  # Unique — long-running monitor service
