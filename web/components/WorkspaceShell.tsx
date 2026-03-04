@@ -10,6 +10,7 @@ import { usePortfolio } from "@/lib/usePortfolio";
 import { useOrders } from "@/lib/useOrders";
 import { useToast } from "@/lib/useToast";
 import { usePrices } from "@/lib/usePrices";
+import { usePreviousClose } from "@/lib/usePreviousClose";
 import { type OptionContract, portfolioLegToContract } from "@/lib/pricesProtocol";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
@@ -49,10 +50,13 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
     return contracts;
   }, [portfolio]);
 
-  const { prices, connected: wsConnected, ibConnected } = usePrices({
+  const { prices: rawPrices, connected: wsConnected, ibConnected } = usePrices({
     symbols: portfolioSymbols,
     contracts: portfolioContracts,
   });
+
+  // Backfill missing previous-close from Yahoo Finance / UW for day-change calc
+  const prices = usePreviousClose(rawPrices);
 
   const prevIbConnectedRef = useRef<boolean | null>(null);
   useEffect(() => {
