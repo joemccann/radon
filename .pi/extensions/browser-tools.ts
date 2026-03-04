@@ -86,25 +86,30 @@ export default function (pi: ExtensionAPI) {
       headed: Type.Optional(Type.Boolean({ description: "Show browser window (not headless)" })),
       json: Type.Optional(Type.Boolean({ description: "Return JSON output" })),
     }),
-    async execute({ command, session, headed, json }) {
-      const browserPath = getBrowserPath();
-      const args: string[] = [];
-      if (session) args.push(`--session "${session}"`);
-      if (headed) args.push("--headed");
-      if (json) args.push("--json");
-      
-      const fullCommand = `${browserPath} ${args.join(" ")} ${command}`;
-      
+    async execute(_toolCallId: string, params: any) {
       try {
-        const output = execSync(fullCommand, { 
+        const { command, session, headed, json } = params ?? {};
+        const browserPath = getBrowserPath();
+        const args: string[] = [];
+        if (session) args.push(`--session "${session}"`);
+        if (headed) args.push("--headed");
+        if (json) args.push("--json");
+
+        const fullCommand = `${browserPath} ${args.join(" ")} ${command}`;
+
+        const output = execSync(fullCommand, {
           encoding: "utf-8",
           timeout: 60000,
           maxBuffer: 10 * 1024 * 1024,
           env: { ...process.env, PATH: process.env.PATH },
         });
-        return output;
+        return {
+          content: [{ type: "text" as const, text: output }],
+        };
       } catch (err: any) {
-        return `Error: ${err.message}\n${err.stdout || ""}\n${err.stderr || ""}`;
+        return {
+          content: [{ type: "text" as const, text: `Error: ${err.message}\n${err.stdout || ""}\n${err.stderr || ""}` }],
+        };
       }
     },
   });

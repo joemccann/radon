@@ -30,7 +30,10 @@ function assert(condition, msg) {
 // 1. kelly_calc tool logic (extracted from trading-tools.ts)
 // ============================================================================
 
-/** Mirrors the execute() logic in .pi/extensions/trading-tools.ts */
+/** 
+ * Mirrors the execute() logic in .pi/extensions/trading-tools.ts
+ * Returns the inner result object for computation testing
+ */
 function kellyCalc({ prob_win, odds, fraction = 0.25, bankroll }) {
   if (typeof prob_win !== "number" || !Number.isFinite(prob_win) ||
       typeof odds !== "number" || !Number.isFinite(odds) ||
@@ -138,6 +141,92 @@ test("undefined/null params result has no NaN or Infinity", () => {
   assert(!json.includes("NaN"), "result contains NaN");
   assert(!json.includes("Infinity"), "result contains Infinity");
   assert(!json.includes("null"), "result contains null from NaN serialization");
+});
+
+// ============================================================================
+// 1b. kelly_calc tool AgentToolResult format (Pi extension API requirement)
+// ============================================================================
+
+/**
+ * Mirrors the ACTUAL execute() from trading-tools.ts with AgentToolResult format
+ * Pi requires: { content: [{ type: "text", text: "..." }], details: ... }
+ */
+function kellyCalcWithFormat(params) {
+  try {
+    const { prob_win, odds, fraction = 0.25, bankroll } = params ?? {};
+    if (typeof prob_win !== "number" || !Number.isFinite(prob_win) ||
+        typeof odds !== "number" || !Number.isFinite(odds) ||
+        odds <= 0) {
+      const result = {
+        full_kelly_pct: 0,
+        fractional_kelly_pct: 0,
+        edge_exists: false,
+        recommendation: "DO NOT BET",
+      };
+      if (bankroll) {
+        result.dollar_size = 0;
+        result.max_per_position = +(bankroll * 0.025).toFixed(2);
+        result.use_size = 0;
+      }
+      return {
+        content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+      };
+    }
+
+    const q = 1 - prob_win;
+    const fullKelly = prob_win - q / odds;
+    const fracKelly = fullKelly * fraction;
+    const result = {
+      full_kelly_pct: +(fullKelly * 100).toFixed(2),
+      fractional_kelly_pct: +(fracKelly * 100).toFixed(2),
+      edge_exists: fullKelly > 0,
+      recommendation: fullKelly <= 0 ? "DO NOT BET"
+        : fullKelly > 0.1 ? "STRONG"
+        : fullKelly > 0.025 ? "MARGINAL" : "WEAK",
+    };
+    if (bankroll) {
+      result.dollar_size = +(bankroll * fracKelly).toFixed(2);
+      result.max_per_position = +(bankroll * 0.025).toFixed(2);
+      result.use_size = Math.min(result.dollar_size, result.max_per_position);
+    }
+    return {
+      content: [{ type: "text", text: JSON.stringify(result, null, 2) }],
+    };
+  } catch (e) {
+    return {
+      content: [{ type: "text", text: `Error: ${e.message}` }],
+    };
+  }
+}
+
+console.log("\n── kelly_calc tool (AgentToolResult format) ──");
+
+test("returns object with content array", () => {
+  const r = kellyCalcWithFormat({ prob_win: 0.6, odds: 2.0 });
+  assert(typeof r === "object" && r !== null, "result should be an object");
+  assert(Array.isArray(r.content), "result.content should be an array");
+});
+
+test("content has type 'text' with text property", () => {
+  const r = kellyCalcWithFormat({ prob_win: 0.6, odds: 2.0 });
+  assert(r.content.length === 1, "content should have one item");
+  assert(r.content[0].type === "text", "content type should be 'text'");
+  assert(typeof r.content[0].text === "string", "content text should be a string");
+});
+
+test("content.text is valid JSON with expected fields", () => {
+  const r = kellyCalcWithFormat({ prob_win: 0.6, odds: 2.0 });
+  const parsed = JSON.parse(r.content[0].text);
+  assert("full_kelly_pct" in parsed, "should have full_kelly_pct");
+  assert("recommendation" in parsed, "should have recommendation");
+  assert("edge_exists" in parsed, "should have edge_exists");
+});
+
+test("invalid params still returns valid AgentToolResult format", () => {
+  const r = kellyCalcWithFormat({ prob_win: undefined, odds: 0 });
+  assert(typeof r === "object" && r !== null, "result should be an object");
+  assert(Array.isArray(r.content), "result.content should be an array");
+  assert(r.content[0].type === "text", "content type should be 'text'");
 });
 
 // ============================================================================
