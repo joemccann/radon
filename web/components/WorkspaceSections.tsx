@@ -376,10 +376,12 @@ function legPriceKey(
 function LegRow({
   leg,
   showExpiry,
+  showUnderlying,
   realtimeLegPrice,
 }: {
   leg: PortfolioPosition["legs"][number];
   showExpiry: boolean;
+  showUnderlying?: boolean;
   realtimeLegPrice?: PriceData | null;
 }) {
   const rtLast = realtimeLegPrice?.last != null && realtimeLegPrice.last !== 0 ? realtimeLegPrice.last : null;
@@ -393,6 +395,7 @@ function LegRow({
       <td colSpan={3} style={{ paddingLeft: "1.5rem", opacity: 0.7, fontSize: "0.85em" }}>
         {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
       </td>
+      {showUnderlying && <td></td>}
       <td className="right" style={{ opacity: 0.7, fontSize: "0.85em" }}>{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
       <td className="right last-price-cell">
         {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
@@ -415,7 +418,7 @@ function getDailyChange(realtimePrice?: PriceData | null): number | null {
   return ((last - close) / close) * 100;
 }
 
-function PositionRow({ pos, showExpiry = true, showStrike = false, realtimePrice, prices }: { pos: PortfolioPosition; showExpiry?: boolean; showStrike?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData> }) {
+function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlying = false, realtimePrice, prices }: { pos: PortfolioPosition; showExpiry?: boolean; showStrike?: boolean; showUnderlying?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData> }) {
   // For stock positions, prefer the real-time WS price over the stale sync price
   const isStock = pos.structure_type === "Stock";
   const rtLast = isStock && realtimePrice?.last != null && realtimePrice.last !== 0 ? realtimePrice.last : null;
@@ -466,6 +469,10 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, realtimePrice
     ? `${pos.structure} $${singleLegStrike}` 
     : pos.structure;
 
+  // Underlying price (for options positions)
+  const underlyingPrice = realtimePrice?.last != null && realtimePrice.last !== 0 ? realtimePrice.last : null;
+  const { direction: underlyingDirection, flashDirection: underlyingFlash } = usePriceDirection(underlyingPrice);
+
   return (
     <>
       <tr className={flashDirection ? `last-price-${flashDirection}` : undefined}>
@@ -477,6 +484,13 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, realtimePrice
             {pos.direction}
           </span>
         </td>
+        {showUnderlying && (
+          <td className={`right last-price-cell ${underlyingFlash ? `last-price-${underlyingFlash}` : ""}`}>
+            {underlyingPrice != null ? fmtPrice(underlyingPrice) : "—"}
+            {underlyingDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="underlying up" />}
+            {underlyingDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="underlying down" />}
+          </td>
+        )}
         <td className="right">{fmtPrice(avgEntry)}</td>
         <td className="right last-price-cell">
           {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
@@ -500,6 +514,7 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, realtimePrice
             key={`${pos.id}-leg-${i}`}
             leg={leg}
             showExpiry={showExpiry}
+            showUnderlying={showUnderlying}
             realtimeLegPrice={key && prices ? prices[key] : null}
           />
         );
@@ -508,7 +523,7 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, realtimePrice
   );
 }
 
-type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "avg_entry" | "last_price" | "daily_chg" | "entry_cost" | "market_value" | "pnl" | "expiry";
+type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "daily_chg" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
 function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock" || !prices) return null;
@@ -541,17 +556,18 @@ function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string, Price
 function makePositionExtract(prices?: Record<string, PriceData>) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
     const isStock = pos.structure_type === "Stock";
-    const rtStockLast = isStock && prices?.[pos.ticker]?.last != null && prices[pos.ticker].last !== 0 ? prices[pos.ticker].last : null;
+    const rtStockLast = prices?.[pos.ticker]?.last != null && prices[pos.ticker].last !== 0 ? prices[pos.ticker].last : null;
     const optRtMv = getOptionRtMv(pos, prices);
-    const mv = rtStockLast != null ? rtStockLast * pos.contracts : optRtMv ?? resolveMarketValue(pos);
+    const mv = isStock && rtStockLast != null ? rtStockLast * pos.contracts : optRtMv ?? resolveMarketValue(pos);
     switch (key) {
       case "ticker": return pos.ticker;
       case "structure": return pos.structure;
       case "qty": return pos.contracts;
       case "direction": return pos.direction;
+      case "underlying": return rtStockLast;
       case "avg_entry": return getAvgEntry(pos);
       case "last_price": {
-        if (rtStockLast != null) return rtStockLast;
+        if (isStock && rtStockLast != null) return rtStockLast;
         if (optRtMv != null) return optRtMv / (pos.contracts * getMultiplier(pos));
         return getLastPrice(pos);
       }
@@ -565,7 +581,7 @@ function makePositionExtract(prices?: Record<string, PriceData>) {
   };
 }
 
-function PositionTable({ positions, showExpiry = true, showStrike = false, prices }: { positions: PortfolioPosition[]; showExpiry?: boolean; showStrike?: boolean; prices?: Record<string, PriceData> }) {
+function PositionTable({ positions, showExpiry = true, showStrike = false, showUnderlying = false, prices }: { positions: PortfolioPosition[]; showExpiry?: boolean; showStrike?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData> }) {
   const positionExtract = useMemo(() => makePositionExtract(prices), [prices]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
 
@@ -577,6 +593,7 @@ function PositionTable({ positions, showExpiry = true, showStrike = false, price
           <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
           <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
@@ -588,7 +605,7 @@ function PositionTable({ positions, showExpiry = true, showStrike = false, price
       </thead>
       <tbody>
         {sorted.map((pos) => (
-          <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showStrike={showStrike} realtimePrice={prices?.[pos.ticker]} prices={prices} />
+          <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showStrike={showStrike} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} />
         ))}
       </tbody>
     </table>
@@ -629,7 +646,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             <span className="pill defined">{definedPositions.length} POSITIONS</span>
           </div>
           <div className="section-body">
-            <PositionTable positions={definedPositions} showStrike={true} prices={prices} />
+            <PositionTable positions={definedPositions} showStrike={true} showUnderlying={true} prices={prices} />
           </div>
         </div>
       )}
@@ -659,7 +676,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             <span className="pill undefined">{undefinedPositions.length} POSITIONS</span>
           </div>
           <div className="section-body">
-            <PositionTable positions={undefinedPositions} prices={prices} />
+            <PositionTable positions={undefinedPositions} showUnderlying={true} prices={prices} />
           </div>
         </div>
       )}
