@@ -120,7 +120,6 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
           case "price":
           case "snapshot": {
             const { data } = message;
-            console.log(`[WS ${message.type}] ${data.symbol} ${data.last ?? data.bid ?? "—"}`);
             setPrices((prev) => ({
               ...prev,
               [data.symbol]: data,
