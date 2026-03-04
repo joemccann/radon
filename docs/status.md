@@ -1,7 +1,7 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-04T15:45:00-08:00
+2026-03-04T15:50:00-08:00
 
 ## Recent Commits
 - 2026-03-04 15:45:00 -0800 — **OI Change Analysis: Made REQUIRED in every evaluation workflow**
@@ -19,25 +19,34 @@
 - 2026-03-04 07:00:00 -0800 — Created ib_fill_monitor.py and ib-order-execution skill
 
 ## Current Portfolio State
-- **Net Liquidation**: $1,145,952
-- **Deployed**: $1,712,649 (149% — on margin)
+- **Net Liquidation**: $1,201,929
+- **Deployed**: $1,267,897 (105% — on margin)
 - **Open Positions**: 23
-- **Defined Risk**: 11 positions
-- **Undefined Risk**: 12 positions (8 stocks + 3 risk reversals + 1 combo)
-- **New Today**: GOOG Bull Call Spread $315/$340
+- **Defined Risk**: 13 positions
+- **Undefined Risk**: 10 positions (7 stocks + 2 risk reversals + 1 synthetic)
+- **Today's Realized P&L**: +$53,082
 
 ## Today's Trades (2026-03-04)
-| Trade | Structure | Cost | Status |
-|-------|-----------|------|--------|
-| GOOG | Bull Call Spread $315/$340 | $27,572 | ✓ FILLED @ $6.26 |
+| Trade | Structure | P&L | Status |
+|-------|-----------|-----|--------|
+| GOOG | Bull Call Spread $315/$340 | -$1,040 (open) | ✓ FILLED @ $6.26 |
+| PLTR | Sold 100 Calls @ $9.18 | +$48,480 | ✓ CLOSED |
+| EWY | Closed Mar 6 Risk Reversal | +$9,888 | ✓ CLOSED |
+| BRZE | Closed Options Structure | -$11,287 | ✓ CLOSED (loss) |
+| AAOI | Bought back $90 Put @ $1.25 | +$6,001 | ✓ FREED (call now free) |
+| **Net P&L Today** | | **+$53,082** | |
 
 ## Positions Requiring Attention
 
 ### ⚠️ Expiring This Week (Mar 6)
 | Position | Structure | P&L | Risk |
 |----------|-----------|-----|------|
-| AAOI | Risk Reversal P$90/C$105 | -24% | ⛔ UNDEFINED |
-| EWY | Risk Reversal P$128/C$138 | -$1,077 | ⛔ UNDEFINED |
+| AAOI | Long Call $105 (freed) | +$6,001 from put | ✅ DEFINED |
+
+### ✅ Closed Today
+| Position | Structure | P&L | Notes |
+|----------|-----------|-----|-------|
+| EWY | Risk Reversal P$128/C$138 (Mar 6) | +$9,888 | Closed before expiry |
 
 ### ⚠️ Expiring in 2-3 Weeks
 | Position | DTE | P&L | Action |
@@ -47,11 +56,13 @@
 | PLTR Long Call $145 | 24 | +116% | Consider profits |
 
 ### ⛔ Rule Violations (Logged for Audit)
-| Position | Violation | Opened |
-|----------|-----------|--------|
-| AAOI Risk Reversal | Undefined risk (short put) | 2026-03-03 |
-| EWY Risk Reversal | Undefined risk (short put) | 2026-03-03 |
-| AMD Long Call | Position size 7.4% (exceeds 2.5% cap) | 2026-03-03 |
+| Position | Violation | Opened | Status |
+|----------|-----------|--------|--------|
+| ~~AAOI Risk Reversal~~ | ~~Undefined risk (short put)~~ | 2026-03-03 | ✅ RESOLVED (short put closed) |
+| ~~EWY Risk Reversal (Mar 6)~~ | ~~Undefined risk (short put)~~ | 2026-03-03 | ✅ RESOLVED (closed for +$9,888) |
+| EWY Risk Reversal (Mar 13) | Undefined risk (short put $130) | 2026-03-04 | ⚠️ ACTIVE |
+| IGV Synthetic Long | Undefined risk (short put $90) | Active | ⚠️ ACTIVE |
+| AMD Long Call | Position size 7.4% (exceeds 2.5% cap) | 2026-03-03 | ⚠️ ACTIVE |
 
 ---
 
@@ -61,11 +72,16 @@
 | 1 | 03-02 | ALAB | Long Call LEAP | OPEN | -8.5% |
 | 2 | 03-02 | WULF | Long Call LEAP | OPEN | -5.4% |
 | 3 | 02-25 | EWY | Bear Put Spread | **CLOSED** | +$17,651 |
-| 4 | 03-03 | AAOI | Risk Reversal | OPEN | -24% |
+| 4 | 03-03 | AAOI | Risk Reversal | **CONVERTED** | → Trade #13 |
 | 5 | 03-03 | AMD | Long Call LEAP | OPEN | +7.5% |
-| 6 | 03-03 | EWY | Risk Reversal | OPEN | -$1,077 |
+| 6 | 03-03 | EWY | Risk Reversal (Mar 6) | **CLOSED** | +$9,888 |
 | 7 | 02-27 | AAOI | Long Stock | **CLOSED** | +$380 |
-| **8** | **03-04** | **GOOG** | **Bull Call Spread $315/$340** | **OPEN** | **-1.9%** |
+| 8 | 03-04 | GOOG | Bull Call Spread $315/$340 | OPEN | -3.8% |
+| 9 | 03-04 | NFLX | Stock Sale | **CLOSED** | $444,150 proceeds |
+| **10** | **03-04** | **PLTR** | **Sold Long Calls** | **CLOSED** | **+$48,480** |
+| **11** | **03-04** | **EWY** | **Closed Mar 6 RR** | **CLOSED** | **+$9,888** |
+| **12** | **03-04** | **BRZE** | **Closed Structure** | **CLOSED** | **-$11,287** |
+| **13** | **03-04** | **AAOI** | **Risk Reversal → Free Call** | **FREED** | **+$6,001** |
 
 ---
 
@@ -181,6 +197,16 @@ Then when async tasks complete:
 ✅ Startup complete (4/4 passed)
 ```
 
+**⚠️ Auto-Reconciliation Rule:**
+When startup shows `⚠️ IB: N new trades`, **IMMEDIATELY**:
+1. Read `data/reconciliation.json`
+2. Log each trade to `data/trade_log.json`
+3. Update `docs/status.md`
+4. Clear reconciliation flag
+5. Validate JSON
+
+**Do NOT wait for user prompt — this is automatic.**
+
 **Notification Strategy:**
 - **Immediate**: Show check count as soon as Pi starts
 - **Deferred**: Progress messages collected during async execution
@@ -195,17 +221,21 @@ Then when async tasks complete:
 
 **Status indicators:**
 - `✓` success — Process completed normally
-- `⚠️` warning — Process skipped or has issues
+- `⚠️` warning — Process skipped or has issues (triggers auto-reconciliation if IB)
 - `❌` error — Process failed
 
 **Implementation:** Uses `StartupTracker` class with TDD (14 tests)
 
-### IB Reconciliation (New)
+### IB Reconciliation (Auto-Log)
 - Script: `scripts/ib_reconcile.py`
 - Runs at Pi startup (non-blocking)
 - Detects new trades, new positions, closed positions
 - Output: `data/reconciliation.json`
-- Notification shown if action needed
+- **Auto-Log**: When `needs_attention: true`, immediately:
+  1. Add trades to `trade_log.json`
+  2. Update `docs/status.md`
+  3. Clear `needs_attention` flag
+- **No user prompt required** — this is automatic
 
 ### Data Files
 | File | Purpose |

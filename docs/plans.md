@@ -1,6 +1,6 @@
 # Evaluation Plan - Milestone Workflow
 
-## Milestone 0: Startup Reconciliation (Automatic)
+## Milestone 0: Startup Reconciliation (Automatic + Auto-Log)
 **Action**: Pi startup extension runs IB reconciliation asynchronously
 **Validation**: Check notification or `data/reconciliation.json`
 **Acceptance Criteria**:
@@ -8,7 +8,25 @@
 - New positions identified
 - Closed positions identified
 - Notification shown if action needed
-**Note**: This runs automatically — no manual action required
+- **⚠️ If `needs_attention: true` → Auto-log trades immediately**
+
+**Auto-Log Workflow (MANDATORY when new trades detected):**
+1. Read `data/reconciliation.json`
+2. For each trade in `new_trades`:
+   - Assign next ID (max existing ID + 1)
+   - Create trade_log entry with full details
+   - Set `validation_method: "ib_reconciliation"`
+3. Append to `data/trade_log.json`
+4. Update `docs/status.md`:
+   - Trade Log Summary table
+   - Today's Trades section
+   - Portfolio State metrics
+5. Clear reconciliation:
+   - Set `needs_attention: false`
+   - Move to `processed_trades`
+6. Validate: `python3 -m json.tool data/trade_log.json`
+
+**Do NOT wait for user request — this is automatic on every startup with new trades.**
 
 ---
 

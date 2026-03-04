@@ -896,6 +896,58 @@ When Pi starts, the startup extension (`.pi/extensions/startup-protocol.ts`) run
 npx tsx .pi/tests/startup-protocol.test.ts
 ```
 
+### ⚠️ Auto-Reconciliation Rule (MANDATORY)
+
+**When IB sync detects new trades (`needs_attention: true`), IMMEDIATELY:**
+
+1. **Read** `data/reconciliation.json` to get the new trades
+2. **Log** each new trade to `data/trade_log.json` with:
+   - Unique ID (auto-increment from last)
+   - Full trade details from reconciliation
+   - `validation_method: "ib_reconciliation"`
+   - Realized P&L and commissions
+3. **Update** `docs/status.md`:
+   - Trade Log Summary table
+   - Today's Trades section
+   - Portfolio State metrics
+   - Rule Violations if applicable
+4. **Clear** reconciliation flag:
+   - Set `needs_attention: false`
+   - Move trades to `processed_trades` array
+5. **Validate** JSON integrity:
+   ```bash
+   python3 -m json.tool data/trade_log.json
+   ```
+
+**This is automatic — do NOT wait for user to request it.**
+
+**Reconciliation data format:**
+```json
+{
+  "new_trades": [
+    {
+      "symbol": "PLTR",
+      "date": "2026-03-04",
+      "action": "SELL_OPTION",  // SELL_OPTION, BUY_OPTION, CLOSED, etc.
+      "net_quantity": -100.0,
+      "avg_price": 9.18,
+      "commission": 70.25,
+      "realized_pnl": 48479.75,
+      "sec_type": "OPT"  // OPT, STK, BAG
+    }
+  ],
+  "needs_attention": true
+}
+```
+
+**Action interpretation:**
+| Action | Meaning | Log As |
+|--------|---------|--------|
+| `SELL_OPTION` | Sold options (closing long OR opening short) | Check context |
+| `BUY_OPTION` | Bought options (opening long OR closing short) | Check context |
+| `CLOSED` | Position fully closed (net zero) | CLOSED with P&L |
+| `BUY` / `SELL` | Stock trade | Stock entry/exit |
+
 ### Startup Reconciliation (Automatic)
 
 When Pi starts, the startup extension automatically runs `ib_reconcile.py` **asynchronously** (non-blocking) to detect:

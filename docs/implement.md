@@ -290,7 +290,7 @@ Capital at Risk:
 
 ---
 
-## Startup Reconciliation
+## Startup Reconciliation (Auto-Log)
 
 The startup extension automatically runs `ib_reconcile.py` when Pi starts:
 
@@ -298,14 +298,46 @@ The startup extension automatically runs `ib_reconcile.py` when Pi starts:
 - **Detects**: New trades, new positions, closed positions
 - **Output**: `data/reconciliation.json`
 - **Notification**: Shows if action needed
+- **⚠️ Auto-Log**: If new trades detected, IMMEDIATELY log them
 
-Manual run:
+### Auto-Log Workflow (MANDATORY)
+
+When startup shows `⚠️ IB: N new trades`, **immediately** run this workflow:
+
 ```bash
-python3 scripts/ib_reconcile.py
+# 1. Check reconciliation data
+cat data/reconciliation.json | python3 -m json.tool
+
+# 2. For each trade in new_trades, add to trade_log.json:
+#    - id: next sequential ID
+#    - date, time from reconciliation
+#    - ticker, action, realized_pnl, commission
+#    - validation_method: "ib_reconciliation"
+#    - notes: "Detected via IB reconciliation"
+
+# 3. Update docs/status.md:
+#    - Trade Log Summary table
+#    - Today's Trades section
+#    - Portfolio State metrics (positions, deployed %, etc.)
+
+# 4. Clear reconciliation flag
+# Write to reconciliation.json:
+#    needs_attention: false
+#    processed_trades: [list of processed trade IDs]
+
+# 5. Validate JSON
+python3 -m json.tool data/trade_log.json
 ```
 
-Check results:
+**Do NOT prompt user** — this auto-log runs automatically whenever `needs_attention: true`.
+
+### Manual Reconciliation
+
 ```bash
+# Trigger reconciliation manually
+python3 scripts/ib_reconcile.py
+
+# Check results
 cat data/reconciliation.json | python3 -m json.tool
 ```
 
