@@ -153,6 +153,74 @@ Return on Risk = Realized P&L / Capital at Risk
 
 ---
 
+## Calculations — Correctness Rules
+
+Financial calculations in the web UI must follow these rules exactly. Bugs here mislead trading decisions.
+
+### Daily Change % (Day Chg column)
+
+```
+Day Chg % = Daily P&L / |Yesterday's Close Value| × 100
+
+NEVER divide by entry cost. Entry cost is for total P&L, not daily change.
+```
+
+**Why this matters**: A spread bought at $0.52 that's now worth $8.50 has a close value ~16x the entry cost. Dividing a $800 daily move by $2,600 (entry) gives -206%; dividing by $42,500 (close) gives the correct +1.88%.
+
+| Position Type | Daily P&L | Denominator |
+|--------------|-----------|-------------|
+| Stock | `(last - close) × qty` | `close × qty` |
+| Single option | `(last - close) × contracts × 100` | `close × contracts × 100` |
+| Spread/combo | `SUM(sign × (last - close) × contracts × 100)` per leg | `SUM(sign × close × contracts × 100)` per leg |
+
+Where `sign = +1` for LONG legs, `-1` for SHORT legs.
+
+**Implementation**: `getOptionDailyChg()` in `WorkspaceSections.tsx`. Tests in `lib/tools/__tests__/daily-chg.test.ts`.
+
+### Spread Net Mid (Last Price for BAG orders)
+
+```
+Spread Mid = SUM(sign × (bid + ask) / 2) per leg
+```
+
+Resolve each leg's WS bid/ask via `legPriceKey()`, compute per-leg mid, combine sign-aware. Do NOT use the underlying stock price for spread orders.
+
+**Implementation**: `resolveOrderLastPrice()` in `WorkspaceSections.tsx`.
+
+### Total P&L % (P&L column)
+
+```
+P&L % = (Market Value - Entry Cost) / |Entry Cost| × 100
+```
+
+This correctly uses entry cost as the denominator because it measures return on capital deployed over the life of the position.
+
+### Return on Risk (trade log)
+
+```
+Return on Risk = Realized P&L / Capital at Risk
+
+Capital at Risk:
+  Debit spread  → Net debit paid
+  Credit spread → Width − credit received
+  Long option   → Premium paid
+```
+
+### Price Resolution Priority
+
+| Context | Price Source |
+|---------|-------------|
+| Stock position | `prices[ticker].last` |
+| Single-leg option | `prices[optionKey(...)].last` (option contract, NOT underlying) |
+| Multi-leg spread | Compute net from each leg's `prices[legPriceKey(...)]` |
+| BAG order last price | `resolveOrderLastPrice()` — net mid from portfolio legs |
+| Order form BID/MID/ASK | Same resolved price data as PriceBar (option-level for options) |
+| PriceBar in modal | `resolvePriceBar()` — option-level for single-leg, underlying for multi-leg |
+
+**Rule**: Never show the underlying stock price where the user expects an option or spread price. If option prices aren't available, show "---" rather than a misleading underlying price.
+
+---
+
 ## Unusual Whales API Quick Reference
 
 ```

@@ -317,6 +317,8 @@ Click any ticker across all 6 table sections → 720px modal with:
 5. ~~`ib_order_manage.py modify` Error 103~~ **FIXED** — Reconnects as original clientId before placeOrder
 6. ~~`ib_order_manage.py cancel` Error 10147~~ **FIXED** — Same clientId mismatch as modify; cancel now reconnects as original placer
 7. ~~Options showing $-1.00 after hours~~ **FIXED** — IB returns -1 sentinel for LAST tick when market closed; normalizeNumber() now rejects negatives, reqMarketDataType(4) requests frozen data
+8. ~~Day Chg % -206% for PLTR spread~~ **FIXED** — `getOptionDailyChg()` was dividing daily P&L by entry cost instead of yesterday's close value. Spread entry $0.52 but close $8.50 → 16x inflation. See CLAUDE.md "Calculations" section.
+9. ~~Spread orders showing underlying stock price~~ **FIXED** — BAG orders now compute net mid from portfolio legs (`resolveOrderLastPrice()`). Order form BID/MID/ASK buttons now use option-level prices via `tickerPriceData` prop.
 
 ## Follow-ups
 - [x] Implement trade blotter service
@@ -340,6 +342,8 @@ Click any ticker across all 6 table sections → 720px modal with:
 - [x] **Option-level pricing in price bar and order form BID/MID/ASK**
 - [x] **Spread net mid computation for BAG orders (long leg mid - short leg mid)**
 - [x] **ib_place_order.py — JSON-in/JSON-out order placement for web API**
+- [x] **Fix Day Chg % for options/spreads (divide by close value, not entry cost)**
+- [x] **Fix spread last price (net mid from leg prices, not underlying)**
 - [ ] Execute MSFT LEAP call trade (pending confirmation)
 - [ ] Close undefined risk positions before Friday expiry
 - [ ] Review PLTR for profit-taking (23 DTE, +175%)
