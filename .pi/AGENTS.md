@@ -90,16 +90,49 @@ When market is closed, free trade analysis explicitly shows it's using closing p
 
 | Command | Action |
 |---------|--------|
-| `evaluate [TICKER]` | **Run full 7-milestone evaluation** (`python3 scripts/evaluate.py TICKER`) |
+| `evaluate [TICKER]` | **Run `python3 scripts/evaluate.py [TICKER]`** — full 7-milestone evaluation |
 | `scan` | Scan watchlist for dark pool flow signals |
 | `discover` | Find new candidates from market-wide options flow |
-| `evaluate [TICKER]` | Full 7-milestone evaluation |
 | `portfolio` | **Generate HTML portfolio report and open in browser** |
 | `free-trade` | Analyze positions for free trade opportunities |
 | `journal` | View recent trade log entries |
 | `sync` | Pull live portfolio from Interactive Brokers |
 | `blotter` | Trade blotter - today's fills, P&L, spread grouping |
 | `strategies` | List available trading strategies (reads `data/strategies.json`) |
+
+### Evaluate Command Details
+
+When user runs `evaluate [TICKER]`, ALWAYS:
+1. Run `python3 scripts/evaluate.py [TICKER]` — this fetches ALL data in parallel
+2. Read the output (text report or `--json`)
+3. If decision is `NO_TRADE`: log to `docs/status.md` under Recent Evaluations
+4. If decision is `PENDING` (edge passed): design structure using live IB quotes, run Kelly, generate trade spec HTML report, present for confirmation
+5. If decision is `TRADE` (after user confirms): execute via `ib_execute.py`, log to `trade_log.json`
+
+```bash
+# Standard evaluation (human-readable output)
+python3 scripts/evaluate.py AAPL
+
+# JSON output (for programmatic use)
+python3 scripts/evaluate.py AAPL --json
+
+# Custom bankroll
+python3 scripts/evaluate.py AAPL --bankroll 1200000
+```
+
+**What the script does automatically:**
+- Fetches M1 (ticker), M1B (seasonality), M1C (analysts), M2 (dark pool), M3 (options), M3B (OI changes) **in parallel**
+- Fetches IB price history on main thread (ib_insync requirement)
+- Always includes **today's** intraday dark pool data
+- Runs edge determination (M4) against all fetched data
+- Stops at first failing gate — no wasted API calls
+- Returns structured `EvaluationResult` with full audit trail
+
+**What you do after the script runs:**
+- If `NO_TRADE`: copy the failing gate + reason into `docs/status.md`
+- If `PENDING`: fetch live option quotes from IB, design structure, calculate Kelly, generate HTML trade spec report, present to user
+
+**NEVER manually step through milestones 1-3B.** The script handles all parallel fetching. Only intervene for M5 (structure) and M6 (Kelly) which require interactive IB quotes and operator judgment.
 
 ### Portfolio Command Details
 
