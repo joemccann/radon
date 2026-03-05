@@ -1,9 +1,13 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-04T15:50:00-08:00
+2026-03-05T06:25:00-08:00
 
 ## Recent Commits
+- 2026-03-05 06:23:00 -0800 — **Test coverage for cancel clientId fix, journal/discover routes, negative prices**
+- 2026-03-05 06:15:00 -0800 — **Live journal table + discover route with auto-sync (5-min interval, startup pre-warm)**
+- 2026-03-05 06:01:00 -0800 — Show Convex Pi Assistant only on dashboard route
+- 2026-03-05 05:52:00 -0800 — Fix cancel order clientId mismatch (Error 10147) + reject negative prices from IB
 - 2026-03-04 15:45:00 -0800 — **OI Change Analysis: Made REQUIRED in every evaluation workflow**
 - 2026-03-04 15:30:00 -0800 — Created fetch_oi_changes.py and verify_options_oi.py scripts
 - 2026-03-04 15:15:00 -0800 — Discovered UW has OI change endpoint that shows hidden institutional positioning
@@ -240,10 +244,11 @@ When startup shows `⚠️ IB: N new trades`, **IMMEDIATELY**:
 ### Data Files
 | File | Purpose |
 |------|---------|
-| `data/trade_log.json` | Executed trades (8 entries) |
+| `data/trade_log.json` | Executed trades (13 entries) |
 | `data/portfolio.json` | Open positions from IB |
 | `data/reconciliation.json` | IB sync discrepancies |
 | `data/watchlist.json` | Tickers under surveillance |
+| `data/discover.json` | Cached discover scan results (auto-refreshed) |
 
 ### Key Scripts
 | Script | Purpose |
@@ -304,6 +309,9 @@ When startup shows `⚠️ IB: N new trades`, **IMMEDIATELY**:
 - [x] **Create OI change analysis scripts (fetch_oi_changes.py, verify_options_oi.py)**
 - [x] **Make OI analysis REQUIRED in every evaluation workflow**
 - [x] **Document OI verification methodology**
+- [x] **Journal route renders trade log table (date, ticker, structure, P&L, gates, edge)**
+- [x] **Discover route with auto-sync (5-min interval) + server startup pre-warm**
+- [x] **ChatPanel removed from non-dashboard routes**
 - [ ] Execute MSFT LEAP call trade (pending confirmation)
 - [ ] Close undefined risk positions before Friday expiry
 - [ ] Review PLTR for profit-taking (23 DTE, +175%)
