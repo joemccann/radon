@@ -79,11 +79,15 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
           </div>
           <div className="news-headline">
             {item.headline}
-            {item.url && (
-              <a href={item.url} target="_blank" rel="noopener noreferrer" className="news-open-link" aria-label="Open article">
-                <ExternalLink size={12} />
-              </a>
-            )}
+            <a
+              href={item.url || `https://www.google.com/search?q=${encodeURIComponent(item.headline)}&tbm=nws`}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="news-open-link"
+              aria-label="Open article"
+            >
+              <ExternalLink size={12} />
+            </a>
           </div>
         </div>
       ))}
