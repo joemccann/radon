@@ -218,41 +218,43 @@ The LEAPS strategy targets 1-3 year options for maximum vega. This strategy uses
 
 ## Scanning Implementation
 
-### Using Existing Tools
-
-The GARCH Convergence scan can be built from existing scanner infrastructure:
+### ⭐ Dedicated Scanner (IMPLEMENTED)
 
 ```bash
-# Step 1: Get IV/HV data for the pair
-python3 scripts/leap_iv_scanner.py NVDA AMD --min-gap 0
-
-# Step 2: Get IV rank from UW
-python3 scripts/leap_scanner_uw.py NVDA AMD
-
-# Step 3: Compare IV/HV ratios manually or via script
+# ALWAYS use this script for GARCH convergence scans
+python3 scripts/garch_convergence.py --preset all          # All 4 built-in presets (~3s)
+python3 scripts/garch_convergence.py --preset semis        # Just semiconductors
+python3 scripts/garch_convergence.py --preset mega-tech    # Mega-cap tech
+python3 scripts/garch_convergence.py --preset energy       # Energy
+python3 scripts/garch_convergence.py --preset china-etf    # China/Asia
+python3 scripts/garch_convergence.py --preset sp500-semiconductors  # File preset
+python3 scripts/garch_convergence.py NVDA AMD GOOGL META   # Ad-hoc ticker pairs
+python3 scripts/garch_convergence.py --preset all --json   # JSON output
 ```
 
-### Proposed Scanner (Future)
+**Architecture:**
+1. Resolves tickers from built-in presets, file presets (`data/presets/`), or ad-hoc CLI args
+2. Fetches ALL ticker data in parallel (8 ThreadPoolExecutor workers)
+   - Yahoo Finance: HV20, HV60, HV252 (concurrent HTTP requests)
+   - Unusual Whales: IV rank, current IV, LEAP chain (shared connection-pooled session)
+3. Computes pair divergence metrics (CPU-only, instant)
+4. Runs 5 gate checks per pair (divergence, HV gap, vol driver, IV rank, liquidity)
+5. Generates HTML report using template from `.pi/skills/html-report/template.html`
+6. Opens report in browser automatically
 
-A dedicated `scripts/garch_convergence_scanner.py` would:
+**Performance:** ~2.6 seconds for 23 tickers / 12 pairs (vs ~5+ min serial).
 
-1. Accept asset pairs or preset pair groups
-2. Fetch HV20/HV60 for both assets (via IBClient)
-3. Fetch current ATM IV for 3-6 month expirations (via IBClient)
-4. Compute IV/HV ratios for both assets
-5. Compare against 60-day rolling ratio distribution
-6. Flag divergences >1σ
-7. Output pair opportunities ranked by divergence magnitude
-
-**Pair presets:**
+**Built-in pair presets:**
 
 | Preset | Pairs |
 |--------|-------|
-| `semis` | (NVDA, AMD), (MU, AMAT), (TSM, ASML), (AVGO, QCOM) |
-| `energy` | (XOM, COP), (SLB, HAL), (XLE, OIH) |
-| `china-etf` | (EWY components vs EWY), (FXI components vs FXI) |
+| `semis` | (NVDA, AMD), (TSM, ASML), (AVGO, QCOM), (MU, AMAT) |
 | `mega-tech` | (AAPL, MSFT), (GOOGL, META), (AMZN, NFLX) |
-| `etf-components` | (Top 3 holdings vs parent ETF) for any ETF |
+| `energy` | (XOM, COP), (SLB, HAL), (XLE, OIH) |
+| `china-etf` | (FXI, BABA), (EWY, FXI) |
+| `all` | Run all 4 above |
+
+Also supports any file preset from `data/presets/` (150+ presets with pairs).
 
 ---
 

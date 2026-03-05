@@ -255,6 +255,59 @@ python3 scripts/leap_iv_scanner.py --portfolio
 
 ---
 
+## Strategy 3: GARCH Convergence Spreads
+
+### Thesis
+
+When a structural catalyst elevates realized volatility in a sector, individual components reprice IV at different rates — creating measurable mispricings between correlated assets. The trade captures convergence as lagging assets' IV catches up to leaders.
+
+### Signal Criteria
+
+| Criterion | Threshold |
+|-----------|-----------|
+| IV/HV60 divergence (leader vs lagger) | ≥ 0.15 |
+| Lagger HV20 − LEAP IV | ≥ +10 points |
+| Shared vol driver | Same fundamental catalyst |
+| Lagger IV rank | < 50th percentile |
+| Lagger has LEAPs | OI > 100 |
+
+### Signal Strength
+
+| Tier | Conditions | Action |
+|------|-----------|--------|
+| Strong | Divergence ≥ 0.30, HV gap ≥ 20, IV rank < 30% | Full size (2.5%) |
+| Moderate | Divergence ≥ 0.20, HV gap ≥ 15, IV rank < 40% | Half size (1.25%) |
+| Weak | Divergence ≥ 0.15, HV gap ≥ 10 | Monitor only |
+
+### Scripts
+
+```bash
+# ⭐ ALWAYS use the unified scanner
+python3 scripts/garch_convergence.py --preset all          # All 4 built-in presets (~3s)
+python3 scripts/garch_convergence.py --preset semis        # Semiconductors only
+python3 scripts/garch_convergence.py --preset mega-tech    # Mega-cap tech
+python3 scripts/garch_convergence.py --preset energy       # Energy sector
+python3 scripts/garch_convergence.py --preset china-etf    # China/Asia
+python3 scripts/garch_convergence.py --preset sp500-semiconductors  # File preset
+python3 scripts/garch_convergence.py NVDA AMD GOOGL META   # Ad-hoc pairs
+python3 scripts/garch_convergence.py --preset all --json   # JSON output
+```
+
+### Built-in Pair Presets
+
+| Preset | Pairs |
+|--------|-------|
+| `semis` | (NVDA,AMD), (TSM,ASML), (AVGO,QCOM), (MU,AMAT) |
+| `mega-tech` | (AAPL,MSFT), (GOOGL,META), (AMZN,NFLX) |
+| `energy` | (XOM,COP), (SLB,HAL), (XLE,OIH) |
+| `china-etf` | (FXI,BABA), (EWY,FXI) |
+
+Also supports any file preset from `data/presets/` (150+ presets with pairs).
+
+Full strategy specification: [`strategy-garch-convergence.md`](strategy-garch-convergence.md)
+
+---
+
 ## Strategy Interaction
 
 These strategies can be combined:
@@ -263,9 +316,14 @@ These strategies can be combined:
 
 2. **LEAP → Flow monitoring**: After entering a LEAP position, monitor dark pool flow for early warning of thesis invalidation.
 
-3. **Position layering**: 
+3. **LEAP → Convergence**: If LEAP scan shows single-asset mispricing, check if paired assets are also mispriced → may upgrade to convergence trade for better risk/reward.
+
+4. **Convergence → LEAP**: If convergence resolves quickly, the lagger's IV may still be below long-term fair value → roll into LEAPS.
+
+5. **Position layering**: 
    - Core: LEAP calls for vega exposure (months to years)
    - Tactical: Short-dated options on flow signals (weeks)
+   - Relative value: Convergence spreads (weeks to months)
 
 ---
 

@@ -96,6 +96,19 @@ If a script fails:
 | Fetch analyst ratings | `python3 scripts/fetch_analyst_ratings.py [TICKER]` |
 | Calculate Kelly | `python3 scripts/kelly.py --prob P --odds O --bankroll B` |
 
+### Scanning Commands
+| Action | Command |
+|--------|---------|
+| **⭐ GARCH Convergence (all presets)** | `python3 scripts/garch_convergence.py --preset all` |
+| GARCH Convergence (one preset) | `python3 scripts/garch_convergence.py --preset semis` |
+| GARCH Convergence (file preset) | `python3 scripts/garch_convergence.py --preset sp500-semiconductors` |
+| GARCH Convergence (ad-hoc) | `python3 scripts/garch_convergence.py NVDA AMD GOOGL META` |
+| GARCH Convergence (JSON) | `python3 scripts/garch_convergence.py --preset all --json` |
+| LEAP IV scan (UW) | `python3 scripts/leap_scanner_uw.py --preset sectors` |
+| LEAP IV scan (IB) | `python3 scripts/leap_iv_scanner.py AAPL --portfolio` |
+| Dark pool discovery | `python3 scripts/discover.py` |
+| Watchlist scan | `python3 scripts/scanner.py` |
+
 ### Portfolio Commands
 | Action | Command |
 |--------|---------|

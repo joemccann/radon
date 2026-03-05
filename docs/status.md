@@ -1,10 +1,11 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-05T11:24:00-08:00
+2026-03-05T12:00:00-08:00
 
 ## Recent Commits
-- 2026-03-05 11:24:00 -0800 — Route evaluate command to python script: explicit instructions in AGENTS.md and plans.md
+- 2026-03-05 12:00:00 -0800 — **feat: GARCH Convergence scanner — parallel fetch (8 workers, ~2.6s for 23 tickers), divergence analysis, HTML report**
+- 2026-03-05 11:47:00 -0800 — Route evaluate command to python script: explicit instructions in AGENTS.md and plans.md
 - 2026-03-05 11:22:00 -0800 — **feat: Improved RatingsTab — maps nested UW API response, shows buy/sell %, distribution bar, price targets with upside/downside, analyst actions with firm/grade**
 - 2026-03-05 11:20:00 -0800 — **feat: News tab fallback to Yahoo Finance when UW is rate-limited (429)**
 - 2026-03-05 11:18:00 -0800 — evaluate.py: Unified evaluation script with parallel milestones, 34 TDD tests
@@ -312,6 +313,7 @@ Click any ticker across all 6 table sections → 720px modal with:
 | `exit_order_service.py` | Place pending exit orders |
 | `blotter.py` | Today's fills and P&L |
 | `trade_blotter/flex_query.py` | Historical trades (365 days) |
+| `garch_convergence.py` | **⭐ GARCH Convergence scanner (parallel, ~3s for 23 tickers)** |
 
 ### Skills
 | Skill | Purpose |
@@ -381,6 +383,7 @@ Click any ticker across all 6 table sections → 720px modal with:
 - [x] **All-sources-failed graceful handling in News and Ratings tabs**
 - [x] **Data normalization: canonical "ticker" key in all data files**
 - [x] **evaluate.py unified evaluation script with 34 TDD tests**
+- [x] **garch_convergence.py — parallel GARCH convergence scanner (8 workers, built-in + file presets, HTML report)**
 - [ ] Execute MSFT LEAP call trade (pending confirmation)
 - [ ] Close undefined risk positions before Friday expiry
 - [ ] Review PLTR for profit-taking (23 DTE, +175%)
