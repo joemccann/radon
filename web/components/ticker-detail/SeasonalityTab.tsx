@@ -75,11 +75,14 @@ function barWidth(absReturn: number): number {
   return Math.max(5, Math.min(100, Math.abs(absReturn) * 100 * 10));
 }
 
+type DataSource = "uw" | "uw+equityclock" | "equityclock" | null;
+
 export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) {
   const [months, setMonths] = useState<MonthData[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [fetched, setFetched] = useState(false);
+  const [source, setSource] = useState<DataSource>(null);
 
   const fetchSeasonality = useCallback(async () => {
     setLoading(true);
@@ -88,6 +91,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
       const res = await fetch(`/api/ticker/seasonality?ticker=${encodeURIComponent(ticker)}`);
       const json = await res.json();
       if (!res.ok) throw new Error(json.error || `Failed (${res.status})`);
+      setSource(json.source ?? null);
       const items = json.data ?? json ?? [];
       if (!Array.isArray(items) || items.length === 0) {
         setMonths([]);
@@ -158,6 +162,11 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
           <span className="seasonality-stat">{unfavorable} unfavorable</span>
           {yearsAnalyzed > 0 && (
             <span className="seasonality-stat">{yearsAnalyzed}y history</span>
+          )}
+          {source && source !== "uw" && (
+            <span className="seasonality-source-badge">
+              {source === "equityclock" ? "EQUITYCLOCK" : "UW + EQUITYCLOCK"}
+            </span>
           )}
         </div>
       </div>

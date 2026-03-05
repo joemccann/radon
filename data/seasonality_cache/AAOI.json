@@ -1,0 +1,147 @@
+{
+  "ticker": "AAOI",
+  "expires": "2026-04-01T00:00:00.000Z",
+  "source": "uw+equityclock",
+  "data": [
+    {
+      "ticker": "AAOI",
+      "month": 1,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "0.2320",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "-0.1356",
+      "median_change": "-0.1431",
+      "positive_closes": 3,
+      "positive_months_perc": "0.3750"
+    },
+    {
+      "ticker": "AAOI",
+      "month": 2,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "1.0050",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "-0.0753",
+      "median_change": "-0.1406",
+      "positive_closes": 3,
+      "positive_months_perc": "0.3750"
+    },
+    {
+      "ticker": "AAOI",
+      "month": 3,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "0.0139",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "-0.2308",
+      "median_change": "-0.1492",
+      "positive_closes": 1,
+      "positive_months_perc": "0.1250"
+    },
+    {
+      "month": 4,
+      "avg_change": -0.059,
+      "median_change": -0.059,
+      "max_change": 0.412,
+      "min_change": -0.296,
+      "positive_months_perc": 0.4,
+      "years": 5
+    },
+    {
+      "month": 5,
+      "avg_change": 0.062,
+      "median_change": 0.062,
+      "max_change": 0.453,
+      "min_change": -0.308,
+      "positive_months_perc": 0.6,
+      "years": 5
+    },
+    {
+      "month": 6,
+      "avg_change": 0.103,
+      "median_change": 0.103,
+      "max_change": 1.685,
+      "min_change": -0.346,
+      "positive_months_perc": 0.8,
+      "years": 5
+    },
+    {
+      "month": 7,
+      "avg_change": 0.072,
+      "median_change": 0.072,
+      "max_change": 0.578,
+      "min_change": -0.224,
+      "positive_months_perc": 0.6,
+      "years": 5
+    },
+    {
+      "ticker": "AAOI",
+      "month": 8,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "1.0370",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "0.0316",
+      "median_change": "0.0833",
+      "positive_closes": 5,
+      "positive_months_perc": "0.6250"
+    },
+    {
+      "ticker": "AAOI",
+      "month": 9,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "0.2794",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "-0.0881",
+      "median_change": "0.0915",
+      "positive_closes": 5,
+      "positive_months_perc": "0.6250"
+    },
+    {
+      "ticker": "AAOI",
+      "month": 10,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "0.4055",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "-0.1683",
+      "median_change": "-0.1702",
+      "positive_closes": 3,
+      "positive_months_perc": "0.3750"
+    },
+    {
+      "ticker": "AAOI",
+      "month": 11,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "1.5827",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "0.1143",
+      "median_change": "0.0804",
+      "positive_closes": 5,
+      "positive_months_perc": "0.6250"
+    },
+    {
+      "ticker": "AAOI",
+      "month": 12,
+      "years": 8,
+      "sector": "Technology",
+      "max_change": "0.4647",
+      "min_change": "-1.0000",
+      "marketcap": "7498074043",
+      "avg_change": "-0.0994",
+      "median_change": "-0.1330",
+      "positive_closes": 3,
+      "positive_months_perc": "0.3750"
+    }
+  ]
+}

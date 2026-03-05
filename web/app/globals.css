@@ -1951,6 +1951,7 @@ tr {
 .seasonality-rating-pill.seasonality-neutral { color: var(--text-muted); border-color: var(--text-muted); }
 .seasonality-summary { display: flex; align-items: center; gap: 10px; }
 .seasonality-stat { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
+.seasonality-source-badge { font-family: var(--font-mono); font-size: 9px; font-weight: 700; color: var(--warning); letter-spacing: 0.08em; padding: 2px 5px; border: 1px solid var(--warning); text-transform: uppercase; line-height: 1; }
 
 /* Monthly heatmap grid: 4 columns x 3 rows */
 .seasonality-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 6px; }

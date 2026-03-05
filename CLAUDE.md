@@ -115,6 +115,26 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 | `data/watchlist.json` | Tickers under surveillance |
 | `data/ticker_cache.json` | Ticker → company name cache |
 | `data/reconciliation.json` | IB reconciliation results |
+| `data/seasonality_cache/{TICKER}.json` | Cached seasonality (UW + EquityClock Vision fallback) |
+
+---
+
+## Seasonality Fallback: UW → EquityClock Vision → Cache
+
+When UW returns incomplete seasonality data (missing months), the API route falls back to EquityClock chart image extraction via Claude Haiku Vision.
+
+**Flow** (`web/app/api/ticker/seasonality/route.ts`):
+1. Check cache: `data/seasonality_cache/{TICKER}.json` — if valid (not expired), return immediately
+2. Fetch UW API — if all 12 months have `years > 0`, cache as `source: "uw"`, return
+3. Missing months → download `https://charts.equityclock.com/seasonal_charts/{TICKER}_sheet.png`
+4. Send image to Claude Haiku Vision (`claude-haiku-4-5-20251001`) for structured extraction
+5. Merge: UW data takes priority (years > 0), Vision fills gaps
+6. Cache as `source: "uw+equityclock"` — expires 1st of next month UTC
+7. If Vision fails → return UW data as-is (partial)
+
+**Cache**: `data/seasonality_cache/{TICKER}.json` — auto-expires monthly. Delete file to force refresh.
+
+**API key**: Uses `resolveApiKey()` — checks `ANTHROPIC_API_KEY`, `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`.
 
 ---
 
