@@ -219,6 +219,20 @@ Capital at Risk:
 
 **Rule**: Never show the underlying stock price where the user expects an option or spread price. If option prices aren't available, show "---" rather than a misleading underlying price.
 
+### Data Normalization
+
+**Ticker key**: Always use `"ticker"` as the key name in JSON data files. Never use `"symbol"` — that's for IB contract objects only.
+
+| File | Key | Example |
+|------|-----|---------|
+| `watchlist.json` entries | `ticker` | `{"ticker": "AAPL", ...}` |
+| `portfolio.json` positions | `ticker` | `{"ticker": "GOOG", ...}` |
+| `trade_log.json` entries | `ticker` | `{"ticker": "AMD", ...}` |
+| IB order contracts | `symbol` | `{"symbol": "AAPL", "secType": "STK"}` |
+| Discover candidates | `ticker` | `{"ticker": "NET", ...}` |
+
+Scripts that write to data files must use `"ticker"`. Scripts that read must handle both defensively (`t.get("ticker") or t.get("symbol")`).
+
 ---
 
 ## Unusual Whales API Quick Reference

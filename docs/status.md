@@ -1,18 +1,19 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-05T09:25:00-08:00
+2026-03-05T11:10:00-08:00
 
 ## Recent Commits
+- 2026-03-05 11:10:00 -0800 — Fix discover.py KeyError on watchlist entries with 'symbol' instead of 'ticker'
+- 2026-03-05 11:05:00 -0800 — **Fix: open orders visible in ticker detail modal on ALL pages (not just /orders)**
+- 2026-03-05 09:59:00 -0800 — docs: Add Calculations correctness rules section to CLAUDE.md
+- 2026-03-05 09:53:00 -0800 — **Fix Day Chg % for options: use close value, not entry cost (TDD: 5 tests)**
 - 2026-03-05 09:22:00 -0800 — **Compute spread net mid for BAG orders from portfolio leg prices**
 - 2026-03-05 09:16:00 -0800 — Show --- for last price on spread/combo orders instead of underlying
 - 2026-03-05 08:59:00 -0800 — Fix order form BID/MID/ASK buttons to use option-level prices
 - 2026-03-05 08:40:00 -0800 — **Open orders modify/cancel in ticker detail, option-level pricing, news link icon**
-- 2026-03-05 08:01:00 -0800 — Fix RatingsTab array response handling
 - 2026-03-05 07:37:00 -0800 — **Ticker detail modal with position, order, news, and ratings tabs**
 - 2026-03-05 07:27:00 -0800 — **Historical trades table on /orders page with pagination**
-- 2026-03-05 06:23:00 -0800 — Test coverage for cancel clientId fix, journal/discover routes, negative prices
-- 2026-03-05 06:15:00 -0800 — Live journal table + discover route with auto-sync (5-min interval, startup pre-warm)
 - 2026-03-04 15:45:00 -0800 — **OI Change Analysis: Made REQUIRED in every evaluation workflow**
 - 2026-03-04 15:30:00 -0800 — Created fetch_oi_changes.py and verify_options_oi.py scripts
 - 2026-03-04 15:15:00 -0800 — Discovered UW has OI change endpoint that shows hidden institutional positioning
@@ -337,6 +338,8 @@ Click any ticker across all 6 table sections → 720px modal with:
 7. ~~Options showing $-1.00 after hours~~ **FIXED** — IB returns -1 sentinel for LAST tick when market closed; normalizeNumber() now rejects negatives, reqMarketDataType(4) requests frozen data
 8. ~~Day Chg % -206% for PLTR spread~~ **FIXED** — `getOptionDailyChg()` was dividing daily P&L by entry cost instead of yesterday's close value. Spread entry $0.52 but close $8.50 → 16x inflation. See CLAUDE.md "Calculations" section.
 9. ~~Spread orders showing underlying stock price~~ **FIXED** — BAG orders now compute net mid from portfolio legs (`resolveOrderLastPrice()`). Order form BID/MID/ASK buttons now use option-level prices via `tickerPriceData` prop.
+10. ~~Ticker detail modal not showing open orders on non-orders pages~~ **FIXED** — `useOrders()` now always reads cached orders on mount; IB auto-sync still only on /orders page.
+11. ~~discover.py crash: KeyError 'ticker' in watchlist~~ **FIXED** — `get_existing_tickers()` handles both `ticker` and `symbol` keys. Normalize all watchlist entries to `ticker`.
 
 ## Follow-ups
 - [x] Implement trade blotter service
@@ -362,6 +365,9 @@ Click any ticker across all 6 table sections → 720px modal with:
 - [x] **ib_place_order.py — JSON-in/JSON-out order placement for web API**
 - [x] **Fix Day Chg % for options/spreads (divide by close value, not entry cost)**
 - [x] **Fix spread last price (net mid from leg prices, not underlying)**
+- [x] **Ticker detail modal works identically on all pages (portfolio, orders, discover, journal, flow)**
+- [x] **useOrders() always loads cached orders on mount for cross-page ticker detail**
+- [x] **Fix discover.py watchlist KeyError (normalize ticker/symbol key)**
 - [ ] Execute MSFT LEAP call trade (pending confirmation)
 - [ ] Close undefined risk positions before Friday expiry
 - [ ] Review PLTR for profit-taking (23 DTE, +175%)
