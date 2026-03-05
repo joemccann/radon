@@ -1,13 +1,18 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-05T06:25:00-08:00
+2026-03-05T09:25:00-08:00
 
 ## Recent Commits
-- 2026-03-05 06:23:00 -0800 — **Test coverage for cancel clientId fix, journal/discover routes, negative prices**
-- 2026-03-05 06:15:00 -0800 — **Live journal table + discover route with auto-sync (5-min interval, startup pre-warm)**
-- 2026-03-05 06:01:00 -0800 — Show Convex Pi Assistant only on dashboard route
-- 2026-03-05 05:52:00 -0800 — Fix cancel order clientId mismatch (Error 10147) + reject negative prices from IB
+- 2026-03-05 09:22:00 -0800 — **Compute spread net mid for BAG orders from portfolio leg prices**
+- 2026-03-05 09:16:00 -0800 — Show --- for last price on spread/combo orders instead of underlying
+- 2026-03-05 08:59:00 -0800 — Fix order form BID/MID/ASK buttons to use option-level prices
+- 2026-03-05 08:40:00 -0800 — **Open orders modify/cancel in ticker detail, option-level pricing, news link icon**
+- 2026-03-05 08:01:00 -0800 — Fix RatingsTab array response handling
+- 2026-03-05 07:37:00 -0800 — **Ticker detail modal with position, order, news, and ratings tabs**
+- 2026-03-05 07:27:00 -0800 — **Historical trades table on /orders page with pagination**
+- 2026-03-05 06:23:00 -0800 — Test coverage for cancel clientId fix, journal/discover routes, negative prices
+- 2026-03-05 06:15:00 -0800 — Live journal table + discover route with auto-sync (5-min interval, startup pre-warm)
 - 2026-03-04 15:45:00 -0800 — **OI Change Analysis: Made REQUIRED in every evaluation workflow**
 - 2026-03-04 15:30:00 -0800 — Created fetch_oi_changes.py and verify_options_oi.py scripts
 - 2026-03-04 15:15:00 -0800 — Discovered UW has OI change endpoint that shows hidden institutional positioning
@@ -258,6 +263,16 @@ When startup shows `⚠️ IB: N new trades`, **IMMEDIATELY**:
 | `data/watchlist.json` | Tickers under surveillance |
 | `data/discover.json` | Cached discover scan results (auto-refreshed) |
 
+### Ticker Detail Modal (NEW)
+Click any ticker across all 6 table sections → 720px modal with:
+- **Price Bar**: Real-time bid/ask/mid/spread/last/volume/day-change. Option positions show option-level prices (not underlying). Spreads show net mid computed from leg prices.
+- **Position Tab**: Structure, direction, qty, entry date, avg entry, last price, entry cost, market value, unrealized P&L, expiry, target/stop. Multi-leg positions show individual legs.
+- **Order Tab**: If open orders exist → inline modify/cancel (reuses `useOrderActions`). Below that, new order form with BUY/SELL, qty, limit price with BID/MID/ASK quick-set (option-level), TIF, 2-step confirm. Combo positions show "close via Orders page" message.
+- **News Tab**: UW headlines with date, source, MAJOR badge, external link icon.
+- **Ratings Tab**: Analyst recommendation, ratings bar, price targets, recent changes (via `fetch_analyst_ratings.py`).
+- **Context**: `TickerDetailContext` provides `openTicker()`/`closeTicker()` app-wide. Prices, portfolio, orders synced via refs (no re-renders).
+- **API Routes**: `/api/ticker/news` (UW proxy), `/api/ticker/ratings` (Python script), `/api/orders/place` (IB order placement via `ib_place_order.py`).
+
 ### Key Scripts
 | Script | Purpose |
 |--------|---------|
@@ -268,6 +283,7 @@ When startup shows `⚠️ IB: N new trades`, **IMMEDIATELY**:
 | `ib_reconcile.py` | Startup reconciliation (async) |
 | `ib_sync.py` | Manual portfolio sync |
 | `ib_order.py` | Place single-leg option orders |
+| `ib_place_order.py` | **JSON-in/JSON-out order placement for web API** |
 | `ib_fill_monitor.py` | Monitor orders for fills |
 | `exit_order_service.py` | Place pending exit orders |
 | `blotter.py` | Today's fills and P&L |
@@ -320,6 +336,10 @@ When startup shows `⚠️ IB: N new trades`, **IMMEDIATELY**:
 - [x] **Journal route renders trade log table (date, ticker, structure, P&L, gates, edge)**
 - [x] **Discover route with auto-sync (5-min interval) + server startup pre-warm**
 - [x] **ChatPanel removed from non-dashboard routes**
+- [x] **Ticker detail modal — position, order (with modify/cancel), news, ratings**
+- [x] **Option-level pricing in price bar and order form BID/MID/ASK**
+- [x] **Spread net mid computation for BAG orders (long leg mid - short leg mid)**
+- [x] **ib_place_order.py — JSON-in/JSON-out order placement for web API**
 - [ ] Execute MSFT LEAP call trade (pending confirmation)
 - [ ] Close undefined risk positions before Friday expiry
 - [ ] Review PLTR for profit-taking (23 DTE, +175%)

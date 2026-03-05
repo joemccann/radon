@@ -101,6 +101,7 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 | `scripts/leap_scanner_uw.py` | LEAP scanner (UW + Yahoo, no IB) |
 | `scripts/exit_order_service.py` | Place pending exit orders when IB accepts |
 | `scripts/ib_order_manage.py` | Cancel or modify open IB orders |
+| `scripts/ib_place_order.py` | JSON-in/JSON-out order placement for web API (client ID 26) |
 | `scripts/fetch_x_watchlist.py` | X account tweet sentiment |
 
 ---
