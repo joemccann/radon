@@ -160,7 +160,7 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
         <ConnectionBanner ibConnected={ibConnected} wsConnected={wsConnected} />
 
         <div className="content">
-          <ChatPanel activeSection={activeSection} />
+          {activeSection === "dashboard" ? <ChatPanel activeSection={activeSection} /> : null}
 
           {activeSection !== "dashboard" ? <MetricCards portfolio={portfolio} /> : null}
 
