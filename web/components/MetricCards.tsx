@@ -28,13 +28,14 @@ function computePnL(portfolio: PortfolioData) {
 
 export default function MetricCards({ portfolio }: MetricCardsProps) {
   if (!portfolio) {
+    const placeholders = ["Net Liquidation", "Positions", "Deployed", "Open P&L"];
     return (
       <div className="metrics-grid">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="metric-card">
-            <div className="metric-label">—</div>
-            <div className="metric-value">...</div>
-            <div className="metric-change neutral">LOADING</div>
+        {placeholders.map((label, i) => (
+          <div key={i} className="metric-card metric-card-loading">
+            <div className="metric-label">{label}</div>
+            <div className="metric-value">$0,000</div>
+            <div className="metric-change neutral">AWAITING SYNC</div>
           </div>
         ))}
       </div>

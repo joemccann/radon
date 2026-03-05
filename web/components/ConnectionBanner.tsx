@@ -51,7 +51,7 @@ export default function ConnectionBanner({ ibConnected, wsConnected }: Connectio
       : "IB Gateway disconnected — prices and portfolio data are stale";
 
   return (
-    <div className={`connection-banner ${reconnected ? "connected" : ""}`}>
+    <div className={`connection-banner ${reconnected ? "connected" : ""}`} role="alert">
       {reconnected ? <Wifi size={14} /> : <WifiOff size={14} />}
       <span>{message}</span>
     </div>

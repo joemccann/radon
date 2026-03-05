@@ -226,3 +226,28 @@ IB error `10358` = Reuters Fundamentals subscription inactive → auto-fallback 
 - [ ] Exit order service auto-runs — checks `PENDING_MANUAL` positions
 - [ ] X account scan: if last scan >12h ago, run `x-scan` for flagged accounts
 - [ ] Check market hours before any analysis
+
+---
+
+## Design Context
+
+### Users
+Single professional trader operating a sub-$1M options account. Uses this dashboard during market hours for real-time portfolio monitoring, dark pool flow analysis, order management, and trade evaluation. Context is high-stakes, time-sensitive decision-making where clarity = edge.
+
+### Brand Personality
+**Surgical. Precise. Unadorned.**
+The interface is a professional instrument, not a product. It communicates through data density and typographic hierarchy, never through decoration. Every element exists to reduce decision latency.
+
+### Aesthetic Direction
+- **Visual tone**: Terminal-grade. Monospace-heavy, uppercase micro-labels, zero border-radius, near-black backgrounds. The aesthetic of institutional trading infrastructure, not consumer fintech.
+- **Theme**: Dark-first (#050505 base), light mode available. Grayscale palette with semantic color only: green (#22c55e) for gains/accumulation, red (#ef4444) for losses/distribution, amber (#f59e0b) for warnings/pending, blue (#3b82f6) for informational/modify actions.
+- **Typography**: Satoshi (sans, body) + JetBrains Mono (mono, labels/data/tables). 13px base, 10-11px for labels, all-caps with letter-spacing for section headers and metadata.
+- **Spacing**: Dense but not cramped. 16px section padding, 12px table cell padding, 8px gaps. Content-to-chrome ratio heavily favors content.
+- **Anti-references**: No Robinhood/retail aesthetics — no gamification, no confetti, no friendly rounded corners, no illustrations, no "Welcome back" banners. This is not for beginners.
+
+### Design Principles
+1. **Signal over decoration** — Every pixel must convey information. If it doesn't reduce ambiguity or speed up a decision, remove it.
+2. **Typographic hierarchy is the only ornament** — Size, weight, case, and spacing do all the work. No icons-as-decoration, no color-as-style.
+3. **Square geometry** — Zero border-radius everywhere (buttons, inputs, pills, scrollbars, status dots). Sharp edges signal precision.
+4. **Semantic color only** — Color is reserved for meaning: green/red for direction, amber for caution, blue for action. Never decorative.
+5. **Monospace as authority** — Data, labels, and anything the trader must trust uses JetBrains Mono. Satoshi is for prose only.

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useId, useRef } from "react";
 import { createPortal } from "react-dom";
 
 type ModalProps = {
@@ -12,6 +12,7 @@ type ModalProps = {
 };
 
 export default function Modal({ open, onClose, title, children, className }: ModalProps) {
+  const titleId = useId();
   const contentRef = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -44,9 +45,9 @@ export default function Modal({ open, onClose, title, children, className }: Mod
 
   return createPortal(
     <div className={`modal-backdrop ${className ?? ""}`} onClick={handleBackdropClick}>
-      <div className="modal-content" ref={contentRef} tabIndex={-1}>
+      <div className="modal-content" ref={contentRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <div className="modal-header">
-          <span className="modal-title">{title}</span>
+          <span className="modal-title" id={titleId}>{title}</span>
           <button className="modal-close" onClick={onClose} aria-label="Close">
             &times;
           </button>

@@ -7,9 +7,13 @@ import { navItems } from "@/lib/data";
 type SidebarProps = {
   activeSection: WorkspaceSection;
   actionTone: string;
+  ibConnected?: boolean;
+  lastSync?: string | null;
 };
 
-export default function Sidebar({ activeSection, actionTone }: SidebarProps) {
+export default function Sidebar({ activeSection, actionTone, ibConnected = true, lastSync }: SidebarProps) {
+  const syncTime = lastSync ? new Date(lastSync).toLocaleTimeString() : "—";
+
   return (
     <aside className="sidebar">
       <div className="sidebar-header">
@@ -39,13 +43,13 @@ export default function Sidebar({ activeSection, actionTone }: SidebarProps) {
         <div className="status-row">
           <span>IB Gateway</span>
           <span className="status-dot-wrap">
-            <span className="status-dot" />
-            CONNECTED
+            <span className={`status-dot ${ibConnected ? "status-dot-live" : "status-dot-dead"}`} />
+            {ibConnected ? "CONNECTED" : "OFFLINE"}
           </span>
         </div>
         <div className="status-row">
           <span>Last Sync</span>
-          <span>18:04:20</span>
+          <span>{syncTime}</span>
         </div>
         <div className="status-row">
           <span>Port</span>

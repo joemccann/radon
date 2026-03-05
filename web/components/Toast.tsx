@@ -16,7 +16,7 @@ export default function ToastContainer({ toasts, onDismiss }: ToastContainerProp
       {toasts.map((toast) => (
         <div key={toast.id} className={`toast toast-${toast.type}`}>
           <span className="toast-message">{toast.message}</span>
-          <button className="toast-close" onClick={() => onDismiss(toast.id)}>
+          <button className="toast-close" onClick={() => onDismiss(toast.id)} aria-label="Dismiss">
             <X size={12} />
           </button>
         </div>

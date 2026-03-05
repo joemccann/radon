@@ -38,6 +38,7 @@ export default function Header({ activeLabel, onToggleTheme, theme, children }: 
           type="text"
           className="search-input"
           placeholder="CMD+K to search..."
+          aria-label="Search"
         />
         <button
           suppressHydrationWarning

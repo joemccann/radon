@@ -122,6 +122,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
               onChange={(event) => setQuery(event.target.value)}
               placeholder="Ask Pi for flow analysis, risk checks, action items..."
               className="chat-textarea"
+              aria-label="Message Pi assistant"
               rows={6}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
@@ -136,12 +137,14 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
               className="chat-send"
               type="submit"
               disabled={!query.trim()}
+              title="Send (Enter)"
+              aria-label="Send message"
             >
               <Send size={14} />
             </button>
           </form>
 
-          <div className="chat-pills" aria-live="polite">
+          <div className="chat-pills">
             {sectionPrompts.map((prompt) => (
               <button
                 type="button"
@@ -157,7 +160,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
           {lastError ? <div className="chat-error">{lastError}</div> : null}
 
           {messages.length ? (
-            <div ref={messagesRef} className="chat-messages">
+            <div ref={messagesRef} className="chat-messages" aria-live="polite">
               {messages.map((message) => (
                 <div
                   key={message.id}
