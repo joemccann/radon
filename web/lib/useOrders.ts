@@ -47,10 +47,9 @@ export function useOrders(active: boolean): UseOrdersReturn {
     void triggerSync();
   }, [triggerSync]);
 
-  // Initial fetch — read cached file, auto-sync if empty
+  // Always read cached orders on mount (needed by ticker detail modal on any page).
+  // Only auto-sync from IB when active (orders page).
   useEffect(() => {
-    if (!active) return;
-
     const init = async () => {
       try {
         const res = await fetch("/api/orders");
@@ -61,8 +60,8 @@ export function useOrders(active: boolean): UseOrdersReturn {
         setError(null);
         setLoading(false);
 
-        // Always sync fresh from IB on first load
-        if (!didInitialSync.current) {
+        // Sync fresh from IB on first load of orders page
+        if (active && !didInitialSync.current) {
           didInitialSync.current = true;
           void triggerSync();
         }
@@ -73,7 +72,16 @@ export function useOrders(active: boolean): UseOrdersReturn {
     };
 
     void init();
-  }, [active, triggerSync]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // When orders page becomes active, trigger IB sync if we haven't yet
+  useEffect(() => {
+    if (active && !didInitialSync.current && data != null) {
+      didInitialSync.current = true;
+      void triggerSync();
+    }
+  }, [active, data, triggerSync]);
 
   // Auto-sync interval (only when active)
   useEffect(() => {
