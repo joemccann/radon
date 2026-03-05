@@ -226,7 +226,7 @@ python3 scripts/free_trade_analyzer.py --json
 
 | `blotter-history` | Historical trades via Flex Query (requires setup) |
 | `leap-scan [TICKERS]` | Scan for LEAP IV mispricing opportunities |
-| `garch-convergence [TICKERS]` | Cross-asset GARCH vol divergence scan |
+| `garch-convergence [TICKERS]` | **Run `python3 scripts/garch_convergence.py`** — cross-asset GARCH vol divergence scan |
 | `seasonal [TICKERS]` | Seasonality assessment for one or more tickers |
 | `x-scan [@ACCOUNT]` | Fetch tweets via xAI API (recommended, slower) |
 | `x-scan-browser [@ACCOUNT]` | Fetch tweets via browser scraping (faster, lower quality) |
@@ -822,59 +822,41 @@ Capital at Risk:
 
 See `.pi/skills/html-report/SKILL.md` for full template documentation.
 
-## GARCH Convergence Reports ⭐ REQUIRED
+## ⚠️ GARCH Convergence → ALWAYS Call `garch_convergence.py` (MANDATORY)
 
-**When generating GARCH Convergence scan reports, ALWAYS use the standard HTML template.**
-
+**Any request for a GARCH convergence scan — regardless of how the user phrases it — MUST route to:**
 ```bash
-# Template location
-.pi/skills/html-report/template.html
-
-# Output location
-reports/garch-convergence-{preset}-{DATE}.html
+python3 scripts/garch_convergence.py --preset [PRESET]
 ```
 
-**Generation pattern:**
-```python
-# 1. Read template
-with open('.pi/skills/html-report/template.html', 'r') as f:
-    template = f.read()
+This is non-negotiable. The script fetches ALL ticker data in parallel (8 workers), computes divergence metrics, and generates the HTML report automatically.
 
-# 2. Build body using template CSS classes
-body = """<header class="header">...</header>
-<div class="metrics">...</div>
-<div class="panel">...</div>"""
+**NEVER manually fetch IV/HV data ticker-by-ticker or build reports inline.** The script does everything in ~3 seconds for 23 tickers.
 
-# 3. Insert into template
-html = template.replace('{{TITLE}}', f'GARCH Convergence — {preset} | {date}')
-html = html.replace('{{BODY}}', body)
+**Usage:**
+```bash
+# Built-in presets
+python3 scripts/garch_convergence.py --preset semis
+python3 scripts/garch_convergence.py --preset mega-tech
+python3 scripts/garch_convergence.py --preset energy
+python3 scripts/garch_convergence.py --preset china-etf
+python3 scripts/garch_convergence.py --preset all          # All 4 built-in presets
 
-# 4. Write to reports/
-with open(f'reports/garch-convergence-{preset}-{date}.html', 'w') as f:
-    f.write(html)
+# File presets (data/presets/)
+python3 scripts/garch_convergence.py --preset sp500-semiconductors
+python3 scripts/garch_convergence.py --preset ndx100-biotech
+
+# Ad-hoc tickers (paired consecutively)
+python3 scripts/garch_convergence.py NVDA AMD GOOGL META
+
+# Options
+python3 scripts/garch_convergence.py --preset all --json   # JSON output
+python3 scripts/garch_convergence.py --preset all --no-open # Don't open browser
 ```
 
-**Required sections:**
-1. Header with preset name, ticker count, timestamp, theme toggle button
-2. Summary metrics (4): Tickers scanned, With LEAPs, Laggers found, Actionable pairs
-3. IV/HV Analysis table with all tickers
-4. Pair Analysis panels for potential convergence pairs
-5. Watchlist with laggers and short vega candidates
-6. Footer with data sources
+**Output:** `reports/garch-convergence-{preset}-{date}.html` (auto-opens in browser)
 
-**Key CSS classes:**
-| Element | Class |
-|---------|-------|
-| Highlighted row (lagger) | `tr.highlight` |
-| Pass indicator | `.text-positive` |
-| Fail indicator | `.text-negative` |
-| Warning | `.text-warning` |
-| Status badge | `.pill`, `.pill-positive`, `.pill-warning`, `.pill-negative` |
-| Alert box | `.callout`, `.callout.positive`, `.callout.warning` |
-
-**Reference:** `reports/garch-convergence-row-2026-03-04.html`
-
-See `docs/strategy-garch-convergence.md` for full report generation spec.
+**Strategy spec:** `docs/strategy-garch-convergence.md`
 
 ## Scripts
 
@@ -899,6 +881,7 @@ See `docs/strategy-garch-convergence.md` for full report generation spec.
 | `scripts/test_ib_realtime.py` | Tests for IB real-time connectivity |
 | `scripts/leap_iv_scanner.py` | LEAP IV mispricing scanner (IB connection required) |
 | `scripts/leap_scanner_uw.py` | LEAP IV scanner using UW (Yahoo as last resort for HV data) |
+| `scripts/garch_convergence.py` | **⭐ GARCH Convergence scanner — parallel fetch, divergence analysis, HTML report** |
 | `scripts/utils/presets.py` | **Preset loader** — `load_preset()`, `list_presets()` for 150 ticker presets |
 | `scripts/fetch_x_watchlist.py` | Fetch X account tweets and extract ticker sentiment |
 | `scripts/monitor_daemon/run.py` | **Extensible monitoring daemon** (replaces exit_order_service) |
