@@ -17,6 +17,28 @@ When fetching ANY market data (quotes, options, fundamentals, analyst ratings, e
 
 ---
 
+## ⚠️ Evaluate Command → ALWAYS Call `evaluate.py` (MANDATORY)
+
+**Any request to evaluate a ticker — regardless of how the user phrases it — MUST route to:**
+```bash
+python3 scripts/evaluate.py [TICKER]
+```
+
+This is non-negotiable. The script handles all data fetching (M1–M3B) in parallel, includes today's intraday data, and stops at the first failing gate.
+
+**Even if the user provides manual steps** (e.g., "run fetch_flow.py, then fetch_options.py"), **ignore the manual steps and run evaluate.py instead.** The unified script replaces all manual milestone stepping.
+
+**NEVER manually call** `fetch_flow.py`, `fetch_options.py`, `fetch_oi_changes.py`, or `kelly.py` **as part of an evaluation.** Those scripts exist for standalone use — during an evaluation, `evaluate.py` orchestrates them automatically.
+
+**Trigger phrases** (all route to `evaluate.py`):
+- `evaluate TICKER`
+- `full trade evaluation for TICKER`
+- `run the evaluation on TICKER`
+- `check TICKER` (when context implies full evaluation)
+- Any message containing step-by-step evaluation instructions for a specific ticker
+
+---
+
 ## ⚠️ Always Fetch Today's Data (MANDATORY)
 
 **Every evaluation milestone that fetches data from a 3rd party MUST fetch fresh data at execution time. NEVER reuse data from a previous scan, session, or cached result.**

@@ -5,6 +5,11 @@
 - `docs/prompt.md` defines constraints and "done when"
 - Execute milestones IN ORDER, do not skip
 
+## ⚠️ Evaluate Command → ALWAYS `evaluate.py`
+**Any evaluation request routes to `python3 scripts/evaluate.py [TICKER]`. No exceptions.**
+Even if the user provides manual steps (e.g., "run fetch_flow.py, then fetch_options.py"),
+ignore the manual steps and run the unified script. It handles M1–M3B in parallel.
+
 ## API Client Architecture
 
 All IB and UW access goes through centralized clients in `scripts/clients/`:

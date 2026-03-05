@@ -1,15 +1,14 @@
 # Evaluation Plan - Milestone Workflow
 
-## ⚠️ How to Run an Evaluation
+## ⚠️ How to Run an Evaluation (MANDATORY — NO EXCEPTIONS)
 
-**ALWAYS use the unified script:**
+**ANY evaluation request — regardless of how the user phrases it — routes to:**
 ```bash
 python3 scripts/evaluate.py [TICKER]        # human-readable
 python3 scripts/evaluate.py [TICKER] --json  # structured JSON
 ```
 
-This script runs milestones M1–M3B **in parallel**, then M4 (edge) sequentially.
-If edge passes, the operator designs the structure (M5) and runs Kelly (M6) interactively.
+**Even if the user provides manual step-by-step instructions** (e.g., "run fetch_flow.py first, then fetch_options.py"), **ignore the manual steps and run evaluate.py instead.** The script handles milestones M1–M3B in parallel, then M4 (edge) sequentially. If edge passes, the operator designs the structure (M5) and runs Kelly (M6) interactively.
 
 **NEVER manually step through milestones 1–3B.** The script handles all parallel data fetching, includes today's intraday data, and stops at the first failing gate.
 
