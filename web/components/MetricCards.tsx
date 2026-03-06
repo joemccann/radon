@@ -53,6 +53,16 @@ function positionDelta(pos: PortfolioPosition, prices: Record<string, PriceData>
       totalDelta += sign * leg.contracts;
       continue;
     }
+    const key = legPriceKey(pos.ticker, pos.expiry, leg);
+    const lp = key ? prices[key] : null;
+
+    // Prefer IB real delta
+    if (lp?.delta != null) {
+      totalDelta += sign * lp.delta * leg.contracts * 100;
+      continue;
+    }
+
+    // Fallback: approximate delta
     const spot = prices[pos.ticker]?.last;
     if (!spot || spot <= 0 || !leg.strike) continue;
     const dte = daysToExpiry(pos.expiry);
@@ -65,7 +75,7 @@ function positionDelta(pos: PortfolioPosition, prices: Record<string, PriceData>
 type ExposureData = {
   netLong: number;
   netShort: number;
-  totalDelta: number;
+  dollarDelta: number;
   netExposurePct: number;
 };
 
@@ -75,11 +85,18 @@ function computeExposure(
 ): ExposureData {
   let netLong = 0;
   let netShort = 0;
-  let totalDelta = 0;
+  let dollarDelta = 0;
 
   for (const pos of portfolio.positions) {
     const delta = positionDelta(pos, prices);
-    totalDelta += delta;
+    const spot = prices[pos.ticker]?.last;
+
+    // Dollar delta: delta × spot for each position
+    // For stocks, delta IS share count, so dollar delta = delta × spot
+    // For options, positionDelta returns equivalent shares, so dollar delta = delta × spot
+    if (spot && spot > 0) {
+      dollarDelta += delta * spot;
+    }
 
     // Classify by delta sign for net long/short
     let mv = 0;
@@ -88,11 +105,9 @@ function computeExposure(
       if (p?.last && p.last > 0) mv = Math.abs(p.last * pos.contracts);
       else if (pos.market_value != null) mv = Math.abs(pos.market_value);
     } else {
-      // Use market value from portfolio (IB sync)
       if (pos.market_value != null) {
         mv = Math.abs(pos.market_value);
       } else {
-        // Fallback: sum leg market values
         const legMv = pos.legs.reduce((s, l) => s + Math.abs(l.market_value ?? 0), 0);
         if (legMv > 0) mv = legMv;
       }
@@ -106,7 +121,7 @@ function computeExposure(
     ? ((netLong - netShort) / portfolio.bankroll) * 100
     : 0;
 
-  return { netLong, netShort, totalDelta, netExposurePct };
+  return { netLong, netShort, dollarDelta, netExposurePct };
 }
 
 function resolveMarketValue(pos: PortfolioData["positions"][number]): number | null {
@@ -233,10 +248,10 @@ function ExposureRow({ exposure }: { exposure: ExposureData | null }) {
           <MetricCard card={{ label: "Net Long", value: fmt(exposure.netLong), change: "LONG BIASED", tone: "positive" }} />
           <MetricCard card={{ label: "Net Short", value: fmt(exposure.netShort), change: "SHORT BIASED", tone: "negative" }} />
           <MetricCard card={{
-            label: "Total Delta",
-            value: `${exposure.totalDelta >= 0 ? "+" : ""}${exposure.totalDelta.toFixed(1)}`,
-            change: "EQUIVALENT SHARES",
-            tone: tone(exposure.totalDelta),
+            label: "Dollar Delta",
+            value: fmtSigned(exposure.dollarDelta),
+            change: "NOTIONAL EXPOSURE",
+            tone: tone(exposure.dollarDelta),
           }} />
           <MetricCard card={{
             label: "Net Exposure",
@@ -247,7 +262,7 @@ function ExposureRow({ exposure }: { exposure: ExposureData | null }) {
         </div>
       ) : (
         <div className="metrics-grid">
-          {["Net Long", "Net Short", "Total Delta", "Net Exposure"].map((label) => (
+          {["Net Long", "Net Short", "Dollar Delta", "Net Exposure"].map((label) => (
             <div key={label} className="metric-card metric-card-loading">
               <div className="metric-label">{label}</div>
               <div className="metric-value">---</div>

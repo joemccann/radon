@@ -1,16 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { OpenOrder } from "@/lib/types";
+import type { OpenOrder, PortfolioData } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import Modal from "./Modal";
-import { fmtPrice } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 
 type ModifyOrderModalProps = {
   order: OpenOrder | null;
   loading: boolean;
   prices?: Record<string, PriceData>;
+  portfolio?: PortfolioData | null;
   onConfirm: (newPrice: number) => void;
   onClose: () => void;
 };
@@ -18,6 +19,7 @@ type ModifyOrderModalProps = {
 function resolveOrderPriceData(
   order: OpenOrder,
   prices?: Record<string, PriceData>,
+  portfolio?: PortfolioData | null,
 ): PriceData | null {
   if (!prices) return null;
   const c = order.contract;
@@ -41,11 +43,58 @@ function resolveOrderPriceData(
     }
   }
 
-  // BAG or unresolvable
+  // BAG: compute net bid/ask/mid from portfolio legs
+  if (c.secType === "BAG" && portfolio) {
+    const pos = portfolio.positions.find(
+      (p) => p.ticker === c.symbol && p.legs.length > 1,
+    );
+    if (!pos) return null;
+
+    let netBid = 0;
+    let netAsk = 0;
+    let netLast = 0;
+    for (const leg of pos.legs) {
+      const key = legPriceKey(pos.ticker, pos.expiry, leg);
+      if (!key) return null;
+      const lp = prices[key];
+      if (!lp || lp.bid == null || lp.ask == null) return null;
+      const sign = leg.direction === "LONG" ? 1 : -1;
+      netBid += sign * lp.bid;
+      netAsk += sign * lp.ask;
+      netLast += sign * (lp.last ?? (lp.bid + lp.ask) / 2);
+    }
+
+    // For debit spreads net natural bid < ask; ensure correct ordering
+    const lo = Math.min(netBid, netAsk);
+    const hi = Math.max(netBid, netAsk);
+
+    return {
+      symbol: c.symbol,
+      last: Math.round(netLast * 100) / 100,
+      lastIsCalculated: true,
+      bid: Math.round(lo * 100) / 100,
+      ask: Math.round(hi * 100) / 100,
+      bidSize: null,
+      askSize: null,
+      volume: null,
+      high: null,
+      low: null,
+      open: null,
+      close: null,
+      delta: null,
+      gamma: null,
+      theta: null,
+      vega: null,
+      impliedVol: null,
+      undPrice: null,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
   return null;
 }
 
-export default function ModifyOrderModal({ order, loading, prices, onConfirm, onClose }: ModifyOrderModalProps) {
+export default function ModifyOrderModal({ order, loading, prices, portfolio, onConfirm, onClose }: ModifyOrderModalProps) {
   const [newPrice, setNewPrice] = useState("");
 
   // Reset price only when a different order is selected (by permId), not on every re-render
@@ -58,8 +107,8 @@ export default function ModifyOrderModal({ order, loading, prices, onConfirm, on
   }, [orderPermId]);
 
   const priceData = useMemo(
-    () => (order ? resolveOrderPriceData(order, prices) : null),
-    [order, prices],
+    () => (order ? resolveOrderPriceData(order, prices, portfolio) : null),
+    [order, prices, portfolio],
   );
 
   if (!order) return null;
@@ -71,7 +120,6 @@ export default function ModifyOrderModal({ order, loading, prices, onConfirm, on
   const canSubmit = priceChanged && !loading;
 
   const delta = isValid ? parsedNew - currentPrice : 0;
-  const isBag = order.contract.secType === "BAG";
   const hasPriceData = priceData?.bid != null && priceData?.ask != null;
 
   const bid = priceData?.bid ?? null;
@@ -93,11 +141,7 @@ export default function ModifyOrderModal({ order, loading, prices, onConfirm, on
         </div>
 
         {/* Market data section */}
-        {isBag ? (
-          <div className="modify-market-warning">
-            Market data unavailable for combo orders
-          </div>
-        ) : hasPriceData ? (
+        {hasPriceData ? (
           <div className="modify-market-data">
             <div className="modify-market-row">
               <span className="modify-market-label">BID</span>

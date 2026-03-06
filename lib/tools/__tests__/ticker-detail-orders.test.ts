@@ -179,6 +179,7 @@ function makePriceData(overrides: Partial<PriceData> = {}): PriceData {
     symbol: "TEST", last: null, lastIsCalculated: false,
     bid: null, ask: null, bidSize: null, askSize: null,
     volume: null, high: null, low: null, open: null, close: null,
+    delta: null, gamma: null, theta: null, vega: null, impliedVol: null, undPrice: null,
     timestamp: new Date().toISOString(),
     ...overrides,
   };

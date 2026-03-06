@@ -111,6 +111,12 @@ function createPriceData(symbol) {
     low: null,
     open: null,
     close: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: null,
     timestamp: nowIso(),
   };
 }
@@ -689,6 +695,35 @@ ib.on("tickSize", (tickerId, sizeType, size) => {
 
 ib.on("tickSnapshotEnd", (tickerId) => {
   onTickSnapshotEnd(tickerId);
+});
+
+ib.on("tickOptionComputation", (tickerId, tickType, impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice) => {
+  const symbol = requestIdToSymbol.get(tickerId);
+  const liveState = symbol ? symbolStates.get(symbol) : null;
+  if (!liveState) return;
+
+  // Accept MODEL_OPTION (13), LAST_OPTION (12), and delayed variants (83, 82)
+  // Prefer MODEL_OPTION over LAST_OPTION — don't downgrade
+  const validTickTypes = [13, 83, 12, 82];
+  if (!validTickTypes.includes(tickType)) return;
+
+  const pd = liveState.data;
+  const isModel = tickType === 13 || tickType === 83;
+  if (!isModel && pd.delta !== null) return;
+
+  // IB uses -2 for "not computed" and -1 for "not available" — treat both as null
+  const valid = (v) => v !== undefined && v !== -2 && v !== -1 && Number.isFinite(v);
+
+  if (valid(delta)) pd.delta = delta;
+  if (valid(gamma)) pd.gamma = gamma;
+  if (valid(theta)) pd.theta = theta;
+  if (valid(vega)) pd.vega = vega;
+  if (valid(impliedVol)) pd.impliedVol = impliedVol;
+  if (valid(undPrice)) pd.undPrice = undPrice;
+
+  pd.timestamp = nowIso();
+  verbose(`greeks ${symbol} tickType=${tickType} delta=${delta} iv=${impliedVol}`);
+  hydrateAndBroadcast(symbol);
 });
 
 wss.on("connection", (client) => {

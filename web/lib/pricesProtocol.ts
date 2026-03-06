@@ -11,6 +11,12 @@ export type PriceData = {
   low: number | null;
   open: number | null;
   close: number | null;
+  delta: number | null;
+  gamma: number | null;
+  theta: number | null;
+  vega: number | null;
+  impliedVol: number | null;
+  undPrice: number | null;
   timestamp: string;
 };
 
