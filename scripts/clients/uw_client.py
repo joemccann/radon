@@ -378,6 +378,10 @@ class UWClient:
         """GET /api/stock/{ticker}/info - Company info, sector, market cap."""
         return self._get(f"stock/{ticker.upper()}/info")
 
+    def get_stock_state(self, ticker: str) -> dict:
+        """GET /api/stock/{ticker}/stock-state - Last stock state (OHLCV)."""
+        return self._get(f"stock/{ticker.upper()}/stock-state")
+
     def get_options_volume(self, ticker: str) -> dict:
         """GET /api/stock/{ticker}/options-volume - Options volume & premium summary."""
         return self._get(f"stock/{ticker.upper()}/options-volume")

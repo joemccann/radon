@@ -1968,6 +1968,21 @@ tr.leg-row td {
 .ratings-targets-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
 .ratings-changes { display: flex; flex-direction: column; gap: 8px; }
 
+/* Company tab */
+.company-tab { display: flex; flex-direction: column; gap: 16px; }
+.company-about { display: flex; flex-direction: column; gap: 8px; }
+.company-about-header { display: flex; align-items: baseline; gap: 10px; }
+.company-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+.company-name { font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--text-primary); }
+.company-description { position: relative; }
+.company-description p { font-family: var(--font-sans); font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.company-description.expanded p { display: block; -webkit-line-clamp: unset; }
+.company-show-more { background: none; border: none; padding: 0; margin-top: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; }
+.company-show-more:hover { color: var(--text-primary); }
+.company-profile-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-top: 4px; }
+.company-stats { display: flex; flex-direction: column; gap: 8px; }
+.company-stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+
 /* ── Modify dialog pending row ── */
 .row-pending-modify {
   opacity: 0.6;

@@ -12,8 +12,9 @@ import OrderTab from "./ticker-detail/OrderTab";
 import NewsTab from "./ticker-detail/NewsTab";
 import RatingsTab from "./ticker-detail/RatingsTab";
 import SeasonalityTab from "./ticker-detail/SeasonalityTab";
+import CompanyTab from "./ticker-detail/CompanyTab";
 
-type TabId = "position" | "order" | "news" | "ratings" | "seasonality";
+type TabId = "company" | "position" | "order" | "news" | "ratings" | "seasonality";
 
 function PriceBar({ priceData, label }: { priceData: PriceData | null; label?: string }) {
   if (!priceData) {
@@ -142,12 +143,13 @@ export default function TickerDetailModal() {
     setActiveTab(null);
   }, [activeTicker]);
 
-  // Default tab: position if position exists, else order
-  const resolvedTab = activeTab ?? (position ? "position" : "order");
+  // Default tab: always company
+  const resolvedTab = activeTab ?? "company";
 
   if (!activeTicker) return null;
 
   const tabs: { id: TabId; label: string; hidden?: boolean }[] = [
+    { id: "company", label: "Company" },
     { id: "position", label: "Position", hidden: !position },
     { id: "order", label: tickerOrders.length > 0 ? `Orders (${tickerOrders.length})` : "Order" },
     { id: "news", label: "News" },
@@ -187,6 +189,9 @@ export default function TickerDetailModal() {
 
         {/* Tab content */}
         <div className="ticker-tab-content">
+          {resolvedTab === "company" && (
+            <CompanyTab ticker={activeTicker} active={resolvedTab === "company"} />
+          )}
           {resolvedTab === "position" && position && (
             <PositionTab position={position} prices={prices} />
           )}
