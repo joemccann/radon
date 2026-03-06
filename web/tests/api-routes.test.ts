@@ -305,6 +305,64 @@ describe("POST /api/orders/place", () => {
     const res = await POST(req);
     expect(res.status).toBe(400);
   });
+
+  it("returns 400 for combo without legs", async () => {
+    const req = makeRequest("http://localhost/api/orders/place", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "combo",
+        symbol: "PLTR",
+        action: "SELL",
+        quantity: 50,
+        limitPrice: 8.50,
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("legs");
+  });
+
+  it("returns 400 for combo with only 1 leg", async () => {
+    const req = makeRequest("http://localhost/api/orders/place", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "combo",
+        symbol: "PLTR",
+        action: "SELL",
+        quantity: 50,
+        limitPrice: 8.50,
+        legs: [
+          { expiry: "20260327", strike: 145, right: "C", action: "SELL", ratio: 1 },
+        ],
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("legs");
+  });
+
+  it("returns 400 for combo with empty legs array", async () => {
+    const req = makeRequest("http://localhost/api/orders/place", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "combo",
+        symbol: "PLTR",
+        action: "SELL",
+        quantity: 50,
+        limitPrice: 8.50,
+        legs: [],
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toContain("legs");
+  });
 });
 
 // =============================================================================

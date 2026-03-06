@@ -6,7 +6,7 @@ import type { OpenOrder, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions } from "@/lib/OrderActionsContext";
-import { fmtPrice } from "@/components/WorkspaceSections";
+import { fmtPrice, legPriceKey } from "@/components/WorkspaceSections";
 
 type OrderTabProps = {
   ticker: string;
@@ -346,20 +346,247 @@ function NewOrderForm({
   );
 }
 
+/* ─── Combo order form for multi-leg positions ─── */
+
+function ComboOrderForm({
+  ticker,
+  position,
+  prices,
+  onOrderPlaced,
+}: {
+  ticker: string;
+  position: PortfolioPosition;
+  prices: Record<string, PriceData>;
+  onOrderPlaced?: () => void;
+}) {
+  const defaultAction: OrderAction = "SELL";
+  const [action, setAction] = useState<OrderAction>(defaultAction);
+  const [quantity, setQuantity] = useState(() => String(position.contracts));
+  const [limitPrice, setLimitPrice] = useState("");
+  const [tif, setTif] = useState<"DAY" | "GTC">("GTC");
+  const [confirmStep, setConfirmStep] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+
+  // Derive leg actions based on the combo action
+  // SELL (closing): LONG leg → SELL, SHORT leg → BUY
+  // BUY (opening): LONG leg → BUY, SHORT leg → SELL
+  const legsWithActions = useMemo(() => {
+    return position.legs.map((leg) => {
+      let legAction: "BUY" | "SELL";
+      if (action === "SELL") {
+        legAction = leg.direction === "LONG" ? "SELL" : "BUY";
+      } else {
+        legAction = leg.direction === "LONG" ? "BUY" : "SELL";
+      }
+      const right = leg.type === "Call" ? "C" : "P";
+      const expiryClean = position.expiry.replace(/-/g, "");
+      return { ...leg, legAction, right: right as "C" | "P", expiry: expiryClean };
+    });
+  }, [position, action]);
+
+  // Compute net BID / ASK / MID for the combo
+  const netPrices = useMemo(() => {
+    let netBid = 0;
+    let netAsk = 0;
+    let allAvailable = true;
+
+    for (const leg of position.legs) {
+      const key = legPriceKey(ticker, position.expiry, leg);
+      if (!key) { allAvailable = false; break; }
+      const lp = prices[key];
+      if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
+
+      // For a SELL combo: SELL legs contribute +bid/+ask, BUY legs contribute -ask/-bid
+      // sign = +1 for legs we're selling, -1 for legs we're buying
+      const legAction = action === "SELL"
+        ? (leg.direction === "LONG" ? "SELL" : "BUY")
+        : (leg.direction === "LONG" ? "BUY" : "SELL");
+      if (legAction === "SELL") {
+        netBid += lp.bid;
+        netAsk += lp.ask;
+      } else {
+        netBid -= lp.ask;
+        netAsk -= lp.bid;
+      }
+    }
+
+    if (!allAvailable) return { bid: null, ask: null, mid: null };
+    const mid = (netBid + netAsk) / 2;
+    return { bid: netBid, ask: netAsk, mid };
+  }, [position, prices, ticker, action]);
+
+  const parsedQty = parseInt(quantity, 10);
+  const parsedPrice = parseFloat(limitPrice);
+  const isValid = !isNaN(parsedQty) && parsedQty > 0 && !isNaN(parsedPrice) && parsedPrice > 0;
+
+  const handlePlace = useCallback(async () => {
+    if (!confirmStep) {
+      setConfirmStep(true);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      const legs = legsWithActions.map((leg) => ({
+        expiry: leg.expiry,
+        strike: leg.strike!,
+        right: leg.right,
+        action: leg.legAction,
+        ratio: 1,
+      }));
+
+      const res = await fetch("/api/orders/place", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          type: "combo",
+          symbol: ticker,
+          action,
+          quantity: parsedQty,
+          limitPrice: parsedPrice,
+          tif,
+          legs,
+        }),
+      });
+      const json = await res.json();
+      if (!res.ok) {
+        setError(json.error || "Order placement failed");
+      } else {
+        setSuccess(`Combo order placed: ${action} ${parsedQty}x ${position.structure} @ ${fmtPrice(parsedPrice)}`);
+        setConfirmStep(false);
+        onOrderPlaced?.();
+      }
+    } catch {
+      setError("Network error placing order");
+    } finally {
+      setLoading(false);
+    }
+  }, [confirmStep, ticker, action, parsedQty, parsedPrice, tif, legsWithActions, position.structure, onOrderPlaced]);
+
+  return (
+    <div className="order-form">
+      {/* Leg summary (read-only) */}
+      <div className="order-field">
+        <label className="order-label">Legs</label>
+        <div className="combo-legs-summary">
+          {legsWithActions.map((leg, i) => (
+            <div key={i} className="combo-leg-row">
+              <span className={`pill ${leg.legAction === "SELL" ? "distrib" : "accum"}`} style={{ fontSize: "9px" }}>
+                {leg.legAction}
+              </span>
+              <span className="combo-leg-desc">
+                {leg.type} ${leg.strike}
+              </span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Action toggle */}
+      <div className="order-field">
+        <label className="order-label">Action</label>
+        <div className="order-action-buttons">
+          <button
+            className={`order-action-btn ${action === "BUY" ? "order-action-active order-action-buy" : ""}`}
+            onClick={() => { setAction("BUY"); setConfirmStep(false); }}
+          >
+            BUY
+          </button>
+          <button
+            className={`order-action-btn ${action === "SELL" ? "order-action-active order-action-sell" : ""}`}
+            onClick={() => { setAction("SELL"); setConfirmStep(false); }}
+          >
+            SELL
+          </button>
+        </div>
+      </div>
+
+      {/* Quantity */}
+      <div className="order-field">
+        <label className="order-label">Quantity</label>
+        <input
+          className="order-input"
+          type="number"
+          min="1"
+          step="1"
+          value={quantity}
+          onChange={(e) => { setQuantity(e.target.value); setConfirmStep(false); }}
+          placeholder="Contracts"
+        />
+      </div>
+
+      {/* Net Limit Price */}
+      <div className="order-field">
+        <label className="order-label">Net Limit Price</label>
+        <div className="modify-price-input-row">
+          <span className="modify-price-prefix">$</span>
+          <input
+            className="modify-price-input"
+            type="number"
+            step="0.01"
+            min="0.01"
+            value={limitPrice}
+            onChange={(e) => { setLimitPrice(e.target.value); setConfirmStep(false); }}
+            placeholder="0.00"
+          />
+        </div>
+        <div className="modify-quick-buttons">
+          <button className="btn-quick" disabled={netPrices.bid == null} onClick={() => { if (netPrices.bid != null) { setLimitPrice(netPrices.bid.toFixed(2)); setConfirmStep(false); } }}>
+            BID{netPrices.bid != null ? ` ${netPrices.bid.toFixed(2)}` : ""}
+          </button>
+          <button className="btn-quick" disabled={netPrices.mid == null} onClick={() => { if (netPrices.mid != null) { setLimitPrice(netPrices.mid.toFixed(2)); setConfirmStep(false); } }}>
+            MID{netPrices.mid != null ? ` ${netPrices.mid.toFixed(2)}` : ""}
+          </button>
+          <button className="btn-quick" disabled={netPrices.ask == null} onClick={() => { if (netPrices.ask != null) { setLimitPrice(netPrices.ask.toFixed(2)); setConfirmStep(false); } }}>
+            ASK{netPrices.ask != null ? ` ${netPrices.ask.toFixed(2)}` : ""}
+          </button>
+        </div>
+      </div>
+
+      {/* TIF */}
+      <div className="order-field">
+        <label className="order-label">Time in Force</label>
+        <div className="order-action-buttons">
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => setTif("DAY")}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => setTif("GTC")}>GTC</button>
+        </div>
+      </div>
+
+      {error && <div className="order-error">{error}</div>}
+      {success && <div className="order-success">{success}</div>}
+
+      {/* Submit / Confirm */}
+      <div className="order-submit">
+        {confirmStep ? (
+          <div className="order-confirm-row">
+            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+            <button
+              className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
+              onClick={handlePlace}
+              disabled={!isValid || loading}
+            >
+              {loading ? "Placing..." : `Confirm: ${action} ${parsedQty}x ${position.structure} @ ${fmtPrice(parsedPrice)}`}
+            </button>
+          </div>
+        ) : (
+          <button className="btn-primary" onClick={handlePlace} disabled={!isValid || loading} style={{ width: "100%" }}>
+            Place Combo Order
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ─── Main OrderTab ─── */
 
 export default function OrderTab({ ticker, position, prices, openOrders = [], tickerPriceData }: OrderTabProps) {
   const isCombo = position != null && position.legs.length > 1 && position.structure_type !== "Stock";
-
-  if (isCombo) {
-    return (
-      <div className="order-tab">
-        <div className="order-combo-notice">
-          This is a multi-leg position ({position.structure}). Close individual legs via the Orders page or use the CLI evaluate command for complex option orders.
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="order-tab">
@@ -373,11 +600,21 @@ export default function OrderTab({ ticker, position, prices, openOrders = [], ti
         </div>
       )}
 
-      {/* New order form */}
-      <div className={openOrders.length > 0 ? "new-order-section" : ""}>
-        {openOrders.length > 0 && <div className="existing-orders-title">New Order</div>}
-        <NewOrderForm ticker={ticker} position={position} tickerPriceData={tickerPriceData} />
-      </div>
+      {/* Combo order form for multi-leg positions */}
+      {isCombo && (
+        <div className={openOrders.length > 0 ? "new-order-section" : ""}>
+          {openOrders.length > 0 && <div className="existing-orders-title">Combo Order</div>}
+          <ComboOrderForm ticker={ticker} position={position!} prices={prices} />
+        </div>
+      )}
+
+      {/* Stock / single-leg order form */}
+      {!isCombo && (
+        <div className={openOrders.length > 0 ? "new-order-section" : ""}>
+          {openOrders.length > 0 && <div className="existing-orders-title">New Order</div>}
+          <NewOrderForm ticker={ticker} position={position} tickerPriceData={tickerPriceData} />
+        </div>
+      )}
     </div>
   );
 }

@@ -120,6 +120,7 @@ When market is closed, free trade analysis explicitly shows it's using closing p
 | `journal` | View recent trade log entries |
 | `sync` | Pull live portfolio from Interactive Brokers |
 | `blotter` | Trade blotter - today's fills, P&L, spread grouping |
+| `risk-reversal [TICKER]` | **Run `python3 scripts/risk_reversal.py [TICKER]`** — IV skew risk reversal analysis + HTML report |
 | `strategies` | List available trading strategies (reads `data/strategies.json`) |
 
 ### Evaluate Command Details
@@ -276,6 +277,34 @@ python3 scripts/free_trade_analyzer.py --json
 - Runs automatically on Pi startup
 - Shows ALL multi-leg positions in compact table format
 - Table includes: Ticker, Progress %, Status icon
+
+### Risk Reversal Command Details
+
+When user runs `risk-reversal [TICKER]`, ALWAYS run `python3 scripts/risk_reversal.py [TICKER]`.
+
+The script is **fully self-contained** — it connects to IB for live quotes/greeks, fetches dark pool flow and options flow for context, builds the risk reversal matrix, selects primary/alternative/aggressive recommendations, and generates an HTML report.
+
+**⚠️ Manager Override:** This is the ONLY strategy that produces undefined-risk structures (naked short options). It requires explicit human invocation and is never auto-triggered by evaluate/discover/scan.
+
+```bash
+# Bullish risk reversal (default: sell put / buy call)
+python3 scripts/risk_reversal.py IWM
+
+# Bearish risk reversal (sell call / buy put)
+python3 scripts/risk_reversal.py SPY --bearish
+
+# Custom parameters
+python3 scripts/risk_reversal.py QQQ --bankroll 500000 --min-dte 21 --max-dte 45
+
+# Don't open browser
+python3 scripts/risk_reversal.py IWM --no-open
+
+# JSON output
+python3 scripts/risk_reversal.py IWM --json
+```
+
+**Output:** `reports/{ticker}-risk-reversal-{date}.html` (auto-opens in browser)
+**Template:** `.pi/skills/html-report/risk-reversal-template.html`
 
 | `blotter-history` | Historical trades via Flex Query (requires setup) |
 | `leap-scan [TICKERS]` | Scan for LEAP IV mispricing opportunities |
@@ -935,6 +964,7 @@ python3 scripts/garch_convergence.py --preset all --no-open # Don't open browser
 | `scripts/leap_iv_scanner.py` | LEAP IV mispricing scanner (IB connection required) |
 | `scripts/leap_scanner_uw.py` | LEAP IV scanner using UW (Yahoo as last resort for HV data) |
 | `scripts/garch_convergence.py` | **⭐ GARCH Convergence scanner — parallel fetch, divergence analysis, HTML report** |
+| `scripts/risk_reversal.py` | **⭐ Risk Reversal scanner — IV skew exploitation, costless/credit directional bets, HTML report** |
 | `scripts/utils/presets.py` | **Preset loader** — `load_preset()`, `list_presets()` for 150 ticker presets |
 | `scripts/fetch_x_watchlist.py` | Fetch X account tweets and extract ticker sentiment |
 | `scripts/monitor_daemon/run.py` | **Extensible monitoring daemon** (replaces exit_order_service) |

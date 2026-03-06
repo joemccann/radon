@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{TICKER}} Risk Reversal | {{DATE}}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-base: #050505; --bg-panel: #0A0A0A; --bg-hover: #141414;
+      --border-dim: #1C1C1C; --border-focus: #333333;
+      --text-primary: #F0F0F0; --text-muted: #666666;
+      --accent-bg: #FFFFFF; --accent-text: #000000;
+      --positive: #00FF88; --negative: #FF4444; --warning: #FFAA00;
+    }
+    @media (prefers-color-scheme: light) {
+      :root:not([data-theme="dark"]) {
+        --bg-base: #F5F5F5; --bg-panel: #FFFFFF; --bg-hover: #F0F0F0;
+        --border-dim: #D9D9D9; --border-focus: #A3A3A3; --text-primary: #0A0A0A;
+        --text-muted: #6B6B6B; --accent-bg: #000000; --accent-text: #FFFFFF;
+        --positive: #00AA55; --negative: #DD2222; --warning: #CC8800;
+      }
+    }
+    [data-theme="light"] {
+      --bg-base: #F5F5F5; --bg-panel: #FFFFFF; --bg-hover: #F0F0F0;
+      --border-dim: #D9D9D9; --border-focus: #A3A3A3; --text-primary: #0A0A0A;
+      --text-muted: #6B6B6B; --accent-bg: #000000; --accent-text: #FFFFFF;
+      --positive: #00AA55; --negative: #DD2222; --warning: #CC8800;
+    }
+    [data-theme="dark"] {
+      --bg-base: #050505; --bg-panel: #0A0A0A; --bg-hover: #141414;
+      --border-dim: #1C1C1C; --border-focus: #333333; --text-primary: #F0F0F0;
+      --text-muted: #666666; --accent-bg: #FFFFFF; --accent-text: #000000;
+      --positive: #00FF88; --negative: #FF4444; --warning: #FFAA00;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: 'JetBrains Mono', monospace; font-size: 13px; line-height: 1.5; background: var(--bg-base); color: var(--text-primary); }
+    .container { max-width: 1400px; margin: 0 auto; padding: 24px; }
+    .header { border-bottom: 1px solid var(--border-dim); padding-bottom: 16px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; }
+    .title { font-size: 14px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.1em; }
+    .subtitle { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+    .timestamp { font-size: 11px; color: var(--text-muted); }
+    .header-actions { display: flex; align-items: center; gap: 16px; }
+    .metrics { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1px; background: var(--border-dim); border: 1px solid var(--border-dim); margin-bottom: 24px; }
+    .metric { background: var(--bg-panel); padding: 16px; }
+    .metric-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 8px; }
+    .metric-value { font-size: 24px; font-weight: 500; letter-spacing: -0.02em; }
+    .metric-value.small { font-size: 18px; }
+    .metric-change { font-size: 11px; color: var(--text-muted); margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-dim); }
+    .panel { background: var(--bg-panel); border: 1px solid var(--border-dim); margin-bottom: 16px; }
+    .panel-header { padding: 12px 16px; border-bottom: 1px solid var(--border-dim); font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center; }
+    .panel-body { padding: 16px; }
+    .panel-accent { border: 2px solid var(--accent-bg); }
+    table { width: 100%; border-collapse: collapse; }
+    th { font-size: 10px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border-dim); position: sticky; top: 0; background: var(--bg-panel); }
+    td { padding: 10px 12px; border-bottom: 1px solid var(--border-dim); font-size: 12px; }
+    tr:hover { background: var(--bg-hover); }
+    tr.highlight { background: var(--bg-hover); }
+    tr.recommended { background: rgba(0, 255, 136, 0.05); border-left: 3px solid var(--positive); }
+    .text-right { text-align: right; }
+    .text-center { text-align: center; }
+    .text-muted { color: var(--text-muted); }
+    .text-positive { color: var(--positive); }
+    .text-negative { color: var(--negative); }
+    .text-warning { color: var(--warning); }
+    .text-small { font-size: 11px; }
+    .pill { display: inline-block; padding: 2px 8px; border: 1px solid var(--border-dim); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; }
+    .pill-accent { background: var(--accent-bg); color: var(--accent-text); border-color: var(--accent-bg); }
+    .pill-positive { background: var(--positive); color: #000; border-color: var(--positive); }
+    .pill-negative { background: var(--negative); color: #FFF; border-color: var(--negative); }
+    .pill-warning { background: var(--warning); color: #000; border-color: var(--warning); }
+    .callout { background: var(--bg-hover); border-left: 3px solid var(--accent-bg); padding: 16px; margin: 16px 0; }
+    .callout-title { font-size: 10px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 8px; }
+    .callout.positive { border-left-color: var(--positive); }
+    .callout.negative { border-left-color: var(--negative); }
+    .callout.warning { border-left-color: var(--warning); }
+    .section-header { font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.15em; color: var(--text-muted); margin-bottom: 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border-dim); }
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 768px) { .grid-2, .grid-3 { grid-template-columns: 1fr; } }
+    .footer { margin-top: 32px; padding-top: 16px; border-top: 1px solid var(--border-dim); color: var(--text-muted); font-size: 11px; }
+    .divider { border: none; border-top: 1px solid var(--border-dim); margin: 24px 0; }
+    .status-dot { display: inline-block; width: 6px; height: 6px; background: var(--accent-bg); animation: pulse 2s infinite; margin-right: 8px; }
+    .status-dot.positive { background: var(--positive); }
+    .status-dot.negative { background: var(--negative); }
+    .status-dot.warning { background: var(--warning); }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .theme-toggle { background: transparent; border: 1px solid var(--border-dim); color: var(--text-primary); padding: 4px 12px; font-family: inherit; font-size: 11px; cursor: pointer; }
+    .theme-toggle:hover { background: var(--bg-hover); border-color: var(--border-focus); }
+    .spark { display: flex; align-items: flex-end; gap: 2px; height: 32px; }
+    .spark-bar { flex: 1; min-width: 4px; background: var(--text-muted); opacity: 0.6; }
+    .spark-bar.up { background: var(--positive); opacity: 0.8; }
+    .spark-bar.down { background: var(--negative); opacity: 0.8; }
+    .spark-bar.today { outline: 2px solid var(--text-primary); outline-offset: 1px; }
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--bg-base); }
+    ::-webkit-scrollbar-thumb { background: var(--border-focus); }
+    @media print { body { background: white; color: black; } .theme-toggle { display: none; } .panel { border-color: #ccc; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+
+    <!-- SECTION 1: HEADER -->
+    <header class="header">
+      <div>
+        <h1 class="title"><span class="status-dot {{STATUS_CLASS}}"></span>{{TICKER}} Risk Reversal Analysis</h1>
+        <p class="subtitle">{{COMPANY_NAME}} — {{DIRECTION_LABEL}} Risk Reversal ({{DIRECTION_DETAIL}})</p>
+      </div>
+      <div class="header-actions">
+        <span class="pill pill-accent">{{DIRECTION}} DIRECTIONAL</span>
+        <span class="pill pill-warning">MANAGER OVERRIDE</span>
+        <span class="timestamp">📊 Data as of: {{TIMESTAMP}}</span>
+        <button class="theme-toggle" onclick="toggleTheme()">☀ LIGHT</button>
+      </div>
+    </header>
+
+    <!-- SECTION 2: SUMMARY METRICS -->
+    <div class="metrics">
+      {{METRICS_HTML}}
+    </div>
+
+    <!-- SECTION 3: THESIS -->
+    {{THESIS_HTML}}
+
+    <!-- SECTION 4: DARK POOL FLOW -->
+    {{FLOW_HTML}}
+
+    <!-- SECTION 5: IV SKEW ANALYSIS -->
+    {{SKEW_HTML}}
+
+    <hr class="divider">
+
+    <!-- SECTION 6: RECOMMENDED TRADES -->
+    <h2 class="section-header" style="font-size:13px; margin-bottom:24px;">⭐ Recommended Trades</h2>
+
+    <!-- Primary -->
+    {{PRIMARY_HTML}}
+
+    <!-- Alternative -->
+    {{ALTERNATIVE_HTML}}
+
+    <!-- Aggressive -->
+    {{AGGRESSIVE_HTML}}
+
+    <hr class="divider">
+
+    <!-- SECTION 7: FULL COMBINATIONS MATRIX -->
+    {{MATRIX_HTML}}
+
+    <hr class="divider">
+
+    <!-- SECTION 8: RISK & COMPLIANCE + EXECUTION -->
+    {{RISK_HTML}}
+
+    <!-- EXECUTION COMMANDS -->
+    {{EXECUTION_HTML}}
+
+    <!-- FOOTER -->
+    <div class="footer">
+      <p>Generated by Convex Scavenger | {{TIMESTAMP}} | IB Live Data + UW Dark Pool Flow | All prices are live market quotes at time of generation. Execute within 5 minutes for pricing accuracy.</p>
+    </div>
+
+  </div>
+
+  <script>
+    function toggleTheme() {
+      const html = document.documentElement;
+      const currentTheme = html.getAttribute('data-theme');
+      if (currentTheme) { html.setAttribute('data-theme', currentTheme === 'dark' ? 'light' : 'dark'); }
+      else { const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches; html.setAttribute('data-theme', prefersDark ? 'light' : 'dark'); }
+      updateToggleIcon();
+    }
+    function updateToggleIcon() {
+      const btn = document.querySelector('.theme-toggle');
+      if (!btn) return;
+      const isDark = document.documentElement.getAttribute('data-theme') === 'dark' || (!document.documentElement.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+      btn.textContent = isDark ? '☀ LIGHT' : '◐ DARK';
+    }
+    document.addEventListener('DOMContentLoaded', updateToggleIcon);
+  </script>
+</body>
+</html>

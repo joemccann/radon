@@ -687,6 +687,88 @@ See: `reports/goog-evaluation-2026-03-04.html`
 
 ---
 
+## Risk Reversal Report Template ⭐
+
+**For the `risk-reversal` command, ALWAYS use the dedicated risk reversal template.**
+
+**Template:** `.pi/skills/html-report/risk-reversal-template.html`
+**Script:** `scripts/risk_reversal.py`
+**Output:** `reports/{ticker}-risk-reversal-{date}.html`
+
+### When to Use
+
+- `risk-reversal [TICKER]` command (auto-generates and opens in browser)
+- Any request involving selling puts + buying calls (or inverse) as a directional bet
+- IV skew analysis for a specific ticker's options chain
+
+### How It Works
+
+The script (`risk_reversal.py`) is **self-contained**:
+1. Fetches dark pool flow and options flow for context (via subprocess to fetch_flow.py / fetch_options.py)
+2. Connects to IB → fetches spot price, option chains, live greeks (25-50Δ puts and calls)
+3. Builds the full risk reversal matrix across 2-5 expirations (14-60 DTE)
+4. Computes IV skew per delta bucket per expiry
+5. Selects 3 recommendations: Primary (costless), Alternative (different expiry), Aggressive (credit)
+6. Fills the template → writes HTML → opens browser
+
+**You do NOT need to fetch data separately.** Just run:
+```bash
+python3 scripts/risk_reversal.py IWM
+```
+
+### 8 Required Sections
+
+Every risk reversal report MUST include these sections (in order):
+
+| # | Section | Template Placeholder | Data Source |
+|---|---------|---------------------|-------------|
+| 1 | **Header** | `{{TICKER}}`, `{{DIRECTION}}`, `{{TIMESTAMP}}` | Script args + clock |
+| 2 | **Summary Metrics** (6 cards) | `{{METRICS_HTML}}` | Spot, skew, DP, options flow, bankroll, net cost |
+| 3 | **Thesis Callout** | `{{THESIS_HTML}}` | DP flow + skew rationale |
+| 4 | **Dark Pool Flow** | `{{FLOW_HTML}}` | UW dark pool API (today-highlighted) |
+| 5 | **IV Skew Analysis** | `{{SKEW_HTML}}` | IB greeks — put IV vs call IV per delta |
+| 6 | **Recommended Trades** (3) | `{{PRIMARY_HTML}}`, `{{ALTERNATIVE_HTML}}`, `{{AGGRESSIVE_HTML}}` | Matrix analysis |
+| 7 | **Full Combos Matrix** | `{{MATRIX_HTML}}` | All near-costless combos per expiry |
+| 8 | **Risk & Compliance + Execution** | `{{RISK_HTML}}`, `{{EXECUTION_HTML}}` | Sizing + commands |
+
+### Template Variables
+
+| Variable | Description | Example |
+|----------|-------------|---------|
+| `{{TICKER}}` | Stock/ETF symbol | IWM |
+| `{{COMPANY_NAME}}` | Name or symbol | iShares Russell 2000 ETF |
+| `{{DATE}}` | Report date | 2026-03-06 |
+| `{{TIMESTAMP}}` | Full timestamp | 2026-03-06 10:32 AM PT |
+| `{{DIRECTION}}` | BULLISH or BEARISH | BULLISH |
+| `{{DIRECTION_LABEL}}` | Bullish or Bearish | Bullish |
+| `{{DIRECTION_DETAIL}}` | Leg description | Sell Put / Buy Call |
+| `{{STATUS_CLASS}}` | CSS class for status dot | positive |
+| `{{METRICS_HTML}}` | 6 metric card divs | Spot, Skew, DP, P/C, Bankroll, Net |
+| `{{THESIS_HTML}}` | Callout with thesis | Dark pool + skew reasoning |
+| `{{FLOW_HTML}}` | Flow panel with table | Daily DP breakdown + sparklines |
+| `{{SKEW_HTML}}` | Skew panel with tables | Put vs Call IV per delta per expiry |
+| `{{PRIMARY_HTML}}` | Primary trade panel | Costless, balanced Δ, longer DTE |
+| `{{ALTERNATIVE_HTML}}` | Alt trade panel | Different expiry |
+| `{{AGGRESSIVE_HTML}}` | Aggressive trade panel | Credit-generating |
+| `{{MATRIX_HTML}}` | Full combos table panel | All near-costless combos |
+| `{{RISK_HTML}}` | Risk + compliance panels | Grid-2 with risk table + warning |
+| `{{EXECUTION_HTML}}` | Execution commands panel | Copy-paste ib_execute.py commands |
+
+### ⚠️ Manager Override Badge (MANDATORY)
+
+Every risk reversal report MUST include the `MANAGER OVERRIDE` warning pill in the header:
+```html
+<span class="pill pill-warning">MANAGER OVERRIDE</span>
+```
+
+And the compliance panel MUST include the undefined risk callout explaining this is an explicit override.
+
+### Reference Implementation
+
+See: `reports/iwm-risk-reversal-2026-03-06.html`
+
+---
+
 ## Generation Checklist
 
 ### General Reports
@@ -747,3 +829,26 @@ See: `reports/goog-evaluation-2026-03-04.html`
 8. [ ] Verify no unresolved `{{PLACEHOLDER}}` variables remain in output HTML
 9. [ ] Report auto-opens in browser (unless `--no-open`)
 10. [ ] Output saved to `reports/portfolio-{date}.html`
+
+### Risk Reversal Reports
+
+1. [ ] Run `python3 scripts/risk_reversal.py [TICKER]` — script is fully self-contained
+2. [ ] Verify IB connection succeeded (spot price + option greeks fetched)
+3. [ ] Verify dark pool flow fetched (context for thesis section)
+4. [ ] Verify IV skew tables populated for ≥2 expirations (put IV > call IV at each delta)
+5. [ ] Verify all 8 sections present:
+   - [ ] Header with direction pill (BULLISH/BEARISH) + MANAGER OVERRIDE pill
+   - [ ] 6 summary metric cards (Spot, Skew, DP Buy Ratio, P/C Ratio, Bankroll, Net Cost)
+   - [ ] Thesis callout with DP flow + skew reasoning
+   - [ ] Dark pool flow table with today-highlighted sparklines
+   - [ ] IV skew analysis with per-expiry put/call IV comparison tables
+   - [ ] 3 recommended trades: Primary (costless), Alternative (diff expiry), Aggressive (credit)
+   - [ ] Full combos matrix with near-costless combinations per expiry
+   - [ ] Risk & Compliance panels (with undefined risk warning) + Execution commands
+6. [ ] Verify Primary recommendation is costless or near-costless (within ±$0.10)
+7. [ ] Verify compliance panel includes MANAGER OVERRIDE callout
+8. [ ] Verify execution commands use `ib_execute.py` with correct strikes/expiries/quantities
+9. [ ] Verify no unresolved `{{PLACEHOLDER}}` variables remain in output HTML
+10. [ ] Report auto-opens in browser (unless `--no-open`)
+11. [ ] Output saved to `reports/{ticker}-risk-reversal-{date}.html`
+12. [ ] Reference implementation: `reports/iwm-risk-reversal-2026-03-06.html`

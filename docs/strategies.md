@@ -2,13 +2,14 @@
 
 ## Overview
 
-The Convex Scavenger employs three edge-detection strategies, each exploiting informational or structural advantages that institutional players leave behind.
+The Convex Scavenger employs four strategies, each exploiting informational or structural advantages that institutional players leave behind.
 
 | Strategy | Edge Source | Instrument | Timeframe | Risk Profile |
 |----------|-------------|------------|-----------|--------------|
 | **Dark Pool Flow** | Institutional positioning | ATM/OTM options | 2-6 weeks | Defined (long options) |
 | **LEAP IV Mispricing** | Volatility regime change | Long-dated calls | 1-3 years | Defined (long options) |
 | **GARCH Convergence** | Cross-asset repricing lag | Medium-dated options | 2-8 weeks | Defined (long options/spreads) |
+| **Risk Reversal** | IV skew exploitation | Sell put + Buy call | 2-8 weeks | **Undefined** (manager override) |
 
 See also: [`strategy-garch-convergence.md`](strategy-garch-convergence.md) for the full GARCH Convergence Spreads specification.
 
@@ -315,6 +316,132 @@ Full strategy specification: [`strategy-garch-convergence.md`](strategy-garch-co
 
 ---
 
+## Strategy 4: Risk Reversal
+
+### Thesis
+
+OTM puts consistently trade at higher implied volatility than equivalent-delta OTM calls due to persistent demand for downside protection. A bullish risk reversal (sell OTM put, buy OTM call) monetizes this skew — the rich put premium funds the cheap call, creating costless or credit-generating directional exposure.
+
+**The edge is skew, not direction.** The structural IV imbalance means you sell expensive vol and buy cheap vol. Direction is the operator's thesis; skew is the structural advantage.
+
+### ⚠️ Undefined Risk — Manager Override
+
+This strategy involves selling naked options (short put for bullish, short call for bearish). This is an explicit **manager override** of the "NEVER sell naked options" constraint. The override is justified when:
+
+1. The underlying is a **broad index ETF** (IWM, SPY, QQQ) — no single-name blowup risk
+2. The operator has an **explicit directional thesis** with supporting data (DP flow, technicals)
+3. Position is **sized to 2.5% margin** — same dollar risk discipline as defined-risk strategies
+4. A **hard stop loss** is set at trade entry (e.g., close if spread value reaches –$3.00)
+5. The manager **explicitly requests** the structure
+
+**This strategy is NEVER auto-triggered.** It requires the `risk-reversal` command with operator confirmation.
+
+### Edge Source: IV Skew
+
+| Delta | Typical Put IV | Typical Call IV | Skew |
+|-------|---------------|----------------|------|
+| ~50Δ | 28-32% | 28-32% | 0% |
+| ~40Δ | 30-34% | 26-29% | +3-5% |
+| ~35Δ | 32-36% | 25-28% | +5-8% |
+| ~30Δ | 33-38% | 24-27% | +7-11% |
+| ~25Δ | 35-40% | 23-26% | +9-14% |
+
+Skew is steeper during selloffs (when put demand surges) — exactly when contrarian bullish risk reversals are most attractive.
+
+### Signal Criteria
+
+| Criterion | Requirement | Notes |
+|-----------|-------------|-------|
+| Operator direction | BULLISH or BEARISH | Manager's thesis, not auto-detected |
+| IV skew | ≥3% at target delta | Ensures structural edge on the trade |
+| Liquid options chain | Bid-ask ≤ $0.10 on target strikes | IWM, SPY, QQQ always qualify |
+| Net cost | Costless or small credit preferred | Maximum $0.50 debit |
+| DTE range | 14-60 days | Balance theta decay vs time for thesis |
+
+### Supporting Signals (Context, Not Gates)
+
+- **Dark pool flow**: Accumulation confirms bullish thesis, distribution confirms bearish
+- **Options flow**: Extreme P/C ratio may indicate hedging (contrarian bullish signal)
+- **OI changes**: Large put OI buildup = structural skew support (more put selling premium)
+
+### Position Structure
+
+**Bullish Risk Reversal (default):**
+- **Sell**: OTM Put (25-50Δ) at bid
+- **Buy**: OTM Call (25-50Δ) at ask
+- Net: Costless or small credit
+- Profit: Unlimited upside above call strike
+- Loss: Stock assigned below put strike (undefined downside)
+
+**Bearish Risk Reversal (`--bearish` flag):**
+- **Sell**: OTM Call (25-50Δ) at bid
+- **Buy**: OTM Put (25-50Δ) at ask
+- Net: Costless or small credit
+- Profit: Unlimited downside profit below put strike
+- Loss: Stock called away above call strike (undefined upside)
+
+### Sizing
+
+- **Margin-based**: ~20% of notional per contract (IB requirement for short puts on index ETFs)
+- **Hard cap**: 2.5% of bankroll in margin
+- **Max contracts**: `bankroll × 0.025 / (put_strike × 100 × 0.20)`
+- **Stop loss**: Set at trade entry — close if spread value hits –$3.00
+
+### Combo Selection Criteria
+
+The script ranks combinations by:
+
+1. **Proximity to zero cost** — costless or small credit preferred
+2. **Delta balance** — put delta ≈ call delta for symmetric exposure
+3. **IV skew captured** — higher skew = more edge
+4. **Buffer from spot** — both strikes sufficiently OTM
+
+Three recommendations are generated:
+- **Primary**: Costless, balanced deltas, longer DTE
+- **Alternative**: Different expiration for faster/slower catalyst
+- **Aggressive**: Generates meaningful credit but tighter downside buffer
+
+### Exit Criteria
+
+| Condition | Action |
+|-----------|--------|
+| Underlying hits call strike + 5% | Close call for profit, close put |
+| Spread value reaches –$3.00 | Stop loss — close both legs |
+| DTE < 5 with no momentum | Close to avoid assignment risk |
+| Thesis invalidated | Close immediately |
+| DP flow reverses direction | Review thesis, consider closing |
+
+### Scripts
+
+```bash
+# Bullish risk reversal on IWM (default)
+python3 scripts/risk_reversal.py IWM
+
+# Bearish risk reversal
+python3 scripts/risk_reversal.py SPY --bearish
+
+# Custom parameters
+python3 scripts/risk_reversal.py QQQ --bankroll 500000 --min-dte 21 --max-dte 45
+
+# Don't open browser
+python3 scripts/risk_reversal.py IWM --no-open
+
+# JSON output (for programmatic use)
+python3 scripts/risk_reversal.py IWM --json
+```
+
+### Tickers Best Suited
+
+| Type | Tickers | Why |
+|------|---------|-----|
+| **Index ETFs** | IWM, SPY, QQQ, DIA | Deepest skew, most liquid, no single-name risk |
+| **Sector ETFs** | XLK, XLE, XLF, EWY | Decent skew, diversified exposure |
+| **Large-cap stocks** | AAPL, MSFT, NVDA, AMZN | Liquid chains, but single-name risk applies |
+
+**Avoid**: Small-caps, illiquid options, earnings-adjacent (IV crush kills both legs).
+
+---
+
 ## Strategy Interaction
 
 These strategies can be combined:
@@ -331,19 +458,37 @@ These strategies can be combined:
    - Core: LEAP calls for vega exposure (months to years)
    - Tactical: Short-dated options on flow signals (weeks)
    - Relative value: Convergence spreads (weeks to months)
+   - Directional: Risk reversals for explicit manager-driven bets (weeks)
+
+6. **Flow → Risk Reversal**: If dark pool flow shows sustained accumulation AND put skew is steep, a risk reversal exploits both the informational edge (flow) and structural edge (skew) simultaneously.
+
+7. **Risk Reversal → Free Trade**: If the underlying rallies and the call appreciates, the short put can be closed for pennies — making the call effectively free (see free trade analyzer).
 
 ---
 
-## Risk Management (Both Strategies)
+## Risk Management (All Strategies)
 
 | Rule | Limit |
 |------|-------|
-| Max position size | 2.5% of bankroll |
-| Sizing method | Fractional Kelly (0.25x) |
-| Risk type | Defined only (long options, spreads) |
-| Never | Naked short options, undefined risk |
+| Max position size | 2.5% of bankroll (premium or margin) |
+| Sizing method | Fractional Kelly (0.25x) for defined-risk; margin-based for undefined |
+| Risk type | Defined only (long options, spreads) — **unless manager override** |
+| Never | Naked short options, undefined risk — **unless manager override** |
 | Max concurrent | 6 positions |
 | Kelly > 20% | Restructure (insufficient convexity) |
+
+### Manager Override for Undefined Risk
+
+The "NEVER sell naked options" constraint can be overridden by the manager (human operator) for specific strategies that require it. Currently the only strategy with this override is **Risk Reversal** (Strategy 4).
+
+**Override conditions (ALL must be met):**
+1. Manager explicitly requests the structure (e.g., `risk-reversal IWM`)
+2. Underlying is a broad index ETF or highly liquid large-cap
+3. Position sized to 2.5% of bankroll in **margin**, not premium
+4. Hard stop loss set at trade entry
+5. Trade logged with `risk_type: "undefined"` and `manager_override: true`
+
+**The agent NEVER initiates undefined-risk trades autonomously.** The `evaluate`, `discover`, and `scan` commands will never recommend naked short options. Only the `risk-reversal` command (which requires explicit human invocation) produces undefined-risk structures.
 
 ---
 

@@ -104,6 +104,9 @@ If a script fails:
 | GARCH Convergence (file preset) | `python3 scripts/garch_convergence.py --preset sp500-semiconductors` |
 | GARCH Convergence (ad-hoc) | `python3 scripts/garch_convergence.py NVDA AMD GOOGL META` |
 | GARCH Convergence (JSON) | `python3 scripts/garch_convergence.py --preset all --json` |
+| **⭐ Risk Reversal** | `python3 scripts/risk_reversal.py IWM` |
+| Risk Reversal (bearish) | `python3 scripts/risk_reversal.py SPY --bearish` |
+| Risk Reversal (custom) | `python3 scripts/risk_reversal.py QQQ --bankroll 500000 --min-dte 21` |
 | LEAP IV scan (UW) | `python3 scripts/leap_scanner_uw.py --preset sectors` |
 | LEAP IV scan (IB) | `python3 scripts/leap_iv_scanner.py AAPL --portfolio` |
 | Discovery (market-wide) | `python3 scripts/discover.py` |

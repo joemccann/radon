@@ -15,7 +15,7 @@ import sys
 from pathlib import Path
 
 try:
-    from ib_insync import Stock, Option, LimitOrder, util
+    from ib_insync import Stock, Option, Contract, ComboLeg, LimitOrder, TagValue, util
 except ImportError:
     print(json.dumps({"status": "error", "message": "ib_insync not installed"}))
     sys.exit(1)
@@ -49,7 +49,43 @@ def place_order(params: dict) -> dict:
 
     try:
         # Build contract
-        if order_type == "option":
+        if order_type == "combo":
+            legs_data = params["legs"]
+            options = []
+            for leg in legs_data:
+                opt = Option(
+                    symbol=symbol,
+                    lastTradeDateOrContractMonth=leg["expiry"],
+                    strike=float(leg["strike"]),
+                    right=leg["right"],
+                    exchange="SMART",
+                    currency="USD",
+                )
+                options.append(opt)
+
+            qualified = client.qualify_contracts(*options)
+            if len(qualified) != len(options):
+                return {"status": "error", "message": f"Could not qualify all combo legs for {symbol}"}
+
+            combo = Contract()
+            combo.symbol = symbol
+            combo.secType = "BAG"
+            combo.currency = "USD"
+            combo.exchange = "SMART"
+
+            combo_legs = []
+            for i, leg in enumerate(legs_data):
+                cl = ComboLeg()
+                cl.conId = qualified[i].conId
+                cl.ratio = int(leg.get("ratio", 1))
+                cl.action = leg["action"].upper()
+                cl.exchange = "SMART"
+                combo_legs.append(cl)
+
+            combo.comboLegs = combo_legs
+            contract = combo
+
+        elif order_type == "option":
             expiry = params["expiry"]
             strike = float(params["strike"])
             right = params["right"]
@@ -61,14 +97,17 @@ def place_order(params: dict) -> dict:
                 exchange="SMART",
                 currency="USD",
             )
+            qualified = client.qualify_contracts(contract)
+            if not qualified:
+                return {"status": "error", "message": f"Could not qualify contract: {symbol}"}
+            contract = qualified[0]
+
         else:
             contract = Stock(symbol, "SMART", "USD")
-
-        # Qualify
-        qualified = client.qualify_contracts(contract)
-        if not qualified:
-            return {"status": "error", "message": f"Could not qualify contract: {symbol}"}
-        contract = qualified[0]
+            qualified = client.qualify_contracts(contract)
+            if not qualified:
+                return {"status": "error", "message": f"Could not qualify contract: {symbol}"}
+            contract = qualified[0]
 
         # Build order
         order = LimitOrder(
@@ -78,6 +117,9 @@ def place_order(params: dict) -> dict:
             tif=tif,
             outsideRth=False,
         )
+
+        if order_type == "combo":
+            order.smartComboRoutingParams = [TagValue("NonGuaranteed", "1")]
 
         # Place
         trade = client.place_order(contract, order)
@@ -131,6 +173,18 @@ def main():
         if opt_missing:
             print(json.dumps({"status": "error", "message": f"Option missing: {', '.join(opt_missing)}"}))
             sys.exit(1)
+
+    if params.get("type") == "combo":
+        legs = params.get("legs")
+        if not legs or not isinstance(legs, list) or len(legs) < 2:
+            print(json.dumps({"status": "error", "message": "Combo requires 'legs' array with 2+ entries"}))
+            sys.exit(1)
+        leg_required = ["expiry", "strike", "right", "action"]
+        for i, leg in enumerate(legs):
+            leg_missing = [f for f in leg_required if f not in leg]
+            if leg_missing:
+                print(json.dumps({"status": "error", "message": f"Leg {i} missing: {', '.join(leg_missing)}"}))
+                sys.exit(1)
 
     result = place_order(params)
     print(json.dumps(result))

@@ -6,8 +6,16 @@ import { OrdersData } from "@tools/schemas/ib-orders";
 
 export const runtime = "nodejs";
 
+type ComboLeg = {
+  expiry: string;
+  strike: number;
+  right: "C" | "P";
+  action: "BUY" | "SELL";
+  ratio: number;
+};
+
 type PlaceBody = {
-  type: "stock" | "option";
+  type: "stock" | "option" | "combo";
   symbol: string;
   action: "BUY" | "SELL";
   quantity: number;
@@ -16,6 +24,7 @@ type PlaceBody = {
   expiry?: string;
   strike?: number;
   right?: "C" | "P";
+  legs?: ComboLeg[];
 };
 
 export async function POST(request: Request): Promise<Response> {
@@ -36,6 +45,13 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
+    if (body.type === "combo" && (!body.legs || body.legs.length < 2)) {
+      return NextResponse.json(
+        { error: "Combo orders require 'legs' array with 2+ entries" },
+        { status: 400 },
+      );
+    }
+
     const orderJson = JSON.stringify({
       type: body.type || "stock",
       symbol: body.symbol.toUpperCase(),
@@ -44,6 +60,7 @@ export async function POST(request: Request): Promise<Response> {
       limitPrice: body.limitPrice,
       tif: body.tif || "DAY",
       ...(body.type === "option" ? { expiry: body.expiry, strike: body.strike, right: body.right } : {}),
+      ...(body.type === "combo" ? { legs: body.legs } : {}),
     });
 
     const result = await runScript("scripts/ib_place_order.py", {
