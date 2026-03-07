@@ -1,9 +1,10 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
-import type { PortfolioPosition } from "@/lib/types";
+import type { PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
+import InstrumentDetailModal from "./InstrumentDetailModal";
 import { useSort, type SortDirection } from "@/lib/useSort";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import {
@@ -201,21 +202,34 @@ function LegRow({
   showExpiry,
   showUnderlying,
   realtimeLegPrice,
+  onLegClick,
 }: {
   leg: PortfolioPosition["legs"][number];
   showExpiry: boolean;
   showUnderlying?: boolean;
   realtimeLegPrice?: PriceData | null;
+  onLegClick?: (leg: PortfolioLeg) => void;
 }) {
   const rtLast = realtimeLegPrice?.last != null && realtimeLegPrice.last > 0 ? realtimeLegPrice.last : null;
   const marketPrice = rtLast ?? (leg.market_price != null ? Math.abs(leg.market_price) : null);
   const isCalculated = rtLast != null ? Boolean(realtimeLegPrice?.lastIsCalculated) : Boolean(leg.market_price_is_calculated);
   const { direction: priceDirection, flashDirection } = usePriceDirection(marketPrice);
 
+  // Per-leg P&L: sign-aware (MV - EC)
+  const mult = leg.type === "Stock" ? 1 : 100;
+  const legMv = rtLast != null ? rtLast * leg.contracts * mult : leg.market_value != null ? Math.abs(leg.market_value) : null;
+  const legEc = Math.abs(leg.entry_cost);
+  const sign = leg.direction === "LONG" ? 1 : -1;
+  const legPnl = legMv != null ? sign * (legMv - legEc) : null;
+
   return (
     <tr className={flashDirection ? `last-price-${flashDirection}` : undefined}>
       <td></td>
-      <td colSpan={3} className="cell-indent cell-muted">
+      <td
+        colSpan={3}
+        className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
+        onClick={onLegClick ? () => onLegClick(leg) : undefined}
+      >
         {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
       </td>
       {showUnderlying && <td></td>}
@@ -227,9 +241,11 @@ function LegRow({
       </td>
       <td></td>
       <td></td>
-      <td className="right cell-muted">{fmtPrice(Math.abs(leg.entry_cost))}</td>
-      <td className="right cell-muted">{rtLast != null ? fmtUsd(rtLast * leg.contracts * (leg.type === "Stock" ? 1 : 100)) : leg.market_value != null ? fmtUsd(Math.abs(leg.market_value)) : "—"}</td>
-      <td></td>
+      <td className="right cell-muted">{fmtPrice(legEc)}</td>
+      <td className="right cell-muted">{rtLast != null ? fmtUsd(rtLast * leg.contracts * mult) : leg.market_value != null ? fmtUsd(Math.abs(leg.market_value)) : "—"}</td>
+      <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
+        {legPnl != null ? `${legPnl >= 0 ? "+" : ""}${fmtUsd(Math.abs(legPnl))}` : "—"}
+      </td>
       {showExpiry && <td></td>}
     </tr>
   );
@@ -237,7 +253,7 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlying = false, realtimePrice, prices }: { pos: PortfolioPosition; showExpiry?: boolean; showStrike?: boolean; showUnderlying?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData> }) {
+function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlying = false, realtimePrice, prices, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showStrike?: boolean; showUnderlying?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -366,6 +382,7 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlyin
             showExpiry={showExpiry}
             showUnderlying={showUnderlying}
             realtimeLegPrice={key && prices ? prices[key] : null}
+            onLegClick={onLegClick ? (l) => onLegClick(l, pos) : undefined}
           />
         );
       })}
@@ -379,30 +396,49 @@ export default function PositionTable({ positions, showExpiry = true, showStrike
   const positionExtract = useMemo(() => makePositionExtract(prices), [prices]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
 
+  // Instrument detail modal state
+  const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
+
+  const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
+    setActiveInstrument({ leg, ticker: pos.ticker, expiry: pos.expiry });
+  }, []);
+
   return (
-    <table>
-      <thead>
-        <tr>
-          <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-          <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-          {showExpiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-        </tr>
-      </thead>
-      <tbody>
-        {sorted.map((pos) => (
-          <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showStrike={showStrike} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} />
-        ))}
-      </tbody>
-    </table>
+    <>
+      <table>
+        <thead>
+          <tr>
+            <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {showExpiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+          </tr>
+        </thead>
+        <tbody>
+          {sorted.map((pos) => (
+            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showStrike={showStrike} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} onLegClick={handleLegClick} />
+          ))}
+        </tbody>
+      </table>
+
+      {activeInstrument && prices && (
+        <InstrumentDetailModal
+          leg={activeInstrument.leg}
+          ticker={activeInstrument.ticker}
+          expiry={activeInstrument.expiry}
+          prices={prices}
+          onClose={() => setActiveInstrument(null)}
+        />
+      )}
+    </>
   );
 }
