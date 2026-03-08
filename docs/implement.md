@@ -161,6 +161,54 @@ If a script fails:
 | Exit service daemon | `python3 scripts/exit_order_service.py --daemon` |
 | Install exit service | `./scripts/setup_exit_order_service.sh install` |
 | Exit service status | `./scripts/setup_exit_order_service.sh status` |
+| **IBC Gateway status** | `./scripts/setup_ibc.sh status` |
+| **IBC Gateway install** | `./scripts/setup_ibc.sh install` |
+| **IBC Gateway start** | `./scripts/setup_ibc.sh start` |
+| **IBC Gateway stop** | `./scripts/setup_ibc.sh stop` |
+| **IBC Gateway logs** | `./scripts/setup_ibc.sh logs` |
+
+### IB Gateway Management (IBC)
+
+IB Gateway is automated via IBC v3.23.0 (vendored at `vendor/ibc/`). IBC handles login, 2FA, session conflicts, daily restarts, and dialog suppression.
+
+**Service commands:**
+```bash
+./scripts/setup_ibc.sh install    # Detect Gateway, patch config, install launchd service
+./scripts/setup_ibc.sh uninstall  # Remove launchd service
+./scripts/setup_ibc.sh status     # Show service state, Gateway PID, config settings
+./scripts/setup_ibc.sh logs       # Tail IBC log files
+./scripts/setup_ibc.sh start      # Manually start Gateway (foreground, for 2FA approval)
+./scripts/setup_ibc.sh stop       # Send STOP to IBC command server (port 7462)
+```
+
+**Automated lifecycle (Mon-Fri):**
+1. **00:00** — launchd starts Gateway via IBC
+2. IBC auto-fills credentials from `~/ibc/config.ini`, approves dialogs
+3. You approve 2FA on IBKR Mobile once
+4. **11:58 PM** — IBC restarts Gateway (reuses auth session, no 2FA)
+5. **Sunday 07:05** — Cold restart with full re-auth (2FA required)
+
+**Key config settings (`~/ibc/config.ini`):**
+| Setting | Value | Purpose |
+|---------|-------|---------|
+| `ExistingSessionDetectedAction` | `primary` | Gateway reconnects if bumped |
+| `AcceptIncomingConnectionAction` | `accept` | No popup for API connections |
+| `AcceptNonBrokerageAccountWarning` | `yes` | Auto-dismiss paper trading dialog |
+| `AutoRestartTime` | `11:58 PM` | Daily restart before IB's forced window |
+| `ColdRestartTime` | `07:05` | Sunday re-auth |
+| `CommandServerPort` | `7462` | IBC command server for stop/restart |
+| `ReloginAfterSecondFactorAuthenticationTimeout` | `yes` | Retry if 2FA times out |
+
+**Architecture:**
+- Plist calls `vendor/ibc/scripts/displaybannerandlaunch.sh` directly (bypasses `gatewaystartmacos.sh` which clobbers env vars)
+- Environment variables set in plist: `APP=GATEWAY`, `TWS_MAJOR_VRSN`, `IBC_PATH`, `IBC_INI`, `LOG_PATH`, `TWOFA_TIMEOUT_ACTION=restart`
+- Logs: `~/ibc/logs/ibc-gateway.log` (stdout/stderr), `~/ibc/logs/ibc-*.txt` (diagnostics)
+- `KeepAlive=false` — IBC/Gateway manage their own lifecycle via AutoRestartTime
+
+**Troubleshooting:**
+- Gateway not running after install → approve 2FA on IBKR Mobile, or run `./scripts/setup_ibc.sh start` manually
+- `ExistingSessionDetectedAction=primary` means this Gateway always wins session conflicts
+- IBC command server (port 7462) allows `STOP`, `RESTART`, `RECONNECT` commands via `echo "STOP" | nc localhost 7462`
 
 ### IB Connection Ports
 | Port | Environment |
@@ -169,6 +217,7 @@ If a script fails:
 | 7497 | TWS Paper |
 | 4001 | IB Gateway Live |
 | 4002 | IB Gateway Paper |
+| 7462 | IBC Command Server (stop/restart Gateway) |
 
 ---
 

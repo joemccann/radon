@@ -118,6 +118,7 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 | `scripts/vcg_scan.py` | Volatility-Credit Gap divergence scanner |
 | `scripts/cri_scan.py` | Crash Risk Index — CTA deleveraging detection |
 | `scripts/fetch_menthorq_cta.py` | MenthorQ CTA positioning (browser + Vision extraction) |
+| `scripts/setup_ibc.sh` | IBC Gateway service manager (install/uninstall/status/logs/start/stop) |
 
 ---
 
@@ -333,7 +334,24 @@ Full spec: `docs/unusual_whales_api.md` | `docs/unusual_whales_api_spec.yaml`
 
 ---
 
-## IB Ports
+## IB Gateway & IBC
+
+IB Gateway is managed by IBC (Interactive Brokers Controller) v3.23.0, vendored at `vendor/ibc/`.
+
+**Setup:** `./scripts/setup_ibc.sh {install|uninstall|status|logs|start|stop}`
+
+**Lifecycle (automated via launchd):**
+- **Mon-Fri 00:00** — launchd starts Gateway via IBC, auto-fills credentials, suppresses dialogs
+- **2FA** — approve once on IBKR Mobile; IBC retries if missed (`TWOFA_TIMEOUT_ACTION=restart`)
+- **11:58 PM daily** — IBC auto-restarts Gateway (reuses auth session, no 2FA needed)
+- **Sunday 07:05** — Cold restart: full shutdown + fresh login (weekly re-auth, 2FA required)
+
+**Key config (`~/ibc/config.ini`):**
+- `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped by another session
+- `AcceptIncomingConnectionAction=accept` — no popup for API connections
+- `CommandServerPort=7462` — IBC command server for stop/restart
+
+**Ports:**
 
 | Port | Connection |
 |------|-----------|
@@ -341,6 +359,7 @@ Full spec: `docs/unusual_whales_api.md` | `docs/unusual_whales_api_spec.yaml`
 | 7497 | TWS Paper (default) |
 | 4001 | IB Gateway Live |
 | 4002 | IB Gateway Paper |
+| 7462 | IBC Command Server (stop/restart Gateway) |
 
 IB error `10358` = Reuters Fundamentals subscription inactive → auto-fallback to next source.
 
@@ -359,6 +378,7 @@ IB error `10358` = Reuters Fundamentals subscription inactive → auto-fallback 
 
 ## Startup Checklist
 
+- [ ] IB Gateway running (`./scripts/setup_ibc.sh status`) — if not, approve 2FA on IBKR Mobile
 - [ ] IB reconciliation auto-runs (`scripts/ib_reconcile.py`) — check `data/reconciliation.json`
 - [ ] Exit order service auto-runs — checks `PENDING_MANUAL` positions
 - [ ] X account scan: if last scan >12h ago, run `x-scan` for flagged accounts

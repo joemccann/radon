@@ -1,9 +1,10 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-07T16:00:00-08:00
+2026-03-07T21:35:00-07:00
 
 ## Recent Commits
+- 2026-03-07 21:33:00 -0700 — **feat: Add IBC Gateway setup script — automated IB Gateway management via launchd (Mon-Fri auto-start, daily restart, 2FA handling, dialog suppression)**
 - 2026-03-07 16:00:00 -0800 — **fix: Enforce data source priority (IB → UW → Yahoo) in all scanners. Add UW OHLC fallback to CRI, VCG, GARCH, LEAP scanners. Yahoo is LAST RESORT only.**
 - 2026-03-07 15:36:00 -0800 — feat: Add MenthorQ client Phase 2 methods + full integration tests
 - 2026-03-07 08:20:00 -0800 — feat: Add realtime price chart to ticker detail modal
@@ -366,6 +367,7 @@ Click any ticker across all 6 table sections → 720px modal with:
 | `garch_convergence.py` | **⭐ GARCH Convergence scanner (parallel, ~3s for 23 tickers)** |
 | `portfolio_report.py` | **⭐ Self-contained portfolio HTML report (IB + DP flow + thesis check)** |
 | `context_constructor.py` | **⭐ Persistent memory: Constructor (auto-load) + Evaluator (save facts/episodes)** |
+| `setup_ibc.sh` | **⭐ IBC Gateway service manager (install/uninstall/status/logs/start/stop)** |
 
 ### Skills
 | Skill | Purpose |
@@ -377,6 +379,7 @@ Click any ticker across all 6 table sections → 720px modal with:
 ### Services
 | Service | Status | Description |
 |---------|--------|-------------|
+| IBC Gateway | 🟢 Active | Automated IB Gateway management — login, 2FA, daily restart, dialog suppression |
 | Monitor Daemon | 🟢 Active | Fill monitoring, exit order placement, preset rebalancing |
 | IB Reconciliation | 🟢 Active | Runs at Pi startup (async) |
 | Context Constructor | 🟢 Active | Loads persistent memory at Pi startup (sync) |
@@ -454,6 +457,7 @@ Click any ticker across all 6 table sections → 720px modal with:
 - [x] **Web: undefined risk table moved above equity positions on portfolio page**
 - [x] **Context engineering: `context_constructor.py` — Constructor + Evaluator pipeline, auto-loads at startup**
 - [x] **Seeded 7 persistent facts from evaluation history + 1 episodic summary**
+- [x] **IBC Gateway setup script — automated IB Gateway management via launchd**
 - [ ] Execute MSFT LEAP call trade (pending confirmation)
 - [ ] Close undefined risk positions before Friday expiry
 - [ ] Review PLTR for profit-taking (23 DTE, +175%)

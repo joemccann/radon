@@ -555,3 +555,45 @@ The **master client** has special privileges:
 **Important:** Only ONE connection can use `clientId=0` at a time. If TWS is using it, the API connection will be rejected (or vice versa).
 
 Use `ib_order_manage.py` for cancel/modify operations — it connects as master to handle TWS-placed orders.
+
+---
+
+## IBC Gateway Automation
+
+IB Gateway is managed by IBC v3.23.0 (`vendor/ibc/`), installed as a launchd service.
+
+### Service Management
+```bash
+./scripts/setup_ibc.sh install    # Detect Gateway version, patch config, install service
+./scripts/setup_ibc.sh uninstall  # Remove service
+./scripts/setup_ibc.sh status     # Service state, Gateway PID, config
+./scripts/setup_ibc.sh logs       # Tail log files
+./scripts/setup_ibc.sh start      # Manual foreground start (for 2FA)
+./scripts/setup_ibc.sh stop       # Send STOP via IBC command server
+```
+
+### Lifecycle
+| Time | Action | 2FA Required |
+|------|--------|-------------|
+| Mon-Fri 00:00 | launchd starts Gateway via IBC | First login only |
+| Daily 11:58 PM | IBC auto-restart (reuses auth session) | No |
+| Sunday 07:05 | Cold restart (full re-auth) | Yes |
+
+### Config (`~/ibc/config.ini`)
+Credentials are in this file (never committed). The setup script patches operational settings only:
+- `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped
+- `AutoRestartTime=11:58 PM` — before IB's forced restart window
+- `ColdRestartTime=07:05` — Sunday re-auth
+- `CommandServerPort=7462` — enables `echo "STOP" | nc localhost 7462`
+
+### Ports
+| Port | Service |
+|------|---------|
+| 4001 | IB Gateway API (Live) |
+| 7462 | IBC Command Server (stop/restart) |
+
+### Logs
+| File | Content |
+|------|---------|
+| `~/ibc/logs/ibc-gateway.log` | stdout/stderr from launchd |
+| `~/ibc/logs/ibc-{version}_GATEWAY-{ver}_{day}.txt` | IBC diagnostic log (login, 2FA, config) |
