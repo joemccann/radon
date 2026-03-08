@@ -37,7 +37,7 @@ export type PiResponse = {
   error?: string;
 };
 
-export type WorkspaceSection = "dashboard" | "flow-analysis" | "portfolio" | "orders" | "scanner" | "discover" | "journal";
+export type WorkspaceSection = "dashboard" | "flow-analysis" | "portfolio" | "orders" | "scanner" | "discover" | "journal" | "regime";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 

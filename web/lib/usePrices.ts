@@ -5,6 +5,7 @@ import {
   type WSMessage,
   type PriceData,
   type OptionContract,
+  type IndexContract,
   normalizeSymbolList,
   symbolKey,
   contractsKey,
@@ -21,6 +22,8 @@ export type UsePricesOptions = {
   symbols: string[];
   /** Option contracts to subscribe to */
   contracts?: OptionContract[];
+  /** Index contracts to subscribe to (e.g. VIX, VVIX) */
+  indexes?: IndexContract[];
   /** Enable real-time streaming (default: true) */
   enabled?: boolean;
   /** Callback when a price updates */
@@ -51,6 +54,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   const {
     symbols,
     contracts = [],
+    indexes = [],
     enabled = true,
     onPriceUpdate,
     onConnectionChange,
@@ -67,6 +71,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
   const symbolHash = symbolKey(symbols);
   const contractHash = contractsKey(contracts);
+  const indexHash = useMemo(
+    () => indexes.map((i) => `${i.symbol}@${i.exchange}`).sort().join(","),
+    [indexes],
+  );
   const normalizedSymbols = useMemo(
     () => normalizeSymbolList(symbols),
     [symbolHash],
@@ -75,6 +83,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     () => contracts,
     [contractHash],
   );
+  const normalizedIndexes = useMemo(
+    () => indexes,
+    [indexHash],
+  );
 
   const socketUrl =
     process.env.NEXT_PUBLIC_IB_REALTIME_WS_URL ??
@@ -82,7 +94,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     "ws://localhost:8765";
 
   const connect = useCallback(() => {
-    if (!enabled || (normalizedSymbols.length === 0 && normalizedContracts.length === 0)) return;
+    if (!enabled || (normalizedSymbols.length === 0 && normalizedContracts.length === 0 && normalizedIndexes.length === 0)) return;
 
     if (reconnectTimeoutRef.current) {
       clearTimeout(reconnectTimeoutRef.current);
@@ -107,6 +119,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
           action: "subscribe",
           symbols: normalizedSymbols,
           ...(normalizedContracts.length > 0 ? { contracts: normalizedContracts } : {}),
+          ...(normalizedIndexes.length > 0 ? { indexes: normalizedIndexes } : {}),
         }),
       );
     };
@@ -157,10 +170,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       setConnected(false);
       onConnectionChange?.(false);
 
-      if (!enabled || (normalizedSymbols.length === 0 && normalizedContracts.length === 0)) return;
+      if (!enabled || (normalizedSymbols.length === 0 && normalizedContracts.length === 0 && normalizedIndexes.length === 0)) return;
 
       reconnectTimeoutRef.current = setTimeout(() => {
-        if (mountedRef.current && enabled && (normalizedSymbols.length > 0 || normalizedContracts.length > 0)) {
+        if (mountedRef.current && enabled && (normalizedSymbols.length > 0 || normalizedContracts.length > 0 || normalizedIndexes.length > 0)) {
           connect();
         }
       }, 5000);
@@ -173,7 +186,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       onConnectionChange?.(false);
       ws.close();
     };
-  }, [enabled, normalizedSymbols, normalizedContracts, onConnectionChange, onPriceUpdate, socketUrl, symbolHash, contractHash]);
+  }, [enabled, normalizedSymbols, normalizedContracts, normalizedIndexes, onConnectionChange, onPriceUpdate, socketUrl, symbolHash, contractHash, indexHash]);
 
   const reconnect = useCallback(() => {
     connect();
@@ -212,7 +225,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   useEffect(() => {
     mountedRef.current = true;
 
-    if (enabled && (normalizedSymbols.length > 0 || normalizedContracts.length > 0)) {
+    if (enabled && (normalizedSymbols.length > 0 || normalizedContracts.length > 0 || normalizedIndexes.length > 0)) {
       connect();
     } else {
       if (wsRef.current) {
@@ -236,7 +249,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         reconnectTimeoutRef.current = null;
       }
     };
-  }, [connect, enabled, onConnectionChange, symbolHash, contractHash, normalizedSymbols.length, normalizedContracts.length]);
+  }, [connect, enabled, onConnectionChange, symbolHash, contractHash, indexHash, normalizedSymbols.length, normalizedContracts.length, normalizedIndexes.length]);
 
   return {
     prices,

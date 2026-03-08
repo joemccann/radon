@@ -33,6 +33,7 @@ import { fmtPrice, fmtUsd, legPriceKey } from "@/lib/positionUtils";
 import PositionTable from "./PositionTable";
 import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
+import RegimePanel from "./RegimePanel";
 
 /* ─── Re-exports for backward compat ──────────────────── */
 
@@ -1225,6 +1226,8 @@ export default function WorkspaceSections({ section, portfolio, orders, prices }
       return <DiscoverSections />;
     case "journal":
       return <JournalSections />;
+    case "regime":
+      return <RegimePanel prices={prices ?? {}} />;
     default:
       return <FlowSections />;
   }

@@ -211,5 +211,9 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "journal";
   }
 
+  if (pathname.startsWith("/regime")) {
+    return "regime";
+  }
+
   return fallback;
 }

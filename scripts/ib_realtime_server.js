@@ -86,6 +86,23 @@ function normalizeContracts(raw) {
     .filter(Boolean);
 }
 
+/**
+ * Validate and normalize index contract descriptors from client messages.
+ * Each must have symbol (string) and exchange (string, e.g. "CBOE").
+ */
+function normalizeIndexes(raw) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((c) => {
+      if (typeof c !== "object" || c === null) return null;
+      const symbol = typeof c.symbol === "string" ? c.symbol.trim().toUpperCase() : null;
+      const exchange = typeof c.exchange === "string" ? c.exchange.trim().toUpperCase() : null;
+      if (!symbol || !exchange) return null;
+      return { symbol, exchange };
+    })
+    .filter(Boolean);
+}
+
 function normalizeNumber(value) {
   if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
     return null;
@@ -205,7 +222,8 @@ function parseActionMessage(raw) {
 
   const symbols = Array.isArray(payload.symbols) ? normalizeSymbols(payload.symbols) : [];
   const contracts = Array.isArray(payload.contracts) ? normalizeContracts(payload.contracts) : [];
-  return { action, symbols, contracts };
+  const indexes = Array.isArray(payload.indexes) ? normalizeIndexes(payload.indexes) : [];
+  return { action, symbols, contracts, indexes };
 }
 
 const cli = parseArgs(process.argv.slice(2));
@@ -545,7 +563,8 @@ async function handleClientMessage(client, data) {
 
   const symbols = message.symbols;
   const contracts = message.contracts;
-  verbose(`action=${message.action} symbols=[${symbols.join(",")}] contracts=${contracts.length}`);
+  const indexes = message.indexes;
+  verbose(`action=${message.action} symbols=[${symbols.join(",")}] contracts=${contracts.length} indexes=${indexes.length}`);
   switch (message.action) {
     case "subscribe": {
       const subscribed = [];
@@ -572,6 +591,24 @@ async function handleClientMessage(client, data) {
         subscribeClientToSymbol(client, key);
         if (ibConnected) {
           const ibContract = ib.contract.option(c.symbol, c.expiry, c.strike, c.right);
+          startLiveSubscription(key, ibContract);
+          const state = symbolStates.get(key);
+          if (state) {
+            sendMessage(client, {
+              type: "price",
+              symbol: key,
+              data: state.data,
+            });
+          }
+          subscribed.push(key);
+        }
+      }
+      // Index subscriptions (e.g. VIX, VVIX on CBOE)
+      for (const idx of indexes) {
+        const key = idx.symbol;
+        subscribeClientToSymbol(client, key);
+        if (ibConnected) {
+          const ibContract = ib.contract.index(idx.symbol, "USD", idx.exchange);
           startLiveSubscription(key, ibContract);
           const state = symbolStates.get(key);
           if (state) {

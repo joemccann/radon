@@ -116,6 +116,13 @@ export function portfolioLegToContract(
   };
 }
 
+/* ─── Index contract types ────────────────────────────── */
+
+export type IndexContract = {
+  symbol: string;
+  exchange: string; // e.g. "CBOE"
+};
+
 /* ─── Symbol helpers ──────────────────────────────────── */
 
 export function normalizeSymbolList(symbols: string[]): string[] {

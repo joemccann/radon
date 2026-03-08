@@ -85,10 +85,10 @@ def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
 
     ib = IB()
     try:
-        ib.connect("127.0.0.1", 4001, clientId=0, timeout=8)
+        ib.connect("127.0.0.1", 4001, clientId=50, timeout=8)
     except Exception:
         try:
-            ib.connect("127.0.0.1", 7497, clientId=0, timeout=8)
+            ib.connect("127.0.0.1", 7497, clientId=50, timeout=8)
         except Exception:
             return {}
 

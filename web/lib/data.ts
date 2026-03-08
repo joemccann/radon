@@ -4,6 +4,7 @@ import {
   LayoutDashboard,
   LineChart,
   Search,
+  Shield,
   Sparkles,
   Wrench,
 } from "lucide-react";
@@ -29,6 +30,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Scanner", route: "scanner", href: "/scanner", icon: Sparkles },
   { label: "Discover", route: "discover", href: "/discover", icon: Search },
   { label: "Journal", route: "journal", href: "/journal", icon: Wrench },
+  { label: "Regime", route: "regime", href: "/regime", icon: Shield },
 ];
 
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
@@ -39,6 +41,7 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
   scanner: ["scan --top 25", "scan --min-score 12", "evaluate igv", "discover", "help"],
   discover: ["discover", "scan --top 12", "analyze aaoi", "journal", "help"],
   journal: ["journal --limit 25", "portfolio", "analyze nfLx", "help"],
+  regime: ["cri-scan", "portfolio", "scan --top 12", "help"],
 };
 
 export const sectionDescription: Record<WorkspaceSection, string> = {
@@ -49,4 +52,5 @@ export const sectionDescription: Record<WorkspaceSection, string> = {
   scanner: "Candidate discovery and scan-driven alerts.",
   discover: "Opportunity discovery and watchlist growth.",
   journal: "Trade decision logs and history review.",
+  regime: "Crash Risk Index — real-time CTA deleveraging monitor.",
 };

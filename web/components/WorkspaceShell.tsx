@@ -13,7 +13,7 @@ import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
 import { useBlotter } from "@/lib/useBlotter";
 import { usePreviousClose } from "@/lib/usePreviousClose";
-import { type OptionContract, optionKey, portfolioLegToContract } from "@/lib/pricesProtocol";
+import { type OptionContract, type IndexContract, optionKey, portfolioLegToContract } from "@/lib/pricesProtocol";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import ChatPanel from "@/components/ChatPanel";
@@ -90,9 +90,17 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
     [portfolioContracts, orderContracts],
   );
 
+  const regimeIndexes = useMemo<IndexContract[]>(
+    () => activeSection === "regime"
+      ? [{ symbol: "VIX", exchange: "CBOE" }, { symbol: "VVIX", exchange: "CBOE" }]
+      : [],
+    [activeSection],
+  );
+
   const { prices: rawPrices, connected: wsConnected, ibConnected: rawIbConnected } = usePrices({
     symbols: allSymbols,
     contracts: allContracts,
+    indexes: regimeIndexes,
   });
 
   // Debounce ibConnected: disconnections must persist >2s before surfacing to UI.

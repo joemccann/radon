@@ -529,6 +529,76 @@ ${memoryContent}
     proc.unref();
   };
 
+  // Run CRI scan asynchronously to pre-warm data/cri.json for /regime page
+  const runCriScan = (cwd: string, tracker: StartupTracker) => {
+    const scriptPath = path.join(cwd, "scripts/cri_scan.py");
+    const cachePath = path.join(cwd, "data/cri.json");
+
+    if (!fs.existsSync(scriptPath)) {
+      tracker.complete("cri", "warning", "CRI scan script not found");
+      return;
+    }
+
+    // Check if cache is fresh (< 30 min old) — skip scan if so
+    if (fs.existsSync(cachePath)) {
+      try {
+        const stat = fs.statSync(cachePath);
+        const ageMinutes = (Date.now() - stat.mtimeMs) / (1000 * 60);
+        if (ageMinutes < 30) {
+          tracker.complete("cri", "success", `CRI cache fresh (${Math.round(ageMinutes)}m old)`);
+          return;
+        }
+      } catch {
+        // Fall through to run scan
+      }
+    }
+
+    // Spawn cri_scan.py --json in background
+    const proc = spawn("python3", [scriptPath, "--json"], {
+      cwd,
+      detached: true,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    let output = "";
+    let errorOutput = "";
+
+    proc.stdout?.on("data", (data) => {
+      output += data.toString();
+    });
+
+    proc.stderr?.on("data", (data) => {
+      errorOutput += data.toString();
+    });
+
+    proc.on("close", (code) => {
+      if (code === 0 && output.trim()) {
+        // Write result to cache file for /regime page
+        try {
+          const jsonStart = output.indexOf("{");
+          if (jsonStart >= 0) {
+            const jsonStr = output.slice(jsonStart);
+            const parsed = JSON.parse(jsonStr);
+            const score = parsed?.cri?.score ?? "?";
+            const level = parsed?.cri?.level ?? "?";
+            fs.writeFileSync(cachePath, JSON.stringify(parsed, null, 2));
+            tracker.complete("cri", "success", `CRI: ${score}/100 (${level})`);
+          } else {
+            tracker.complete("cri", "warning", "CRI scan: no JSON output");
+          }
+        } catch (e) {
+          tracker.complete("cri", "warning", "CRI scan: parse error");
+        }
+      } else if (errorOutput.includes("client id is already in use") || errorOutput.includes("Cannot connect")) {
+        tracker.complete("cri", "warning", "CRI: IB busy, skipped");
+      } else {
+        tracker.complete("cri", "warning", "CRI scan failed");
+      }
+    });
+
+    proc.unref();
+  };
+
   // Check X account scan status
   const checkXScanStatus = (cwd: string): { account: string; needsScan: boolean; lastScan: string | null; hoursSince: number | null }[] => {
     const watchlistPath = path.join(cwd, "data/watchlist.json");
@@ -654,7 +724,7 @@ ${memoryContent}
     // Build list of processes to track
     // Order matters: IB sync must complete BEFORE free trade analysis
     // because closed positions affect which multi-leg positions exist
-    const processNames: string[] = ["market", "docs", "ib", "free_trade", "daemon"];
+    const processNames: string[] = ["market", "docs", "ib", "free_trade", "daemon", "cri"];
     
     // Add ALL X accounts to process list (not just pending scans)
     for (const scan of xScans) {
@@ -693,6 +763,9 @@ ${memoryContent}
     // This handles fill monitoring and exit order placement
     ensureMonitorDaemonRunning(ctx.cwd, tracker);
     
+    // Run CRI scan in parallel (pre-warm /regime page data)
+    runCriScan(ctx.cwd, tracker);
+
     // Run X account scans in parallel (independent of IB/free trade)
     for (const scan of xScans) {
       runXScan(ctx.cwd, scan.account, tracker);
