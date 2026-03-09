@@ -1,6 +1,6 @@
 {
   "name": "convex-scavenger",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "An AI-powered options trading agent built on [PI](https://github.com/mariozechner/pi-coding-agent) that hunts for asymmetric bets using institutional dark pool flow data. It enforces a strict three-gate discipline — convexity, edge, risk management — on every trade decision.",
   "type": "module",
   "main": "index.js",

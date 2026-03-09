@@ -1,7 +1,7 @@
 {
   "name": "convex-scavenger-web",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Embedded Convex Scavenger dashboard with a conversational Claude-powered interface.",
   "type": "module",
   "scripts": {
