@@ -163,6 +163,8 @@ describe("quickPromptsBySection", () => {
     "scanner",
     "discover",
     "journal",
+    "regime",
+    "cta",
   ];
 
   it("covers all WorkspaceSection keys", () => {
@@ -208,6 +210,8 @@ describe("sectionDescription", () => {
     "scanner",
     "discover",
     "journal",
+    "regime",
+    "cta",
   ];
 
   it("covers all WorkspaceSection keys", () => {

@@ -34,6 +34,7 @@ import PositionTable from "./PositionTable";
 import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
 import RegimePanel from "./RegimePanel";
+import CtaPage from "./CtaPage";
 
 /* ─── Re-exports for backward compat ──────────────────── */
 
@@ -1228,6 +1229,8 @@ export default function WorkspaceSections({ section, portfolio, orders, prices }
       return <JournalSections />;
     case "regime":
       return <RegimePanel prices={prices ?? {}} />;
+    case "cta":
+      return <CtaPage />;
     default:
       return <FlowSections />;
   }

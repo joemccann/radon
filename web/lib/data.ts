@@ -1,4 +1,5 @@
 import {
+  Activity,
   Circle,
   ClipboardList,
   LayoutDashboard,
@@ -31,6 +32,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Discover", route: "discover", href: "/discover", icon: Search },
   { label: "Journal", route: "journal", href: "/journal", icon: Wrench },
   { label: "Regime", route: "regime", href: "/regime", icon: Shield },
+  { label: "CTA", route: "cta", href: "/cta", icon: Activity },
 ];
 
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
@@ -42,6 +44,7 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
   discover: ["discover", "scan --top 12", "analyze aaoi", "journal", "help"],
   journal: ["journal --limit 25", "portfolio", "analyze nfLx", "help"],
   regime: ["cri-scan", "portfolio", "scan --top 12", "help"],
+  cta: ["menthorq-cta", "cri-scan", "portfolio", "help"],
 };
 
 export const sectionDescription: Record<WorkspaceSection, string> = {
@@ -53,4 +56,5 @@ export const sectionDescription: Record<WorkspaceSection, string> = {
   discover: "Opportunity discovery and watchlist growth.",
   journal: "Trade decision logs and history review.",
   regime: "Crash Risk Index — real-time CTA deleveraging monitor.",
+  cta: "CTA positioning, vol-targeting exposure model and institutional flow.",
 };
