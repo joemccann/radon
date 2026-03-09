@@ -52,6 +52,20 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 - **Market CLOSED**: Use latest available. Note: `"Market closed — using last available data."`
 - **Never analyze stale data without flagging it.**
 
+### CRI / Regime Staleness Rule — Market-Hours Aware
+
+**`/api/regime` only triggers background `cri_scan.py` during market hours.**
+
+| Condition | Stale? | Action |
+|-----------|--------|--------|
+| `data.date !== today (ET)` | YES | Trigger background scan (new trading day) |
+| `market_open === true` + mtime > 60s | YES | Trigger background scan (intraday refresh) |
+| `market_open === false` + date = today | **NO** | Serve cached EOD data — launchd handles schedule |
+
+**Rule**: When `cri_scan.py` sets `market_open: false`, the API must treat that data as final and stop triggering re-scans. The launchd CRI service (every 30 min, 4:05 AM–8 PM ET) provides the EOD calculation automatically.
+
+**Implementation**: `web/lib/criStaleness.ts` — `isCriDataStale(data, mtimeMs, todayET)` is the single source of truth for this logic. Tests in `web/tests/regime-cri-staleness.test.ts`. **Do not inline this logic in the route.**
+
 ---
 
 ## Evaluation — 7 Milestones (Stop on Any Failure)
@@ -127,6 +141,10 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 | `scripts/setup_ibc.sh` | IBC Gateway service manager (install/uninstall/status/logs/start/stop) |
 | `scripts/setup_cri_service.sh` | CRI Scan launchd service (every 30 min, 4:05 AM–8 PM ET, Mon-Fri trading days) |
 | `scripts/run_cri_scan.sh` | Holiday-aware CRI scan wrapper for launchd |
+| `scripts/clients/inspect_dashboard.py` | MenthorQ DOM inspector — finds chart containers, S3 image URLs per command |
+| `scripts/clients/map_nav.py` | MenthorQ navigation tree mapper — discovers all sidebar links and pages |
+| `scripts/clients/map_screeners.py` | MenthorQ screener slug discovery — maps all sub-slugs and ticker tab clicks |
+| `scripts/clients/map_subnav.py` | MenthorQ sub-navigation mapper — checks ticker tabs and selectors per page |
 
 ---
 
