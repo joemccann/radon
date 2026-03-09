@@ -73,6 +73,82 @@ DASHBOARD_COMMANDS = {
     "cryptos_options": "cryptos_options",
 }
 
+# Dashboard commands that support ticker tab selection
+TICKER_TAB_COMMANDS = {"eod", "intraday", "futures", "cryptos_technical", "cryptos_options"}
+
+# Valid tickers for dashboard ticker tabs (16 tabs shown in sidebar)
+DASHBOARD_TICKERS = [
+    "spx", "vix", "ndx", "rut", "spy", "qqq", "iwm", "smh",
+    "ibit", "nvda", "googl", "meta", "tsla", "amzn", "msft", "nflx",
+]
+
+# Valid summary categories
+SUMMARY_CATEGORIES = {"futures", "cryptos"}
+
+# Forex command card slugs (data-command-slug attributes on the forex dashboard)
+FOREX_CARD_SLUGS = {"forex_gamma", "forex_blindspot"}
+
+# Validated screener slugs by category (from live DOM discovery 2026-03-08)
+SCREENER_SLUGS = {
+    "gamma": [
+        "highest_gex_change",
+        "highest_negative_dex_change",
+        "highest_negative_gex_change",
+        "biggest_dex_expiry_next_2w",
+        "biggest_gex_expiry_next_2w",
+    ],
+    "gamma_levels": [
+        "closer_0dte_call_resistance",
+        "closer_0dte_put_support",
+        "closer_to_HVL",
+        "closer_call_resistance",
+        "closer_put_support",
+    ],
+    "open_interest": [
+        "highest_call_oi",
+        "highest_oi",
+        "highest_pc_oi",
+        "highest_put_oi",
+        "lowest_pc_oi",
+        "highest_oi_change",
+        "highest_negative_oi_change",
+    ],
+    "volatility": [
+        "highest_iv30",
+        "highest_ivrank",
+        "highest_hv30",
+        "lowest_iv30",
+        "lowest_ivrank",
+        "lowest_hv30",
+    ],
+    "volume": [
+        "highest_call_volume",
+        "highest_put_volume",
+        "highest_total_volume",
+        "unusual_call_activity",
+        "unusual_put_activity",
+        "unusual_activity",
+    ],
+    "qscore": [
+        "highest_option_score",
+        "lowest_option_score",
+        "highest_option_score_diff",
+        "lowest_option_score_diff",
+        "highest_volatility_score",
+        "lowest_volatility_score",
+        "highest_volatility_score_diff",
+        "lowest_volatility_score_diff",
+        "highest_momentum_score",
+        "lowest_momentum_score",
+        "highest_momentum_score_diff",
+        "lowest_momentum_score_diff",
+        "highest_seasonality_score",
+        "lowest_seasonality_score",
+        "highest_seasonality_score_diff",
+        "lowest_seasonality_score_diff",
+    ],
+}
+
 # Anthropic API key env var names (tried in order)
 _ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"]
 
@@ -396,11 +472,24 @@ class MenthorQClient:
 
         Args:
             category: Screener category (e.g. "gamma", "volatility")
-            slug: Specific screener slug (e.g. "top-gamma")
+            slug: Specific screener slug (e.g. "highest_gex_change")
 
         Returns:
             List of dicts, one per screener row.
+
+        Raises:
+            MenthorQExtractionError: If category or slug is not in SCREENER_SLUGS.
         """
+        if category not in SCREENER_SLUGS:
+            raise MenthorQExtractionError(
+                f"Unknown screener category: {category}. "
+                f"Valid categories: {', '.join(sorted(SCREENER_SLUGS))}"
+            )
+        if slug not in SCREENER_SLUGS[category]:
+            raise MenthorQExtractionError(
+                f"Unknown slug '{slug}' for category '{category}'. "
+                f"Valid slugs: {', '.join(SCREENER_SLUGS[category])}"
+            )
         self._navigate({
             "action": "data",
             "type": "screeners",
@@ -409,6 +498,212 @@ class MenthorQClient:
         })
         return self._scrape_tables(self._page)
 
+    def discover_screener_cards(
+        self, category: str
+    ) -> List[Dict[str, str]]:
+        """Navigate to a screener category page and discover all sub-screener cards.
+
+        This navigates to the category overview (without a slug) and scrapes
+        the DOM for card elements that represent each sub-screener. Useful for
+        verifying SCREENER_SLUGS against the live DOM.
+
+        Args:
+            category: Screener category (e.g. "gamma", "volatility").
+
+        Returns:
+            List of dicts with keys: title, slug, description.
+
+        Raises:
+            MenthorQExtractionError: If category is not valid.
+        """
+        valid_categories = set(SCREENER_SLUGS.keys())
+        if category not in valid_categories:
+            raise MenthorQExtractionError(
+                f"Unknown screener category: {category}. "
+                f"Valid categories: {', '.join(sorted(valid_categories))}"
+            )
+        self._navigate({
+            "action": "data",
+            "type": "screeners",
+            "category": category,
+        })
+        cards = self._page.evaluate("""() => {
+            const cards = [];
+            // Look for clickable screener cards in the DOM
+            const cardElements = document.querySelectorAll(
+                '.screener-card, .command-card, [data-slug], a[href*="slug="]'
+            );
+            for (const el of cardElements) {
+                const title = (
+                    el.querySelector('h3, h4, .card-title, .screener-title')
+                    || el.querySelector(':first-child')
+                );
+                const desc = el.querySelector('p, .card-description, .screener-description');
+                const slug = (
+                    el.getAttribute('data-slug')
+                    || el.getAttribute('data-command-slug')
+                    || (el.href && new URL(el.href).searchParams.get('slug'))
+                    || ''
+                );
+                if (title) {
+                    cards.push({
+                        title: title.textContent.trim(),
+                        slug: slug,
+                        description: desc ? desc.textContent.trim() : '',
+                    });
+                }
+            }
+            // Fallback: look for any links with slug params on the page
+            if (cards.length === 0) {
+                const links = document.querySelectorAll('a[href*="slug="]');
+                for (const link of links) {
+                    const url = new URL(link.href);
+                    const slug = url.searchParams.get('slug') || '';
+                    cards.push({
+                        title: link.textContent.trim(),
+                        slug: slug,
+                        description: '',
+                    });
+                }
+            }
+            return cards;
+        }""")
+        return cards if isinstance(cards, list) else []
+
+    def get_all_screener_data(
+        self, category: str
+    ) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch data for ALL sub-screeners in a category.
+
+        Iterates every slug in SCREENER_SLUGS[category], navigates to each
+        sub-screener page, scrapes the table, and returns all results.
+
+        Args:
+            category: Screener category (e.g. "gamma", "volatility").
+
+        Returns:
+            Dict mapping slug → list of row dicts.
+            Example: {"highest_gex_change": [{"ticker": "HYG", ...}, ...], ...}
+
+        Raises:
+            MenthorQExtractionError: If category is not valid.
+        """
+        if category not in SCREENER_SLUGS:
+            raise MenthorQExtractionError(
+                f"Unknown screener category: {category}. "
+                f"Valid categories: {', '.join(sorted(SCREENER_SLUGS))}"
+            )
+        results: Dict[str, List[Dict[str, Any]]] = {}
+        for slug in SCREENER_SLUGS[category]:
+            try:
+                self._navigate({
+                    "action": "data",
+                    "type": "screeners",
+                    "category": category,
+                    "slug": slug,
+                })
+                data = self._scrape_tables(self._page)
+                results[slug] = data
+                logger.info(
+                    f"Screener {category}/{slug}: {len(data)} rows"
+                )
+            except Exception as exc:
+                logger.warning(f"Screener {category}/{slug} failed: {exc}")
+                results[slug] = []
+        return results
+
+    # ── Summary ──────────────────────────────────────────────────
+
+    def get_summary(self, category: str) -> List[Dict[str, Any]]:
+        """Fetch summary page data via HTML table scraping.
+
+        Summary pages contain overview tables for asset classes (e.g.
+        Active Futures with 93 rows, Crypto Market Summary with 16 rows).
+
+        Args:
+            category: Summary category — "futures" or "cryptos".
+
+        Returns:
+            List of dicts, one per table row.
+
+        Raises:
+            MenthorQExtractionError: If category is not valid.
+        """
+        if category not in SUMMARY_CATEGORIES:
+            raise MenthorQExtractionError(
+                f"Unknown summary category: {category}. "
+                f"Valid categories: {', '.join(sorted(SUMMARY_CATEGORIES))}"
+            )
+        self._navigate({
+            "action": "data",
+            "type": "summary",
+            "category": category,
+        })
+        return self._scrape_tables(self._page)
+
+    # ── Forex Levels ─────────────────────────────────────────────
+
+    def get_forex_levels(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Fetch forex gamma levels and blindspot data via text card scraping.
+
+        The forex dashboard renders two command cards (``forex_gamma`` and
+        ``forex_blindspot``) with plain text (not HTML tables or images).
+        Each card contains comma-separated key-value pairs per forex pair.
+
+        Returns:
+            Dict with keys ``"gamma"`` and ``"blindspot"``, each mapping to
+            a list of dicts (one per forex pair) with parsed fields.
+
+            Example::
+
+                {
+                    "gamma": [
+                        {"pair": "EURUSD", "call_resistance": 1.196, "put_support": 1.161, ...},
+                        ...
+                    ],
+                    "blindspot": [
+                        {"pair": "EURUSD", "bl_1": 1.161, "bl_2": 1.164, ...},
+                        ...
+                    ]
+                }
+
+        Raises:
+            MenthorQExtractionError: If no data can be extracted.
+        """
+        self._navigate({
+            "action": "data",
+            "type": "dashboard",
+            "commands": "forex",
+        })
+
+        # Wait for command cards to render
+        for _ in range(5):
+            count = self._page.evaluate(
+                "() => document.querySelectorAll('.command-card').length"
+            )
+            if count >= 2:
+                break
+            time.sleep(3)
+
+        result: Dict[str, List[Dict[str, Any]]] = {}
+
+        for card_slug, key in [("forex_gamma", "gamma"), ("forex_blindspot", "blindspot")]:
+            text = self._scrape_forex_text_card(self._page, card_slug)
+            if text:
+                parsed = self._parse_forex_text(text)
+                result[key] = parsed
+                logger.info(f"Forex {key}: {len(parsed)} pairs parsed")
+            else:
+                logger.warning(f"No text found for forex card: {card_slug}")
+                result[key] = []
+
+        if not result.get("gamma") and not result.get("blindspot"):
+            raise MenthorQExtractionError(
+                "Forex levels extraction returned no data for either card."
+            )
+
+        return result
+
     # ══════════════════════════════════════════════════════════════
     # Phase 2: Dashboard Images + Asset Lists
     # ══════════════════════════════════════════════════════════════
@@ -416,34 +711,45 @@ class MenthorQClient:
     # ── Dashboard Images ─────────────────────────────────────────
 
     def get_dashboard_image(
-        self, command: str, *, tickers: str | None = None
+        self,
+        command: str,
+        *,
+        ticker: str | None = None,
+        tickers: str | None = None,
     ) -> bytes:
         """Fetch a dashboard image, preferring S3 download over screenshot.
 
-        Navigates to the dashboard page, then tries to download the
-        full-resolution S3 image from the command card. Falls back to a
-        viewport screenshot if no S3 image is available.
-
-        Covers GEX, DIX, VIX, flows, dark pool, options, put/call, skew,
-        term structure, breadth, sectors, correlation, CTA flows, vol models,
-        volatility, forex levels, crypto options, crypto quant dashboards.
+        Navigates to the dashboard page, optionally clicks a ticker tab to
+        load that ticker's cards, then downloads the full-resolution S3 image.
+        Falls back to a viewport screenshot if no S3 image is available.
 
         Args:
-            command: Dashboard command slug (e.g. "gex", "dix", "vix").
-            tickers: Optional tickers param (needed for crypto routes).
+            command: Dashboard command slug (e.g. "eod", "vol", "cta").
+            ticker: Optional ticker tab to click (e.g. "nvda", "spy").
+                Only valid for commands in TICKER_TAB_COMMANDS.
+            tickers: Optional tickers URL param (auto-populated from
+                DASHBOARD_COMMANDS if not provided).
 
         Returns:
             PNG image bytes (S3 original or viewport screenshot).
 
         Raises:
             MenthorQExtractionError: If neither S3 download nor screenshot succeeds,
-                or if the command is not a valid dashboard command.
+                if the command is invalid, or if ticker is passed for a
+                command that doesn't support ticker tabs.
         """
         # Validate command
         if command not in DASHBOARD_COMMANDS:
             raise MenthorQExtractionError(
                 f"Unknown dashboard command: {command}. "
                 f"Valid commands: {', '.join(sorted(DASHBOARD_COMMANDS))}"
+            )
+
+        # Validate ticker tab usage
+        if ticker and command not in TICKER_TAB_COMMANDS:
+            raise MenthorQExtractionError(
+                f"Command '{command}' does not support ticker tabs. "
+                f"Ticker tabs are only available for: {', '.join(sorted(TICKER_TAB_COMMANDS))}"
             )
 
         params: Dict[str, str] = {
@@ -468,6 +774,23 @@ class MenthorQClient:
             if count >= 1:
                 break
             time.sleep(3)
+
+        # Click ticker tab if specified
+        if ticker:
+            tab = self._page.query_selector(f'[data-ticker="{ticker}"]')
+            if tab:
+                tab.click()
+                time.sleep(3)
+                # Wait for new cards to load after tab click
+                for _ in range(5):
+                    count = self._page.evaluate(
+                        "() => document.querySelectorAll('.command-card img').length"
+                    )
+                    if count >= 1:
+                        break
+                    time.sleep(3)
+            else:
+                logger.warning(f"Ticker tab not found: {ticker}")
 
         # Try S3 download first
         slugs = {command: command}
@@ -725,6 +1048,111 @@ class MenthorQClient:
             return data;
         }""")
         return result if isinstance(result, dict) else {}
+
+    def _scrape_forex_text_card(self, page: Page, card_slug: str) -> Optional[str]:
+        """Extract raw text from a forex command card's .data-text div.
+
+        Args:
+            page: Current Playwright page.
+            card_slug: The data-command-slug value (e.g. "forex_gamma").
+
+        Returns:
+            Raw text content or None if not found.
+        """
+        text = page.evaluate(
+            """(slug) => {
+                const card = document.querySelector(
+                    `.command-card[data-command-slug="${slug}"]`
+                );
+                if (!card) return null;
+                const textEl = card.querySelector('.data-text');
+                if (!textEl) {
+                    // Fallback: try broader selectors
+                    const content = card.querySelector('.data-content, .main-container');
+                    return content ? content.textContent.trim() : null;
+                }
+                return textEl.textContent.trim();
+            }""",
+            card_slug,
+        )
+        return text if text else None
+
+    @staticmethod
+    def _parse_forex_text(text: str) -> List[Dict[str, Any]]:
+        """Parse forex card text into structured list of pair dicts.
+
+        Input format (one or more pairs, separated by $)::
+
+            $EURUSD: Call Resistance, 1.19602, Put Support, 1.16113, HVL, 1.17857, ...
+            $GBPUSD: Call Resistance, 1.35, ...
+
+        Returns:
+            List of dicts, one per forex pair, with "pair" key and
+            numeric/string fields parsed from key-value pairs.
+        """
+        if not text or not text.strip():
+            return []
+
+        pairs: List[Dict[str, Any]] = []
+
+        # Split by $ to isolate each pair's data
+        segments = text.split("$")
+
+        for segment in segments:
+            segment = segment.strip()
+            if not segment:
+                continue
+
+            # Extract pair name (before the colon)
+            if ":" not in segment:
+                continue
+
+            pair_name, rest = segment.split(":", 1)
+            pair_name = pair_name.strip()
+
+            if not pair_name:
+                continue
+
+            row: Dict[str, Any] = {"pair": pair_name}
+
+            # Parse comma-separated key-value pairs
+            parts = [p.strip() for p in rest.split(",")]
+
+            i = 0
+            while i < len(parts):
+                part = parts[i].strip()
+                if not part:
+                    i += 1
+                    continue
+
+                # Try to parse as: key, value (next part is the value)
+                if i + 1 < len(parts):
+                    value_str = parts[i + 1].strip()
+                    try:
+                        value = float(value_str)
+                        # Normalize key: lowercase, spaces to underscores
+                        key = part.lower().replace(" ", "_").replace("-", "_")
+                        row[key] = value
+                        i += 2
+                        continue
+                    except (ValueError, TypeError):
+                        pass
+
+                # If we can't parse as key-value, try the part itself as a value
+                try:
+                    float(part)
+                    # It's a standalone number — skip
+                    i += 1
+                except (ValueError, TypeError):
+                    # Non-numeric standalone text — add as string value
+                    key = part.lower().replace(" ", "_").replace("-", "_")
+                    row[key] = part
+                    i += 1
+
+            if len(row) > 1:  # More than just "pair"
+                pairs.append(row)
+
+        return pairs
 
     def _download_card_images(
         self, page: Page, slugs: Dict[str, str]

@@ -90,7 +90,10 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 | `vcg-scan` | Cross-asset volatility-credit gap divergence signal |
 | `cri-scan` | Crash Risk Index — systematic CTA deleveraging detection |
 | `menthorq-cta` | Fetch MenthorQ institutional CTA positioning data |
-| `menthorq-dashboard [COMMAND]` | Fetch MenthorQ dashboard image (vol, forex, eod, intraday, futures, cryptos_technical, cryptos_options) |
+| `menthorq-dashboard [COMMAND]` | Fetch MenthorQ dashboard image (vol, forex, eod, intraday, futures, cryptos_technical, cryptos_options). Supports `--ticker` for eod/intraday/futures/crypto dashboards (16 tickers: spx, vix, ndx, etc.) |
+| `menthorq-screener [CATEGORY] [SLUG]` | Fetch MenthorQ screener data (6 categories, 45 sub-screeners). Categories: gamma (5), gamma_levels (5), open_interest (7), volatility (6), volume (6), qscore (16) |
+| `menthorq-forex` | Fetch MenthorQ forex gamma levels + blindspot data (14 pairs, 20+ fields per pair) |
+| `menthorq-summary [CATEGORY]` | Fetch MenthorQ summary tables (futures: 93 rows, cryptos: 16 rows) |
 
 ---
 
@@ -100,7 +103,7 @@ TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, 
 |--------|---------|
 | `scripts/clients/ib_client.py` | **IBClient** — Primary IB API client (connection, orders, quotes, options, fills, flex) |
 | `scripts/clients/uw_client.py` | **UWClient** — Primary UW API client (dark pool, flow, chain, ratings, seasonality, 50+ endpoints) |
-| `scripts/clients/menthorq_client.py` | **MenthorQClient** — MenthorQ browser automation client (CTA, dashboard, screeners). `DASHBOARD_COMMANDS` validates allowed commands. |
+| `scripts/clients/menthorq_client.py` | **MenthorQClient** — MenthorQ browser automation client. Constants: `DASHBOARD_COMMANDS` (8 commands), `TICKER_TAB_COMMANDS` (5), `DASHBOARD_TICKERS` (16), `SCREENER_SLUGS` (6 categories, 45 slugs), `SUMMARY_CATEGORIES` (2), `FOREX_CARD_SLUGS` (2). Methods: `get_cta()`, `get_eod()`, `get_dashboard_image()`, `get_forex_levels()`, `get_summary()`, `get_screener()`, `get_screener_category()`, `get_all_screener_data()`, `discover_screener_cards()`, `get_futures_list/detail/contracts()`, `get_forex_list/detail()`, `get_crypto_list/detail()`, `get_intraday()`. |
 | `scripts/fetch_ticker.py` | Ticker validation |
 | `scripts/fetch_flow.py` | Dark pool + options flow |
 | `scripts/fetch_options.py` | Options chain + institutional flow |

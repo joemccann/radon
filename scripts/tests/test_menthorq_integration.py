@@ -22,6 +22,8 @@ import pytest
 from clients.menthorq_client import (
     MenthorQClient,
     MenthorQError,
+    MenthorQExtractionError,
+    SCREENER_SLUGS,
 )
 
 
@@ -113,7 +115,7 @@ class TestMenthorQIntegrationHTML:
 
     def test_screener_category_gamma(self, client):
         """get_screener_category() returns data for a gamma screener."""
-        result = client.get_screener_category("gamma", "top-gamma")
+        result = client.get_screener_category("gamma", "highest_gex_change")
         assert isinstance(result, list)
 
     def test_futures_list(self, client):
@@ -286,25 +288,371 @@ class TestMenthorQIntegrationImage:
 @pytest.mark.integration
 class TestMenthorQIntegrationScreenerCategories:
     def test_category_gamma(self, client):
-        result = client.get_screener_category("gamma", "top-gamma")
+        result = client.get_screener_category("gamma", "highest_gex_change")
         assert isinstance(result, list)
 
     def test_category_gamma_levels(self, client):
-        result = client.get_screener_category("gamma_levels", "gamma-flip")
+        result = client.get_screener_category("gamma_levels", "closer_to_HVL")
         assert isinstance(result, list)
 
     def test_category_open_interest(self, client):
-        result = client.get_screener_category("open_interest", "top-oi-change")
+        result = client.get_screener_category("open_interest", "highest_oi")
         assert isinstance(result, list)
 
     def test_category_volatility(self, client):
-        result = client.get_screener_category("volatility", "top-iv-rank")
+        result = client.get_screener_category("volatility", "highest_ivrank")
         assert isinstance(result, list)
 
     def test_category_volume(self, client):
-        result = client.get_screener_category("volume", "top-volume")
+        result = client.get_screener_category("volume", "highest_call_volume")
         assert isinstance(result, list)
 
     def test_category_qscore(self, client):
-        result = client.get_screener_category("qscore", "top-qscore")
+        result = client.get_screener_category("qscore", "highest_option_score")
         assert isinstance(result, list)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# TICKER TAB SELECTION
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationTickerTabs:
+    def test_image_eod_nvda(self, client):
+        """get_dashboard_image('eod', ticker='nvda') clicks NVDA tab and returns PNG."""
+        data, s3, attempted = _get_image_with_tracking(client, "eod")
+        # First load default ticker
+        _assert_png(data, "eod/default")
+
+        # Now load with NVDA ticker tab
+        data_nvda = client.get_dashboard_image("eod", ticker="nvda")
+        _assert_png(data_nvda, "eod/nvda")
+
+    def test_image_futures_with_ticker(self, client):
+        """get_dashboard_image('futures', ticker='spy') clicks SPY tab and returns PNG."""
+        data = client.get_dashboard_image("futures", ticker="spy")
+        _assert_png(data, "futures/spy")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SUMMARY PAGES
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationSummary:
+    def test_summary_futures(self, client):
+        """get_summary('futures') returns rows with expected headers."""
+        result = client.get_summary("futures")
+        assert isinstance(result, list)
+        assert len(result) > 0, "Futures summary should have rows"
+        # Check that at least one expected header key exists
+        first_row = result[0]
+        assert isinstance(first_row, dict)
+        assert len(first_row) > 0
+
+    def test_summary_cryptos(self, client):
+        """get_summary('cryptos') returns rows with expected headers."""
+        result = client.get_summary("cryptos")
+        assert isinstance(result, list)
+        assert len(result) > 0, "Crypto summary should have rows"
+        first_row = result[0]
+        assert isinstance(first_row, dict)
+        assert len(first_row) > 0
+
+    def test_summary_invalid_category_raises(self, client):
+        """get_summary() raises MenthorQExtractionError for unknown category."""
+        with pytest.raises(MenthorQExtractionError, match="Unknown summary category"):
+            client.get_summary("stocks")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# FOREX LEVELS (TEXT CARD PARSING)
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationForexLevels:
+    """Verify get_forex_levels() parses text-based forex cards."""
+
+    def test_forex_levels_returns_gamma_and_blindspot(self, client):
+        """get_forex_levels() returns dict with gamma and blindspot keys."""
+        result = client.get_forex_levels()
+        assert isinstance(result, dict)
+        assert "gamma" in result
+        assert "blindspot" in result
+
+    def test_forex_gamma_has_pairs(self, client):
+        """Forex gamma data contains parsed forex pairs."""
+        result = client.get_forex_levels()
+        gamma = result["gamma"]
+        assert isinstance(gamma, list)
+        assert len(gamma) > 0, "Gamma should have at least one forex pair"
+        first = gamma[0]
+        assert isinstance(first, dict)
+        assert "pair" in first, "Each gamma entry should have a 'pair' field"
+
+    def test_forex_gamma_has_numeric_levels(self, client):
+        """Forex gamma pairs have numeric level values."""
+        result = client.get_forex_levels()
+        gamma = result["gamma"]
+        if len(gamma) == 0:
+            pytest.skip("No gamma data available")
+        first = gamma[0]
+        # Should have more than just the pair name
+        assert len(first) > 1, f"Gamma pair should have level data, got: {first}"
+        # At least one value should be numeric
+        numeric_values = [v for k, v in first.items() if k != "pair" and isinstance(v, (int, float))]
+        assert len(numeric_values) > 0, f"Expected numeric level values, got: {first}"
+
+    def test_forex_blindspot_has_pairs(self, client):
+        """Forex blindspot data contains parsed forex pairs."""
+        result = client.get_forex_levels()
+        blindspot = result["blindspot"]
+        assert isinstance(blindspot, list)
+        # Blindspot may or may not have data depending on market conditions
+        if len(blindspot) > 0:
+            first = blindspot[0]
+            assert isinstance(first, dict)
+            assert "pair" in first
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SCREENER DISCOVERY
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationDiscoverScreeners:
+    """Verify discover_screener_cards() can navigate to each category page."""
+
+    def test_discover_gamma(self, client):
+        cards = client.discover_screener_cards("gamma")
+        assert isinstance(cards, list)
+
+    def test_discover_gamma_levels(self, client):
+        cards = client.discover_screener_cards("gamma_levels")
+        assert isinstance(cards, list)
+
+    def test_discover_open_interest(self, client):
+        cards = client.discover_screener_cards("open_interest")
+        assert isinstance(cards, list)
+
+    def test_discover_volatility(self, client):
+        cards = client.discover_screener_cards("volatility")
+        assert isinstance(cards, list)
+
+    def test_discover_volume(self, client):
+        cards = client.discover_screener_cards("volume")
+        assert isinstance(cards, list)
+
+    def test_discover_qscore(self, client):
+        cards = client.discover_screener_cards("qscore")
+        assert isinstance(cards, list)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# SCREENER DATA — ALL SLUGS PER CATEGORY
+# Each test navigates to one sub-screener and verifies table data.
+# ══════════════════════════════════════════════════════════════════════
+
+
+def _assert_screener_data(client, category: str, slug: str):
+    """Helper: fetch screener data and assert it returns a non-empty list of dicts."""
+    result = client.get_screener_category(category, slug)
+    assert isinstance(result, list), f"{category}/{slug}: expected list, got {type(result)}"
+    assert len(result) > 0, f"{category}/{slug}: expected rows, got empty list"
+    first = result[0]
+    assert isinstance(first, dict), f"{category}/{slug}: expected dict rows"
+    assert len(first) > 0, f"{category}/{slug}: row has no columns"
+    return result
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationScreenerGamma:
+    """All 5 gamma sub-screeners return table data."""
+
+    def test_highest_gex_change(self, client):
+        _assert_screener_data(client, "gamma", "highest_gex_change")
+
+    def test_highest_negative_dex_change(self, client):
+        _assert_screener_data(client, "gamma", "highest_negative_dex_change")
+
+    def test_highest_negative_gex_change(self, client):
+        _assert_screener_data(client, "gamma", "highest_negative_gex_change")
+
+    def test_biggest_dex_expiry_next_2w(self, client):
+        _assert_screener_data(client, "gamma", "biggest_dex_expiry_next_2w")
+
+    def test_biggest_gex_expiry_next_2w(self, client):
+        _assert_screener_data(client, "gamma", "biggest_gex_expiry_next_2w")
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationScreenerGammaLevels:
+    """All 5 gamma_levels sub-screeners return table data."""
+
+    def test_closer_0dte_call_resistance(self, client):
+        _assert_screener_data(client, "gamma_levels", "closer_0dte_call_resistance")
+
+    def test_closer_0dte_put_support(self, client):
+        _assert_screener_data(client, "gamma_levels", "closer_0dte_put_support")
+
+    def test_closer_to_HVL(self, client):
+        _assert_screener_data(client, "gamma_levels", "closer_to_HVL")
+
+    def test_closer_call_resistance(self, client):
+        _assert_screener_data(client, "gamma_levels", "closer_call_resistance")
+
+    def test_closer_put_support(self, client):
+        _assert_screener_data(client, "gamma_levels", "closer_put_support")
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationScreenerOpenInterest:
+    """All 7 open_interest sub-screeners return table data."""
+
+    def test_highest_call_oi(self, client):
+        _assert_screener_data(client, "open_interest", "highest_call_oi")
+
+    def test_highest_oi(self, client):
+        _assert_screener_data(client, "open_interest", "highest_oi")
+
+    def test_highest_pc_oi(self, client):
+        _assert_screener_data(client, "open_interest", "highest_pc_oi")
+
+    def test_highest_put_oi(self, client):
+        _assert_screener_data(client, "open_interest", "highest_put_oi")
+
+    def test_lowest_pc_oi(self, client):
+        _assert_screener_data(client, "open_interest", "lowest_pc_oi")
+
+    def test_highest_oi_change(self, client):
+        _assert_screener_data(client, "open_interest", "highest_oi_change")
+
+    def test_highest_negative_oi_change(self, client):
+        _assert_screener_data(client, "open_interest", "highest_negative_oi_change")
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationScreenerVolatility:
+    """All 6 volatility sub-screeners return table data."""
+
+    def test_highest_iv30(self, client):
+        _assert_screener_data(client, "volatility", "highest_iv30")
+
+    def test_highest_ivrank(self, client):
+        _assert_screener_data(client, "volatility", "highest_ivrank")
+
+    def test_highest_hv30(self, client):
+        _assert_screener_data(client, "volatility", "highest_hv30")
+
+    def test_lowest_iv30(self, client):
+        _assert_screener_data(client, "volatility", "lowest_iv30")
+
+    def test_lowest_ivrank(self, client):
+        _assert_screener_data(client, "volatility", "lowest_ivrank")
+
+    def test_lowest_hv30(self, client):
+        _assert_screener_data(client, "volatility", "lowest_hv30")
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationScreenerVolume:
+    """All 6 volume sub-screeners return table data."""
+
+    def test_highest_call_volume(self, client):
+        _assert_screener_data(client, "volume", "highest_call_volume")
+
+    def test_highest_put_volume(self, client):
+        _assert_screener_data(client, "volume", "highest_put_volume")
+
+    def test_highest_total_volume(self, client):
+        _assert_screener_data(client, "volume", "highest_total_volume")
+
+    def test_unusual_call_activity(self, client):
+        _assert_screener_data(client, "volume", "unusual_call_activity")
+
+    def test_unusual_put_activity(self, client):
+        _assert_screener_data(client, "volume", "unusual_put_activity")
+
+    def test_unusual_activity(self, client):
+        _assert_screener_data(client, "volume", "unusual_activity")
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationScreenerQScore:
+    """All 16 qscore sub-screeners return table data."""
+
+    def test_highest_option_score(self, client):
+        _assert_screener_data(client, "qscore", "highest_option_score")
+
+    def test_lowest_option_score(self, client):
+        _assert_screener_data(client, "qscore", "lowest_option_score")
+
+    def test_highest_option_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "highest_option_score_diff")
+
+    def test_lowest_option_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "lowest_option_score_diff")
+
+    def test_highest_volatility_score(self, client):
+        _assert_screener_data(client, "qscore", "highest_volatility_score")
+
+    def test_lowest_volatility_score(self, client):
+        _assert_screener_data(client, "qscore", "lowest_volatility_score")
+
+    def test_highest_volatility_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "highest_volatility_score_diff")
+
+    def test_lowest_volatility_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "lowest_volatility_score_diff")
+
+    def test_highest_momentum_score(self, client):
+        _assert_screener_data(client, "qscore", "highest_momentum_score")
+
+    def test_lowest_momentum_score(self, client):
+        _assert_screener_data(client, "qscore", "lowest_momentum_score")
+
+    def test_highest_momentum_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "highest_momentum_score_diff")
+
+    def test_lowest_momentum_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "lowest_momentum_score_diff")
+
+    def test_highest_seasonality_score(self, client):
+        _assert_screener_data(client, "qscore", "highest_seasonality_score")
+
+    def test_lowest_seasonality_score(self, client):
+        _assert_screener_data(client, "qscore", "lowest_seasonality_score")
+
+    def test_highest_seasonality_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "highest_seasonality_score_diff")
+
+    def test_lowest_seasonality_score_diff(self, client):
+        _assert_screener_data(client, "qscore", "lowest_seasonality_score_diff")
+
+
+# ══════════════════════════════════════════════════════════════════════
+# BULK SCREENER DATA — get_all_screener_data()
+# ══════════════════════════════════════════════════════════════════════
+
+
+@pytest.mark.integration
+class TestMenthorQIntegrationBulkScreener:
+    """Verify get_all_screener_data() returns data for all slugs in a category."""
+
+    def test_get_all_gamma(self, client):
+        result = client.get_all_screener_data("gamma")
+        assert isinstance(result, dict)
+        assert len(result) == len(SCREENER_SLUGS["gamma"])
+        for slug, data in result.items():
+            assert isinstance(data, list), f"gamma/{slug}: expected list"
+
+    def test_get_all_volatility(self, client):
+        result = client.get_all_screener_data("volatility")
+        assert isinstance(result, dict)
+        assert len(result) == len(SCREENER_SLUGS["volatility"])
+        for slug, data in result.items():
+            assert isinstance(data, list), f"volatility/{slug}: expected list"
