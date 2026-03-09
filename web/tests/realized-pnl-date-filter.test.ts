@@ -84,10 +84,12 @@ describe("computeRealizedPnlFromFills — date filter", () => {
   });
 
   test("handles UTC timestamps that cross the ET midnight boundary", () => {
-    // 2026-03-09T04:00:00Z = 2026-03-08T23:00:00 ET (previous day!)
+    // 2026 DST starts March 8 — ET on March 9 is EDT = UTC-4.
+    // ET midnight on 2026-03-09 = 2026-03-09T04:00:00Z.
+    // So 03:00Z = 23:00 EDT on March 8 (previous day) and 05:00Z = 01:00 EDT on March 9 (today).
     const fills = [
-      makeFill(1000, "2026-03-09T04:00:00+00:00", "SPY"),  // still March 8 in ET
-      makeFill(200,  "2026-03-09T10:00:00+00:00", "SPY"),  // 5 AM ET = March 9 in ET
+      makeFill(1000, "2026-03-09T03:00:00+00:00", "SPY"),  // still March 8 in ET (EDT)
+      makeFill(200,  "2026-03-09T05:00:00+00:00", "SPY"),  // 01:00 EDT = March 9 in ET
     ];
     // Only the second fill is today (ET)
     expect(computeRealizedPnlFromFills(fills)).toBeCloseTo(200);
