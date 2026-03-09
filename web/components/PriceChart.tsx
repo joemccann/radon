@@ -8,12 +8,15 @@ import { usePriceHistory } from "@/lib/usePriceHistory";
 interface PriceChartProps {
   ticker: string;
   prices: Record<string, PriceData>;
+  /** Override the price key used for charting (e.g. option contract key instead of underlying) */
+  priceKey?: string;
 }
 
-export default function PriceChart({ ticker, prices }: PriceChartProps) {
-  const { data, value, loading } = usePriceHistory(ticker, prices);
+export default function PriceChart({ ticker, prices, priceKey }: PriceChartProps) {
+  const chartKey = priceKey ?? ticker;
+  const { data, value, loading } = usePriceHistory(chartKey, prices);
 
-  const priceData = prices[ticker];
+  const priceData = prices[chartKey];
   const closePrice = priceData?.close ?? null;
 
   const color = useMemo(() => {

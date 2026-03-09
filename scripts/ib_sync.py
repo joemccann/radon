@@ -82,6 +82,10 @@ def get_pnl(client: IBClient, account: str = "") -> dict:
         return val is not None and not ib_util.isNan(val)
 
     try:
+        # IB requires a non-empty account string for reqPnL
+        if not account:
+            accounts = client.ib.managedAccounts()
+            account = accounts[0] if accounts else ""
         pnl = client.get_pnl(account)
         # Poll until dailyPnL is non-NaN (IB streams this asynchronously)
         for _ in range(8):  # 8 x 1s = 8s max on top of the 2s in get_pnl
@@ -97,7 +101,10 @@ def get_pnl(client: IBClient, account: str = "") -> dict:
             result['dailyPnL'] = float(daily) if _valid(daily) else None
             result['unrealizedPnL'] = float(unrealized) if _valid(unrealized) else None
             result['realizedPnL'] = float(realized) if _valid(realized) else None
-        client.cancel_pnl(pnl)
+        try:
+            client.cancel_pnl(pnl)
+        except Exception:
+            pass  # ib_insync PnL unhashable in some versions
         return result
     except Exception as e:
         print(f"  Warning: reqPnL failed: {e}")

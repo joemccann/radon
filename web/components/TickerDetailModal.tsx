@@ -87,7 +87,7 @@ function resolvePriceBar(
   ticker: string,
   position: PortfolioPosition | null,
   prices: Record<string, PriceData>,
-): { priceData: PriceData | null; label?: string } {
+): { priceData: PriceData | null; label?: string; priceKey?: string } {
   if (!position || position.structure_type === "Stock") {
     return { priceData: prices[ticker] ?? null };
   }
@@ -101,6 +101,7 @@ function resolvePriceBar(
       const type = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : "";
       return {
         priceData: prices[key],
+        priceKey: key,
         label: `${ticker} ${position.expiry} ${strike} ${type}`,
       };
     }
@@ -134,7 +135,7 @@ export default function TickerDetailModal() {
   }, [activeTicker, ordersData]);
 
   // Resolve price bar data (option-level for single-leg options)
-  const { priceData, label: priceLabel } = useMemo(
+  const { priceData, label: priceLabel, priceKey: chartPriceKey } = useMemo(
     () => resolvePriceBar(activeTicker ?? "", position, prices),
     [activeTicker, position, prices],
   );
@@ -176,7 +177,7 @@ export default function TickerDetailModal() {
         <PriceBar priceData={priceData} label={priceLabel} />
 
         {/* Price chart */}
-        <PriceChart ticker={activeTicker} prices={prices} />
+        <PriceChart ticker={activeTicker} prices={prices} priceKey={chartPriceKey} />
 
         {/* Tab bar */}
         <div className="ticker-tabs">
