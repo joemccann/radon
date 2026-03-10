@@ -21,6 +21,7 @@
     "@fontsource/ibm-plex-mono": "^5.2.7",
     "@sinclair/typebox": "^0.34.48",
     "@types/d3": "^7.4.3",
+    "@vercel/analytics": "^2.0.0",
     "d3": "^7.9.0",
     "ib": "^0.2.9",
     "liveline": "^0.0.6",
