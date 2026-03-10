@@ -1,0 +1,129 @@
+{
+  "name": "Radon Design Tokens",
+  "version": "4.0.0",
+  "theme": "dual",
+  "color": {
+    "dark": {
+      "bg": {
+        "canvas": "#0a0f14",
+        "panel": "#0f1519",
+        "panelRaised": "#151c22"
+      },
+      "line": {
+        "grid": "#1e293b",
+        "focus": "#05AD98"
+      },
+      "text": {
+        "primary": "#e2e8f0",
+        "secondary": "#94a3b8",
+        "muted": "#475569"
+      },
+      "signal": {
+        "core": "#05AD98",
+        "strong": "#0FCFB5",
+        "deep": "#048A7A"
+      },
+      "semantic": {
+        "positive": "#05AD98",
+        "negative": "#E85D6C",
+        "warn": "#F5A623",
+        "fault": "#E85D6C",
+        "dislocation": "#D946A8",
+        "extreme": "#8B5CF6",
+        "neutral": "#94a3b8"
+      }
+    },
+    "light": {
+      "bg": {
+        "canvas": "#FFFFFF",
+        "panel": "#FFFFFF",
+        "panelRaised": "#f1f5f9"
+      },
+      "line": {
+        "grid": "#BBBFBF",
+        "focus": "#05AD98"
+      },
+      "text": {
+        "primary": "#000000",
+        "secondary": "#636363",
+        "muted": "#878787"
+      },
+      "signal": {
+        "core": "#05AD98",
+        "strong": "#048A7A",
+        "deep": "#037066"
+      },
+      "semantic": {
+        "positive": "#048A7A",
+        "negative": "#D4183D",
+        "warn": "#F5A623",
+        "fault": "#D4183D",
+        "dislocation": "#C026A0",
+        "extreme": "#7C3AED",
+        "neutral": "#878787"
+      }
+    }
+  },
+  "cssVariables": {
+    "surfaces": ["--bg-base", "--bg-panel", "--bg-hover"],
+    "borders": ["--border-dim", "--border-focus"],
+    "text": ["--text-primary", "--text-secondary", "--text-muted"],
+    "accent": ["--accent-bg", "--positive", "--negative"],
+    "signal": ["--signal-core", "--signal-strong", "--signal-deep"],
+    "semantic": ["--dislocation", "--extreme", "--fault", "--neutral"]
+  },
+  "radius": {
+    "panel": "4px",
+    "badge": "999px",
+    "focus": "6px"
+  },
+  "spacing": {
+    "micro": 4,
+    "base": 8,
+    "panelPadding": 16,
+    "sectionGap": 32
+  },
+  "typography": {
+    "fontFamily": {
+      "ui": "Inter, ui-sans-serif, system-ui, sans-serif",
+      "mono": "\"IBM Plex Mono\", ui-monospace, SFMono-Regular, monospace",
+      "display": "S\u00f6hne, Inter, ui-sans-serif, system-ui, sans-serif"
+    },
+    "sizes": {
+      "meta": "11px",
+      "body": "12px",
+      "table": "13px",
+      "title": "14px",
+      "view": "18px",
+      "metric": "28px"
+    },
+    "weights": {
+      "regular": 400,
+      "medium": 500,
+      "semibold": 600
+    },
+    "tracking": {
+      "meta": "0.03em",
+      "label": "0.02em",
+      "tight": "0em"
+    }
+  },
+  "component": {
+    "panel": {
+      "bg": "{color.bg.panel}",
+      "border": "1px solid {color.line.grid}",
+      "radius": "{radius.panel}",
+      "shadow": "none"
+    },
+    "badge": {
+      "height": "20px",
+      "fontFamily": "{typography.fontFamily.mono}",
+      "fontSize": "{typography.sizes.meta}",
+      "radius": "{radius.badge}"
+    },
+    "table": {
+      "rowHeightDense": "28px",
+      "rowHeightDefault": "32px"
+    }
+  }
+}

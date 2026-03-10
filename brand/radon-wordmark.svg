@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="320" viewBox="0 0 1400 320" fill="none">
+<rect width="1400" height="320" fill="#0a0f14"/>
+<g opacity="0.22">
+  <path d="M20 250 L280 70" stroke="#1e293b" stroke-width="1"/>
+  <path d="M160 250 L420 70" stroke="#1e293b" stroke-width="1"/>
+  <path d="M300 250 L560 70" stroke="#1e293b" stroke-width="1"/>
+  <path d="M440 250 L700 70" stroke="#1e293b" stroke-width="1"/>
+  <path d="M580 250 L840 70" stroke="#1e293b" stroke-width="1"/>
+</g>
+<g transform="translate(90 75)">
+  <rect x="0" y="0" width="140" height="140" rx="10" fill="#0f1519" stroke="#1e293b"/>
+  <circle cx="70" cy="70" r="48" stroke="#05AD98" stroke-width="2" opacity="0.9"/>
+  <circle cx="70" cy="70" r="33" stroke="#048A7A" stroke-width="1.5" opacity="0.7"/>
+  <path d="M28 96 L112 44" stroke="#05AD98" stroke-width="2.5" stroke-linecap="square"/>
+  <path d="M37 108 L121 56" stroke="#8B5CF6" stroke-width="1.2" opacity="0.85"/>
+  <circle cx="70" cy="70" r="4.5" fill="#e2e8f0"/>
+</g>
+<g transform="translate(290 94)">
+  <text x="0" y="84" fill="#e2e8f0" font-size="92" font-family="Inter, Arial, sans-serif" font-weight="600" letter-spacing="4">RADON</text>
+  <text x="5" y="128" fill="#94a3b8" font-size="24" font-family="IBM Plex Mono, monospace" font-weight="500" letter-spacing="3">RECONSTRUCTING MARKET STRUCTURE</text>
+</g>
+</svg>

@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="400" viewBox="0 0 1600 400" fill="none">
+<rect width="1600" height="400" fill="#0a0f14"/>
+<g opacity="0.16">
+  <path d="M0 330 L430 45" stroke="#05AD98" stroke-width="1"/>
+  <path d="M120 355 L550 70" stroke="#1e293b" stroke-width="1"/>
+  <path d="M240 380 L670 95" stroke="#05AD98" stroke-width="1"/>
+  <path d="M360 400 L790 115" stroke="#1e293b" stroke-width="1"/>
+</g>
+<g transform="translate(90 80)">
+  <rect x="0" y="0" width="220" height="220" rx="12" fill="#0f1519" stroke="#1e293b" stroke-width="2"/>
+  <circle cx="110" cy="110" r="78" stroke="#05AD98" stroke-width="3"/>
+  <circle cx="110" cy="110" r="54" stroke="#048A7A" stroke-width="2"/>
+  <path d="M38 158 L182 68" stroke="#05AD98" stroke-width="5"/>
+  <path d="M54 180 L198 90" stroke="#8B5CF6" stroke-width="2.5"/>
+  <circle cx="110" cy="110" r="7" fill="#e2e8f0"/>
+</g>
+<g transform="translate(380 98)">
+  <text x="0" y="110" fill="#e2e8f0" font-size="118" font-family="Inter, Arial, sans-serif" font-weight="600" letter-spacing="6">RADON</text>
+  <text x="4" y="164" fill="#05AD98" font-size="28" font-family="IBM Plex Mono, monospace" font-weight="500" letter-spacing="3">TERMINAL</text>
+  <text x="4" y="212" fill="#94a3b8" font-size="24" font-family="IBM Plex Mono, monospace" font-weight="500" letter-spacing="2">RECONSTRUCTING MARKET STRUCTURE FROM NOISY SIGNALS</text>
+</g>
+</svg>

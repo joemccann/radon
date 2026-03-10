@@ -1,4 +1,31 @@
-# Convex Scavenger — Project Instructions
+# Radon — Project Instructions
+
+## ⛔ Radon Brand Identity — Mandatory for ALL UI & Asset Work
+
+**Any change touching UI code, components, styles, layouts, modals, charts, empty states, system messages, or visual assets MUST comply with the Radon Brand Identity. Violations are blocking failures.**
+
+**Reference files:**
+- `docs/brand-identity.md` — Design system reference (quick lookup)
+- `brand/radon-brand-system.md` — Complete brand specification (9 sections)
+- `brand/radon-design-tokens.json` — Machine-readable design tokens
+- `brand/radon-tailwind-theme.ts` — Tailwind CSS theme extension
+- `brand/radon-component-kit.html` — Live component reference (panels, badges, tables, motifs)
+- `brand/radon-terminal-mockup.html` — Full terminal layout mockup
+- Logo assets: `brand/radon-app-icon.svg`, `radon-monogram.svg`, `radon-wordmark.svg`, `radon-lockup-horizontal.svg`, `radon-readme-hero.svg`
+
+**Non-negotiable rules (read full spec before any UI work):**
+- **Flagship accent:** `signal.core: #05AD98` (teal) — the core Radon discovery color
+- **Surfaces:** `bg.canvas: #0a0f14` | `bg.panel: #0f1519` | `bg.panelRaised: #151c22` | `line.grid: #1e293b`
+- **Typography:** Inter (UI/titles/labels/metrics) + IBM Plex Mono (dense numeric tables, status/meta telemetry) + Söhne (display/wordmark only)
+- **4px max** `border-radius` on panels; badges use `999px` capsule — no soft consumer rounding
+- **Signal semantics use clarity scale**, not P&L: Baseline → Emerging → Clear → Strong → Dislocated → Extreme
+- Panels are instrument modules: hairline borders, matte surfaces, device-label headers, metadata rails
+- Grid: 8px base unit, 4px micro, 16px gutters, 32px section gaps
+- Brand voice: precise, calm, scientific — no hype, no emojis, no emotional punctuation
+- No glassmorphism, heavy gradients, soft shadows, or decorative elements
+- Empty states describe measurement conditions, not generic placeholders
+
+---
 
 ## ⚠️ Bug Fix Workflow — Mandatory
 

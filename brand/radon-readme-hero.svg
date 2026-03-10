@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="600" viewBox="0 0 1800 600" fill="none">
+<rect width="1800" height="600" fill="#0a0f14"/>
+<g opacity="0.18">
+  <path d="M0 520 L520 80" stroke="#1e293b" stroke-width="1"/>
+  <path d="M140 560 L660 120" stroke="#1e293b" stroke-width="1"/>
+  <path d="M280 600 L800 160" stroke="#1e293b" stroke-width="1"/>
+  <path d="M420 600 L940 160" stroke="#1e293b" stroke-width="1"/>
+  <path d="M560 600 L1080 160" stroke="#1e293b" stroke-width="1"/>
+  <path d="M700 600 L1220 160" stroke="#1e293b" stroke-width="1"/>
+</g>
+<g opacity="0.22">
+  <circle cx="1340" cy="170" r="180" stroke="#05AD98" stroke-width="1"/>
+  <circle cx="1340" cy="170" r="132" stroke="#048A7A" stroke-width="1"/>
+  <circle cx="1340" cy="170" r="84" stroke="#1e293b" stroke-width="1"/>
+</g>
+<path d="M0 420 C140 410, 220 350, 340 360 C480 372, 560 250, 700 262 C820 272, 920 178, 1040 190 C1200 206, 1270 116, 1410 110 C1540 104, 1640 72, 1800 76" stroke="#05AD98" stroke-width="5"/>
+<path d="M0 456 C140 450, 220 402, 340 394 C468 386, 572 320, 700 314 C826 308, 936 248, 1040 256 C1184 266, 1288 232, 1410 214 C1544 194, 1650 170, 1800 168" stroke="#8B5CF6" stroke-width="3" opacity="0.9"/>
+<g opacity="0.7">
+  <rect x="96" y="448" width="18" height="52" fill="#048A7A"/>
+  <rect x="128" y="434" width="18" height="66" fill="#05AD98"/>
+  <rect x="160" y="462" width="18" height="38" fill="#048A7A"/>
+  <rect x="192" y="420" width="18" height="80" fill="#05AD98"/>
+  <rect x="224" y="388" width="18" height="112" fill="#05AD98"/>
+  <rect x="256" y="404" width="18" height="96" fill="#048A7A"/>
+  <rect x="288" y="360" width="18" height="140" fill="#05AD98"/>
+  <rect x="320" y="374" width="18" height="126" fill="#048A7A"/>
+  <rect x="352" y="334" width="18" height="166" fill="#05AD98"/>
+</g>
+<g>
+  <rect x="110" y="86" width="360" height="138" rx="6" fill="#0f1519" stroke="#1e293b"/>
+  <text x="140" y="138" fill="#e2e8f0" font-size="56" font-family="Inter, Arial, sans-serif" font-weight="600" letter-spacing="4">RADON</text>
+  <text x="142" y="182" fill="#94a3b8" font-size="20" font-family="IBM Plex Mono, monospace" font-weight="500" letter-spacing="2">RECONSTRUCTING MARKET STRUCTURE</text>
+</g>
+</svg>

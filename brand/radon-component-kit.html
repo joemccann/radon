@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Radon Component Kit</title>
+<style>
+:root{
+  --bg-canvas:#0a0f14;
+  --bg-panel:#0f1519;
+  --bg-panel-raised:#151c22;
+  --line-grid:#1e293b;
+  --text-primary:#e2e8f0;
+  --text-secondary:#94a3b8;
+  --text-muted:#475569;
+  --signal-core:#05AD98;
+  --signal-strong:#0FCFB5;
+  --signal-deep:#048A7A;
+  --warn:#F5A623;
+  --fault:#E85D6C;
+  --dislocation:#D946A8;
+  --extreme:#8B5CF6;
+  --neutral:#94a3b8;
+}
+*{box-sizing:border-box}
+body{
+  margin:0;
+  background:var(--bg-canvas);
+  color:var(--text-primary);
+  font-family:Inter,system-ui,sans-serif;
+}
+.page{
+  max-width:1440px;
+  margin:0 auto;
+  padding:32px;
+}
+.h1{
+  font-size:28px;
+  line-height:1.1;
+  font-weight:600;
+  letter-spacing:.04em;
+}
+.meta{
+  font:500 11px/1.35 "IBM Plex Mono", monospace;
+  letter-spacing:.03em;
+  color:var(--text-secondary);
+  text-transform:uppercase;
+}
+.grid{
+  display:grid;
+  grid-template-columns:repeat(12,minmax(0,1fr));
+  gap:16px;
+  margin-top:24px;
+}
+.panel{
+  background:var(--bg-panel);
+  border:1px solid var(--line-grid);
+  border-radius:4px;
+  padding:16px;
+  min-height:180px;
+  position:relative;
+  overflow:hidden;
+}
+.panel:hover{background:var(--bg-panel-raised);}
+.span-3{grid-column:span 3}
+.span-4{grid-column:span 4}
+.span-6{grid-column:span 6}
+.span-8{grid-column:span 8}
+.span-12{grid-column:span 12}
+.panel-header{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  margin-bottom:16px;
+}
+.panel-title{
+  font-size:14px;
+  line-height:1.2;
+  font-weight:600;
+  letter-spacing:.02em;
+}
+.metric{
+  font-size:30px;
+  line-height:1.05;
+  font-weight:600;
+  margin:10px 0 6px;
+}
+.row{
+  display:flex;
+  justify-content:space-between;
+  gap:12px;
+  padding:8px 0;
+  border-top:1px solid var(--line-grid);
+}
+.row:first-child{border-top:0}
+.badge{
+  display:inline-flex;
+  align-items:center;
+  height:20px;
+  border-radius:999px;
+  padding:0 8px;
+  font:500 11px/1 "IBM Plex Mono", monospace;
+  letter-spacing:.03em;
+  border:1px solid var(--line-grid);
+}
+.badge.signal{color:var(--signal-core); background:rgba(5,173,152,.08)}
+.badge.dislocation{color:var(--dislocation); background:rgba(217,70,168,.09)}
+.badge.warn{color:var(--warn); background:rgba(245,166,35,.09)}
+.kv{
+  display:grid;
+  grid-template-columns:1fr auto;
+  gap:8px;
+  align-items:center;
+  padding:8px 0;
+  border-top:1px solid var(--line-grid);
+  font-family:"IBM Plex Mono", monospace;
+  font-size:12px;
+}
+.table{
+  width:100%;
+  border-collapse:collapse;
+  font-family:"IBM Plex Mono", monospace;
+  font-size:12px;
+}
+.table th,.table td{
+  border-top:1px solid var(--line-grid);
+  padding:10px 8px;
+  text-align:right;
+}
+.table th:first-child,.table td:first-child{text-align:left}
+.table th{
+  color:var(--text-secondary);
+  font-family:Inter,system-ui,sans-serif;
+  font-size:11px;
+  text-transform:uppercase;
+  letter-spacing:.04em;
+}
+.trace{
+  position:absolute;
+  left:0; top:0; bottom:0;
+  width:2px;
+  background:linear-gradient(180deg,var(--signal-core),transparent 80%);
+}
+.spectrum{
+  display:grid;
+  grid-template-columns:repeat(24,1fr);
+  gap:4px;
+  align-items:end;
+  height:96px;
+  margin-top:12px;
+}
+.spectrum span{
+  display:block;
+  background:linear-gradient(180deg,var(--signal-strong),var(--signal-deep));
+  border-radius:1px 1px 0 0;
+}
+.radar{
+  width:140px;height:140px;border-radius:50%;
+  border:1px solid rgba(5,173,152,.55);
+  margin:12px auto 0;
+  position:relative;
+}
+.radar:before,.radar:after{
+  content:"";
+  position:absolute; inset:18px;
+  border-radius:50%;
+  border:1px solid rgba(4,138,122,.4);
+}
+.radar .sweep{
+  position:absolute; left:50%; top:50%;
+  width:52px;height:1px; background:var(--signal-core);
+  transform-origin:left center; transform:rotate(-28deg);
+}
+.footer-note{margin-top:24px;color:var(--text-muted);font-size:12px}
+</style>
+</head>
+<body>
+  <div class="page">
+    <div class="meta">Radon Contributor Kit / Component Spec</div>
+    <div class="h1">Radon Scientific Instrument UI Components</div>
+
+    <div class="grid">
+      <section class="panel span-4">
+        <div class="trace"></div>
+        <div class="panel-header">
+          <div>
+            <div class="meta">FLOW MODULE / 01</div>
+            <div class="panel-title">Signal Summary</div>
+          </div>
+          <span class="badge signal">CLEAR</span>
+        </div>
+        <div class="metric">0.84</div>
+        <div class="meta">Confidence</div>
+        <div class="kv"><span>source_delay</span><span>132ms</span></div>
+        <div class="kv"><span>engine</span><span>Spectral</span></div>
+        <div class="kv"><span>basis</span><span>1m / 5d</span></div>
+      </section>
+
+      <section class="panel span-4">
+        <div class="panel-header">
+          <div>
+            <div class="meta">EXPOSURE MODULE / 03</div>
+            <div class="panel-title">Portfolio Convexity</div>
+          </div>
+          <span class="badge dislocation">DISLOCATED</span>
+        </div>
+        <div class="metric">+2.73&sigma;</div>
+        <div class="meta">Local baseline deviation</div>
+        <div class="row"><span class="meta">Net Gamma</span><span style="font-family:'IBM Plex Mono',monospace">+0.61</span></div>
+        <div class="row"><span class="meta">Net Vega</span><span style="font-family:'IBM Plex Mono',monospace">-1.24</span></div>
+        <div class="row"><span class="meta">Signal Layer</span><span style="font-family:'IBM Plex Mono',monospace">Radon Core</span></div>
+      </section>
+
+      <section class="panel span-4">
+        <div class="panel-header">
+          <div>
+            <div class="meta">DISCOVERY / SCAN</div>
+            <div class="panel-title">Circular Scan Motif</div>
+          </div>
+          <span class="badge warn">STANDBY</span>
+        </div>
+        <div class="radar"><div class="sweep"></div></div>
+      </section>
+
+      <section class="panel span-8">
+        <div class="panel-header">
+          <div>
+            <div class="meta">SPECTRAL ENGINE / DETAIL</div>
+            <div class="panel-title">Energy Distribution</div>
+          </div>
+          <span class="badge signal">SPECTRAL</span>
+        </div>
+        <div class="spectrum">
+          <span style="height:28%"></span><span style="height:34%"></span><span style="height:48%"></span><span style="height:58%"></span>
+          <span style="height:76%"></span><span style="height:80%"></span><span style="height:86%"></span><span style="height:72%"></span>
+          <span style="height:58%"></span><span style="height:44%"></span><span style="height:30%"></span><span style="height:22%"></span>
+          <span style="height:26%"></span><span style="height:36%"></span><span style="height:64%"></span><span style="height:82%"></span>
+          <span style="height:94%"></span><span style="height:72%"></span><span style="height:54%"></span><span style="height:38%"></span>
+          <span style="height:24%"></span><span style="height:20%"></span><span style="height:26%"></span><span style="height:18%"></span>
+        </div>
+        <div class="footer-note">Use this treatment for decomposition, load states, and engine drill-down summaries.</div>
+      </section>
+
+      <section class="panel span-4">
+        <div class="panel-header">
+          <div>
+            <div class="meta">SIGNAL BADGES</div>
+            <div class="panel-title">Semantic States</div>
+          </div>
+        </div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:10px">
+          <span class="badge signal">EMERGING</span>
+          <span class="badge signal">CLEAR</span>
+          <span class="badge dislocation">DISLOCATION</span>
+          <span class="badge warn">QUALITY</span>
+        </div>
+      </section>
+
+      <section class="panel span-12">
+        <div class="panel-header">
+          <div>
+            <div class="meta">MEASUREMENT ARRAY / TABLE</div>
+            <div class="panel-title">Dense Numeric Table</div>
+          </div>
+          <span class="badge signal">ARRAY</span>
+        </div>
+        <table class="table">
+          <thead>
+            <tr>
+              <th>Symbol</th>
+              <th>Signal</th>
+              <th>Confidence</th>
+              <th>Vol Gap</th>
+              <th>Net Gamma</th>
+              <th>State</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr><td>SPX</td><td>Surface kink</td><td>0.84</td><td>+1.92</td><td>+0.61</td><td>Clear</td></tr>
+            <tr><td>QQQ</td><td>Flow cluster</td><td>0.79</td><td>+1.33</td><td>-0.12</td><td>Emerging</td></tr>
+            <tr><td>IWM</td><td>Regime transition</td><td>0.68</td><td>+2.08</td><td>-0.51</td><td>Dislocated</td></tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+  </div>
+</body>
+</html>

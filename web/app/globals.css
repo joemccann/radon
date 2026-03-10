@@ -14,43 +14,59 @@
 }
 
 [data-theme="dark"] {
-  --bg-base: #050505;
-  --bg-panel: #0a0a0a;
-  --bg-hover: #141414;
-  --border-dim: #1c1c1c;
-  --border-focus: #333333;
-  --text-primary: #f0f0f0;
-  --text-muted: #757575;
-  --accent-bg: #ffffff;
-  --accent-text: #000000;
-  --scrollbar-track: #050505;
-  --scrollbar-thumb: #333333;
-  --positive: #22c55e;
-  --negative: #ef4444;
-  --warning: #f59e0b;
-  --info: #3b82f6;
-  --banner-negative: #dc2626;
-  --banner-positive: #16a34a;
+  --bg-base: #0a0f14;
+  --bg-panel: #0f1519;
+  --bg-hover: #151c22;
+  --border-dim: #1e293b;
+  --border-focus: #05AD98;
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+  --accent-bg: #05AD98;
+  --accent-text: #0a0f14;
+  --scrollbar-track: #0a0f14;
+  --scrollbar-thumb: #1e293b;
+  --positive: #05AD98;
+  --negative: #E85D6C;
+  --warning: #F5A623;
+  --info: #8B5CF6;
+  --banner-negative: #E85D6C;
+  --banner-positive: #05AD98;
+  --signal-core: #05AD98;
+  --signal-strong: #0FCFB5;
+  --signal-deep: #048A7A;
+  --dislocation: #D946A8;
+  --extreme: #8B5CF6;
+  --fault: #E85D6C;
+  --neutral: #94a3b8;
 }
 
 [data-theme="light"] {
-  --bg-base: #f5f5f5;
-  --bg-panel: #ffffff;
-  --bg-hover: #f0f0f0;
-  --border-dim: #d9d9d9;
-  --border-focus: #a3a3a3;
-  --text-primary: #0a0a0a;
-  --text-muted: #636363;
-  --accent-bg: #000000;
-  --accent-text: #ffffff;
-  --scrollbar-track: #f5f5f5;
-  --scrollbar-thumb: #a3a3a3;
-  --positive: #22c55e;
-  --negative: #ef4444;
-  --warning: #f59e0b;
-  --info: #3b82f6;
-  --banner-negative: #dc2626;
-  --banner-positive: #16a34a;
+  --bg-base: #FFFFFF;
+  --bg-panel: #FFFFFF;
+  --bg-hover: #f1f5f9;
+  --border-dim: #BBBFBF;
+  --border-focus: #05AD98;
+  --text-primary: #000000;
+  --text-secondary: #636363;
+  --text-muted: #878787;
+  --accent-bg: #05AD98;
+  --accent-text: #FFFFFF;
+  --scrollbar-track: #FFFFFF;
+  --scrollbar-thumb: #BBBFBF;
+  --positive: #048A7A;
+  --negative: #D4183D;
+  --warning: #D4910A;
+  --info: #7C3AED;
+  --banner-negative: #D4183D;
+  --banner-positive: #048A7A;
+  --signal-core: #05AD98;
+  --signal-strong: #048A7A;
+  --signal-deep: #037066;
+  --dislocation: #C026A0;
+  --extreme: #7C3AED;
+  --fault: #D4183D;
+  --neutral: #878787;
 }
 
 *,
