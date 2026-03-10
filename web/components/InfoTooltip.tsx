@@ -58,8 +58,9 @@ export default function InfoTooltip({ text }: { text: string }) {
               ? { top: rect.bottom + 6 }
               : { top: rect.top - 6, transform: "translateY(-100%)" }),
             left: Math.max(8, Math.min(rect.left + rect.width / 2 - 130, typeof window !== "undefined" ? window.innerWidth - 268 : 1200)),
-            background: "#111",
+            background: "var(--bg-panel)",
             border: "1px solid var(--border-focus)",
+            boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
             padding: "8px 10px",
             width: 260,
             fontSize: 11,

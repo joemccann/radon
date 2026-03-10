@@ -323,8 +323,8 @@ export default function CriHistoryChart({ history, criScore }: CriHistoryChartPr
               ? { right: width - tooltip.x + 12 }
               : { left: tooltip.x + 12 }),
             top: tooltip.y - 10,
-            background: "#111111",
-            border: "1px solid #1C1C1C",
+            background: "var(--bg-panel, #111111)",
+            border: "1px solid var(--border-dim, #1C1C1C)",
             padding: "8px 10px",
             pointerEvents: "none",
             zIndex: 10,
