@@ -80,6 +80,63 @@ export function legPriceKey(
   return optionKey({ symbol: ticker.toUpperCase(), expiry: expiryClean, strike: leg.strike, right });
 }
 
+/* ─── Spread net price resolution ─────────────────────────── */
+
+/**
+ * Compute synthetic PriceData for a multi-leg spread from per-leg WS prices.
+ * Returns null for single-leg, stock positions, or when leg prices are unavailable.
+ */
+export function resolveSpreadPriceData(
+  ticker: string,
+  position: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): PriceData | null {
+  if (position.structure_type === "Stock") return null;
+  if (position.legs.length < 2) return null;
+
+  let netBid = 0;
+  let netAsk = 0;
+  let netLast = 0;
+  for (const leg of position.legs) {
+    const key = legPriceKey(ticker, position.expiry, leg);
+    if (!key) return null;
+    const lp = prices[key];
+    if (!lp || lp.bid == null || lp.ask == null) return null;
+    const sign = leg.direction === "LONG" ? 1 : -1;
+    netBid += sign * lp.bid;
+    netAsk += sign * lp.ask;
+    netLast += sign * (lp.last ?? (lp.bid + lp.ask) / 2);
+  }
+
+  const lo = Math.min(netBid, netAsk);
+  const hi = Math.max(netBid, netAsk);
+
+  return {
+    symbol: ticker,
+    last: Math.round(netLast * 100) / 100,
+    lastIsCalculated: true,
+    bid: Math.round(lo * 100) / 100,
+    ask: Math.round(hi * 100) / 100,
+    bidSize: null,
+    askSize: null,
+    volume: null,
+    high: null,
+    low: null,
+    open: null,
+    close: null,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: null,
+    timestamp: new Date().toISOString(),
+  };
+}
+
 /* ─── Option daily change ─────────────────────────────────── */
 
 export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {

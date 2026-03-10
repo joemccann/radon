@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import type { OpenOrder, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
-import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveSpreadPriceData } from "@/lib/positionUtils";
 import Modal from "./Modal";
 import PriceChart from "./PriceChart";
 import PositionTab from "./ticker-detail/PositionTab";
@@ -88,7 +88,7 @@ export function PriceBar({ priceData, label }: { priceData: PriceData | null; la
  * Resolve the best price data for the PriceBar.
  * - Stock positions → underlying ticker price
  * - Single-leg option → option contract price (bid/ask from WS)
- * - Multi-leg → underlying (option-level net pricing not available via single key)
+ * - Multi-leg → net spread price computed from per-leg WS bid/ask (falls back to underlying)
  * - No position → underlying ticker price
  */
 function resolvePriceBar(
@@ -115,7 +115,13 @@ function resolvePriceBar(
     }
   }
 
-  // Multi-leg: fall back to underlying
+  // Multi-leg: compute net spread price from per-leg WS prices
+  const spreadData = resolveSpreadPriceData(ticker, position, prices);
+  if (spreadData) {
+    return { priceData: spreadData, label: `${ticker} ${position.structure}` };
+  }
+
+  // Fallback to underlying if leg prices unavailable
   return { priceData: prices[ticker] ?? null, label: `${ticker} (underlying)` };
 }
 
