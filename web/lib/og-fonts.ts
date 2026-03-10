@@ -7,8 +7,8 @@ let fontBold: Buffer | null = null;
 export async function loadFonts() {
   if (!fontRegular) {
     const dir = join(process.cwd(), "public", "fonts");
-    fontRegular = await readFile(join(dir, "IBMPlexMono-Regular.ttf"));
-    fontBold = await readFile(join(dir, "IBMPlexMono-Bold.ttf"));
+    fontRegular = await readFile(join(dir, "IBMPlexMono-Regular.woff"));
+    fontBold = await readFile(join(dir, "IBMPlexMono-Bold.woff"));
   }
   return [
     {

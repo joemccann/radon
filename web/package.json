@@ -18,6 +18,7 @@
     "test:ib": "python3 ../scripts/test_ib_realtime.py"
   },
   "dependencies": {
+    "@fontsource/ibm-plex-mono": "^5.2.7",
     "@sinclair/typebox": "^0.34.48",
     "@types/d3": "^7.4.3",
     "d3": "^7.9.0",

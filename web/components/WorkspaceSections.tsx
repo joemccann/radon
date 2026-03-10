@@ -37,6 +37,7 @@ import ModifyOrderModal from "./ModifyOrderModal";
 import RegimePanel from "./RegimePanel";
 import CtaPage from "./CtaPage";
 import InfoTooltip from "./InfoTooltip";
+import SharePnlButton, { type SharePnlData } from "./SharePnlButton";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 
 /* ─── Re-exports for backward compat ──────────────────── */
@@ -54,6 +55,46 @@ export {
   getOptionDailyChg,
   getLastPrice,
 } from "@/lib/positionUtils";
+
+/* ─── Share P&L helpers ────────────────────────────────── */
+
+/** Build a human-readable description from an ExecutedOrder.
+ *  e.g. "Long AAOI 2026-04-17 Call $45.00" */
+function execOrderDescription(e: ExecutedOrder): string {
+  const c = e.contract;
+  const side = e.side === "BOT" ? "Long" : e.side === "SLD" ? "Short" : e.side;
+  if (c.secType === "OPT" && c.strike != null && c.right && c.expiry) {
+    const right = c.right === "C" || c.right === "CALL" ? "Call" : c.right === "P" || c.right === "PUT" ? "Put" : c.right;
+    return `${side} ${c.symbol} ${c.expiry} ${right} $${c.strike.toFixed(2)}`;
+  }
+  return `${side} ${c.symbol}`;
+}
+
+function execOrderShareData(e: ExecutedOrder): SharePnlData {
+  return {
+    description: execOrderDescription(e),
+    pnl: e.realizedPNL ?? 0,
+    pnlPct: e.realizedPNL != null && e.avgPrice != null && e.avgPrice > 0
+      ? (e.realizedPNL / (e.avgPrice * e.quantity * (e.contract.secType === "OPT" ? 100 : 1))) * 100
+      : null,
+    commission: e.commission,
+    fillPrice: e.avgPrice,
+    time: e.time ? new Date(e.time).toLocaleString() : "",
+  };
+}
+
+function blotterShareData(t: BlotterTrade): SharePnlData {
+  const lastExec = t.executions.length > 0 ? t.executions[t.executions.length - 1] : null;
+  const pnlPct = t.cost_basis !== 0 ? (t.realized_pnl / Math.abs(t.cost_basis)) * 100 : null;
+  return {
+    description: t.contract_desc || t.symbol,
+    pnl: t.realized_pnl,
+    pnlPct,
+    commission: t.total_commission,
+    fillPrice: lastExec?.price ?? null,
+    time: lastExec?.time ? new Date(lastExec.time).toLocaleString() : "",
+  };
+}
 
 /* ─── Ticker link (clickable) ──────────────────────────── */
 
@@ -1079,6 +1120,7 @@ function OrdersSections({
                   <SortTh<ExecOrderKey> label="Commission" sortKey="commission" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
                   <SortTh<ExecOrderKey> label="Realized P&L" sortKey="realizedPNL" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
                   <SortTh<ExecOrderKey> label="Time" sortKey="time" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
+                  <th style={{ width: "32px" }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -1103,6 +1145,11 @@ function OrdersSections({
                         {e.realizedPNL != null ? `${e.realizedPNL >= 0 ? "+" : ""}${fmtPrice(e.realizedPNL)}` : "—"}
                       </td>
                       <td>{new Date(e.time).toLocaleTimeString()}</td>
+                      <td>
+                        {!isCancelled && e.realizedPNL != null && (
+                          <SharePnlButton data={execOrderShareData(e)} />
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -1225,6 +1272,7 @@ function HistoricalTradesSection() {
                   <SortTh<BlotterSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Cost Basis" sortKey="cost_basis" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Proceeds" sortKey="proceeds" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <th style={{ width: "32px" }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -1246,6 +1294,9 @@ function HistoricalTradesSection() {
                     </td>
                     <td className="right">{fmtPrice(t.cost_basis)}</td>
                     <td className="right">{fmtPrice(t.proceeds)}</td>
+                    <td>
+                      {t.is_closed && <SharePnlButton data={blotterShareData(t)} />}
+                    </td>
                   </tr>
                 ))}
               </tbody>

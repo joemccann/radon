@@ -252,6 +252,28 @@ Return on Risk = Realized P&L / Capital at Risk
 
 ---
 
+## Share PnL Card (Image Generation)
+
+Generates a branded 1200x630 PNG card for sharing trade P&L on social media. Uses `next/og` (Satori) for server-side rendering.
+
+```
+API Route : web/app/api/share/pnl/route.tsx
+Component : web/components/SharePnlButton.tsx
+Fonts     : web/lib/og-fonts.ts (IBM Plex Mono .woff from @fontsource)
+Theme     : web/lib/og-theme.ts (Radon brand colors for Satori)
+Tests     : web/tests/share-pnl.test.ts (12 unit), web/e2e/share-pnl.spec.ts (6 E2E)
+```
+
+**Card layout:** Contract description (e.g. "Long AAOI 2026-04-17 Call $45.00") → Hero P&L $ + % → Fill/Commission/Time details → Radon icon + "Executed with Radon" footer.
+
+**Wired into:** Executed Orders table + Historical Trades (Blotter) table on `/orders` page. Share button appears for non-cancelled fills (executed orders) and closed trades (blotter).
+
+**Clipboard copy:** `navigator.clipboard.write()` with `ClipboardItem({ "image/png": blob })`.
+
+**Font note:** Satori does NOT support `.ttf` parsed by `@vercel/og` in Next.js 16 — use `.woff` format. Font files from `@fontsource/ibm-plex-mono` npm package.
+
+---
+
 ## Bug Fix Workflow — Mandatory
 
 **Red/green TDD for every bug fix, no exceptions:**
