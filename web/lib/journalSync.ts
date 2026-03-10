@@ -20,6 +20,9 @@ export interface ReconciliationTrade {
   commission: number;
   realized_pnl: number;
   sec_type: string;
+  strike?: number;
+  expiry?: string;
+  right?: string; // "C" or "P"
 }
 
 interface ReconciliationData {
@@ -58,10 +61,20 @@ function fingerprint(ticker: string, date: string, action: string, qty: number):
   return `${ticker}|${date}|${action}|${Math.abs(qty)}`;
 }
 
-/** Map sec_type + action to a human-readable structure string */
-function resolveStructure(secType: string, action: string): string {
+/** Map sec_type + action + optional contract details to a human-readable structure string */
+function resolveStructure(secType: string, action: string, strike?: number, expiry?: string, right?: string): string {
   const typeLabel = secType === "STK" ? "Stock" : secType === "OPT" ? "Option" : secType === "BAG" ? "Spread" : secType;
   const side = action.includes("BUY") ? "Long" : action.includes("SELL") || action === "CLOSED" ? "Closed" : action;
+
+  // Include contract details for options when available
+  if ((secType === "OPT" || secType === "BAG") && strike && right) {
+    const rightLabel = right === "C" ? "Call" : right === "P" ? "Put" : right;
+    const expiryLabel = expiry
+      ? expiry.replace(/(\d{4})(\d{2})(\d{2})/, "$1-$2-$3")
+      : "";
+    return `${side} ${rightLabel} $${strike}${expiryLabel ? ` ${expiryLabel}` : ""}`;
+  }
+
   return `${side} ${typeLabel} (${secType})`;
 }
 
@@ -115,7 +128,7 @@ export function syncNewTrades(
       id: nextId++,
       date: nt.date,
       ticker: nt.symbol,
-      structure: resolveStructure(nt.sec_type, nt.action),
+      structure: resolveStructure(nt.sec_type, nt.action, nt.strike, nt.expiry, nt.right),
       decision: "IB_AUTO_IMPORT",
       action: nt.action,
       fill_price: nt.avg_price,

@@ -192,6 +192,34 @@ describe("syncNewTrades", () => {
     expect(r2.skipped).toBe(1);
   });
 
+  it("uses contract details in structure when available", () => {
+    const optionWithDetails: ReconciliationTrade = {
+      symbol: "EWY",
+      date: "2026-03-10",
+      action: "BUY_OPTION",
+      net_quantity: 25,
+      avg_price: 2.0,
+      commission: 7.55,
+      realized_pnl: 0,
+      sec_type: "OPT",
+      strike: 130,
+      expiry: "20260313",
+      right: "P",
+    };
+    const result = syncNewTrades([], [optionWithDetails]);
+    expect(result.imported).toBe(1);
+    const t = result.trades[0];
+    expect(t.structure).toBe("Long Put $130 2026-03-13");
+  });
+
+  it("falls back to generic structure without contract details", () => {
+    const result = syncNewTrades(MOCK_EXISTING, [OPTION_TRADE]);
+    expect(result.imported).toBe(1);
+    // OPTION_TRADE has no strike/expiry/right
+    expect(result.trades[0].structure).toContain("Option");
+    expect(result.trades[0].structure).toContain("OPT");
+  });
+
   it("mixed new and duplicate trades", () => {
     // Import BUY_STOCK first
     const r1 = syncNewTrades(MOCK_EXISTING, [BUY_STOCK]);

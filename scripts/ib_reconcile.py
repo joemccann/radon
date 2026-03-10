@@ -110,34 +110,44 @@ def fetch_ib_positions(client: IBClient) -> list:
         })
     return positions
 
+def _contract_key(e: dict) -> str:
+    """Build a grouping key: symbol only for stocks, symbol+strike+expiry+right for options."""
+    if e["sec_type"] in ("OPT", "BAG"):
+        return f"{e['symbol']}|{e['sec_type']}|{e.get('strike')}|{e.get('expiry')}|{e.get('right')}"
+    return f"{e['symbol']}|{e['sec_type']}"
+
+
 def group_executions_by_symbol(executions: list) -> dict:
-    """Group executions by symbol and determine net action."""
+    """Group executions by contract (symbol + strike/expiry/right for options) and determine net action."""
     grouped = {}
-    
+
     for e in executions:
-        symbol = e["symbol"]
-        if symbol not in grouped:
-            grouped[symbol] = {
-                "symbol": symbol,
+        key = _contract_key(e)
+        if key not in grouped:
+            grouped[key] = {
+                "symbol": e["symbol"],
                 "sec_type": e["sec_type"],
+                "strike": e.get("strike"),
+                "expiry": e.get("expiry"),
+                "right": e.get("right"),
                 "executions": [],
                 "net_quantity": 0,
                 "total_value": 0,
                 "total_commission": 0,
                 "total_realized_pnl": 0,
             }
-        
-        g = grouped[symbol]
+
+        g = grouped[key]
         g["executions"].append(e)
-        
+
         qty = e["shares"] if e["side"] == "BOT" else -e["shares"]
         g["net_quantity"] += qty
         g["total_value"] += e["shares"] * e["price"]
         g["total_commission"] += e["commission"]
         g["total_realized_pnl"] += e["realized_pnl"]
-    
-    # Determine action for each symbol
-    for symbol, g in grouped.items():
+
+    # Determine action for each group
+    for key, g in grouped.items():
         if g["net_quantity"] > 0:
             g["action"] = "BUY" if g["sec_type"] == "STK" else "BUY_OPTION"
         elif g["net_quantity"] < 0:
@@ -152,29 +162,30 @@ def group_executions_by_symbol(executions: list) -> dict:
                 g["action"] = "CLOSED"
             else:
                 g["action"] = "NEUTRAL"
-    
+
     return grouped
 
 def find_new_trades(executions: list, trade_log: dict) -> list:
     """Find executions that aren't in the trade log."""
     existing = get_trade_log_trades(trade_log)
     grouped = group_executions_by_symbol(executions)
-    
+
     new_trades = []
-    for symbol, g in grouped.items():
+    for key, g in grouped.items():
+        symbol = g["symbol"]
         # Get the date from first execution
         if g["executions"]:
             trade_date = g["executions"][0]["time"].strftime("%Y-%m-%d")
-            
+
             # Check if this trade exists in log
             found = False
             for ticker, date, structure in existing:
                 if ticker == symbol and date == trade_date:
                     found = True
                     break
-            
+
             if not found and g["action"] not in ["NEUTRAL"]:
-                new_trades.append({
+                entry = {
                     "symbol": symbol,
                     "date": trade_date,
                     "action": g["action"],
@@ -183,8 +194,14 @@ def find_new_trades(executions: list, trade_log: dict) -> list:
                     "commission": g["total_commission"],
                     "realized_pnl": g["total_realized_pnl"],
                     "sec_type": g["sec_type"],
-                })
-    
+                }
+                # Include contract details for options
+                if g["sec_type"] in ("OPT", "BAG") and g.get("strike"):
+                    entry["strike"] = g["strike"]
+                    entry["expiry"] = g.get("expiry")
+                    entry["right"] = g.get("right")
+                new_trades.append(entry)
+
     return new_trades
 
 def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
