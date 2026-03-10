@@ -1,58 +1,146 @@
 <p align="center">
-  <img src=".github/hero.png" alt="Radon — Reconstructing Market Structure" width="900" />
+  <img src=".github/hero.png" alt="Radon - Reconstructing Market Structure" width="900" />
+</p>
+
+<p align="center">
+  <img alt="Python 3.9+" src="https://img.shields.io/badge/Python-3.9%2B-3776AB?logo=python&logoColor=white" />
+  <img alt="Next.js 16" src="https://img.shields.io/badge/Next.js-16-000000?logo=nextdotjs&logoColor=white" />
+  <img alt="Test stack" src="https://img.shields.io/badge/Tests-pytest%20%7C%20Vitest%20%7C%20Playwright-0A7F6F" />
 </p>
 
 # Radon
 
-Market structure reconstruction system. Surfaces convex opportunities from institutional dark pool flow, volatility surfaces, and cross-asset positioning. Detects institutional positioning via dark pool/OTC flow, constructs convex options structures, sizes with fractional Kelly criterion. Includes a real-time Next.js terminal with IB WebSocket streaming, order management, and an AI chat interface.
+**Reconstructing market structure from institutional signals.**
+
+Radon is a market-structure reconstruction system that detects institutional positioning and turns it into convex options trades using dark pool flow, volatility signals, and cross-asset positioning data.
+
+- Detects hidden positioning through dark pool, options flow, and cross-asset signals
+- Evaluates every trade through a strict three-gate framework
+- Generates portfolio, scan, and scenario reports with a real-time trading terminal on top
 
 **No narrative trades. No TA trades. Flow signal or nothing.**
 
-## Three Gates
+---
 
-Every trade must pass three sequential gates:
+## What Radon Does
 
-1. **Convexity** — Potential gain >= 2x potential loss. Defined-risk only (long options, vertical spreads).
-2. **Edge** — A specific, data-backed signal that hasn't yet moved price.
-3. **Risk Management** — Fractional Kelly sizing with a hard cap of 2.5% of bankroll per position.
+Radon reconstructs market structure from multiple institutional signals and converts that information into executable trade ideas, risk reports, and portfolio decisions.
 
-If any gate fails, no trade is taken.
+**Inputs**
+
+- Dark pool and OTC flow from Unusual Whales
+- Options flow, volatility surface, and open-interest change data
+- Real-time quotes and options chains from Interactive Brokers
+- Cross-asset volatility relationships, CTA positioning, and analyst context
+
+**Processing**
+
+- Signal detection and scoring
+- Strategy-specific modeling
+- Convex options structure design
+- Fractional Kelly sizing and portfolio risk checks
+
+**Outputs**
+
+- Trade candidates and evaluations
+- HTML reports for scans, portfolio state, and stress tests
+- Live portfolio and order-state monitoring in the web terminal
+- Execution and post-trade management through Interactive Brokers
+
+## Trade Validation Framework
+
+Every trade must pass three sequential gates. If any gate fails, no trade is taken.
+
+### 1. Convexity
+
+Potential gain must be at least **2x potential loss**.
+
+- Default posture: defined-risk structures
+- Typical structures: long options, vertical spreads, calendars
+- Exception: risk reversals are explicit manager-override trades
+
+### 2. Edge
+
+A trade needs a **specific, data-backed signal** that has not fully moved price yet.
+
+- Dark pool accumulation or distribution
+- LEAP implied volatility mispricing
+- Cross-asset volatility divergence
+- Credit-volatility dislocations or crash-risk regime shifts
+
+### 3. Risk Management
+
+Trades are sized using **fractional Kelly** with hard limits.
+
+- Max position size: **2.5% of bankroll**
+- No pyramiding into weak signals
+- Portfolio-level exposure is monitored continuously
 
 ## Strategies
 
-Six active strategies, each exploiting a different informational or structural advantage:
+Six active strategies drive the system.
 
-| # | Strategy | Edge Source | Timeframe | Risk |
-|---|----------|-------------|-----------|------|
-| 1 | **Dark Pool Flow** | Institutional positioning via dark pool/OTC | 2-6 weeks | Defined |
-| 2 | **LEAP IV Mispricing** | HV >> LEAP IV during regime changes | Weeks-9 months | Defined |
-| 3 | **GARCH Convergence** | Cross-asset IV repricing lag | 2-8 weeks | Defined |
-| 4 | **Risk Reversal** | IV skew exploitation (sell rich put, buy cheap call) | 2-8 weeks | Undefined |
-| 5 | **Volatility-Credit Gap (VCG)** | Vol complex / credit market divergence | 1-5 days | Defined |
-| 6 | **Crash Risk Index (CRI)** | CTA deleveraging + sector correlation | 3-5 days | Defined |
+| Strategy | Signal | Market Inefficiency | Typical Structure | Timeframe | Risk |
+|----------|--------|---------------------|-------------------|-----------|------|
+| **Dark Pool Flow** | Institutional accumulation or distribution | Price lag versus hidden liquidity | Calls, puts, vertical spreads | 2-6 weeks | Defined |
+| **LEAP IV Mispricing** | Realized vol materially above long-dated IV | Long-dated volatility underpricing | Long LEAPs, diagonals | Weeks-9 months | Defined |
+| **GARCH Convergence** | Cross-asset vol repricing lag | Surface adjustment is slower than regime change | Calendars, verticals | 2-8 weeks | Defined |
+| **Risk Reversal** | Skew distortion between puts and calls | Put demand richer than equivalent call demand | Risk reversal | 2-8 weeks | Undefined |
+| **Volatility-Credit Gap (VCG)** | VIX/VVIX/HYG divergence | Credit markets are lagging vol stress | Index puts, put spreads | 1-5 days | Defined |
+| **Crash Risk Index (CRI)** | CTA deleveraging plus correlation stress | Systematic positioning unwind | Index puts, tactical hedges | 3-5 days | Defined |
 
-Full specs in `docs/strategies.md`. VCG math in `docs/VCG_institutional_research_note.md`.
+Full strategy specs live in [docs/strategies.md](docs/strategies.md). VCG research notes live in [docs/VCG_institutional_research_note.md](docs/VCG_institutional_research_note.md).
 
-## Prerequisites
+## System Architecture
 
-- Python 3.9+
-- [Interactive Brokers](https://www.interactivebrokers.com/) TWS or IB Gateway running locally
-- [Unusual Whales](https://unusualwhales.com) API key for dark pool / flow data
-- Node.js 18+ (for the web terminal)
+```text
+Interactive Brokers ----\
+Unusual Whales ---------+--> Signal Detection Engine --> Strategy Evaluation
+MenthorQ / CTA Data ----/                                  |
+Exa / Research ---------/                                  v
+                                                   Convex Structure Builder
+                                                            |
+                                                            v
+                                                   Kelly Position Sizing
+                                                            |
+                                                            v
+                                                   Execution / Monitoring
+                                                            |
+                                                            v
+                                                       Radon Terminal
+```
 
-## Getting Started
+At a high level:
 
-### 1. Clone and install
+- `scripts/` contains scanners, evaluators, pricing logic, reporting, and broker integrations
+- `web/` contains the Next.js terminal for portfolio, flow, orders, and AI-assisted workflows
+- `data/` holds runtime artifacts and scan outputs
+
+## Quick Start
+
+**Prerequisites**
+
+- Python `3.9+`
+- Node.js `18+`
+- Interactive Brokers TWS or Gateway running locally
+- Unusual Whales API access
+
+**Install and run**
 
 ```bash
 git clone https://github.com/joemccann/radon.git
 cd radon
 pip install -r requirements.txt
+cd web && npm install && cd ..
+python scripts/ib_sync.py
+python scripts/scanner.py --top 15
 ```
 
-### 2. Set environment variables
+## Setup Details
 
-**Web app** (`web/.env` — copied from `web/.env.example`):
+### Environment Variables
+
+**Web app** in `web/.env`:
 
 ```bash
 ANTHROPIC_API_KEY=your-anthropic-key
@@ -60,190 +148,198 @@ UW_TOKEN=your-unusual-whales-key
 EXA_API_KEY=your-exa-key
 ```
 
-**Python scripts** (project root `.env`):
+**Python scripts** in the project root `.env`:
 
 ```bash
-# MenthorQ — institutional CTA positioning data (for CRI scanner)
 MENTHORQ_USER=your-menthorq-email
 MENTHORQ_PASS=your-menthorq-password
 ```
 
-Python scripts load the root `.env` via `python-dotenv`. The web app uses Next.js built-in `.env` loading from `web/`.
-
-**Optional shell exports** (`.zshrc` / `.bashrc`):
+**Optional shell exports**:
 
 ```bash
-export XAI_API_KEY="your-xai-api-key"  # xAI Grok — X/Twitter sentiment
+export XAI_API_KEY="your-xai-api-key"
 ```
 
-**MenthorQ additional dependencies:**
+### Additional Dependencies
+
+MenthorQ-based workflows require Playwright and `httpx`:
 
 ```bash
 pip install playwright httpx
 playwright install chromium
 ```
 
-IB Gateway/TWS connects locally on port 4001 (Gateway) or 7497 (TWS). No API key needed — just have it running.
+Interactive Brokers connects locally on port `4001` for Gateway or `7497` for TWS. No broker API key is required, but TWS or Gateway must be running before live workflows.
 
-### 3. Verify IB connection
+## Radon Terminal
 
-```bash
-python scripts/ib_sync.py
-```
-
-### 4. Run your first scan
-
-```bash
-python scripts/scanner.py --top 15
-```
-
-## Radon Terminal (Web)
-
-A Next.js 16 trading terminal with real-time IB WebSocket price streaming and greeks.
+Radon includes a real-time trading terminal built with **Next.js 16**. It streams Interactive Brokers prices, computes live greeks, visualizes portfolio exposures, and serves as the operator interface for scans, evaluation, and monitoring.
 
 ```bash
 cd web
 npm install
-npm run dev        # Starts Next.js + IB WebSocket server
+npm run dev
 ```
 
 Visit `http://localhost:3000`.
 
-1. Dashboard
-2. Flow Analysis
-3. Portfolio
-4. Orders
-5. Scanner
-6. Discover
-7. Journal
-8. Regime
-9. CTA
+**Key capabilities**
 
-**Key features:**
-- Real-time price streaming via IB WebSocket with live greeks (delta, gamma, theta, vega)
-- Position table with per-leg P&L breakdown for multi-leg spreads
-- Exposure breakdown modal with clickable metric cards showing delta calculation details
-- Order management: cancel, modify (including BAG/combo spread orders)
-- Ticker detail modal with company info, seasonality charts, and analyst ratings
-- Crash Risk Index with intraday time-series and MenthorQ CTA overlay
-- Dual light/dark theme with Radon design system
-- AI chat interface for running commands and analysis
+- Real-time price streaming with live greeks
+- Multi-leg position monitoring and per-leg P&L
+- Order management, including combo spread workflows
+- Flow analysis, regime views, and thesis checks
+- AI chat interface for command execution and analysis
+
+## Example Workflow
+
+1. Run `scan` to surface dark pool and regime-aware candidates.
+2. Run `evaluate NVDA` to execute the full seven-milestone validation flow.
+3. If edge passes, design a convex structure and size it with Kelly constraints.
+4. Send or stage the trade through Interactive Brokers.
+5. Monitor the position in the Radon Terminal and portfolio report.
+
+## CLI Commands
+
+### Scanning
+
+| Command | Description |
+|---------|-------------|
+| `scan` | Watchlist dark pool flow scan with CRI regime overlay and HTML report |
+| `discover` | Market-wide or targeted discovery scan for new candidates |
+| `leap-scan [TICKERS]` | Find LEAP IV mispricing opportunities |
+| `garch-convergence [TICKERS]` | Cross-asset implied-versus-realized volatility divergence scan |
+| `seasonal [TICKERS]` | Monthly seasonality analysis from EquityClock |
+| `analyst-ratings [TICKERS]` | Ratings, price targets, and recent changes |
+
+### Evaluation And Risk
+
+| Command | Description |
+|---------|-------------|
+| `evaluate [TICKER]` | Full seven-milestone trade evaluation |
+| `stress-test` | Interactive bear/base/bull scenario report for the current portfolio |
+| `risk-reversal [TICKER]` | IV-skew analysis for directional risk-reversal structures |
+| `vcg` | Cross-asset volatility-credit gap scan |
+| `cri-scan` | Crash Risk Index with CTA exposure model |
+
+### Portfolio And Operations
+
+| Command | Description |
+|---------|-------------|
+| `portfolio` | Live portfolio report with dark pool thesis checks |
+| `free-trade` | Analyze multi-leg positions for free-trade progression |
+| `journal` | View recent trade log entries |
+| `sync` | Pull live portfolio data from Interactive Brokers |
+| `blotter` | Today's fills, grouped spreads, and commission totals |
+| `blotter-history` | Historical trades via IB Flex Query |
+
+### Research And System
+
+| Command | Description |
+|---------|-------------|
+| `strategies` | Show the strategy registry |
+| `menthorq-cta` | Fetch institutional CTA positioning data |
+| `x-scan [@ACCOUNT]` | Fetch X sentiment through xAI |
+| `x-scan-browser [@ACCOUNT]` | Fetch X sentiment through browser scraping |
+| `commands` | Display the full command registry |
 
 ## Project Structure
 
-```
+```text
 radon/
-├── CLAUDE.md                          # Agent identity, trading rules, commands
-├── VERSION                            # Semantic version
-├── requirements.txt                   # Python deps (ib_insync, requests, pandas, numpy)
-├── brand/                             # Radon design system assets
-│   ├── radon-brand-system.md          # Full 9-section brand spec
-│   ├── radon-design-tokens.json       # Machine-readable design tokens
-│   ├── radon-tailwind-theme.ts        # Tailwind theme extension
-│   ├── radon-component-kit.html       # Live component reference
-│   ├── radon-terminal-mockup.html     # Terminal layout mockup
-│   └── radon-*.svg                    # Logo assets
-├── scripts/
-│   ├── clients/                       # API client libraries
-│   │   ├── ib_client.py               # IBClient — wraps ib_insync
-│   │   ├── uw_client.py               # UWClient — wraps UW REST API (50+ endpoints)
-│   │   └── menthorq_client.py         # MenthorQClient — browser automation + Vision
-│   ├── utils/                         # Shared utilities
-│   ├── trade_blotter/                 # IB trade blotter subsystem
-│   ├── monitor_daemon/                # Background monitoring daemon
-│   ├── tests/                         # pytest test suite (735+ tests)
-│   ├── evaluate.py                    # Unified 7-milestone evaluation (parallel)
-│   ├── scanner.py                     # Watchlist batch dark pool scan
-│   ├── discover.py                    # Market-wide options flow scanner
-│   ├── cri_scan.py                    # Crash Risk Index scanner
-│   ├── vcg_scan.py                    # Volatility-Credit Gap scanner
-│   ├── garch_convergence.py           # GARCH convergence vol divergence scanner
-│   ├── kelly.py                       # Kelly criterion calculator
-│   ├── scenario_analysis.py           # Portfolio stress testing
-│   └── ...                            # IB sync, orders, blotter, etc.
-├── data/                              # Runtime JSON data (gitignored)
-├── docs/                              # Strategy specs, API references
-├── config/                            # launchd plists for background services
-├── web/                               # Next.js 16 terminal
-│   ├── app/                           # App Router pages + API routes
-│   ├── components/                    # React 19 components
-│   │   ├── kit/                       # Radon component kit (viewable at /kit)
-│   │   └── ...                        # WorkspaceShell, PositionTable, MetricCards, etc.
-│   ├── lib/                           # Hooks, utilities, types, Zustand store
-│   └── tests/                         # Vitest + Playwright tests
-└── .pi/                               # Agent slash commands + skills
+├── scripts/          # Python scanners, evaluators, broker integrations
+├── web/              # Next.js terminal
+├── docs/             # Strategy and implementation documentation
+├── brand/            # Radon design system
+├── data/             # Runtime data and generated artifacts
+├── config/           # launchd and service configuration
+├── requirements.txt  # Python dependencies
+├── CLAUDE.md         # Agent and workflow rules
+└── .pi/              # Command registry and agent skills
 ```
 
-## Commands
+Important directories:
 
-| Command | Action |
-|---------|--------|
-| `scan` | Watchlist dark pool flow scan |
-| `discover` | Market-wide options flow for new candidates |
-| `evaluate [TICKER]` | Full 7-milestone three-gate evaluation |
-| `portfolio` | Positions, exposure, capacity |
-| `journal` | Recent trade log |
-| `strategies` | Display strategy registry |
-| `scenario [TYPE] [PCT]` | Portfolio stress test (price shock or delta decay) |
-| `vcg-scan` | Volatility-Credit Gap divergence scan |
-| `cri-scan` | Crash Risk Index scan |
-| `garch-convergence [PRESET]` | Cross-asset GARCH vol divergence scan |
-| `sync` | Pull live portfolio from IB |
-| `blotter` | Today's fills + P&L |
-| `leap-scan [TICKERS]` | LEAP IV mispricing opportunities |
-| `seasonal [TICKERS]` | Monthly seasonality assessment |
-| `analyst-ratings [TICKERS]` | Ratings, changes, price targets |
+- `scripts/clients/` for broker and data-provider adapters
+- `scripts/tests/` for the Python test suite
+- `web/components/` and `web/app/` for terminal UI and routes
+- `brand/` for the design system and tokens
 
-## Data Source Priority
+## Data Sources
 
-| Priority | Source | Notes |
-|----------|--------|-------|
-| **1** | Interactive Brokers (TWS/Gateway) | Real-time quotes, options chains, fundamentals |
-| **2** | Unusual Whales (`$UW_TOKEN`) | Dark pool flow, sweeps, flow alerts, analyst ratings |
-| **3** | Exa (`$EXA_API_KEY`) | Web search, company research |
-| **4** | Yahoo Finance | **Last resort** — delayed, rate-limited |
+Market-data priority is intentionally strict:
+
+1. **Interactive Brokers** for real-time quotes, options chains, and portfolio state
+2. **Unusual Whales** for dark pool flow, sweeps, options flow, and analyst data
+3. **Exa** for company and market research
+4. **Yahoo Finance** as a last-resort fallback
+
+Auxiliary sources:
+
+- **MenthorQ** for CTA positioning used in CRI analysis
+- **xAI / browser scraping** for X-account sentiment workflows
 
 ## Testing
 
+Radon includes Python, frontend, and end-to-end test coverage.
+
+- **Python**: `pytest` for scanners, evaluation logic, utilities, and adapters
+- **Frontend**: `Vitest` for web logic
+- **E2E**: `Playwright` for browser workflows
+
 ```bash
-# Python tests (735+ tests)
 python -m pytest scripts/tests/ -v
-
-# TypeScript tests (Vitest)
-cd web && npx vitest run
-
-# E2E tests (Playwright)
+cd web && npm test
 cd web && npx playwright test
 ```
 
-All unit tests use mocked API calls — no live IB or UW connections required.
+Unit tests use mocked API calls where possible, so most development work does not require a live IB or Unusual Whales connection.
 
-## Background Services
+## Services
 
-| Service | Schedule | Purpose |
-|---------|----------|---------|
-| IB Gateway (IBC) | Mon-Fri 00:00 | Auto-start Gateway, 2FA, daily restart |
-| CRI Scan | Every 30 min, 4:05 AM–8 PM ET | Crash Risk Index intraday time-series |
-| Monitor Daemon | Pluggable | Fill monitoring, exit order placement |
-| Data Refresh | Configurable | Portfolio + orders staleness refresh |
+The repo includes background-service support for the live trading environment:
 
-Setup:
+| Service | Purpose |
+|---------|---------|
+| Secure IBC service (`local.ibc-gateway`) | Maintains the local broker session for live quotes, execution, and reports |
+| CRI scan service | Refreshes crash-risk regime data intraday |
+| Monitor daemon | Tracks fills and manages post-entry workflows |
+| Data refresh services | Keeps portfolio and order-state data current |
 
-1. `./scripts/setup_ibc.sh install`
-2. `./scripts/setup_cri_service.sh install`
-3. `./scripts/setup_monitor_daemon.sh install`
-4. `./scripts/setup_data_refresh_service.sh install`
-5. `./scripts/setup_exit_order_service.sh install`
+Historical setup helpers remain in `scripts/`, and the broader implementation notes live in [docs/implement.md](docs/implement.md).
+
+### Phase 1 Remote IBC Access
+
+The current working path for iPhone control is **standard macOS SSH over Tailscale** to the secure machine-local IBC wrappers in `~/ibc/bin/`.
+
+Dependencies:
+
+- `Tailscale.app` on the Mac
+- Tailscale on the iPhone, connected to the same tailnet
+- macOS `Remote Login`
+- iPhone SSH client such as Termius, Blink Shell, or Prompt
+- Optional: dedicated public key in `~/.ssh/authorized_keys` for key-based login
+
+Reference docs:
+
+- [docs/ibc-remote-access.md](docs/ibc-remote-access.md)
+- [reports/ibc-remote-control-and-cloud-options-2026-03-10.html](reports/ibc-remote-control-and-cloud-options-2026-03-10.html)
+
+Direct command example:
+
+```bash
+ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
+```
 
 ## Glossary
 
 | Term | Definition |
 |------|------------|
-| **Convexity** | Asymmetric payoff where gain >> loss (we require >= 2:1) |
-| **CRI** | Crash Risk Index — composite crash risk score (VIX, VVIX, correlation, momentum) |
-| **CTA** | Commodity Trading Advisor — systematic funds that deleverage on vol spikes |
-| **DP** | Dark Pool — private exchanges for institutional orders |
-| **Edge** | Data-backed reason the market is mispricing an outcome |
-| **GEX** | Gamma Exposure — aggregate market maker gamma positioning |
-| **Kelly Criterion** | Optimal bet sizing: `f* = p - (q/b)` where p = win prob, q = 1-p, b = odds |
-| **VCG** | Volatility-Credit Gap — divergence between vol complex and credit markets |
+| **Convexity** | An asymmetric payoff where expected upside materially exceeds downside |
+| **CRI** | Crash Risk Index, a composite crash-risk and deleveraging model |
+| **CTA** | Commodity Trading Advisor, typically systematic trend-following funds |
+| **Dark Pool** | Private off-exchange venue used for institutional trading |
+| **Edge** | A specific reason the market is mispricing an outcome |
+| **Kelly Criterion** | Position-sizing framework used to scale exposure to edge and odds |
+| **VCG** | Volatility-Credit Gap, a divergence model across VIX, VVIX, and credit |

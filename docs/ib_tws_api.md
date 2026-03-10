@@ -560,16 +560,15 @@ Use `ib_order_manage.py` for cancel/modify operations — it connects as master 
 
 ## IBC Gateway Automation
 
-IB Gateway is managed by IBC v3.23.0 (`vendor/ibc/`), installed as a launchd service.
+IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gateway`) with IBC installed under `~/ibc-install/` and wrappers under `~/ibc/bin/`.
 
 ### Service Management
 ```bash
-./scripts/setup_ibc.sh install    # Detect Gateway version, patch config, install service
-./scripts/setup_ibc.sh uninstall  # Remove service
-./scripts/setup_ibc.sh status     # Service state, Gateway PID, config
-./scripts/setup_ibc.sh logs       # Tail log files
-./scripts/setup_ibc.sh start      # Manual foreground start (for 2FA)
-./scripts/setup_ibc.sh stop       # Send STOP via IBC command server
+~/ibc/bin/start-secure-ibc-service.sh    # Start Gateway via launchd
+~/ibc/bin/stop-secure-ibc-service.sh     # Stop Gateway
+~/ibc/bin/restart-secure-ibc-service.sh  # Restart Gateway
+~/ibc/bin/status-secure-ibc-service.sh   # Show launchd state
+tail -f ~/ibc/logs/ibc-gateway-service.log
 ```
 
 ### Lifecycle
@@ -579,21 +578,50 @@ IB Gateway is managed by IBC v3.23.0 (`vendor/ibc/`), installed as a launchd ser
 | Daily 11:58 PM | IBC auto-restart (reuses auth session) | No |
 | Sunday 07:05 | Cold restart (full re-auth) | Yes |
 
-### Config (`~/ibc/config.ini`)
-Credentials are in this file (never committed). The setup script patches operational settings only:
+### Config (`~/ibc/config.secure.ini`)
+Credentials are not stored in this file. The secure runner reads them from Keychain at launch, writes a temporary `0600` runtime config, and removes it after exit.
 - `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped
+- `AcceptIncomingConnectionAction=accept` — suppress API connection prompt
 - `AutoRestartTime=11:58 PM` — before IB's forced restart window
 - `ColdRestartTime=07:05` — Sunday re-auth
 - `CommandServerPort=7462` — enables `echo "STOP" | nc localhost 7462`
+
+### LaunchAgent and Runner
+- LaunchAgent: `~/Library/LaunchAgents/local.ibc-gateway.plist`
+- Runner: `~/ibc/bin/run-secure-ibc-gateway.sh`
+- Logs: `~/ibc/logs/ibc-gateway-service.log` and IBC diagnostics in `~/ibc/logs/`
+
+### Phase 1 Remote Access Dependencies
+- `Tailscale.app` on the Mac
+- Tailscale on the iPhone, connected to the same tailnet
+- macOS `Remote Login` enabled
+- iPhone SSH client such as Termius, Blink Shell, or Prompt
+- Optional: dedicated SSH public key in `~/.ssh/authorized_keys`
+
+### Phase 1 Remote Access Usage
+```bash
+# Direct secure service commands over SSH
+ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
+ssh joemccann@macbook-pro '~/ibc/bin/restart-secure-ibc-service.sh'
+
+# Optional repo helper
+ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/convex-scavenger && ./scripts/ibc_remote_control.sh ibc-status'
+```
+
+Reference: `docs/ibc-remote-access.md`
 
 ### Ports
 | Port | Service |
 |------|---------|
 | 4001 | IB Gateway API (Live) |
+| 4002 | IB Gateway API (Paper) |
 | 7462 | IBC Command Server (stop/restart) |
 
 ### Logs
 | File | Content |
 |------|---------|
-| `~/ibc/logs/ibc-gateway.log` | stdout/stderr from launchd |
+| `~/ibc/logs/ibc-gateway-service.log` | stdout/stderr from launchd |
 | `~/ibc/logs/ibc-{version}_GATEWAY-{ver}_{day}.txt` | IBC diagnostic log (login, 2FA, config) |
+
+### Legacy
+`scripts/setup_ibc.sh` is legacy and is no longer the active service-management path on this machine.

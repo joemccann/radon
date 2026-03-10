@@ -471,6 +471,21 @@ IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gat
 | 4002 | IB Gateway Paper |
 | 7462 | IBC Command Server (stop/restart Gateway) |
 
+**Phase 1 remote access (working path):**
+- Canonical remote control surface is the secure wrapper set in `~/ibc/bin/`
+- Transport is **standard macOS SSH over Tailscale**, not Tailscale SSH server mode
+- Dependencies:
+  - `Tailscale.app` on the Mac
+  - Tailscale on the iPhone, connected to the same tailnet
+  - macOS `Remote Login` enabled
+  - iPhone SSH client such as Termius, Blink Shell, or Prompt
+  - Optional: dedicated public key in `~/.ssh/authorized_keys` for key-based login
+- Example direct remote commands:
+  - `ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'`
+  - `ssh joemccann@macbook-pro '~/ibc/bin/restart-secure-ibc-service.sh'`
+- Optional repo helper: `scripts/ibc_remote_control.sh`
+- Detailed runbook: `docs/ibc-remote-access.md`
+
 **Legacy:** The old `com.convex-scavenger.ibc-gateway` LaunchAgent and `scripts/setup_ibc.sh` are superseded by the global `local.ibc-gateway` service. The legacy plist was migrated automatically by the market-data-warehouse installer.
 
 IB error `10358` = Reuters Fundamentals subscription inactive → auto-fallback to next source.

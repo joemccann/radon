@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>IBC Remote Control and Cloud Hosting Options | 2026-03-10</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-canvas: #0a0f14;
+      --bg-panel: #0f1519;
+      --bg-panel-raised: #151c22;
+      --line-grid: #1e293b;
+      --text-primary: #e2e8f0;
+      --text-secondary: #94a3b8;
+      --text-muted: #475569;
+      --signal-core: #05AD98;
+      --signal-strong: #0FCFB5;
+      --signal-deep: #048A7A;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+      --dislocation: #D946A8;
+      --extreme: #8B5CF6;
+      --neutral: #94a3b8;
+      --radius-panel: 4px;
+      --shadow-none: none;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background:
+        linear-gradient(180deg, rgba(5, 173, 152, 0.06), rgba(5, 173, 152, 0) 240px),
+        repeating-linear-gradient(
+          90deg,
+          transparent 0,
+          transparent 95px,
+          rgba(30, 41, 59, 0.22) 95px,
+          rgba(30, 41, 59, 0.22) 96px
+        ),
+        var(--bg-canvas);
+      color: var(--text-primary);
+      font-family: "Inter", sans-serif;
+      line-height: 1.5;
+      min-height: 100vh;
+    }
+
+    .page {
+      max-width: 1380px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: end;
+      border-bottom: 1px solid var(--line-grid);
+      padding-bottom: 20px;
+      margin-bottom: 24px;
+    }
+
+    .eyebrow,
+    .meta,
+    .pill,
+    th,
+    .card-label,
+    .section-kicker,
+    .timeline-label {
+      font-family: "IBM Plex Mono", monospace;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .eyebrow {
+      color: var(--signal-core);
+      font-size: 12px;
+      margin-bottom: 10px;
+    }
+
+    h1 {
+      font-size: clamp(28px, 4vw, 44px);
+      line-height: 1.02;
+      font-weight: 700;
+      max-width: 14ch;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      font-size: 15px;
+      max-width: 72ch;
+      margin-top: 12px;
+    }
+
+    .header-meta {
+      display: grid;
+      gap: 10px;
+      justify-items: end;
+    }
+
+    .meta {
+      color: var(--text-secondary);
+      font-size: 12px;
+    }
+
+    .pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    .pill {
+      border: 1px solid var(--line-grid);
+      color: var(--text-secondary);
+      background: var(--bg-panel);
+      border-radius: 999px;
+      padding: 4px 10px;
+      font-size: 11px;
+    }
+
+    .pill.core {
+      border-color: rgba(5, 173, 152, 0.45);
+      color: var(--signal-core);
+    }
+
+    .pill.warn {
+      border-color: rgba(245, 166, 35, 0.4);
+      color: var(--warn);
+    }
+
+    .pill.fault {
+      border-color: rgba(232, 93, 108, 0.4);
+      color: var(--fault);
+    }
+
+    .banner {
+      display: grid;
+      grid-template-columns: 1.2fr 1fr;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--line-grid);
+      border-radius: var(--radius-panel);
+      box-shadow: var(--shadow-none);
+      overflow: hidden;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      gap: 12px;
+      align-items: center;
+      min-height: 32px;
+      padding: 10px 16px;
+      border-bottom: 1px solid var(--line-grid);
+      color: var(--text-secondary);
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .section-kicker {
+      font-size: 11px;
+    }
+
+    .panel-body {
+      padding: 16px;
+    }
+
+    .panel-body p + p,
+    .panel-body ul + p,
+    .panel-body p + ul {
+      margin-top: 12px;
+    }
+
+    .accent-left {
+      position: relative;
+    }
+
+    .accent-left::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 2px;
+      background: linear-gradient(180deg, var(--signal-core), var(--signal-deep));
+    }
+
+    .callout {
+      padding: 16px 16px 16px 18px;
+    }
+
+    .callout strong {
+      color: var(--text-primary);
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .metric {
+      background: var(--bg-panel);
+      border: 1px solid var(--line-grid);
+      border-radius: var(--radius-panel);
+      padding: 16px;
+    }
+
+    .card-label {
+      color: var(--text-secondary);
+      font-size: 11px;
+      margin-bottom: 10px;
+    }
+
+    .metric-value {
+      font-size: 30px;
+      line-height: 1;
+      font-weight: 600;
+      margin-bottom: 10px;
+    }
+
+    .metric-detail {
+      color: var(--text-secondary);
+      font-size: 13px;
+    }
+
+    .metric .mono,
+    td,
+    .source-list a,
+    code {
+      font-family: "IBM Plex Mono", monospace;
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .grid-3 {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .summary-list,
+    .panel-list {
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .summary-list li,
+    .panel-list li {
+      color: var(--text-secondary);
+      padding-left: 14px;
+      position: relative;
+    }
+
+    .summary-list li::before,
+    .panel-list li::before {
+      content: "";
+      position: absolute;
+      left: 0;
+      top: 0.6em;
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--signal-core);
+    }
+
+    .summary-list strong,
+    .panel-list strong {
+      color: var(--text-primary);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 12px 14px;
+      vertical-align: top;
+      border-bottom: 1px solid var(--line-grid);
+      font-size: 12px;
+    }
+
+    th {
+      color: var(--text-secondary);
+      font-size: 10px;
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    td {
+      color: var(--text-primary);
+    }
+
+    .table-note {
+      color: var(--text-secondary);
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    .status-core { color: var(--signal-core); }
+    .status-warn { color: var(--warn); }
+    .status-fault { color: var(--fault); }
+    .status-extreme { color: var(--extreme); }
+    .status-neutral { color: var(--neutral); }
+
+    .architecture {
+      display: grid;
+      gap: 12px;
+      margin-top: 8px;
+    }
+
+    .arch-node {
+      border: 1px solid var(--line-grid);
+      border-radius: var(--radius-panel);
+      padding: 12px 14px;
+      background: rgba(255, 255, 255, 0.01);
+    }
+
+    .arch-node-title {
+      color: var(--text-primary);
+      font-weight: 600;
+      margin-bottom: 4px;
+    }
+
+    .arch-node-copy {
+      color: var(--text-secondary);
+      font-size: 14px;
+    }
+
+    .timeline {
+      display: grid;
+      gap: 14px;
+    }
+
+    .timeline-item {
+      display: grid;
+      grid-template-columns: 120px 1fr;
+      gap: 14px;
+      align-items: start;
+      border-top: 1px solid var(--line-grid);
+      padding-top: 14px;
+    }
+
+    .timeline-item:first-child {
+      border-top: none;
+      padding-top: 0;
+    }
+
+    .timeline-label {
+      color: var(--signal-core);
+      font-size: 11px;
+    }
+
+    .timeline-copy {
+      color: var(--text-secondary);
+    }
+
+    .source-list {
+      list-style: none;
+      display: grid;
+      gap: 10px;
+    }
+
+    .source-list a {
+      color: var(--signal-strong);
+      text-decoration: none;
+      word-break: break-word;
+    }
+
+    .source-list a:hover {
+      text-decoration: underline;
+    }
+
+    .footer {
+      border-top: 1px solid var(--line-grid);
+      padding-top: 16px;
+      margin-top: 24px;
+      color: var(--text-muted);
+      font-size: 12px;
+    }
+
+    code {
+      background: var(--bg-panel-raised);
+      border: 1px solid var(--line-grid);
+      border-radius: 4px;
+      padding: 1px 5px;
+      color: var(--text-primary);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1100px) {
+      .metrics {
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+      }
+    }
+
+    @media (max-width: 860px) {
+      .header,
+      .banner,
+      .grid-2,
+      .grid-3 {
+        grid-template-columns: 1fr;
+      }
+
+      .header-meta {
+        justify-items: start;
+      }
+
+      .pill-row {
+        justify-content: flex-start;
+      }
+
+      .timeline-item {
+        grid-template-columns: 1fr;
+        gap: 6px;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .page {
+        padding: 16px;
+      }
+
+      .metrics {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header class="header">
+      <div>
+        <div class="eyebrow">Radon Terminal | IBC service control assessment</div>
+        <h1>Remote Control and Cloud Hosting Options for IBC</h1>
+        <p class="subtitle">
+          Research summary for operating the existing local IB Gateway / IBC service from an iPhone, and for
+          migrating the service to cloud infrastructure with acceptable operational controls.
+        </p>
+      </div>
+      <div class="header-meta">
+        <div class="pill-row">
+          <span class="pill core">Primary recommendation: Tailscale control plane</span>
+          <span class="pill warn">Weekly Sunday re-auth remains mandatory</span>
+          <span class="pill">Generated: 2026-03-10 08:58 AM PDT</span>
+        </div>
+        <div class="meta">Current local service state observed via <code>launchctl print gui/501/local.ibc-gateway</code>: <span class="status-core">running</span></div>
+      </div>
+    </header>
+
+    <section class="banner">
+      <article class="panel accent-left">
+        <div class="panel-header">
+          <span class="section-kicker">Current machine state</span>
+          <span class="pill core">Local service verified</span>
+        </div>
+        <div class="panel-body callout">
+          <p><strong>Active service model:</strong> <code>local.ibc-gateway</code> LaunchAgent at <code>~/Library/LaunchAgents/local.ibc-gateway.plist</code>.</p>
+          <p><strong>Live control wrappers:</strong> <code>~/ibc/bin/start-secure-ibc-service.sh</code>, <code>stop-secure-ibc-service.sh</code>, <code>restart-secure-ibc-service.sh</code>, <code>status-secure-ibc-service.sh</code>.</p>
+          <p><strong>Credential path:</strong> runtime credentials are read from macOS Keychain by <code>~/ibc/bin/run-secure-ibc-gateway.sh</code> and injected into a temporary <code>0600</code> runtime config.</p>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Decision summary</span>
+          <span class="pill">2 tracks</span>
+        </div>
+        <div class="panel-body">
+          <ul class="summary-list">
+            <li><strong>Best local path:</strong> keep IBC on the Mac and add a private remote control layer over Tailscale.</li>
+            <li><strong>Best UX variant:</strong> small status/start/stop/restart endpoint served only inside the tailnet.</li>
+            <li><strong>Best cloud path:</strong> dedicated Linux VM with IB Gateway + IBC, private network access only.</li>
+            <li><strong>Constraint that does not go away:</strong> Sunday login / 2FA still requires human action.</li>
+          </ul>
+        </div>
+      </article>
+    </section>
+
+    <section class="metrics">
+      <article class="metric">
+        <div class="card-label">Local service</div>
+        <div class="metric-value status-core">Running</div>
+        <div class="metric-detail">Observed from <span class="mono">launchctl</span> during report generation.</div>
+      </article>
+      <article class="metric">
+        <div class="card-label">Existing wrappers</div>
+        <div class="metric-value">4</div>
+        <div class="metric-detail">Start, stop, restart, status already exist and are usable as the control API.</div>
+      </article>
+      <article class="metric">
+        <div class="card-label">Recommended local method</div>
+        <div class="metric-value" style="font-size: 20px;">Tailscale</div>
+        <div class="metric-detail">Private access plus identity-based access control from iPhone.</div>
+      </article>
+      <article class="metric">
+        <div class="card-label">Recommended cloud target</div>
+        <div class="metric-value" style="font-size: 20px;">Linux VM</div>
+        <div class="metric-detail">Native Gateway + IBC, private-only ingress, persistent state.</div>
+      </article>
+      <article class="metric">
+        <div class="card-label">Non-negotiable risk</div>
+        <div class="metric-value status-warn" style="font-size: 20px;">Weekly 2FA</div>
+        <div class="metric-detail">Operational burden remains for both local and cloud paths.</div>
+      </article>
+      <article class="metric">
+        <div class="card-label">Recommended order</div>
+        <div class="metric-value" style="font-size: 20px;">Local first</div>
+        <div class="metric-detail">Ship remote control on Mac, then migrate to cloud only if uptime needs justify it.</div>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Local remote-control options</span>
+          <span class="pill core">Recommended first</span>
+        </div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>Fit</th>
+                <th>Strengths</th>
+                <th>Risks / limits</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Tailscale + private web control endpoint</strong></td>
+                <td class="status-core"><strong>Best overall</strong></td>
+                <td>One-tap iPhone workflow, no public exposure, reuses current wrapper scripts, easy to audit.</td>
+                <td>Mac must stay powered and reachable. Requires a tiny local service to shell out safely.</td>
+              </tr>
+              <tr>
+                <td><strong>Tailscale + SSH</strong></td>
+                <td class="status-neutral"><strong>Fastest to ship</strong></td>
+                <td>No custom service required. Uses the existing scripts directly from an iPhone SSH client.</td>
+                <td>Worse UX, easier to mistype commands, less status visibility.</td>
+              </tr>
+              <tr>
+                <td><strong>Expose IBC command port 7462</strong></td>
+                <td class="status-fault"><strong>Do not use</strong></td>
+                <td>Minimal setup.</td>
+                <td>Unsafe design. Raw control port should never be exposed outside a trusted private boundary.</td>
+              </tr>
+              <tr>
+                <td><strong>Remote desktop only</strong></td>
+                <td class="status-warn"><strong>Recovery path only</strong></td>
+                <td>Useful when Gateway is in an unexpected GUI state.</td>
+                <td>Heavyweight, fragile on phone, not a clean service-control plane.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="table-note">Recommended local implementation: Tailscale on Mac + iPhone, then a narrow control app that runs only <code>status</code>, <code>start</code>, <code>stop</code>, and <code>restart</code> against the existing wrappers.</p>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Why the current setup maps well</span>
+          <span class="pill">No secret rewrite</span>
+        </div>
+        <div class="panel-body">
+          <div class="architecture">
+            <div class="arch-node">
+              <div class="arch-node-title">Control surface already exists</div>
+              <div class="arch-node-copy">The remote layer does not need to understand IBC internals. It only needs to trigger the existing launchd wrapper scripts in <code>~/ibc/bin/</code>.</div>
+            </div>
+            <div class="arch-node">
+              <div class="arch-node-title">Secrets stay on the Mac</div>
+              <div class="arch-node-copy">The control layer never handles IB credentials directly. <code>run-secure-ibc-gateway.sh</code> pulls them from Keychain locally at start time.</div>
+            </div>
+            <div class="arch-node">
+              <div class="arch-node-title">Service semantics stay unchanged</div>
+              <div class="arch-node-copy">launchd remains the lifecycle manager. You are adding remote invocation, not replacing the current service model.</div>
+            </div>
+            <div class="arch-node">
+              <div class="arch-node-title">Recovery path remains available</div>
+              <div class="arch-node-copy">If IBC or Gateway reaches a bad GUI state, Tailscale can still provide SSH or remote-desktop access for operator recovery.</div>
+            </div>
+          </div>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Recommended local architecture</span>
+          <span class="pill core">Private control plane</span>
+        </div>
+        <div class="panel-body">
+          <div class="timeline">
+            <div class="timeline-item">
+              <div class="timeline-label">Layer 1</div>
+              <div class="timeline-copy"><strong>Tailnet transport.</strong> Install Tailscale on the Mac and iPhone. Use tailnet ACLs or device identity so only your user can reach the endpoint.</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-label">Layer 2</div>
+              <div class="timeline-copy"><strong>Minimal controller.</strong> Run a tiny local service that exposes only four actions: service status, start, stop, restart.</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-label">Layer 3</div>
+              <div class="timeline-copy"><strong>Safe execution policy.</strong> The controller should dispatch only the known wrapper scripts and return exit status plus current launchd state. No arbitrary shell input.</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-label">Layer 4</div>
+              <div class="timeline-copy"><strong>Operator observability.</strong> Include last action timestamp, current launchd state, and a small tail of <code>~/ibc/logs/ibc-gateway-service.log</code>.</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Cloud hosting options</span>
+          <span class="pill warn">Migration track</span>
+        </div>
+        <div class="panel-body">
+          <table>
+            <thead>
+              <tr>
+                <th>Option</th>
+                <th>Recommendation</th>
+                <th>Operational profile</th>
+                <th>Main downside</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td><strong>Self-managed Linux VM</strong></td>
+                <td class="status-core"><strong>Best cloud path</strong></td>
+                <td>Dedicated VM, native IB Gateway install, native IBC, Tailscale/private ingress, persistent state volumes.</td>
+                <td>Still outside IBKR's supported headless model. You own the weekly re-auth and operational drift.</td>
+              </tr>
+              <tr>
+                <td><strong>QuantRocket</strong></td>
+                <td class="status-neutral"><strong>Good if broader stack needed</strong></td>
+                <td>More complete IB operating environment with documentation around deployment and multiple gateways.</td>
+                <td>Heavier and more opinionated than needed if the requirement is only Gateway uptime and control.</td>
+              </tr>
+              <tr>
+                <td><strong>Community Docker images</strong></td>
+                <td class="status-warn"><strong>Use only if ops-ready</strong></td>
+                <td>Reproducible deployment, easier rebuilds, container-native workflows.</td>
+                <td>Leans most heavily on unsupported headless/containerized patterns. Easy to misconfigure networking or persistence.</td>
+              </tr>
+            </tbody>
+          </table>
+          <p class="table-note">Cloud recommendation order: Linux VM first, QuantRocket second, Docker only if you already run secure private container infrastructure well.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid-3">
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Cloud constraints</span>
+          <span class="pill fault">Hard limits</span>
+        </div>
+        <div class="panel-body">
+          <ul class="panel-list">
+            <li><strong>IBKR API requires TWS or IB Gateway.</strong> There is no standalone API daemon.</li>
+            <li><strong>Headless auto-launch is not officially supported by IBKR.</strong> Cloud operation is viable but outside the strict support boundary.</li>
+            <li><strong>Sunday re-auth persists.</strong> Daily unattended restarts are possible, but weekly re-auth still requires operator action.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Security posture</span>
+          <span class="pill core">Private-only</span>
+        </div>
+        <div class="panel-body">
+          <ul class="panel-list">
+            <li><strong>Never expose IB API, VNC, or IBC control ports publicly.</strong> Use VPN or tailnet-only access.</li>
+            <li><strong>Persist settings and state.</strong> Gateway API settings and session-recovery files must survive restarts.</li>
+            <li><strong>Constrain control paths.</strong> Remote operators should access service wrappers, not a generic shell by default.</li>
+          </ul>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Session behavior</span>
+          <span class="pill warn">Operator awareness</span>
+        </div>
+        <div class="panel-body">
+          <ul class="panel-list">
+            <li><strong>Single-user conflicts matter.</strong> Other IBKR session activity can interrupt a Gateway session.</li>
+            <li><strong>Market data entitlements follow usernames.</strong> Separate concurrent apps may require multiple usernames.</li>
+            <li><strong>Plan for human recovery.</strong> Keep SSH or remote desktop available for unusual GUI or session states.</li>
+          </ul>
+        </div>
+      </article>
+    </section>
+
+    <section class="grid-2">
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Implementation plan</span>
+          <span class="pill core">Phased rollout</span>
+        </div>
+        <div class="panel-body">
+          <div class="timeline">
+            <div class="timeline-item">
+              <div class="timeline-label">Phase 1</div>
+              <div class="timeline-copy"><strong>Fastest safe version.</strong> Enable Tailscale on Mac and iPhone. Validate that you can SSH in from the phone and run the wrapper scripts manually.</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-label">Phase 2</div>
+              <div class="timeline-copy"><strong>Operator UX.</strong> Build a small local service and status page that wraps the four known actions and returns service/log health.</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-label">Phase 3</div>
+              <div class="timeline-copy"><strong>Availability hardening.</strong> Decide whether the Mac should stay awake when unattended or whether you need a dedicated always-on node.</div>
+            </div>
+            <div class="timeline-item">
+              <div class="timeline-label">Phase 4</div>
+              <div class="timeline-copy"><strong>Cloud pilot.</strong> Stand up a private Linux VM, install Gateway + IBC, test reboots and session recovery for at least one full weekly cycle before cutover.</div>
+            </div>
+          </div>
+        </div>
+      </article>
+
+      <article class="panel">
+        <div class="panel-header">
+          <span class="section-kicker">Recommendation order</span>
+          <span class="pill core">Final ranking</span>
+        </div>
+        <div class="panel-body">
+          <ol class="panel-list" style="list-style: none;">
+            <li><strong>Deploy a private Tailscale-based control plane on the existing Mac.</strong> Lowest risk, least invasive, reuses the current launchd/Keychain model.</li>
+            <li><strong>If cloud uptime is required, migrate to a dedicated Linux VM.</strong> Keep the VM private and accept the unsupported-headless tradeoff.</li>
+            <li><strong>Use QuantRocket only if you want a fuller operating platform.</strong> Good productized option, but broader than the stated need.</li>
+            <li><strong>Use Docker only if you already manage secure container operations well.</strong> Do not make containerization the first move.</li>
+          </ol>
+        </div>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="panel-header">
+        <span class="section-kicker">Primary sources and references</span>
+        <span class="pill">Linked evidence</span>
+      </div>
+      <div class="panel-body">
+        <ul class="source-list">
+          <li><a href="https://interactivebrokers.github.io/tws-api/introduction.html">Interactive Brokers TWS API Introduction</a></li>
+          <li><a href="https://interactivebrokers.github.io/tws-api/initial_setup.html">Interactive Brokers TWS API Initial Setup</a></li>
+          <li><a href="https://interactivebrokers.github.io/tws-api/third_party.html">Interactive Brokers Third-Party API FAQ</a></li>
+          <li><a href="https://brokerage.ibkr.com/en/trading/tws-requirements.php">Interactive Brokers TWS / Gateway System Requirements</a></li>
+          <li><a href="https://github.com/IbcAlpha/IBC">IBC repository</a></li>
+          <li><a href="https://raw.githubusercontent.com/IbcAlpha/IBC/master/userguide.md">IBC user guide</a></li>
+          <li><a href="https://tailscale.com/kb/1193/tailscale-ssh">Tailscale SSH</a></li>
+          <li><a href="https://tailscale.com/kb/1312/serve">Tailscale Serve</a></li>
+          <li><a href="https://tailscale.com/kb/1296/ios-vpn-on-demand">Tailscale iOS VPN On-Demand</a></li>
+          <li><a href="https://tailscale.com/blog/wake-on-lan">Tailscale Wake-on-LAN notes</a></li>
+          <li><a href="https://support.apple.com/en-ng/guide/mac-help/mchlp1066/mac">Apple Remote Login / SSH on macOS</a></li>
+          <li><a href="https://www.quantrocket.com/docs/">QuantRocket documentation</a></li>
+          <li><a href="https://www.quantrocket.com/interactive-brokers/">QuantRocket Interactive Brokers integration</a></li>
+          <li><a href="https://github.com/extrange/ibkr-docker">Community container example: extrange/ibkr-docker</a></li>
+          <li><a href="https://github.com/UnusualAlpha/ib-gateway-docker">Community container example: UnusualAlpha/ib-gateway-docker</a></li>
+        </ul>
+      </div>
+    </section>
+
+    <footer class="footer">
+      Report artifact: <code>reports/ibc-remote-control-and-cloud-options-2026-03-10.html</code><br>
+      Local machine observation included: <code>local.ibc-gateway</code> running, LaunchAgent last modified 2026-03-10 08:04 AM PDT.
+    </footer>
+  </main>
+</body>
+</html>
