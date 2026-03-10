@@ -112,16 +112,23 @@ export default function LandingPage() {
       { t: "AAOI", s: "Long Call $105", q: "50", u: (123.36 + (Math.random() * 0.4 - 0.2)).toFixed(2), l: (22.20 + (Math.random() * 0.1 - 0.05)).toFixed(2), d: "+64.08%", p: "+43,350", e: "2026-03-20" },
       { t: "AAPL", s: "Bull Call Spread", q: "100", u: (262.15 + (Math.random() * 0.2 - 0.1)).toFixed(2), l: (4.65 + (Math.random() * 0.05 - 0.02)).toFixed(2), d: "+11.24%", p: "+4,700", e: "2026-04-17" },
       { t: "AMD", s: "Long Call $195", q: "20", u: (205.65 + (Math.random() * 0.5 - 0.25)).toFixed(2), l: (49.85 + (Math.random() * 0.2 - 0.1)).toFixed(2), d: "+4.22%", p: "+4,040", e: "2027-01-15" },
+      { t: "BAP", s: "Long Call $380", q: "1", u: (344.12 + (Math.random() * 0.5)).toFixed(2), l: "3.04", d: "+0.00%", p: "+$0", e: "2026-05-15" },
+      { t: "BRZE", s: "Long Call $22.5", q: "120", u: (19.01 + (Math.random() * 0.1)).toFixed(2), l: "0.18", d: "-59.30%", p: "-11,500", e: "2026-03-20" },
     ],
     undefined: [
       { t: "APO", s: "Risk Reversal", q: "25", u: (108.13 + (Math.random() * 0.3)).toFixed(2), l: "0.55", d: "+450.0%", p: "+2,335", e: "2026-04-17" },
       { t: "IGV", s: "Synthetic Long", q: "40", u: (85.60 + (Math.random() * 0.2)).toFixed(2), l: "-3.60", d: "-122.2%", p: "+5,144", e: "2026-05-15" },
       { t: "IWM", s: "Risk Reversal", q: "6", u: (254.50 + (Math.random() * 0.4)).toFixed(2), l: "1.06", d: "+325.5%", p: "+1,840", e: "2026-04-17" },
+      { t: "ETHA", s: "Long Call $15", q: "200", u: (15.69 + (Math.random() * 0.1)).toFixed(2), l: "2.75", d: "+6.18%", p: "+3,200", e: "2026-06-18" },
+      { t: "GOOG", s: "Bull Call Spread", q: "44", u: (308.18 + (Math.random() * 0.5)).toFixed(2), l: "7.29", d: "+5.81%", p: "+4,504", e: "2026-04-17" },
     ],
     equity: [
       { t: "EC", s: "Stock (5000.0)", q: "5000", u: "12.37", l: (12.83 + (Math.random() * 0.05)).toFixed(2), d: "-0.08%", p: "+2,288", e: "---" },
       { t: "MSFT", s: "Stock (1000.0)", q: "1000", u: "468.51", l: (404.44 + (Math.random() * 0.2)).toFixed(2), d: "-1.21%", p: "-64,065", e: "---" },
       { t: "NAK", s: "Stock (18628.0)", q: "18628", u: "3.04", l: (1.40 + (Math.random() * 0.01)).toFixed(2), d: "+3.82%", p: "-30,563", e: "---" },
+      { t: "PLTR", s: "Stock (2500.0)", q: "2500", u: "111.10", l: (112.45 + (Math.random() * 0.1)).toFixed(2), d: "+1.2%", p: "+3,400", e: "---" },
+      { t: "TSLA", s: "Stock (500.0)", q: "500", u: "254.12", l: (252.80 + (Math.random() * 0.5)).toFixed(2), d: "-0.5%", p: "-650", e: "---" },
+      { t: "NVDA", s: "Stock (1200.0)", q: "1200", u: "135.45", l: (138.20 + (Math.random() * 0.3)).toFixed(2), d: "+2.1%", p: "+3,300", e: "---" },
     ]
   }), [tick]);
 
@@ -131,9 +138,13 @@ export default function LandingPage() {
     { t: "IGV", p: "Synthetic Long", f: "77% ACCUM", s: [8, 6, 4, 7, 9, 8, 7], sig: "Moderate accumulation signal" },
     { t: "IWM", p: "Risk Reversal", f: "74% ACCUM", s: [6, 7, 8, 8, 7, 6, 5], sig: "Moderate accumulation signal" },
     { t: "BRZE", p: "Long Call", f: "73% DISTRIB", s: [4, 3, 2, 5, 4, 3, 2], sig: "Weak distribution signal", type: 'distrib' },
+    { t: "BRZE", p: "Bull Call Spread", f: "73% DISTRIB", s: [3, 4, 2, 4, 3, 4, 2], sig: "Weak distribution signal", type: 'distrib' },
     { t: "AAPL", p: "Bull Call Spread", f: "66% ACCUM", s: [5, 6, 7, 5, 4, 5, 6], sig: "Weak accumulation signal" },
     { t: "RR", p: "Stock (10000.0)", f: "64% ACCUM", s: [4, 5, 6, 5, 4, 5, 4], sig: "Weak accumulation signal" },
     { t: "PLTR", p: "Long Call", f: "63% ACCUM", s: [3, 4, 5, 4, 3, 4, 3], sig: "Weak accumulation signal" },
+    { t: "BAP", p: "Long Call", f: "61% ACCUM", s: [2, 3, 4, 3, 2, 3, 2], sig: "Weak accumulation signal" },
+    { t: "META", p: "Iron Condor", f: "58% DISTRIB", s: [5, 4, 3, 4, 5, 4, 3], sig: "Neutral distribution", type: 'distrib' },
+    { t: "NVDA", p: "Long Put $120", f: "55% ACCUM", s: [6, 5, 4, 5, 6, 5, 4], sig: "Emerging accumulation" },
   ], [tick]);
 
   const renderMockView = () => {
@@ -241,13 +252,39 @@ export default function LandingPage() {
       case "PORTFOLIO":
         return (
           <motion.div key="portfolio" initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -20 }} className="flex flex-col gap-6 overflow-y-auto max-h-full pr-2 scrollbar-thin scrollbar-thumb-grid">
+            {/* Defined Risk Section */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div className="text-[10px] font-mono text-primary flex items-center gap-2 uppercase tracking-widest">
+                  <Shield size={12} className="text-accent" /> Defined Risk Positions
+                </div>
+                <div className="text-[8px] font-mono text-muted uppercase tracking-widest">5 POSITIONS</div>
+              </div>
+              <div className="border border-grid bg-panel/30">
+                <table className="w-full text-left font-mono text-[9px] border-collapse">
+                  <tbody className="divide-y divide-grid/30">
+                    {portfolioData.defined.map((row, i) => (
+                      <tr key={i} className="hover:bg-panel-raised/40 transition-colors">
+                        <td className="p-3 font-bold text-accent">{row.t}</td>
+                        <td className="p-3 text-muted">{row.s}</td>
+                        <td className="p-3"><FlashingValue value={row.u} /></td>
+                        <td className="p-3 font-bold"><FlashingValue value={row.l} /></td>
+                        <td className="p-3 text-right text-signal-strong font-bold">{row.p}</td>
+                        <td className="p-3 text-right text-muted">{row.e}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {/* Undefined Risk Section */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <div className="text-[10px] font-mono text-warn flex items-center gap-2 uppercase tracking-widest">
                   <Zap size={12} /> Undefined Risk Positions
                 </div>
-                <div className="text-[8px] font-mono text-muted uppercase tracking-widest">3 POSITIONS</div>
+                <div className="text-[8px] font-mono text-muted uppercase tracking-widest">5 POSITIONS</div>
               </div>
               <div className="border border-grid bg-panel/30">
                 <table className="w-full text-left font-mono text-[9px] border-collapse">
