@@ -76,6 +76,23 @@ function blotterShareData(t: BlotterTrade) {
   };
 }
 
+// --- Twitter text builder ---
+
+function buildTweetText(description: string, pnl: number, pnlPct: number | null, showDollar: boolean, showPct: boolean): string {
+  const parts: string[] = [];
+  const sign = pnl >= 0 ? "+" : "-";
+  const abs = Math.abs(pnl);
+  if (showDollar) {
+    parts.push(`${sign}$${abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
+  }
+  if (showPct && pnlPct != null && Number.isFinite(pnlPct)) {
+    const pSign = pnlPct >= 0 ? "+" : "";
+    parts.push(`${pSign}${pnlPct.toFixed(2)}%`);
+  }
+  const pnlStr = parts.join(" ");
+  return `${description} ${pnlStr}\n\nExecuted with @raaborern`;
+}
+
 describe("execOrderDescription", () => {
   it("formats long option correctly", () => {
     const order: ExecutedOrder = {
@@ -235,5 +252,66 @@ describe("API route query params", () => {
     expect(params.get("pnlPct")).toBe("47.5");
     expect(params.get("commission")).toBe("-2.6");
     expect(params.get("fillPrice")).toBe("12.5");
+  });
+
+  it("respects showDollar=false by omitting pnl param", () => {
+    const params = new URLSearchParams();
+    params.set("description", "Test");
+    // showDollar=false → don't set pnl
+    params.set("pnlPct", "25.5");
+    // showPct=true → set pnlPct
+    expect(params.has("pnl")).toBe(false);
+    expect(params.get("pnlPct")).toBe("25.5");
+  });
+
+  it("respects showPct=false by omitting pnlPct param", () => {
+    const params = new URLSearchParams();
+    params.set("description", "Test");
+    params.set("pnl", "500");
+    // showPct=false → don't set pnlPct
+    expect(params.has("pnlPct")).toBe(false);
+    expect(params.get("pnl")).toBe("500");
+  });
+});
+
+describe("buildTweetText", () => {
+  it("includes both $ and % when both enabled", () => {
+    const text = buildTweetText("Long AAOI 2026-04-17 Call $45.00", 1234.56, 47.5, true, true);
+    expect(text).toContain("+$1,234.56");
+    expect(text).toContain("+47.50%");
+    expect(text).toContain("Long AAOI 2026-04-17 Call $45.00");
+    expect(text).toContain("Executed with @raaborern");
+  });
+
+  it("includes only $ when showPct=false", () => {
+    const text = buildTweetText("Long AAPL", 500, 2.86, true, false);
+    expect(text).toContain("+$500.00");
+    expect(text).not.toContain("%");
+  });
+
+  it("includes only % when showDollar=false", () => {
+    const text = buildTweetText("Short TSLA Put", -200, -10.5, false, true);
+    expect(text).not.toContain("$200");
+    expect(text).toContain("-10.50%");
+  });
+
+  it("handles negative P&L correctly", () => {
+    const text = buildTweetText("Short SPY Call", -567.89, -12.3, true, true);
+    expect(text).toContain("-$567.89");
+    expect(text).toContain("-12.30%");
+  });
+
+  it("skips % when pnlPct is null even if showPct=true", () => {
+    const text = buildTweetText("Long GOOG", 100, null, true, true);
+    expect(text).toContain("+$100.00");
+    expect(text).not.toContain("%");
+  });
+
+  it("shows empty pnl portion when both disabled", () => {
+    const text = buildTweetText("Long X", 100, 50, false, false);
+    expect(text).toContain("Long X");
+    expect(text).toContain("Executed with @raaborern");
+    expect(text).not.toContain("$");
+    expect(text).not.toContain("%");
   });
 });

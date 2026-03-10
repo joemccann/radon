@@ -1,6 +1,8 @@
 import { test, expect } from "@playwright/test";
 
 test.describe("Share PnL", () => {
+  // --- API route tests ---
+
   test("API route returns valid PNG for positive P&L", async ({ request }) => {
     const res = await request.get("/api/share/pnl?description=Long+AAOI+2026-04-17+Call+%2445.00&pnl=1234.56&pnlPct=47.5&commission=2.60&fillPrice=12.50&time=2026-03-10");
     expect(res.status()).toBe(200);
@@ -25,38 +27,96 @@ test.describe("Share PnL", () => {
     expect(res.status()).toBe(400);
   });
 
-  test("API route handles minimal params (pnl only)", async ({ request }) => {
+  test("API route handles pnl-only (no pnlPct)", async ({ request }) => {
     const res = await request.get("/api/share/pnl?description=Long+AAPL&pnl=100");
     expect(res.status()).toBe(200);
     expect(res.headers()["content-type"]).toContain("image/png");
   });
 
-  test("share button appears on orders page for executed trades", async ({ page }) => {
-    await page.goto("/orders");
-    // Wait for the executed orders section to load
-    const section = page.locator("text=Today's Executed Orders");
-    await expect(section).toBeVisible({ timeout: 10000 });
-
-    // Check if there are any executed orders with share buttons
-    const shareButtons = page.locator(".share-pnl-button");
-    // Can't guarantee fills exist, so just verify the button class is styled
-    const count = await shareButtons.count();
-    // If there are executed orders with P&L, share buttons should be present
-    if (count > 0) {
-      const firstButton = shareButtons.first();
-      await expect(firstButton).toBeVisible();
-      // Verify it has the share icon (SVG from lucide Share2)
-      await expect(firstButton.locator("svg")).toBeVisible();
-    }
+  test("API route handles pnlPct-only (no pnl)", async ({ request }) => {
+    const res = await request.get("/api/share/pnl?description=Long+AAPL&pnlPct=25.5");
+    expect(res.status()).toBe(200);
+    expect(res.headers()["content-type"]).toContain("image/png");
   });
+
+  // --- Share popover UI tests ---
+
+  test("clicking share button opens popover with checkboxes", async ({ page }) => {
+    await page.goto("/orders");
+    await page.locator("text=Today's Executed Orders").waitFor({ timeout: 10000 });
+    const shareBtn = page.locator(".share-pnl-button").first();
+    if (await shareBtn.count() === 0) {
+      test.skip();
+      return;
+    }
+    await shareBtn.click();
+    const popover = page.locator(".share-pnl-popover");
+    await expect(popover).toBeVisible({ timeout: 3000 });
+    // Should have two checkboxes
+    const checkboxes = popover.locator("input[type='checkbox']");
+    await expect(checkboxes).toHaveCount(2);
+    // Both should be checked by default
+    await expect(checkboxes.nth(0)).toBeChecked();
+    await expect(checkboxes.nth(1)).toBeChecked();
+  });
+
+  test("popover has Copy & Tweet and Copy buttons", async ({ page }) => {
+    await page.goto("/orders");
+    await page.locator("text=Today's Executed Orders").waitFor({ timeout: 10000 });
+    const shareBtn = page.locator(".share-pnl-button").first();
+    if (await shareBtn.count() === 0) {
+      test.skip();
+      return;
+    }
+    await shareBtn.click();
+    const popover = page.locator(".share-pnl-popover");
+    await expect(popover).toBeVisible({ timeout: 3000 });
+    // Should have a "Copy & Tweet" button and a "Copy" button
+    await expect(popover.locator("button", { hasText: "Copy & Tweet" })).toBeVisible();
+    await expect(popover.locator("button", { hasText: /^Copy$/ })).toBeVisible();
+  });
+
+  test("unchecking P&L $ disables it but keeps % checked", async ({ page }) => {
+    await page.goto("/orders");
+    await page.locator("text=Today's Executed Orders").waitFor({ timeout: 10000 });
+    const shareBtn = page.locator(".share-pnl-button").first();
+    if (await shareBtn.count() === 0) {
+      test.skip();
+      return;
+    }
+    await shareBtn.click();
+    const popover = page.locator(".share-pnl-popover");
+    await expect(popover).toBeVisible({ timeout: 3000 });
+    const dollarCheckbox = popover.locator("input[type='checkbox']").nth(0);
+    const pctCheckbox = popover.locator("input[type='checkbox']").nth(1);
+    // Uncheck dollar
+    await dollarCheckbox.uncheck();
+    await expect(dollarCheckbox).not.toBeChecked();
+    await expect(pctCheckbox).toBeChecked();
+  });
+
+  test("popover closes when clicking outside", async ({ page }) => {
+    await page.goto("/orders");
+    await page.locator("text=Today's Executed Orders").waitFor({ timeout: 10000 });
+    const shareBtn = page.locator(".share-pnl-button").first();
+    if (await shareBtn.count() === 0) {
+      test.skip();
+      return;
+    }
+    await shareBtn.click();
+    const popover = page.locator(".share-pnl-popover");
+    await expect(popover).toBeVisible({ timeout: 3000 });
+    // Click outside
+    await page.locator("body").click({ position: { x: 10, y: 10 } });
+    await expect(popover).not.toBeVisible({ timeout: 2000 });
+  });
+
+  // --- Historical trades ---
 
   test("share button appears on historical trades for closed trades", async ({ page }) => {
     await page.goto("/orders");
-    // Wait for the historical trades section
     const section = page.locator("text=Historical Trades");
     await expect(section).toBeVisible({ timeout: 15000 });
-
-    // The blotter table should have share buttons for closed trades
     const shareButtons = page.locator(".share-pnl-button");
     const count = await shareButtons.count();
     if (count > 0) {

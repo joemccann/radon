@@ -19,7 +19,8 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const description = searchParams.get("description") ?? "";
-    const pnl = parseFloat(searchParams.get("pnl") ?? "0");
+    const pnlRaw = searchParams.get("pnl");
+    const pnl = pnlRaw != null ? parseFloat(pnlRaw) : null;
     const pnlPctRaw = searchParams.get("pnlPct");
     const pnlPct = pnlPctRaw != null ? parseFloat(pnlPctRaw) : null;
     const commRaw = searchParams.get("commission");
@@ -33,8 +34,15 @@ export async function GET(request: Request) {
     }
 
     const fonts = await loadFonts();
-    const isPositive = pnl >= 0;
+
+    // Determine accent color from whichever value is present
+    const refValue = pnl ?? pnlPct ?? 0;
+    const isPositive = refValue >= 0;
     const accentColor = isPositive ? OG.positive : OG.negative;
+
+    // Build hero text parts
+    const heroDollar = pnl != null && Number.isFinite(pnl) ? fmtDollar(pnl) : null;
+    const heroPct = pnlPct != null && Number.isFinite(pnlPct) ? fmtPct(pnlPct) : null;
 
     const detailItems: { label: string; value: string }[] = [];
     if (fillPrice != null && Number.isFinite(fillPrice)) {
@@ -60,13 +68,15 @@ export async function GET(request: Request) {
             color: OG.text,
           }}
         >
-          {/* Main content area */}
+          {/* Main content area — centered */}
           <div
             style={{
               display: "flex",
               flexDirection: "column",
               flexGrow: 1,
-              padding: "56px 64px 0 64px",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "0 64px",
             }}
           >
             {/* Contract description */}
@@ -77,42 +87,46 @@ export async function GET(request: Request) {
                 fontWeight: 400,
                 color: OG.muted,
                 marginBottom: "20px",
+                textAlign: "center",
               }}
             >
               {description}
             </div>
 
-            {/* Hero P&L dollar amount + pct */}
+            {/* Hero P&L — dollar and/or percent */}
             <div
               style={{
                 display: "flex",
                 flexDirection: "row",
                 alignItems: "baseline",
+                justifyContent: "center",
                 marginBottom: "12px",
               }}
             >
-              <span
-                style={{
-                  fontSize: "80px",
-                  fontWeight: 700,
-                  color: accentColor,
-                  lineHeight: "1",
-                }}
-              >
-                {fmtDollar(pnl)}
-              </span>
-              {pnlPct != null && Number.isFinite(pnlPct) ? (
+              {heroDollar ? (
                 <span
                   style={{
-                    fontSize: "40px",
+                    fontSize: heroPct ? "80px" : "88px",
                     fontWeight: 700,
                     color: accentColor,
-                    opacity: 0.75,
                     lineHeight: "1",
-                    marginLeft: "24px",
                   }}
                 >
-                  {fmtPct(pnlPct)}
+                  {heroDollar}
+                </span>
+              ) : null}
+              {heroPct ? (
+                <span
+                  style={{
+                    fontSize: heroDollar ? "40px" : "88px",
+                    fontWeight: 700,
+                    color: accentColor,
+                    opacity: heroDollar ? 0.75 : 1,
+                    lineHeight: "1",
+                    marginLeft: heroDollar ? "24px" : "0",
+                  }}
+                >
+                  {heroPct}
                 </span>
               ) : null}
             </div>
@@ -128,34 +142,37 @@ export async function GET(request: Request) {
               }}
             />
 
-            {/* Detail items row */}
-            <div style={{ display: "flex", flexDirection: "row" }}>
-              {detailItems.map((item, idx) => (
-                <div
-                  key={idx}
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    marginRight: idx < detailItems.length - 1 ? "56px" : "0px",
-                  }}
-                >
-                  <span
+            {/* Detail items row — centered */}
+            {detailItems.length > 0 ? (
+              <div style={{ display: "flex", flexDirection: "row", justifyContent: "center" }}>
+                {detailItems.map((item, idx) => (
+                  <div
+                    key={idx}
                     style={{
-                      color: OG.muted,
-                      fontSize: "12px",
-                      fontWeight: 700,
-                      letterSpacing: "0.1em",
-                      marginBottom: "6px",
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "center",
+                      marginRight: idx < detailItems.length - 1 ? "56px" : "0px",
                     }}
                   >
-                    {item.label}
-                  </span>
-                  <span style={{ color: OG.text, fontSize: "16px" }}>
-                    {item.value}
-                  </span>
-                </div>
-              ))}
-            </div>
+                    <span
+                      style={{
+                        color: OG.muted,
+                        fontSize: "12px",
+                        fontWeight: 700,
+                        letterSpacing: "0.1em",
+                        marginBottom: "6px",
+                      }}
+                    >
+                      {item.label}
+                    </span>
+                    <span style={{ color: OG.text, fontSize: "16px" }}>
+                      {item.value}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : null}
           </div>
 
           {/* Bottom bar: Radon branding */}

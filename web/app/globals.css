@@ -2978,18 +2978,55 @@ tr {
   cursor: wait;
 }
 
-.share-pnl-toast {
+.share-pnl-popover {
   position: absolute;
-  top: -28px;
-  left: 50%;
-  transform: translateX(-50%);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--signal-core);
+  bottom: calc(100% + 8px);
+  right: 0;
+  z-index: 100;
+  min-width: 200px;
   background: var(--bg-panel);
   border: 1px solid var(--border-dim);
   border-radius: 4px;
-  padding: 2px 8px;
+  padding: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.share-pnl-popover-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 10px;
+}
+
+.share-pnl-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px 0;
+  color: var(--text-primary);
+}
+
+.share-pnl-checkbox input[type="checkbox"] {
+  accent-color: var(--signal-core);
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+}
+
+.share-pnl-popover-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.share-pnl-action {
+  flex: 1;
+  font-size: 11px;
+  padding: 6px 10px;
   white-space: nowrap;
-  pointer-events: none;
 }
