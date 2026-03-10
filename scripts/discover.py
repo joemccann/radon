@@ -476,7 +476,14 @@ def discover(min_premium: int = 500000, min_alerts: int = 1,
         alerts = fetch_options_flow(min_premium=min_premium, limit=200, _client=client)
 
         if not alerts:
-            return {"error": "No flow alerts found", "candidates": []}
+            return {
+                "discovery_time": datetime.now().isoformat(),
+                "mode": "market-wide",
+                "scoring_weights": WEIGHTS,
+                "alerts_analyzed": 0,
+                "candidates_found": 0,
+                "candidates": []
+            }
 
         print(f"  Found {len(alerts)} alerts (>= ${min_premium/1000:.0f}K premium)", file=sys.stderr)
 

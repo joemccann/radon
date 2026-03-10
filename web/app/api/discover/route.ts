@@ -83,6 +83,10 @@ export async function POST(): Promise<Response> {
     const jsonStr = stdout.slice(jsonStart);
     const data = JSON.parse(jsonStr);
 
+    if (data.error) {
+      return NextResponse.json(data, { status: 400 });
+    }
+
     // Cache to disk
     await writeFile(DISCOVER_CACHE_PATH, JSON.stringify(data, null, 2));
 

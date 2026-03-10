@@ -226,6 +226,7 @@ export type DiscoverData = {
   alerts_analyzed: number;
   candidates_found: number;
   candidates: DiscoverCandidate[];
+  error?: string;
 };
 
 // Blotter types (historical trades from IB Flex Query)
