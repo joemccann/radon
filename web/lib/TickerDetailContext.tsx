@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from "react";
-import type { PriceData } from "@/lib/pricesProtocol";
+import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
 import type { OrdersData, PortfolioData } from "@/lib/types";
 
 type TickerDetailContextValue = {
@@ -10,9 +10,11 @@ type TickerDetailContextValue = {
   openTicker: (ticker: string, positionId?: number) => void;
   closeTicker: () => void;
   getPrices: () => Record<string, PriceData>;
+  getFundamentals: () => Record<string, FundamentalsData>;
   getPortfolio: () => PortfolioData | null;
   getOrders: () => OrdersData | null;
   setPrices: (p: Record<string, PriceData>) => void;
+  setFundamentals: (f: Record<string, FundamentalsData>) => void;
   setPortfolio: (p: PortfolioData | null) => void;
   setOrders: (o: OrdersData | null) => void;
 };
@@ -23,6 +25,7 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
   const [activeTicker, setActiveTicker] = useState<string | null>(null);
   const [activePositionId, setActivePositionId] = useState<number | null>(null);
   const pricesRef = useRef<Record<string, PriceData>>({});
+  const fundamentalsRef = useRef<Record<string, FundamentalsData>>({});
   const portfolioRef = useRef<PortfolioData | null>(null);
   const ordersRef = useRef<OrdersData | null>(null);
 
@@ -37,11 +40,16 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const getPrices = useCallback(() => pricesRef.current, []);
+  const getFundamentals = useCallback(() => fundamentalsRef.current, []);
   const getPortfolio = useCallback(() => portfolioRef.current, []);
   const getOrders = useCallback(() => ordersRef.current, []);
 
   const setPrices = useCallback((p: Record<string, PriceData>) => {
     pricesRef.current = p;
+  }, []);
+
+  const setFundamentals = useCallback((f: Record<string, FundamentalsData>) => {
+    fundamentalsRef.current = f;
   }, []);
 
   const setPortfolio = useCallback((p: PortfolioData | null) => {
@@ -54,7 +62,7 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
 
   return (
     <TickerDetailContext.Provider
-      value={{ activeTicker, activePositionId, openTicker, closeTicker, getPrices, getPortfolio, getOrders, setPrices, setPortfolio, setOrders }}
+      value={{ activeTicker, activePositionId, openTicker, closeTicker, getPrices, getFundamentals, getPortfolio, getOrders, setPrices, setFundamentals, setPortfolio, setOrders }}
     >
       {children}
     </TickerDetailContext.Provider>

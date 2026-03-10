@@ -11,6 +11,8 @@ import { WebSocketServer } from "ws";
 import IB from "ib";
 import {
   createPriceData,
+  createFundamentalsData,
+  parseFundamentalRatios,
   updatePriceFromTickPrice,
   updatePriceFromTickSize,
 } from "./ib_tick_handler.js";
@@ -152,6 +154,7 @@ const clientSymbols = new Map();
 const symbolStates = new Map();
 const requestIdToSymbol = new Map();
 const snapshotRequests = new Map();
+const fundamentalsStore = new Map(); // symbol → FundamentalsData
 
 let ibConnected = false;
 let shuttingDown = false;
@@ -243,6 +246,9 @@ function startLiveSubscription(key, ibContract) {
     state.data.timestamp = nowIso();
     symbolStates.set(key, state);
     requestIdToSymbol.set(nextTickerId, key);
+
+    // Request fundamentals data for stocks (one-shot, cached)
+    requestFundamentals(key, ibContract);
   } catch (error) {
     console.error(`Failed to subscribe ${key}:`, error);
   }
@@ -441,6 +447,81 @@ function onTickSnapshotEnd(tickerId) {
   completeSnapshot(symbol, tickerId);
 }
 
+/* ─── Fundamentals via reqFundamentalData (IBIS subscription) ─── */
+
+const fundamentalsRequestIds = new Map(); // reqId → symbol
+const fundamentalsPending = new Set(); // symbols currently being fetched
+
+function requestFundamentals(symbol, ibContract) {
+  // Only for stock symbols, not options
+  if (symbol.includes("_")) return;
+  // Already have data or request in-flight
+  if (fundamentalsStore.has(symbol) || fundamentalsPending.has(symbol)) return;
+  if (!ibConnected) return;
+
+  const reqId = nextRequestId += 1;
+  fundamentalsRequestIds.set(reqId, symbol);
+  fundamentalsPending.add(symbol);
+
+  try {
+    ib.reqFundamentalData(reqId, ibContract, "ReportSnapshot");
+    verbose(`reqFundamentalData ${symbol} reqId=${reqId}`);
+  } catch (error) {
+    verbose(`reqFundamentalData failed for ${symbol}: ${error}`);
+    fundamentalsRequestIds.delete(reqId);
+    fundamentalsPending.delete(symbol);
+  }
+}
+
+function onFundamentalData(reqId, xmlData) {
+  const symbol = fundamentalsRequestIds.get(reqId);
+  if (!symbol) return;
+  fundamentalsRequestIds.delete(reqId);
+  fundamentalsPending.delete(symbol);
+
+  const fundData = createFundamentalsData(symbol);
+
+  // Parse XML ratio data — extract key financial ratios
+  const extractRatio = (tag) => {
+    const match = xmlData.match(new RegExp(`<${tag}[^>]*>([^<]+)</${tag}>`));
+    if (!match) return null;
+    const val = parseFloat(match[1]);
+    return Number.isFinite(val) ? val : null;
+  };
+
+  // IB ReportSnapshot XML has Ratio tags like:
+  //   <Ratio FieldName="PEEXCLXOR">25.3</Ratio>
+  const extractNamedRatio = (fieldName) => {
+    const re = new RegExp(`<Ratio[^>]*FieldName="${fieldName}"[^>]*>([^<]+)</Ratio>`);
+    const match = xmlData.match(re);
+    if (!match) return null;
+    const val = parseFloat(match[1]);
+    return Number.isFinite(val) ? val : null;
+  };
+
+  fundData.peRatio = extractNamedRatio("PEEXCLXOR") ?? extractNamedRatio("APENORM");
+  fundData.eps = extractNamedRatio("TTMEPSXCLX") ?? extractNamedRatio("AEPSNORM");
+  fundData.dividendYield = extractNamedRatio("YIELD") ?? extractNamedRatio("TTMDIVSHR");
+  fundData.week52High = extractNamedRatio("NHIG") ?? extractNamedRatio("NPRICE");
+  fundData.week52Low = extractNamedRatio("NLOW");
+  fundData.priceBookRatio = extractNamedRatio("PRICE2BK");
+  fundData.roe = extractNamedRatio("TTMROEPCT");
+  fundData.revenue = extractNamedRatio("TTMREV");
+
+  const hasData = Object.entries(fundData).some(([k, v]) => k !== "symbol" && k !== "timestamp" && v !== null);
+  if (hasData) {
+    fundamentalsStore.set(symbol, fundData);
+    verbose(`fundamentals ${symbol}: PE=${fundData.peRatio} EPS=${fundData.eps} DY=${fundData.dividendYield} 52H=${fundData.week52High} 52L=${fundData.week52Low}`);
+    sendToSymbolSubscribers(symbol, {
+      type: "fundamentals",
+      symbol,
+      data: fundData,
+    });
+  } else {
+    verbose(`fundamentals ${symbol}: no usable data in XML (${xmlData.length} chars)`);
+  }
+}
+
 function restoreSubscriptions() {
   const keys = [...symbolSubscribers.keys()];
   for (const key of keys) {
@@ -485,6 +566,15 @@ async function handleClientMessage(client, data) {
               type: "price",
               symbol,
               data: state.data,
+            });
+          }
+          // Send cached fundamentals if available
+          const fund = fundamentalsStore.get(symbol);
+          if (fund) {
+            sendMessage(client, {
+              type: "fundamentals",
+              symbol,
+              data: fund,
             });
           }
           subscribed.push(symbol);
@@ -617,6 +707,16 @@ ib.on("error", (error, data) => {
         state.tickerId = null;
       }
     }
+  } else if (/Fundamentals data is not allowed/i.test(msg)) {
+    // IB IBIS subscription not active on this port/account — suppress and clean up
+    verbose(`fundamentals not allowed for tickerId:${tickerId} — IBIS subscription may be inactive`);
+    if (tickerId != null) {
+      const fundSymbol = fundamentalsRequestIds.get(tickerId);
+      if (fundSymbol) {
+        fundamentalsRequestIds.delete(tickerId);
+        fundamentalsPending.delete(fundSymbol);
+      }
+    }
   } else if (/Can't find EId/i.test(msg)) {
     // Cascading error from a rejected subscription — suppress
     console.warn(`\x1b[33mIB warning: ${msg}\x1b[0m`);
@@ -637,6 +737,10 @@ ib.on("tickSize", (tickerId, sizeType, size) => {
 
 ib.on("tickSnapshotEnd", (tickerId) => {
   onTickSnapshotEnd(tickerId);
+});
+
+ib.on("fundamentalData", (reqId, data) => {
+  onFundamentalData(reqId, data);
 });
 
 ib.on("tickOptionComputation", (tickerId, tickType, impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice) => {

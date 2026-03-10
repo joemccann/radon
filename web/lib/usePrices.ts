@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   type WSMessage,
   type PriceData,
+  type FundamentalsData,
   type OptionContract,
   type IndexContract,
   normalizeSymbolList,
@@ -35,6 +36,8 @@ export type UsePricesOptions = {
 export type UsePricesReturn = {
   /** Current prices keyed by symbol */
   prices: Record<string, PriceData>;
+  /** Fundamentals data keyed by symbol (from IB generic tick 258) */
+  fundamentals: Record<string, FundamentalsData>;
   /** Whether the connection is active */
   connected: boolean;
   /** Whether IB is connected on the server */
@@ -61,6 +64,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   } = options;
 
   const [prices, setPrices] = useState<Record<string, PriceData>>({});
+  const [fundamentals, setFundamentals] = useState<Record<string, FundamentalsData>>({});
   const [connected, setConnected] = useState(false);
   const [ibConnected, setIbConnected] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -142,6 +146,14 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
               data,
               receivedAt: new Date(),
             });
+            break;
+          }
+          case "fundamentals": {
+            const { symbol: fundSymbol, data: fundData } = message;
+            setFundamentals((prev) => ({
+              ...prev,
+              [fundSymbol]: fundData,
+            }));
             break;
           }
           case "status":
@@ -278,6 +290,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
   return {
     prices,
+    fundamentals,
     connected,
     ibConnected,
     error,

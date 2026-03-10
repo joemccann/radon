@@ -120,10 +120,11 @@ function resolvePriceBar(
 }
 
 export default function TickerDetailModal({ theme = "dark" }: { theme?: "dark" | "light" }) {
-  const { activeTicker, activePositionId, closeTicker, getPrices, getPortfolio, getOrders } = useTickerDetail();
+  const { activeTicker, activePositionId, closeTicker, getPrices, getFundamentals, getPortfolio, getOrders } = useTickerDetail();
   const [activeTab, setActiveTab] = useState<TabId | null>(null);
 
   const prices = getPrices();
+  const fundStore = getFundamentals();
   const portfolio = getPortfolio();
   const ordersData = getOrders();
 
@@ -203,7 +204,7 @@ export default function TickerDetailModal({ theme = "dark" }: { theme?: "dark" |
         {/* Tab content */}
         <div className="ticker-tab-content">
           {resolvedTab === "company" && (
-            <CompanyTab ticker={activeTicker} active={resolvedTab === "company"} priceData={prices[activeTicker] ?? null} />
+            <CompanyTab ticker={activeTicker} active={resolvedTab === "company"} priceData={prices[activeTicker] ?? null} fundamentals={fundStore[activeTicker] ?? null} />
           )}
           {resolvedTab === "position" && position && (
             <PositionTab position={position} prices={prices} />

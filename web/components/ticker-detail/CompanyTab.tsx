@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import type { PriceData } from "@/lib/pricesProtocol";
+import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
 
 type CompanyData = {
   uw_info: Record<string, unknown>;
@@ -14,6 +14,7 @@ type CompanyTabProps = {
   ticker: string;
   active: boolean;
   priceData: PriceData | null;
+  fundamentals: FundamentalsData | null;
 };
 
 function fmtMktCap(val: unknown): string {
@@ -43,7 +44,7 @@ function fmtNum(val: unknown): string {
   return `$${n.toFixed(2)}`;
 }
 
-export default function CompanyTab({ ticker, active, priceData }: CompanyTabProps) {
+export default function CompanyTab({ ticker, active, priceData, fundamentals }: CompanyTabProps) {
   const [data, setData] = useState<CompanyData | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -98,16 +99,18 @@ export default function CompanyTab({ ticker, active, priceData }: CompanyTabProp
   const headquarters = profile.headquarters as string | undefined;
   const founded = profile.founded as string | undefined;
 
-  // Key stats — IB realtime (PriceData via WS) takes priority, then UW, then Exa
+  // Key stats — IB fundamentals (tick 258) → IB price ticks (tick 165) → UW → Exa → Yahoo
   const p = priceData;
+  const f = fundamentals;
   const marketCap = info.marketcap ?? info.market_cap;
   const beta = info.beta;
   const avgVolume = p?.avgVolume ?? info.avg30_volume ?? stats.avg_volume;
   const nextEarnings = info.next_earnings_date;
-  const peRatio = stats.pe_ratio;
-  const dividendYield = stats.dividend_yield;
-  const week52High = p?.week52High ?? stats.week_52_high;
-  const week52Low = p?.week52Low ?? stats.week_52_low;
+  const peRatio = f?.peRatio ?? stats.pe_ratio;
+  const dividendYield = f?.dividendYield ?? stats.dividend_yield;
+  const eps = f?.eps;
+  const week52High = f?.week52High ?? p?.week52High ?? stats.week_52_high;
+  const week52Low = f?.week52Low ?? p?.week52Low ?? stats.week_52_low;
 
   // Today's state from stock-state
   const todayOpen = state.open;
@@ -119,6 +122,7 @@ export default function CompanyTab({ ticker, active, priceData }: CompanyTabProp
   const statItems: { label: string; value: string }[] = [
     { label: "Market Cap", value: fmtMktCap(marketCap) },
     { label: "P/E Ratio", value: peRatio != null && !isNaN(Number(peRatio)) ? Number(peRatio).toFixed(2) : "---" },
+    { label: "EPS", value: eps != null && !isNaN(Number(eps)) ? `$${Number(eps).toFixed(2)}` : "---" },
     { label: "Div Yield", value: dividendYield != null && !isNaN(Number(dividendYield)) ? `${Number(dividendYield).toFixed(2)}%` : "---" },
     { label: "Avg Volume", value: fmtVol(avgVolume) },
     { label: "High Today", value: todayHigh != null ? fmtNum(todayHigh) : "---" },

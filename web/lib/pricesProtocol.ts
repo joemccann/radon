@@ -25,6 +25,19 @@ export type PriceData = {
 };
 
 
+export type FundamentalsData = {
+  symbol: string;
+  peRatio: number | null;
+  eps: number | null;
+  dividendYield: number | null;
+  week52High: number | null;
+  week52Low: number | null;
+  priceBookRatio: number | null;
+  roe: number | null;
+  revenue: number | null;
+  timestamp: string;
+};
+
 export type WSPriceMessage = {
   type: "price";
   symbol: string;
@@ -47,6 +60,12 @@ export type WSSnapshotMessage = {
   data: PriceData;
 };
 
+export type WSFundamentalsMessage = {
+  type: "fundamentals";
+  symbol: string;
+  data: FundamentalsData;
+};
+
 export type WSErrorMessage = {
   type: "error";
   message: string;
@@ -64,6 +83,7 @@ export type WSStatusMessage = {
 
 export type WSMessage =
   | WSPriceMessage
+  | WSFundamentalsMessage
   | WSSubscribedMessage
   | WSUnsubscribedMessage
   | WSSnapshotMessage

@@ -117,7 +117,7 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
     [activeSection],
   );
 
-  const { prices: rawPrices, connected: wsConnected, ibConnected: rawIbConnected } = usePrices({
+  const { prices: rawPrices, fundamentals, connected: wsConnected, ibConnected: rawIbConnected } = usePrices({
     symbols: allSymbols,
     contracts: allContracts,
     indexes: regimeIndexes,
@@ -155,8 +155,9 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
   );
 
   // Sync prices + portfolio into ticker-detail context (refs, no re-renders)
-  const { setPrices: setTickerPrices, setPortfolio: setTickerPortfolio, setOrders: setTickerOrders } = useTickerDetail();
+  const { setPrices: setTickerPrices, setFundamentals: setTickerFundamentals, setPortfolio: setTickerPortfolio, setOrders: setTickerOrders } = useTickerDetail();
   useEffect(() => { setTickerPrices(prices); }, [prices, setTickerPrices]);
+  useEffect(() => { setTickerFundamentals(fundamentals); }, [fundamentals, setTickerFundamentals]);
   useEffect(() => { setTickerPortfolio(portfolio); }, [portfolio, setTickerPortfolio]);
   useEffect(() => { setTickerOrders(orders); }, [orders, setTickerOrders]);
 
