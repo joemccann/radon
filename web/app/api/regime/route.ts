@@ -16,6 +16,17 @@ function todayET(): string {
   return new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
 }
 
+/** Real-time market open check: Mon-Fri, 9:30-16:00 ET */
+function isMarketOpenNow(): boolean {
+  const now = new Date();
+  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
+  const et = new Date(etStr);
+  const day = et.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+  const minutes = et.getHours() * 60 + et.getMinutes();
+  return minutes >= 9 * 60 + 30 && minutes <= 16 * 60;
+}
+
 const EMPTY_CRI = {
   scan_time: "",
   date: "",
@@ -64,16 +75,23 @@ function normalizeCriPayload(raw: Record<string, unknown>): Record<string, unkno
 
 let bgScanInFlight = false;
 
-/** Read the latest CRI JSON — scheduled dir first, then legacy cri.json */
+/** Read the latest CRI JSON — scheduled dir first, then legacy cri.json.
+ *  Iterates newest→oldest, skipping corrupt files (e.g. stderr mixed in). */
 async function readLatestCri(): Promise<{ data: object; path: string } | null> {
-  // 1. Try scheduled dir — files sort lexicographically by timestamp
+  // 1. Try scheduled dir — newest to oldest, skip corrupt files
   try {
     const files = await readdir(SCHEDULED_DIR);
     const jsonFiles = files.filter((f) => f.startsWith("cri-") && f.endsWith(".json")).sort();
-    if (jsonFiles.length > 0) {
-      const latest = join(SCHEDULED_DIR, jsonFiles[jsonFiles.length - 1]);
-      const raw = await readFile(latest, "utf-8");
-      return { data: JSON.parse(raw), path: latest };
+    for (let i = jsonFiles.length - 1; i >= 0; i--) {
+      const filePath = join(SCHEDULED_DIR, jsonFiles[i]);
+      try {
+        const raw = await readFile(filePath, "utf-8");
+        const jsonStart = raw.indexOf("{");
+        if (jsonStart === -1) continue;
+        return { data: JSON.parse(raw.slice(jsonStart)), path: filePath };
+      } catch {
+        continue; // corrupt file — try next
+      }
     }
   } catch { /* dir may not exist yet */ }
 
@@ -147,6 +165,13 @@ export async function GET(): Promise<Response> {
   // kick off a background scan if data date != today (ET) or file mtime > TTL
   if (!result || await isCacheStale(result.path, data)) {
     triggerBackgroundScan();
+  }
+
+  // Override market_open with real-time check when serving stale data from a
+  // previous day — prevents "MARKET CLOSED" banner when the market is actually open.
+  const today = todayET();
+  if ((data as Record<string, unknown>).date !== today) {
+    (data as Record<string, unknown>).market_open = isMarketOpenNow();
   }
 
   return NextResponse.json(data);

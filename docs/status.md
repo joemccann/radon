@@ -1,9 +1,11 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-10T17:30:00-07:00
+2026-03-11T10:30:00-04:00
 
 ## Recent Commits
+- 2026-03-11 10:30:00 -0400 — **fix: Regime page showing "MARKET CLOSED" during market hours — corrupt CRI cache files + stale market_open override**
+- 2026-03-11 10:15:00 -0400 — **fix: Classify spread directions (DEBIT/CREDIT) in flow analysis**
 - 2026-03-10 17:30:00 -0700 — **fix: Brand audit — align all 7 HTML report templates with Radon design tokens (fonts, CSS vars, radius, semantic colors)**
 - 2026-03-09 19:30:00 -0700 — **feat: Upgrade to Next.js 15, React 19, implement Zustand for decoupled state, direct WS snapshots, and UI Skeletons**
 - 2026-03-08 20:30:00 -0700 — **feat: Scenario stress test — interactive `stress-test` command with β-SPX/oil/VIX crash-beta pricing engine, BSM IV expansion, expandable ▶ detail rows per position, HTML template**

@@ -21,10 +21,10 @@ if [ "$IS_TRADING" = "no" ]; then
     exit 0
 fi
 
-mkdir -p data/cri_scheduled
+mkdir -p data/cri_scheduled logs
 TIMESTAMP=$(TZ=America/New_York date +"%Y-%m-%dT%H-%M")
 echo "$(date): Running CRI scan..."
-python3 scripts/cri_scan.py --json > "data/cri_scheduled/cri-${TIMESTAMP}.json" 2>&1
+python3 scripts/cri_scan.py --json > "data/cri_scheduled/cri-${TIMESTAMP}.json" 2>>"logs/cri-scan.err.log"
 EXIT_CODE=$?
 echo "$(date): CRI scan complete (exit $EXIT_CODE)"
 exit $EXIT_CODE
