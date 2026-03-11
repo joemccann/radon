@@ -13,8 +13,10 @@ Data sources (priority order):
   1. Interactive Brokers — Index('VIX','CBOE'), Index('VVIX','CBOE'),
      Index('COR1M','CBOE'), Stock('SPY','SMART','USD')
   2. Unusual Whales — OHLC for SPY only. Does NOT support VIX/VVIX/COR1M.
-  3. Yahoo Finance — ABSOLUTE LAST RESORT. Only for VIX/VVIX/COR1M when
-     IB unavailable (UW cannot serve index data).
+  3. Cboe COR1M dashboard historical feed — COR1M only, via the official
+     dashboard endpoint used by the site's download workflow.
+  4. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
+     higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
 Usage:
     python3 scripts/cri_scan.py                 # HTML report (opens in browser)
@@ -29,6 +31,7 @@ import math
 import sys
 import time
 from datetime import datetime, timedelta, timezone
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -51,6 +54,8 @@ MIN_BARS = MA_WINDOW + 20  # Minimum price history
 CTA_VOL_TARGET = 10.0  # 10% target volatility
 CTA_MAX_EXPOSURE = 200.0  # Max 200% exposure (leverage)
 CTA_AUM_BN = 400.0     # Estimated CTA AUM in billions
+CRI_IB_HISTORY_CLIENT_IDS = (50, 52, 53, 54, 57)
+CRI_IB_QUOTE_CLIENT_IDS = (51, 58, 59, 60, 61)
 
 # Yahoo-to-IB ticker map
 YAHOO_TICKERS = {
@@ -58,6 +63,7 @@ YAHOO_TICKERS = {
     "VVIX": "^VVIX",
     "COR1M": "^COR1M",
 }
+CBOE_COR1M_HISTORICAL_URL = "https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_COR1M.json"
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -76,6 +82,25 @@ def _valid_quote_value(value: Any) -> Optional[float]:
         return None
     return numeric
 
+def _connect_ib_with_retry(
+    ib: Any,
+    client_ids: Tuple[int, ...],
+    ports: Tuple[int, ...] = (4001, 7497),
+    timeout: int = 8,
+) -> bool:
+    """Connect to IB by cycling a small client-id pool before giving up."""
+    for client_id in client_ids:
+        for port in ports:
+            try:
+                ib.connect("127.0.0.1", port, clientId=client_id, timeout=timeout)
+                return True
+            except Exception as exc:
+                print(
+                    f"  IB connect failed on port {port} clientId {client_id}: {exc}",
+                    file=sys.stderr,
+                )
+    return False
+
 def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
     """Fetch 1Y daily bars from IB concurrently using asyncio.gather.
 
@@ -89,13 +114,8 @@ def _fetch_ib(tickers: List[str]) -> Dict[str, List[Tuple[str, float]]]:
         return {}
 
     ib = IB()
-    try:
-        ib.connect("127.0.0.1", 4001, clientId=50, timeout=8)
-    except Exception:
-        try:
-            ib.connect("127.0.0.1", 7497, clientId=50, timeout=8)
-        except Exception:
-            return {}
+    if not _connect_ib_with_retry(ib, CRI_IB_HISTORY_CLIENT_IDS):
+        return {}
 
     import asyncio
 
@@ -205,6 +225,59 @@ def _fetch_yahoo_chart_result(ticker: str, days: int = 400) -> Optional[Dict[str
         return None
 
 
+@lru_cache(maxsize=1)
+def _fetch_cboe_cor1m_payload() -> Optional[Dict[str, Any]]:
+    """Fetch the official COR1M history payload used by the Cboe dashboard."""
+    from urllib.request import Request, urlopen
+
+    req = Request(CBOE_COR1M_HISTORICAL_URL, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urlopen(req, timeout=10) as resp:
+            data = json.load(resp)
+    except Exception as exc:
+        print(f"  CBOE: COR1M historical feed failed — {exc}", file=sys.stderr)
+        return None
+
+    if not isinstance(data, dict) or not isinstance(data.get("data"), list):
+        print("  CBOE: COR1M historical feed returned an unexpected payload", file=sys.stderr)
+        return None
+
+    return data
+
+
+def _fetch_cboe_cor1m() -> List[Tuple[str, float]]:
+    """Fetch COR1M historical bars from the official Cboe dashboard feed."""
+    payload = _fetch_cboe_cor1m_payload()
+    if not payload:
+        return []
+
+    bars: List[Tuple[str, float]] = []
+    for row in payload.get("data", []):
+        if not isinstance(row, dict):
+            continue
+        date = row.get("date")
+        close = row.get("close")
+        if not isinstance(date, str):
+            continue
+        try:
+            close_value = float(close)
+        except (TypeError, ValueError):
+            continue
+        if math.isnan(close_value) or math.isinf(close_value):
+            continue
+        bars.append((date, close_value))
+
+    return bars
+
+
+def _fetch_cboe_cor1m_current_quote() -> Optional[float]:
+    """Use the last Cboe historical close as the official COR1M fallback quote."""
+    bars = _fetch_cboe_cor1m()
+    if not bars:
+        return None
+    return bars[-1][1]
+
+
 def _fetch_yahoo(ticker: str, days: int = 400) -> List[Tuple[str, float]]:
     """Fetch daily bars from Yahoo Finance.  Returns [(date_str, close), ...]."""
     result = _fetch_yahoo_chart_result(ticker, days=days)
@@ -262,12 +335,7 @@ def _fetch_ib_current_quote(ticker: str) -> Optional[float]:
         return None
 
     ib = IB()
-    try:
-        try:
-            ib.connect("127.0.0.1", 4001, clientId=51, timeout=8)
-        except Exception:
-            ib.connect("127.0.0.1", 7497, clientId=51, timeout=8)
-    except Exception:
+    if not _connect_ib_with_retry(ib, CRI_IB_QUOTE_CLIENT_IDS):
         return None
 
     contract = Index(ticker, "CBOE")
@@ -295,17 +363,22 @@ def _fetch_ib_current_quote(ticker: str) -> Optional[float]:
 
 def select_cor1m_current_quote(
     ib_quote: Optional[float],
-    yahoo_quote: Optional[float],
+    yahoo_quote: Optional[float] = None,
+    cboe_quote: Optional[float] = None,
     discrepancy_threshold: float = 1.0,
 ) -> Optional[float]:
     """Choose the most reliable current COR1M level.
 
-    IB is preferred when it is the only source or when it agrees with Yahoo.
-    If both exist and diverge materially, prefer Yahoo's chart metadata for the
-    current level while retaining IB for historical bars.
+    IB is preferred when it is the only source or when it agrees with the
+    official Cboe dashboard feed. If IB diverges materially from Cboe, prefer
+    Cboe. Yahoo remains an absolute last resort only when Cboe is unavailable.
     """
     if ib_quote is None:
-        return yahoo_quote
+        return cboe_quote if cboe_quote is not None else yahoo_quote
+    if cboe_quote is not None:
+        if abs(ib_quote - cboe_quote) > discrepancy_threshold:
+            return cboe_quote
+        return ib_quote
     if yahoo_quote is None:
         return ib_quote
     if abs(ib_quote - yahoo_quote) > discrepancy_threshold:
@@ -316,15 +389,23 @@ def select_cor1m_current_quote(
 def fetch_cor1m_current_quote() -> Optional[float]:
     """Fetch the current COR1M level separate from daily history."""
     ib_quote = _fetch_ib_current_quote("COR1M")
+    cboe_quote = _fetch_cboe_cor1m_current_quote()
     yahoo_quote = _fetch_yahoo_current_quote("COR1M")
 
     if ib_quote is not None:
         print(f"  IB: COR1M current quote {ib_quote:.2f}", file=sys.stderr)
+    if cboe_quote is not None:
+        print(f"  CBOE: COR1M current quote {cboe_quote:.2f}", file=sys.stderr)
     if yahoo_quote is not None:
         print(f"  Yahoo: COR1M current quote {yahoo_quote:.2f}", file=sys.stderr)
 
-    selected = select_cor1m_current_quote(ib_quote, yahoo_quote)
-    if ib_quote is not None and yahoo_quote is not None and selected == yahoo_quote and abs(ib_quote - yahoo_quote) > 1.0:
+    selected = select_cor1m_current_quote(ib_quote, yahoo_quote=yahoo_quote, cboe_quote=cboe_quote)
+    if ib_quote is not None and cboe_quote is not None and selected == cboe_quote and abs(ib_quote - cboe_quote) > 1.0:
+        print(
+            f"  COR1M quote discrepancy detected (IB {ib_quote:.2f} vs CBOE {cboe_quote:.2f}) — using CBOE current value",
+            file=sys.stderr,
+        )
+    elif ib_quote is not None and yahoo_quote is not None and selected == yahoo_quote and abs(ib_quote - yahoo_quote) > 1.0:
         print(
             f"  COR1M quote discrepancy detected (IB {ib_quote:.2f} vs Yahoo {yahoo_quote:.2f}) — using Yahoo current value",
             file=sys.stderr,
@@ -336,7 +417,7 @@ def fetch_cor1m_current_quote() -> Optional[float]:
 
 
 def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
-    """Fetch close prices for all tickers.  IB first (concurrent), Yahoo fallback.
+    """Fetch close prices for all tickers. IB first, then source-specific fallbacks.
 
     Returns ({ticker: np.array of closes}, [common_dates]).
     """
@@ -366,7 +447,18 @@ def fetch_all(tickers: List[str]) -> Tuple[Dict[str, np.ndarray], List[str]]:
                 still_needed.append(t)
         fallback_needed = still_needed
 
-    # Priority 3 (LAST RESORT): Yahoo Finance
+    # Priority 3: official Cboe dashboard history for COR1M
+    if "COR1M" in fallback_needed:
+        print("  Trying CBOE dashboard fallback for COR1M...", file=sys.stderr)
+        cboe_cor1m = _fetch_cboe_cor1m()
+        if len(cboe_cor1m) >= MIN_BARS:
+            raw["COR1M"] = cboe_cor1m
+            print(f"  CBOE: COR1M — {len(cboe_cor1m)} bars", file=sys.stderr)
+        elif cboe_cor1m:
+            print(f"  CBOE: COR1M only {len(cboe_cor1m)} bars (need {MIN_BARS}), trying Yahoo", file=sys.stderr)
+        fallback_needed = [ticker for ticker in fallback_needed if ticker != "COR1M" or "COR1M" not in raw]
+
+    # Priority 4 (LAST RESORT): Yahoo Finance
     for t in fallback_needed:
         print(f"  LAST RESORT: Yahoo for {t}", file=sys.stderr)
         time.sleep(0.5)  # Rate limit Yahoo
@@ -682,6 +774,7 @@ def run_analysis(
         cor1m_values,
         current_override=current_quotes.get("COR1M"),
     )
+    cor1m_previous_close = float(cor1m_values[-1]) if len(cor1m_values) > 0 else float("nan")
 
     # Realized vol (SPY)
     realized_vol = compute_realized_vol(spy, VOL_WINDOW)
@@ -752,7 +845,7 @@ def run_analysis(
             "vix": round(v, 2),
             "vvix": round(vv, 2),
             "spy": round(s, 2),
-            "cor1m": round(cor1m_now if i == n - 1 and not math.isnan(cor1m_now) else float(cor1m_values[i]), 2),
+            "cor1m": round(float(cor1m_values[i]), 2),
             "realized_vol": round(day_rvol, 2) if not math.isnan(day_rvol) else None,
             "spx_vs_ma_pct": round(float(day_dist), 2),
             "vix_5d_roc": round(float(day_vix_roc), 1),
@@ -768,6 +861,7 @@ def run_analysis(
         "spx_100d_ma": round(ma_100, 2) if not math.isnan(ma_100) else None,
         "spx_distance_pct": round(float(spx_distance_pct), 2),
         "cor1m": round(cor1m_now, 2) if not math.isnan(cor1m_now) else None,
+        "cor1m_previous_close": round(cor1m_previous_close, 2) if not math.isnan(cor1m_previous_close) else None,
         "cor1m_5d_change": round(cor1m_5d_change, 2) if not math.isnan(cor1m_5d_change) else None,
         "realized_vol": round(realized_vol, 2) if not math.isnan(realized_vol) else None,
         "cri": cri,
@@ -1209,7 +1303,7 @@ def generate_html_report(
   Components: VIX (level + RoC) | VVIX (level + ratio) | COR1M implied correlation (level + 5d change) | SPX Momentum (vs 100d MA)<br>
   CTA Model: Exposure = 10% target / Realized Vol | Estimated AUM: $400B<br>
   Crash Trigger: SPX &lt; 100d MA AND 20d RVol &gt; 25% AND COR1M &gt; 60<br>
-  Data: IB (primary) | UW for SPY fallback | Yahoo Finance last-resort for indices | {now}<br>
+  Data: IB (primary) | UW for SPY fallback | Cboe dashboard for COR1M fallback | Yahoo Finance last-resort for remaining index gaps | {now}<br>
   Strategy spec: <code>docs/strategies.md</code> (Strategy 6) |
   <a href="https://chatgpt.com/share/69ab7eee-fe34-8013-b489-7758297da446" style="color:var(--text-muted)">Source: CTA Deleveraging Research</a>
 </div>""")

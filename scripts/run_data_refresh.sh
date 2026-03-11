@@ -120,6 +120,7 @@ refresh_cri_cache_post_close() {
     local timestamp
     local tmp_cache
     local scheduled_path
+    local scan_complete
 
     cache_status=$(cri_cache_has_complete_rvol "data/cri.json" "$today_et")
     if [ "$cache_status" = "yes" ]; then
@@ -136,11 +137,23 @@ refresh_cri_cache_post_close() {
     if python3 scripts/cri_scan.py --json > "$tmp_cache" 2>>"logs/cri-scan.err.log"; then
         mv "$tmp_cache" data/cri.json
         cp data/cri.json "$scheduled_path"
-        echo "$(date): CRI cache refresh complete (OK) → data/cri.json, $scheduled_path"
+        scan_complete=$(cri_cache_has_complete_rvol "data/cri.json" "$today_et")
+        if [ "$scan_complete" = "yes" ]; then
+            echo "$(date): CRI cache refresh complete (OK) → data/cri.json, $scheduled_path"
+            return
+        fi
+        echo "$(date): CRI scan output is still missing complete RVOL history — attempting repair fallback"
     else
         local exit_code=$?
         rm -f "$tmp_cache"
-        echo "$(date): CRI cache refresh failed (exit $exit_code)"
+        echo "$(date): CRI cache refresh failed (exit $exit_code) — attempting repair fallback"
+    fi
+
+    if python3 scripts/repair_cri_rvol_cache.py --write --target-date "$today_et" 2>>"logs/cri-scan.err.log"; then
+        echo "$(date): CRI cache repair complete (OK)"
+    else
+        local repair_exit_code=$?
+        echo "$(date): CRI cache repair failed (exit $repair_exit_code)"
     fi
 }
 

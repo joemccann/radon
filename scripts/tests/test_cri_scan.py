@@ -2,6 +2,7 @@
 
 All tests are pure computation — no network calls.
 """
+from datetime import date, timedelta
 import math
 from types import SimpleNamespace
 
@@ -10,7 +11,9 @@ import pytest
 
 from cri_scan import (
     _extract_ib_quote_value,
+    _connect_ib_with_retry,
     cor1m_level_and_change,
+    fetch_all,
     score_vix_component,
     score_vvix_component,
     score_correlation_component,
@@ -71,8 +74,48 @@ class TestIBCurrentQuoteExtraction:
         assert _extract_ib_quote_value(snapshot) == 28.97
 
 
+class TestIBConnectionRetry:
+    """Tests for retrying alternate IB client IDs when one is busy."""
+
+    def test_retries_next_client_id_after_busy_session(self):
+        attempts = []
+
+        class StubIB:
+            def connect(self, host, port, clientId, timeout):
+                attempts.append((host, port, clientId, timeout))
+                if clientId == 50:
+                    raise RuntimeError("client id is already in use")
+                return None
+
+        connected = _connect_ib_with_retry(StubIB(), (50, 52), ports=(4001,), timeout=8)
+
+        assert connected is True
+        assert attempts == [
+            ("127.0.0.1", 4001, 50, 8),
+            ("127.0.0.1", 4001, 52, 8),
+        ]
+
+    def test_returns_false_when_all_ports_and_client_ids_fail(self):
+        attempts = []
+
+        class StubIB:
+            def connect(self, host, port, clientId, timeout):
+                attempts.append((host, port, clientId, timeout))
+                raise RuntimeError("connect failed")
+
+        connected = _connect_ib_with_retry(StubIB(), (50, 52), ports=(4001, 7497), timeout=5)
+
+        assert connected is False
+        assert attempts == [
+            ("127.0.0.1", 4001, 50, 5),
+            ("127.0.0.1", 7497, 50, 5),
+            ("127.0.0.1", 4001, 52, 5),
+            ("127.0.0.1", 7497, 52, 5),
+        ]
+
+
 class TestCor1mCurrentQuoteSelection:
-    """Tests for reconciling IB and Yahoo current COR1M quotes."""
+    """Tests for reconciling IB, CBOE, and Yahoo current COR1M quotes."""
 
     def test_prefers_yahoo_when_quotes_diverge_materially(self):
         assert select_cor1m_current_quote(ib_quote=31.1, yahoo_quote=28.97) == 28.97
@@ -85,6 +128,87 @@ class TestCor1mCurrentQuoteSelection:
 
     def test_uses_yahoo_when_ib_missing(self):
         assert select_cor1m_current_quote(ib_quote=None, yahoo_quote=28.97) == 28.97
+
+    def test_prefers_cboe_when_ib_missing(self):
+        assert select_cor1m_current_quote(ib_quote=None, cboe_quote=28.97, yahoo_quote=31.1) == 28.97
+
+    def test_prefers_cboe_when_ib_diverges_materially(self):
+        assert select_cor1m_current_quote(ib_quote=31.1, cboe_quote=28.97, yahoo_quote=31.1) == 28.97
+
+
+class TestCor1mHistoricalFallbackOrder:
+    """Tests for COR1M historical source order inside fetch_all()."""
+
+    @staticmethod
+    def _bars(base: float, count: int = 130):
+        start = date(2025, 8, 1)
+        return [
+            ((start + timedelta(days=index)).isoformat(), base + index * 0.1)
+            for index in range(count)
+        ]
+
+    def test_prefers_cboe_history_before_yahoo_for_cor1m(self, monkeypatch):
+        yahoo_calls = []
+
+        def fake_fetch_ib(_tickers):
+            return {}
+
+        def fake_fetch_uw(_tickers):
+            return {}
+
+        def fake_fetch_cboe_cor1m():
+            return self._bars(24.0)
+
+        def fake_fetch_yahoo(ticker, days=400):
+            yahoo_calls.append((ticker, days))
+            if ticker == "COR1M":
+                raise AssertionError("Yahoo should not be used for COR1M when CBOE history is available")
+            bases = {"VIX": 18.0, "VVIX": 92.0, "SPY": 580.0}
+            return self._bars(bases[ticker])
+
+        monkeypatch.setattr("cri_scan._fetch_ib", fake_fetch_ib)
+        monkeypatch.setattr("cri_scan._fetch_uw", fake_fetch_uw)
+        monkeypatch.setattr("cri_scan._fetch_cboe_cor1m", fake_fetch_cboe_cor1m, raising=False)
+        monkeypatch.setattr("cri_scan._fetch_yahoo", fake_fetch_yahoo)
+        monkeypatch.setattr("cri_scan.time.sleep", lambda _seconds: None)
+
+        aligned, common_dates = fetch_all(["VIX", "VVIX", "SPY", "COR1M"])
+
+        assert set(aligned.keys()) == {"VIX", "VVIX", "SPY", "COR1M"}
+        assert len(common_dates) == 130
+        assert [ticker for ticker, _ in yahoo_calls] == ["VIX", "VVIX", "SPY"]
+
+
+class TestCor1mHistoricalFallback:
+    """Tests for COR1M history source ordering."""
+
+    def test_fetch_all_uses_cboe_for_cor1m_before_yahoo(self, monkeypatch):
+        dates = [f"2026-01-{day:02d}" for day in range(2, 22)]
+        ticker_bars = {
+            "VIX": [(date, 18.0 + index) for index, date in enumerate(dates)],
+            "VVIX": [(date, 90.0 + index) for index, date in enumerate(dates)],
+            "SPY": [(date, 600.0 - index) for index, date in enumerate(dates)],
+            "COR1M": [(date, 25.0 + index) for index, date in enumerate(dates)],
+        }
+        yahoo_calls = []
+
+        monkeypatch.setattr("cri_scan.MIN_BARS", 20)
+        monkeypatch.setattr("cri_scan._fetch_ib", lambda tickers: {})
+        monkeypatch.setattr("cri_scan._fetch_uw", lambda tickers: {"SPY": ticker_bars["SPY"]})
+        monkeypatch.setattr("cri_scan._fetch_cboe_cor1m", lambda: ticker_bars["COR1M"])
+
+        def fake_yahoo(ticker, days=400):
+            yahoo_calls.append(ticker)
+            return ticker_bars[ticker]
+
+        monkeypatch.setattr("cri_scan._fetch_yahoo", fake_yahoo)
+        monkeypatch.setattr("cri_scan.time.sleep", lambda _: None)
+
+        aligned, common_dates = fetch_all(["VIX", "VVIX", "SPY", "COR1M"])
+
+        assert common_dates == dates
+        assert np.array_equal(aligned["COR1M"], np.array([25.0 + index for index in range(20)]))
+        assert yahoo_calls == ["VIX", "VVIX"]
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -470,7 +594,7 @@ class TestRunAnalysis:
         assert "avg_sector_correlation" not in result
         assert result["crash_trigger"]["conditions"]["cor1m_gt_60"] is False
 
-    def test_prefers_cor1m_current_quote_over_last_history_bar(self):
+    def test_preserves_prior_cor1m_close_when_current_quote_override_exists(self):
         n = 140
         dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
 
@@ -478,13 +602,14 @@ class TestRunAnalysis:
             "VIX": np.linspace(18.0, 30.0, n),
             "VVIX": np.linspace(90.0, 120.0, n),
             "SPY": np.linspace(600.0, 560.0, n),
-            "COR1M": np.concatenate([np.full(n - 6, 24.0), np.array([25.0, 26.0, 27.0, 28.0, 29.0, 31.1])]),
+            "COR1M": np.concatenate([np.full(n - 6, 24.0), np.array([25.0, 26.0, 27.0, 27.83, 28.97, 28.97])]),
         }
 
-        result = run_analysis(aligned, dates, current_quotes={"COR1M": 28.97})
+        result = run_analysis(aligned, dates, current_quotes={"COR1M": 29.31})
 
-        assert result["cor1m"] == 28.97
-        assert result["cor1m_5d_change"] == pytest.approx(3.97)
+        assert result["cor1m"] == 29.31
+        assert result["cor1m_previous_close"] == 28.97
+        assert result["cor1m_5d_change"] == pytest.approx(4.31)
         assert result["history"][-1]["cor1m"] == 28.97
 
     def test_caches_enough_spy_closes_to_rebuild_20_session_rvol_history(self):

@@ -14,8 +14,17 @@ from typing import Any, Dict, List
 
 ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = ROOT / "data" / "performance.json"
+CHART_SYSTEM_PATH = ROOT / "web" / "lib" / "chart-system-spec.json"
 REPORTS_DIR = ROOT / "reports"
 DEFAULT_OUTPUT = REPORTS_DIR / f"performance-page-explainer-{datetime.now().strftime('%Y-%m-%d')}.html"
+
+BRAND_LITERALS = {
+    "--bg-panel": "#0f1519",
+    "--border-dim": "#1e293b",
+    "--chart-grid": "rgba(148, 163, 184, 0.16)",
+    "--chart-axis": "#1e293b",
+    "--chart-axis-muted": "#94a3b8",
+}
 
 
 def fmt_usd_exact(value: float) -> str:
@@ -47,33 +56,86 @@ def tone_class(value: float) -> str:
     return "neutral"
 
 
+def fmt_axis_value(value: float) -> str:
+    abs_value = abs(value)
+    if abs_value >= 1_000_000_000:
+        return f"${value / 1_000_000_000:.1f}B"
+    if abs_value >= 1_000_000:
+        return f"${value / 1_000_000:.2f}M"
+    if abs_value >= 1_000:
+        return f"${value / 1_000:.1f}K"
+    return fmt_usd_exact(value)
+
+
+def fmt_session_label(value: str) -> str:
+    try:
+        return datetime.fromisoformat(value).strftime("%b %d").replace(" 0", " ")
+    except ValueError:
+        return value
+
+
 def load_payload() -> dict:
     if not DATA_PATH.exists():
         raise FileNotFoundError(f"Missing performance cache: {DATA_PATH}")
     return json.loads(DATA_PATH.read_text())
 
 
+def load_chart_system() -> dict:
+    if not CHART_SYSTEM_PATH.exists():
+        raise FileNotFoundError(f"Missing chart-system spec: {CHART_SYSTEM_PATH}")
+    return json.loads(CHART_SYSTEM_PATH.read_text())
+
+
+def chart_literal(token: str) -> str:
+    return BRAND_LITERALS[token]
+
+
+def chart_role_color(chart_system: dict, role: str) -> str:
+    return chart_system["seriesRoles"][role]["fallback"]
+
+
+def chart_family_contract(chart_system: dict, family: str) -> dict:
+    family_spec = chart_system["families"][family]
+    renderer = family_spec["renderer"]
+    return {
+        "id": family,
+        "label": family_spec["label"],
+        "renderer": renderer,
+        "interaction": family_spec["interaction"],
+        "requires_axes": family_spec["requiresAxes"],
+        "renderer_description": chart_system["sanctionedRenderers"][renderer],
+    }
+
+
 def build_chart_paths(series: List[dict], starting_equity: float) -> Dict[str, str]:
     width = 820
     height = 280
-    padding = 24
+    padding_top = 24
+    padding_right = 24
+    padding_bottom = 28
+    padding_left = 56
     equity_values = [float(point["equity"]) for point in series]
     first_benchmark = float(series[0]["benchmark_close"]) if series else 1.0
     benchmark_values = [
         (float(point["benchmark_close"]) / first_benchmark) * starting_equity
         for point in series
     ] if series else []
+    all_values = equity_values + benchmark_values if benchmark_values else equity_values
 
     def line_path(values: List[float]) -> str:
         if not values:
             return ""
-        min_value = min(values)
-        max_value = max(values)
+        min_value = min(all_values) if all_values else 0.0
+        max_value = max(all_values) if all_values else 1.0
         span = max_value - min_value or 1.0
+        lower = min_value - span * 0.1
+        upper = max_value + span * 0.1
+        plot_width = width - padding_left - padding_right
+        plot_height = height - padding_top - padding_bottom
         parts: List[str] = []
         for index, value in enumerate(values):
-            x = padding + (index / max(len(values) - 1, 1)) * (width - padding * 2)
-            y = height - padding - ((value - min_value) / span) * (height - padding * 2)
+            x = padding_left + (index / max(len(values) - 1, 1)) * plot_width
+            y = height - padding_bottom - ((value - lower) / (upper - lower or 1.0)) * plot_height
             parts.append(f"{'M' if index == 0 else 'L'} {x:.2f} {y:.2f}")
         return " ".join(parts)
 
@@ -81,7 +143,40 @@ def build_chart_paths(series: List[dict], starting_equity: float) -> Dict[str, s
     benchmark_path = line_path(benchmark_values)
     area_path = ""
     if equity_path:
-        area_path = f"{equity_path} L {width - padding} {height - padding} L {padding} {height - padding} Z"
+        area_path = (
+            f"{equity_path} "
+            f"L {width - padding_right:.2f} {height - padding_bottom:.2f} "
+            f"L {padding_left:.2f} {height - padding_bottom:.2f} Z"
+        )
+
+    min_value = min(all_values) if all_values else starting_equity
+    max_value = max(all_values) if all_values else starting_equity
+    span = max_value - min_value or 1.0
+    lower = min_value - span * 0.1
+    upper = max_value + span * 0.1
+    plot_height = height - padding_top - padding_bottom
+    plot_width = width - padding_left - padding_right
+
+    y_guides = []
+    for index in range(4):
+        tick_value = lower + ((upper - lower) / 3) * index
+        y = height - padding_bottom - ((tick_value - lower) / (upper - lower or 1.0)) * plot_height
+        y_guides.append(
+            f'<line class="chart-guide" x1="{padding_left}" x2="{width - padding_right}" y1="{y:.2f}" y2="{y:.2f}" />'
+            f'<text class="chart-label" x="{padding_left - 10}" y="{y + 3:.2f}" text-anchor="end">{html.escape(fmt_axis_value(tick_value))}</text>'
+        )
+
+    x_labels = []
+    if series:
+        skip = max(1, len(series) // 6)
+        for index, point in enumerate(series):
+            if index % skip != 0 and index != len(series) - 1:
+                continue
+            x = padding_left + (index / max(len(series) - 1, 1)) * plot_width
+            label = fmt_session_label(str(point["date"]))
+            x_labels.append(
+                f'<text class="chart-label" x="{x:.2f}" y="{height - 8}" text-anchor="middle">{html.escape(label)}</text>'
+            )
 
     return {
         "equity_path": equity_path,
@@ -90,6 +185,11 @@ def build_chart_paths(series: List[dict], starting_equity: float) -> Dict[str, s
         "latest_equity": fmt_usd_exact(equity_values[-1] if equity_values else starting_equity),
         "latest_benchmark_rebased": fmt_usd_exact(benchmark_values[-1] if benchmark_values else starting_equity),
         "sessions": str(len(series)),
+        "y_guides_svg": "".join(y_guides),
+        "x_labels_svg": "".join(x_labels),
+        "plot_left": str(padding_left),
+        "plot_right": str(width - padding_right),
+        "plot_bottom": str(height - padding_bottom),
     }
 
 
@@ -465,10 +565,21 @@ def build_sections(payload: dict) -> List[str]:
     ]
 
 
-def build_html(payload: dict) -> str:
+def build_html(payload: dict, chart_system: dict) -> str:
     summary = payload["summary"]
     sections = build_sections(payload)
     chart = build_chart_paths(payload["series"], float(summary["starting_equity"]))
+    chart_contract = chart_family_contract(chart_system, "analytical-time-series")
+    primary_color = chart_role_color(chart_system, "primary")
+    comparison_color = chart_role_color(chart_system, "comparison")
+    caution_color = chart_role_color(chart_system, "caution")
+    fault_color = chart_role_color(chart_system, "fault")
+    surface_bg = chart_literal(chart_system["surface"]["backgroundVar"])
+    surface_border = chart_literal(chart_system["surface"]["borderVar"])
+    chart_grid = chart_literal(chart_system["axis"]["gridVar"])
+    chart_axis = chart_literal(chart_system["axis"]["axisVar"])
+    chart_axis_label = chart_literal(chart_system["axis"]["labelVar"])
+    chart_axis_font = chart_system["axis"]["fontFamily"]
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     total_items = sum(section.count("<tr>") for section in sections)
 
@@ -481,16 +592,22 @@ def build_html(payload: dict) -> str:
   <style>
     :root {{
       --bg: #0a0f14;
-      --panel: #0f1519;
+      --panel: {surface_bg};
       --panel-raised: #151c22;
-      --line: #1e293b;
+      --line: {surface_border};
       --text: #e2e8f0;
       --muted: #94a3b8;
       --faint: #475569;
-      --teal: #05AD98;
-      --teal-strong: #0FCFB5;
-      --warn: #F5A623;
-      --fault: #E85D6C;
+      --series-primary: {primary_color};
+      --series-comparison: {comparison_color};
+      --series-caution: {caution_color};
+      --fault: {fault_color};
+      --chart-grid: {chart_grid};
+      --chart-axis: {chart_axis};
+      --chart-axis-muted: {chart_axis_label};
+      --chart-radius: {int(chart_system["surface"]["radiusPx"])}px;
+      --chart-padding: {int(chart_system["surface"]["paddingPx"])}px;
+      --chart-axis-size: {int(chart_system["axis"]["fontSizePx"])}px;
     }}
     * {{ box-sizing: border-box; }}
     body {{
@@ -511,6 +628,7 @@ def build_html(payload: dict) -> str:
       background: linear-gradient(180deg, rgba(5, 173, 152, 0.08), rgba(5, 173, 152, 0.02)), var(--panel);
       padding: 24px;
       margin-bottom: 20px;
+      border-radius: var(--chart-radius);
     }}
     .eyebrow {{
       font: 600 11px/1.2 "IBM Plex Mono", ui-monospace, monospace;
@@ -557,13 +675,31 @@ def build_html(payload: dict) -> str:
       font: 500 24px/1.05 "IBM Plex Mono", ui-monospace, monospace;
       letter-spacing: -.03em;
     }}
-    .positive {{ color: var(--teal-strong); }}
+    .positive {{ color: var(--series-primary); }}
     .negative {{ color: var(--fault); }}
     .neutral {{ color: var(--text); }}
     .hero-meta {{
       border: 1px solid var(--line);
       background: rgba(15, 21, 25, 0.78);
       padding: 14px;
+    }}
+    .contract-grid {{
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 0;
+      margin-top: 16px;
+    }}
+    .contract-card {{
+      border: 1px solid var(--line);
+      margin-right: -1px;
+      background: rgba(15, 21, 25, 0.62);
+      padding: 14px;
+    }}
+    .contract-copy {{
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.45;
+      margin-top: 6px;
     }}
     .meta-line {{
       display: flex;
@@ -577,8 +713,9 @@ def build_html(payload: dict) -> str:
     .chart-panel {{
       border: 1px solid var(--line);
       background: var(--panel);
-      padding: 18px;
+      padding: var(--chart-padding);
       margin-bottom: 20px;
+      border-radius: var(--chart-radius);
     }}
     .chart-title {{
       display: flex;
@@ -590,6 +727,18 @@ def build_html(payload: dict) -> str:
       letter-spacing: .12em;
       text-transform: uppercase;
       color: var(--muted);
+    }}
+    .chart-title-meta {{
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      justify-content: flex-end;
+    }}
+    .chart-note {{
+      margin-bottom: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
     }}
     .pill {{
       border: 1px solid var(--line);
@@ -613,19 +762,21 @@ def build_html(payload: dict) -> str:
       margin-right: 6px;
       border: 1px solid var(--line);
     }}
-    .swatch.portfolio {{ background: var(--teal); }}
-    .swatch.benchmark {{ background: rgba(148, 163, 184, 0.45); }}
+    .swatch.portfolio {{ background: var(--series-primary); }}
+    .swatch.benchmark {{ background: var(--series-comparison); }}
     svg {{
       width: 100%;
       height: auto;
       display: block;
       border: 1px solid var(--line);
       background: linear-gradient(180deg, rgba(15,21,25,.84), rgba(10,15,20,.95));
+      border-radius: var(--chart-radius);
     }}
     .panel {{
       border: 1px solid var(--line);
       background: var(--panel);
       margin-bottom: 20px;
+      border-radius: var(--chart-radius);
     }}
     .panel-header {{
       display: flex;
@@ -703,7 +854,7 @@ def build_html(payload: dict) -> str:
     }}
     .sources {{
       display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
+      grid-template-columns: repeat(4, minmax(0, 1fr));
       gap: 12px;
       margin-top: 14px;
     }}
@@ -711,9 +862,10 @@ def build_html(payload: dict) -> str:
       border: 1px solid var(--line);
       padding: 12px;
       background: rgba(21, 28, 34, 0.45);
+      border-radius: var(--chart-radius);
     }}
     @media (max-width: 1100px) {{
-      .hero-grid, .summary-grid, .sources {{
+      .hero-grid, .summary-grid, .sources, .contract-grid {{
         grid-template-columns: 1fr;
       }}
     }}
@@ -763,9 +915,32 @@ def build_html(payload: dict) -> str:
           <div class="meta-line"><span>Generated</span><strong>{html.escape(generated_at)}</strong></div>
         </div>
       </div>
+      <div class="contract-grid">
+        <div class="contract-card">
+          <div class="summary-label">Chart Family</div>
+          <div class="summary-value neutral">{html.escape(chart_contract['label'])}</div>
+          <div class="contract-copy">This surface is sanctioned as an <code>{html.escape(chart_contract['id'])}</code> chart.</div>
+        </div>
+        <div class="contract-card">
+          <div class="summary-label">Renderer</div>
+          <div class="summary-value neutral">{html.escape(chart_contract['renderer']).upper()}</div>
+          <div class="contract-copy">{html.escape(chart_contract['renderer_description'])}</div>
+        </div>
+        <div class="contract-card">
+          <div class="summary-label">Axis Contract</div>
+          <div class="summary-value neutral">{'REQUIRED' if chart_contract['requires_axes'] else 'OPTIONAL'}</div>
+          <div class="contract-copy">Axes use <code>{html.escape(chart_system['axis']['fontFamily'])}</code> at <code>{chart_system['axis']['fontSizePx']}px</code>.</div>
+        </div>
+        <div class="contract-card">
+          <div class="summary-label">Semantic Roles</div>
+          <div class="summary-value neutral">PRIMARY / COMPARISON</div>
+          <div class="contract-copy">Portfolio owns the thesis line; the benchmark is a rebased comparison overlay.</div>
+        </div>
+      </div>
       <div class="sources">
         <div class="source-card"><strong>Metric Engine</strong><br><code>scripts/portfolio_performance.py</code></div>
         <div class="source-card"><strong>Rendered Surface</strong><br><code>web/components/PerformancePanel.tsx</code></div>
+        <div class="source-card"><strong>Chart System</strong><br><code>web/lib/chart-system-spec.json</code></div>
         <div class="source-card"><strong>Conventions</strong><br><code>empyrical</code> / <code>quantstats</code> aligned, risk-free = 0</div>
       </div>
     </section>
@@ -773,26 +948,48 @@ def build_html(payload: dict) -> str:
     <section class="chart-panel">
       <div class="chart-title">
         <span>Current YTD Equity Curve Visual Context</span>
-        <span class="pill">{chart['sessions']} SESSIONS</span>
+        <div class="chart-title-meta">
+          <span class="pill">{html.escape(chart_contract['label']).upper()}</span>
+          <span class="pill">{html.escape(chart_contract['renderer']).upper()}</span>
+          <span class="pill">{chart['sessions']} SESSIONS</span>
+        </div>
+      </div>
+      <div class="chart-note">
+        This panel uses the shared chart-system contract: <code>primary</code> for portfolio, <code>comparison</code> for the rebased benchmark, mono axis labels, and an explicit analytical time-series frame.
       </div>
       <div class="chart-legend">
-        <span><span class="swatch portfolio"></span>Portfolio</span>
-        <span><span class="swatch benchmark"></span>{html.escape(payload['benchmark'])} rebased</span>
+        <span><span class="swatch portfolio"></span>Portfolio / Primary</span>
+        <span><span class="swatch benchmark"></span>{html.escape(payload['benchmark'])} rebased / Comparison</span>
       </div>
       <svg viewBox="0 0 820 280" role="img" aria-label="Current YTD portfolio vs rebased benchmark">
         <defs>
           <linearGradient id="explainerAreaGradient" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stop-color="rgba(5,173,152,0.22)" />
-            <stop offset="100%" stop-color="rgba(5,173,152,0.02)" />
+            <stop offset="0%" stop-color="{primary_color}" stop-opacity="0.22" />
+            <stop offset="100%" stop-color="{primary_color}" stop-opacity="0.02" />
           </linearGradient>
         </defs>
-        <line x1="24" x2="796" y1="24" y2="24" stroke="rgba(148,163,184,.16)" />
-        <line x1="24" x2="796" y1="101.33" y2="101.33" stroke="rgba(148,163,184,.16)" />
-        <line x1="24" x2="796" y1="178.66" y2="178.66" stroke="rgba(148,163,184,.16)" />
-        <line x1="24" x2="796" y1="256" y2="256" stroke="rgba(148,163,184,.16)" />
+        <style>
+          .chart-guide {{
+            stroke: {chart_grid};
+            stroke-width: 1;
+          }}
+          .chart-axis {{
+            stroke: {chart_axis};
+            stroke-width: 1;
+          }}
+          .chart-label {{
+            fill: {chart_axis_label};
+            font-family: {chart_axis_font};
+            font-size: {int(chart_system["axis"]["fontSizePx"])}px;
+            letter-spacing: {chart_system["axis"]["trackingEm"]}em;
+          }}
+        </style>
+        {chart['y_guides_svg']}
+        <line x1="{chart['plot_left']}" x2="{chart['plot_right']}" y1="{chart['plot_bottom']}" y2="{chart['plot_bottom']}" class="chart-axis" />
         <path d="{chart['area_path']}" fill="url(#explainerAreaGradient)"></path>
-        <path d="{chart['benchmark_path']}" fill="none" stroke="rgba(148,163,184,.7)" stroke-width="2" stroke-dasharray="6 5"></path>
-        <path d="{chart['equity_path']}" fill="none" stroke="var(--teal)" stroke-width="2"></path>
+        <path d="{chart['benchmark_path']}" fill="none" stroke="{comparison_color}" stroke-width="2" stroke-dasharray="6 5"></path>
+        <path d="{chart['equity_path']}" fill="none" stroke="{primary_color}" stroke-width="2"></path>
+        {chart['x_labels_svg']}
       </svg>
     </section>
 
@@ -810,8 +1007,9 @@ def build_html(payload: dict) -> str:
 
 def write_report(output_path: Path) -> Path:
     payload = load_payload()
+    chart_system = load_chart_system()
     REPORTS_DIR.mkdir(parents=True, exist_ok=True)
-    html_content = build_html(payload)
+    html_content = build_html(payload, chart_system)
     output_path.write_text(html_content)
     return output_path
 
@@ -825,7 +1023,7 @@ def main() -> int:
     out = write_report(args.output.resolve())
     print(out)
     if not args.no_open:
-      webbrowser.open(f"file://{out}")
+        webbrowser.open(f"file://{out}")
     return 0
 
 
