@@ -1,5 +1,110 @@
 # TODO
 
+## Session: Site Docs Checkpoint And SEO Audit (2026-03-11)
+
+### Dependency Graph
+- T1 (Audit the current `/site` worktree, documentation gaps, generated artifact noise, and the unresolved non-site WIP that must stay out of the checkpoint commit) depends_on: []
+- T2 (Update docs and ignore rules for the landing-page batch, then create a scoped checkpoint commit for finished `/site` work only) depends_on: [T1]
+- T3 (Audit the live `/site` SEO surface, identify crawl/indexation/share gaps, and write failing or objective verification around the new SEO contract where practical) depends_on: [T1]
+- T4 (Implement the `/site` SEO remediations, generate and open an HTML audit report with recommendations, and document the workflow) depends_on: [T2, T3]
+- T5 (Run targeted verification for metadata/routes/build/report generation, then capture review notes and a second scoped commit for the SEO pass) depends_on: [T4]
+
+### Checklist
+- [x] T1 Audit the current `/site` worktree, documentation gaps, generated artifact noise, and the unresolved non-site WIP that must stay out of the checkpoint commit
+- [x] T2 Update docs and ignore rules for the landing-page batch, then create a scoped checkpoint commit for finished `/site` work only
+- [x] T3 Audit the live `/site` SEO surface, identify crawl/indexation/share gaps, and write failing or objective verification around the new SEO contract where practical
+- [x] T4 Implement the `/site` SEO remediations, generate and open an HTML audit report with recommendations, and document the workflow
+- [x] T5 Run targeted verification for metadata/routes/build/report generation, then capture review notes and a second scoped commit for the SEO pass
+
+### Review
+- Created the checkpoint commit `400c7f1` for the finished landing-page refactor only, leaving the unrelated fullscreen/header WIP and local `.claude` manifest changes out of the site history.
+- Added shared metadata and structured-data helpers in [site/lib/seo.ts](/Users/joemccann/dev/apps/finance/radon/site/lib/seo.ts) so the marketing site now ships canonical URLs, Open Graph/Twitter cards, robots directives, app identity fields, and JSON-LD for `WebSite`, `Organization`, and `SoftwareApplication`.
+- Added crawl and share endpoints in [site/app/robots.ts](/Users/joemccann/dev/apps/finance/radon/site/app/robots.ts), [site/app/sitemap.ts](/Users/joemccann/dev/apps/finance/radon/site/app/sitemap.ts), [site/app/manifest.ts](/Users/joemccann/dev/apps/finance/radon/site/app/manifest.ts), [site/app/opengraph-image.tsx](/Users/joemccann/dev/apps/finance/radon/site/app/opengraph-image.tsx), [site/app/twitter-image.tsx](/Users/joemccann/dev/apps/finance/radon/site/app/twitter-image.tsx), and [site/app/apple-icon.tsx](/Users/joemccann/dev/apps/finance/radon/site/app/apple-icon.tsx).
+- Added [site/scripts/seo_audit_report.py](/Users/joemccann/dev/apps/finance/radon/site/scripts/seo_audit_report.py), which builds the site, starts a local production server, audits the rendered HTML plus discovery/image routes, writes [site-seo-audit-2026-03-11.html](/Users/joemccann/dev/apps/finance/radon/reports/site-seo-audit-2026-03-11.html), and opens it by default.
+- Updated [README.md](/Users/joemccann/dev/apps/finance/radon/README.md), [site/README.md](/Users/joemccann/dev/apps/finance/radon/site/README.md), [site/.gitignore](/Users/joemccann/dev/apps/finance/radon/site/.gitignore), and [site/eslint.config.mjs](/Users/joemccann/dev/apps/finance/radon/site/eslint.config.mjs) so the SEO workflow is documented and the dedicated `.next-seo-audit/` build directory does not pollute lint or git status.
+- Verified `python3 -m py_compile site/scripts/seo_audit_report.py`, `cd site && npm run lint`, and `python3 site/scripts/seo_audit_report.py --no-open`, with the final audit reporting `16 pass, 0 warn, 0 fail`.
+
+## Session: RVOL Docs, Commit Checkpoint, And Fullscreen Toggle (2026-03-11)
+
+### Dependency Graph
+- T1 (Audit the current RVOL-fix worktree, documentation update targets, and the shell/header implementation that owns the theme selector) depends_on: []
+- T2 (Record the docs + commit + fullscreen plan in `tasks/todo.md`) depends_on: [T1]
+- T3 (Update the relevant docs for the RVOL cache/backfill fix and create a scoped commit for the CRI/RVOL work) depends_on: [T1, T2]
+- T4 (Add failing fullscreen regressions for the header control and Escape-to-exit behavior) depends_on: [T1, T2]
+- T5 (Implement the fullscreen toggle next to the theme selector and wire document-level Escape handling) depends_on: [T3, T4]
+- T6 (Run targeted verification for docs/build/tests/browser behavior, then capture review notes) depends_on: [T5]
+
+### Checklist
+- [x] T1 Audit the current RVOL-fix worktree, documentation update targets, and the shell/header implementation that owns the theme selector
+- [x] T2 Record the docs + commit + fullscreen plan in `tasks/todo.md`
+- [x] T3 Update the relevant docs for the RVOL cache/backfill fix and create a scoped commit for the CRI/RVOL work
+- [x] T4 Add failing fullscreen regressions for the header control and Escape-to-exit behavior
+- [x] T5 Implement the fullscreen toggle next to the theme selector and wire document-level Escape handling
+- [x] T6 Run targeted verification for docs/build/tests/browser behavior, then capture review notes
+
+### Review
+- Updated the CRI/regime docs in [README.md](/Users/joemccann/dev/apps/finance/radon/README.md), [docs/strategies.md](/Users/joemccann/dev/apps/finance/radon/docs/strategies.md), and [docs/status.md](/Users/joemccann/dev/apps/finance/radon/docs/status.md) to describe the richer CRI cache selection, 20-session RVOL backfill behavior, and the post-close cache refresh path.
+- Committed the scoped RVOL/cache/docs checkpoint as `27e78a7` (`fix: restore regime rvol history from cri cache`) without pulling in the unrelated site/worktree changes that were already present in the repo.
+- Added the fullscreen control in [Header.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/Header.tsx) and [WorkspaceShell.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/WorkspaceShell.tsx), using `Maximize2` / `Minimize2` icons and a document-level Escape handler that exits fullscreen when the app is expanded.
+- Kept the existing theme button uniquely targetable by moving the new control onto its own `.fullscreen-toggle` class and sharing the button styling in [globals.css](/Users/joemccann/dev/apps/finance/radon/web/app/globals.css).
+- Added fullscreen regressions in [header-fullscreen-control.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/header-fullscreen-control.test.ts) and [header-fullscreen.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/header-fullscreen.spec.ts).
+- Verified `pytest scripts/tests/test_cri_scan.py -q`, `npx vitest run web/tests/cri-cache-selection.test.ts web/tests/regime-history-backfill.test.ts web/tests/regime-route-cache-selection.test.ts web/tests/header-fullscreen-control.test.ts`, `cd web && npx playwright test e2e/regime-rvol-history.spec.ts e2e/regime-rvol-history-live-route.spec.ts e2e/header-fullscreen.spec.ts`, `bash -n scripts/run_cri_scan.sh && bash -n scripts/run_data_refresh.sh`, and `cd web && npm run build`.
+- Additional sanity check: the theme-toggle-only cases in [price-chart-theme.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/price-chart-theme.spec.ts) still pass. Two older modal-opening cases in that same spec are still failing because the stubbed AAPL ticker-detail modal never appears; that failure is outside the fullscreen path and was not part of this task.
+
+## Session: Regime RVOL History Cache Fix (2026-03-11)
+
+### Dependency Graph
+- T1 (Audit the `/regime` RVOL/COR1M chart data flow, existing CRI cache artifacts, and the post-close sync hooks) depends_on: []
+- T2 (Record the RVOL history cache fix plan in `tasks/todo.md`) depends_on: [T1]
+- T3 (Add failing regression tests for RVOL history backfill, cache normalization, and `/regime` browser rendering) depends_on: [T1, T2]
+- T4 (Implement 20-session RVOL history backfill plus post-close CRI cache refresh in the daily sync path) depends_on: [T3]
+- T5 (Run targeted verification with Python tests, web tests, and Playwright E2E) depends_on: [T4]
+- T6 (Capture review notes and verification results for the RVOL history fix) depends_on: [T5]
+
+### Checklist
+- [x] T1 Audit the `/regime` RVOL/COR1M chart data flow, existing CRI cache artifacts, and the post-close sync hooks
+- [x] T2 Record the RVOL history cache fix plan in `tasks/todo.md`
+- [x] T3 Add failing regression tests for RVOL history backfill, cache normalization, and `/regime` browser rendering
+- [x] T4 Implement 20-session RVOL history backfill plus post-close CRI cache refresh in the daily sync path
+- [x] T5 Run targeted verification with Python tests, web tests, and Playwright E2E
+- [x] T6 Capture review notes and verification results for the RVOL history fix
+
+### Review
+- Expanded the CRI payload in [scripts/cri_scan.py](/Users/joemccann/dev/apps/finance/radon/scripts/cri_scan.py) so cached `spy_closes` now preserve the trailing 40 daily closes, which is enough to reconstruct realized-vol values for the full 20-session chart instead of only today’s point.
+- Added [regimeHistory.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/regimeHistory.ts) and wired it into [route.ts](/Users/joemccann/dev/apps/finance/radon/web/app/api/regime/route.ts) so `/api/regime` backfills missing `history[].realized_vol` values from cached SPY closes before the page renders the RVOL/COR1M chart.
+- Updated the post-close path in [run_data_refresh.sh](/Users/joemccann/dev/apps/finance/radon/scripts/run_data_refresh.sh) so the daily sync refreshes `data/cri.json` and writes a new scheduled CRI snapshot after 4:00 PM ET whenever the current cache is missing a complete 20-session RVOL history.
+- Added regressions in [test_cri_scan.py](/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_cri_scan.py), [regime-history-backfill.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/regime-history-backfill.test.ts), and [regime-rvol-history.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/regime-rvol-history.spec.ts) to lock the cache contract, API repair path, and live-route browser rendering.
+- Verified `pytest scripts/tests/test_cri_scan.py -q`, `npx tsx --test web/tests/regime-history-backfill.test.ts`, `cd web && npx playwright test e2e/regime-rvol-history.spec.ts`, `bash -n scripts/run_data_refresh.sh`, and `cd web && npm run build`.
+
+## Session: Site Landing Page Phase 4 Implementation (2026-03-11)
+
+### Dependency Graph
+- T1 (Audit the current `/site` implementation, package setup, and brand constraints for the landing-page refactor) depends_on: []
+- T2 (Record the Phase 4 implementation plan in `tasks/todo.md`) depends_on: [T1]
+- T3 (Refactor `/site` into Radon-native atoms, molecules, organisms, and section components) depends_on: [T1, T2]
+- T4 (Replace the existing homepage with the new institutional-terminal landing page and supporting content/data) depends_on: [T3]
+- T5 (Verify the redesigned `/site` with build and browser automation, then capture review notes) depends_on: [T4]
+
+### Checklist
+- [x] T1 Audit the current `/site` implementation, package setup, and brand constraints for the landing-page refactor
+- [x] T2 Record the Phase 4 implementation plan in `tasks/todo.md`
+- [x] T3 Refactor `/site` into Radon-native atoms, molecules, organisms, and section components
+- [x] T4 Replace the existing homepage with the new institutional-terminal landing page and supporting content/data
+- [x] T5 Verify the redesigned `/site` with build and browser automation, then capture review notes
+
+### Review
+- Replaced the old monolithic homepage with a section-composed landing page in [site/app/page.tsx](/Users/joemccann/dev/apps/finance/radon/site/app/page.tsx) and a reusable `/site/components` architecture built around Radon-native atoms, molecules, organisms, and sections.
+- The redesign now centers the product on strategies, execution, and state reconstruction, with dedicated sections for the strategy matrix, execution rail, surface preview, auditability layer, and final operator CTA.
+- Preserved Radon’s enforced design system in [site/app/globals.css](/Users/joemccann/dev/apps/finance/radon/site/app/globals.css) and the section/component primitives: dark-first surfaces, teal `signal.core`, hairline borders, tight panel geometry, mono telemetry, and depth via layered surfaces instead of soft shadows or glassmorphism.
+- Consolidated the richer landing-page content model in [site/lib/landing-content.ts](/Users/joemccann/dev/apps/finance/radon/site/lib/landing-content.ts) and reconciled mixed worktree component contracts so the active section tree compiles cleanly against a single data shape.
+- Updated [site/.gitignore](/Users/joemccann/dev/apps/finance/radon/site/.gitignore) to ignore `.next-build/` and `.next-dev-webpack/`, so the alternate build paths used for verification do not leave untracked noise in the worktree.
+- Verified `cd site && npm run lint` passes.
+- Verified `cd site && NEXT_DIST_DIR=.next-build npm run build` passes, using an alternate `distDir` to avoid a live `.next` lock held by another local Next process.
+- Added [site/next.config.ts](/Users/joemccann/dev/apps/finance/radon/site/next.config.ts) support for environment-scoped `distDir` values and an explicit Turbopack root so site verification can run without colliding with other local site processes.
+- Verified live browser rendering on a dedicated webpack dev server with `cd site && NEXT_DIST_DIR=.next-dev-webpack npx next dev -p 3335 --webpack`.
+- Verified browser automation from the repo’s Playwright install against `http://127.0.0.1:3335`, asserting the hero, strategy, execution, and audit sections and capturing `/tmp/radon-site-phase4.png`.
+
+
 ## Session: Performance Card Explainability Modals (2026-03-11)
 
 ### Dependency Graph

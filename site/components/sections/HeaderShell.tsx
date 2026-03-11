@@ -12,7 +12,7 @@ export function HeaderShell() {
             Radon
           </span>
         </a>
-        <nav className="hidden items-center gap-6 lg:flex">
+        <nav aria-label="Primary" className="hidden items-center gap-6 lg:flex">
           {headerLinks.map((item) => (
             <a
               key={item.href}
@@ -27,7 +27,7 @@ export function HeaderShell() {
           <a
             href="https://github.com/joemccann/radon"
             target="_blank"
-            rel="noreferrer"
+            rel="noopener noreferrer"
             className="hidden sm:inline-flex"
           >
             <CommandChip command="Inspect Source" />

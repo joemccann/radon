@@ -17,6 +17,7 @@
 /.next/
 /.next-build/
 /.next-dev-webpack/
+/.next-seo-audit/
 /out/
 
 # production

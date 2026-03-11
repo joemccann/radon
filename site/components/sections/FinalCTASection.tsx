@@ -32,7 +32,7 @@ export function FinalCTASection() {
             <a
               href="https://github.com/joemccann/radon"
               target="_blank"
-              rel="noreferrer"
+              rel="noopener noreferrer"
               className="inline-flex"
             >
               <CommandChip command="Inspect Source" />

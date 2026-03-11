@@ -205,6 +205,8 @@ npm install
 npm run dev
 ```
 
+Set `NEXT_PUBLIC_SITE_URL` in the site environment so `canonical`, JSON-LD, `robots.txt`, and `sitemap.xml` all reference the production hostname correctly.
+
 For Vercel, the project should use `site/` as the Root Directory. The site app includes an ignored-build step in [site/vercel.json](/Users/joemccann/dev/apps/finance/radon/site/vercel.json) so pushes only trigger a site deploy when files under `site/` changed.
 
 The marketing app is intentionally separate from `web/`: it carries the Radon landing-page narrative and its own deployment guardrails. To verify the site locally without colliding with another live Next.js process:
@@ -213,7 +215,18 @@ The marketing app is intentionally separate from `web/`: it carries the Radon la
 cd site
 npm run lint
 NEXT_DIST_DIR=.next-build npm run build
+python3 scripts/seo_audit_report.py
 ```
+
+`site/scripts/seo_audit_report.py` audits the rendered page metadata plus `robots.txt`, `sitemap.xml`, `manifest.webmanifest`, and the Open Graph/Twitter image routes, then writes a branded HTML report to `reports/`.
+
+To generate an operator-facing SEO report against a live local instance:
+
+```bash
+python3 scripts/site_seo_audit.py --url http://127.0.0.1:3333 --open
+```
+
+If local port binding is unavailable, build the static site and point the audit at `site/.next-build/server/app` instead.
 
 ## Example Workflow
 
