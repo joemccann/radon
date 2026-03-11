@@ -23,8 +23,17 @@ fi
 
 mkdir -p data/cri_scheduled logs
 TIMESTAMP=$(TZ=America/New_York date +"%Y-%m-%dT%H-%M")
+OUT_PATH="data/cri_scheduled/cri-${TIMESTAMP}.json"
+TMP_PATH=$(mktemp "data/cri_scheduled/.cri-${TIMESTAMP}.XXXXXX.tmp")
 echo "$(date): Running CRI scan..."
-python3 scripts/cri_scan.py --json > "data/cri_scheduled/cri-${TIMESTAMP}.json" 2>>"logs/cri-scan.err.log"
+python3 scripts/cri_scan.py --json > "$TMP_PATH" 2>>"logs/cri-scan.err.log"
 EXIT_CODE=$?
-echo "$(date): CRI scan complete (exit $EXIT_CODE)"
+if [ "$EXIT_CODE" -eq 0 ]; then
+    mv "$TMP_PATH" "$OUT_PATH"
+    cp "$OUT_PATH" data/cri.json
+    echo "$(date): CRI scan complete (OK) → $OUT_PATH"
+else
+    rm -f "$TMP_PATH"
+    echo "$(date): CRI scan failed (exit $EXIT_CODE) — keeping existing CRI caches"
+fi
 exit $EXIT_CODE

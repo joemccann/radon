@@ -85,6 +85,65 @@ fi
 
 echo "$(date): Data refresh complete (scanner: $SCANNER_STATUS, flow: $FLOW_STATUS, discover: $DISCOVER_STATUS)"
 
+cri_cache_has_complete_rvol() {
+    python3 - "$1" "$2" <<'PY'
+import json
+import sys
+from pathlib import Path
+
+cache_path = Path(sys.argv[1])
+today_et = sys.argv[2]
+
+if not cache_path.exists():
+    print("no")
+    raise SystemExit(0)
+
+try:
+    data = json.loads(cache_path.read_text())
+except Exception:
+    print("no")
+    raise SystemExit(0)
+
+history = data.get("history") or []
+complete = (
+    data.get("date") == today_et
+    and len(history) >= 20
+    and all(entry.get("realized_vol") is not None for entry in history[-20:])
+)
+print("yes" if complete else "no")
+PY
+}
+
+refresh_cri_cache_post_close() {
+    local today_et="$1"
+    local cache_status
+    local timestamp
+    local tmp_cache
+    local scheduled_path
+
+    cache_status=$(cri_cache_has_complete_rvol "data/cri.json" "$today_et")
+    if [ "$cache_status" = "yes" ]; then
+        echo "$(date): CRI cache already contains 20 RVOL history points for $today_et — skipping"
+        return
+    fi
+
+    mkdir -p data/cri_scheduled logs
+    timestamp=$(TZ=America/New_York date +"%Y-%m-%dT%H-%M")
+    tmp_cache="data/cri.json.tmp"
+    scheduled_path="data/cri_scheduled/cri-${timestamp}.json"
+
+    echo "$(date): Refreshing CRI cache with 20-session RVOL history..."
+    if python3 scripts/cri_scan.py --json > "$tmp_cache" 2>>"logs/cri-scan.err.log"; then
+        mv "$tmp_cache" data/cri.json
+        cp data/cri.json "$scheduled_path"
+        echo "$(date): CRI cache refresh complete (OK) → data/cri.json, $scheduled_path"
+    else
+        local exit_code=$?
+        rm -f "$tmp_cache"
+        echo "$(date): CRI cache refresh failed (exit $exit_code)"
+    fi
+}
+
 # --- fetch_menthorq_cta.py (once per day, post-close only) ---
 # Only run after 16:00 ET and only if today's cache doesn't already exist.
 # This avoids running the expensive Playwright automation multiple times per day.
@@ -92,20 +151,22 @@ CURRENT_HOUR_ET=$(TZ=America/New_York date +%H)
 TODAY_ET=$(TZ=America/New_York date +%Y-%m-%d)
 CTA_CACHE="data/menthorq_cache/cta_${TODAY_ET}.json"
 
-if [ "$CURRENT_HOUR_ET" -ge 16 ] && [ ! -f "$CTA_CACHE" ]; then
-    echo "$(date): Running fetch_menthorq_cta.py (post-close, cache missing)..."
-    mkdir -p data/menthorq_cache
-    python3 scripts/fetch_menthorq_cta.py 2>/tmp/menthorq_cta.err
-    EXIT_CODE=$?
-    if [ "$EXIT_CODE" -eq 0 ]; then
-        echo "$(date): fetch_menthorq_cta.py complete (OK) → $CTA_CACHE"
+if [ "$CURRENT_HOUR_ET" -ge 16 ]; then
+    refresh_cri_cache_post_close "$TODAY_ET"
+
+    if [ ! -f "$CTA_CACHE" ]; then
+        echo "$(date): Running fetch_menthorq_cta.py (post-close, cache missing)..."
+        mkdir -p data/menthorq_cache
+        python3 scripts/fetch_menthorq_cta.py 2>/tmp/menthorq_cta.err
+        EXIT_CODE=$?
+        if [ "$EXIT_CODE" -eq 0 ]; then
+            echo "$(date): fetch_menthorq_cta.py complete (OK) → $CTA_CACHE"
+        else
+            echo "$(date): fetch_menthorq_cta.py failed (exit $EXIT_CODE)"
+        fi
     else
-        echo "$(date): fetch_menthorq_cta.py failed (exit $EXIT_CODE)"
+        echo "$(date): MenthorQ CTA cache already exists for $TODAY_ET — skipping"
     fi
 else
-    if [ -f "$CTA_CACHE" ]; then
-        echo "$(date): MenthorQ CTA cache already exists for $TODAY_ET — skipping"
-    else
-        echo "$(date): MenthorQ CTA fetch skipped (market not yet closed, hour=$CURRENT_HOUR_ET ET)"
-    fi
+    echo "$(date): Post-close CRI/CTA refresh skipped (market not yet closed, hour=$CURRENT_HOUR_ET ET)"
 fi

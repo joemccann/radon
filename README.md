@@ -190,6 +190,7 @@ Visit `http://localhost:3000`.
 - Real-time price streaming with live greeks
 - Multi-leg position monitoring and per-leg P&L
 - YTD portfolio performance analytics with reconstructed institutional metrics
+- Regime history charts with cached 20-session RVOL and COR1M context
 - Order management, including combo spread workflows
 - Flow analysis, regime views, and thesis checks
 - AI chat interface for command execution and analysis
@@ -317,11 +318,13 @@ The repo includes background-service support for the live trading environment:
 | Service | Purpose |
 |---------|---------|
 | Secure IBC service (`local.ibc-gateway`) | Maintains the local broker session for live quotes, execution, and reports |
-| CRI scan service | Refreshes crash-risk regime data intraday |
+| CRI scan service | Refreshes crash-risk regime data intraday and writes atomic CRI cache snapshots |
 | Monitor daemon | Tracks fills and manages post-entry workflows |
-| Data refresh services | Keeps portfolio and order-state data current |
+| Data refresh services | Keeps portfolio and order-state data current and repairs post-close CRI cache history when needed |
 
 Historical setup helpers remain in `scripts/`, and the broader implementation notes live in [docs/implement.md](docs/implement.md).
+
+For the `/regime` RVOL/COR1M chart, the CRI cache now preserves enough trailing SPY closes to rebuild the full prior 20 sessions of realized volatility. The API prefers the richer CRI cache candidate when scheduled snapshots lag and backfills missing `history[].realized_vol` values from cached closes before rendering the chart.
 
 ### Phase 1 Remote IBC Access
 

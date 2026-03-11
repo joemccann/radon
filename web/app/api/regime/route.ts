@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { readFile, readdir, writeFile, stat, mkdir } from "fs/promises";
 import { join } from "path";
 import { isCriDataStale } from "@/lib/criStaleness";
+import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
+import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { spawn } from "child_process";
 
 export const runtime = "nodejs";
@@ -55,12 +57,23 @@ function asNumber(value: unknown): number | null {
 function normalizeCriPayload(raw: Record<string, unknown>): Record<string, unknown> {
   const crashTrigger = (raw.crash_trigger ?? {}) as Record<string, unknown>;
   const conditions = (crashTrigger.conditions ?? {}) as Record<string, unknown>;
+  const spyCloses = Array.isArray(raw.spy_closes)
+    ? raw.spy_closes.map((value) => asNumber(value)).filter((value): value is number => value !== null)
+    : [];
+  const history = Array.isArray(raw.history)
+    ? backfillRealizedVolHistory(raw.history as RegimeHistoryEntry[], spyCloses)
+    : [];
+  const latestRealizedVol = history.length > 0 ? asNumber(history[history.length - 1].realized_vol) : null;
+  const normalizedRealizedVol = asNumber(raw.realized_vol) ?? latestRealizedVol;
 
   return {
     ...EMPTY_CRI,
     ...raw,
     cor1m: asNumber(raw.cor1m),
     cor1m_5d_change: asNumber(raw.cor1m_5d_change),
+    realized_vol: normalizedRealizedVol,
+    history,
+    spy_closes: spyCloses,
     crash_trigger: {
       ...EMPTY_CRI.crash_trigger,
       ...crashTrigger,
@@ -78,30 +91,43 @@ let bgScanInFlight = false;
 /** Read the latest CRI JSON — scheduled dir first, then legacy cri.json.
  *  Iterates newest→oldest, skipping corrupt files (e.g. stderr mixed in). */
 async function readLatestCri(): Promise<{ data: object; path: string } | null> {
-  // 1. Try scheduled dir — newest to oldest, skip corrupt files
-  try {
-    const files = await readdir(SCHEDULED_DIR);
-    const jsonFiles = files.filter((f) => f.startsWith("cri-") && f.endsWith(".json")).sort();
-    for (let i = jsonFiles.length - 1; i >= 0; i--) {
-      const filePath = join(SCHEDULED_DIR, jsonFiles[i]);
-      try {
-        const raw = await readFile(filePath, "utf-8");
-        const jsonStart = raw.indexOf("{");
-        if (jsonStart === -1) continue;
-        return { data: JSON.parse(raw.slice(jsonStart)), path: filePath };
-      } catch {
-        continue; // corrupt file — try next
-      }
+  async function readCriCandidate(filePath: string): Promise<CriCacheCandidate | null> {
+    try {
+      const raw = await readFile(filePath, "utf-8");
+      const jsonStart = raw.indexOf("{");
+      if (jsonStart === -1) return null;
+      const fileStat = await stat(filePath);
+      return {
+        path: filePath,
+        mtimeMs: fileStat.mtimeMs,
+        data: JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>,
+      };
+    } catch {
+      return null;
     }
-  } catch { /* dir may not exist yet */ }
+  }
 
-  // 2. Fall back to legacy cache
-  try {
-    const raw = await readFile(CACHE_PATH, "utf-8");
-    return { data: JSON.parse(raw), path: CACHE_PATH };
-  } catch { /* no cache */ }
+  async function readLatestScheduledCri(): Promise<CriCacheCandidate | null> {
+    try {
+      const files = await readdir(SCHEDULED_DIR);
+      const jsonFiles = files.filter((f) => f.startsWith("cri-") && f.endsWith(".json")).sort();
+      for (let index = jsonFiles.length - 1; index >= 0; index -= 1) {
+        const candidate = await readCriCandidate(join(SCHEDULED_DIR, jsonFiles[index]));
+        if (candidate) return candidate;
+      }
+    } catch {
+      // dir may not exist yet
+    }
 
-  return null;
+    return null;
+  }
+
+  const selected = selectPreferredCriCandidate(
+    await readLatestScheduledCri(),
+    await readCriCandidate(CACHE_PATH),
+  );
+
+  return selected ? { data: selected.data, path: selected.path } : null;
 }
 
 /** Check if the latest cached data is stale (market-hours aware).
@@ -150,7 +176,9 @@ function triggerBackgroundScan(): void {
       const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
         .replace(" ", "T").slice(0, 16).replace(":", "-");
       const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
-      await writeFile(outPath, JSON.stringify(data, null, 2));
+      const payload = JSON.stringify(data, null, 2);
+      await writeFile(outPath, payload);
+      await writeFile(CACHE_PATH, payload);
       console.log(`[CRI] Background scan complete → ${outPath}`);
     })
     .catch((err) => { console.error("[CRI] Background scan failed:", err.message); })

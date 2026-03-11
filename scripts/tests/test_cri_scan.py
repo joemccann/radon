@@ -486,3 +486,20 @@ class TestRunAnalysis:
         assert result["cor1m"] == 28.97
         assert result["cor1m_5d_change"] == pytest.approx(3.97)
         assert result["history"][-1]["cor1m"] == 28.97
+
+    def test_caches_enough_spy_closes_to_rebuild_20_session_rvol_history(self):
+        n = 140
+        dates = [f"2026-02-{(i % 28) + 1:02d}" for i in range(n)]
+
+        aligned = {
+            "VIX": np.linspace(18.0, 30.0, n),
+            "VVIX": np.linspace(90.0, 120.0, n),
+            "SPY": np.linspace(600.0, 560.0, n),
+            "COR1M": np.linspace(24.0, 40.0, n),
+        }
+
+        result = run_analysis(aligned, dates)
+
+        assert len(result["history"]) == 20
+        assert all(entry["realized_vol"] is not None for entry in result["history"])
+        assert len(result["spy_closes"]) == 40

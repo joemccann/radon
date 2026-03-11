@@ -812,6 +812,8 @@ python3 scripts/fetch_menthorq_cta.py --json
 python3 scripts/fetch_menthorq_cta.py --date 2026-03-06
 ```
 
+**Cache behavior:** the CRI JSON cache now stores enough trailing SPY closes to reconstruct the prior 20 realized-vol sessions used by `/regime`. Scheduled CRI snapshots and the post-close data refresh both refresh `data/cri.json`, and the API backfills missing `history[].realized_vol` values from cached closes when a newer snapshot is less complete than the legacy cache.
+
 ### Source Research
 
 Based on systematic CTA deleveraging dynamics documented in:
