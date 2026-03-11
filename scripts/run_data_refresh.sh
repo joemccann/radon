@@ -8,13 +8,22 @@
 
 cd "$(dirname "$0")/.."
 
-# Load env vars from web/.env (UW_TOKEN, etc.) — launchd doesn't inherit shell env
-if [ -f "web/.env" ]; then
+# Load env vars from both .env files — launchd doesn't inherit shell env
+# Avoid process substitution <(...) which is unreliable under launchd's bash 3.2
+_load_env() {
+    local f="$1"
+    [ -f "$f" ] || return
+    local tmp
+    tmp=$(mktemp)
+    grep -v '^#' "$f" | grep -v '^\s*$' | sed 's/^export //' > "$tmp"
     set -a
-    # shellcheck disable=SC1091
-    source <(grep -v '^#' web/.env | grep -v '^\s*$' | sed 's/^export //')
+    # shellcheck disable=SC1090
+    . "$tmp"
     set +a
-fi
+    rm -f "$tmp"
+}
+_load_env "web/.env"
+_load_env ".env"
 
 # Check if today is a trading day (reuses market_holidays.json)
 IS_TRADING=$(python3 -c "
@@ -85,12 +94,6 @@ CTA_CACHE="data/menthorq_cache/cta_${TODAY_ET}.json"
 
 if [ "$CURRENT_HOUR_ET" -ge 16 ] && [ ! -f "$CTA_CACHE" ]; then
     echo "$(date): Running fetch_menthorq_cta.py (post-close, cache missing)..."
-    # Load project root .env for MenthorQ credentials
-    if [ -f ".env" ]; then
-        set -a
-        source <(grep -v '^#' .env | grep -v '^\s*$' | sed 's/^export //')
-        set +a
-    fi
     mkdir -p data/menthorq_cache
     python3 scripts/fetch_menthorq_cta.py 2>/tmp/menthorq_cta.err
     EXIT_CODE=$?
