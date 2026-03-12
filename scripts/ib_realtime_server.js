@@ -32,6 +32,7 @@ function parseArgs(argv) {
     port: DEFAULT_WS_PORT,
     ibHost: DEFAULT_IB_HOST,
     ibPort: DEFAULT_IB_PORT,
+    ibClientId: 100,
     verbose: false,
   };
 
@@ -54,6 +55,14 @@ function parseArgs(argv) {
       const value = Number.parseInt(argv[i + 1], 10);
       if (Number.isInteger(value)) {
         args.ibPort = value;
+      }
+      i += 1;
+      continue;
+    }
+    if (arg === "--client-id") {
+      const value = Number.parseInt(argv[i + 1], 10);
+      if (Number.isInteger(value)) {
+        args.ibClientId = value;
       }
       i += 1;
       continue;
@@ -145,11 +154,18 @@ function verbose(...args) {
   if (cli.verbose) console.log(`\x1b[90m[verbose]\x1b[0m`, ...args);
 }
 
-const ib = new IB({
-  host: cli.ibHost,
-  port: cli.ibPort,
-  clientId: 100,
-});
+const IB_CLIENT_ID_POOL = [cli.ibClientId, cli.ibClientId + 1, cli.ibClientId + 2];
+let activeClientIdIndex = 0;
+
+let ib = createIBClient(IB_CLIENT_ID_POOL[0]);
+
+function createIBClient(clientId) {
+  return new IB({
+    host: cli.ibHost,
+    port: cli.ibPort,
+    clientId,
+  });
+}
 
 async function isPortAvailable(host, port) {
   return new Promise((resolve) => {
@@ -865,6 +881,21 @@ async function handleClientMessage(client, data) {
   }
 }
 
+function rotateIBClient(newClientId) {
+  // Tear down old instance
+  try { ib.disconnect(); } catch { /* ignore */ }
+  try { ib.removeAllListeners(); } catch { /* ignore */ }
+
+  // Create new instance and rewire all events
+  ib = createIBClient(newClientId);
+  wireIBEvents();
+
+  // Reconnect after a short delay
+  setTimeout(() => {
+    try { ib.connect(); } catch { /* ignore — scheduleReconnect will retry */ }
+  }, 2000);
+}
+
 function scheduleReconnect() {
   if (shuttingDown || reconnectTimer) return;
   reconnectTimer = setTimeout(() => {
@@ -886,162 +917,164 @@ function scheduleReconnect() {
   }, RECONNECT_MS);
 }
 
-ib.on("connected", () => {
-  ibConnected = true;
-  ibConnectionIssue = null;
-  console.log("IB connected");
-  reconnectTimer = null;
-  // Request Delayed-Frozen data so closed-market queries return last known prices
-  // Type 4 cascades: Live → Delayed → Frozen → Delayed-Frozen
-  ib.reqMarketDataType(4);
-  cleanupSymbolStateForReconnect();
-  restoreSubscriptions();
-  broadcastStatus();
-});
-
-ib.on("disconnected", () => {
-  if (ibConnected) {
-    console.log("IB disconnected");
-  }
-  ibConnected = false;
-  broadcastStatus();
-  scheduleReconnect();
-});
-
-ib.on("error", (error, data) => {
-  const msg = String(error?.message ?? error);
-  const tickerId = data?.id;
-  const code = data?.code;
-  const symbol = tickerId != null ? requestIdToSymbol.get(tickerId) : null;
-  const connectionIssue = classifyIBConnectionError(msg, {
-    ibHost: cli.ibHost,
-    ibPort: cli.ibPort,
+function wireIBEvents() {
+  ib.on("connected", () => {
+    ibConnected = true;
+    ibConnectionIssue = null;
+    console.log(`IB connected (clientId ${IB_CLIENT_ID_POOL[activeClientIdIndex]})`);
+    reconnectTimer = null;
+    // Request Delayed-Frozen data so closed-market queries return last known prices
+    // Type 4 cascades: Live → Delayed → Frozen → Delayed-Frozen
+    ib.reqMarketDataType(4);
+    cleanupSymbolStateForReconnect();
+    restoreSubscriptions();
+    broadcastStatus();
   });
 
-  if (/connection is OK|farm connection is OK/i.test(msg)) {
-    console.log(`\x1b[32mIB status: ${msg}\x1b[0m`);
-  } else if (code === 200 || /No security definition has been found/i.test(msg)) {
-    // Invalid contract (e.g. non-existent option strike) — clean up silently
-    verbose(`no security def for ${symbol ?? `tickerId:${tickerId}`}`);
-    if (symbol) {
-      const state = symbolStates.get(symbol);
-      if (state && state.tickerId === tickerId) {
-        requestIdToSymbol.delete(tickerId);
-        state.tickerId = null;
-      }
-    } else if (tickerId != null) {
-      requestIdToSymbol.delete(tickerId);
+  ib.on("disconnected", () => {
+    if (ibConnected) {
+      console.log("IB disconnected");
     }
-  } else if (code === 354 || /market data is not subscribed/i.test(msg)) {
-    // IB account lacks market data subscription for this symbol
-    console.warn(`\x1b[33mIB warning: no market data subscription for ${symbol ?? `tickerId:${tickerId}`}\x1b[0m`);
-    // Clean up the failed subscription so we stop retrying
-    if (symbol) {
-      const state = symbolStates.get(symbol);
-      if (state && state.tickerId === tickerId) {
-        requestIdToSymbol.delete(tickerId);
-        state.tickerId = null;
-      }
-    }
-  } else if (/Fundamentals data is not allowed/i.test(msg)) {
-    // IB IBIS subscription not active on this port/account — suppress and clean up
-    verbose(`fundamentals not allowed for tickerId:${tickerId} — IBIS subscription may be inactive`);
-    if (tickerId != null) {
-      const fundSymbol = fundamentalsRequestIds.get(tickerId);
-      if (fundSymbol) {
-        fundamentalsRequestIds.delete(tickerId);
-        fundamentalsPending.delete(fundSymbol);
-      }
-    }
-  } else if (/Can't find EId/i.test(msg)) {
-    // Cascading error from a rejected subscription — suppress
-    console.warn(`\x1b[33mIB warning: ${msg}\x1b[0m`);
-  } else {
-    console.error(`\x1b[31mIB error: ${msg}${symbol ? ` (${symbol})` : tickerId != null ? ` (tickerId:${tickerId})` : ""}\x1b[0m`);
-  }
-
-  if (connectionIssue) {
     ibConnected = false;
-    ibConnectionIssue = connectionIssue;
     broadcastStatus();
     scheduleReconnect();
-  }
-});
-
-ib.on("tickPrice", (tickerId, tickType, price) => {
-  onTickPrice(tickerId, tickType, price);
-});
-
-ib.on("tickSize", (tickerId, sizeType, size) => {
-  onTickSize(tickerId, sizeType, size);
-});
-
-ib.on("tickSnapshotEnd", (tickerId) => {
-  onTickSnapshotEnd(tickerId);
-});
-
-ib.on("fundamentalData", (reqId, data) => {
-  onFundamentalData(reqId, data);
-});
-
-ib.on("tickOptionComputation", (tickerId, tickType, impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice) => {
-  const symbol = requestIdToSymbol.get(tickerId);
-  const liveState = symbol ? symbolStates.get(symbol) : null;
-  if (!liveState) return;
-
-  // Accept MODEL_OPTION (13), LAST_OPTION (12), and delayed variants (83, 82)
-  // Prefer MODEL_OPTION over LAST_OPTION — don't downgrade
-  const validTickTypes = [13, 83, 12, 82];
-  if (!validTickTypes.includes(tickType)) return;
-
-  const pd = liveState.data;
-  const isModel = tickType === 13 || tickType === 83;
-  if (!isModel && pd.delta !== null) return;
-
-  // IB uses -2 for "not computed" and -1 for "not available" — treat both as null
-  const valid = (v) => v !== undefined && v !== -2 && v !== -1 && Number.isFinite(v);
-
-  if (valid(delta)) pd.delta = delta;
-  if (valid(gamma)) pd.gamma = gamma;
-  if (valid(theta)) pd.theta = theta;
-  if (valid(vega)) pd.vega = vega;
-  if (valid(impliedVol)) pd.impliedVol = impliedVol;
-  if (valid(undPrice)) pd.undPrice = undPrice;
-
-  pd.timestamp = nowIso();
-  verbose(`greeks ${symbol} tickType=${tickType} delta=${delta} iv=${impliedVol}`);
-  hydrateAndBroadcast(symbol);
-});
-
-ib.on("symbolSamples", (reqId, contracts) => {
-  const req = searchRequestClients.get(reqId);
-  if (!req) return;
-  searchRequestClients.delete(reqId);
-
-  const results = contracts.map((c) => ({
-    conId: c.conId,
-    symbol: c.symbol,
-    secType: c.secType,
-    primaryExchange: c.primaryExchange,
-    currency: c.currency,
-    derivativeSecTypes: c.derivativeSecTypes || [],
-  }));
-
-  // Cache results
-  if (searchCache.size >= SEARCH_CACHE_MAX) {
-    const oldest = searchCache.keys().next().value;
-    searchCache.delete(oldest);
-  }
-  searchCache.set(req.pattern, { results, ts: Date.now() });
-
-  sendMessage(req.client, {
-    type: "searchResults",
-    pattern: req.pattern,
-    results,
   });
 
-  verbose(`search "${req.pattern}" → ${results.length} results`);
-});
+  ib.on("error", (error, data) => {
+    const msg = String(error?.message ?? error);
+    const tickerId = data?.id;
+    const code = data?.code;
+    const symbol = tickerId != null ? requestIdToSymbol.get(tickerId) : null;
+    const connectionIssue = classifyIBConnectionError(msg, {
+      ibHost: cli.ibHost,
+      ibPort: cli.ibPort,
+    });
+
+    if (/connection is OK|farm connection is OK/i.test(msg)) {
+      console.log(`\x1b[32mIB status: ${msg}\x1b[0m`);
+    } else if (code === 200 || /No security definition has been found/i.test(msg)) {
+      verbose(`no security def for ${symbol ?? `tickerId:${tickerId}`}`);
+      if (symbol) {
+        const state = symbolStates.get(symbol);
+        if (state && state.tickerId === tickerId) {
+          requestIdToSymbol.delete(tickerId);
+          state.tickerId = null;
+        }
+      } else if (tickerId != null) {
+        requestIdToSymbol.delete(tickerId);
+      }
+    } else if (code === 354 || /market data is not subscribed/i.test(msg)) {
+      console.warn(`\x1b[33mIB warning: no market data subscription for ${symbol ?? `tickerId:${tickerId}`}\x1b[0m`);
+      if (symbol) {
+        const state = symbolStates.get(symbol);
+        if (state && state.tickerId === tickerId) {
+          requestIdToSymbol.delete(tickerId);
+          state.tickerId = null;
+        }
+      }
+    } else if (/Fundamentals data is not allowed/i.test(msg)) {
+      verbose(`fundamentals not allowed for tickerId:${tickerId} — IBIS subscription may be inactive`);
+      if (tickerId != null) {
+        const fundSymbol = fundamentalsRequestIds.get(tickerId);
+        if (fundSymbol) {
+          fundamentalsRequestIds.delete(tickerId);
+          fundamentalsPending.delete(fundSymbol);
+        }
+      }
+    } else if (/Can't find EId/i.test(msg)) {
+      console.warn(`\x1b[33mIB warning: ${msg}\x1b[0m`);
+    } else if (/client id is already in use/i.test(msg)) {
+      activeClientIdIndex = (activeClientIdIndex + 1) % IB_CLIENT_ID_POOL.length;
+      const nextId = IB_CLIENT_ID_POOL[activeClientIdIndex];
+      console.warn(`\x1b[33mIB warning: client ID ${IB_CLIENT_ID_POOL[(activeClientIdIndex - 1 + IB_CLIENT_ID_POOL.length) % IB_CLIENT_ID_POOL.length]} in use, rotating to ${nextId}\x1b[0m`);
+      rotateIBClient(nextId);
+      return;
+    } else {
+      console.error(`\x1b[31mIB error: ${msg}${symbol ? ` (${symbol})` : tickerId != null ? ` (tickerId:${tickerId})` : ""}\x1b[0m`);
+    }
+
+    if (connectionIssue) {
+      ibConnected = false;
+      ibConnectionIssue = connectionIssue;
+      broadcastStatus();
+      scheduleReconnect();
+    }
+  });
+
+  ib.on("tickPrice", (tickerId, tickType, price) => {
+    onTickPrice(tickerId, tickType, price);
+  });
+
+  ib.on("tickSize", (tickerId, sizeType, size) => {
+    onTickSize(tickerId, sizeType, size);
+  });
+
+  ib.on("tickSnapshotEnd", (tickerId) => {
+    onTickSnapshotEnd(tickerId);
+  });
+
+  ib.on("fundamentalData", (reqId, data) => {
+    onFundamentalData(reqId, data);
+  });
+
+  ib.on("tickOptionComputation", (tickerId, tickType, impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice) => {
+    const symbol = requestIdToSymbol.get(tickerId);
+    const liveState = symbol ? symbolStates.get(symbol) : null;
+    if (!liveState) return;
+
+    const validTickTypes = [13, 83, 12, 82];
+    if (!validTickTypes.includes(tickType)) return;
+
+    const pd = liveState.data;
+    const isModel = tickType === 13 || tickType === 83;
+    if (!isModel && pd.delta !== null) return;
+
+    const valid = (v) => v !== undefined && v !== -2 && v !== -1 && Number.isFinite(v);
+
+    if (valid(delta)) pd.delta = delta;
+    if (valid(gamma)) pd.gamma = gamma;
+    if (valid(theta)) pd.theta = theta;
+    if (valid(vega)) pd.vega = vega;
+    if (valid(impliedVol)) pd.impliedVol = impliedVol;
+    if (valid(undPrice)) pd.undPrice = undPrice;
+
+    pd.timestamp = nowIso();
+    verbose(`greeks ${symbol} tickType=${tickType} delta=${delta} iv=${impliedVol}`);
+    hydrateAndBroadcast(symbol);
+  });
+
+  ib.on("symbolSamples", (reqId, contracts) => {
+    const req = searchRequestClients.get(reqId);
+    if (!req) return;
+    searchRequestClients.delete(reqId);
+
+    const results = contracts.map((c) => ({
+      conId: c.conId,
+      symbol: c.symbol,
+      secType: c.secType,
+      primaryExchange: c.primaryExchange,
+      currency: c.currency,
+      derivativeSecTypes: c.derivativeSecTypes || [],
+    }));
+
+    if (searchCache.size >= SEARCH_CACHE_MAX) {
+      const oldest = searchCache.keys().next().value;
+      searchCache.delete(oldest);
+    }
+    searchCache.set(req.pattern, { results, ts: Date.now() });
+
+    sendMessage(req.client, {
+      type: "searchResults",
+      pattern: req.pattern,
+      results,
+    });
+
+    verbose(`search "${req.pattern}" → ${results.length} results`);
+  });
+}
+
+// Wire events on initial instance
+wireIBEvents();
 
 wss.on("connection", (client) => {
   clients.add(client);

@@ -10,6 +10,7 @@
 
 ## 2026-03-12
 
+- When a chart point encodes the current classified regime, do not hardcode its highlight color independently of the shared classifier; the marker, summary label, and state key must all derive from the same quadrant state or the UI will contradict itself.
 - When adding a new shell-level alert surface for an actionable broker issue, do not broaden it into a generic connection-status banner; keep the new banner scoped to the actionable state and leave generic reconnect/disconnect notices on the existing toast channel.
 - When a repo-owned dev service binds a fixed local port, do not let `EADDRINUSE` crash the whole startup workflow; detect the port conflict and either reuse the existing listener intentionally or fail with an explicit, non-catastrophic message.
 - When a stacked telemetry row still wastes width after collapsing to one line, do not just center the cluster; anchor the primary label/value on the left and use the remaining width for an intentional meta rail.
@@ -34,6 +35,8 @@
 - `border-collapse: collapse` on a `<table>` breaks `position: sticky` on `<th>` elements in all major browsers; always use `border-collapse: separate; border-spacing: 0` when sticky headers are needed.
 - When a helper like `computeNetPrice()` already multiplies by `leg.quantity`, the display layer must not multiply by quantity again; always trace the data flow to verify what's already baked into the value before adding multipliers.
 - When IB returns error code 200 ("No security definition"), handle it like code 354 — silently clean up the subscription instead of logging red errors that flood the console for every invalid option strike.
+- IB Gateway holds stale client sessions in CLOSED socket state even after the connecting process dies; the relay server cannot simply retry with the same client ID. Implement a client ID pool (e.g. [100, 101, 102]) with automatic rotation on "client id already in use" errors, and extract all `ib.on(...)` handlers into a reusable `wireIBEvents()` function so they can be reattached to the new IB instance after rotation.
+- When multiple processes (`concurrently` dev server + standalone `nohup` relay) compete for the same IB client ID, the second connection silently fails or evicts the first. Ensure only one relay instance runs per client ID pool.
 
 ## 2026-03-11
 
