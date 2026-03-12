@@ -3,8 +3,9 @@
 # Data Refresh Scheduled Service Manager
 #
 # Runs scanner.py, flow_analysis.py, and discover.py every 15 minutes,
-# 9:30 AM – 4:15 PM ET, Mon-Fri on trading days only. Uses launchd
-# StartCalendarInterval with explicit time slots (135 entries: 27 slots x 5 weekdays).
+# 9:30 AM - 4:15 PM ET, Mon-Fri on trading days only. Uses launchd
+# StartCalendarInterval with ET slots converted into local machine time at
+# install time (135 entries: 27 slots x 5 weekdays).
 #
 # Usage:
 #   ./scripts/setup_data_refresh_service.sh install   - Install and load service
@@ -27,28 +28,22 @@ WRAPPER="$PROJECT_DIR/scripts/run_data_refresh.sh"
 # --- Helpers ---
 
 generate_plist() {
-    local entries=""
+    local entries
+    entries=$(PROJECT_DIR_ENV="$PROJECT_DIR" python3 - <<'PY'
+import os
+import sys
 
-    for weekday in 1 2 3 4 5; do
-        hour=9
-        minute=30
-        while [ "$hour" -lt 16 ] || ([ "$hour" -eq 16 ] && [ "$minute" -le 15 ]); do
-            entries+="        <dict>
-            <key>Hour</key>
-            <integer>${hour}</integer>
-            <key>Minute</key>
-            <integer>${minute}</integer>
-            <key>Weekday</key>
-            <integer>${weekday}</integer>
-        </dict>
-"
-            minute=$((minute + 15))
-            if [ "$minute" -ge 60 ]; then
-                minute=$((minute - 60))
-                hour=$((hour + 1))
-            fi
-        done
-    done
+project_dir = os.environ["PROJECT_DIR_ENV"]
+sys.path.insert(0, os.path.join(project_dir, "scripts"))
+
+from utils.launchd_calendar import build_local_calendar_entries, expand_intraday_slots, render_calendar_interval_xml
+
+slots = expand_intraday_slots((9, 30), (16, 15), 15)
+entries = build_local_calendar_entries(slots, weekdays=[1, 2, 3, 4, 5])
+
+print(render_calendar_interval_xml(entries), end="")
+PY
+)
 
     cat > "$PLIST_SRC" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -174,7 +169,7 @@ status() {
     fi
 
     # Schedule
-    echo "Schedule: Every 15 min, 9:30 AM – 4:15 PM ET, Mon-Fri"
+    echo "Schedule: Every 15 min, 9:30 AM - 4:15 PM ET (converted to local launchd times at install), Mon-Fri"
 
     # Last refresh time for each data file
     for datafile in scanner.json flow_analysis.json discover.json; do

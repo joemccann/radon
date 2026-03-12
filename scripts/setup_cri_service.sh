@@ -3,8 +3,8 @@
 # CRI Scan Scheduled Service Manager
 #
 # Runs CRI (Crash Risk Index) scan every 30 minutes from 4:05 AM to 8:00 PM ET,
-# Mon-Fri on trading days only. Uses launchd StartCalendarInterval with explicit
-# time slots (165 entries: 33 slots x 5 weekdays).
+# Mon-Fri on trading days only. Uses launchd StartCalendarInterval with ET slots
+# converted into local machine time at install time (165 entries: 33 slots x 5 weekdays).
 #
 # Depends on IB Gateway (auto-starts at midnight via IBC Gateway service).
 #
@@ -29,41 +29,29 @@ WRAPPER="$PROJECT_DIR/scripts/run_cri_scan.sh"
 # --- Helpers ---
 
 generate_plist() {
-    local entries=""
+    local entries
+    entries=$(PROJECT_DIR_ENV="$PROJECT_DIR" python3 - <<'PY'
+import os
+import sys
 
-    for weekday in 1 2 3 4 5; do
-        # 4:05 AM — first premarket slot
-        entries+="        <dict>
-            <key>Hour</key>
-            <integer>4</integer>
-            <key>Minute</key>
-            <integer>5</integer>
-            <key>Weekday</key>
-            <integer>${weekday}</integer>
-        </dict>
-"
-        # 4:30 through 20:00 — every 30 min on :00 and :30
-        for hour in $(seq 4 20); do
-            for minute in 0 30; do
-                # Skip 4:00 (covered by 4:05) and 20:30 (past cutoff)
-                if [ "$hour" -eq 4 ] && [ "$minute" -eq 0 ]; then
-                    continue
-                fi
-                if [ "$hour" -eq 20 ] && [ "$minute" -eq 30 ]; then
-                    continue
-                fi
-                entries+="        <dict>
-            <key>Hour</key>
-            <integer>${hour}</integer>
-            <key>Minute</key>
-            <integer>${minute}</integer>
-            <key>Weekday</key>
-            <integer>${weekday}</integer>
-        </dict>
-"
-            done
-        done
-    done
+project_dir = os.environ["PROJECT_DIR_ENV"]
+sys.path.insert(0, os.path.join(project_dir, "scripts"))
+
+from utils.launchd_calendar import build_local_calendar_entries, render_calendar_interval_xml
+
+slots = [(4, 5)]
+for hour in range(4, 21):
+    for minute in (0, 30):
+        if hour == 4 and minute == 0:
+            continue
+        if hour == 20 and minute == 30:
+            continue
+        slots.append((hour, minute))
+
+entries = build_local_calendar_entries(slots, weekdays=[1, 2, 3, 4, 5])
+print(render_calendar_interval_xml(entries), end="")
+PY
+)
 
     cat > "$PLIST_SRC" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -187,7 +175,7 @@ status() {
     fi
 
     # Schedule
-    echo "Schedule: Every 30 min, 4:05 AM - 8:00 PM ET, Mon-Fri"
+    echo "Schedule: Every 30 min, 4:05 AM - 8:00 PM ET (converted to local launchd times at install), Mon-Fri"
 
     # Last CRI reading
     local latest

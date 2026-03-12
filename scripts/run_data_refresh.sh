@@ -25,8 +25,32 @@ _load_env() {
 _load_env "web/.env"
 _load_env ".env"
 
+resolve_python() {
+    local candidate
+    for candidate in "${RADON_PYTHON_BIN:-}" python3.9 /usr/bin/python3 python3; do
+        [ -n "$candidate" ] || continue
+        command -v "$candidate" >/dev/null 2>&1 || continue
+        "$candidate" - <<'PY' >/dev/null 2>&1
+import importlib.util
+required = ("ib_insync",)
+raise SystemExit(0 if all(importlib.util.find_spec(name) for name in required) else 1)
+PY
+        if [ $? -eq 0 ]; then
+            echo "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+PYTHON_BIN=$(resolve_python)
+if [ -z "$PYTHON_BIN" ]; then
+    echo "$(date): No Python interpreter with ib_insync available for data refresh"
+    exit 1
+fi
+
 # Check if today is a trading day (reuses market_holidays.json)
-IS_TRADING=$(python3 -c "
+IS_TRADING=$("$PYTHON_BIN" -c "
 import sys; sys.path.insert(0, 'scripts')
 from utils.market_calendar import _is_trading_day
 from datetime import datetime
@@ -46,7 +70,7 @@ DISCOVER_STATUS="FAIL"
 
 # --- scanner.py ---
 echo "$(date): Running scanner.py --top 25..."
-python3 scripts/scanner.py --top 25 > data/scanner.json.tmp 2>/tmp/scanner.err
+"$PYTHON_BIN" scripts/scanner.py --top 25 > data/scanner.json.tmp 2>/tmp/scanner.err
 EXIT_CODE=$?
 if [ "$EXIT_CODE" -eq 0 ]; then
     mv data/scanner.json.tmp data/scanner.json
@@ -59,7 +83,7 @@ fi
 
 # --- flow_analysis.py ---
 echo "$(date): Running flow_analysis.py..."
-python3 scripts/flow_analysis.py > data/flow_analysis.json.tmp 2>/tmp/flow_analysis.err
+"$PYTHON_BIN" scripts/flow_analysis.py > data/flow_analysis.json.tmp 2>/tmp/flow_analysis.err
 EXIT_CODE=$?
 if [ "$EXIT_CODE" -eq 0 ]; then
     mv data/flow_analysis.json.tmp data/flow_analysis.json
@@ -72,7 +96,7 @@ fi
 
 # --- discover.py ---
 echo "$(date): Running discover.py --min-alerts 1..."
-python3 scripts/discover.py --min-alerts 1 > data/discover.json.tmp 2>/tmp/discover.err
+"$PYTHON_BIN" scripts/discover.py --min-alerts 1 > data/discover.json.tmp 2>/tmp/discover.err
 EXIT_CODE=$?
 if [ "$EXIT_CODE" -eq 0 ]; then
     mv data/discover.json.tmp data/discover.json
@@ -86,7 +110,7 @@ fi
 echo "$(date): Data refresh complete (scanner: $SCANNER_STATUS, flow: $FLOW_STATUS, discover: $DISCOVER_STATUS)"
 
 cri_cache_has_complete_rvol() {
-    python3 - "$1" "$2" <<'PY'
+    "$PYTHON_BIN" - "$1" "$2" <<'PY'
 import json
 import sys
 from pathlib import Path
@@ -134,7 +158,7 @@ refresh_cri_cache_post_close() {
     scheduled_path="data/cri_scheduled/cri-${timestamp}.json"
 
     echo "$(date): Refreshing CRI cache with 20-session RVOL history..."
-    if python3 scripts/cri_scan.py --json > "$tmp_cache" 2>>"logs/cri-scan.err.log"; then
+    if "$PYTHON_BIN" scripts/cri_scan.py --json > "$tmp_cache" 2>>"logs/cri-scan.err.log"; then
         mv "$tmp_cache" data/cri.json
         cp data/cri.json "$scheduled_path"
         scan_complete=$(cri_cache_has_complete_rvol "data/cri.json" "$today_et")
@@ -149,7 +173,7 @@ refresh_cri_cache_post_close() {
         echo "$(date): CRI cache refresh failed (exit $exit_code) — attempting repair fallback"
     fi
 
-    if python3 scripts/repair_cri_rvol_cache.py --write --target-date "$today_et" 2>>"logs/cri-scan.err.log"; then
+    if "$PYTHON_BIN" scripts/repair_cri_rvol_cache.py --write --target-date "$today_et" 2>>"logs/cri-scan.err.log"; then
         echo "$(date): CRI cache repair complete (OK)"
     else
         local repair_exit_code=$?
@@ -157,29 +181,14 @@ refresh_cri_cache_post_close() {
     fi
 }
 
-# --- fetch_menthorq_cta.py (once per day, post-close only) ---
-# Only run after 16:00 ET and only if today's cache doesn't already exist.
-# This avoids running the expensive Playwright automation multiple times per day.
+# --- post-close CRI repair ---
+# CTA sync now runs via the dedicated com.radon.cta-sync launch agent so
+# this wrapper only owns the CRI post-close repair path.
 CURRENT_HOUR_ET=$(TZ=America/New_York date +%H)
 TODAY_ET=$(TZ=America/New_York date +%Y-%m-%d)
-CTA_CACHE="data/menthorq_cache/cta_${TODAY_ET}.json"
 
 if [ "$CURRENT_HOUR_ET" -ge 16 ]; then
     refresh_cri_cache_post_close "$TODAY_ET"
-
-    if [ ! -f "$CTA_CACHE" ]; then
-        echo "$(date): Running fetch_menthorq_cta.py (post-close, cache missing)..."
-        mkdir -p data/menthorq_cache
-        python3 scripts/fetch_menthorq_cta.py 2>/tmp/menthorq_cta.err
-        EXIT_CODE=$?
-        if [ "$EXIT_CODE" -eq 0 ]; then
-            echo "$(date): fetch_menthorq_cta.py complete (OK) → $CTA_CACHE"
-        else
-            echo "$(date): fetch_menthorq_cta.py failed (exit $EXIT_CODE)"
-        fi
-    else
-        echo "$(date): MenthorQ CTA cache already exists for $TODAY_ET — skipping"
-    fi
 else
-    echo "$(date): Post-close CRI/CTA refresh skipped (market not yet closed, hour=$CURRENT_HOUR_ET ET)"
+    echo "$(date): Post-close CRI refresh skipped (market not yet closed, hour=$CURRENT_HOUR_ET ET)"
 fi
