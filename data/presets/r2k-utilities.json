@@ -4,22 +4,22 @@
   "tickers": [
     "OKLO",
     "ORA",
-    "POR",
     "TXNM",
+    "POR",
     "BIPC",
     "SWX",
-    "BKH",
     "NJR",
     "SR",
     "OGS",
+    "BKH",
     "NWE",
     "OTTR",
     "AVA",
     "CPK",
-    "MGEE",
     "AWR",
-    "HE",
+    "MGEE",
     "CWT",
+    "HE",
     "NWN",
     "HTO",
     "MSEX",
@@ -40,20 +40,20 @@
       "ORA"
     ],
     [
-      "POR",
-      "TXNM"
+      "TXNM",
+      "POR"
     ],
     [
       "BIPC",
       "SWX"
     ],
     [
-      "BKH",
-      "NJR"
+      "NJR",
+      "SR"
     ],
     [
-      "SR",
-      "OGS"
+      "OGS",
+      "BKH"
     ],
     [
       "NWE",
@@ -64,12 +64,12 @@
       "CPK"
     ],
     [
-      "MGEE",
-      "AWR"
+      "AWR",
+      "MGEE"
     ],
     [
-      "HE",
-      "CWT"
+      "CWT",
+      "HE"
     ],
     [
       "NWN",

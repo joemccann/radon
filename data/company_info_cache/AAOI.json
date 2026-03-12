@@ -1,22 +1,22 @@
 {
   "ticker": "AAOI",
   "profile_expires": null,
-  "stats_expires": "2026-03-11T14:18:58.576Z",
+  "stats_expires": "2026-03-13T13:35:06.820Z",
   "uw_info": {
     "symbol": "AAOI",
     "logo": "https://storage.googleapis.com/uwassets/logos/AAOI.png",
-    "beta": "3.7462",
+    "beta": "3.7487",
     "full_name": "APPLIED OPTOELECTRONICS",
     "sector": "Technology",
+    "outstanding": "75198817",
     "has_options": true,
     "marketcap_size": "mid",
-    "outstanding": "75198817",
     "announce_time": "unknown",
     "issue_type": "Common Stock",
-    "marketcap": "8318493137",
+    "marketcap": "9551001747",
     "next_earnings_date": "2026-05-14",
-    "avg30_volume": "8775766.2",
     "uw_tags": [],
+    "avg30_volume": "9213389.666666666667",
     "short_name": "APPLIED OPTOELECTRONICS",
     "short_description": "applied optoelectronics, inc. | nasdaq: aaoi aoi is a leading designer and manufacturer of fiber optic networking products. we primarily serve three ...",
     "has_investment_arm": false,
@@ -24,15 +24,15 @@
     "has_earnings_history": true
   },
   "stock_state": {
-    "close": "122.63",
-    "high": "127.39",
-    "low": "112.01",
-    "open": "112.34",
-    "volume": 11343900,
+    "close": "111.39",
+    "high": "116.91",
+    "low": "107.57",
+    "open": "115.425",
+    "volume": 4123156,
     "market_time": "regular",
-    "tape_time": "2026-03-10T18:50:36Z",
-    "total_volume": 11682394,
-    "prev_close": "112.35"
+    "tape_time": "2026-03-12T14:01:58Z",
+    "total_volume": 4919919,
+    "prev_close": "115.75"
   },
   "exa_profile": {
     "ceo": "Chih Hsiang Lin",
@@ -41,9 +41,11 @@
     "founded": "1997"
   },
   "exa_stats": {
-    "pe_ratio": "-10.85",
-    "week_52_high": 52,
+    "pe_ratio": "-156.38",
+    "dividend_yield": "—",
+    "avg_volume": "8.78M",
+    "week_52_high": 117,
     "week_52_low": 9.71
   },
-  "fetched_at": "2026-03-10T14:18:58.576Z"
+  "fetched_at": "2026-03-12T13:35:06.821Z"
 }

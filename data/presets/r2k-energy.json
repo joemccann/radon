@@ -3,118 +3,118 @@
   "description": "Russell 2000 Energy (105 companies)",
   "tickers": [
     "UEC",
-    "AROC",
     "SM",
+    "AROC",
     "RIG",
     "VAL",
     "NE",
     "CNX",
     "MGY",
-    "UUUU",
-    "KGS",
     "CNR",
-    "MUR",
-    "GLNG",
-    "CRC",
-    "BTU",
+    "KGS",
     "LBRT",
+    "CRC",
+    "MUR",
+    "UUUU",
+    "GLNG",
+    "BTU",
     "TDW",
     "PBF",
-    "STNG",
     "OII",
-    "WHD",
-    "LEU",
-    "GPOR",
-    "HP",
     "PTEN",
+    "LEU",
+    "HP",
+    "WHD",
+    "STNG",
+    "GPOR",
     "INSW",
-    "NOG",
     "CRGY",
+    "NOG",
     "SDRL",
+    "PARR",
     "DK",
     "DHT",
-    "PARR",
     "SEI",
-    "CLMT",
     "KNTK",
-    "TNK",
+    "CLMT",
     "TALO",
+    "TNK",
+    "XPRO",
     "CRK",
     "BORR",
-    "XPRO",
+    "WTTR",
+    "WKC",
+    "SOC",
+    "VTOL",
+    "SFL",
+    "HLX",
     "NESR",
     "LPG",
-    "WKC",
-    "SFL",
-    "WTTR",
-    "HLX",
-    "VTOL",
-    "KOS",
-    "NAT",
+    "REX",
     "NBR",
     "TTI",
-    "REX",
-    "INVX",
+    "NAT",
     "GPRE",
     "PUMP",
-    "EE",
-    "DEC",
-    "FLNG",
-    "CVI",
-    "NEXT",
-    "SOC",
     "AESI",
+    "INVX",
+    "KOS",
+    "DEC",
+    "CVI",
+    "FLNG",
+    "EE",
+    "NEXT",
     "CLB",
     "OIS",
     "BKV",
     "TK",
-    "SD",
     "NVGS",
     "FET",
-    "ASC",
+    "SD",
     "RES",
     "EGY",
     "VTS",
-    "FLOC",
     "GEVO",
+    "ASC",
     "REPX",
-    "CLNE",
+    "FLOC",
     "NGS",
+    "CLNE",
     "EU",
     "RNGR",
     "LTBR",
     "WTI",
     "SMC",
-    "GRNT",
     "INR",
-    "NC",
+    "GRNT",
     "NFE",
-    "ESOA",
-    "SMHI",
+    "NC",
     "ACDC",
+    "SMHI",
+    "ESOA",
     "KGEI",
     "HPK",
     "EPM",
-    "BOOM",
     "FF",
+    "BOOM",
     "PNRG",
     "EPSN",
-    "TUSK",
     "PROP",
+    "TUSK",
     "EP",
     "OPAL",
     "NXXT",
-    "VGAS",
     "SAFX",
+    "VGAS",
     "P5N994"
   ],
   "pairs": [
     [
       "UEC",
-      "AROC"
+      "SM"
     ],
     [
-      "SM",
+      "AROC",
       "RIG"
     ],
     [
@@ -126,112 +126,112 @@
       "MGY"
     ],
     [
-      "UUUU",
+      "CNR",
       "KGS"
     ],
     [
-      "CNR",
-      "MUR"
-    ],
-    [
-      "GLNG",
+      "LBRT",
       "CRC"
     ],
     [
-      "BTU",
-      "LBRT"
+      "MUR",
+      "UUUU"
+    ],
+    [
+      "GLNG",
+      "BTU"
     ],
     [
       "TDW",
       "PBF"
     ],
     [
-      "STNG",
-      "OII"
+      "OII",
+      "PTEN"
     ],
     [
-      "WHD",
-      "LEU"
-    ],
-    [
-      "GPOR",
+      "LEU",
       "HP"
     ],
     [
-      "PTEN",
+      "WHD",
+      "STNG"
+    ],
+    [
+      "GPOR",
       "INSW"
     ],
     [
-      "NOG",
-      "CRGY"
+      "CRGY",
+      "NOG"
     ],
     [
       "SDRL",
-      "DK"
-    ],
-    [
-      "DHT",
       "PARR"
     ],
     [
+      "DK",
+      "DHT"
+    ],
+    [
       "SEI",
-      "CLMT"
+      "KNTK"
     ],
     [
-      "KNTK",
-      "TNK"
+      "CLMT",
+      "TALO"
     ],
     [
-      "TALO",
-      "CRK"
-    ],
-    [
-      "BORR",
+      "TNK",
       "XPRO"
+    ],
+    [
+      "CRK",
+      "BORR"
+    ],
+    [
+      "WTTR",
+      "WKC"
+    ],
+    [
+      "SOC",
+      "VTOL"
+    ],
+    [
+      "SFL",
+      "HLX"
     ],
     [
       "NESR",
       "LPG"
     ],
     [
-      "WKC",
-      "SFL"
-    ],
-    [
-      "WTTR",
-      "HLX"
-    ],
-    [
-      "VTOL",
-      "KOS"
-    ],
-    [
-      "NAT",
+      "REX",
       "NBR"
     ],
     [
       "TTI",
-      "REX"
+      "NAT"
     ],
     [
-      "INVX",
-      "GPRE"
+      "GPRE",
+      "PUMP"
     ],
     [
-      "PUMP",
-      "EE"
+      "AESI",
+      "INVX"
     ],
     [
-      "DEC",
-      "FLNG"
+      "KOS",
+      "DEC"
     ],
     [
       "CVI",
-      "NEXT"
+      "FLNG"
     ],
     [
-      "SOC",
-      "AESI"
+      "EE",
+      "NEXT"
     ],
     [
       "CLB",
@@ -242,28 +242,28 @@
       "TK"
     ],
     [
+      "NVGS",
+      "FET"
+    ],
+    [
       "SD",
-      "NVGS"
+      "RES"
     ],
     [
-      "FET",
-      "ASC"
-    ],
-    [
-      "RES",
-      "EGY"
-    ],
-    [
-      "VTS",
-      "FLOC"
+      "EGY",
+      "VTS"
     ],
     [
       "GEVO",
-      "REPX"
+      "ASC"
     ],
     [
-      "CLNE",
-      "NGS"
+      "REPX",
+      "FLOC"
+    ],
+    [
+      "NGS",
+      "CLNE"
     ],
     [
       "EU",
@@ -275,19 +275,19 @@
     ],
     [
       "SMC",
-      "GRNT"
+      "INR"
     ],
     [
-      "INR",
-      "NC"
+      "GRNT",
+      "NFE"
     ],
     [
-      "NFE",
-      "ESOA"
+      "NC",
+      "ACDC"
     ],
     [
       "SMHI",
-      "ACDC"
+      "ESOA"
     ],
     [
       "KGEI",
@@ -295,18 +295,18 @@
     ],
     [
       "EPM",
-      "BOOM"
+      "FF"
     ],
     [
-      "FF",
+      "BOOM",
       "PNRG"
     ],
     [
       "EPSN",
-      "TUSK"
+      "PROP"
     ],
     [
-      "PROP",
+      "TUSK",
       "EP"
     ],
     [
@@ -314,8 +314,8 @@
       "NXXT"
     ],
     [
-      "VGAS",
-      "SAFX"
+      "SAFX",
+      "VGAS"
     ],
     [
       "P5N994",

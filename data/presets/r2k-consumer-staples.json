@@ -4,40 +4,40 @@
   "tickers": [
     "CALM",
     "PSMT",
-    "MZTI",
     "WDFC",
+    "MZTI",
     "COCO",
     "UNFI",
     "CHEF",
     "ANDE",
     "SPB",
-    "HLF",
     "IPAR",
+    "HLF",
     "TPB",
     "CENTA",
-    "SMPL",
     "FDP",
+    "SMPL",
     "JJSF",
     "UVV",
-    "DOLE",
     "IMKTA",
+    "DOLE",
     "ENR",
     "EPC",
     "FIZZ",
     "WMK",
-    "GO",
     "TR",
-    "VITL",
-    "ODC",
     "SENEA",
-    "UTZ",
+    "ODC",
     "STKL",
+    "VITL",
     "JBSS",
-    "AVO",
+    "GO",
     "MAMA",
+    "AVO",
+    "UTZ",
+    "CVGW",
     "NATR",
     "BGS",
-    "CVGW",
     "CENT",
     "NUS",
     "VLGEA",
@@ -46,17 +46,17 @@
     "HNST",
     "NAGE",
     "MGPI",
-    "OLPX",
     "LMNR",
     "ALCO",
     "USNA",
+    "OLPX",
     "WEST",
     "SKIN",
     "MED",
     "LWAY",
+    "BRCC",
     "HFFG",
     "ZVIA",
-    "BRCC",
     "HAIN",
     "WALD",
     "LFVN",
@@ -70,8 +70,8 @@
       "PSMT"
     ],
     [
-      "MZTI",
-      "WDFC"
+      "WDFC",
+      "MZTI"
     ],
     [
       "COCO",
@@ -83,26 +83,26 @@
     ],
     [
       "SPB",
-      "HLF"
+      "IPAR"
     ],
     [
-      "IPAR",
+      "HLF",
       "TPB"
     ],
     [
       "CENTA",
-      "SMPL"
+      "FDP"
     ],
     [
-      "FDP",
+      "SMPL",
       "JJSF"
     ],
     [
       "UVV",
-      "DOLE"
+      "IMKTA"
     ],
     [
-      "IMKTA",
+      "DOLE",
       "ENR"
     ],
     [
@@ -111,31 +111,31 @@
     ],
     [
       "WMK",
-      "GO"
+      "TR"
     ],
     [
-      "TR",
+      "SENEA",
+      "ODC"
+    ],
+    [
+      "STKL",
       "VITL"
     ],
     [
-      "ODC",
-      "SENEA"
-    ],
-    [
-      "UTZ",
-      "STKL"
-    ],
-    [
       "JBSS",
-      "AVO"
+      "GO"
     ],
     [
       "MAMA",
-      "NATR"
+      "AVO"
     ],
     [
-      "BGS",
+      "UTZ",
       "CVGW"
+    ],
+    [
+      "NATR",
+      "BGS"
     ],
     [
       "CENT",
@@ -154,12 +154,12 @@
       "MGPI"
     ],
     [
-      "OLPX",
-      "LMNR"
+      "LMNR",
+      "ALCO"
     ],
     [
-      "ALCO",
-      "USNA"
+      "USNA",
+      "OLPX"
     ],
     [
       "WEST",
@@ -170,11 +170,11 @@
       "LWAY"
     ],
     [
-      "HFFG",
-      "ZVIA"
+      "BRCC",
+      "HFFG"
     ],
     [
-      "BRCC",
+      "ZVIA",
       "HAIN"
     ],
     [

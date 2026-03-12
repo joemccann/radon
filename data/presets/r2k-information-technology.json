@@ -4,212 +4,212 @@
   "tickers": [
     "FN",
     "CRDO",
-    "IONQ",
     "AEIS",
-    "TTMI",
+    "IONQ",
     "RMBS",
+    "TTMI",
     "IDCC",
+    "AAOI",
     "SITM",
     "SMTC",
-    "SANM",
     "FORM",
-    "VIAV",
     "APLD",
+    "VIAV",
+    "SANM",
     "SLAB",
     "CWAN",
     "QBTS",
-    "AAOI",
     "VSAT",
-    "RIOT",
     "RGTI",
-    "BDC",
     "PLXS",
-    "CIFR",
-    "HUT",
     "MIR",
+    "RIOT",
+    "HUT",
+    "BDC",
+    "CORZ",
+    "DOCN",
+    "WULF",
+    "CIFR",
     "NOVT",
     "OSIS",
-    "WULF",
-    "CORZ",
     "BMI",
     "ACIW",
     "ITRI",
+    "VISN",
     "YOU",
     "CVLT",
-    "VISN",
-    "BOX",
     "QLYS",
-    "DOCN",
+    "BOX",
     "ZETA",
-    "MARA",
+    "FSLY",
     "KLIC",
-    "CALX",
+    "MARA",
     "QTWO",
-    "LASR",
     "WK",
+    "CALX",
+    "LASR",
+    "SYNA",
     "SOUN",
     "DIOD",
-    "PI",
-    "SYNA",
-    "CLSK",
-    "FSLY",
     "VRNS",
+    "CLSK",
     "ACLS",
-    "UCTT",
+    "PI",
     "POWI",
-    "ACMR",
-    "NSIT",
-    "TENB",
-    "ALRM",
-    "SPSC",
-    "AMBA",
+    "UCTT",
     "ADEA",
-    "BELFB",
+    "TENB",
+    "NSIT",
+    "ACMR",
+    "SPSC",
+    "ALRM",
+    "AMBA",
     "KN",
-    "PLAB",
     "NTCT",
     "VSH",
+    "BELFB",
     "PLUS",
-    "AGYS",
     "BHE",
-    "DBD",
+    "PLAB",
+    "EXTR",
     "ROG",
     "BL",
+    "DBD",
     "VECO",
-    "EXTR",
-    "BLKB",
-    "RAMP",
+    "AGYS",
     "DGII",
+    "RAMP",
+    "BBAI",
+    "BLKB",
+    "NVTS",
     "ASGN",
     "FRSH",
-    "BBAI",
     "BRZE",
-    "PRGS",
-    "QUBT",
-    "AVPT",
-    "ICHR",
-    "INTA",
     "NN",
+    "PRGS",
+    "AVPT",
+    "QUBT",
+    "ICHR",
+    "ATEN",
     "NSSC",
+    "INTA",
+    "MXL",
     "ARLO",
     "CTS",
-    "ATEN",
-    "NVTS",
-    "MXL",
-    "FIVN",
-    "GPGI",
-    "COHU",
     "OUST",
+    "FIVN",
+    "COHU",
+    "ALKT",
     "AEHR",
     "AI",
-    "VYX",
-    "HLIT",
-    "ALKT",
-    "VERX",
-    "APPN",
+    "GPGI",
     "PDFS",
+    "HLIT",
+    "VYX",
+    "APPN",
+    "VERX",
     "PENG",
     "LIF",
+    "EVLV",
     "SKYT",
     "SCSC",
     "DAKT",
-    "EVLV",
     "BTDR",
     "ADTN",
-    "PAR",
     "CNXN",
-    "PRCH",
     "AMPL",
-    "PD",
     "DJCO",
-    "MITK",
+    "PAR",
     "CXM",
-    "ASAN",
+    "PD",
+    "PRCH",
+    "MITK",
+    "AEVA",
     "SEMR",
+    "ASAN",
     "PGY",
-    "BTBT",
+    "NTGR",
     "CCSI",
     "KE",
     "YEXT",
-    "NTGR",
     "IIIV",
-    "VPG",
-    "AEVA",
-    "RDVT",
     "AOSL",
+    "BTBT",
+    "VPG",
     "INDI",
-    "AIP",
-    "GDYN",
     "RZLV",
+    "RDVT",
+    "AIP",
     "CEVA",
-    "APPS",
-    "AIOT",
     "RPD",
+    "GDYN",
+    "AIOT",
+    "APPS",
     "KOPN",
     "OSPN",
     "FEIM",
-    "CLFD",
-    "CLMB",
-    "NABL",
-    "SPT",
-    "HCKT",
-    "KODK",
     "BLND",
+    "HCKT",
+    "NABL",
+    "KODK",
+    "CLFD",
+    "OOMA",
+    "SPT",
     "NVEC",
+    "CLMB",
+    "ONTF",
     "WEAV",
-    "CRNC",
     "AVNW",
     "EGHT",
-    "OOMA",
+    "CRNC",
+    "BELFA",
     "CRSR",
     "XPER",
-    "ONTF",
-    "BELFA",
-    "MEI",
-    "BKTI",
-    "TLS",
-    "CD",
-    "ALMU",
-    "MVIS",
-    "TBCH",
-    "RBBN",
-    "CMRC",
     "TSSI",
-    "XRX",
+    "BKTI",
+    "TBCH",
     "VTEX",
+    "TLS",
+    "XRX",
+    "ALMU",
+    "RBBN",
     "BLZE",
-    "RXT",
-    "VIA",
-    "III",
+    "CMRC",
     "WYFI",
-    "MASS",
+    "MEI",
+    "VIA",
     "EVCM",
-    "RMNI",
-    "VUZI",
     "IMMR",
-    "UIS",
-    "MPTI",
-    "EGAN",
-    "DSP",
-    "RELL",
-    "INSG",
-    "ATOM",
+    "VUZI",
+    "MASS",
+    "RMNI",
     "DOMO",
-    "KLTR",
+    "MVIS",
+    "UIS",
+    "DSP",
+    "III",
+    "RXT",
+    "CD",
+    "ATOM",
+    "EGAN",
+    "MPTI",
+    "INSG",
     "AMBQ",
-    "TCX",
+    "RELL",
+    "KLTR",
     "LAW",
     "CXDO",
-    "TRAK",
-    "BZAI",
-    "DMRC",
+    "TCX",
     "PMTS",
-    "MAPS",
+    "BZAI",
+    "TRAK",
+    "DMRC",
     "AISP",
+    "MAPS",
+    "SSTI",
+    "CSPI",
     "AEYE",
     "EXFY",
-    "CSPI",
-    "SSTI",
     "SVCO",
     "NEON"
   ],
@@ -219,287 +219,287 @@
       "CRDO"
     ],
     [
-      "IONQ",
-      "AEIS"
+      "AEIS",
+      "IONQ"
     ],
     [
-      "TTMI",
-      "RMBS"
+      "RMBS",
+      "TTMI"
     ],
     [
       "IDCC",
-      "SITM"
+      "AAOI"
     ],
     [
-      "SMTC",
-      "SANM"
+      "SITM",
+      "SMTC"
     ],
     [
       "FORM",
-      "VIAV"
+      "APLD"
     ],
     [
-      "APLD",
-      "SLAB"
+      "VIAV",
+      "SANM"
     ],
     [
-      "CWAN",
-      "QBTS"
+      "SLAB",
+      "CWAN"
     ],
     [
-      "AAOI",
+      "QBTS",
       "VSAT"
     ],
     [
-      "RIOT",
-      "RGTI"
-    ],
-    [
-      "BDC",
+      "RGTI",
       "PLXS"
     ],
     [
-      "CIFR",
-      "HUT"
-    ],
-    [
       "MIR",
-      "NOVT"
+      "RIOT"
     ],
     [
-      "OSIS",
-      "WULF"
+      "HUT",
+      "BDC"
     ],
     [
       "CORZ",
-      "BMI"
+      "DOCN"
     ],
     [
-      "ACIW",
-      "ITRI"
+      "WULF",
+      "CIFR"
+    ],
+    [
+      "NOVT",
+      "OSIS"
+    ],
+    [
+      "BMI",
+      "ACIW"
+    ],
+    [
+      "ITRI",
+      "VISN"
     ],
     [
       "YOU",
       "CVLT"
     ],
     [
-      "VISN",
+      "QLYS",
       "BOX"
     ],
     [
-      "QLYS",
-      "DOCN"
-    ],
-    [
       "ZETA",
-      "MARA"
+      "FSLY"
     ],
     [
       "KLIC",
-      "CALX"
+      "MARA"
     ],
     [
       "QTWO",
+      "WK"
+    ],
+    [
+      "CALX",
       "LASR"
     ],
     [
-      "WK",
+      "SYNA",
       "SOUN"
     ],
     [
       "DIOD",
-      "PI"
-    ],
-    [
-      "SYNA",
-      "CLSK"
-    ],
-    [
-      "FSLY",
       "VRNS"
     ],
     [
-      "ACLS",
-      "UCTT"
+      "CLSK",
+      "ACLS"
     ],
     [
-      "POWI",
-      "ACMR"
+      "PI",
+      "POWI"
     ],
     [
-      "NSIT",
-      "TENB"
-    ],
-    [
-      "ALRM",
-      "SPSC"
-    ],
-    [
-      "AMBA",
+      "UCTT",
       "ADEA"
     ],
     [
-      "BELFB",
-      "KN"
+      "TENB",
+      "NSIT"
     ],
     [
-      "PLAB",
+      "ACMR",
+      "SPSC"
+    ],
+    [
+      "ALRM",
+      "AMBA"
+    ],
+    [
+      "KN",
       "NTCT"
     ],
     [
       "VSH",
-      "PLUS"
+      "BELFB"
     ],
     [
-      "AGYS",
+      "PLUS",
       "BHE"
     ],
     [
-      "DBD",
-      "ROG"
+      "PLAB",
+      "EXTR"
     ],
     [
-      "BL",
+      "ROG",
+      "BL"
+    ],
+    [
+      "DBD",
       "VECO"
     ],
     [
-      "EXTR",
-      "BLKB"
+      "AGYS",
+      "DGII"
     ],
     [
       "RAMP",
-      "DGII"
+      "BBAI"
+    ],
+    [
+      "BLKB",
+      "NVTS"
     ],
     [
       "ASGN",
       "FRSH"
     ],
     [
-      "BBAI",
-      "BRZE"
-    ],
-    [
-      "PRGS",
-      "QUBT"
-    ],
-    [
-      "AVPT",
-      "ICHR"
-    ],
-    [
-      "INTA",
+      "BRZE",
       "NN"
     ],
     [
-      "NSSC",
-      "ARLO"
+      "PRGS",
+      "AVPT"
     ],
     [
-      "CTS",
-      "ATEN"
+      "QUBT",
+      "ICHR"
     ],
     [
-      "NVTS",
+      "ATEN",
+      "NSSC"
+    ],
+    [
+      "INTA",
       "MXL"
     ],
     [
-      "FIVN",
-      "GPGI"
+      "ARLO",
+      "CTS"
+    ],
+    [
+      "OUST",
+      "FIVN"
     ],
     [
       "COHU",
-      "OUST"
+      "ALKT"
     ],
     [
       "AEHR",
       "AI"
     ],
     [
-      "VYX",
-      "HLIT"
+      "GPGI",
+      "PDFS"
     ],
     [
-      "ALKT",
-      "VERX"
+      "HLIT",
+      "VYX"
     ],
     [
       "APPN",
-      "PDFS"
+      "VERX"
     ],
     [
       "PENG",
       "LIF"
     ],
     [
-      "SKYT",
-      "SCSC"
+      "EVLV",
+      "SKYT"
     ],
     [
-      "DAKT",
-      "EVLV"
+      "SCSC",
+      "DAKT"
     ],
     [
       "BTDR",
       "ADTN"
     ],
     [
-      "PAR",
-      "CNXN"
-    ],
-    [
-      "PRCH",
+      "CNXN",
       "AMPL"
     ],
     [
-      "PD",
-      "DJCO"
+      "DJCO",
+      "PAR"
     ],
     [
-      "MITK",
-      "CXM"
+      "CXM",
+      "PD"
     ],
     [
-      "ASAN",
-      "SEMR"
-    ],
-    [
-      "PGY",
-      "BTBT"
-    ],
-    [
-      "CCSI",
-      "KE"
-    ],
-    [
-      "YEXT",
-      "NTGR"
-    ],
-    [
-      "IIIV",
-      "VPG"
+      "PRCH",
+      "MITK"
     ],
     [
       "AEVA",
-      "RDVT"
+      "SEMR"
     ],
     [
-      "AOSL",
-      "INDI"
+      "ASAN",
+      "PGY"
     ],
     [
-      "AIP",
-      "GDYN"
+      "NTGR",
+      "CCSI"
     ],
     [
-      "RZLV",
-      "CEVA"
+      "KE",
+      "YEXT"
     ],
     [
-      "APPS",
+      "IIIV",
+      "AOSL"
+    ],
+    [
+      "BTBT",
+      "VPG"
+    ],
+    [
+      "INDI",
+      "RZLV"
+    ],
+    [
+      "RDVT",
+      "AIP"
+    ],
+    [
+      "CEVA",
+      "RPD"
+    ],
+    [
+      "GDYN",
       "AIOT"
     ],
     [
-      "RPD",
+      "APPS",
       "KOPN"
     ],
     [
@@ -507,128 +507,128 @@
       "FEIM"
     ],
     [
-      "CLFD",
-      "CLMB"
+      "BLND",
+      "HCKT"
     ],
     [
       "NABL",
-      "SPT"
-    ],
-    [
-      "HCKT",
       "KODK"
     ],
     [
-      "BLND",
+      "CLFD",
+      "OOMA"
+    ],
+    [
+      "SPT",
       "NVEC"
     ],
     [
+      "CLMB",
+      "ONTF"
+    ],
+    [
       "WEAV",
+      "AVNW"
+    ],
+    [
+      "EGHT",
       "CRNC"
     ],
     [
-      "AVNW",
-      "EGHT"
-    ],
-    [
-      "OOMA",
+      "BELFA",
       "CRSR"
     ],
     [
       "XPER",
-      "ONTF"
-    ],
-    [
-      "BELFA",
-      "MEI"
+      "TSSI"
     ],
     [
       "BKTI",
-      "TLS"
-    ],
-    [
-      "CD",
-      "ALMU"
-    ],
-    [
-      "MVIS",
       "TBCH"
     ],
     [
-      "RBBN",
-      "CMRC"
-    ],
-    [
-      "TSSI",
-      "XRX"
-    ],
-    [
       "VTEX",
+      "TLS"
+    ],
+    [
+      "XRX",
+      "ALMU"
+    ],
+    [
+      "RBBN",
       "BLZE"
     ],
     [
-      "RXT",
-      "VIA"
-    ],
-    [
-      "III",
+      "CMRC",
       "WYFI"
     ],
     [
-      "MASS",
-      "EVCM"
+      "MEI",
+      "VIA"
+    ],
+    [
+      "EVCM",
+      "IMMR"
+    ],
+    [
+      "VUZI",
+      "MASS"
     ],
     [
       "RMNI",
-      "VUZI"
+      "DOMO"
     ],
     [
-      "IMMR",
+      "MVIS",
       "UIS"
     ],
     [
-      "MPTI",
+      "DSP",
+      "III"
+    ],
+    [
+      "RXT",
+      "CD"
+    ],
+    [
+      "ATOM",
       "EGAN"
     ],
     [
-      "DSP",
-      "RELL"
-    ],
-    [
-      "INSG",
-      "ATOM"
-    ],
-    [
-      "DOMO",
-      "KLTR"
+      "MPTI",
+      "INSG"
     ],
     [
       "AMBQ",
+      "RELL"
+    ],
+    [
+      "KLTR",
+      "LAW"
+    ],
+    [
+      "CXDO",
       "TCX"
     ],
     [
-      "LAW",
-      "CXDO"
-    ],
-    [
-      "TRAK",
+      "PMTS",
       "BZAI"
     ],
     [
-      "DMRC",
-      "PMTS"
+      "TRAK",
+      "DMRC"
     ],
     [
-      "MAPS",
-      "AISP"
+      "AISP",
+      "MAPS"
+    ],
+    [
+      "SSTI",
+      "CSPI"
     ],
     [
       "AEYE",
       "EXFY"
-    ],
-    [
-      "CSPI",
-      "SSTI"
     ],
     [
       "SVCO",

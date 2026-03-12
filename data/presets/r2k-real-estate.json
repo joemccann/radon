@@ -2,86 +2,86 @@
   "name": "r2k-real-estate",
   "description": "Russell 2000 Real Estate (99 companies)",
   "tickers": [
-    "CTRE",
     "AHR",
+    "CTRE",
     "EPRT",
     "TRNO",
     "RHP",
-    "COMP",
     "KRG",
+    "COMP",
     "MAC",
-    "PECO",
     "SBRA",
+    "PECO",
     "OUT",
     "SKT",
-    "IRT",
     "NHI",
+    "IRT",
     "CDP",
     "BNL",
-    "SLG",
     "LXP",
     "APLE",
     "AKR",
-    "CURB",
+    "SLG",
     "JOE",
     "UE",
     "FCPT",
+    "CURB",
     "IVT",
     "NMRK",
     "DRH",
     "GNL",
-    "CWK",
     "GTY",
+    "LTC",
     "SHO",
     "NTST",
-    "LTC",
+    "CWK",
     "DHC",
-    "IIPR",
     "PEB",
+    "IIPR",
     "ALEX",
-    "XHR",
     "VRE",
+    "XHR",
     "SILA",
     "DEI",
     "KW",
     "UMH",
     "RLJ",
-    "AAT",
-    "SMA",
     "CSR",
+    "SMA",
+    "AAT",
     "DEA",
-    "PDM",
     "JBGS",
+    "PDM",
     "SAFE",
-    "ESRT",
     "PKST",
-    "CBL",
+    "ESRT",
     "WSR",
+    "CBL",
     "MMI",
     "NXRT",
-    "EXPI",
     "CTO",
     "UHT",
-    "FOR",
     "GOOD",
-    "BDN",
+    "EXPI",
+    "ALX",
     "FPI",
+    "BDN",
+    "FOR",
     "AHRT",
     "INN",
-    "ALX",
+    "XRN",
     "CHCT",
     "PSTL",
-    "XRN",
     "OLP",
-    "HPP",
-    "CLDT",
+    "TRC",
     "LAND",
     "BFS",
-    "TRC",
-    "SVC",
-    "REAX",
+    "CLDT",
     "ILPT",
+    "HPP",
+    "SVC",
     "FVR",
+    "REAX",
     "SITC",
     "RMR",
     "FRPH",
@@ -91,21 +91,21 @@
     "NXDT",
     "DOUG",
     "BRT",
-    "BHR",
     "SEG",
+    "BHR",
     "MDV",
     "MLP",
     "RMAX",
     "STRW",
-    "FSP",
     "TCI",
+    "FSP",
     "CLPR",
     "ARL"
   ],
   "pairs": [
     [
-      "CTRE",
-      "AHR"
+      "AHR",
+      "CTRE"
     ],
     [
       "EPRT",
@@ -113,43 +113,43 @@
     ],
     [
       "RHP",
-      "COMP"
+      "KRG"
     ],
     [
-      "KRG",
+      "COMP",
       "MAC"
     ],
     [
-      "PECO",
-      "SBRA"
+      "SBRA",
+      "PECO"
     ],
     [
       "OUT",
       "SKT"
     ],
     [
-      "IRT",
-      "NHI"
+      "NHI",
+      "IRT"
     ],
     [
       "CDP",
       "BNL"
     ],
     [
-      "SLG",
-      "LXP"
+      "LXP",
+      "APLE"
     ],
     [
-      "APLE",
-      "AKR"
+      "AKR",
+      "SLG"
     ],
     [
-      "CURB",
-      "JOE"
+      "JOE",
+      "UE"
     ],
     [
-      "UE",
-      "FCPT"
+      "FCPT",
+      "CURB"
     ],
     [
       "IVT",
@@ -160,27 +160,27 @@
       "GNL"
     ],
     [
-      "CWK",
-      "GTY"
+      "GTY",
+      "LTC"
     ],
     [
       "SHO",
       "NTST"
     ],
     [
-      "LTC",
+      "CWK",
       "DHC"
     ],
     [
-      "IIPR",
-      "PEB"
+      "PEB",
+      "IIPR"
     ],
     [
       "ALEX",
-      "XHR"
+      "VRE"
     ],
     [
-      "VRE",
+      "XHR",
       "SILA"
     ],
     [
@@ -192,76 +192,76 @@
       "RLJ"
     ],
     [
-      "AAT",
+      "CSR",
       "SMA"
     ],
     [
-      "CSR",
+      "AAT",
       "DEA"
     ],
     [
-      "PDM",
-      "JBGS"
+      "JBGS",
+      "PDM"
     ],
     [
       "SAFE",
-      "ESRT"
+      "PKST"
     ],
     [
-      "PKST",
-      "CBL"
+      "ESRT",
+      "WSR"
     ],
     [
-      "WSR",
+      "CBL",
       "MMI"
     ],
     [
       "NXRT",
-      "EXPI"
+      "CTO"
     ],
     [
-      "CTO",
-      "UHT"
-    ],
-    [
-      "FOR",
+      "UHT",
       "GOOD"
     ],
     [
-      "BDN",
-      "FPI"
+      "EXPI",
+      "ALX"
     ],
     [
-      "AHRT",
-      "INN"
+      "FPI",
+      "BDN"
     ],
     [
-      "ALX",
-      "CHCT"
+      "FOR",
+      "AHRT"
     ],
     [
-      "PSTL",
+      "INN",
       "XRN"
     ],
     [
+      "CHCT",
+      "PSTL"
+    ],
+    [
       "OLP",
-      "HPP"
-    ],
-    [
-      "CLDT",
-      "LAND"
-    ],
-    [
-      "BFS",
       "TRC"
     ],
     [
-      "SVC",
-      "REAX"
+      "LAND",
+      "BFS"
     ],
     [
-      "ILPT",
-      "FVR"
+      "CLDT",
+      "ILPT"
+    ],
+    [
+      "HPP",
+      "SVC"
+    ],
+    [
+      "FVR",
+      "REAX"
     ],
     [
       "SITC",
@@ -281,10 +281,10 @@
     ],
     [
       "BRT",
-      "BHR"
+      "SEG"
     ],
     [
-      "SEG",
+      "BHR",
       "MDV"
     ],
     [
@@ -293,15 +293,15 @@
     ],
     [
       "STRW",
-      "FSP"
+      "TCI"
     ],
     [
-      "TCI",
+      "FSP",
       "CLPR"
     ],
     [
       "ARL",
-      "CTRE"
+      "AHR"
     ]
   ],
   "sector": "Real Estate",

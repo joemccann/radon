@@ -1,6 +1,6 @@
 {
   "name": "r2k-communication",
-  "description": "Russell 2000 Communication (79 companies)",
+  "description": "Russell 2000 Communication (78 companies)",
   "tickers": [
     "SATS",
     "LUMN",
@@ -11,69 +11,68 @@
     "CNK",
     "CARG",
     "MSGE",
-    "MGNI",
-    "BATRK",
     "LION",
+    "BATRK",
+    "MGNI",
     "IMAX",
     "ZD",
     "YELP",
-    "UNIT",
     "WLY",
+    "UNIT",
     "TRIP",
     "CCOI",
     "LILAK",
     "TDAY",
     "IDT",
     "SHEN",
+    "STGW",
     "SCHL",
     "QNST",
-    "AMC",
-    "SBGI",
     "RUM",
     "CABO",
-    "STGW",
-    "GTN",
+    "AMC",
+    "SBGI",
     "EVER",
+    "GTN",
     "BAND",
+    "ATEX",
     "CARS",
+    "OPTU",
     "SSTK",
     "FUBO",
-    "OPTU",
-    "GOGO",
-    "MCS",
-    "ATEX",
-    "BATRA",
-    "IHRT",
     "GRND",
+    "BATRA",
+    "MCS",
+    "GOGO",
+    "IHRT",
     "NXDR",
     "MAX",
     "NMAX",
-    "IBTA",
-    "EB",
     "PUBM",
+    "IBTA",
     "ANGI",
-    "ATNI",
-    "BOC",
     "SSP",
-    "AMCX",
-    "LILA",
-    "NCMI",
+    "BOC",
     "NEXN",
+    "AMCX",
+    "ATNI",
+    "NCMI",
+    "LILA",
     "SPOK",
     "BMBL",
     "RSVR",
+    "STRZ",
+    "ZIP",
     "EVC",
     "WBTN",
-    "STRZ",
     "PLTK",
     "CURI",
-    "ZIP",
     "THRY",
     "TTGT",
     "GETY",
     "GAMB",
-    "EEX",
     "ADV",
+    "EEX",
     "GAIA",
     "MYPS",
     "AREN",
@@ -101,11 +100,11 @@
     ],
     [
       "MSGE",
-      "MGNI"
+      "LION"
     ],
     [
       "BATRK",
-      "LION"
+      "MGNI"
     ],
     [
       "IMAX",
@@ -113,10 +112,10 @@
     ],
     [
       "YELP",
-      "UNIT"
+      "WLY"
     ],
     [
-      "WLY",
+      "UNIT",
       "TRIP"
     ],
     [
@@ -129,46 +128,46 @@
     ],
     [
       "SHEN",
-      "SCHL"
-    ],
-    [
-      "QNST",
-      "AMC"
-    ],
-    [
-      "SBGI",
-      "RUM"
-    ],
-    [
-      "CABO",
       "STGW"
     ],
     [
-      "GTN",
-      "EVER"
+      "SCHL",
+      "QNST"
+    ],
+    [
+      "RUM",
+      "CABO"
+    ],
+    [
+      "AMC",
+      "SBGI"
+    ],
+    [
+      "EVER",
+      "GTN"
     ],
     [
       "BAND",
-      "CARS"
+      "ATEX"
+    ],
+    [
+      "CARS",
+      "OPTU"
     ],
     [
       "SSTK",
       "FUBO"
     ],
     [
-      "OPTU",
-      "GOGO"
+      "GRND",
+      "BATRA"
     ],
     [
       "MCS",
-      "ATEX"
+      "GOGO"
     ],
     [
-      "BATRA",
-      "IHRT"
-    ],
-    [
-      "GRND",
+      "IHRT",
       "NXDR"
     ],
     [
@@ -176,72 +175,68 @@
       "NMAX"
     ],
     [
-      "IBTA",
-      "EB"
-    ],
-    [
       "PUBM",
-      "ANGI"
+      "IBTA"
     ],
     [
-      "ATNI",
-      "BOC"
+      "ANGI",
+      "SSP"
     ],
     [
-      "SSP",
-      "AMCX"
+      "BOC",
+      "NEXN"
     ],
     [
-      "LILA",
-      "NCMI"
+      "AMCX",
+      "ATNI"
     ],
     [
-      "NEXN",
-      "SPOK"
+      "NCMI",
+      "LILA"
     ],
     [
-      "BMBL",
-      "RSVR"
+      "SPOK",
+      "BMBL"
     ],
     [
-      "EVC",
-      "WBTN"
+      "RSVR",
+      "STRZ"
     ],
     [
-      "STRZ",
+      "ZIP",
+      "EVC"
+    ],
+    [
+      "WBTN",
       "PLTK"
     ],
     [
       "CURI",
-      "ZIP"
+      "THRY"
     ],
     [
-      "THRY",
-      "TTGT"
+      "TTGT",
+      "GETY"
     ],
     [
-      "GETY",
-      "GAMB"
-    ],
-    [
-      "EEX",
+      "GAMB",
       "ADV"
     ],
     [
-      "GAIA",
-      "MYPS"
+      "EEX",
+      "GAIA"
     ],
     [
-      "AREN",
-      "TZOO"
+      "MYPS",
+      "AREN"
     ],
     [
-      "TEAD",
-      "SEAT"
+      "TZOO",
+      "TEAD"
     ],
     [
-      "MRDN",
-      "SATS"
+      "SEAT",
+      "MRDN"
     ]
   ],
   "sector": "Communication",
