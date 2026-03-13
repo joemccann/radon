@@ -1406,6 +1406,49 @@ This workflow triggers on ANY of these events:
 
 ## Interactive Brokers Integration
 
+### Connection Troubleshooting
+
+**Full runbook:** `docs/ib-connection-troubleshooting.md`
+
+**Quick triage (run these in order):**
+
+```bash
+# 1. Gateway process running?
+~/ibc/bin/status-secure-ibc-service.sh | grep -E "state|pid"
+
+# 2. Port 4001 listening?
+lsof -iTCP:4001 -sTCP:LISTEN
+
+# 3. Port accepting connections?
+python3 -c "
+import socket; s = socket.socket(); s.settimeout(3)
+try: s.connect(('127.0.0.1', 4001)); print('OK')
+except Exception as e: print(f'FAIL: {e}')
+finally: s.close()
+"
+```
+
+**Common failure scenarios:**
+
+| Scenario | Process? | Port listening? | Connects? | Fix |
+|----------|----------|----------------|-----------|-----|
+| Gateway down | No | No | No | `~/ibc/bin/start-secure-ibc-service.sh` + approve 2FA |
+| **Zombie state** | Yes | Yes | **No** | `~/ibc/bin/restart-secure-ibc-service.sh` + approve 2FA |
+| Client ID collision | Yes | Yes | Yes | Kill stale script holding the client ID |
+| 2FA pending | Yes | Yes | No | Approve push notification on IBKR Mobile |
+
+**Zombie state is the most common failure.** The Java process is alive and the socket is bound, but the API layer stopped accepting connections (session expired, 2FA timeout, IBC nightly restart failed).
+
+**Timeout budget when Gateway is unreachable:**
+
+| Layer | Time | Notes |
+|-------|------|-------|
+| `IBClient.connect()` | 3s | Default timeout (lowered from 10s) |
+| Cached fallback read | <50ms | Serves `data/portfolio.json` or `data/orders.json` |
+| **Total API response** | **~3.5s** | Returns 200 with `X-Sync-Warning` header |
+
+**Automated recovery layers:** IBClient reconnect (5 attempts, exponential backoff) > WS server reconnect (5s interval, client ID rotation) > syncMutex (coalesce concurrent calls) > cached fallback (serve stale data as 200) > IBC auto-restart (nightly 11:58 PM) > 2FA retry (`TWOFA_TIMEOUT_ACTION=restart`).
+
 ### Client ID Strategy
 
 **Default to `clientId=0` (master client)** for full order control.

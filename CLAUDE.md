@@ -549,6 +549,8 @@ Full spec: `docs/unusual_whales_api.md` | `docs/unusual_whales_api_spec.yaml`
 
 ## IB Gateway & IBC
 
+**Troubleshooting:** `docs/ib-connection-troubleshooting.md` — full diagnostic runbook for connection failures, timeout budget, cached fallback behavior, and architecture diagram.
+
 IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gateway`), shared with [market-data-warehouse](https://github.com/joemccann/market-data-warehouse). IBC install lives at `~/ibc-install/`, config and wrappers at `~/ibc/`.
 
 **Credentials:** Stored in macOS Keychain (not on disk). The runner reads credentials at launch, writes a temporary `0600` runtime config, and removes it after IBC exits.

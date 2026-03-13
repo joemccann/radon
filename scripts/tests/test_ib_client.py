@@ -215,7 +215,7 @@ class TestConnection:
         client = IBClient()
         client.connect(host="127.0.0.1", port=4001, client_id=1)
 
-        mock_ib.connect.assert_called_once_with("127.0.0.1", 4001, clientId=1, timeout=10)
+        mock_ib.connect.assert_called_once_with("127.0.0.1", 4001, clientId=1, timeout=3)
         assert client.is_connected()
 
     @patch("clients.ib_client.IB")
@@ -229,7 +229,7 @@ class TestConnection:
 
         expected_id = CLIENT_IDS["ib_sync"]
         mock_ib.connect.assert_called_once_with(
-            DEFAULT_HOST, DEFAULT_GATEWAY_PORT, clientId=expected_id, timeout=10
+            DEFAULT_HOST, DEFAULT_GATEWAY_PORT, clientId=expected_id, timeout=3
         )
 
     @patch("clients.ib_client.IB")
@@ -1000,6 +1000,36 @@ class TestErrorHandling:
 # ===========================================================================
 # RETRY LOGIC
 # ===========================================================================
+
+class TestFastTimeout:
+    """IBClient.connect() defaults to 3s timeout for fast failure."""
+
+    @patch("clients.ib_client.IB")
+    def test_default_timeout_is_3s(self, MockIB):
+        """Default timeout should be 3s, not 10s."""
+        mock_ib = MockIB.return_value
+        mock_ib.isConnected.return_value = True
+
+        client = IBClient()
+        client.connect(host="127.0.0.1", port=4001, client_id=1)
+
+        mock_ib.connect.assert_called_once_with(
+            "127.0.0.1", 4001, clientId=1, timeout=3,
+        )
+
+    @patch("clients.ib_client.IB")
+    def test_explicit_timeout_overrides_default(self, MockIB):
+        """Callers can pass a custom timeout."""
+        mock_ib = MockIB.return_value
+        mock_ib.isConnected.return_value = True
+
+        client = IBClient()
+        client.connect(host="127.0.0.1", port=4001, client_id=1, timeout=10)
+
+        mock_ib.connect.assert_called_once_with(
+            "127.0.0.1", 4001, clientId=1, timeout=10,
+        )
+
 
 class TestRetryLogic:
     """Test automatic retry for transient errors."""

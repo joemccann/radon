@@ -181,7 +181,7 @@ class IBClient:
         port: int = DEFAULT_GATEWAY_PORT,
         client_id: Optional[int] = None,
         client_name: Optional[str] = None,
-        timeout: int = 10,
+        timeout: int = 3,
         max_retries: int = 1,
     ) -> None:
         """Connect to TWS / IB Gateway.
@@ -191,7 +191,8 @@ class IBClient:
             port: IB Gateway / TWS port.
             client_id: Explicit client ID override.
             client_name: Lookup client ID from ``CLIENT_IDS`` registry.
-            timeout: Connection timeout in seconds.
+            timeout: Connection timeout in seconds (default 3s for fast
+                fallback when Gateway is unreachable).
             max_retries: Number of attempts before giving up.
 
         Raises:

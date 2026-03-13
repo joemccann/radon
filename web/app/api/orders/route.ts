@@ -40,6 +40,15 @@ export async function POST(): Promise<Response> {
     const result = await syncMutex();
 
     if (!result.ok) {
+      // Sync failed — fall back to cached data file
+      const cached = await readOrders();
+      if (cached.last_sync) {
+        console.warn("[Orders] Sync failed, serving cached data:", result.stderr);
+        const res = NextResponse.json(cached);
+        res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
+        return res;
+      }
+      // No cached data (empty last_sync) — genuine failure
       return NextResponse.json(
         { error: "Sync failed", stderr: result.stderr },
         { status: 502 },

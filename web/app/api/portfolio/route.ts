@@ -77,6 +77,15 @@ export async function POST(): Promise<Response> {
     const result = await ibSync({ sync: true, port: 4001 });
 
     if (!result.ok) {
+      // Sync failed — fall back to cached data file
+      const cached = await readDataFile("data/portfolio.json", PortfolioData);
+      if (cached.ok) {
+        console.warn("[Portfolio] Sync failed, serving cached data:", result.stderr);
+        const res = NextResponse.json(cached.data);
+        res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
+        return res;
+      }
+      // No cached data either — genuine failure
       return NextResponse.json(
         { error: "Sync failed", stderr: result.stderr },
         { status: 502 },
