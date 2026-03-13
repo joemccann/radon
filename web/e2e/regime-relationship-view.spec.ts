@@ -174,6 +174,19 @@ test.describe("/regime page — RVOL/COR1M relationship view", () => {
     await expect(fragileCalmBubble).toContainText("COR1M is at or above its 20-session mean");
   });
 
+  test("uses the classified quadrant tone for the latest scatter marker", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1800 });
+    await setupMocks(page);
+    await page.goto("/regime");
+
+    const quadrantCard = page.locator('[data-testid="regime-quadrant-card"]');
+    await expect(quadrantCard.locator('[data-testid="regime-current-quadrant"]')).toHaveText("FRAGILE CALM");
+
+    const latestMarker = quadrantCard.locator('[data-testid="regime-quadrant-chart"] .regime-relationship-marker');
+    await expect(latestMarker).toHaveAttribute("fill", "var(--dislocation)");
+    await expect(latestMarker).toHaveAttribute("stroke", "var(--dislocation)");
+  });
+
   test("shows a tooltip for the normalized divergence panel", async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 1800 });
     await setupMocks(page);

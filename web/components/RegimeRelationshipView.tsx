@@ -181,6 +181,7 @@ export default function RegimeRelationshipView({
   const latest = entries[entries.length - 1];
   const spreadColor = spreadStateColor(summary.spreadState);
   const quadrantColor = quadrantTone(summary.latestQuadrant);
+  const latestQuadrantColor = quadrantTone(latest.quadrant);
   const zScoreTooltipSideStyle = zScoreHover
     ? zScoreHover.x > zScoreHover.width / 2
       ? { right: zScoreHover.width - zScoreHover.x + 12 }
@@ -446,9 +447,9 @@ export default function RegimeRelationshipView({
                     cx={scatterXScale(entry.realizedVol)}
                     cy={scatterYScale(entry.cor1m)}
                     r={isLatest ? 6 : 3.5}
-                    fill={isLatest ? "var(--warning)" : "var(--signal-core)"}
+                    fill={isLatest ? latestQuadrantColor : "var(--signal-core)"}
                     opacity={isLatest ? 1 : 0.18 + (index / entries.length) * 0.45}
-                    stroke={isLatest ? "var(--warning)" : "none"}
+                    stroke={isLatest ? latestQuadrantColor : "none"}
                     className={isLatest ? "regime-relationship-marker" : undefined}
                   />
                 );
