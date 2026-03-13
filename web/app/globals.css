@@ -15,6 +15,7 @@
 [data-theme="dark"] {
   --bg-base: #0a0f14;
   --bg-panel: #0f1519;
+  --bg-panel-raised: #151c22;
   --bg-hover: #151c22;
   --border-dim: #1e293b;
   --border-focus: #05AD98;
@@ -58,6 +59,7 @@
 [data-theme="light"] {
   --bg-base: #FFFFFF;
   --bg-panel: #FFFFFF;
+  --bg-panel-raised: #F1F5F9;
   --bg-hover: #f1f5f9;
   --border-dim: #BBBFBF;
   --border-focus: #05AD98;

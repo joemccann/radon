@@ -170,6 +170,19 @@ All portfolio state writes use `scripts/utils/atomic_io.py`:
 
 **Impact**: 500 symbols x 10 ticks/sec = 5000 msg/s → 10 batched updates/s. Initial subscription state still sent immediately (not batched).
 
+### WebSocket Connection State Machine
+
+`usePrices.ts` uses a connection state machine (`idle → connecting → open → closed`) to prevent WebSocket teardown/recreate cycles when React subscription data changes during page load. Key design:
+
+- **State machine** in `connStateRef` (ref, not state) — `connect()` is idempotent (no-op if `connecting` or `open`)
+- **Socket generation guard** (`socketGenRef`) — event handlers ignore stale socket events
+- **Diff-based subscription sync** — computes added/removed symbols and sends `subscribe`/`unsubscribe` over existing connection instead of full teardown
+- **Callback refs** (`onPriceUpdateRef`, `onConnectionChangeRef`) — eliminates stale closures in WS handlers
+- **Exponential backoff reconnect** — `min(1000 * 2^attempt, 30000) + jitter`, max 10 attempts, resets on successful open
+- **Two effects**: lifecycle (connect/disconnect based on `enabled` + `hasSubscriptions`) + subscription sync (diffs over open connection)
+
+**Tests**: `web/tests/use-prices-ws-stability.test.ts` (25 unit), `web/e2e/ws-connection-stability.spec.ts` (4 E2E)
+
 ### Vectorized Math
 
 - `kelly_size_batch()` in `kelly.py` — NumPy batch sizing for N candidates
@@ -188,7 +201,7 @@ All portfolio state writes use `scripts/utils/atomic_io.py`:
 
 `scripts/utils/incremental_sync.py` — compares current `portfolio.json` positions against IB by `(ticker, expiry)` key + contract count. Skips full sync when nothing changed.
 
-**Tests**: 96 total (87 Python + 9 TypeScript) across `scripts/tests/test_{scanner_parallel,discover_parallel,atomic_io,kelly_vectorized,vectorized_greeks,batched_relay,ib_resilient,ib_error_handling,incremental_sync}.py` and `web/tests/batched-prices.test.ts`.
+**Tests**: 125 total (87 Python + 38 TypeScript) across `scripts/tests/test_{scanner_parallel,discover_parallel,atomic_io,kelly_vectorized,vectorized_greeks,batched_relay,ib_resilient,ib_error_handling,incremental_sync}.py`, `web/tests/batched-prices.test.ts`, `web/tests/use-prices-ws-stability.test.ts` (25 unit), and `web/e2e/ws-connection-stability.spec.ts` (4 E2E).
 
 ---
 
