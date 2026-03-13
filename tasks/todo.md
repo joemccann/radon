@@ -1,5 +1,29 @@
 # TODO
 
+## Session: Keep /performance Reconstructed YTD In Sync With Portfolio Refreshes (2026-03-13)
+
+### Goal
+Stop the `/performance` hero from staying on a stale reconstructed YTD snapshot after the workspace portfolio sync advances. When the shell refreshes `portfolio.last_sync`, the performance panel should promptly revalidate `/api/performance` and adopt the rebuilt same-session payload instead of waiting for its long polling interval or a manual page reload.
+
+### Dependency Graph
+- T1 (Trace the `/performance` freshness contract across the shell portfolio sync, the performance hook, and `/api/performance` so the stale boundary is explicit before editing code) depends_on: []
+- T2 (Add failing regression coverage for the stale-after-portfolio-sync behavior in unit and browser tests) depends_on: [T1]
+- T3 (Implement the minimal freshness fix so the performance panel reacts to a newer portfolio sync timestamp and revalidates `/api/performance`) depends_on: [T2]
+- T4 (Run targeted Vitest and Playwright verification, review the live `/performance` result, and capture notes) depends_on: [T3]
+
+### Checklist
+- [x] T1 Trace the `/performance` freshness contract across the shell portfolio sync, the performance hook, and `/api/performance` so the stale boundary is explicit before editing code
+- [x] T2 Add failing regression coverage for the stale-after-portfolio-sync behavior in unit and browser tests
+- [x] T3 Implement the minimal freshness fix so the performance panel reacts to a newer portfolio sync timestamp and revalidates `/api/performance`
+- [x] T4 Run targeted Vitest and Playwright verification, review the live `/performance` result, and capture notes
+
+### Review
+- Root cause: the performance cache route already knew how to rebuild when `data/performance.json` lagged `data/portfolio.json`, but the `/performance` page itself had no link to the shell’s much fresher portfolio sync lifecycle. [usePortfolio.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/usePortfolio.ts) keeps pushing `POST /api/portfolio` updates every 30 seconds and on manual `Sync Now`, while [usePerformance.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/usePerformance.ts) only revalidated `/api/performance` on initial load and every 15 minutes. That left the hero stuck on an older `as_of`/ending-equity snapshot even after the shell had already advanced `portfolio.last_sync`.
+- Added a shared freshness contract in [performanceFreshness.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/performanceFreshness.ts). Both [route.ts](/Users/joemccann/dev/apps/finance/radon/web/app/api/performance/route.ts) and [PerformancePanel.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/PerformancePanel.tsx) now use the same rule: performance is behind whenever either `last_sync` or the session `as_of` date no longer matches the latest portfolio sync timestamp.
+- Fixed the UI handoff by threading `portfolioLastSync` from [WorkspaceShell.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/WorkspaceShell.tsx) through [WorkspaceSections.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/WorkspaceSections.tsx) into [PerformancePanel.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/PerformancePanel.tsx). When the shell portfolio sync advances, the performance panel now issues a fresh `GET /api/performance`, which lets the route rebuild inline and replace the stale reconstructed YTD banner immediately instead of waiting for the next long poll.
+- Locked the fix with red/green coverage in [performance-freshness.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/performance-freshness.test.ts) and [performance-page.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/performance-page.spec.ts). The new browser regression proves the bug directly: after `Sync Now` advances the portfolio snapshot, the hero updates from `AS OF 2026-03-12` to `AS OF 2026-03-13` and adopts the rebuilt ending equity.
+- Verification was green with `npx vitest run web/tests/performance-freshness.test.ts web/tests/performance-route.test.ts`, `cd web && npx playwright test e2e/performance-page.spec.ts --config playwright.config.ts`, and `cd web && npm run build`.
+
 ## Session: Keep /regime Aligned With Today's Settled Close After Market Hours (2026-03-12)
 
 ### Goal

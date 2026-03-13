@@ -1,13 +1,14 @@
 "use client";
 
 import { AlertTriangle, Gauge, ShieldAlert, Sigma, TrendingDown } from "lucide-react";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_PERFORMANCE_CHART_HEIGHT,
   DEFAULT_PERFORMANCE_CHART_MARGINS,
   DEFAULT_PERFORMANCE_CHART_WIDTH,
   buildPerformanceChartModel,
 } from "@/lib/performanceChart";
+import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import type { PerformanceData, PerformanceSeriesPoint } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
 import ChartPanel from "./charts/ChartPanel";
@@ -214,9 +215,20 @@ function drawdownLeader(series: PerformanceSeriesPoint[]): string {
   return worst?.date ?? "---";
 }
 
-export default function PerformancePanel() {
-  const { data, loading, error } = usePerformance(true);
+export default function PerformancePanel({ portfolioLastSync = null }: { portfolioLastSync?: string | null }) {
+  const { data, loading, error, syncNow } = usePerformance(true);
   const [activeCardId, setActiveCardId] = useState<string | null>(null);
+  const requestedPortfolioSyncRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!data || !portfolioLastSync) return;
+    if (!isPerformanceBehindPortfolioSync(data, portfolioLastSync)) return;
+    if (requestedPortfolioSyncRef.current === portfolioLastSync) return;
+
+    requestedPortfolioSyncRef.current = portfolioLastSync;
+    syncNow();
+  }, [data, portfolioLastSync, syncNow]);
+
   const cardConfigs = useMemo<PerformanceCardConfig[]>(() => {
     if (!data) return [];
     const { summary } = data;

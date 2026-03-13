@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-03-13
+
+- When a derived page like `/performance` depends on the portfolio sync lifecycle, do not give it an isolated long-poll loop and assume the cache route will save you; if the shell can advance `portfolio.last_sync` first, the dependent page must react to that fresher timestamp and revalidate immediately.
+
 ## 2026-03-12 (Cloud Migration — Reverted)
 
 - Before refactoring a route from `spawn()` to `fetch()`, read the original wrapper code to understand output format (stdout JSON vs file write vs human text). `ib_sync.py` writes to `portfolio.json` and prints human-readable text — the FastAPI endpoint and fallback both assumed JSON stdout.

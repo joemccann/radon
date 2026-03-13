@@ -231,6 +231,155 @@ test.describe("/performance page", () => {
     expect(performanceGetCalls).toBeGreaterThan(1);
   });
 
+  test("refreshes the hero as_of date after route revalidation returns the current session", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+
+    let performanceGetCalls = 0;
+    await page.route("**/api/performance", async (route) => {
+      performanceGetCalls += 1;
+
+      const isFresh = performanceGetCalls > 1;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...PERFORMANCE_MOCK,
+          as_of: isFresh ? "2026-03-13" : "2026-03-12",
+          last_sync: isFresh ? "2026-03-13T20:02:06Z" : "2026-03-12T13:23:21Z",
+          summary: {
+            ...PERFORMANCE_MOCK.summary,
+            ending_equity: isFresh ? 1_250_902.19 : 1_218_410.03,
+            pnl: isFresh ? 236_620.64 : 204_128.48,
+            total_return: isFresh ? 0.23329 : 0.20125,
+          },
+        }),
+      });
+    });
+    await page.route("**/api/portfolio", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...PORTFOLIO_EMPTY,
+          last_sync: "2026-03-13T20:02:06Z",
+          account_summary: {
+            ...PORTFOLIO_EMPTY.account_summary,
+            net_liquidation: 1_250_902.19,
+          },
+        }),
+      }),
+    );
+    await page.route("**/api/orders", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_EMPTY) }),
+    );
+    await page.route("**/api/blotter", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          as_of: "2026-03-13T20:02:06Z",
+          summary: { closed_trades: 0, open_trades: 0, total_commissions: 0, realized_pnl: 0 },
+          closed_trades: [],
+          open_trades: [],
+        }),
+      }),
+    );
+
+    await page.goto("/performance");
+
+    await expect(page.locator('[data-testid="performance-panel"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=AS OF 2026-03-13")).toBeVisible({ timeout: 10_000 });
+    expect(performanceGetCalls).toBeGreaterThan(1);
+  });
+
+  test("revalidates reconstructed YTD after portfolio sync advances the shell snapshot", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+
+    let performanceGetCalls = 0;
+    let portfolioPostCalls = 0;
+
+    await page.route("**/api/performance", async (route) => {
+      performanceGetCalls += 1;
+
+      const isFresh = portfolioPostCalls > 0 && performanceGetCalls > 2;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...PERFORMANCE_MOCK,
+          as_of: isFresh ? "2026-03-13" : "2026-03-12",
+          last_sync: isFresh ? "2026-03-13T21:01:00Z" : "2026-03-12T21:01:00Z",
+          summary: {
+            ...PERFORMANCE_MOCK.summary,
+            ending_equity: isFresh ? 1_218_410.03 : 1_094_500,
+            pnl: isFresh ? 204_128.48 : 44_500,
+            total_return: isFresh ? 0.2013 : 0.04238,
+          },
+        }),
+      });
+    });
+
+    await page.route("**/api/portfolio", async (route, request) => {
+      const method = request.method();
+      if (method === "POST") {
+        portfolioPostCalls += 1;
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({
+            ...PORTFOLIO_EMPTY,
+            last_sync: "2026-03-13T21:01:00Z",
+            account_summary: {
+              ...PORTFOLIO_EMPTY.account_summary,
+              net_liquidation: 1_218_410.03,
+            },
+          }),
+        });
+        return;
+      }
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ...PORTFOLIO_EMPTY,
+          last_sync: "2026-03-12T21:01:00Z",
+          account_summary: {
+            ...PORTFOLIO_EMPTY.account_summary,
+            net_liquidation: 1_094_500,
+          },
+        }),
+      });
+    });
+    await page.route("**/api/orders", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_EMPTY) }),
+    );
+    await page.route("**/api/blotter", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          as_of: "2026-03-12T21:01:00Z",
+          summary: { closed_trades: 0, open_trades: 0, total_commissions: 0, realized_pnl: 0 },
+          closed_trades: [],
+          open_trades: [],
+        }),
+      }),
+    );
+
+    await page.goto("/performance");
+
+    await expect(page.locator('[data-testid="performance-panel"]')).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=AS OF 2026-03-12")).toBeVisible();
+
+    const callsBeforeSync = performanceGetCalls;
+    await page.getByRole("button", { name: "Sync Now" }).click();
+
+    await expect(page.locator("text=Ending equity $1,218,410.03")).toBeVisible({ timeout: 10_000 });
+    await expect(page.locator("text=AS OF 2026-03-13")).toBeVisible({ timeout: 10_000 });
+    expect(performanceGetCalls).toBeGreaterThan(callsBeforeSync);
+  });
+
   test("sidebar exposes the performance route", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/performance");

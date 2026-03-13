@@ -1,9 +1,10 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-12T09:38:00-07:00
+2026-03-13T09:17:01-07:00
 
 ## Recent Commits
+- 2026-03-13 09:17:01 -0700 — **fix: keep `/performance` reconstructed YTD aligned with portfolio sync. Added a shared freshness contract, made the performance panel revalidate as soon as the shell portfolio sync advances, and locked the handoff with Vitest plus Playwright regressions.**
 - 2026-03-12 10:45:00 -0700 — **fix: tighten `/regime` operator telemetry. Added a shared responsive strip renderer (`5-up -> 3x2 -> stacked telemetry rail`), stacked the CRI detail panels earlier on narrow widths, and made `NORMALIZED DIVERGENCE` actionable plus hoverable. Locked with Vitest and Playwright coverage.**
 - 2026-03-12 08:43:57 -0700 — **fix: unify quote telemetry across ticker, instrument, and modify-order views. Shared calculator/renderer now show `BID`, `MID`, `ASK`, `SPREAD`, with spread rendered as raw quote width plus midpoint percent. Locked with unit and Playwright regressions.**
 - 2026-03-12 07:14:00 -0700 — **fix: All-long combo positions (e.g., AAOI 2x long calls) classified as "complex" → silently dropped from web UI. Fix: ib_sync.py classifies all-long combos as "defined"; UI fallback includes "complex" in undefined bucket. 13 new tests.**

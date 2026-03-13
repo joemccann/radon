@@ -177,7 +177,7 @@ function PriceDisplay() {
 |-------|--------|-------------|
 | `/api/portfolio` | GET | Read portfolio.json |
 | `/api/portfolio` | POST | Trigger IB sync |
-| `/api/performance` | GET | Read cached YTD performance metrics and trigger background refresh when stale |
+| `/api/performance` | GET | Read cached YTD performance metrics, rebuild when they lag the latest portfolio sync, and let `/performance` revalidate immediately after the shell portfolio snapshot advances |
 | `/api/performance` | POST | Rebuild YTD performance metrics from the Python engine |
 | `/api/menthorq/cta` | GET | Read the latest MenthorQ CTA cache, attach `cache_meta` plus `sync_health`/`sync_status`, and trigger one background CTA refresh when the latest closed trading day is missing |
 | `/api/orders` | GET | Read open/executed orders |

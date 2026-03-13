@@ -1334,11 +1334,12 @@ function HistoricalTradesSection() {
 type WorkspaceSectionsProps = {
   section: WorkspaceSection;
   portfolio?: PortfolioData | null;
+  portfolioLastSync?: string | null;
   orders?: OrdersData | null;
   prices?: Record<string, PriceData>;
 };
 
-export default function WorkspaceSections({ section, portfolio, orders, prices }: WorkspaceSectionsProps) {
+export default function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, prices }: WorkspaceSectionsProps) {
   switch (section) {
     case "dashboard":
       return null;
@@ -1347,7 +1348,7 @@ export default function WorkspaceSections({ section, portfolio, orders, prices }
     case "portfolio":
       return <PortfolioSections portfolio={portfolio ?? null} prices={prices} />;
     case "performance":
-      return <PerformancePanel />;
+      return <PerformancePanel portfolioLastSync={portfolioLastSync} />;
     case "orders":
       return <OrdersSections orders={orders ?? null} prices={prices} portfolio={portfolio} />;
     case "scanner":

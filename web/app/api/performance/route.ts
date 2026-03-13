@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFile, stat, writeFile } from "fs/promises";
 import { spawn } from "child_process";
 import { join } from "path";
+import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 
 export const runtime = "nodejs";
 
@@ -73,13 +74,15 @@ function isCacheBehindPortfolio(
   portfolio: Record<string, unknown> | null,
 ): boolean {
   const portfolioLastSync = extractTimestampValue(portfolio, "last_sync");
-  if (!portfolioLastSync || !performance) return false;
-
-  const performanceLastSync = extractTimestampValue(performance, "last_sync");
-  const performanceAsOf = extractTimestampValue(performance, "as_of");
-  const portfolioAsOf = portfolioLastSync.slice(0, 10);
-
-  return performanceLastSync !== portfolioLastSync || performanceAsOf !== portfolioAsOf;
+  return isPerformanceBehindPortfolioSync(
+    performance
+      ? {
+          last_sync: extractTimestampValue(performance, "last_sync"),
+          as_of: extractTimestampValue(performance, "as_of"),
+        }
+      : null,
+    portfolioLastSync,
+  );
 }
 
 export async function GET(): Promise<Response> {

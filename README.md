@@ -192,7 +192,7 @@ Visit `http://localhost:3000`.
 - Real-time price streaming with live greeks
 - Shared quote telemetry across ticker, instrument, and modify-order views with `BID`, `MID`, `ASK`, and `SPREAD` rendered in a single layout contract; spread displays use raw quote width plus midpoint percent
 - Multi-leg position monitoring and per-leg P&L
-- YTD portfolio performance analytics with reconstructed institutional metrics
+- YTD portfolio performance analytics with reconstructed institutional metrics that revalidate against the latest workspace portfolio sync so the hero does not stay pinned to an older session snapshot
 - Shared `/regime` strip renderer with a responsive `5-up -> 3x2 -> stacked telemetry rail` contract so label, value, delta, and context remain readable on narrower viewports
 - Regime history charts with cached 20-session RVOL and COR1M context
 - RVOL/COR1M relationship view with spread, quadrant state, and normalized divergence

@@ -321,7 +321,13 @@ export default function WorkspaceShell({ section }: WorkspaceShellProps) {
           {activeSection !== "dashboard" ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
 
           {activeSection !== "dashboard" ? (
-            <WorkspaceSections section={activeSection} portfolio={portfolio} orders={orders} prices={prices} />
+            <WorkspaceSections
+              section={activeSection}
+              portfolio={portfolio}
+              portfolioLastSync={portfolioLastSync}
+              orders={orders}
+              prices={prices}
+            />
           ) : null}
         </div>
       </main>
