@@ -384,12 +384,6 @@ body {
   margin-bottom: 20px;
 }
 
-.metrics-grid-5 {
-  display: grid;
-  grid-template-columns: repeat(5, 1fr);
-  gap: 0;
-  margin-bottom: 20px;
-}
 
 .metrics-grid-3 {
   display: grid;
@@ -675,13 +669,7 @@ tr:last-child td {
   border-bottom: none;
 }
 
-.last-price-up {
-  animation: last-price-flash-up 2.5s ease-out;
-}
 
-.last-price-down {
-  animation: last-price-flash-down 2.5s ease-out;
-}
 
 /* Price cells with trend arrows: flex keeps value + arrow on one line, right-aligned.
    Any td using .last-price-cell MUST place the arrow icon after the value text. */
@@ -764,18 +752,7 @@ td.last-price-cell {
   color: var(--info);
 }
 
-.strength-bar {
-  width: 60px;
-  height: 4px;
-  background: var(--border-dim);
-  position: relative;
-}
 
-.strength-fill {
-  height: 100%;
-  background: var(--text-primary);
-  transition: width 400ms var(--ease-out);
-}
 
 .strength-value {
   font-size: 10px;
@@ -913,22 +890,8 @@ td.last-price-cell {
   gap: 14px;
 }
 
-.performance-swatch {
-  display: inline-block;
-  width: 12px;
-  height: 12px;
-  margin-right: 6px;
-  border: 1px solid var(--border-dim);
-  vertical-align: -2px;
-}
 
-.performance-swatch-equity {
-  background: var(--signal-core);
-}
 
-.performance-swatch-benchmark {
-  background: var(--performance-chart-benchmark);
-}
 
 .performance-chart {
   width: 100%;
@@ -1067,11 +1030,6 @@ td.last-price-cell {
   color: var(--text-secondary);
 }
 
-.two-col {
-  display: grid;
-  grid-template-columns: 2fr 1fr;
-  gap: 20px;
-}
 
 .chat-shell {
   padding: 16px;
@@ -1202,21 +1160,9 @@ td.last-price-cell {
   letter-spacing: 0.06em;
 }
 
-.chat-markdown-heading-1 {
-  font-size: 14px;
-}
 
-.chat-markdown-heading-2 {
-  font-size: 13px;
-}
 
-.chat-markdown-heading-3 {
-  font-size: 12px;
-}
 
-.chat-markdown-heading-4 {
-  font-size: 11px;
-}
 
 .chat-markdown-link {
   color: inherit;
@@ -1303,17 +1249,7 @@ td.last-price-cell {
   gap: 8px;
 }
 
-.chat-list-index {
-  color: var(--text-muted);
-  min-width: 24px;
-  font-size: 11px;
-  font-family: var(--font-mono);
-}
 
-.chat-list-bullet {
-  color: var(--text-muted);
-  min-width: 12px;
-}
 
 .chat-line.chat-kv {
   display: grid;
@@ -1321,12 +1257,6 @@ td.last-price-cell {
   gap: 8px;
 }
 
-.chat-kv-key {
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  text-transform: uppercase;
-}
 
 .chat-line.chat-heading {
   color: var(--text-primary);
@@ -1463,17 +1393,11 @@ td.last-price-cell {
 }
 
 @media (max-width: 1200px) {
-  .two-col {
-    grid-template-columns: 1fr;
-  }
 
   .metrics-grid {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .metrics-grid-5 {
-    grid-template-columns: repeat(3, 1fr);
-  }
 
   .metrics-grid-3 {
     grid-template-columns: repeat(2, 1fr);
@@ -1503,9 +1427,6 @@ td.last-price-cell {
     grid-template-columns: 1fr;
   }
 
-  .metrics-grid-5 {
-    grid-template-columns: 1fr;
-  }
 
   .metrics-grid-3 {
     grid-template-columns: 1fr;
@@ -1749,18 +1670,8 @@ tr.leg-row td {
   background: var(--banner-positive);
 }
 
-.connection-banner-error {
-  background: var(--banner-negative);
-}
 
-.connection-banner-warning {
-  background: var(--warning);
-  color: var(--bg-canvas);
-}
 
-.connection-banner-success {
-  background: var(--banner-positive);
-}
 
 @keyframes banner-slide-down {
   from {
@@ -1806,17 +1717,8 @@ tr.leg-row td {
   max-width: 380px;
 }
 
-.toast-error {
-  border-left: 3px solid var(--negative);
-}
 
-.toast-warning {
-  border-left: 3px solid var(--warning);
-}
 
-.toast-success {
-  border-left: 3px solid var(--positive);
-}
 
 .toast-message {
   flex: 1;
@@ -2478,8 +2380,6 @@ tr.leg-row td {
 .news-date { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); }
 .news-source { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.03em; }
 .news-headline { font-family: var(--font-mono); font-size: 12px; line-height: 1.4; }
-.news-link { color: inherit; text-decoration: underline; text-underline-offset: 2px; }
-.news-link:hover { opacity: 0.78; }
 .news-open-link { display: inline-flex; align-items: center; color: var(--text-muted); margin-left: 6px; vertical-align: middle; transition: color 150ms; }
 .news-open-link:hover { color: var(--text-primary); }
 .news-fallback-notice { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; text-align: right; padding-top: 8px; }
@@ -2771,8 +2671,6 @@ tr {
   border: 1px solid var(--border-dim);
   letter-spacing: 0.05em;
 }
-.eb-source-ib { color: var(--positive); border-color: color-mix(in srgb, var(--positive) 30%, transparent); }
-.eb-source-approx { color: var(--text-muted); }
 
 .eb-leg-row td { border-bottom: none; padding: 3px 8px; }
 .eb-leg-detail {
@@ -3306,27 +3204,8 @@ tr {
 }
 
 /* CTA Grid */
-.regime-cta-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 1px;
-  background: var(--border-dim);
-}
 
-.regime-cta-panel {
-  background: var(--bg-panel);
-  padding: 16px;
-}
 
-.regime-cta-title {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  margin-bottom: 12px;
-}
 
 .regime-cta-rows {
   display: flex;
@@ -3368,18 +3247,7 @@ tr {
   margin-top: 2px;
 }
 
-.regime-cta-date {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 12px;
-}
 
-.regime-cta-empty {
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
 
 /* History Table */
 .regime-history {
@@ -3706,9 +3574,6 @@ tr {
 
 /* ─── CTA Tables (MenthorQ) ──────────────────────────── */
 
-.regime-cta-panel-full {
-  padding: 0;
-}
 
 .cta-container {
   width: 100%;
@@ -3921,8 +3786,6 @@ tr {
 .fills-table tbody tr:hover { background: var(--bg-hover); }
 
 .fills-side { font-weight: 600; }
-.fills-side-bot { color: var(--color-green); }
-.fills-side-sld { color: var(--color-red); }
 .fills-row-positive { background: rgba(34, 197, 94, 0.04); }
 .fills-row-negative { background: rgba(239, 68, 68, 0.04); }
 
