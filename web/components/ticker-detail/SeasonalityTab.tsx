@@ -148,10 +148,10 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
   const yearsAnalyzed = months[0]?.years ?? 0;
 
   return (
-    <div className="seasonality-tab">
+    <div className="stz">
       {/* Overall assessment header */}
       <div className="sh78">
-        <span className={`seasonality-rating-pill ${ratingClass(rating)}`}>
+        <span className={`srp ${ratingClass(rating)}`}>
           {rating}
         </span>
         <div className="ss67">
@@ -200,7 +200,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
                   <div className="sw25">
                     {fmtWinRate(m.positive_months_perc)} win
                   </div>
-                  <div className={`seasonality-cell-badge ${ratingClass(monthRating)}`}>
+                  <div className={`scb ${ratingClass(monthRating)}`}>
                     {monthRating.charAt(0)}
                   </div>
                 </>
@@ -245,7 +245,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
                       <td className="positive">{fmtPct(m.max_change)}</td>
                       <td className="negative">{fmtPct(m.min_change)}</td>
                       <td className={m.positive_months_perc > 0.6 ? "positive" : m.positive_months_perc < 0.5 ? "negative" : ""}>{fmtWinRate(m.positive_months_perc)}</td>
-                      <td><span className={`seasonality-table-badge ${ratingClass(monthRating)}`}>{monthRating}</span></td>
+                      <td><span className={`stb ${ratingClass(monthRating)}`}>{monthRating}</span></td>
                     </>
                   ) : (
                     <td colSpan={6} className="tm" style={{ fontStyle: "italic" }}>No data</td>

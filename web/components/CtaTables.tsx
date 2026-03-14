@@ -50,7 +50,7 @@ function CtaSection({ sectionKey, rows }: { sectionKey: string; rows: CtaRow[] }
   const [open, setOpen] = useState(true);
 
   return (
-    <div className="cta-section">
+    <div >
       <button className="cta-s-hd" onClick={() => setOpen(!open)}>
         {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         {SECTION_LABELS[sectionKey] ?? sectionKey.toUpperCase()}

@@ -446,7 +446,7 @@ body {
 .scr.negative,
 .stb.suf,
 .regime-history .text-negative,
-.csb.csb-error .ct105,
+.csb.csbe .ct105,
 .amh.negative { color: var(--negative); }
 
 .sx {
@@ -1634,7 +1634,7 @@ tr.leg-row td {
 .position-tab,
 .ratings-tab,
 .company-tab,
-.seasonality-tab { display: flex; flex-direction: column; gap: 16px; }
+.stz { display: flex; flex-direction: column; gap: 16px; }
 
 .ms51,
 .pl155,
@@ -2867,7 +2867,6 @@ tr {
 .cs45 {
   height: 440px;
 }
-
 .cs45 {
   display: block;
   width: 100%;
@@ -3078,7 +3077,7 @@ tr {
   gap: 6px;
 }
 
-.csb.csb-error {
+.csb.csbe {
   border-left-color: var(--negative);
 }
 
@@ -3576,9 +3575,6 @@ tr {
 }
 
 
-.apf.positive {
-  background: var(--signal-core);
-}
 
 .amh {
   font-family: var(--font-mono);
@@ -3599,12 +3595,9 @@ tr {
 
 /* Risk/Edge tables — 4 columns (no bar) */
 .att[data-testid="attribution-risk-table"] .at-h,
-.att[data-testid="attribution-risk-table"] .at-r,
-.att[data-testid="attribution-kelly-table"] .at-h,
-.att[data-testid="attribution-kelly-table"] .at-r {
+.att[data-testid="attribution-risk-table"] .at-r {
   grid-template-columns: 2fr 1fr 1fr 1.5fr;
 }
-
 /* Kelly table — 5 columns */
 .att[data-testid="attribution-kelly-table"] .at-h,
 .att[data-testid="attribution-kelly-table"] .at-r {

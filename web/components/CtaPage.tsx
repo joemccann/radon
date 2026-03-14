@@ -86,7 +86,7 @@ export default function CtaPage() {
   }
 
   const statusBannerClass = syncState === "degraded" || error
-    ? "csb cta-status-banner-error"
+    ? "csb csbe"
     : syncState === "syncing" || syncState === "running"
       ? "csb csbr"
       : "csb";
