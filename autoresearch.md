@@ -57,7 +57,7 @@ Market data and PnL Single both need time for IB to stream data back. Currently 
 5. **Request PnL BEFORE market data** (improves reliability): PnL Single takes slightly longer to arrive, so requesting first gives it more lead time.
 6. **Direct ib.reqMktData/cancelMktData** (minor cleanup): Skip subscription tracking in IBClient.get_quote.
 7. **accountValues() instead of accountSummary()** (3.26s → 3.19s, −2%): `ib.accountValues()` reads from ib_insync's internal cache (0ms) vs `ib.accountSummary()` which makes a blocking round-trip (200-700ms). Same data, same tags.
-8. **Reduce Phase 6 fallback** (pending validation): Account PnL fallback sleep reduced from 1.0s to 0.3s. First benchmark: 2.99s. Needs gateway up to validate reliability.
+8. **Eliminate Phase 6 fallback entirely** (pending clean benchmark): Account PnL arrives during Phase 4's 2.7s sleep without any fallback. Confirmed in 3 runs (daily_pnl present, 0 none_pnl). Clean timing benchmark blocked by gateway degraded state (frozen option data unavailable after prolonged 2FA loop — only stocks return data Friday evening). Needs market open to validate timing.
 
 ### Dead ends (discarded)
 - **1.5s combined sleep**: Lost 3 PnL + 2 market values. Too aggressive.
