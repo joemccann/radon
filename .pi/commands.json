@@ -77,6 +77,26 @@
       "description": "Fetch MenthorQ institutional CTA positioning data"
     },
     {
+      "command": "menthorq-dashboard [COMMAND]",
+      "description": "Fetch MenthorQ dashboard chart (vol, forex, eod, intraday, futures, cryptos_technical, cryptos_options). Supports --ticker for eod/intraday/futures/crypto dashboards"
+    },
+    {
+      "command": "menthorq-screener [CATEGORY] [SLUG]",
+      "description": "Fetch MenthorQ screener data (6 categories, 45 sub-screeners: gamma, gamma_levels, open_interest, volatility, volume, qscore)"
+    },
+    {
+      "command": "menthorq-forex",
+      "description": "Fetch MenthorQ forex gamma levels + blindspot data (14 pairs, 20+ fields per pair)"
+    },
+    {
+      "command": "menthorq-summary [CATEGORY]",
+      "description": "Fetch MenthorQ summary tables (futures: 93 rows, cryptos: 16 rows)"
+    },
+    {
+      "command": "menthorq-quin [PROMPT]",
+      "description": "Execute a QUIN AI screener query \u2014 natural-language search across 97+ metrics per ticker. See docs/menthorq-prompts.md for preset prompts"
+    },
+    {
       "command": "x-scan [@ACCOUNT]",
       "description": "Fetch tweets via xAI API and extract ticker sentiment (recommended, slower)"
     },
