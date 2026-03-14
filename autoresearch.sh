@@ -26,8 +26,13 @@ css_kb=$(( css_bytes / 1024 ))
 # Count chunks
 chunk_count=$(find .next/static -name "*.js" | wc -l | tr -d ' ')
 
-# Extract build time from log
-build_time=$(grep -o "Compiled successfully in [0-9.]*s" /tmp/next-build.log | grep -o "[0-9.]*" || echo "0")
+# Extract build time from log (handles "2.3s" and "1827.8ms" formats)
+raw_time=$(grep "Compiled successfully" /tmp/next-build.log | grep -o '[0-9.]*[ms]*' | tail -1 || echo "0")
+if echo "$raw_time" | grep -q "ms$"; then
+  build_time=$(echo "$raw_time" | sed 's/ms$//' | awk '{printf "%.1f", $1/1000}')
+else
+  build_time=$(echo "$raw_time" | sed 's/s$//')
+fi
 
 echo "METRIC bundle_kb=$js_kb"
 echo "METRIC css_kb=$css_kb"
