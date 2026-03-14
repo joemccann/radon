@@ -189,7 +189,7 @@ export default function CriHistoryChart({
       family="analytical-time-series"
       title={title}
       legend={series.map((item) => ({ label: item.label, color: item.color }))}
-      className="chart-panel-inline"
+      className="cp-i"
       bodyClassName="cri-history-chart-panel"
       contentClassName="cri-history-chart-content"
       dataTestId="cri-history-chart"
@@ -339,9 +339,9 @@ export default function CriHistoryChart({
               const val = tooltip.d![s.key];
               const fmt = s.format ?? defaultFormat;
               return (
-                <div key={String(s.key)} className="chart-tooltip-row">
-                  <span className="chart-tooltip-label">{s.label}</span>
-                  <span className="chart-tooltip-value" style={{ color: s.color }}>
+                <div key={String(s.key)} className="ct-r">
+                  <span className="ct-l">{s.label}</span>
+                  <span className="ct-v" style={{ color: s.color }}>
                     {val != null && Number.isFinite(val as number) ? fmt(val as number) : "---"}
                   </span>
                 </div>

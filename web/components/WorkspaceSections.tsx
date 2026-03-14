@@ -882,8 +882,8 @@ function OrderPriceCell({ price }: { price: number | null }) {
   return (
     <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
       {price != null ? fmtPrice(price) : "—"}
-      {direction === "up" && <ArrowUp size={11} className="pt-i price-trend-up" aria-label="price up" />}
-      {direction === "down" && <ArrowDown size={11} className="pt-i price-trend-down" aria-label="price down" />}
+      {direction === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="price up" />}
+      {direction === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="price down" />}
     </td>
   );
 }
@@ -1068,7 +1068,7 @@ function OrdersSections({
                         ) : (
                           <>
                             <button
-                              className="btn-order-action btn-modify"
+                              className="b-oa btn-modify"
                               disabled={!canModify(o)}
                               title={canModify(o) ? "Modify limit price" : "Only LMT orders can be modified"}
                               onClick={() => setModifyTarget(o)}
@@ -1076,7 +1076,7 @@ function OrdersSections({
                               MODIFY
                             </button>
                             <button
-                              className="btn-order-action btn-cancel"
+                              className="b-oa btn-cancel"
                               onClick={() => setCancelTarget(o)}
                             >
                               CANCEL

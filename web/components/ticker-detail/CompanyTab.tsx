@@ -74,7 +74,7 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
   }, [active, fetched, fetchInfo]);
 
   if (loading) {
-    return <div className="tab-loading"><div className="tab-loading-text">Loading company info...</div></div>;
+    return <div className="tab-loading"><div className="tl-t">Loading company info...</div></div>;
   }
   if (error) {
     return <div className="tab-error">{error}</div>;

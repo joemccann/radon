@@ -325,7 +325,7 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
           </div>
           <span className="pill neutral">LOADING</span>
         </div>
-        <div className="s-bd performance-empty">
+        <div className="s-bd pe">
           Reconstructing YTD portfolio performance...
         </div>
       </div>
@@ -342,7 +342,7 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
           </div>
           <span className="pill undefined">UNAVAILABLE</span>
         </div>
-        <div className="s-bd performance-empty">
+        <div className="s-bd pe">
           {error ?? "No performance data available."}
         </div>
       </div>
@@ -397,7 +397,7 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
 
       <PerformanceChart data={data} />
 
-      <div className="performance-grid-2">
+      <div className="pg-2">
         <div className="section">
           <div className="s-hd">
             <div className="s-tt">
@@ -439,7 +439,7 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
         </div>
       </div>
 
-      <div className="performance-grid-2">
+      <div className="pg-2">
         <div className="section">
           <div className="s-hd">
             <div className="s-tt">

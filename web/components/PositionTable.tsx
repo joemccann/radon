@@ -229,8 +229,8 @@ function LegRow({
       <td className="right cell-muted">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
       <td className="right last-price-cell">
         {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
-        {priceDirection === "up" && <ArrowUp size={11} className="pt-i price-trend-up" aria-label="price up" />}
-        {priceDirection === "down" && <ArrowDown size={11} className="pt-i price-trend-down" aria-label="price down" />}
+        {priceDirection === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="price up" />}
+        {priceDirection === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="price down" />}
       </td>
       <td></td>
       <td></td>
@@ -351,15 +351,15 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlyin
         {showUnderlying && (
           <td className={`right last-price-cell ${underlyingFlash ? `last-price-${underlyingFlash}` : ""}`}>
             {underlyingPrice != null ? fmtPrice(underlyingPrice) : "—"}
-            {underlyingDirection === "up" && <ArrowUp size={11} className="pt-i price-trend-up" aria-label="underlying up" />}
-            {underlyingDirection === "down" && <ArrowDown size={11} className="pt-i price-trend-down" aria-label="underlying down" />}
+            {underlyingDirection === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="underlying up" />}
+            {underlyingDirection === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="underlying down" />}
           </td>
         )}
         <td className="right">{fmtPrice(avgEntry)}</td>
         <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
           {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
-          {priceDirection === "up" && <ArrowUp size={11} className="pt-i price-trend-up" aria-label="price up" />}
-          {priceDirection === "down" && <ArrowDown size={11} className="pt-i price-trend-down" aria-label="price down" />}
+          {priceDirection === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="price up" />}
+          {priceDirection === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="price down" />}
         </td>
         <td className={`right ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
           {dailyChg != null ? `${dailyChg >= 0 ? "+" : ""}${dailyChg.toFixed(2)}%` : "—"}

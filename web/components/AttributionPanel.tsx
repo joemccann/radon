@@ -35,7 +35,7 @@ function PnlBar({ value, max }: { value: number; max: number }) {
 
 function StrategyTable({ strategies, maxPnl }: { strategies: StrategyAttribution[]; maxPnl: number }) {
   return (
-    <div className="attribution-table" data-testid="attribution-strategy-table">
+    <div className="att" data-testid="attribution-strategy-table">
       <div className="at-h">
         <span>Strategy</span>
         <span>Trades</span>
@@ -68,7 +68,7 @@ function EdgeTable({ edges, maxPnl }: { edges: EdgeAttribution[]; maxPnl: number
     none: "No Edge",
   };
   return (
-    <div className="attribution-table" data-testid="attribution-edge-table">
+    <div className="att" data-testid="attribution-edge-table">
       <div className="at-h">
         <span>Edge Type</span>
         <span>Trades</span>
@@ -97,7 +97,7 @@ function RiskTable({ risks }: { risks: RiskAttribution[] }) {
     unknown: "Unknown",
   };
   return (
-    <div className="attribution-table" data-testid="attribution-risk-table">
+    <div className="att" data-testid="attribution-risk-table">
       <div className="at-h">
         <span>Risk Profile</span>
         <span>Trades</span>
@@ -120,7 +120,7 @@ function TickerLeaderboard({ tickers }: { tickers: TickerAttributionEntry[] }) {
   const top = tickers.slice(0, 5);
   const bottom = [...tickers].sort((a, b) => a.realized_pnl - b.realized_pnl).slice(0, 5);
   return (
-    <div className="performance-grid-2" data-testid="attribution-ticker-leaderboard">
+    <div className="pg-2" data-testid="attribution-ticker-leaderboard">
       <div>
         <div className="attribution-mini-header positive">Top Performers</div>
         {top.map((t) => (
@@ -153,7 +153,7 @@ function KellyCalibration({ data }: { data: AttributionData }) {
   }
 
   return (
-    <div className="attribution-table" data-testid="attribution-kelly-table">
+    <div className="att" data-testid="attribution-kelly-table">
       <div className="at-h">
         <span>Strategy</span>
         <span>Expected WR</span>
@@ -189,7 +189,7 @@ export default function AttributionPanel() {
           </div>
           <span className="pill neutral">LOADING</span>
         </div>
-        <div className="s-bd performance-empty">
+        <div className="s-bd pe">
           Computing attribution across strategies...
         </div>
       </div>
@@ -206,7 +206,7 @@ export default function AttributionPanel() {
           </div>
           <span className="pill undefined">UNAVAILABLE</span>
         </div>
-        <div className="s-bd performance-empty">
+        <div className="s-bd pe">
           {error ?? "Attribution data not available."}
         </div>
       </div>
@@ -233,7 +233,7 @@ export default function AttributionPanel() {
       </div>
 
       {/* Edge Quality + Risk Profile side by side */}
-      <div className="performance-grid-2">
+      <div className="pg-2">
         <div className="section">
           <div className="s-hd">
             <div className="s-tt">

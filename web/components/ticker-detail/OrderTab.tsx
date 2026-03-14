@@ -113,7 +113,7 @@ function ExistingOrderRow({
       {!isPending && (
         <div className="existing-order-actions">
           <button
-            className="btn-order-action btn-modify"
+            className="b-oa btn-modify"
             disabled={!canModify}
             title={canModify ? "Modify limit price" : "Only LMT orders can be modified"}
             onClick={() => onModify(order)}
@@ -121,7 +121,7 @@ function ExistingOrderRow({
             MODIFY
           </button>
           <button
-            className="btn-order-action btn-cancel"
+            className="b-oa btn-cancel"
             onClick={handleCancel}
             disabled={actionLoading}
           >
@@ -619,7 +619,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
         {/* Existing open orders for this ticker */}
         {openOrders.length > 0 && (
           <div className="existing-orders-section">
-            <div className="existing-orders-title">Open Orders</div>
+            <div className="eo-t">Open Orders</div>
             {openOrders.map((o) => (
               <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={setModifyTarget} />
             ))}
@@ -629,7 +629,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
         {/* Combo order form for multi-leg positions */}
         {isCombo && (
           <div className={openOrders.length > 0 ? "new-order-section" : ""}>
-            {openOrders.length > 0 && <div className="existing-orders-title">Combo Order</div>}
+            {openOrders.length > 0 && <div className="eo-t">Combo Order</div>}
             <ComboOrderForm ticker={ticker} position={position!} prices={prices} />
           </div>
         )}
@@ -637,7 +637,7 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
         {/* Stock / single-leg order form */}
         {!isCombo && (
           <div className={openOrders.length > 0 ? "new-order-section" : ""}>
-            {openOrders.length > 0 && <div className="existing-orders-title">New Order</div>}
+            {openOrders.length > 0 && <div className="eo-t">New Order</div>}
             <NewOrderForm ticker={ticker} position={position} tickerPriceData={tickerPriceData} />
           </div>
         )}

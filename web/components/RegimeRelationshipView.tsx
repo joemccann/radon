@@ -227,7 +227,7 @@ export default function RegimeRelationshipView({
           </span>
         </div>
       }
-      className="chart-panel-inline regime-relationship-view"
+      className="cp-i regime-relationship-view"
       contentClassName="regime-relationship-content"
       dataTestId="regime-relationship-view"
     >
@@ -310,7 +310,7 @@ export default function RegimeRelationshipView({
                 );
               })}
 
-              <path d={spreadLine ?? ""} className="regime-relationship-line regime-relationship-line-spread" />
+              <path d={spreadLine ?? ""} className="rr-li regime-relationship-line-spread" />
 
               <circle
                 cx={xScale(entries.length - 1)}
@@ -326,7 +326,7 @@ export default function RegimeRelationshipView({
                     x2={xScale(index)}
                     y1={innerHeight}
                     y2={innerHeight + 6}
-                    className="regime-relationship-axis-tick"
+                    className="rr-ak"
                   />
                   <text
                     x={xScale(index)}
@@ -350,7 +350,7 @@ export default function RegimeRelationshipView({
             </div>
             <div className="rr-su">
               <div
-                className="rr-va regime-relationship-value-compact"
+                className="rr-va rr-vc"
                 data-testid="regime-current-quadrant"
                 style={{ color: quadrantColor }}
               >
@@ -449,7 +449,7 @@ export default function RegimeRelationshipView({
                 x={innerWidth / 2}
                 y={innerHeight + 30}
                 textAnchor="middle"
-                className="regime-relationship-axis-title"
+                className="rr-at"
               >
                 RVOL
               </text>
@@ -458,7 +458,7 @@ export default function RegimeRelationshipView({
                 y={-30}
                 textAnchor="middle"
                 transform="rotate(-90)"
-                className="regime-relationship-axis-title"
+                className="rr-at"
               >
                 COR1M
               </text>
@@ -512,7 +512,7 @@ export default function RegimeRelationshipView({
             </div>
             <div className="rr-su">
               <div
-                className="rr-va regime-relationship-value-compact"
+                className="rr-va rr-vc"
                 data-testid="regime-current-zgap"
                 style={{ color: spreadStateColor(summary.zScoreBias) }}
               >
@@ -567,8 +567,8 @@ export default function RegimeRelationshipView({
                   className="rr-bl"
                 />
 
-                <path d={zRvolLine ?? ""} className="regime-relationship-line regime-relationship-line-rvol" />
-                <path d={zCor1mLine ?? ""} className="regime-relationship-line regime-relationship-line-cor1m" />
+                <path d={zRvolLine ?? ""} className="rr-li regime-relationship-line-rvol" />
+                <path d={zCor1mLine ?? ""} className="rr-li regime-relationship-line-cor1m" />
 
                 <circle
                   cx={xScale(entries.length - 1)}
@@ -614,7 +614,7 @@ export default function RegimeRelationshipView({
                       x2={xScale(index)}
                       y1={innerHeight}
                       y2={innerHeight + 6}
-                      className="regime-relationship-axis-tick"
+                      className="rr-ak"
                     />
                     <text
                       x={xScale(index)}
@@ -653,17 +653,17 @@ export default function RegimeRelationshipView({
                 <div className="chart-tooltip-date" data-testid="regime-zscore-hover-date">
                   {formatDateLabel(zScoreHover.entry.date)}
                 </div>
-                <div className="chart-tooltip-row">
-                  <span className="chart-tooltip-label">RVOL z-score</span>
-                  <span className="chart-tooltip-value">{fmtSigned(zScoreHover.entry.realizedVolZ)}σ</span>
+                <div className="ct-r">
+                  <span className="ct-l">RVOL z-score</span>
+                  <span className="ct-v">{fmtSigned(zScoreHover.entry.realizedVolZ)}σ</span>
                 </div>
-                <div className="chart-tooltip-row">
-                  <span className="chart-tooltip-label">COR1M z-score</span>
-                  <span className="chart-tooltip-value">{fmtSigned(zScoreHover.entry.cor1mZ)}σ</span>
+                <div className="ct-r">
+                  <span className="ct-l">COR1M z-score</span>
+                  <span className="ct-v">{fmtSigned(zScoreHover.entry.cor1mZ)}σ</span>
                 </div>
-                <div className="chart-tooltip-row">
-                  <span className="chart-tooltip-label">Divergence</span>
-                  <span className="chart-tooltip-value">{fmtSigned(zScoreHover.entry.zDivergence)}σ</span>
+                <div className="ct-r">
+                  <span className="ct-l">Divergence</span>
+                  <span className="ct-v">{fmtSigned(zScoreHover.entry.zDivergence)}σ</span>
                 </div>
               </div>
             )}

@@ -104,7 +104,7 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
   }, [active, fetched, fetchRatings]);
 
   if (loading) {
-    return <div className="tab-loading"><div className="tab-loading-text">Loading ratings...</div></div>;
+    return <div className="tab-loading"><div className="tl-t">Loading ratings...</div></div>;
   }
   if (error) {
     return <div className="tab-error">{error}</div>;
@@ -163,11 +163,11 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
       {total > 0 && (
         <div className="ratings-bar-wrap">
           <div className="ratings-bar">
-            {strongBuy > 0 && <div className="ratings-bar-seg ratings-strong-buy" style={{ flex: strongBuy }}>{strongBuy}</div>}
-            {buy > 0 && <div className="ratings-bar-seg ratings-buy" style={{ flex: buy }}>{buy}</div>}
-            {hold > 0 && <div className="ratings-bar-seg ratings-hold" style={{ flex: hold }}>{hold}</div>}
-            {sell > 0 && <div className="ratings-bar-seg ratings-sell" style={{ flex: sell }}>{sell}</div>}
-            {strongSell > 0 && <div className="ratings-bar-seg ratings-strong-sell" style={{ flex: strongSell }}>{strongSell}</div>}
+            {strongBuy > 0 && <div className="rb-s ratings-strong-buy" style={{ flex: strongBuy }}>{strongBuy}</div>}
+            {buy > 0 && <div className="rb-s ratings-buy" style={{ flex: buy }}>{buy}</div>}
+            {hold > 0 && <div className="rb-s ratings-hold" style={{ flex: hold }}>{hold}</div>}
+            {sell > 0 && <div className="rb-s ratings-sell" style={{ flex: sell }}>{sell}</div>}
+            {strongSell > 0 && <div className="rb-s ratings-strong-sell" style={{ flex: strongSell }}>{strongSell}</div>}
           </div>
           <div className="ratings-bar-labels">
             <span>Strong Buy</span>

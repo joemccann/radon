@@ -53,7 +53,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
   if (loading) {
     return (
       <div className="tab-loading">
-        <div className="tab-loading-text">Loading news...</div>
+        <div className="tl-t">Loading news...</div>
       </div>
     );
   }

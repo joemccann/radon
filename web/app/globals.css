@@ -298,7 +298,7 @@ body {
 }
 
 .breadcrumb span,
-.chart-tooltip-value,
+.ct-v,
 .chat-message.user,
 .leg-toggle-btn:hover,
 .pos-legs-toggle:hover,
@@ -412,7 +412,7 @@ body {
 }
 
 .metric-label,
-.existing-orders-title { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 8px; }
+.eo-t { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); margin-bottom: 8px; }
 
 .metric-value {
   font-family: var(--font-mono);
@@ -447,7 +447,7 @@ body {
 }
 
 .metric-change.positive,
-.price-trend-up,
+.ptu,
 .bullish,
 .modify-delta.positive,
 .price-bar-value.positive,
@@ -457,7 +457,7 @@ body {
 .regime-history .text-positive { color: var(--positive); }
 
 .metric-change.negative,
-.price-trend-down,
+.ptd,
 .sync-status.sync-error,
 .bearish,
 .modify-delta.negative,
@@ -502,7 +502,7 @@ body {
   overflow: hidden;
 }
 
-.chart-panel-inline {
+.cp-i {
   margin-bottom: 0;
 }
 
@@ -610,9 +610,9 @@ body {
 }
 
 .chart-tooltip-date,
-.chart-tooltip-row,
-.chart-tooltip-label,
-.chart-tooltip-value {
+.ct-r,
+.ct-l,
+.ct-v {
   font-family: var(--font-mono);
   font-size: 10px;
 }
@@ -623,14 +623,14 @@ body {
   letter-spacing: 0.05em;
 }
 
-.chart-tooltip-row {
+.ct-r {
   display: flex;
   justify-content: space-between;
   gap: 12px;
   line-height: 1.6;
 }
 
-.chart-tooltip-label,
+.ct-l,
 .performance-metric-list span,
 .combo-leg-desc,
 .t-s { color: var(--text-secondary); }
@@ -744,11 +744,11 @@ td.last-price-cell {
 
 .flow-spark-bar.accum,
 .seasonality-bar-positive,
-.seasonality-legend-dot.seasonality-favorable { background: var(--positive); }
+.sl-d.seasonality-favorable { background: var(--positive); }
 
 .flow-spark-bar.distrib,
 .seasonality-bar-negative,
-.seasonality-legend-dot.seasonality-unfavorable,
+.sl-d.seasonality-unfavorable,
 .attribution-pnl-fill.negative { background: var(--negative); }
 
 .flow-spark-bar.neutral {
@@ -874,7 +874,7 @@ td.last-price-cell {
 
 .pa-l,
 .rr-gl,
-.regime-relationship-axis-tick { stroke: var(--border-dim); stroke-width: 1; }
+.rr-ak { stroke: var(--border-dim); stroke-width: 1; }
 
 .performance-axis-label {
   fill: var(--text-muted);
@@ -884,10 +884,10 @@ td.last-price-cell {
 }
 
 .performance-line,
-.regime-relationship-line { fill: none; stroke-width: 2; }
+.rr-li { fill: none; stroke-width: 2; }
 
 .performance-line-equity,
-.regime-relationship-line-spread { stroke: var(--signal-core); }
+.rr-li-spread { stroke: var(--signal-core); }
 
 .performance-line-benchmark {
   stroke: var(--performance-chart-benchmark);
@@ -925,7 +925,7 @@ td.last-price-cell {
   color: var(--text-primary);
 }
 
-.performance-grid-2 {
+.pg-2 {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 20px;
@@ -974,7 +974,7 @@ td.last-price-cell {
   border-bottom: none;
 }
 
-.performance-empty {
+.pe {
   padding: 18px 16px;
   font-family: var(--font-mono);
   font-size: 12px;
@@ -1291,7 +1291,7 @@ td.last-price-cell {
     grid-template-columns: repeat(2, 1fr);
   }
 
-  .performance-grid-2,
+  .pg-2,
   .performance-chart-meta,
   .performance-meta-grid {
     grid-template-columns: 1fr;
@@ -1674,7 +1674,7 @@ tr.leg-row td {
   white-space: nowrap;
 }
 
-.btn-order-action {
+.b-oa {
   display: inline-block;
   font-family: var(--font-mono);
   font-size: 9px;
@@ -1688,11 +1688,11 @@ tr.leg-row td {
   margin-left: 4px;
 }
 
-.btn-order-action:first-child {
+.b-oa:first-child {
   margin-left: 0;
 }
 
-.btn-order-action:disabled,
+.b-oa:disabled,
 .btn-quick:disabled { opacity: 0.3; cursor: not-allowed; }
 
 .btn-modify {
@@ -2067,7 +2067,7 @@ tr.leg-row td {
 
 /* Tab shared */
 .tab-loading { padding: 24px 0; text-align: center; }
-.tab-loading-text,
+.tl-t,
 .ratings-count,
 .seasonality-stat { font-family: var(--font-mono); font-size: 11px; color: var(--text-muted); }
 .tab-error { font-family: var(--font-mono); font-size: 11px; color: var(--negative); padding: 16px 0; }
@@ -2136,7 +2136,7 @@ tr.leg-row td {
 .ratings-rec-pill.neutral,
 .seasonality-rating-pill.seasonality-neutral { color: var(--text-muted); border-color: var(--text-muted); }
 .ratings-bar { display: flex; height: 24px; border: 1px solid var(--border-dim); overflow: hidden; }
-.ratings-bar-seg { display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 500; min-width: 20px; }
+.rb-s { display: flex; align-items: center; justify-content: center; font-family: var(--font-mono); font-size: 10px; font-weight: 500; min-width: 20px; }
 .ratings-strong-buy { background: #048A7A; color: #fff; }
 .ratings-buy { background: var(--positive); color: #000; }
 .ratings-hold { background: #475569; color: #fff; }
@@ -2184,7 +2184,7 @@ tr.leg-row td {
 .btn-primary:active:not(:disabled),
 .bt-s:active:not(:disabled),
 .btn-danger:active:not(:disabled),
-.btn-order-action:active:not(:disabled),
+.b-oa:active:not(:disabled),
 .btn-quick:active:not(:disabled),
 .pill-chip:active,
 .chat-send:active:not(:disabled),
@@ -2256,9 +2256,9 @@ tr {
 
 /* Legend */
 .seasonality-legend { display: flex; flex-direction: column; gap: 4px; padding-top: 8px; border-top: 1px solid var(--border-dim); }
-.seasonality-legend-item { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
-.seasonality-legend-dot { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
-.seasonality-legend-dot.seasonality-neutral { background: var(--text-muted); }
+.sl-i { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); display: flex; align-items: center; gap: 6px; }
+.sl-d { width: 8px; height: 8px; border-radius: 2px; flex-shrink: 0; }
+.sl-d.seasonality-neutral { background: var(--text-muted); }
 .seasonality-cell-nodata { opacity: 0.4; }
 .seasonality-cell-nodata-text { font-family: var(--font-mono); font-size: 9px; color: var(--text-muted); font-style: italic; padding: 4px 0; }
 .seasonality-row-nodata { opacity: 0.5; }
@@ -3076,11 +3076,11 @@ tr {
   opacity: 0.7;
 }
 
-.regime-relationship-line-rvol {
+.rr-li-rvol {
   stroke: var(--warning);
 }
 
-.regime-relationship-line-cor1m {
+.rr-li-cor1m {
   stroke: var(--dislocation);
 }
 
@@ -3104,14 +3104,14 @@ tr {
 }
 
 .rr-al,
-.regime-relationship-axis-title,
+.rr-at,
 
 .rr-al {
   font-size: 10px;
   fill: var(--text-muted);
 }
 
-.regime-relationship-axis-title {
+.rr-at {
   font-size: 10px;
   fill: var(--text-secondary);
   letter-spacing: 0.08em;
@@ -3696,7 +3696,7 @@ tr {
   .lg\:grid-cols-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 /* ── Attribution Panel ─────────────────────────────────────────────── */
 
-.attribution-table {
+.att {
   display: flex;
   flex-direction: column;
   gap: 0;
@@ -3764,15 +3764,15 @@ tr {
 }
 
 /* Risk/Edge tables — 4 columns (no bar) */
-.attribution-table[data-testid="attribution-risk-table"] .at-h,
-.attribution-table[data-testid="attribution-risk-table"] .at-r,
-.attribution-table[data-testid="attribution-kelly-table"] .at-h,
-.attribution-table[data-testid="attribution-kelly-table"] .at-r {
+.att[data-testid="attribution-risk-table"] .at-h,
+.att[data-testid="attribution-risk-table"] .at-r,
+.att[data-testid="attribution-kelly-table"] .at-h,
+.att[data-testid="attribution-kelly-table"] .at-r {
   grid-template-columns: 2fr 1fr 1fr 1.5fr;
 }
 
 /* Kelly table — 5 columns */
-.attribution-table[data-testid="attribution-kelly-table"] .at-h,
-.attribution-table[data-testid="attribution-kelly-table"] .at-r {
+.att[data-testid="attribution-kelly-table"] .at-h,
+.att[data-testid="attribution-kelly-table"] .at-r {
   grid-template-columns: 2fr 1fr 1fr 1fr 1fr;
 }

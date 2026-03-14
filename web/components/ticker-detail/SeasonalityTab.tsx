@@ -128,7 +128,7 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
   if (loading) {
     return (
       <div className="tab-loading">
-        <div className="tab-loading-text">Loading seasonality...</div>
+        <div className="tl-t">Loading seasonality...</div>
       </div>
     );
   }
@@ -259,14 +259,14 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
 
       {/* Legend */}
       <div className="seasonality-legend">
-        <span className="seasonality-legend-item">
-          <span className="seasonality-legend-dot seasonality-favorable" /> FAVORABLE: win rate &gt;60%
+        <span className="sl-i">
+          <span className="sl-d seasonality-favorable" /> FAVORABLE: win rate &gt;60%
         </span>
-        <span className="seasonality-legend-item">
-          <span className="seasonality-legend-dot seasonality-neutral" /> NEUTRAL: 50-60% win rate
+        <span className="sl-i">
+          <span className="sl-d seasonality-neutral" /> NEUTRAL: 50-60% win rate
         </span>
-        <span className="seasonality-legend-item">
-          <span className="seasonality-legend-dot seasonality-unfavorable" /> UNFAVORABLE: win rate &lt;50%
+        <span className="sl-i">
+          <span className="sl-d seasonality-unfavorable" /> UNFAVORABLE: win rate &lt;50%
         </span>
       </div>
     </div>
