@@ -9,6 +9,10 @@ const config = {
     removeConsole: { exclude: ["error", "warn"] },
     reactRemoveProperties: { properties: ["^data-testid$"] },
   },
+  experimental: {
+    turbopackInferModuleSideEffects: true,
+    inlineCss: true,
+  },
   turbopack: {},
   webpack: (config) => {
     config.resolve.alias["@tools"] = resolve(__dirname, "..", "lib", "tools");

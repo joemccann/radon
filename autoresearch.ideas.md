@@ -30,4 +30,13 @@
 - 110KB core-js polyfills: shipped by framework, no config to remove
 - 332KB app code: proportional to 51 client components (charts, tables, order management)
 - 39KB liveline canvas charting: would require major rewrite to replace
-- 71KB CSS: all rules verified as used
+- 71KB CSS: all rules verified as used, 12KB gzipped (compression handles repetition)
+
+## Exhausted approaches (session 3+)
+- optimizePackageImports for lucide-react: 0KB (Turbopack already tree-shakes)
+- Dynamic import RegimeRelationshipView: +5KB (chunk wrapper overhead, confirmed dead end)
+- Dead utils.ts exports (11 functions): 0KB (Turbopack already tree-shakes them)
+- Dead CSS selectors: 0 found (all classes referenced)
+- Move chat formatters server-side: ~5KB savings possible but changes API contract, too risky
+- Server components: 34/36 need client interactivity, can't convert more
+- CSS utility class extraction: 73KB→12KB gzipped, gzip already handles repetition efficiently
