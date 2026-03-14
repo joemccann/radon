@@ -7,6 +7,7 @@ const config = {
   outputFileTracingRoot: resolve(__dirname, ".."),
   compiler: {
     removeConsole: { exclude: ["error", "warn"] },
+    reactRemoveProperties: { properties: ["^data-testid$"] },
   },
   turbopack: {},
   webpack: (config) => {

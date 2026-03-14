@@ -1239,33 +1239,12 @@ td.last-price-cell {
   white-space: pre-wrap;
 }
 
-.chat-line.chat-gap {
-  height: 0.35rem;
-}
-
-.chat-line.chat-list-item {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-}
 
 
 
-.chat-line.chat-kv {
-  display: grid;
-  grid-template-columns: 130px 1fr;
-  gap: 8px;
-}
 
 
-.chat-line.chat-heading {
-  color: var(--text-primary);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
+
 
 .chat-empty {
   color: var(--text-muted);
@@ -3284,12 +3263,8 @@ tr {
 
 .regime-history td.text-right { text-align: right; }
 
-.regime-history tr.regime-history-current {
-  background: var(--bg-hover);
-}
 
 .regime-history .text-negative { color: var(--negative); }
-.regime-history .text-warning { color: var(--warning); }
 .regime-history .text-positive { color: var(--positive); }
 
 .regime-history-grid {
