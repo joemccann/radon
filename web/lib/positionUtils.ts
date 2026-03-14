@@ -4,9 +4,9 @@ import { optionKey } from "@/lib/pricesProtocol";
 
 /* ─── Formatters ──────────────────────────────────────────── */
 
-import { fmtPrice } from "@/lib/format";
+import { fmtPrice, fmtUsdRound } from "@/lib/format";
 export { fmtPrice };
-export const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+export const fmtUsd = fmtUsdRound;
 export const fmtPriceOrCalculated = (n: number, isCalculated: boolean) => isCalculated ? `C${fmtPrice(n)}` : fmtPrice(n);
 
 /* ─── Position math ───────────────────────────────────────── */

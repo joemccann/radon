@@ -15,6 +15,10 @@ export function fmtPct(v: number | null | undefined, decimals = 2, raw = false):
   return `${pct >= 0 ? "+" : ""}${pct.toFixed(decimals)}%`;
 }
 
+/** Format as rounded USD: "$45,678" / "-$1,234" (no millions abbreviation) */
+export const fmtUsdRound = (n: number): string =>
+  `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
 /** Format as USD: "$1.23M" / "$45,678" / "-$1,234" */
 export function fmtUsd(value: number): string {
   const abs = Math.abs(value);

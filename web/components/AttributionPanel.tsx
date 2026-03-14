@@ -9,25 +9,11 @@ import type {
   RiskAttribution,
   TickerAttributionEntry,
 } from "@/lib/types";
-
-function fmtUsd(value: number): string {
-  const abs = Math.abs(value);
-  if (abs >= 1_000_000) {
-    return `${value < 0 ? "-" : "+"}$${(abs / 1_000_000).toFixed(2)}M`;
-  }
-  return `${value < 0 ? "-" : "+"}$${abs.toLocaleString("en-US", {
-    minimumFractionDigits: 0,
-    maximumFractionDigits: 0,
-  })}`;
-}
+import { fmtSignedUsd as fmtUsd, fmtPct as fmtPctShared, toneClass } from "@/lib/format";
 
 function fmtPct(value: number | null): string {
   if (value === null) return "---";
-  return `${(value * 100).toFixed(0)}%`;
-}
-
-function toneClass(value: number): string {
-  return value > 0 ? "positive" : value < 0 ? "negative" : "";
+  return fmtPctShared(value, 0);
 }
 
 function PnlBar({ value, max }: { value: number; max: number }) {

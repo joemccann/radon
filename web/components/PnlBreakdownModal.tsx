@@ -1,6 +1,7 @@
 "use client";
 
 import Modal from "./Modal";
+import { fmtSignedUsdExact, fmtPct as fmtPctShared } from "@/lib/format";
 
 export type PnlBreakdownRow = {
   id: string | number;
@@ -25,14 +26,8 @@ type Props = {
   className?: string;
 };
 
-function fmtSigned(n: number, decimals = 0) {
-  const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
-  return `${n >= 0 ? "+" : "-"}$${abs}`;
-}
-
-function fmtPct(n: number) {
-  return `${n >= 0 ? "+" : ""}${n.toFixed(1)}%`;
-}
+const fmtSigned = (_n: number, _d?: number) => fmtSignedUsdExact(_n);
+const fmtPct = (n: number) => fmtPctShared(n, 1, true);
 
 export default function PnlBreakdownModal({
   open, title, formula, col1Header, col2Header, rows, total, totalLabel = "TOTAL", onClose, className = "",
