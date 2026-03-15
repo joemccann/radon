@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { ibOrders } from "@tools/wrappers/ib-orders";
 import { readDataFile } from "@tools/data-reader";
 import { OrdersData } from "@tools/schemas/ib-orders";
-import { createSyncMutex } from "@/lib/syncMutex";
+import { radonFetch } from "@/lib/radonApi";
 import type { Static } from "@sinclair/typebox";
 
 export const runtime = "nodejs";
@@ -20,10 +19,7 @@ const readOrders = async (): Promise<Static<typeof OrdersData>> => {
   return result.ok ? result.data : EMPTY_ORDERS;
 };
 
-const syncMutex = createSyncMutex(async () => {
-  const result = await ibOrders({ sync: true, port: 4001, clientId: 11 });
-  return { ok: result.ok, stderr: result.ok ? "" : result.stderr };
-});
+let syncInFlight: Promise<void> | null = null;
 
 export async function GET(): Promise<Response> {
   try {
@@ -37,28 +33,29 @@ export async function GET(): Promise<Response> {
 
 export async function POST(): Promise<Response> {
   try {
-    const result = await syncMutex();
-
-    if (!result.ok) {
-      // Sync failed — fall back to cached data file
-      const cached = await readOrders();
-      if (cached.last_sync) {
-        console.warn("[Orders] Sync failed, serving cached data:", result.stderr);
-        const res = NextResponse.json(cached);
-        res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
-        return res;
-      }
-      // No cached data (empty last_sync) — genuine failure
-      return NextResponse.json(
-        { error: "Sync failed", stderr: result.stderr },
-        { status: 502 },
-      );
+    // Coalesce concurrent POSTs
+    if (!syncInFlight) {
+      syncInFlight = radonFetch("/orders/refresh", { method: "POST", timeout: 35_000 })
+        .then(() => {})
+        .finally(() => { syncInFlight = null; });
     }
+    await syncInFlight;
 
     const data = await readOrders();
     return NextResponse.json(data);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Sync failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+  } catch {
+    // Sync failed — fall back to cached data file
+    const cached = await readOrders();
+    if (cached.last_sync) {
+      console.warn("[Orders] Sync failed, serving cached data");
+      const res = NextResponse.json(cached);
+      res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
+      return res;
+    }
+    // No cached data (empty last_sync) — genuine failure
+    return NextResponse.json(
+      { error: "Sync failed" },
+      { status: 502 },
+    );
   }
 }

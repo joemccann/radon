@@ -71,6 +71,22 @@ vi.mock("@/lib/syncMutex", () => ({
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
 
+// Mock @/lib/radonApi — the NEW dependency for migrated routes
+const mockRadonFetch = vi.fn().mockRejectedValue(new Error("mocked"));
+vi.mock("@/lib/radonApi", () => ({
+  radonFetch: mockRadonFetch,
+  RadonApiError: class extends Error {
+    status: number;
+    detail: string;
+    constructor(status: number, detail: string) {
+      super(`Radon API ${status}: ${detail}`);
+      this.name = "RadonApiError";
+      this.status = status;
+      this.detail = detail;
+    }
+  },
+}));
+
 // ---------------------------------------------------------------------------
 // Env helpers
 // ---------------------------------------------------------------------------
@@ -526,10 +542,8 @@ describe("POST /api/previous-close — extended", () => {
 describe("POST /api/orders/cancel — extended", () => {
   beforeEach(() => {
     vi.resetModules();
-    mockIbCancelOrder.mockReset();
-    mockIbOrders.mockReset();
+    mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
-    mockIbOrders.mockResolvedValue({ ok: true, stderr: "" });
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -537,10 +551,9 @@ describe("POST /api/orders/cancel — extended", () => {
   });
 
   it("returns success when cancel succeeds", async () => {
-    mockIbCancelOrder.mockResolvedValue({
-      ok: true,
-      data: { status: "ok", message: "Order 101 cancelled" },
-    });
+    mockRadonFetch
+      .mockResolvedValueOnce({ status: "ok", message: "Order 101 cancelled" })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/cancel/route");
     const res = await POST(
@@ -558,12 +571,8 @@ describe("POST /api/orders/cancel — extended", () => {
     expect(body.orders).toBeDefined();
   });
 
-  it("returns 502 when cancel wrapper fails", async () => {
-    mockIbCancelOrder.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "conn refused",
-    });
+  it("returns 500 when cancel fails via radonFetch", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("conn refused"));
 
     const { POST } = await import("../app/api/orders/cancel/route");
     const res = await POST(
@@ -573,31 +582,10 @@ describe("POST /api/orders/cancel — extended", () => {
         body: JSON.stringify({ orderId: 202 }),
       }),
     );
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
 
     const body = await res.json();
-    expect(body.error).toBe("Cancel failed");
-    expect(body.stderr).toBe("conn refused");
-  });
-
-  it("returns 502 when IB reports error status", async () => {
-    mockIbCancelOrder.mockResolvedValue({
-      ok: true,
-      data: { status: "error", message: "Order not found" },
-    });
-
-    const { POST } = await import("../app/api/orders/cancel/route");
-    const res = await POST(
-      new Request("http://localhost/api/orders/cancel", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: 999 }),
-      }),
-    );
-    expect(res.status).toBe(502);
-
-    const body = await res.json();
-    expect(body.error).toBe("Order not found");
+    expect(body.error).toContain("conn refused");
   });
 
   it("returns 400 when neither orderId nor permId provided", async () => {
@@ -623,10 +611,8 @@ describe("POST /api/orders/cancel — extended", () => {
 describe("POST /api/orders/modify — extended", () => {
   beforeEach(() => {
     vi.resetModules();
-    mockIbModifyOrder.mockReset();
-    mockIbOrders.mockReset();
+    mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
-    mockIbOrders.mockResolvedValue({ ok: true, stderr: "" });
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -634,10 +620,9 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns success when modify succeeds", async () => {
-    mockIbModifyOrder.mockResolvedValue({
-      ok: true,
-      data: { status: "ok", message: "Order 101 modified to 5.50" },
-    });
+    mockRadonFetch
+      .mockResolvedValueOnce({ status: "ok", message: "Order 101 modified to 5.50" })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/modify/route");
     const res = await POST(
@@ -655,12 +640,8 @@ describe("POST /api/orders/modify — extended", () => {
     expect(body.orders).toBeDefined();
   });
 
-  it("returns 502 when modify wrapper fails", async () => {
-    mockIbModifyOrder.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "connection timeout",
-    });
+  it("returns 500 when modify fails via radonFetch", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("connection timeout"));
 
     const { POST } = await import("../app/api/orders/modify/route");
     const res = await POST(
@@ -670,31 +651,10 @@ describe("POST /api/orders/modify — extended", () => {
         body: JSON.stringify({ orderId: 202, newPrice: 3.00 }),
       }),
     );
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
 
     const body = await res.json();
-    expect(body.error).toBe("Modify failed");
-    expect(body.stderr).toBe("connection timeout");
-  });
-
-  it("returns 502 when IB reports error status", async () => {
-    mockIbModifyOrder.mockResolvedValue({
-      ok: true,
-      data: { status: "error", message: "Order not found" },
-    });
-
-    const { POST } = await import("../app/api/orders/modify/route");
-    const res = await POST(
-      new Request("http://localhost/api/orders/modify", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: 999, newPrice: 2.00 }),
-      }),
-    );
-    expect(res.status).toBe(502);
-
-    const body = await res.json();
-    expect(body.error).toBe("Order not found");
+    expect(body.error).toContain("connection timeout");
   });
 
   it("returns 400 when neither orderId nor permId provided", async () => {
@@ -735,10 +695,8 @@ describe("POST /api/orders/modify — extended", () => {
 describe("POST /api/orders/place — extended", () => {
   beforeEach(() => {
     vi.resetModules();
-    mockRunScript.mockReset();
-    mockIbOrders.mockReset();
+    mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
-    mockIbOrders.mockResolvedValue({ ok: true, stderr: "" });
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -746,16 +704,15 @@ describe("POST /api/orders/place — extended", () => {
   });
 
   it("returns success with orderId when placement succeeds", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
+    mockRadonFetch
+      .mockResolvedValueOnce({
         status: "ok",
         orderId: 12345,
         permId: 67890,
         initialStatus: "Submitted",
         message: "Order placed successfully",
-      },
-    });
+      })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/place/route");
     const res = await POST(
@@ -781,12 +738,8 @@ describe("POST /api/orders/place — extended", () => {
     expect(body.orders).toBeDefined();
   });
 
-  it("returns 502 when script fails", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "IB Gateway not running",
-    });
+  it("returns 500 when radonFetch fails", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("IB Gateway not running"));
 
     const { POST } = await import("../app/api/orders/place/route");
     const res = await POST(
@@ -802,40 +755,10 @@ describe("POST /api/orders/place — extended", () => {
         }),
       }),
     );
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(500);
 
     const body = await res.json();
-    expect(body.error).toBe("Order placement failed");
-    expect(body.stderr).toBe("IB Gateway not running");
-  });
-
-  it("returns 502 when IB reports error in the result", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
-        status: "error",
-        message: "Insufficient margin",
-      },
-    });
-
-    const { POST } = await import("../app/api/orders/place/route");
-    const res = await POST(
-      new Request("http://localhost/api/orders/place", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "stock",
-          symbol: "TSLA",
-          action: "BUY",
-          quantity: 1000,
-          limitPrice: 250.00,
-        }),
-      }),
-    );
-    expect(res.status).toBe(502);
-
-    const body = await res.json();
-    expect(body.error).toBe("Insufficient margin");
+    expect(body.error).toContain("IB Gateway");
   });
 
   it("returns 400 when required fields are missing", async () => {
@@ -850,17 +773,16 @@ describe("POST /api/orders/place — extended", () => {
     expect(res.status).toBe(400);
   });
 
-  it("passes option fields through to the script correctly", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
+  it("passes option fields through to radonFetch correctly", async () => {
+    mockRadonFetch
+      .mockResolvedValueOnce({
         status: "ok",
         orderId: 55555,
         permId: 88888,
         initialStatus: "PreSubmitted",
         message: "Option order placed",
-      },
-    });
+      })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/place/route");
     const res = await POST(
@@ -880,26 +802,16 @@ describe("POST /api/orders/place — extended", () => {
       }),
     );
     expect(res.status).toBe(200);
-
     const body = await res.json();
     expect(body.orderId).toBe(55555);
 
-    // Verify runScript was called with correct args
-    expect(mockRunScript).toHaveBeenCalledWith(
-      "scripts/ib_place_order.py",
-      expect.objectContaining({
-        args: expect.arrayContaining(["--json"]),
-      }),
-    );
-
-    // Verify the JSON arg contains option fields
-    const callArgs = mockRunScript.mock.calls[0][1].args as string[];
-    const jsonArg = callArgs[callArgs.indexOf("--json") + 1];
-    const parsed = JSON.parse(jsonArg);
-    expect(parsed.expiry).toBe("20260320");
-    expect(parsed.strike).toBe(200);
-    expect(parsed.right).toBe("C");
-    expect(parsed.symbol).toBe("AAPL");
+    // Verify radonFetch was called with order payload containing option fields
+    const [, opts] = mockRadonFetch.mock.calls[0];
+    const payload = JSON.parse(opts.body);
+    expect(payload.expiry).toBe("20260320");
+    expect(payload.strike).toBe(200);
+    expect(payload.right).toBe("C");
+    expect(payload.symbol).toBe("AAPL");
   });
 });
 
@@ -923,10 +835,8 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
 
   beforeEach(() => {
     vi.resetModules();
-    mockRunScript.mockReset();
-    mockIbOrders.mockReset();
+    mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
-    mockIbOrders.mockResolvedValue({ ok: true, stderr: "" });
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -934,15 +844,12 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
   });
 
   it("returns 502 when IB silently cancels the order (Cancelled status)", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
-        status: "ok",
-        orderId: 12345,
-        permId: 67890,
-        initialStatus: "Cancelled",
-        message: "SELL 20 SPXU @ $2.25 — Cancelled",
-      },
+    mockRadonFetch.mockResolvedValueOnce({
+      status: "ok",
+      orderId: 12345,
+      permId: 67890,
+      initialStatus: "Cancelled",
+      message: "SELL 20 SPXU @ $2.25 — Cancelled",
     });
 
     const { POST } = await import("../app/api/orders/place/route");
@@ -959,15 +866,11 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
   });
 
   it("returns 502 when IB reports ApiCancelled", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
-        status: "ok",
-        orderId: 12345,
-        permId: 67890,
-        initialStatus: "ApiCancelled",
-        message: "SELL 20 SPXU @ $2.25 — ApiCancelled",
-      },
+    mockRadonFetch.mockResolvedValueOnce({
+      status: "ok",
+      orderId: 12345,
+      permId: 67890,
+      initialStatus: "ApiCancelled",
     });
 
     const { POST } = await import("../app/api/orders/place/route");
@@ -984,15 +887,11 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
   });
 
   it("returns 502 when IB returns Unknown (no ack before disconnect)", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
-        status: "ok",
-        orderId: 0,
-        permId: 0,
-        initialStatus: "Unknown",
-        message: "SELL 20 SPXU @ $2.25 — Unknown",
-      },
+    mockRadonFetch.mockResolvedValueOnce({
+      status: "ok",
+      orderId: 0,
+      permId: 0,
+      initialStatus: "Unknown",
     });
 
     const { POST } = await import("../app/api/orders/place/route");
@@ -1009,15 +908,11 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
   });
 
   it("returns 502 when IB returns Inactive", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
-        status: "ok",
-        orderId: 12345,
-        permId: 67890,
-        initialStatus: "Inactive",
-        message: "SELL 20 SPXU @ $2.25 — Inactive",
-      },
+    mockRadonFetch.mockResolvedValueOnce({
+      status: "ok",
+      orderId: 12345,
+      permId: 67890,
+      initialStatus: "Inactive",
     });
 
     const { POST } = await import("../app/api/orders/place/route");
@@ -1034,16 +929,15 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
   });
 
   it("returns 200 when IB accepts the combo order (Submitted)", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
+    mockRadonFetch
+      .mockResolvedValueOnce({
         status: "ok",
         orderId: 12345,
         permId: 67890,
         initialStatus: "Submitted",
         message: "SELL 20 SPXU @ $2.25 — Submitted",
-      },
-    });
+      })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/place/route");
     const res = await POST(
@@ -1060,16 +954,14 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
   });
 
   it("returns 200 when IB accepts the combo order (PreSubmitted)", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
+    mockRadonFetch
+      .mockResolvedValueOnce({
         status: "ok",
         orderId: 12345,
         permId: 67890,
         initialStatus: "PreSubmitted",
-        message: "SELL 20 SPXU @ $2.25 — PreSubmitted",
-      },
-    });
+      })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/place/route");
     const res = await POST(
@@ -1082,17 +974,15 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
     expect(res.status).toBe(200);
   });
 
-  it("passes combo legs to ib_place_order.py correctly", async () => {
-    mockRunScript.mockResolvedValue({
-      ok: true,
-      data: {
+  it("passes combo legs to FastAPI correctly", async () => {
+    mockRadonFetch
+      .mockResolvedValueOnce({
         status: "ok",
         orderId: 12345,
         permId: 67890,
         initialStatus: "Submitted",
-        message: "ok",
-      },
-    });
+      })
+      .mockResolvedValueOnce({});
 
     const { POST } = await import("../app/api/orders/place/route");
     await POST(
@@ -1103,9 +993,9 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
       }),
     );
 
-    const callArgs = mockRunScript.mock.calls[0][1].args as string[];
-    const jsonArg = callArgs[callArgs.indexOf("--json") + 1];
-    const parsed = JSON.parse(jsonArg);
+    // Verify radonFetch was called with order payload containing combo legs
+    const [, opts] = mockRadonFetch.mock.calls[0];
+    const parsed = JSON.parse(opts.body);
     expect(parsed.type).toBe("combo");
     expect(parsed.symbol).toBe("SPXU");
     expect(parsed.legs).toHaveLength(2);

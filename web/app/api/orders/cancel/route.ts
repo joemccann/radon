@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { ibCancelOrder } from "@tools/wrappers/ib-order-manage";
-import { ibOrders } from "@tools/wrappers/ib-orders";
 import { readDataFile } from "@tools/data-reader";
 import { OrdersData } from "@tools/schemas/ib-orders";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
@@ -24,29 +23,24 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const result = await ibCancelOrder({ orderId, permId, port: 4001 });
-
-    if (!result.ok) {
-      return NextResponse.json(
-        { error: "Cancel failed", stderr: result.stderr },
-        { status: 502 },
-      );
-    }
-
-    if (result.data.status === "error") {
-      return NextResponse.json(
-        { error: result.data.message, detail: result.data },
-        { status: 502 },
-      );
-    }
+    const result = await radonFetch<Record<string, unknown>>("/orders/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ orderId, permId }),
+      timeout: 20_000,
+    });
 
     // Refresh orders after cancel
-    await ibOrders({ sync: true, port: 4001, clientId: 11 });
+    try {
+      await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+    } catch {
+      // Non-fatal
+    }
     const ordersResult = await readDataFile("data/orders.json", OrdersData);
 
     return NextResponse.json({
       status: "ok",
-      message: result.data.message,
+      message: result.message,
       orders: ordersResult.ok ? ordersResult.data : null,
     });
   } catch (error) {

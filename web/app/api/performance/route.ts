@@ -1,16 +1,13 @@
 import { NextResponse } from "next/server";
-import { readFile, stat, writeFile } from "fs/promises";
-import { spawn } from "child_process";
+import { readFile, stat } from "fs/promises";
 import { join } from "path";
 import { isPerformanceBehindPortfolioSync, isPortfolioBehindCurrentEtSession } from "@/lib/performanceFreshness";
-import { ibSync } from "@tools/wrappers/ib-sync";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
 const PERFORMANCE_PATH = join(process.cwd(), "..", "data", "performance.json");
 const PORTFOLIO_PATH = join(process.cwd(), "..", "data", "portfolio.json");
-const SCRIPTS_DIR = join(process.cwd(), "..", "scripts");
-const PYTHON_BIN = process.env.PYTHON_BIN ?? "/usr/bin/python3";
 const CACHE_TTL_MS = 15 * 60_000;
 
 async function isPerformanceStale(): Promise<boolean> {
@@ -20,40 +17,6 @@ async function isPerformanceStale(): Promise<boolean> {
   } catch {
     return true;
   }
-}
-
-function extractJson(stdout: string): unknown {
-  const jsonStart = stdout.indexOf("{");
-  if (jsonStart === -1) {
-    throw new Error("No JSON output from portfolio_performance.py");
-  }
-  return JSON.parse(stdout.slice(jsonStart));
-}
-
-function runPerformanceSync(): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn(PYTHON_BIN, ["portfolio_performance.py", "--json"], {
-      cwd: SCRIPTS_DIR,
-      timeout: 180_000,
-    });
-
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        reject(new Error(stderr || `portfolio_performance.py exited with code ${code}`));
-        return;
-      }
-      try {
-        resolve(extractJson(stdout));
-      } catch (error) {
-        reject(error);
-      }
-    });
-    proc.on("error", reject);
-  });
 }
 
 async function readJsonFile(path: string): Promise<Record<string, unknown> | null> {
@@ -97,11 +60,16 @@ export async function GET(): Promise<Response> {
   const portfolioLastSync = extractTimestampValue(portfolioSnapshot, "last_sync");
 
   if (isPortfolioBehindCurrentEtSession(portfolioLastSync)) {
-    const refreshedPortfolio = await ibSync({ sync: true, port: 4001 });
-    if (refreshedPortfolio.ok) {
-      portfolioSnapshot = refreshedPortfolio.data as unknown as Record<string, unknown>;
-    } else if (cachedPerformance && !isCacheBehindPortfolio(cachedPerformance, portfolioSnapshot)) {
-      return NextResponse.json(cachedPerformance);
+    try {
+      const refreshed = await radonFetch<Record<string, unknown>>("/portfolio/sync", {
+        method: "POST",
+        timeout: 35_000,
+      });
+      portfolioSnapshot = refreshed;
+    } catch {
+      if (cachedPerformance && !isCacheBehindPortfolio(cachedPerformance, portfolioSnapshot)) {
+        return NextResponse.json(cachedPerformance);
+      }
     }
   }
 
@@ -111,8 +79,7 @@ export async function GET(): Promise<Response> {
   }
 
   try {
-    const data = await runPerformanceSync();
-    await writeFile(PERFORMANCE_PATH, JSON.stringify(data, null, 2));
+    const data = await radonFetch("/performance", { method: "POST", timeout: 190_000 });
     return NextResponse.json(data);
   } catch (error) {
     if (cachedPerformance) {
@@ -125,8 +92,7 @@ export async function GET(): Promise<Response> {
 
 export async function POST(): Promise<Response> {
   try {
-    const data = await runPerformanceSync();
-    await writeFile(PERFORMANCE_PATH, JSON.stringify(data, null, 2));
+    const data = await radonFetch("/performance", { method: "POST", timeout: 190_000 });
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to generate performance metrics";

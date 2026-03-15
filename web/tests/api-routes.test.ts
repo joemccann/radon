@@ -22,16 +22,32 @@ vi.mock("@tools/runner", () => ({
   resolveProjectRoot: vi.fn().mockReturnValue("/mock/root"),
 }));
 
-// Mock @tools/wrappers/ib-orders for orders routes
+// Mock @tools/wrappers/ib-orders for orders routes (legacy — no longer used by routes)
 const mockIbOrders = vi.fn().mockResolvedValue({ ok: false, stderr: "mocked" });
 vi.mock("@tools/wrappers/ib-orders", () => ({
   ibOrders: mockIbOrders,
 }));
 
-// Mock @tools/wrappers/ib-sync for portfolio route
+// Mock @tools/wrappers/ib-sync for portfolio route (legacy — no longer used by routes)
 const mockIbSync = vi.fn().mockResolvedValue({ ok: false, stderr: "mocked" });
 vi.mock("@tools/wrappers/ib-sync", () => ({
   ibSync: mockIbSync,
+}));
+
+// Mock @/lib/radonApi — the NEW dependency for migrated routes
+const mockRadonFetch = vi.fn().mockRejectedValue(new Error("mocked"));
+vi.mock("@/lib/radonApi", () => ({
+  radonFetch: mockRadonFetch,
+  RadonApiError: class extends Error {
+    status: number;
+    detail: string;
+    constructor(status: number, detail: string) {
+      super(`Radon API ${status}: ${detail}`);
+      this.name = "RadonApiError";
+      this.status = status;
+      this.detail = detail;
+    }
+  },
 }));
 
 // Mock @tools/data-reader for portfolio + orders routes
@@ -486,7 +502,8 @@ describe("POST /api/portfolio", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    mockIbSync.mockReset();
+    mockRadonFetch.mockReset();
+    mockReadDataFile.mockReset();
     const mod = await import("../app/api/portfolio/route");
     POST = mod.POST;
   });
@@ -505,7 +522,7 @@ describe("POST /api/portfolio", () => {
       undefined_risk_count: 0,
       avg_kelly_optimal: null,
     };
-    mockIbSync.mockResolvedValue({ ok: true, data: mockPortfolio });
+    mockRadonFetch.mockResolvedValue(mockPortfolio);
 
     const res = await POST();
     expect(res.status).toBe(200);
@@ -514,14 +531,12 @@ describe("POST /api/portfolio", () => {
     expect(body.last_sync).toBe("2026-03-05T14:30:00");
   });
 
-  it("returns 502 when sync fails", async () => {
-    mockIbSync.mockResolvedValue({ ok: false, stderr: "connection refused" });
+  it("returns 502 when sync fails and no cache", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("connection refused"));
+    mockReadDataFile.mockResolvedValue({ ok: false, error: "not found" });
 
     const res = await POST();
     expect(res.status).toBe(502);
-    const body = await res.json();
-    expect(body.error).toBe("Sync failed");
-    expect(body.stderr).toBe("connection refused");
   });
 });
 
@@ -596,20 +611,23 @@ describe("POST /api/orders", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    mockIbOrders.mockReset();
+    mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
     const mod = await import("../app/api/orders/route");
     POST = mod.POST;
   });
 
-  it("returns 502 when sync fails", async () => {
-    mockIbOrders.mockResolvedValue({ ok: false, stderr: "IB gateway timeout" });
+  it("returns 502 when sync fails and no cache", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("IB gateway timeout"));
+    mockReadDataFile.mockResolvedValue({
+      ok: true,
+      data: { last_sync: "", open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
+    });
 
     const res = await POST();
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.error).toBe("Sync failed");
-    expect(body.stderr).toBe("IB gateway timeout");
   });
 
   it("returns refreshed orders on success", async () => {
@@ -633,7 +651,7 @@ describe("POST /api/orders", () => {
       open_count: 0,
       executed_count: 1,
     };
-    mockIbOrders.mockResolvedValue({ ok: true, stderr: "" });
+    mockRadonFetch.mockResolvedValue(refreshedOrders);
     mockReadDataFile.mockResolvedValue({ ok: true, data: refreshedOrders });
 
     const res = await POST();

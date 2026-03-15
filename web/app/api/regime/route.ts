@@ -4,14 +4,13 @@ import { join } from "path";
 import { isCriDataStale } from "@/lib/criStaleness";
 import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCache";
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
-import { spawn } from "child_process";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
 const DATA_DIR = join(process.cwd(), "..", "data");
 const CACHE_PATH = join(DATA_DIR, "cri.json");
 const SCHEDULED_DIR = join(DATA_DIR, "cri_scheduled");
-const SCRIPTS_DIR = join(process.cwd(), "..", "scripts");
 
 /** Today's date in ET (YYYY-MM-DD) — the trading calendar reference */
 function todayET(): string {
@@ -136,10 +135,7 @@ async function readLatestCri(): Promise<{ data: object; path: string } | null> {
   return selected ? { data: selected.data, path: selected.path } : null;
 }
 
-/** Check if the latest cached data is stale (market-hours aware).
- *  - Different day            → always stale (new trading day)
- *  - market_open=false+today  → NOT stale (EOD data is final; launchd handles schedule)
- *  - market_open=true+today   → stale if mtime > 60s (intraday refresh) */
+/** Check if the latest cached data is stale (market-hours aware). */
 async function isCacheStale(filePath: string, data: Record<string, unknown>): Promise<boolean> {
   try {
     const s = await stat(filePath);
@@ -149,42 +145,20 @@ async function isCacheStale(filePath: string, data: Record<string, unknown>): Pr
   }
 }
 
-function runCriScan(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("python3", ["cri_scan.py", "--json"], {
-      cwd: SCRIPTS_DIR,
-      timeout: 120_000,
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => {
-      if (code !== 0) reject(new Error(stderr || `cri_scan.py exited with code ${code}`));
-      else resolve(stdout);
-    });
-    proc.on("error", reject);
-  });
-}
-
-/** Fire-and-forget: run CRI scan and overwrite the latest scheduled file */
+/** Fire-and-forget: run CRI scan via FastAPI and save results */
 function triggerBackgroundScan(): void {
   if (bgScanInFlight) return;
   bgScanInFlight = true;
 
-  console.log("[CRI] Background scan triggered");
-  runCriScan()
-    .then(async (stdout) => {
-      const jsonStart = stdout.indexOf("{");
-      if (jsonStart === -1) return;
-      const data = JSON.parse(stdout.slice(jsonStart));
+  console.log("[CRI] Background scan triggered via FastAPI");
+  radonFetch<Record<string, unknown>>("/regime/scan", { method: "POST", timeout: 130_000 })
+    .then(async (data) => {
       await mkdir(SCHEDULED_DIR, { recursive: true });
       const ts = new Date().toLocaleString("sv", { timeZone: "America/New_York" })
         .replace(" ", "T").slice(0, 16).replace(":", "-");
       const outPath = join(SCHEDULED_DIR, `cri-${ts}.json`);
       const payload = JSON.stringify(data, null, 2);
       await writeFile(outPath, payload);
-      await writeFile(CACHE_PATH, payload);
       console.log(`[CRI] Background scan complete → ${outPath}`);
     })
     .catch((err) => { console.error("[CRI] Background scan failed:", err.message); })
@@ -213,14 +187,11 @@ export async function GET(): Promise<Response> {
 
 export async function POST(): Promise<Response> {
   try {
-    const stdout = await runCriScan();
-    const jsonStart = stdout.indexOf("{");
-    if (jsonStart === -1) throw new Error("No JSON output from cri_scan.py");
-    const jsonStr = stdout.slice(jsonStart);
-    const data = normalizeCriPayload(JSON.parse(jsonStr));
-
-    await writeFile(CACHE_PATH, JSON.stringify(data, null, 2));
-
+    const rawData = await radonFetch<Record<string, unknown>>("/regime/scan", {
+      method: "POST",
+      timeout: 130_000,
+    });
+    const data = normalizeCriPayload(rawData);
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "CRI scan failed";

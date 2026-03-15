@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server";
 import { stat } from "fs/promises";
-import { spawn } from "child_process";
 import { join } from "path";
-import { ibSync } from "@tools/wrappers/ib-sync";
 import { readDataFile } from "@tools/data-reader";
 import { PortfolioData } from "@tools/schemas/ib-sync";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
 const PORTFOLIO_PATH = join(process.cwd(), "..", "data", "portfolio.json");
-const SCRIPTS_DIR = join(process.cwd(), "..", "scripts");
 const CACHE_TTL_MS = 60_000; // 1 minute
 
 let bgSyncInFlight = false;
@@ -25,31 +23,22 @@ async function isPortfolioStale(): Promise<boolean> {
   }
 }
 
-/** Fire-and-forget: spawn ib_sync.py in the background, non-blocking */
+/** Fire-and-forget: call FastAPI background sync endpoint */
 function triggerBackgroundSync(): void {
   if (bgSyncInFlight) return;
   bgSyncInFlight = true;
 
-  console.log("[Portfolio] Background sync triggered");
-  const proc = spawn("python3", ["ib_sync.py", "--json"], {
-    cwd: SCRIPTS_DIR,
-    detached: false,
-  });
-
-  proc.stdout.on("data", () => { /* discard */ });
-  proc.stderr.on("data", () => { /* discard */ });
-  proc.on("close", (code) => {
-    if (code !== 0) {
-      console.warn(`[Portfolio] Background sync exited with code ${code}`);
-    } else {
-      console.log("[Portfolio] Background sync complete");
-    }
-    bgSyncInFlight = false;
-  });
-  proc.on("error", (err) => {
-    console.error("[Portfolio] Background sync error:", err.message);
-    bgSyncInFlight = false;
-  });
+  console.log("[Portfolio] Background sync triggered via FastAPI");
+  radonFetch("/portfolio/background-sync", { method: "POST", timeout: 5_000 })
+    .then(() => {
+      console.log("[Portfolio] Background sync accepted");
+    })
+    .catch((err) => {
+      console.warn("[Portfolio] Background sync trigger failed:", err.message);
+    })
+    .finally(() => {
+      bgSyncInFlight = false;
+    });
 }
 
 export async function GET(): Promise<Response> {
@@ -74,27 +63,21 @@ export async function GET(): Promise<Response> {
 
 export async function POST(): Promise<Response> {
   try {
-    const result = await ibSync({ sync: true, port: 4001 });
-
-    if (!result.ok) {
-      // Sync failed — fall back to cached data file
-      const cached = await readDataFile("data/portfolio.json", PortfolioData);
-      if (cached.ok) {
-        console.warn("[Portfolio] Sync failed, serving cached data:", result.stderr);
-        const res = NextResponse.json(cached.data);
-        res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
-        return res;
-      }
-      // No cached data either — genuine failure
-      return NextResponse.json(
-        { error: "Sync failed", stderr: result.stderr },
-        { status: 502 },
-      );
+    const data = await radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000 });
+    return NextResponse.json(data);
+  } catch {
+    // Sync failed — fall back to cached data file
+    const cached = await readDataFile("data/portfolio.json", PortfolioData);
+    if (cached.ok) {
+      console.warn("[Portfolio] Sync failed, serving cached data");
+      const res = NextResponse.json(cached.data);
+      res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
+      return res;
     }
-
-    return NextResponse.json(result.data);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Sync failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // No cached data either — genuine failure
+    return NextResponse.json(
+      { error: "Sync failed and no cached data available" },
+      { status: 502 },
+    );
   }
 }

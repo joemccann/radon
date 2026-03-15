@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { runScript } from "@tools/runner";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
@@ -12,27 +12,18 @@ export async function GET(request: Request): Promise<Response> {
     return NextResponse.json({ error: "Required: symbol" }, { status: 400 });
   }
 
-  const args = ["--symbol", symbol];
-  if (expiry) {
-    args.push("--expiry", expiry);
-  }
+  try {
+    const params = new URLSearchParams({ symbol });
+    if (expiry) params.set("expiry", expiry);
 
-  const result = await runScript("scripts/ib_option_chain.py", {
-    args,
-    timeout: 15_000,
-  });
-
-  if (!result.ok) {
-    return NextResponse.json(
-      { error: "Failed to fetch option chain", stderr: result.stderr },
-      { status: 502 },
+    const data = await radonFetch<Record<string, unknown>>(
+      `/options/chain?${params}`,
+      { timeout: 20_000 },
     );
-  }
 
-  const data = result.data as Record<string, unknown>;
-  if (data.error) {
-    return NextResponse.json({ error: data.error }, { status: 502 });
+    return NextResponse.json(data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to fetch option chain";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
-
-  return NextResponse.json(data);
 }

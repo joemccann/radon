@@ -1,8 +1,7 @@
 import { NextResponse } from "next/server";
-import { runScript } from "@tools/runner";
-import { ibOrders } from "@tools/wrappers/ib-orders";
 import { readDataFile } from "@tools/data-reader";
 import { OrdersData } from "@tools/schemas/ib-orders";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
@@ -52,7 +51,7 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    const orderJson = JSON.stringify({
+    const orderPayload = {
       type: body.type || "stock",
       symbol: body.symbol.toUpperCase(),
       action: body.action,
@@ -61,31 +60,16 @@ export async function POST(request: Request): Promise<Response> {
       tif: body.tif || "DAY",
       ...(body.type === "option" ? { expiry: body.expiry, strike: body.strike, right: body.right } : {}),
       ...(body.type === "combo" ? { legs: body.legs } : {}),
+    };
+
+    const orderResult = await radonFetch<Record<string, unknown>>("/orders/place", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(orderPayload),
+      timeout: 20_000,
     });
-
-    const result = await runScript("scripts/ib_place_order.py", {
-      args: ["--json", orderJson],
-      timeout: 15_000,
-    });
-
-    if (!result.ok) {
-      return NextResponse.json(
-        { error: "Order placement failed", stderr: result.stderr },
-        { status: 502 },
-      );
-    }
-
-    const orderResult = result.data as Record<string, unknown>;
-
-    if (orderResult.status === "error") {
-      return NextResponse.json(
-        { error: orderResult.message, detail: orderResult },
-        { status: 502 },
-      );
-    }
 
     // IB silent rejection: order was submitted but immediately cancelled/inactive.
-    // These states mean the order will never appear in open orders — treat as failure.
     const REJECTED_STATUSES = new Set(["Cancelled", "ApiCancelled", "Inactive", "Unknown"]);
     const initialStatus = orderResult.initialStatus as string | undefined;
     if (initialStatus && REJECTED_STATUSES.has(initialStatus)) {
@@ -99,7 +83,11 @@ export async function POST(request: Request): Promise<Response> {
     }
 
     // Refresh orders after placement
-    await ibOrders({ sync: true, port: 4001, clientId: 11 });
+    try {
+      await radonFetch("/orders/refresh", { method: "POST", timeout: 10_000 });
+    } catch {
+      // Non-fatal — order was placed, refresh failed
+    }
     const ordersResult = await readDataFile("data/orders.json", OrdersData);
 
     return NextResponse.json({

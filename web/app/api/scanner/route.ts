@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { readFile, writeFile } from "fs/promises";
+import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
-import { spawn } from "child_process";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
 const CACHE_PATH = join(process.cwd(), "..", "data", "scanner.json");
-const SCRIPTS_DIR = join(process.cwd(), "..", "scripts");
 const STALE_THRESHOLD_SECONDS = 600;
 
 interface CacheMeta {
@@ -37,31 +36,6 @@ function buildCacheMeta(filePath: string): CacheMeta {
   }
 }
 
-function runScanner(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("python3", ["scanner.py", "--top", "25"], {
-      cwd: SCRIPTS_DIR,
-      timeout: 120_000,
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => {
-      if (code !== 0) {
-        // Extract last meaningful line from stderr — skip progress/warning noise
-        const lines = stderr.trim().split("\n").filter((l) => !l.includes("warnings.warn(") && !l.includes("NotOpenSSLWarning"));
-        const lastLine = lines[lines.length - 1] ?? "";
-        const msg = lastLine.length > 200 ? lastLine.slice(0, 200) + "..." : lastLine;
-        reject(new Error(msg || `scanner.py exited with code ${code}`));
-      } else {
-        resolve(stdout);
-      }
-    });
-    proc.on("error", reject);
-  });
-}
-
 export async function GET(): Promise<Response> {
   try {
     const raw = await readFile(CACHE_PATH, "utf-8");
@@ -82,18 +56,21 @@ export async function GET(): Promise<Response> {
 
 export async function POST(): Promise<Response> {
   try {
-    const stdout = await runScanner();
-    const jsonStart = stdout.indexOf("{");
-    if (jsonStart === -1) throw new Error("No JSON output from scanner.py");
-    const jsonStr = stdout.slice(jsonStart);
-    const data = JSON.parse(jsonStr);
-
-    await writeFile(CACHE_PATH, JSON.stringify(data, null, 2));
-
+    const data = await radonFetch("/scan", { method: "POST", timeout: 130_000 });
     const cache_meta = buildCacheMeta(CACHE_PATH);
     return NextResponse.json({ ...data, cache_meta });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Scanner failed";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // Serve cached data on failure
+    try {
+      const raw = await readFile(CACHE_PATH, "utf-8");
+      const cached = JSON.parse(raw);
+      const cache_meta = buildCacheMeta(CACHE_PATH);
+      const res = NextResponse.json({ ...cached, cache_meta, is_stale: true });
+      res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
+      return res;
+    } catch {
+      const message = error instanceof Error ? error.message : "Scanner failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
   }
 }

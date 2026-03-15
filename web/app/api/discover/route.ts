@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
-import { readFile, writeFile } from "fs/promises";
+import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
-import { spawn } from "child_process";
+import { radonFetch } from "@/lib/radonApi";
 
 export const runtime = "nodejs";
 
 const DISCOVER_CACHE_PATH = join(process.cwd(), "..", "data", "discover.json");
-const SCRIPTS_DIR = join(process.cwd(), "..", "scripts");
 const STALE_THRESHOLD_SECONDS = 600;
 
 interface CacheMeta {
@@ -37,24 +36,6 @@ function buildCacheMeta(filePath: string): CacheMeta {
   }
 }
 
-function runDiscover(): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const proc = spawn("python3", ["discover.py", "--min-alerts", "1"], {
-      cwd: SCRIPTS_DIR,
-      timeout: 120_000,
-    });
-    let stdout = "";
-    let stderr = "";
-    proc.stdout.on("data", (chunk: Buffer) => { stdout += chunk.toString(); });
-    proc.stderr.on("data", (chunk: Buffer) => { stderr += chunk.toString(); });
-    proc.on("close", (code) => {
-      if (code !== 0) reject(new Error(stderr || `discover.py exited with code ${code}`));
-      else resolve(stdout);
-    });
-    proc.on("error", reject);
-  });
-}
-
 export async function GET(): Promise<Response> {
   try {
     const raw = await readFile(DISCOVER_CACHE_PATH, "utf-8");
@@ -75,25 +56,21 @@ export async function GET(): Promise<Response> {
 
 export async function POST(): Promise<Response> {
   try {
-    const stdout = await runDiscover();
-    // Extract JSON from stdout (discover.py prints progress to stderr via print(..., file=sys.stderr))
-    // But it actually prints progress to stdout too — find the JSON object
-    const jsonStart = stdout.indexOf("{");
-    if (jsonStart === -1) throw new Error("No JSON output from discover.py");
-    const jsonStr = stdout.slice(jsonStart);
-    const data = JSON.parse(jsonStr);
-
-    if (data.error) {
-      return NextResponse.json(data, { status: 400 });
-    }
-
-    // Cache to disk
-    await writeFile(DISCOVER_CACHE_PATH, JSON.stringify(data, null, 2));
-
+    const data = await radonFetch("/discover", { method: "POST", timeout: 130_000 });
     const cache_meta = buildCacheMeta(DISCOVER_CACHE_PATH);
     return NextResponse.json({ ...data, cache_meta });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Discover sync failed";
-    return NextResponse.json({ error: message }, { status: 502 });
+    // Serve cached data on failure
+    try {
+      const raw = await readFile(DISCOVER_CACHE_PATH, "utf-8");
+      const cached = JSON.parse(raw);
+      const cache_meta = buildCacheMeta(DISCOVER_CACHE_PATH);
+      const res = NextResponse.json({ ...cached, cache_meta, is_stale: true });
+      res.headers.set("X-Sync-Warning", "Radon API unavailable - serving cached data");
+      return res;
+    } catch {
+      const message = error instanceof Error ? error.message : "Discover sync failed";
+      return NextResponse.json({ error: message }, { status: 502 });
+    }
   }
 }
