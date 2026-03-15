@@ -123,14 +123,14 @@ export default function TickerDetailContent({
       {/* Hero row: telemetry (left) + chart (right) */}
       <div className="ticker-detail-hero">
         <div className="ticker-detail-hero-left">
-          <div className="th49">
+          <div className="ticker-detail-header">
             <span className={`pill ${position ? "defined" : "neutral"}`} style={{ fontSize: "9px" }}>
               {positionSummary}
             </span>
           </div>
           <TickerQuoteTelemetry priceData={priceData} label={priceLabel} />
         </div>
-        <div className="tr17">
+        <div className="ticker-detail-hero-right">
           <PriceChart ticker={ticker} prices={prices} priceKey={chartPriceKey} theme={theme} />
         </div>
       </div>
@@ -149,7 +149,7 @@ export default function TickerDetailContent({
       </div>
 
       {/* Tab content */}
-      <div className="tc73">
+      <div className="ticker-tab-content">
         {resolvedTab === "company" && (
           <CompanyTab ticker={ticker} active={resolvedTab === "company"} priceData={prices[ticker] ?? null} fundamentals={fundamentals[ticker] ?? null} />
         )}

@@ -110,8 +110,8 @@ describe("components/RegimePanel.tsx — CTA section removed", () => {
 describe("components/CriHistoryChart.tsx — D3 chart exists", () => {
   const src = read("components/CriHistoryChart.tsx");
 
-  it("uses scale/path utilities", () => {
-    expect(src).toMatch(/from ['"](@\/lib\/scales|d3(-[a-z]+)?)['"]/);
+  it("uses d3", () => {
+    expect(src).toMatch(/from ['"]d3['"]/);
   });
 
   it("exports CriHistoryChart", () => {

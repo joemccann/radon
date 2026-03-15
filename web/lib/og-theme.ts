@@ -153,4 +153,7 @@ export function zOpacity(z: number): number {
   return 0.55;
 }
 
-export { fmt } from "./format";
+export function fmt(v: number | null | undefined, decimals = 2): string {
+  if (v == null || !Number.isFinite(v)) return "---";
+  return v.toFixed(decimals);
+}

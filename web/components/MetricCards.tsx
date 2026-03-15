@@ -9,7 +9,6 @@ import ExposureBreakdownModal, { type ExposureMetric } from "./ExposureBreakdown
 import FillsModal from "./FillsModal";
 import PnlBreakdownModal, { type PnlBreakdownRow } from "./PnlBreakdownModal";
 import AccountMetricModal from "./AccountMetricModal";
-import { fmtUsd, fmtUsdExact, fmtSignedUsd, fmtPrice, toneClass } from "@/lib/format";
 
 type MetricCardsProps = {
   portfolio: PortfolioData | null;
@@ -19,12 +18,21 @@ type MetricCardsProps = {
   section?: string;
 };
 
-const fmt = fmtUsd;
-const fmtSigned = (n: number) => fmtSignedUsd(n);
-const fmtExact = fmtUsdExact;
+const fmt = (n: number) =>
+  n >= 1_000_000
+    ? `$${(n / 1_000_000).toFixed(2)}M`
+    : `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+
+const fmtSigned = (n: number) =>
+  `${n >= 0 ? "+" : ""}${fmt(Math.abs(n))}`;
+
+const fmtExact = (n: number) =>
+  `$${Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 const fmtSignedExact = (n: number) =>
   `${n >= 0 ? "+" : "-"}${fmtExact(n)}`;
-const tone = toneClass;
+
+const tone = (n: number) => (n > 0 ? "positive" as const : n < 0 ? "negative" as const : "neutral" as const);
 
 function resolveMarketValue(pos: PortfolioData["positions"][number]): number | null {
   if (pos.market_value != null) return pos.market_value;
@@ -44,8 +52,8 @@ function computeUnrealizedBreakdown(portfolio: PortfolioData): PnlBreakdownRow[]
       id: pos.id,
       ticker: pos.ticker,
       structure: pos.structure,
-      col1: fmtPrice(Math.abs(pos.entry_cost)),
-      col2: fmtPrice(Math.abs(mv)),
+      col1: `$${Math.abs(pos.entry_cost).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      col2: `$${Math.abs(mv).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       pnl,
       pnlPct,
     }];
@@ -68,9 +76,9 @@ type CardDef = { label: string; value: string; change: string; tone: "positive" 
 function MetricCard({ card, onClick }: { card: CardDef; onClick?: () => void }) {
   return (
     <div className={`metric-card${onClick ? " metric-card-clickable" : ""}`} onClick={onClick}>
-      <div className="ml">{card.label}</div>
-      <div className={`mv ${card.tone !== "neutral" ? card.tone : ""}`}>{card.value}</div>
-      <div className={`mc ${card.tone}`}>{card.change}</div>
+      <div className="metric-label">{card.label}</div>
+      <div className={`metric-value ${card.tone !== "neutral" ? card.tone : ""}`}>{card.value}</div>
+      <div className={`metric-change ${card.tone}`}>{card.change}</div>
     </div>
   );
 }
@@ -94,7 +102,7 @@ function AccountRow({
   return (
     <>
       <div className="section-label-mono">ACCOUNT</div>
-      <div className="mg">
+      <div className="metrics-grid">
         <MetricCard
           card={{ label: "Net Liquidation", value: fmtExact(acct.net_liquidation), change: "BANKROLL", tone: "neutral" }}
           onClick={onNetLiqClick}
@@ -134,7 +142,7 @@ function RiskRow({
   return (
     <>
       <div className="section-label-mono">RISK</div>
-      <div className="mg">
+      <div className="metrics-grid">
         <MetricCard
           card={{ label: "Buying Power", value: fmtExact(acct.buying_power), change: "AVAILABLE", tone: "neutral" }}
           onClick={onBuyingPowerClick}
@@ -169,7 +177,7 @@ function ExposureRow({
     <>
       <div className="section-label-mono">EXPOSURE</div>
       {exposure ? (
-        <div className="mg">
+        <div className="metrics-grid">
           <MetricCard
             card={{ label: "Net Long", value: fmt(exposure.netLong), change: "LONG BIASED", tone: "positive" }}
             onClick={() => onCardClick("netLong")}
@@ -188,12 +196,12 @@ function ExposureRow({
           />
         </div>
       ) : (
-        <div className="mg">
+        <div className="metrics-grid">
           {["Net Long", "Net Short", "Dollar Delta", "Net Exposure"].map((label) => (
-            <div key={label} className="metric-card mcl">
-              <div className="ml">{label}</div>
-              <div className="mv">---</div>
-              <div className="mc neutral">AWAITING PRICES</div>
+            <div key={label} className="metric-card metric-card-loading">
+              <div className="metric-label">{label}</div>
+              <div className="metric-value">---</div>
+              <div className="metric-change neutral">AWAITING PRICES</div>
             </div>
           ))}
         </div>
@@ -233,7 +241,7 @@ function TodayPnlRow({
     <>
       <div className="section-label-mono">TODAY&apos;S P&amp;L</div>
       {hasDaily ? (
-        <div className="mg3">
+        <div className="metrics-grid-3">
           {/* Renamed: "Unrealized" → "Day Move" — intraday change from yesterday's close */}
           <MetricCard
             card={{
@@ -254,23 +262,23 @@ function TodayPnlRow({
           />
         </div>
       ) : (
-        <div className="mg3">
+        <div className="metrics-grid-3">
           <div className="metric-card">
-            <div className="ml">Day Move</div>
-            <div className="mv">---</div>
-            <div className="mc neutral">MARKET CLOSED</div>
+            <div className="metric-label">Day Move</div>
+            <div className="metric-value">---</div>
+            <div className="metric-change neutral">MARKET CLOSED</div>
           </div>
           <div className="metric-card metric-card-clickable" onClick={onRealizedClick}>
-            <div className="ml">Realized</div>
-            <div className={`mv ${tone(realizedPnl ?? 0) !== "neutral" ? tone(realizedPnl ?? 0) : ""}`}>
+            <div className="metric-label">Realized</div>
+            <div className={`metric-value ${tone(realizedPnl ?? 0) !== "neutral" ? tone(realizedPnl ?? 0) : ""}`}>
               {fmtSigned(realizedPnl ?? 0)}
             </div>
-            <div className="mc neutral">TODAY&apos;S FILLS</div>
+            <div className="metric-change neutral">TODAY&apos;S FILLS</div>
           </div>
           <div className="metric-card">
-            <div className="ml">Total</div>
-            <div className="mv">---</div>
-            <div className="mc neutral">MARKET CLOSED</div>
+            <div className="metric-label">Total</div>
+            <div className="metric-value">---</div>
+            <div className="metric-change neutral">MARKET CLOSED</div>
           </div>
         </div>
       )}
@@ -291,7 +299,7 @@ function LegacyLeverageRow({ portfolio, pnl, pnlPct }: { portfolio: PortfolioDat
   return (
     <>
       <div className="section-label-mono">NET LEVERAGE</div>
-      <div className="mg">
+      <div className="metrics-grid">
         {cards.map((c) => <MetricCard key={c.label} card={c} />)}
       </div>
     </>
@@ -321,12 +329,12 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
     return (
       <>
         <div className="section-label-mono">ACCOUNT</div>
-        <div className="mg">
+        <div className="metrics-grid">
           {placeholders.map((label, i) => (
-            <div key={i} className="metric-card mcl">
-              <div className="ml">{label}</div>
-              <div className="mv">$0,000</div>
-              <div className="mc neutral">AWAITING SYNC</div>
+            <div key={i} className="metric-card metric-card-loading">
+              <div className="metric-label">{label}</div>
+              <div className="metric-value">$0,000</div>
+              <div className="metric-change neutral">AWAITING SYNC</div>
             </div>
           ))}
         </div>
@@ -576,9 +584,9 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         title="Today's Total P&L"
         formula={
           `Total = Day Move + Realized\n` +
-          `      = ${unrealized >= 0 ? "+" : ""}${fmtPrice(Math.abs(unrealized))} (day move)` +
-          `  ${realized >= 0 ? "+" : "−"}  ${fmtPrice(Math.abs(realized))} (fills)\n` +
-          `      = ${total >= 0 ? "+" : ""}${fmtPrice(Math.abs(total))}`
+          `      = ${unrealized >= 0 ? "+" : ""}$${Math.abs(unrealized).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (day move)` +
+          `  ${realized >= 0 ? "+" : "−"}  $${Math.abs(realized).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} (fills)\n` +
+          `      = ${total >= 0 ? "+" : ""}$${Math.abs(total).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
         }
         col1Header="COMPONENT"
         col2Header="SOURCE"

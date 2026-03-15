@@ -42,20 +42,20 @@ function SortTh<K extends string>({
   const ariaSort = active ? (direction === "asc" ? "ascending" : "descending") : undefined;
   return (
     <th
-      className={`sth ${className ?? ""} ${active ? "sa" : ""}`}
+      className={`sortable-th ${className ?? ""} ${active ? "sort-active" : ""}`}
       onClick={() => onToggle(sortKey)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(sortKey); } }}
       tabIndex={0}
       role="columnheader"
       aria-sort={ariaSort}
     >
-      <span className="so">
+      <span className="sort-label">
         {label}
-        <span className="si">
+        <span className="sort-icon">
           {active ? (
             direction === "asc" ? <ChevronUp size={10} /> : <ChevronDown size={10} />
           ) : (
-            <ChevronDown size={10} className="sii" />
+            <ChevronDown size={10} className="sort-icon-idle" />
           )}
         </span>
       </span>
@@ -220,23 +220,23 @@ function LegRow({
       <td></td>
       <td
         colSpan={3}
-        className={`cell-indent cm ${onLegClick ? "leg-clickable" : ""}`}
+        className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
         onClick={onLegClick ? () => onLegClick(leg) : undefined}
       >
         {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
       </td>
       {showUnderlying && <td></td>}
-      <td className="rg cm">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
-      <td className="rg last-price-cell">
+      <td className="right cell-muted">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
+      <td className="right last-price-cell">
         {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
-        {priceDirection === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="price up" />}
-        {priceDirection === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="price down" />}
+        {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
+        {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
       </td>
       <td></td>
       <td></td>
-      <td className="rg cm">{fmtPrice(legEc)}</td>
-      <td className="rg cm">{rtLast != null ? fmtUsd(rtLast * leg.contracts * mult) : leg.market_value != null ? fmtUsd(Math.abs(leg.market_value)) : "—"}</td>
-      <td className={`rg cm ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
+      <td className="right cell-muted">{fmtPrice(legEc)}</td>
+      <td className="right cell-muted">{rtLast != null ? fmtUsd(rtLast * leg.contracts * mult) : leg.market_value != null ? fmtUsd(Math.abs(leg.market_value)) : "—"}</td>
+      <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
         {legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}
       </td>
       {showExpiry && <td></td>}
@@ -326,10 +326,10 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlyin
       <tr className={flashDirection ? `last-price-${flashDirection}` : undefined}>
         <td>
           {hasMultipleLegs ? (
-            <span className="tc63">
+            <span className="ticker-with-chevron">
               <TickerLink ticker={pos.ticker} positionId={pos.id} />
               <button
-                className="lb128"
+                className="leg-toggle-btn"
                 onClick={() => setLegsExpanded((v) => !v)}
                 aria-expanded={legsExpanded}
                 aria-label={`${legsExpanded ? "Collapse" : "Expand"} legs for ${pos.ticker}`}
@@ -342,34 +342,34 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlyin
           )}
         </td>
         <td>{structureDisplay}</td>
-        <td className="rg">{pos.contracts}</td>
+        <td className="right">{pos.contracts}</td>
         <td>
           <span className={`pill ${pos.risk_profile === "defined" ? "defined" : pos.risk_profile === "equity" ? "neutral" : "undefined"}`}>
             {pos.direction}
           </span>
         </td>
         {showUnderlying && (
-          <td className={`rg last-price-cell ${underlyingFlash ? `last-price-${underlyingFlash}` : ""}`}>
+          <td className={`right last-price-cell ${underlyingFlash ? `last-price-${underlyingFlash}` : ""}`}>
             {underlyingPrice != null ? fmtPrice(underlyingPrice) : "—"}
-            {underlyingDirection === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="underlying up" />}
-            {underlyingDirection === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="underlying down" />}
+            {underlyingDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="underlying up" />}
+            {underlyingDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="underlying down" />}
           </td>
         )}
-        <td className="rg">{fmtPrice(avgEntry)}</td>
-        <td className={`rg last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
+        <td className="right">{fmtPrice(avgEntry)}</td>
+        <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
           {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
-          {priceDirection === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="price up" />}
-          {priceDirection === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="price down" />}
+          {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
+          {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
         </td>
-        <td className={`rg ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
+        <td className={`right ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
           {dailyChg != null ? `${dailyChg >= 0 ? "+" : ""}${dailyChg.toFixed(2)}%` : "—"}
         </td>
-        <td className={`rg ${todayPnl != null ? (todayPnl >= 0 ? "positive" : "negative") : ""}`}>
+        <td className={`right ${todayPnl != null ? (todayPnl >= 0 ? "positive" : "negative") : ""}`}>
           {todayPnl != null ? `${todayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(todayPnl))}` : "—"}
         </td>
-        <td className="rg">{fmtUsd(entryCost)}</td>
-        <td className="rg">{mv != null ? fmtUsd(mv) : "—"}</td>
-        <td className={`rg ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
+        <td className="right">{fmtUsd(entryCost)}</td>
+        <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>
+        <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
           {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "—"}
         </td>
         {showExpiry && <td>{pos.expiry !== "N/A" ? pos.expiry : "—"}</td>}
@@ -411,16 +411,16 @@ export default function PositionTable({ positions, showExpiry = true, showStrike
           <tr>
             <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             {showExpiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
           </tr>
         </thead>

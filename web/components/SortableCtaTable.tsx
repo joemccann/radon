@@ -14,7 +14,10 @@ type SortableCtaTableProps = {
 
 /* ─── Helpers ────────────────────────────────────────── */
 
-import { fmt } from "@/lib/format";
+function fmt(v: number | null | undefined, decimals = 2): string {
+  if (v == null || !Number.isFinite(v)) return "---";
+  return v.toFixed(decimals);
+}
 
 function posColor(v: number): string {
   if (v > 0) return "var(--positive)";
@@ -109,14 +112,16 @@ export default function SortableCtaTable({ sectionKey, rows }: SortableCtaTableP
   }
 
   return (
-    <div data-testid="sortable-cta-table" className="wf">
+    <div data-testid="sortable-cta-table" style={{ width: "100%" }}>
       <div
-        className="fm tm uc"
         style={{
+          fontFamily: "var(--font-mono, monospace)",
           fontSize: "10px",
           fontWeight: 700,
           letterSpacing: "0.10em",
+          color: "var(--text-muted)",
           padding: "8px 12px 4px",
+          textTransform: "uppercase",
         }}
       >
         {SECTION_LABELS[sectionKey] ?? sectionKey.toUpperCase()}
@@ -136,30 +141,30 @@ export default function SortableCtaTable({ sectionKey, rows }: SortableCtaTableP
           {rows.length}
         </span>
       </div>
-      <div className="ctw w-full">
-        <table className="cta-table w-full">
+      <div className="cta-table-wrap" style={{ width: "100%" }}>
+        <table className="cta-table" style={{ width: "100%" }}>
           <thead>
             <tr>
-              <th className="ctu">UNDERLYING</th>
-              <th className="ctn" style={thStyle("position_today")} onClick={() => handleSort("position_today")}>
+              <th className="cta-th-underlying">UNDERLYING</th>
+              <th className="cta-th-num" style={thStyle("position_today")} onClick={() => handleSort("position_today")}>
                 TODAY{indicator("position_today")}
               </th>
-              <th className="ctn" style={thStyle("position_yesterday")} onClick={() => handleSort("position_yesterday")}>
+              <th className="cta-th-num" style={thStyle("position_yesterday")} onClick={() => handleSort("position_yesterday")}>
                 YDAY{indicator("position_yesterday")}
               </th>
-              <th className="ctn" style={thStyle("position_1m_ago")} onClick={() => handleSort("position_1m_ago")}>
+              <th className="cta-th-num" style={thStyle("position_1m_ago")} onClick={() => handleSort("position_1m_ago")}>
                 1M AGO{indicator("position_1m_ago")}
               </th>
-              <th className="ctn" style={thStyle("percentile_1m")} onClick={() => handleSort("percentile_1m")}>
+              <th className="cta-th-num" style={thStyle("percentile_1m")} onClick={() => handleSort("percentile_1m")}>
                 1M %ILE{indicator("percentile_1m")}
               </th>
-              <th className="ctn" style={thStyle("percentile_3m")} onClick={() => handleSort("percentile_3m")}>
+              <th className="cta-th-num" style={thStyle("percentile_3m")} onClick={() => handleSort("percentile_3m")}>
                 3M %ILE{indicator("percentile_3m")}
               </th>
-              <th className="ctn" style={thStyle("percentile_1y")} onClick={() => handleSort("percentile_1y")}>
+              <th className="cta-th-num" style={thStyle("percentile_1y")} onClick={() => handleSort("percentile_1y")}>
                 1Y %ILE{indicator("percentile_1y")}
               </th>
-              <th className="ctn" style={thStyle("z_score_3m")} onClick={() => handleSort("z_score_3m")}>
+              <th className="cta-th-num" style={thStyle("z_score_3m")} onClick={() => handleSort("z_score_3m")}>
                 3M Z{indicator("z_score_3m")}
               </th>
             </tr>
@@ -167,29 +172,29 @@ export default function SortableCtaTable({ sectionKey, rows }: SortableCtaTableP
           <tbody>
             {sorted.map((r) => (
               <tr key={r.underlying}>
-                <td className="cdu">{r.underlying}</td>
-                <td className="cdn" style={{ color: posColor(r.position_today) }}>
+                <td className="cta-td-underlying">{r.underlying}</td>
+                <td className="cta-td-num" style={{ color: posColor(r.position_today) }}>
                   {fmt(r.position_today)}
                 </td>
-                <td className="cdn" style={{ color: posColor(r.position_yesterday) }}>
+                <td className="cta-td-num" style={{ color: posColor(r.position_yesterday) }}>
                   {fmt(r.position_yesterday)}
                 </td>
-                <td className="cdn" style={{ color: posColor(r.position_1m_ago) }}>
+                <td className="cta-td-num" style={{ color: posColor(r.position_1m_ago) }}>
                   {fmt(r.position_1m_ago)}
                 </td>
-                <td className="cdn" style={{ background: pctileBg(r.percentile_1m) }}>
+                <td className="cta-td-num" style={{ background: pctileBg(r.percentile_1m) }}>
                   {r.percentile_1m}
                 </td>
-                <td className="cdn" style={{ background: pctileBg(r.percentile_3m) }}>
+                <td className="cta-td-num" style={{ background: pctileBg(r.percentile_3m) }}>
                   {r.percentile_3m}
                 </td>
-                <td className="cdn" style={{ background: pctileBg(r.percentile_1y) }}>
+                <td className="cta-td-num" style={{ background: pctileBg(r.percentile_1y) }}>
                   {typeof r.percentile_1y === "number" && r.percentile_1y > 100
                     ? fmt(r.percentile_1y)
                     : r.percentile_1y}
                 </td>
                 <td
-                  className="cdn"
+                  className="cta-td-num"
                   style={{ color: zColor(r.z_score_3m), opacity: zOpacity(r.z_score_3m) }}
                 >
                   {fmt(r.z_score_3m)}

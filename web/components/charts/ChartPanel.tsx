@@ -38,31 +38,31 @@ export default function ChartPanel({
 
   return (
     <div
-      className={`sx chart-panel ${className ?? ""}`.trim()}
+      className={`section chart-panel ${className ?? ""}`.trim()}
       data-testid={dataTestId}
       data-chart-family={chartFamily}
       data-chart-renderer={chartRenderer}
     >
-      <div className="s-hd ch85">
-        <div className="ch72">
+      <div className="section-header chart-panel-header">
+        <div className="chart-panel-heading">
           <div
-            className="ck86"
+            className="chart-panel-kicker"
             data-chart-family={chartFamily}
             data-chart-renderer={chartRenderer}
           >
             <span>{chartFamily}</span>
           </div>
-          <div className="s-tt ct101">
-            {icon ? <span className="ci109" aria-hidden="true">{icon}</span> : null}
+          <div className="section-title chart-panel-title">
+            {icon ? <span className="chart-panel-icon" aria-hidden="true">{icon}</span> : null}
             <span>{title}</span>
           </div>
         </div>
-        {badge ? <div className="cb102">{badge}</div> : null}
+        {badge ? <div className="chart-panel-badge">{badge}</div> : null}
       </div>
-      <div className={`s-bd chart-panel-body ${bodyClassName ?? ""}`.trim()}>
-        {legend.length > 0 ? <ChartLegend items={legend} className="cl87" /> : null}
+      <div className={`section-body chart-panel-body ${bodyClassName ?? ""}`.trim()}>
+        {legend.length > 0 ? <ChartLegend items={legend} className="chart-panel-legend" /> : null}
         <div className={`chart-panel-content ${contentClassName ?? ""}`.trim()}>{children}</div>
-        {footer ? <div className="cf88">{footer}</div> : null}
+        {footer ? <div className="chart-panel-footer">{footer}</div> : null}
       </div>
     </div>
   );

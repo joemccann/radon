@@ -1,7 +1,6 @@
 "use client";
 
 import type { ExecutedOrder } from "@/lib/types";
-import { fmtSignedUsdExact, fmtPrice, fmtPct as fmtPctBase } from "@/lib/format";
 
 type Props = {
   open: boolean;
@@ -11,7 +10,14 @@ type Props = {
   onClose: () => void;
 };
 
-const fmtPnl = fmtSignedUsdExact;
+const fmtPnl = (n: number | null) => {
+  if (n == null) return "---";
+  const abs = Math.abs(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return `${n >= 0 ? "+" : "-"}$${abs}`;
+};
+
+const fmtPrice = (n: number | null) =>
+  n == null ? "---" : `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const fmtTime = (iso: string) => {
   try {
@@ -21,7 +27,7 @@ const fmtTime = (iso: string) => {
   }
 };
 
-const fmtPct = (n: number) => fmtPctBase(n, 2, true);
+const fmtPct = (n: number) => `${n >= 0 ? "+" : ""}${n.toFixed(2)}%`;
 
 export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidation, onClose }: Props) {
   if (!open) return null;
@@ -30,17 +36,17 @@ export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidati
   const hasFills = fills.length > 0;
 
   return (
-    <div className="fills-modal mb135" onClick={onClose}>
+    <div className="fills-modal modal-backdrop" onClick={onClose}>
       <div className="modal-content" onClick={(e) => e.stopPropagation()}>
-        <div className="mh165">
-          <span className="mt">TODAY&apos;S FILLS</span>
+        <div className="modal-header">
+          <span className="modal-title">TODAY&apos;S FILLS</span>
           <button className="modal-close" onClick={onClose}>×</button>
         </div>
 
         {!hasFills ? (
           <div className="fills-empty">
             <p>No fills this session.</p>
-            <p className="fs113">Realized P&L = $0.00</p>
+            <p className="fills-empty-sub">Realized P&L = $0.00</p>
           </div>
         ) : (
           <>
@@ -50,22 +56,22 @@ export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidati
                   <th>TIME</th>
                   <th>SYMBOL</th>
                   <th>SIDE</th>
-                  <th className="tr">QTY</th>
-                  <th className="tr">PRICE</th>
-                  <th className="tr">COMMISSION</th>
-                  <th className="tr">REALIZED P&L</th>
+                  <th className="text-right">QTY</th>
+                  <th className="text-right">PRICE</th>
+                  <th className="text-right">COMMISSION</th>
+                  <th className="text-right">REALIZED P&L</th>
                 </tr>
               </thead>
               <tbody>
                 {fills.map((fill) => (
                   <tr key={fill.execId} className={fill.realizedPNL != null ? (fill.realizedPNL >= 0 ? "fills-row-positive" : "fills-row-negative") : ""}>
-                    <td className="fm">{fmtTime(fill.time)}</td>
-                    <td className="fm">{fill.symbol}</td>
-                    <td className={`fm fills-side fills-side-${fill.side.toLowerCase()}`}>{fill.side}</td>
-                    <td className="fm tr">{fill.quantity}</td>
-                    <td className="fm tr">{fmtPrice(fill.avgPrice)}</td>
-                    <td className="fm tr">{fill.commission != null ? fmtPnl(fill.commission) : "---"}</td>
-                    <td className={`fm tr ${fill.realizedPNL != null ? (fill.realizedPNL >= 0 ? "positive" : "negative") : ""}`}>
+                    <td className="mono">{fmtTime(fill.time)}</td>
+                    <td className="mono">{fill.symbol}</td>
+                    <td className={`mono fills-side fills-side-${fill.side.toLowerCase()}`}>{fill.side}</td>
+                    <td className="mono text-right">{fill.quantity}</td>
+                    <td className="mono text-right">{fmtPrice(fill.avgPrice)}</td>
+                    <td className="mono text-right">{fill.commission != null ? fmtPnl(fill.commission) : "---"}</td>
+                    <td className={`mono text-right ${fill.realizedPNL != null ? (fill.realizedPNL >= 0 ? "positive" : "negative") : ""}`}>
                       {fmtPnl(fill.realizedPNL)}
                     </td>
                   </tr>
@@ -73,25 +79,25 @@ export default function FillsModal({ open, fills, totalRealizedPnl, netLiquidati
               </tbody>
             </table>
 
-            <div className="fs149">
-              <div className="ff47">
+            <div className="fills-summary">
+              <div className="fills-summary-formula">
                 {fillsWithPnl.map((f, i) => (
                   <span key={f.execId}>
                     {i > 0 && <span className="fills-op">{f.realizedPNL! >= 0 ? " + " : " "}</span>}
                     <span className={f.realizedPNL! >= 0 ? "positive" : "negative"}>
                       {fmtPnl(f.realizedPNL)}
                     </span>
-                    <span className="fl"> ({f.symbol})</span>
+                    <span className="fills-label"> ({f.symbol})</span>
                   </span>
                 ))}
-                {fillsWithPnl.length === 0 && <span className="fl">No closed positions this session</span>}
+                {fillsWithPnl.length === 0 && <span className="fills-label">No closed positions this session</span>}
               </div>
-              <div className="ft64">
-                <span className="fl93">REALIZED P&L</span>
+              <div className="fills-summary-total">
+                <span className="fills-total-label">REALIZED P&L</span>
                 <span className={`fills-total-value ${totalRealizedPnl >= 0 ? "positive" : "negative"}`}>
                   {fmtPnl(totalRealizedPnl)}
                   {netLiquidation != null && netLiquidation > 0 && (
-                    <span className="fp114"> ({fmtPct(totalRealizedPnl / netLiquidation * 100)})</span>
+                    <span className="fills-total-pct"> ({fmtPct(totalRealizedPnl / netLiquidation * 100)})</span>
                   )}
                 </span>
               </div>

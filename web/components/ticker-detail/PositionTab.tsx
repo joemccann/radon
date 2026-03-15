@@ -23,25 +23,25 @@ function LegsDisclosure({ position, prices }: { position: PortfolioPosition; pri
   const [expanded, setExpanded] = useState(false);
 
   return (
-    <div className="pl155">
+    <div className="position-legs">
       <button
-        className="pt122"
+        className="pos-legs-toggle"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
       >
         {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-        <span className="pt141">Legs ({position.legs.length})</span>
+        <span className="pos-legs-title">Legs ({position.legs.length})</span>
       </button>
       {expanded && (
-        <table className="plt">
+        <table className="pos-legs-table">
           <thead>
             <tr>
               <th>Direction</th>
               <th>Type</th>
-              <th className="rg">Strike</th>
-              <th className="rg">Qty</th>
-              <th className="rg">Entry</th>
-              <th className="rg">Market</th>
+              <th className="right">Strike</th>
+              <th className="right">Qty</th>
+              <th className="right">Entry</th>
+              <th className="right">Market</th>
             </tr>
           </thead>
           <tbody>
@@ -53,10 +53,10 @@ function LegsDisclosure({ position, prices }: { position: PortfolioPosition; pri
                 <tr key={i}>
                   <td>{leg.direction}</td>
                   <td>{leg.type}</td>
-                  <td className="rg">{leg.strike != null ? `$${leg.strike}` : "---"}</td>
-                  <td className="rg">{leg.contracts}</td>
-                  <td className="rg">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
-                  <td className="rg">{legMkt != null ? fmtPrice(legMkt) : "---"}</td>
+                  <td className="right">{leg.strike != null ? `$${leg.strike}` : "---"}</td>
+                  <td className="right">{leg.contracts}</td>
+                  <td className="right">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
+                  <td className="right">{legMkt != null ? fmtPrice(legMkt) : "---"}</td>
                 </tr>
               );
             })}
@@ -98,61 +98,61 @@ export default function PositionTab({ position, prices }: PositionTabProps) {
 
   return (
     <div className="position-tab">
-      <div className="pg48">
-        <div className="ps">
-          <span className="ps-l">Structure</span>
-          <span className="ps-v">{position.structure}</span>
+      <div className="position-summary-grid">
+        <div className="pos-stat">
+          <span className="pos-stat-label">Structure</span>
+          <span className="pos-stat-value">{position.structure}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Direction</span>
-          <span className="ps-v">{position.direction}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Direction</span>
+          <span className="pos-stat-value">{position.direction}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Qty</span>
-          <span className="ps-v">{position.contracts}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Qty</span>
+          <span className="pos-stat-value">{position.contracts}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Entry Date</span>
-          <span className="ps-v">{position.entry_date || "---"}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Entry Date</span>
+          <span className="pos-stat-value">{position.entry_date || "---"}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Avg Entry</span>
-          <span className="ps-v">{fmtPrice(avgEntry)}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Avg Entry</span>
+          <span className="pos-stat-value">{fmtPrice(avgEntry)}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Last Price</span>
-          <span className="ps-v">{lastPrice != null ? fmtPrice(lastPrice) : "---"}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Last Price</span>
+          <span className="pos-stat-value">{lastPrice != null ? fmtPrice(lastPrice) : "---"}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Entry Cost</span>
-          <span className="ps-v">{fmtUsd(entryCost)}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Entry Cost</span>
+          <span className="pos-stat-value">{fmtUsd(entryCost)}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Market Value</span>
-          <span className="ps-v">{mv != null ? fmtUsd(mv) : "---"}</span>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Market Value</span>
+          <span className="pos-stat-value">{mv != null ? fmtUsd(mv) : "---"}</span>
         </div>
-        <div className="ps">
-          <span className="ps-l">Unrealized P&L</span>
-          <span className={`ps-v ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
+        <div className="pos-stat">
+          <span className="pos-stat-label">Unrealized P&L</span>
+          <span className={`pos-stat-value ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
             {pnl != null ? `${pnl >= 0 ? "+" : ""}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "---"}
           </span>
         </div>
         {position.expiry !== "N/A" && (
-          <div className="ps">
-            <span className="ps-l">Expiry</span>
-            <span className="ps-v">{position.expiry}</span>
+          <div className="pos-stat">
+            <span className="pos-stat-label">Expiry</span>
+            <span className="pos-stat-value">{position.expiry}</span>
           </div>
         )}
         {position.target != null && (
-          <div className="ps">
-            <span className="ps-l">Target</span>
-            <span className="ps-v">{fmtPrice(position.target)}</span>
+          <div className="pos-stat">
+            <span className="pos-stat-label">Target</span>
+            <span className="pos-stat-value">{fmtPrice(position.target)}</span>
           </div>
         )}
         {position.stop != null && (
-          <div className="ps">
-            <span className="ps-l">Stop</span>
-            <span className="ps-v">{fmtPrice(position.stop)}</span>
+          <div className="pos-stat">
+            <span className="pos-stat-label">Stop</span>
+            <span className="pos-stat-value">{fmtPrice(position.stop)}</span>
           </div>
         )}
       </div>

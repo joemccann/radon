@@ -82,67 +82,67 @@ function StrikeRow({
       {/* Call side */}
       {showCalls && (
         <>
-          <td className="ch-c chain-greek">{callDelta != null ? callDelta.toFixed(2) : ""}</td>
-          <td className="ch-c chain-iv">{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
-          <td className="ch-c chain-vol">{callVol != null ? callVol.toLocaleString() : ""}</td>
+          <td className="chain-cell chain-greek">{callDelta != null ? callDelta.toFixed(2) : ""}</td>
+          <td className="chain-cell chain-iv">{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
+          <td className="chain-cell chain-vol">{callVol != null ? callVol.toLocaleString() : ""}</td>
           <td
-            className="ch-c chain-bid chain-clickable"
+            className="chain-cell chain-bid chain-clickable"
             onClick={() => onClickCall(strike, "SELL")}
             title="Sell call"
           >
             {callBid != null ? fmtPrice(callBid) : "---"}
           </td>
           <td
-            className="ch-c chain-mid chain-clickable"
+            className="chain-cell chain-mid chain-clickable"
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
             {callMid != null ? fmtPrice(callMid) : "---"}
           </td>
           <td
-            className="ch-c chain-ask chain-clickable"
+            className="chain-cell chain-ask chain-clickable"
             onClick={() => onClickCall(strike, "BUY")}
             title="Buy call"
           >
             {callAsk != null ? fmtPrice(callAsk) : "---"}
           </td>
-          <td className="ch-c chain-last">{callLast != null ? fmtPrice(callLast) : ""}</td>
+          <td className="chain-cell chain-last">{callLast != null ? fmtPrice(callLast) : ""}</td>
         </>
       )}
 
       {/* Strike */}
-      <td className={`ch-c chain-strike ${isAtm ? "chain-strike-atm" : ""}`}>
+      <td className={`chain-cell chain-strike ${isAtm ? "chain-strike-atm" : ""}`}>
         {fmtPrice(strike)}
       </td>
 
       {/* Put side */}
       {showPuts && (
         <>
-          <td className="ch-c chain-last">{putLast != null ? fmtPrice(putLast) : ""}</td>
+          <td className="chain-cell chain-last">{putLast != null ? fmtPrice(putLast) : ""}</td>
           <td
-            className="ch-c chain-bid chain-clickable"
+            className="chain-cell chain-bid chain-clickable"
             onClick={() => onClickPut(strike, "SELL")}
             title="Sell put"
           >
             {putBid != null ? fmtPrice(putBid) : "---"}
           </td>
           <td
-            className="ch-c chain-mid chain-clickable"
+            className="chain-cell chain-mid chain-clickable"
             onClick={() => onClickPut(strike, "BUY")}
             title="Buy put"
           >
             {putMid != null ? fmtPrice(putMid) : "---"}
           </td>
           <td
-            className="ch-c chain-ask chain-clickable"
+            className="chain-cell chain-ask chain-clickable"
             onClick={() => onClickPut(strike, "BUY")}
             title="Buy put"
           >
             {putAsk != null ? fmtPrice(putAsk) : "---"}
           </td>
-          <td className="ch-c chain-vol">{putVol != null ? putVol.toLocaleString() : ""}</td>
-          <td className="ch-c chain-iv">{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
-          <td className="ch-c chain-greek">{putDelta != null ? putDelta.toFixed(2) : ""}</td>
+          <td className="chain-cell chain-vol">{putVol != null ? putVol.toLocaleString() : ""}</td>
+          <td className="chain-cell chain-iv">{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
+          <td className="chain-cell chain-greek">{putDelta != null ? putDelta.toFixed(2) : ""}</td>
         </>
       )}
     </tr>
@@ -242,18 +242,20 @@ function OrderBuilder({
 
   return (
     <div className="order-builder">
-      <div className="oh59">
+      <div className="order-builder-header">
         <span
-          className="t-s uc"
           style={{
+            fontFamily: "var(--font-mono)",
             fontSize: "11px",
+            textTransform: "uppercase",
             letterSpacing: "0.05em",
+            color: "var(--text-secondary)",
           }}
         >
           ORDER BUILDER {structure ? `— ${structure}` : ""}
         </span>
         <button
-          className="bt-s"
+          className="btn-secondary"
           onClick={() => {
             onClearLegs();
             setConfirmStep(false);
@@ -267,7 +269,7 @@ function OrderBuilder({
       </div>
 
       {/* Legs list */}
-      <div className="obl">
+      <div className="order-builder-legs">
         {legs.map((leg) => {
           const key = optionKey({
             symbol: ticker,
@@ -280,9 +282,9 @@ function OrderBuilder({
 
           return (
             <div key={leg.id} className="order-builder-leg">
-              <div className="fc" style={{ gap: "8px", flex: 1 }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
                 <button
-                  className={`oaa ${leg.action === "BUY" ? "oby" : "oas"}`}
+                  className={`order-action-btn order-action-active ${leg.action === "BUY" ? "order-action-buy" : "order-action-sell"}`}
                   onClick={() => {
                     onUpdateLeg(leg.id, { action: leg.action === "BUY" ? "SELL" : "BUY" });
                     setConfirmStep(false);
@@ -291,19 +293,19 @@ function OrderBuilder({
                 >
                   {leg.action}
                 </button>
-                <span className="fm" style={{ fontSize: "12px" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px" }}>
                   {leg.quantity}x ${leg.strike} {leg.right === "C" ? "Call" : "Put"}
                 </span>
-                <span className="fm t-s" style={{ fontSize: "11px" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
                   {formatExpiry(leg.expiry)}
                 </span>
-                <span className="fm t-s" style={{ fontSize: "11px", marginLeft: "auto" }}>
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)", marginLeft: "auto" }}>
                   {mid != null ? fmtPrice(mid) : "---"}
                 </span>
               </div>
-              <div className="fc" style={{ gap: "4px" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <input
-                  className="oi"
+                  className="order-input"
                   type="number"
                   min="1"
                   step="1"
@@ -329,6 +331,7 @@ function OrderBuilder({
                     cursor: "pointer",
                     fontSize: "14px",
                     padding: "0 4px",
+                    fontFamily: "var(--font-mono)",
                   }}
                   title="Remove leg"
                 >
@@ -341,13 +344,13 @@ function OrderBuilder({
       </div>
 
       {/* Net price */}
-      <div className="on98">
-        <span className="fm t-s" style={{ fontSize: "11px" }}>
+      <div className="order-builder-net">
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
           NET {isDebit ? "DEBIT" : "CREDIT"}
         </span>
         <span
-          className="fm"
           style={{
+            fontFamily: "var(--font-mono)",
             fontSize: "14px",
             fontWeight: 600,
             color: isDebit ? "var(--fault)" : "var(--signal-core)",
@@ -355,23 +358,23 @@ function OrderBuilder({
         >
           {netPrice != null ? fmtPrice(Math.abs(netPrice)) : "---"}
         </span>
-        <span className="fm t-s" style={{ fontSize: "10px" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-secondary)" }}>
           {netPrice != null ? `(${fmtPrice(Math.abs(netPrice) * 100)} notional)` : ""}
         </span>
       </div>
 
       {/* TIF */}
-      <div className="o-f" style={{ marginTop: "8px" }}>
-        <label className="o-l">Time in Force</label>
-        <div className="o-ab">
+      <div className="order-field" style={{ marginTop: "8px" }}>
+        <label className="order-label">Time in Force</label>
+        <div className="order-action-buttons">
           <button
-            className={tif === "DAY" ? "oaa" : ""}
+            className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`}
             onClick={() => setTif("DAY")}
           >
             DAY
           </button>
           <button
-            className={tif === "GTC" ? "oaa" : ""}
+            className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`}
             onClick={() => setTif("GTC")}
           >
             GTC
@@ -383,18 +386,18 @@ function OrderBuilder({
       {success && <div className="order-success">{success}</div>}
 
       {/* Submit */}
-      <div className="os" style={{ marginTop: "8px" }}>
+      <div className="order-submit" style={{ marginTop: "8px" }}>
         {confirmStep ? (
-          <div className="oc-r">
+          <div className="order-confirm-row">
             <button
-              className="bt-s"
+              className="btn-secondary"
               onClick={() => setConfirmStep(false)}
               disabled={loading}
             >
               Back
             </button>
             <button
-              className={`bp ${!isDebit ? "bd" : ""}`}
+              className={`btn-primary ${!isDebit ? "btn-danger" : ""}`}
               onClick={handlePlace}
               disabled={loading}
             >
@@ -403,9 +406,10 @@ function OrderBuilder({
           </div>
         ) : (
           <button
-            className="bp w-full"
+            className="btn-primary"
             onClick={handlePlace}
             disabled={netPrice == null}
+            style={{ width: "100%" }}
           >
             Place {structure || "Order"}
           </button>
@@ -624,7 +628,7 @@ export default function OptionsChainTab({
   if (loadingExpiries) {
     return (
       <div style={{ padding: "24px 0", textAlign: "center" }}>
-        <span className="fm t-s" style={{ fontSize: "12px" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--text-secondary)" }}>
           Loading expirations...
         </span>
       </div>
@@ -634,7 +638,7 @@ export default function OptionsChainTab({
   if (error && expirations.length === 0) {
     return (
       <div style={{ padding: "24px 0", textAlign: "center" }}>
-        <span className="fm" style={{ fontSize: "12px", color: "var(--fault)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--fault)" }}>
           {error}
         </span>
       </div>
@@ -642,14 +646,16 @@ export default function OptionsChainTab({
   }
 
   return (
-    <div style={{ padding: "8px 0" }}>
+    <div className="chain-tab" style={{ padding: "8px 0" }}>
       {/* Expiry selector */}
-      <div className="cb107">
+      <div className="chain-expiry-bar">
         <label
-          className="fm t-s uc"
           style={{
+            fontFamily: "var(--font-mono)",
             fontSize: "10px",
+            textTransform: "uppercase",
             letterSpacing: "0.05em",
+            color: "var(--text-secondary)",
           }}
         >
           EXPIRY
@@ -668,10 +674,10 @@ export default function OptionsChainTab({
             </option>
           ))}
         </select>
-        <span className="fm t-s" style={{ fontSize: "11px" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
           {currentPrice != null ? `Underlying: ${fmtPrice(currentPrice)}` : ""}
         </span>
-        <div className="fc" style={{ marginLeft: "auto", gap: "8px" }}>
+        <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: "8px" }}>
           <div className="chain-side-toggle">
             {(["both", "calls", "puts"] as const).map((val) => (
               <button
@@ -683,7 +689,7 @@ export default function OptionsChainTab({
               </button>
             ))}
           </div>
-          <label className="fm t-s" style={{ fontSize: "10px" }}>
+          <label style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-secondary)" }}>
             STRIKES
           </label>
           <select
@@ -703,7 +709,7 @@ export default function OptionsChainTab({
       {/* Chain grid */}
       {loadingStrikes ? (
         <div style={{ padding: "24px 0", textAlign: "center" }}>
-          <span className="fm t-s" style={{ fontSize: "12px" }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px", color: "var(--text-secondary)" }}>
             Loading chain...
           </span>
         </div>
@@ -718,17 +724,17 @@ export default function OptionsChainTab({
                     <th className="chain-header">IV</th>
                     <th className="chain-header">Vol</th>
                     <th className="chain-header">Bid</th>
-                    <th className="chain-header chm">Mid</th>
+                    <th className="chain-header chain-header-mid">Mid</th>
                     <th className="chain-header">Ask</th>
                     <th className="chain-header">Last</th>
                   </>
                 )}
-                <th className="chain-header cs68">Strike</th>
+                <th className="chain-header chain-header-strike">Strike</th>
                 {sideFilter !== "calls" && (
                   <>
                     <th className="chain-header">Last</th>
                     <th className="chain-header">Bid</th>
-                    <th className="chain-header chm">Mid</th>
+                    <th className="chain-header chain-header-mid">Mid</th>
                     <th className="chain-header">Ask</th>
                     <th className="chain-header">Vol</th>
                     <th className="chain-header">IV</th>

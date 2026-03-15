@@ -1,105 +1,10 @@
-import type { ReactNode } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { normalizeTextLines } from "@/lib/utils";
 
 type MarkdownRendererProps = {
   content: string;
 };
-
-/* ────────────────────────────────────────────────
- * Lightweight markdown → React renderer.
- *
- * Replaces react-markdown + remark-gfm (~540KB) with a
- * ~3KB inline renderer that handles the subset of markdown
- * used in chat messages: paragraphs, headings, lists,
- * code blocks, inline formatting, links, blockquotes,
- * and GFM tables.
- * ──────────────────────────────────────────────── */
-
-// Inline formatting: bold, italic, inline code, links
-function renderInline(text: string): (string | ReactNode)[] {
-  const parts: (string | ReactNode)[] = [];
-  // Process inline patterns with a single regex scan
-  const re = /(`[^`]+`)|(\*\*[^*]+\*\*)|(\*[^*]+\*)|(_[^_]+_)|(\[([^\]]+)\]\(([^)]+)\))/g;
-  let lastIndex = 0;
-  let match: RegExpExecArray | null;
-
-  while ((match = re.exec(text)) !== null) {
-    // Push text before match
-    if (match.index > lastIndex) {
-      parts.push(text.slice(lastIndex, match.index));
-    }
-
-    if (match[1]) {
-      // Inline code
-      const code = match[1].slice(1, -1);
-      parts.push(<code key={match.index} className="cc15">{code}</code>);
-    } else if (match[2]) {
-      // Bold
-      const bold = match[2].slice(2, -2);
-      parts.push(<strong key={match.index} className="cs54">{bold}</strong>);
-    } else if (match[3]) {
-      // Italic *text*
-      const em = match[3].slice(1, -1);
-      parts.push(<em key={match.index} className="cme">{em}</em>);
-    } else if (match[4]) {
-      // Italic _text_
-      const em = match[4].slice(1, -1);
-      parts.push(<em key={match.index} className="cme">{em}</em>);
-    } else if (match[5]) {
-      // Link [text](url)
-      parts.push(
-        <a key={match.index} href={match[7]} target="_blank" rel="noopener noreferrer" className="cl75">
-          {match[6]}
-        </a>
-      );
-    }
-
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Push remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.slice(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : [text];
-}
-
-// Parse a GFM table block (array of lines starting with |)
-function renderTable(lines: string[], keyBase: number): ReactNode {
-  const parseRow = (line: string) =>
-    line.split("|").slice(1, -1).map((cell) => cell.trim());
-
-  const headerCells = parseRow(lines[0]);
-  // lines[1] is the separator (|---|---|)
-  const bodyLines = lines.slice(2);
-
-  return (
-    <div key={keyBase} className="cw115">
-      <table className="chat-table">
-        <thead className="ct65">
-          <tr>
-            {headerCells.map((cell, i) => (
-              <th key={i}>{renderInline(cell)}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {bodyLines.map((line, ri) => {
-            const cells = parseRow(line);
-            return (
-              <tr key={ri}>
-                {cells.map((cell, ci) => (
-                  <td key={ci}>{renderInline(cell)}</td>
-                ))}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
 
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const normalized = normalizeTextLines(content);
@@ -107,121 +12,45 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
     return <span className="chat-empty">No output.</span>;
   }
 
-  const lines = normalized.split("\n");
-  const elements: ReactNode[] = [];
-  let i = 0;
-
-  while (i < lines.length) {
-    const line = lines[i];
-
-    // Fenced code block
-    if (line.startsWith("```")) {
-      const lang = line.slice(3).trim();
-      const codeLines: string[] = [];
-      i++;
-      while (i < lines.length && !lines[i].startsWith("```")) {
-        codeLines.push(lines[i]);
-        i++;
-      }
-      i++; // skip closing ```
-      elements.push(
-        <pre key={elements.length} className="cb22">
-          <code className={lang ? `chat-markdown-fenced-code language-${lang}` : "chat-markdown-fenced-code"}>
-            {codeLines.join("\n")}
-          </code>
-        </pre>
-      );
-      continue;
-    }
-
-    // GFM table (starts with |, next line is separator)
-    if (line.startsWith("|") && i + 1 < lines.length && /^\|[\s:]*-+/.test(lines[i + 1])) {
-      const tableLines: string[] = [];
-      while (i < lines.length && lines[i].startsWith("|")) {
-        tableLines.push(lines[i]);
-        i++;
-      }
-      elements.push(renderTable(tableLines, elements.length));
-      continue;
-    }
-
-    // Headings
-    const headingMatch = line.match(/^(#{1,4})\s+(.*)/);
-    if (headingMatch) {
-      const level = headingMatch[1].length as 1 | 2 | 3 | 4;
-      const Tag = `h${level}` as const;
-      elements.push(
-        <Tag key={elements.length} className="cmh">
-          {renderInline(headingMatch[2])}
-        </Tag>
-      );
-      i++;
-      continue;
-    }
-
-    // Blockquote
-    if (line.startsWith("> ")) {
-      const quoteLines: string[] = [];
-      while (i < lines.length && lines[i].startsWith("> ")) {
-        quoteLines.push(lines[i].slice(2));
-        i++;
-      }
-      elements.push(
-        <blockquote key={elements.length} className="cb23">
-          {quoteLines.map((ql, qi) => (
-            <p key={qi} className="cmp">{renderInline(ql)}</p>
-          ))}
-        </blockquote>
-      );
-      continue;
-    }
-
-    // Unordered list
-    if (/^[-*+]\s/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^[-*+]\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^[-*+]\s/, ""));
-        i++;
-      }
-      elements.push(
-        <ul key={elements.length} className="cml cu8">
-          {items.map((item, ii) => (
-            <li key={ii} className="cli">{renderInline(item)}</li>
-          ))}
-        </ul>
-      );
-      continue;
-    }
-
-    // Ordered list
-    if (/^\d+\.\s/.test(line)) {
-      const items: string[] = [];
-      while (i < lines.length && /^\d+\.\s/.test(lines[i])) {
-        items.push(lines[i].replace(/^\d+\.\s/, ""));
-        i++;
-      }
-      elements.push(
-        <ol key={elements.length} className="cml co10">
-          {items.map((item, ii) => (
-            <li key={ii} className="cli">{renderInline(item)}</li>
-          ))}
-        </ol>
-      );
-      continue;
-    }
-
-    // Empty line
-    if (line.trim() === "") {
-      i++;
-      continue;
-    }
-
-    // Paragraph (default)
-    elements.push(
-      <p key={elements.length} className="cmp">{renderInline(line)}</p>
-    );
-    i++;
-  }
-
-  return <div className="cm150">{elements}</div>;
+  return (
+    <div className="chat-markdown">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm]}
+        components={{
+          p: ({ children }) => <p className="chat-markdown-p">{children}</p>,
+          ul: ({ children }) => <ul className="chat-markdown-list chat-markdown-list-unordered">{children}</ul>,
+          ol: ({ children }) => <ol className="chat-markdown-list chat-markdown-list-ordered">{children}</ol>,
+          li: ({ children }) => <li className="chat-markdown-list-item">{children}</li>,
+          table: ({ children }) => <div className="chat-table-wrap"><table className="chat-table">{children}</table></div>,
+          thead: ({ children }) => <thead className="chat-markdown-thead">{children}</thead>,
+          tbody: ({ children }) => <tbody>{children}</tbody>,
+          tr: ({ children }) => <tr>{children}</tr>,
+          th: ({ children }) => <th>{children}</th>,
+          td: ({ children }) => <td>{children}</td>,
+          blockquote: ({ children }) => <blockquote className="chat-markdown-blockquote">{children}</blockquote>,
+          pre: ({ children }) => <pre className="chat-markdown-code-block">{children}</pre>,
+          code: ({ children, className }) => {
+            const isBlock = typeof className === "string" && className.startsWith("language-");
+            if (isBlock) {
+              return <code className="chat-markdown-fenced-code">{children}</code>;
+            }
+            return <code className="chat-markdown-inline-code">{children}</code>;
+          },
+          a: ({ href, children }) => (
+            <a href={href ?? "#"} target="_blank" rel="noopener noreferrer" className="chat-markdown-link">
+              {children}
+            </a>
+          ),
+          em: ({ children }) => <em className="chat-markdown-emphasis">{children}</em>,
+          strong: ({ children }) => <strong className="chat-markdown-strong">{children}</strong>,
+          h1: ({ children }) => <h1 className="chat-markdown-heading chat-markdown-heading-1">{children}</h1>,
+          h2: ({ children }) => <h2 className="chat-markdown-heading chat-markdown-heading-2">{children}</h2>,
+          h3: ({ children }) => <h3 className="chat-markdown-heading chat-markdown-heading-3">{children}</h3>,
+          h4: ({ children }) => <h4 className="chat-markdown-heading chat-markdown-heading-4">{children}</h4>,
+        }}
+      >
+        {normalized}
+      </ReactMarkdown>
+    </div>
+  );
 }

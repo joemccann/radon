@@ -54,18 +54,18 @@ export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onC
     <Modal open={true} onClose={onClose} title={title} className="instrument-detail-modal">
       <div className="ticker-detail-content">
         {/* Position summary pill */}
-        <div className="isg">
-          <div className="ps">
-            <span className="ps-l">DIRECTION</span>
-            <span className="ps-v">{leg.direction} {leg.contracts}x</span>
+        <div className="instrument-summary-grid">
+          <div className="pos-stat">
+            <span className="pos-stat-label">DIRECTION</span>
+            <span className="pos-stat-value">{leg.direction} {leg.contracts}x</span>
           </div>
-          <div className="ps">
-            <span className="ps-l">AVG ENTRY</span>
-            <span className="ps-v">{fmtPrice(avgEntry)}</span>
+          <div className="pos-stat">
+            <span className="pos-stat-label">AVG ENTRY</span>
+            <span className="pos-stat-value">{fmtPrice(avgEntry)}</span>
           </div>
-          <div className="ps">
-            <span className="ps-l">P&L</span>
-            <span className={`ps-v ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
+          <div className="pos-stat">
+            <span className="pos-stat-label">P&L</span>
+            <span className={`pos-stat-value ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
               {legPnl != null ? `${legPnl >= 0 ? "+" : ""}${fmtUsd(Math.abs(legPnl))}` : "---"}
             </span>
           </div>
@@ -172,18 +172,18 @@ function LegOrderForm({
   }, [confirmStep, ticker, action, parsedQty, parsedPrice, tif, expiryClean, leg.strike, right, strikeStr]);
 
   return (
-    <div className="of">
-      <div className="o-f">
-        <label className="o-l">Action</label>
-        <div className="o-ab">
+    <div className="order-form">
+      <div className="order-field">
+        <label className="order-label">Action</label>
+        <div className="order-action-buttons">
           <button
-            className={action === "BUY" ? "oaa oby" : ""}
+            className={`order-action-btn ${action === "BUY" ? "order-action-active order-action-buy" : ""}`}
             onClick={() => { setAction("BUY"); setConfirmStep(false); }}
           >
             BUY
           </button>
           <button
-            className={action === "SELL" ? "oaa oas" : ""}
+            className={`order-action-btn ${action === "SELL" ? "order-action-active order-action-sell" : ""}`}
             onClick={() => { setAction("SELL"); setConfirmStep(false); }}
           >
             SELL
@@ -191,10 +191,10 @@ function LegOrderForm({
         </div>
       </div>
 
-      <div className="o-f">
-        <label className="o-l">Quantity</label>
+      <div className="order-field">
+        <label className="order-label">Quantity</label>
         <input
-          className="oi"
+          className="order-input"
           type="number"
           min="1"
           step="1"
@@ -204,12 +204,12 @@ function LegOrderForm({
         />
       </div>
 
-      <div className="o-f">
-        <label className="o-l">Limit Price</label>
-        <div className="mp-ir">
-          <span className="mp-p">$</span>
+      <div className="order-field">
+        <label className="order-label">Limit Price</label>
+        <div className="modify-price-input-row">
+          <span className="modify-price-prefix">$</span>
           <input
-            className="mxi"
+            className="modify-price-input"
             type="number"
             step="0.01"
             min="0.01"
@@ -218,36 +218,36 @@ function LegOrderForm({
             placeholder="0.00"
           />
         </div>
-        <div className="mq-b">
-          <button className="bq" disabled={bid == null} onClick={() => { if (bid != null) { setLimitPrice(bid.toFixed(2)); setConfirmStep(false); } }}>
+        <div className="modify-quick-buttons">
+          <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setLimitPrice(bid.toFixed(2)); setConfirmStep(false); } }}>
             BID{bid != null ? ` ${bid.toFixed(2)}` : ""}
           </button>
-          <button className="bq" disabled={mid == null} onClick={() => { if (mid != null) { setLimitPrice(mid.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setLimitPrice(mid.toFixed(2)); setConfirmStep(false); } }}>
             MID{mid != null ? ` ${mid.toFixed(2)}` : ""}
           </button>
-          <button className="bq" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); setConfirmStep(false); } }}>
+          <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); setConfirmStep(false); } }}>
             ASK{ask != null ? ` ${ask.toFixed(2)}` : ""}
           </button>
         </div>
       </div>
 
-      <div className="o-f">
-        <label className="o-l">Time in Force</label>
-        <div className="o-ab">
-          <button className={tif === "DAY" ? "oaa" : ""} onClick={() => setTif("DAY")}>DAY</button>
-          <button className={tif === "GTC" ? "oaa" : ""} onClick={() => setTif("GTC")}>GTC</button>
+      <div className="order-field">
+        <label className="order-label">Time in Force</label>
+        <div className="order-action-buttons">
+          <button className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`} onClick={() => setTif("DAY")}>DAY</button>
+          <button className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`} onClick={() => setTif("GTC")}>GTC</button>
         </div>
       </div>
 
       {error && <div className="order-error">{error}</div>}
       {success && <div className="order-success">{success}</div>}
 
-      <div className="os">
+      <div className="order-submit">
         {confirmStep ? (
-          <div className="oc-r">
-            <button className="bt-s" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
+          <div className="order-confirm-row">
+            <button className="btn-secondary" onClick={() => setConfirmStep(false)} disabled={loading}>Back</button>
             <button
-              className={`bp ${action === "SELL" ? "bd" : ""}`}
+              className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
               disabled={!isValid || loading}
             >
@@ -255,7 +255,7 @@ function LegOrderForm({
             </button>
           </div>
         ) : (
-          <button className="bp w-full" onClick={handlePlace} disabled={!isValid || loading}>
+          <button className="btn-primary" onClick={handlePlace} disabled={!isValid || loading} style={{ width: "100%" }}>
             Place Order
           </button>
         )}

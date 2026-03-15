@@ -14,7 +14,7 @@ import { usePrices } from "@/lib/usePrices";
 import { useBlotter } from "@/lib/useBlotter";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
 import { usePreviousClose } from "@/lib/usePreviousClose";
-import { type OptionContract, type IndexContract, portfolioLegToContract } from "@/lib/pricesProtocol";
+import { type OptionContract, type IndexContract, optionKey, portfolioLegToContract } from "@/lib/pricesProtocol";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import ChatPanel from "@/components/ChatPanel";
@@ -302,12 +302,12 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           onToggleTheme={toggleTheme}
           theme={resolvedTheme}
         >
-          <div className="sc151">
+          <div className="sync-controls">
             <span className={`sync-status ${error ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
             <button
-              className="sb"
+              className="sync-button"
               onClick={syncNow}
               disabled={syncing}
               title={`Sync ${syncTarget} from IB Gateway`}

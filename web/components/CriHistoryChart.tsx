@@ -1,12 +1,8 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, useEffect, type MouseEvent } from "react";
-import { scaleLinear, scaleTime, type ScaleLinear } from "@/lib/scales";
-import { linePath } from "@/lib/svgPath";
-import { extent, bisectLeft } from "@/lib/arrayUtils";
+import { useRef, useEffect, useState } from "react";
+import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
-
-const shortDate = (d: Date) => d.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
 export interface CriHistoryEntry {
   date: string;
@@ -38,17 +34,20 @@ interface CriHistoryChartProps {
   history: CriHistoryEntry[];
   series: [ChartSeries, ChartSeries];
   title: string;
+  /** Override for today's live values — keys match CriHistoryEntry fields */
   liveValues?: Partial<Record<keyof CriHistoryEntry, number>>;
 }
 
 const MARGIN = { top: 20, right: 56, bottom: 32, left: 48 };
 const HEIGHT = 440;
+const CHART_GRID = "var(--chart-grid, var(--border-dim))";
+const CHART_AXIS = "var(--chart-axis, var(--border-dim))";
+const CHART_AXIS_MUTED = "var(--chart-axis-muted, var(--text-secondary))";
+const CHART_SURFACE = "var(--chart-surface, var(--bg-panel))";
 
 function defaultFormat(v: number): string {
   return v.toFixed(2);
 }
-
-/* ── Pure-React SVG chart (no d3-selection / d3-axis) ────── */
 
 export default function CriHistoryChart({
   history,
@@ -56,11 +55,17 @@ export default function CriHistoryChart({
   title,
   liveValues,
 }: CriHistoryChartProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
-  const [tooltip, setTooltip] = useState<TooltipState>({ visible: false, x: 0, y: 0, d: null });
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [tooltip, setTooltip] = useState<TooltipState>({
+    visible: false,
+    x: 0,
+    y: 0,
+    d: null,
+  });
   const [width, setWidth] = useState(400);
 
+  // ResizeObserver for responsive width
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
@@ -73,276 +78,262 @@ export default function CriHistoryChart({
     return () => ro.disconnect();
   }, []);
 
-  // Merge live values into last data point
-  const chartData = useMemo(() => {
+  // Merge live values into the last data point
+  const chartData: CriHistoryEntry[] = (() => {
     if (!history || history.length === 0) return [];
     if (!liveValues || Object.keys(liveValues).length === 0) return history;
     const result = [...history];
     const last = { ...result[result.length - 1] };
     for (const [k, v] of Object.entries(liveValues)) {
-      if (v != null) (last as Record<string, unknown>)[k] = v;
+      if (v != null) {
+        (last as Record<string, unknown>)[k] = v;
+      }
     }
     result[result.length - 1] = last;
     return result;
-  }, [history, liveValues]);
+  })();
 
   const [leftSeries, rightSeries] = series;
-  const innerW = width - MARGIN.left - MARGIN.right;
-  const innerH = HEIGHT - MARGIN.top - MARGIN.bottom;
 
-  // Scales
-  const dates = useMemo(() => chartData.map((d) => new Date(d.date)), [chartData]);
-  const xScale = useMemo(
-    () => {
-      if (dates.length === 0) return scaleTime().domain([new Date(), new Date()]).range([0, innerW]);
-      const sorted = dates.slice().sort((a, b) => a.getTime() - b.getTime());
-      return scaleTime().domain([sorted[0], sorted[sorted.length - 1]]).range([0, innerW]);
-    },
-    [dates, innerW],
-  );
+  useEffect(() => {
+    const svg = d3.select(svgRef.current);
+    svg.selectAll("*").remove();
 
-  const buildYScale = useCallback(
-    (s: ChartSeries) => {
+    if (!chartData || chartData.length < 2) return;
+
+    const innerW = width - MARGIN.left - MARGIN.right;
+    const innerH = HEIGHT - MARGIN.top - MARGIN.bottom;
+
+    const g = svg
+      .attr("width", width)
+      .attr("height", HEIGHT)
+      .append("g")
+      .attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
+
+    // Parse dates
+    const dates = chartData.map((d) => new Date(d.date));
+
+    // Scales
+    const xScale = d3
+      .scaleTime()
+      .domain(d3.extent(dates) as [Date, Date])
+      .range([0, innerW]);
+
+    // Helper: build Y scale for a series
+    function buildYScale(s: ChartSeries) {
       const vals = chartData
         .map((d) => d[s.key] as number | null | undefined)
         .filter((v): v is number => v != null && Number.isFinite(v));
-      if (vals.length === 0) return scaleLinear().domain([0, 100]).range([innerH, 0]);
-      const ext = extent(vals) as [number, number];
+      if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
+      const ext = d3.extent(vals) as [number, number];
       const pad = (ext[1] - ext[0]) * 0.15 || 2;
-      return scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range([innerH, 0]);
-    },
-    [chartData, innerH],
-  );
+      return d3.scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range([innerH, 0]);
+    }
 
-  const yLeft = useMemo(() => buildYScale(leftSeries), [buildYScale, leftSeries]);
-  const yRight = useMemo(() => buildYScale(rightSeries), [buildYScale, rightSeries]);
+    const yLeft = buildYScale(leftSeries);
+    const yRight = buildYScale(rightSeries);
 
-  // Tick arrays
-  const yLeftTicks = useMemo(() => yLeft.ticks(5), [yLeft]);
-  const yRightTicks = useMemo(() => yRight.ticks(5), [yRight]);
-  const xTicks = useMemo(() => {
-    const count = Math.max(2, Math.min(chartData.length, Math.floor(innerW / 50)));
-    return xScale.ticks(count);
-  }, [xScale, chartData.length, innerW]);
+    // Grid lines (based on left axis)
+    const gridLines = yLeft.ticks(5);
+    g.append("g")
+      .selectAll("line")
+      .data(gridLines)
+      .enter()
+      .append("line")
+      .attr("x1", 0)
+      .attr("x2", innerW)
+      .attr("y1", (d) => yLeft(d))
+      .attr("y2", (d) => yLeft(d))
+      .attr("stroke", CHART_GRID)
+      .attr("stroke-width", 1);
 
-  // Line path generators
-  const buildPath = useCallback(
-    (s: ChartSeries, yScale: ScaleLinear<number>) => {
-      const valid = chartData.filter(
+    // Draw a line series
+    function drawLine(
+      s: ChartSeries,
+      yScale: d3.ScaleLinear<number, number>,
+    ) {
+      const validData = chartData.filter(
         (d) => d[s.key] != null && Number.isFinite(d[s.key] as number),
       );
-      if (valid.length < 2) return { path: null, dots: [], lastDot: null };
-      const pathFn = linePath<CriHistoryEntry>()
+      if (validData.length < 2) return;
+
+      const line = d3
+        .line<CriHistoryEntry>()
         .x((d) => xScale(new Date(d.date)))
-        .y((d) => yScale(d[s.key] as number));
-      const dots = valid.map((d) => ({
-        cx: xScale(new Date(d.date)),
-        cy: yScale(d[s.key] as number),
-      }));
-      const hasLive = liveValues && Object.keys(liveValues).length > 0;
-      const lastDot = hasLive ? dots[dots.length - 1] : null;
-      return { path: pathFn(valid), dots, lastDot };
-    },
-    [chartData, xScale, liveValues],
-  );
+        .y((d) => yScale(d[s.key] as number))
+        .curve(d3.curveMonotoneX);
 
-  const leftLine = useMemo(() => buildPath(leftSeries, yLeft), [buildPath, leftSeries, yLeft]);
-  const rightLine = useMemo(() => buildPath(rightSeries, yRight), [buildPath, rightSeries, yRight]);
+      g.append("path")
+        .datum(validData)
+        .attr("fill", "none")
+        .attr("stroke", s.color)
+        .attr("stroke-width", 2)
+        .attr("d", line);
 
-  // Tooltip mouse handler
-  const onMouseMove = useCallback(
-    (e: MouseEvent<SVGRectElement>) => {
-      const svg = svgRef.current;
-      if (!svg || chartData.length === 0) return;
-      const rect = svg.getBoundingClientRect();
-      const mx = e.clientX - rect.left - MARGIN.left;
-      const hoveredDate = xScale.invert(mx);
-      let idx = bisectLeft(chartData, hoveredDate, (d: CriHistoryEntry) => new Date(d.date));
-      idx = Math.max(0, Math.min(chartData.length - 1, idx));
-      if (idx > 0) {
-        const tBefore = Math.abs(new Date(chartData[idx - 1].date).getTime() - hoveredDate.getTime());
-        const tAfter = Math.abs(new Date(chartData[idx].date).getTime() - hoveredDate.getTime());
-        if (tBefore < tAfter) idx -= 1;
+      // Dots
+      g.selectAll(`.dot-${s.key}`)
+        .data(validData)
+        .enter()
+        .append("circle")
+        .attr("class", `dot-${s.key}`)
+        .attr("cx", (d) => xScale(new Date(d.date)))
+        .attr("cy", (d) => yScale(d[s.key] as number))
+        .attr("r", 2)
+        .attr("fill", s.color)
+        .attr("stroke", CHART_SURFACE)
+        .attr("stroke-width", 1);
+
+      // Highlight the last dot (live) with a larger radius and a pulse ring
+      const lastValid = validData[validData.length - 1];
+      if (liveValues && Object.keys(liveValues).length > 0 && lastValid) {
+        g.append("circle")
+          .attr("cx", xScale(new Date(lastValid.date)))
+          .attr("cy", yScale(lastValid[s.key] as number))
+          .attr("r", 4)
+          .attr("fill", s.color)
+          .attr("stroke", s.color)
+          .attr("stroke-width", 1)
+          .attr("opacity", 0.5);
       }
-      setTooltip({
-        visible: true,
-        x: e.clientX - rect.left,
-        y: e.clientY - rect.top,
-        d: chartData[idx],
+    }
+
+    drawLine(leftSeries, yLeft);
+    drawLine(rightSeries, yRight);
+
+    // Left Y-axis
+    const leftFormat = leftSeries.format ?? defaultFormat;
+    g.append("g")
+      .call(
+        d3
+          .axisLeft(yLeft)
+          .ticks(5)
+          .tickFormat((d) => leftFormat(d as number)),
+      )
+      .call((axis) => {
+        axis.select(".domain").remove();
+        axis.selectAll(".tick line").attr("stroke", CHART_GRID);
+        axis
+          .selectAll(".tick text")
+          .attr("fill", leftSeries.color)
+          .attr("font-size", "10px")
+          .attr("font-family", "IBM Plex Mono, monospace");
       });
-    },
-    [chartData, xScale],
-  );
 
-  const onMouseLeave = useCallback(() => {
-    setTooltip({ visible: false, x: 0, y: 0, d: null });
-  }, []);
+    // Right Y-axis
+    const rightFormat = rightSeries.format ?? defaultFormat;
+    g.append("g")
+      .attr("transform", `translate(${innerW},0)`)
+      .call(
+        d3
+          .axisRight(yRight)
+          .ticks(5)
+          .tickFormat((d) => rightFormat(d as number)),
+      )
+      .call((axis) => {
+        axis.select(".domain").remove();
+        axis.selectAll(".tick line").attr("stroke", CHART_GRID);
+        axis
+          .selectAll(".tick text")
+          .attr("fill", rightSeries.color)
+          .attr("font-size", "10px")
+          .attr("font-family", "IBM Plex Mono, monospace");
+      });
 
-  const showEmpty = chartData.length < 2;
-  const leftFmt = leftSeries.format ?? defaultFormat;
-  const rightFmt = rightSeries.format ?? defaultFormat;
+    // X-axis
+    const tickCount = Math.max(2, Math.min(chartData.length, Math.floor(innerW / 50)));
+    const xAxis = d3
+      .axisBottom(xScale)
+      .ticks(tickCount)
+      .tickFormat((d) => d3.timeFormat("%b %-d")(d as Date));
+
+    g.append("g")
+      .attr("transform", `translate(0,${innerH})`)
+      .call(xAxis)
+      .call((axis) => {
+        axis.select(".domain").attr("stroke", CHART_AXIS);
+        axis.selectAll(".tick line").attr("stroke", CHART_GRID);
+        axis
+          .selectAll(".tick text")
+          .attr("fill", CHART_AXIS_MUTED)
+          .attr("font-size", "10px")
+          .attr("font-family", "IBM Plex Mono, monospace");
+      });
+
+    // Invisible overlay for tooltip
+    g.append("rect")
+      .attr("width", innerW)
+      .attr("height", innerH)
+      .attr("fill", "transparent")
+      .on("mousemove", function (event: MouseEvent) {
+        const [mx] = d3.pointer(event, this);
+        const hoveredDate = xScale.invert(mx);
+        const bisect = d3.bisector((d: CriHistoryEntry) => new Date(d.date)).left;
+        let idx = bisect(chartData, hoveredDate);
+        idx = Math.max(0, Math.min(chartData.length - 1, idx));
+        if (idx > 0) {
+          const before = chartData[idx - 1];
+          const after = chartData[idx];
+          const tBefore = Math.abs(new Date(before.date).getTime() - hoveredDate.getTime());
+          const tAfter = Math.abs(new Date(after.date).getTime() - hoveredDate.getTime());
+          if (tBefore < tAfter) idx = idx - 1;
+        }
+        const entry = chartData[idx];
+        const svgRect = svgRef.current?.getBoundingClientRect();
+        const ex = event.clientX - (svgRect?.left ?? 0);
+        const ey = event.clientY - (svgRect?.top ?? 0);
+        setTooltip({ visible: true, x: ex, y: ey, d: entry });
+      })
+      .on("mouseleave", function () {
+        setTooltip({ visible: false, x: 0, y: 0, d: null });
+      });
+  }, [chartData, width, series, liveValues, leftSeries, rightSeries]);
+
+  const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =
-    tooltip.x > width / 2 ? { right: width - tooltip.x + 12 } : { left: tooltip.x + 12 };
+    tooltip.x > width / 2
+      ? { right: width - tooltip.x + 12 }
+      : { left: tooltip.x + 12 };
 
   return (
     <ChartPanel
       family="analytical-time-series"
       title={title}
       legend={series.map((item) => ({ label: item.label, color: item.color }))}
-      className="cp-i"
+      className="chart-panel-inline"
       bodyClassName="cri-history-chart-panel"
       contentClassName="cri-history-chart-content"
       dataTestId="cri-history-chart"
     >
-      <div ref={containerRef} className="cs28">
-        <div className="cs146 cs14">
+      <div ref={containerRef} className="cri-history-chart-shell">
+        <div className="chart-surface cri-history-chart-surface">
           {showEmpty ? (
-            <div className="cs89 ce29">NO HISTORY AVAILABLE</div>
+            <div className="chart-empty-state cri-history-chart-empty">
+              NO HISTORY AVAILABLE
+            </div>
           ) : (
-            <svg ref={svgRef} width={width} height={HEIGHT} className="cs45">
-              <g transform={`translate(${MARGIN.left},${MARGIN.top})`}>
-                {/* Grid lines */}
-                {yLeftTicks.map((t) => (
-                  <line
-                    key={t}
-                    x1={0}
-                    x2={innerW}
-                    y1={yLeft(t)}
-                    y2={yLeft(t)}
-                    stroke="var(--chart-grid, var(--border-dim))"
-                    strokeWidth={1}
-                  />
-                ))}
-
-                {/* Left line + dots */}
-                {leftLine.path && (
-                  <path d={leftLine.path} fill="none" stroke={leftSeries.color} strokeWidth={2} />
-                )}
-                {leftLine.dots.map((dot, i) => (
-                  <circle
-                    key={i}
-                    cx={dot.cx}
-                    cy={dot.cy}
-                    r={2}
-                    fill={leftSeries.color}
-                    stroke="var(--chart-surface, var(--bg-panel))"
-                    strokeWidth={1}
-                  />
-                ))}
-                {leftLine.lastDot && (
-                  <circle
-                    cx={leftLine.lastDot.cx}
-                    cy={leftLine.lastDot.cy}
-                    r={4}
-                    fill={leftSeries.color}
-                    stroke={leftSeries.color}
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                )}
-
-                {/* Right line + dots */}
-                {rightLine.path && (
-                  <path d={rightLine.path} fill="none" stroke={rightSeries.color} strokeWidth={2} />
-                )}
-                {rightLine.dots.map((dot, i) => (
-                  <circle
-                    key={i}
-                    cx={dot.cx}
-                    cy={dot.cy}
-                    r={2}
-                    fill={rightSeries.color}
-                    stroke="var(--chart-surface, var(--bg-panel))"
-                    strokeWidth={1}
-                  />
-                ))}
-                {rightLine.lastDot && (
-                  <circle
-                    cx={rightLine.lastDot.cx}
-                    cy={rightLine.lastDot.cy}
-                    r={4}
-                    fill={rightSeries.color}
-                    stroke={rightSeries.color}
-                    strokeWidth={1}
-                    opacity={0.5}
-                  />
-                )}
-
-                {/* Left Y-axis ticks */}
-                {yLeftTicks.map((t) => (
-                  <g key={t} transform={`translate(0,${yLeft(t)})`}>
-                    <line x1={-6} x2={0} stroke="var(--chart-grid, var(--border-dim))" />
-                    <text
-                      x={-9}
-                      dy="0.32em"
-                      textAnchor="end"
-                      fill={leftSeries.color}
-                      fontSize="10px"
-                      fontFamily="IBM Plex Mono, monospace"
-                    >
-                      {leftFmt(t)}
-                    </text>
-                  </g>
-                ))}
-
-                {/* Right Y-axis ticks */}
-                {yRightTicks.map((t) => (
-                  <g key={t} transform={`translate(${innerW},${yRight(t)})`}>
-                    <line x1={0} x2={6} stroke="var(--chart-grid, var(--border-dim))" />
-                    <text
-                      x={9}
-                      dy="0.32em"
-                      textAnchor="start"
-                      fill={rightSeries.color}
-                      fontSize="10px"
-                      fontFamily="IBM Plex Mono, monospace"
-                    >
-                      {rightFmt(t)}
-                    </text>
-                  </g>
-                ))}
-
-                {/* X-axis */}
-                <line x1={0} x2={innerW} y1={innerH} y2={innerH} stroke="var(--chart-axis, var(--border-dim))" />
-                {xTicks.map((t) => (
-                  <g key={t.getTime()} transform={`translate(${xScale(t)},${innerH})`}>
-                    <line y1={0} y2={6} stroke="var(--chart-grid, var(--border-dim))" />
-                    <text
-                      y={18}
-                      textAnchor="middle"
-                      fill="var(--chart-axis-muted, var(--text-secondary))"
-                      fontSize="10px"
-                      fontFamily="IBM Plex Mono, monospace"
-                    >
-                      {shortDate(t)}
-                    </text>
-                  </g>
-                ))}
-
-                {/* Invisible overlay for tooltip */}
-                <rect
-                  width={innerW}
-                  height={innerH}
-                  fill="transparent"
-                  onMouseMove={onMouseMove}
-                  onMouseLeave={onMouseLeave}
-                />
-              </g>
-            </svg>
+            <svg ref={svgRef} className="cri-history-chart-svg" />
           )}
         </div>
 
         {tooltip.visible && tooltip.d && (
-          <div className="chart-tooltip" style={{ ...tooltipSideStyle, top: tooltip.y - 10 }}>
-            <div className="ctd">{tooltip.d.date}</div>
+          <div
+            className="chart-tooltip"
+            style={{
+              ...tooltipSideStyle,
+              top: tooltip.y - 10,
+            }}
+          >
+            <div className="chart-tooltip-date">{tooltip.d.date}</div>
             {series.map((s) => {
               const val = tooltip.d![s.key];
               const fmt = s.format ?? defaultFormat;
               return (
-                <div key={String(s.key)} className="ct-r">
-                  <span className="ct-l">{s.label}</span>
-                  <span className="ct-v" style={{ color: s.color }}>
-                    {val != null && Number.isFinite(val as number) ? fmt(val as number) : "---"}
+                <div key={String(s.key)} className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">{s.label}</span>
+                  <span className="chart-tooltip-value" style={{ color: s.color }}>
+                    {val != null && Number.isFinite(val as number)
+                      ? fmt(val as number)
+                      : "---"}
                   </span>
                 </div>
               );

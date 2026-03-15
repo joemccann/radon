@@ -63,8 +63,8 @@ function QuoteTelemetryPanel({
             <span className={classes.label}>{field.label}</span>
             <span className={`${classes.value}${toneClass}`}>
               {field.value}
-              {field.trend === "up" && <ArrowUp size={10} className="pt-i ptu" />}
-              {field.trend === "down" && <ArrowDown size={10} className="pt-i ptd" />}
+              {field.trend === "up" && <ArrowUp size={10} className="price-trend-icon price-trend-up" />}
+              {field.trend === "down" && <ArrowDown size={10} className="price-trend-icon price-trend-down" />}
             </span>
           </div>
         );

@@ -4,9 +4,8 @@ import { optionKey } from "@/lib/pricesProtocol";
 
 /* ─── Formatters ──────────────────────────────────────────── */
 
-import { fmtPrice, fmtUsdRound } from "@/lib/format";
-export { fmtPrice };
-export const fmtUsd = fmtUsdRound;
+export const fmtUsd = (n: number) => `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+export const fmtPrice = (n: number) => `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 export const fmtPriceOrCalculated = (n: number, isCalculated: boolean) => isCalculated ? `C${fmtPrice(n)}` : fmtPrice(n);
 
 /* ─── Position math ───────────────────────────────────────── */

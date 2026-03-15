@@ -1,5 +1,4 @@
 import type { PerformanceData } from "./types";
-import { fmtUsd } from "./format";
 
 export type ChartMargins = {
   top: number;
@@ -58,7 +57,16 @@ function formatAxisDate(value: string): string {
   return Number.isNaN(parsed.getTime()) ? value : axisDateFormatter.format(parsed);
 }
 
-const formatAxisUsd = fmtUsd;
+function formatAxisUsd(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    return `${value < 0 ? "-" : ""}$${(abs / 1_000_000).toFixed(2)}M`;
+  }
+  return `${value < 0 ? "-" : ""}$${abs.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+}
 
 function buildLinePath(
   values: number[],

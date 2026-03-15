@@ -9,7 +9,10 @@ import SortableCtaTable from "./SortableCtaTable";
 
 /* ─── Helpers ────────────────────────────────────────── */
 
-import { fmt } from "@/lib/format";
+function fmt(v: number | null | undefined, decimals = 2): string {
+  if (v == null || !Number.isFinite(v)) return "---";
+  return v.toFixed(decimals);
+}
 
 function formatFetchedAt(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -86,10 +89,10 @@ export default function CtaPage() {
   }
 
   const statusBannerClass = syncState === "degraded" || error
-    ? "csb csbe"
+    ? "cta-status-banner cta-status-banner-error"
     : syncState === "syncing" || syncState === "running"
-      ? "csb csbr"
-      : "csb";
+      ? "cta-status-banner cta-status-banner-running"
+      : "cta-status-banner";
 
   return (
     <div data-testid="cta-page" style={{ width: "100%", display: "flex", flexDirection: "column", gap: "0" }}>
@@ -97,12 +100,16 @@ export default function CtaPage() {
       {/* ── Vol-Targeting Model Panel ─────────────────── */}
       <div data-testid="vol-targeting-model" style={{ padding: "16px", borderBottom: "1px solid var(--border)" }}>
         <div
-          className="fm tm uc fc"
           style={{
+            display: "flex",
+            alignItems: "center",
             gap: "6px",
+            fontFamily: "var(--font-mono, monospace)",
             fontSize: "10px",
             fontWeight: 700,
             letterSpacing: "0.10em",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
             marginBottom: "12px",
           }}
         >
@@ -111,14 +118,14 @@ export default function CtaPage() {
           <InfoTooltip text={SECTION_TOOLTIPS["VOL-TARGETING MODEL"]} />
         </div>
 
-        <div className="rr118">
-          <div className="rcr">
+        <div className="regime-cta-rows">
+          <div className="regime-cta-row">
             <span>Implied Exposure</span>
             <span className={exposurePct != null && exposurePct < 50 ? "text-negative" : ""}>
               {fmt(exposurePct, 1)}%
             </span>
           </div>
-          <div className="rcr">
+          <div className="regime-cta-row">
             <span>Forced Reduction</span>
             <span
               className={
@@ -130,7 +137,7 @@ export default function CtaPage() {
               {fmt(cta?.forced_reduction_pct, 1)}%
             </span>
           </div>
-          <div className="rcr">
+          <div className="regime-cta-row">
             <span>Est. CTA Selling</span>
             <span
               className={
@@ -143,11 +150,11 @@ export default function CtaPage() {
         </div>
 
         {exposurePct != null && (
-          <div className="rcg" style={{ marginTop: "12px" }}>
-            <div className="rl37">EXPOSURE</div>
-            <div className="rbt">
+          <div className="regime-cta-gauge" style={{ marginTop: "12px" }}>
+            <div className="regime-cta-gauge-label">EXPOSURE</div>
+            <div className="regime-bar-track">
               <div
-                className="rbf"
+                className="regime-bar-fill"
                 style={{
                   width: `${Math.min(exposurePct, 200) / 2}%`,
                   background:
@@ -155,7 +162,7 @@ export default function CtaPage() {
                 }}
               />
             </div>
-            <div className="rs38">
+            <div className="regime-cta-gauge-scale">
               <span>0%</span>
               <span>100%</span>
               <span>200%</span>
@@ -165,15 +172,17 @@ export default function CtaPage() {
       </div>
 
       {/* ── MenthorQ CTA Positioning ──────────────────── */}
-      <div className="wf">
+      <div style={{ width: "100%" }}>
         <div
-          className="fm tm uc"
           style={{
+            fontFamily: "var(--font-mono, monospace)",
             fontSize: "10px",
             fontWeight: 700,
             letterSpacing: "0.10em",
+            color: "var(--text-muted)",
             padding: "12px 12px 8px",
             borderBottom: "1px solid var(--border)",
+            textTransform: "uppercase",
             display: "flex",
             alignItems: "baseline",
             gap: "8px",
@@ -182,7 +191,7 @@ export default function CtaPage() {
           MENTHORQ CTA POSITIONING — {ctaData?.date ?? "---"}{" "}
           <InfoTooltip text={SECTION_TOOLTIPS["MENTHORQ CTA POSITIONING"]} />
           {fetchLabel && (
-            <span className="tm" style={{ fontWeight: 400, fontSize: "9px", letterSpacing: "0.06em" }}>
+            <span style={{ fontWeight: 400, fontSize: "9px", color: "var(--text-muted)", letterSpacing: "0.06em" }}>
               · FETCHED {fetchLabel}
             </span>
           )}
@@ -190,15 +199,16 @@ export default function CtaPage() {
 
         {!loading && ctaIsStale && (
           <div className={statusBannerClass} data-testid="cta-stale-banner" role="alert">
-            <div className="ct105">CTA CACHE STALE</div>
-            <div className="cc119">{staleCopy}</div>
-            {syncDetail && <div className="cm120">{syncDetail}</div>}
+            <div className="cta-status-title">CTA CACHE STALE</div>
+            <div className="cta-status-copy">{staleCopy}</div>
+            {syncDetail && <div className="cta-status-meta">{syncDetail}</div>}
           </div>
         )}
 
         {loading && (
           <div
-            className="ce fm tm" style={{ padding: "24px 16px", fontSize: "11px" }}
+            className="cta-empty"
+            style={{ padding: "24px 16px", fontFamily: "var(--font-mono, monospace)", fontSize: "11px", color: "var(--text-muted)" }}
           >
             Loading CTA positioning data...
           </div>
@@ -206,7 +216,8 @@ export default function CtaPage() {
 
         {!loading && !ctaData?.tables && (
           <div
-            className="ce fm tm" style={{ padding: "24px 16px", fontSize: "11px" }}
+            className="cta-empty"
+            style={{ padding: "24px 16px", fontFamily: "var(--font-mono, monospace)", fontSize: "11px", color: "var(--text-muted)" }}
           >
             No MenthorQ CTA data available. Run: <code>menthorq-cta</code>
           </div>

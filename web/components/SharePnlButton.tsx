@@ -17,13 +17,18 @@ type SharePnlButtonProps = {
   size?: number;
 };
 
-import { fmtSignedUsdExact as fmtDollar, fmtPct as _fmtPct } from "@/lib/format";
-
-function fmtPct(v: number): string {
-  return _fmtPct(v, 2, true);
+function fmtDollar(v: number): string {
+  const abs = Math.abs(v);
+  const sign = v >= 0 ? "+" : "-";
+  return `${sign}$${abs.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
-function buildTweetText(
+function fmtPct(v: number): string {
+  const sign = v >= 0 ? "+" : "";
+  return `${sign}${v.toFixed(2)}%`;
+}
+
+export function buildTweetText(
   description: string,
   pnl: number,
   pnlPct: number | null,
@@ -126,8 +131,8 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
 
       {open && (
         <div className="share-pnl-popover">
-          <div className="st26">Share Options</div>
-          <label className="spc">
+          <div className="share-pnl-popover-title">Share Options</div>
+          <label className="share-pnl-checkbox">
             <input
               type="checkbox"
               checked={showDollar}
@@ -135,7 +140,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
             />
             <span>P&amp;L $</span>
           </label>
-          <label className="spc">
+          <label className="share-pnl-checkbox">
             <input
               type="checkbox"
               checked={showPct}
@@ -143,16 +148,16 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
             />
             <span>P&amp;L %</span>
           </label>
-          <div className="sa12">
+          <div className="share-pnl-popover-actions">
             <button
-              className="bp spa"
+              className="btn-primary share-pnl-action"
               onClick={handleCopyAndTweet}
               disabled={copying || (!showDollar && !showPct)}
             >
               {copying ? "Generating..." : "Copy & Tweet"}
             </button>
             <button
-              className="bt-s spa"
+              className="btn-secondary share-pnl-action"
               onClick={handleCopy}
               disabled={copying || (!showDollar && !showPct)}
             >

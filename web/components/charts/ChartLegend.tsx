@@ -14,9 +14,9 @@ export default function ChartLegend({ items, className }: ChartLegendProps) {
   return (
     <div className={`chart-legend ${className ?? ""}`.trim()}>
       {items.map((item) => (
-        <span key={`${item.label}-${item.role ?? item.color ?? "custom"}`} className="ci100">
+        <span key={`${item.label}-${item.role ?? item.color ?? "custom"}`} className="chart-legend-item">
           <span
-            className="cs71"
+            className="chart-legend-swatch"
             style={{ background: item.color ?? chartSeriesColor(item.role ?? "primary") }}
           />
           {item.label}

@@ -55,11 +55,28 @@ const METRIC_CONFIG: Record<ExposureMetric, {
   },
 };
 
-import { fmtUsd, fmtSignedUsd, fmtDelta, fmtSpot, fmtSigned } from "@/lib/format";
+function fmtUsd(n: number): string {
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`;
+  return `$${n.toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+}
 
+function fmtSignedUsd(n: number): string {
+  return `${n >= 0 ? "+" : ""}${fmtUsd(Math.abs(n))}${n < 0 ? "" : ""}`.replace("+-", "-");
+}
 
+function fmtDelta(n: number): string {
+  return `${n >= 0 ? "+" : ""}${n.toFixed(0)}`;
+}
 
-const fmtLegDelta = (n: number | null) => fmtSigned(n, 4);
+function fmtSpot(n: number | null): string {
+  if (n == null) return "---";
+  return `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+function fmtLegDelta(n: number | null): string {
+  if (n == null) return "---";
+  return n >= 0 ? `+${n.toFixed(4)}` : n.toFixed(4);
+}
 
 export default function ExposureBreakdownModal({ metric, exposure, bankroll, onClose }: Props) {
   const [expandedId, setExpandedId] = useState<number | null>(null);
@@ -83,26 +100,26 @@ export default function ExposureBreakdownModal({ metric, exposure, bankroll, onC
       open
       onClose={() => { setExpandedId(null); onClose(); }}
       title={config.title}
-      className="em21"
+      className="exposure-breakdown-modal"
     >
       {/* Total value */}
-      <div className="et">
-        <span className="etv">{config.formatValue(totalValue)}</span>
+      <div className="eb-total">
+        <span className="eb-total-value">{config.formatValue(totalValue)}</span>
         {metric === "netExposure" && (
-          <span className="ed112">
+          <span className="eb-total-detail">
             {fmtUsd(exposure.netLong)} long - {fmtUsd(exposure.netShort)} short / {fmtUsd(bankroll)} bankroll
           </span>
         )}
       </div>
 
       {/* Formula */}
-      <div className="ef">
+      <div className="eb-formula">
         <code>{config.formula}</code>
       </div>
 
       {/* Per-position table */}
       {rows.length > 0 ? (
-        <table className="ej">
+        <table className="eb-table">
           <thead>
             <tr>
               <th>TICKER</th>
@@ -157,25 +174,25 @@ function RowGroup({
   return (
     <>
       <tr className="eb-row" onClick={hasLegs ? onToggle : undefined} style={hasLegs ? { cursor: "pointer" } : undefined}>
-        <td className="ek">
+        <td className="eb-ticker">
           {hasLegs && <span className="eb-expand">{isExpanded ? "\u25BC" : "\u25B6"}</span>}
           {row.ticker}
         </td>
-        <td className="es163">{row.structure}</td>
-        <td className="em">{fmtSpot(row.spot)}</td>
-        <td className="em">{fmtDelta(row.delta)}</td>
-        <td className="em">{formatContribution(contribution)}</td>
+        <td className="eb-structure">{row.structure}</td>
+        <td className="eb-mono">{fmtSpot(row.spot)}</td>
+        <td className="eb-mono">{fmtDelta(row.delta)}</td>
+        <td className="eb-mono">{formatContribution(contribution)}</td>
         <td><span className={`eb-source eb-source-${row.deltaSource}`}>{row.deltaSource.toUpperCase()}</span></td>
       </tr>
       {isExpanded && row.legs.map((leg, i) => (
         <tr key={i} className="eb-leg-row">
           <td></td>
-          <td className="ed148">
+          <td className="eb-leg-detail">
             {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
           </td>
           <td></td>
-          <td className="em ed164">{fmtLegDelta(leg.rawDelta)}</td>
-          <td className="em ed164">{fmtDelta(leg.legDelta)}</td>
+          <td className="eb-mono eb-leg-delta">{fmtLegDelta(leg.rawDelta)}</td>
+          <td className="eb-mono eb-leg-delta">{fmtDelta(leg.legDelta)}</td>
           <td></td>
         </tr>
       ))}

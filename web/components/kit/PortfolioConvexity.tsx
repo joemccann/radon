@@ -22,14 +22,14 @@ export function PortfolioConvexity({
         padding: 24,
       }}
     >
-      <div className="flex jb ix" style={{ marginBottom: 24 }}>
+      <div className="flex justify-between items-start" style={{ marginBottom: 24 }}>
         <div>
           <p
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 10,
               letterSpacing: "0.1em",
-              textTransform: "uc",
+              textTransform: "uppercase",
               color: "var(--text-muted)",
               marginBottom: 4,
             }}
@@ -51,7 +51,7 @@ export function PortfolioConvexity({
             fontFamily: "var(--font-mono)",
             fontSize: 10,
             letterSpacing: "0.1em",
-            textTransform: "uc",
+            textTransform: "uppercase",
             color: "var(--dislocation)",
           }}
         >
@@ -76,7 +76,7 @@ export function PortfolioConvexity({
             fontFamily: "var(--font-mono)",
             fontSize: 10,
             letterSpacing: "0.1em",
-            textTransform: "uc",
+            textTransform: "uppercase",
             color: "var(--text-muted)",
           }}
         >
@@ -90,7 +90,7 @@ export function PortfolioConvexity({
           { label: "Net Vega", value: netVega },
           { label: "Signal Layer", value: signalLayer },
         ].map((row) => (
-          <div key={row.label} className="flex jb ic">
+          <div key={row.label} className="flex justify-between items-center">
             <span
               style={{
                 fontFamily: "var(--font-mono)",

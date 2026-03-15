@@ -74,13 +74,13 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
   }, [active, fetched, fetchInfo]);
 
   if (loading) {
-    return <div className="tl"><div className="tl-t">Loading company info...</div></div>;
+    return <div className="tab-loading"><div className="tab-loading-text">Loading company info...</div></div>;
   }
   if (error) {
-    return <div className="te">{error}</div>;
+    return <div className="tab-error">{error}</div>;
   }
   if (!data) {
-    return <div className="ty">No data for {ticker}</div>;
+    return <div className="tab-empty">No data for {ticker}</div>;
   }
 
   const info = data.uw_info;
@@ -145,24 +145,24 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
   return (
     <div className="company-tab">
       {/* About section */}
-      <div className="ca157">
-        <div className="ch60">
-          <span className="rt-t">
+      <div className="company-about">
+        <div className="company-about-header">
+          <span className="ratings-targets-title">
             About {ticker}
           </span>
           {(sector || issueType) && (
-            <span className="cm171">
+            <span className="company-meta">
               {sector}{sector && issueType ? " \u00B7 " : ""}{issueType}
             </span>
           )}
         </div>
-        {name && <div className="cn172">{name}</div>}
+        {name && <div className="company-name">{name}</div>}
         {description && (
           <div className={`company-description ${expanded ? "expanded" : ""}`}>
             <p>{description}</p>
             {description.length > 200 && (
               <button
-                className="cm99"
+                className="company-show-more"
                 onClick={() => setExpanded(!expanded)}
               >
                 {expanded ? "Show less" : "Show more"}
@@ -173,11 +173,11 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
 
         {/* Profile grid */}
         {profileItems.length > 0 && (
-          <div className="cg61">
+          <div className="company-profile-grid">
             {profileItems.map((item) => (
-              <div key={item.label} className="ps">
-                <span className="ps-l">{item.label}</span>
-                <span className="ps-v">{item.value}</span>
+              <div key={item.label} className="pos-stat">
+                <span className="pos-stat-label">{item.label}</span>
+                <span className="pos-stat-value">{item.value}</span>
               </div>
             ))}
           </div>
@@ -185,13 +185,13 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
       </div>
 
       {/* Key Statistics */}
-      <div className="cs158">
-        <div className="rt-t">Key Statistics</div>
-        <div className="cg81">
+      <div className="company-stats">
+        <div className="ratings-targets-title">Key Statistics</div>
+        <div className="company-stats-grid">
           {statItems.map((item) => (
-            <div key={item.label} className="ps">
-              <span className="ps-l">{item.label}</span>
-              <span className="ps-v">{item.value}</span>
+            <div key={item.label} className="pos-stat">
+              <span className="pos-stat-label">{item.label}</span>
+              <span className="pos-stat-value">{item.value}</span>
             </div>
           ))}
         </div>

@@ -52,18 +52,18 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
 
   if (loading) {
     return (
-      <div className="tl">
-        <div className="tl-t">Loading news...</div>
+      <div className="tab-loading">
+        <div className="tab-loading-text">Loading news...</div>
       </div>
     );
   }
 
   if (error) {
-    return <div className="te">{error}</div>;
+    return <div className="tab-error">{error}</div>;
   }
 
   if (fetched && news.length === 0) {
-    return <div className="ty">No recent news for {ticker}</div>;
+    return <div className="tab-empty">No recent news for {ticker}</div>;
   }
 
   return (
@@ -77,13 +77,13 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
             {item.source && <span className="news-source">{item.source}</span>}
             {item.is_major && <span className="pill defined" style={{ fontSize: "8px", padding: "1px 4px" }}>MAJOR</span>}
           </div>
-          <div className="nh156">
+          <div className="news-headline">
             {item.headline}
             <a
               href={item.url || `https://www.google.com/search?q=${encodeURIComponent(item.headline)}&tbm=nws`}
               target="_blank"
               rel="noopener noreferrer"
-              className="nl142"
+              className="news-open-link"
               aria-label="Open article"
             >
               <ExternalLink size={12} />
@@ -92,7 +92,7 @@ export default function NewsTab({ ticker, active }: NewsTabProps) {
         </div>
       ))}
       {source && source !== "unusualwhales" && (
-        <div className="nfn">via {source === "yahoo" ? "Yahoo Finance" : source}</div>
+        <div className="news-fallback-notice">via {source === "yahoo" ? "Yahoo Finance" : source}</div>
       )}
     </div>
   );

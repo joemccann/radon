@@ -335,11 +335,11 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
           >
             {loading && results.length === 0 && (
               <div
-                className="tm"
                 style={{
                   padding: "12px 16px",
                   fontFamily: "Inter, sans-serif",
                   fontSize: "12px",
+                  color: "var(--text-muted)",
                 }}
               >
                 Searching...
@@ -348,11 +348,11 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
 
             {!loading && results.length === 0 && (
               <div
-                className="tm"
                 style={{
                   padding: "12px 16px",
                   fontFamily: "Inter, sans-serif",
                   fontSize: "12px",
+                  color: "var(--text-muted)",
                 }}
               >
                 No results
@@ -370,8 +370,9 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
                   handleSelect(r.symbol);
                 }}
                 onMouseEnter={() => setActiveIndex(i)}
-                className="fc"
                 style={{
+                  display: "flex",
+                  alignItems: "center",
                   gap: "12px",
                   padding: "8px 16px",
                   cursor: "pointer",
@@ -398,12 +399,12 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
 
                 {/* secType badge */}
                 <span
-                  className="tm"
                   style={{
                     fontFamily: "Inter, sans-serif",
                     fontSize: "10px",
                     fontWeight: 500,
-                    textTransform: "uc",
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
                     letterSpacing: "0.5px",
                   }}
                 >
@@ -412,10 +413,10 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
 
                 {/* Exchange */}
                 <span
-                  className="t-s"
                   style={{
                     fontFamily: "Inter, sans-serif",
                     fontSize: "11px",
+                    color: "var(--text-secondary)",
                     marginLeft: "auto",
                   }}
                 >

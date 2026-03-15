@@ -33,7 +33,7 @@ function Metric({ value, label }: MetricProps) {
           fontFamily: "var(--font-mono)",
           fontSize: 10,
           letterSpacing: "0.1em",
-          textTransform: "uc",
+          textTransform: "uppercase",
           color: "var(--text-muted)",
         }}
       >
@@ -53,14 +53,14 @@ export function SemanticStates() {
         padding: 24,
       }}
     >
-      <div className="flex jb ix" style={{ marginBottom: 24 }}>
+      <div className="flex justify-between items-start" style={{ marginBottom: 24 }}>
         <div>
           <p
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 10,
               letterSpacing: "0.1em",
-              textTransform: "uc",
+              textTransform: "uppercase",
               color: "var(--text-muted)",
               marginBottom: 4,
             }}
@@ -87,7 +87,7 @@ export function SemanticStates() {
               fontFamily: "var(--font-mono)",
               fontSize: 10,
               letterSpacing: "0.1em",
-              textTransform: "uc",
+              textTransform: "uppercase",
               padding: "6px 12px",
               borderRadius: 999,
               background: `var(${state.bgVar})`,

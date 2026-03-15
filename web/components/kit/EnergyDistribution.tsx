@@ -25,14 +25,14 @@ export function EnergyDistribution({
         padding: 24,
       }}
     >
-      <div className="flex jb ix" style={{ marginBottom: 24 }}>
+      <div className="flex justify-between items-start" style={{ marginBottom: 24 }}>
         <div>
           <p
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 10,
               letterSpacing: "0.1em",
-              textTransform: "uc",
+              textTransform: "uppercase",
               color: "var(--text-muted)",
               marginBottom: 4,
             }}
@@ -54,7 +54,7 @@ export function EnergyDistribution({
             fontFamily: "var(--font-mono)",
             fontSize: 10,
             letterSpacing: "0.1em",
-            textTransform: "uc",
+            textTransform: "uppercase",
             color: "var(--signal-core)",
           }}
         >

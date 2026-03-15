@@ -128,20 +128,20 @@ function SortTh<K extends string>({
   const ariaSort = active ? (direction === "asc" ? "ascending" : "descending") : undefined;
   return (
     <th
-      className={`sth ${className ?? ""} ${active ? "sa" : ""}`}
+      className={`sortable-th ${className ?? ""} ${active ? "sort-active" : ""}`}
       onClick={() => onToggle(sortKey)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(sortKey); } }}
       tabIndex={0}
       role="columnheader"
       aria-sort={ariaSort}
     >
-      <span className="so">
+      <span className="sort-label">
         {label}
-        <span className="si">
+        <span className="sort-icon">
           {active ? (
             direction === "asc" ? <ChevronUp size={10} /> : <ChevronDown size={10} />
           ) : (
-            <ChevronDown size={10} className="sii" />
+            <ChevronDown size={10} className="sort-icon-idle" />
           )}
         </span>
       </span>
@@ -201,16 +201,16 @@ const flowPosExtract = (item: FlowAnalysisPosition, key: FlowPosKey): string | n
 };
 
 function FlowSparkline({ ratios }: { ratios?: { date: string; buy_ratio: number | null }[] }) {
-  if (!ratios || ratios.length === 0) return <div className="sv">---</div>;
+  if (!ratios || ratios.length === 0) return <div className="strength-value">---</div>;
   const maxH = 28;
   return (
-    <div className="fs132">
+    <div className="flow-sparkline">
       {ratios.map((d, i) => {
         const r = d.buy_ratio;
-        if (r == null) return <div key={i} className="fb133 neutral" style={{ height: 2 }} />;
+        if (r == null) return <div key={i} className="flow-spark-bar neutral" style={{ height: 2 }} />;
         const cls = r >= 0.55 ? "accum" : r <= 0.45 ? "distrib" : "neutral";
         const h = Math.max(2, Math.round(r * maxH));
-        return <div key={i} className={`fb133 ${cls}`} style={{ height: h }} title={`${d.date}: ${Math.round(r * 100)}%`} />;
+        return <div key={i} className={`flow-spark-bar ${cls}`} style={{ height: h }} title={`${d.date}: ${Math.round(r * 100)}%`} />;
       })}
     </div>
   );
@@ -237,7 +237,7 @@ function FlowTable({ rows, lastColumn }: { rows: FlowAnalysisPosition[]; lastCol
             <td><span className={`pill ${item.flow_class}`}>{item.flow_label}</span></td>
             <td>
               <FlowSparkline ratios={item.daily_buy_ratios} />
-              <div className="sv">{item.strength}</div>
+              <div className="strength-value">{item.strength}</div>
             </td>
             <td>{item.note}</td>
           </tr>
@@ -262,15 +262,15 @@ function FlowSections() {
   return (
     <>
       {actionItems.length > 0 && (
-        <div className="sx">
+        <div className="section">
           <div className="alert-box">
             <div className="alert-title">
               <TriangleAlert size={14} />
               ACTION ITEMS
             </div>
             {actionItems.map((item) => (
-              <div key={`${item.ticker}-${item.position}`} className="a-i">
-                <span className="at161">{item.ticker}</span> — {item.position}: {item.note}
+              <div key={`${item.ticker}-${item.position}`} className="alert-item">
+                <span className="alert-ticker">{item.ticker}</span> — {item.position}: {item.note}
               </div>
             ))}
           </div>
@@ -278,21 +278,21 @@ function FlowSections() {
       )}
 
       {error && (
-        <div className="sx">
-          <div className="s-bd"><div className="a-i be">{error}</div></div>
+        <div className="section">
+          <div className="section-body"><div className="alert-item bearish">{error}</div></div>
         </div>
       )}
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <CheckCircle2 size={14} />
             Flow Supports Position
             <InfoTooltip text={SECTION_TOOLTIPS["Flow Supports Position"]} />
           </div>
-          <div className="fc" style={{ gap: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {lastSync && (
-              <span className="rm" style={{ margin: 0 }}>
+              <span className="report-meta" style={{ margin: 0 }}>
                 {new Date(lastSync).toLocaleTimeString()}
               </span>
             )}
@@ -301,71 +301,71 @@ function FlowSections() {
             </span>
           </div>
         </div>
-        <div className="s-bd">
+        <div className="section-body">
           {supportsArr.length > 0 ? (
             <FlowTable rows={supportsArr} lastColumn="Signal" />
           ) : (
-            <div className="a-i">{syncing ? "Scanning portfolio flow..." : "No supporting flow detected"}</div>
+            <div className="alert-item">{syncing ? "Scanning portfolio flow..." : "No supporting flow detected"}</div>
           )}
         </div>
       </div>
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <TrendingDown size={14} />
             Flow Against Position
             <InfoTooltip text={SECTION_TOOLTIPS["Flow Against Position"]} />
           </div>
           <span className="pill distrib">{againstArr.length} POSITIONS</span>
         </div>
-        <div className="s-bd">
+        <div className="section-body">
           {againstArr.length > 0 ? (
             <FlowTable rows={againstArr} lastColumn="Concern" />
           ) : (
-            <div className="a-i">No contradicting flow detected</div>
+            <div className="alert-item">No contradicting flow detected</div>
           )}
         </div>
       </div>
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Circle size={14} />
             Neutral / Low Signal
             <InfoTooltip text={SECTION_TOOLTIPS["Neutral / Low Signal"]} />
           </div>
           <span className="pill neutral">{neutralArr.length} POSITIONS</span>
         </div>
-        <div className="s-bd">
+        <div className="section-body">
           {neutralArr.length > 0 ? (
             <FlowTable rows={neutralArr} lastColumn="Note" />
           ) : (
-            <div className="a-i">No neutral positions</div>
+            <div className="alert-item">No neutral positions</div>
           )}
         </div>
       </div>
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Bell size={14} />
             Watch Closely
             <InfoTooltip text={SECTION_TOOLTIPS["Watch Closely"]} />
           </div>
           <span className="pill undefined">{watchArr.length} POSITIONS</span>
         </div>
-        <div className="s-bd">
+        <div className="section-body">
           {watchArr.length > 0 ? (
             <FlowTable rows={watchArr} lastColumn="Note" />
           ) : (
-            <div className="a-i">No watch items</div>
+            <div className="alert-item">No watch items</div>
           )}
         </div>
       </div>
 
-      <div className="sx">
-        <div className="rm">
+      <div className="section">
+        <div className="report-meta">
           {lastSync
             ? `Report Generated: ${new Date(lastSync).toLocaleString()} • Source: UW API • Dark Pool Lookback: 5 Trading Days • ${totalScanned} Positions Scanned`
             : "Awaiting initial flow analysis..."}
@@ -380,17 +380,17 @@ function FlowSections() {
 function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | null; prices?: Record<string, PriceData> }) {
   if (!portfolio) {
     return (
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Circle size={14} />
             Portfolio
             <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
           </div>
           <span className="pill neutral">LOADING</span>
         </div>
-        <div className="s-bd">
-          <div className="a-i">Waiting for portfolio data...</div>
+        <div className="section-body">
+          <div className="alert-item">Waiting for portfolio data...</div>
         </div>
       </div>
     );
@@ -403,55 +403,55 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
   return (
     <>
       {definedPositions.length > 0 && (
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <CheckCircle2 size={14} />
               Defined Risk Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
             </div>
             <span className="pill defined">{definedPositions.length} POSITIONS</span>
           </div>
-          <div className="s-bd">
+          <div className="section-body">
             <PositionTable positions={definedPositions} showStrike={true} showUnderlying={true} prices={prices} />
           </div>
         </div>
       )}
 
       {undefinedPositions.length > 0 && (
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <TriangleAlert size={14} />
               Undefined Risk Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Undefined Risk Positions"]} />
             </div>
             <span className="pill undefined">{undefinedPositions.length} POSITIONS</span>
           </div>
-          <div className="s-bd">
+          <div className="section-body">
             <PositionTable positions={undefinedPositions} showUnderlying={true} prices={prices} />
           </div>
         </div>
       )}
 
       {equityPositions.length > 0 && (
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <Circle size={14} />
               Equity Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Equity Positions"]} />
             </div>
             <span className="pill neutral">{equityPositions.length} POSITIONS</span>
           </div>
-          <div className="s-bd">
+          <div className="section-body">
             <PositionTable positions={equityPositions} showExpiry={false} prices={prices} />
           </div>
         </div>
       )}
 
-      <div className="sx">
-        <div className="rm">
+      <div className="section">
+        <div className="report-meta">
           Last Sync: {new Date(portfolio.last_sync).toLocaleString()} • Source: IB Gateway (4001)
         </div>
       </div>
@@ -483,9 +483,9 @@ function ScannerSections() {
   const { sorted, sort, toggle } = useSort(signals, scannerSigExtract);
 
   const signalClass = (signal: string) => {
-    if (signal === "STRONG") return "bu";
+    if (signal === "STRONG") return "bullish";
     if (signal === "MODERATE") return "neutral";
-    return "be";
+    return "bearish";
   };
 
   const dirClass = (dir: string) => {
@@ -496,16 +496,16 @@ function ScannerSections() {
 
   return (
     <>
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Sparkles size={14} />
             Scanner Signals
             <InfoTooltip text={SECTION_TOOLTIPS["Scanner Signals"]} />
           </div>
-          <div className="fc" style={{ gap: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {lastSync && (
-              <span className="rm" style={{ margin: 0 }}>
+              <span className="report-meta" style={{ margin: 0 }}>
                 {new Date(lastSync).toLocaleTimeString()}
               </span>
             )}
@@ -514,23 +514,23 @@ function ScannerSections() {
             </span>
           </div>
         </div>
-        {error && <div className="s-bd"><div className="a-i be">{error}</div></div>}
+        {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
         {signals.length === 0 && !syncing && !error && (
-          <div className="s-bd"><div className="a-i">No scanner signals. Waiting for initial scan...</div></div>
+          <div className="section-body"><div className="alert-item">No scanner signals. Waiting for initial scan...</div></div>
         )}
         {signals.length > 0 && (
-          <div className="s-bd tw">
+          <div className="section-body table-wrap">
             <table>
               <thead>
                 <tr>
                   <SortTh<ScannerSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<ScannerSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<ScannerSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Score" sortKey="score" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Strength" sortKey="strength" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Buy Ratio" sortKey="buy_ratio" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Sustained" sortKey="sustained_days" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Prints" sortKey="num_prints" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<ScannerSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<ScannerSortKey> label="Strength" sortKey="strength" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<ScannerSortKey> label="Buy Ratio" sortKey="buy_ratio" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<ScannerSortKey> label="Sustained" sortKey="sustained_days" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<ScannerSortKey> label="Prints" sortKey="num_prints" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
               <tbody>
@@ -539,11 +539,11 @@ function ScannerSections() {
                     <td><TickerLink ticker={row.ticker} /></td>
                     <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
                     <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
-                    <td className="rg">{row.score.toFixed(1)}</td>
-                    <td className="rg">{row.strength.toFixed(1)}</td>
-                    <td className="rg">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
-                    <td className="rg">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
-                    <td className="rg">{row.num_prints.toLocaleString()}</td>
+                    <td className="right">{row.score.toFixed(1)}</td>
+                    <td className="right">{row.strength.toFixed(1)}</td>
+                    <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
+                    <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>
+                    <td className="right">{row.num_prints.toLocaleString()}</td>
                   </tr>
                 ))}
               </tbody>
@@ -553,8 +553,8 @@ function ScannerSections() {
       </div>
 
       {lastSync && (
-        <div className="sx">
-          <div className="rm">
+        <div className="section">
+          <div className="report-meta">
             Last Scan: {new Date(lastSync).toLocaleString()} • {data?.tickers_scanned ?? 0} Tickers Scanned
           </div>
         </div>
@@ -595,35 +595,35 @@ function DiscoverSections() {
   };
 
   const biasClass = (bias: string) => {
-    if (bias === "BULLISH" || bias === "CALLS") return "bu";
-    if (bias === "BEARISH" || bias === "PUTS") return "be";
+    if (bias === "BULLISH" || bias === "CALLS") return "bullish";
+    if (bias === "BEARISH" || bias === "PUTS") return "bearish";
     return "neutral";
   };
 
   const dpClass = (dir: string) => {
-    if (dir === "ACCUMULATION") return "bu";
-    if (dir === "DISTRIBUTION") return "be";
+    if (dir === "ACCUMULATION") return "bullish";
+    if (dir === "DISTRIBUTION") return "bearish";
     return "neutral";
   };
 
   const scoreClass = (score: number) => {
-    if (score >= 60) return "bu";
+    if (score >= 60) return "bullish";
     if (score >= 40) return "neutral";
-    return "be";
+    return "bearish";
   };
 
   return (
     <>
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Search size={14} />
             Discovery Candidates
             <InfoTooltip text={SECTION_TOOLTIPS["Discovery Candidates"]} />
           </div>
-          <div className="fc" style={{ gap: "0.75rem" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {lastSync && (
-              <span className="rm" style={{ margin: 0 }}>
+              <span className="report-meta" style={{ margin: 0 }}>
                 {new Date(lastSync).toLocaleTimeString()}
               </span>
             )}
@@ -632,24 +632,24 @@ function DiscoverSections() {
             </span>
           </div>
         </div>
-        {error && <div className="s-bd"><div className="a-i be">{error}</div></div>}
+        {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
         {candidates.length === 0 && !syncing && !error && (
-          <div className="s-bd"><div className="a-i">No candidates found. Waiting for initial scan...</div></div>
+          <div className="section-body"><div className="alert-item">No candidates found. Waiting for initial scan...</div></div>
         )}
         {candidates.length > 0 && (
-          <div className="s-bd tw">
+          <div className="section-body table-wrap">
             <table>
               <thead>
                 <tr>
                   <SortTh<DiscoverSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<DiscoverSortKey> label="Score" sortKey="score" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<DiscoverSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<DiscoverSortKey> label="DP Direction" sortKey="dp_direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<DiscoverSortKey> label="DP Strength" sortKey="dp_strength" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<DiscoverSortKey> label="Buy Ratio" sortKey="dp_buy_ratio" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<DiscoverSortKey> label="DP Strength" sortKey="dp_strength" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<DiscoverSortKey> label="Buy Ratio" sortKey="dp_buy_ratio" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<DiscoverSortKey> label="Options Bias" sortKey="options_bias" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<DiscoverSortKey> label="Alerts" sortKey="alerts" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<DiscoverSortKey> label="Premium" sortKey="total_premium" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<DiscoverSortKey> label="Sweeps" sortKey="sweeps" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<DiscoverSortKey> label="Alerts" sortKey="alerts" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<DiscoverSortKey> label="Premium" sortKey="total_premium" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<DiscoverSortKey> label="Sweeps" sortKey="sweeps" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<DiscoverSortKey> label="Sector" sortKey="sector" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>
               </thead>
@@ -657,17 +657,17 @@ function DiscoverSections() {
                 {sorted.map((c) => (
                   <tr key={c.ticker}>
                     <td><TickerLink ticker={c.ticker} /></td>
-                    <td className="rg">
+                    <td className="right">
                       <span className={scoreClass(c.score)}>{c.score.toFixed(1)}</span>
                     </td>
                     <td><span className={dpClass(c.dp_direction)}>{c.dp_direction}</span></td>
-                    <td className="rg">{c.dp_strength.toFixed(1)}</td>
-                    <td className="rg">{(c.dp_buy_ratio * 100).toFixed(1)}%</td>
+                    <td className="right">{c.dp_strength.toFixed(1)}</td>
+                    <td className="right">{(c.dp_buy_ratio * 100).toFixed(1)}%</td>
                     <td><span className={biasClass(c.options_bias)}>{c.options_bias}</span></td>
-                    <td className="rg">{c.alerts}</td>
-                    <td className="rg">{fmtPremium(c.total_premium)}</td>
-                    <td className="rg">{c.sweeps}</td>
-                    <td className="cm">{c.sector || c.issue_type || "—"}</td>
+                    <td className="right">{c.alerts}</td>
+                    <td className="right">{fmtPremium(c.total_premium)}</td>
+                    <td className="right">{c.sweeps}</td>
+                    <td className="cell-muted">{c.sector || c.issue_type || "—"}</td>
                   </tr>
                 ))}
               </tbody>
@@ -704,28 +704,28 @@ function JournalSections() {
   };
 
   const decisionClass = (d: string) => {
-    if (d === "EXECUTED" || d === "OPEN") return "bu";
+    if (d === "EXECUTED" || d === "OPEN") return "bullish";
     if (d === "CLOSED") return "neutral";
     if (d === "FREED" || d === "CONVERTED") return "lean-bullish";
     if (d === "IB_AUTO_IMPORT") return "ib-import";
-    return "be";
+    return "bearish";
   };
 
   const pnlClass = (v: number | undefined | null) => {
     if (v == null) return "";
-    return v >= 0 ? "bu" : "be";
+    return v >= 0 ? "bullish" : "bearish";
   };
 
   return (
     <>
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Wrench size={14} />
             Trade Journal
             <InfoTooltip text={SECTION_TOOLTIPS["Trade Journal"]} />
           </div>
-          <div className="fc" style={{ gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
             <button
               className="btn-sync"
               onClick={handleSync}
@@ -744,14 +744,14 @@ function JournalSections() {
             <span className="pill defined">{trades.length} TRADES</span>
           </div>
         </div>
-        {error && <div className="s-bd"><div className="a-i be">{error}</div></div>}
-        {syncError && <div className="s-bd"><div className="a-i be">IB Sync: {syncError}</div></div>}
-        {loading && <div className="s-bd p-6"><TableSkeleton rows={4} columns={6} /></div>}
+        {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
+        {syncError && <div className="section-body"><div className="alert-item bearish">IB Sync: {syncError}</div></div>}
+        {loading && <div className="section-body p-6"><TableSkeleton rows={4} columns={6} /></div>}
         {!loading && trades.length === 0 && !error && (
-          <div className="s-bd"><div className="a-i">No trades in journal.</div></div>
+          <div className="section-body"><div className="alert-item">No trades in journal.</div></div>
         )}
         {trades.length > 0 && (
-          <div className="s-bd tw">
+          <div className="section-body table-wrap">
             <table>
               <thead>
                 <tr>
@@ -760,11 +760,11 @@ function JournalSections() {
                   <th>Ticker</th>
                   <th>Structure</th>
                   <th>Status</th>
-                  <th className="rg">Qty</th>
-                  <th className="rg">Entry Cost</th>
-                  <th className="rg">Max Risk</th>
-                  <th className="rg">Realized P&L</th>
-                  <th className="rg">RoR</th>
+                  <th className="right">Qty</th>
+                  <th className="right">Entry Cost</th>
+                  <th className="right">Max Risk</th>
+                  <th className="right">Realized P&L</th>
+                  <th className="right">RoR</th>
                   <th>Gates</th>
                   <th>Edge</th>
                 </tr>
@@ -775,18 +775,18 @@ function JournalSections() {
                   const cost = t.total_cost ?? t.entry_cost ?? null;
                   return (
                     <tr key={t.id}>
-                      <td className="cm">{t.id}</td>
+                      <td className="cell-muted">{t.id}</td>
                       <td>{t.date}</td>
                       <td><TickerLink ticker={t.ticker} /></td>
                       <td>{t.structure}</td>
                       <td><span className={decisionClass(t.decision)}>{t.decision}</span></td>
-                      <td className="rg">{qty ?? "—"}</td>
-                      <td className="rg">{fmtJournalUsd(cost)}</td>
-                      <td className="rg">{fmtJournalUsd(t.max_risk)}</td>
-                      <td className="rg"><span className={pnlClass(t.realized_pnl)}>{fmtJournalUsd(t.realized_pnl)}</span></td>
-                      <td className="rg">{t.return_on_risk != null ? `${(t.return_on_risk * 100).toFixed(1)}%` : "—"}</td>
-                      <td className="cm">{t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || "—"}</td>
-                      <td className="cm">{t.edge_analysis?.edge_type ?? "—"}</td>
+                      <td className="right">{qty ?? "—"}</td>
+                      <td className="right">{fmtJournalUsd(cost)}</td>
+                      <td className="right">{fmtJournalUsd(t.max_risk)}</td>
+                      <td className="right"><span className={pnlClass(t.realized_pnl)}>{fmtJournalUsd(t.realized_pnl)}</span></td>
+                      <td className="right">{t.return_on_risk != null ? `${(t.return_on_risk * 100).toFixed(1)}%` : "—"}</td>
+                      <td className="cell-muted">{t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || "—"}</td>
+                      <td className="cell-muted">{t.edge_analysis?.edge_type ?? "—"}</td>
                     </tr>
                   );
                 })}
@@ -880,10 +880,10 @@ function makeOpenOrderExtract(prices?: Record<string, PriceData>, portfolio?: Po
 function OrderPriceCell({ price }: { price: number | null }) {
   const { direction, flashDirection } = usePriceDirection(price);
   return (
-    <td className={`rg last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
+    <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
       {price != null ? fmtPrice(price) : "—"}
-      {direction === "up" && <ArrowUp size={11} className="pt-i ptu" aria-label="price up" />}
-      {direction === "down" && <ArrowDown size={11} className="pt-i ptd" aria-label="price down" />}
+      {direction === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
+      {direction === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
     </td>
   );
 }
@@ -963,17 +963,17 @@ function OrdersSections({
 
   if (!orders) {
     return (
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <ClipboardList size={14} />
             Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Open Orders"]} />
           </div>
           <span className="pill neutral">LOADING</span>
         </div>
-        <div className="s-bd">
-          <div className="a-i">Waiting for orders data...</div>
+        <div className="section-body">
+          <div className="alert-item">Waiting for orders data...</div>
         </div>
       </div>
     );
@@ -999,18 +999,18 @@ function OrdersSections({
         onClose={() => setModifyTarget(null)}
       />
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <ClipboardList size={14} />
             Open Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Open Orders"]} />
           </div>
           <span className="pill defined">{orders.open_count} ORDERS</span>
         </div>
-        <div className="s-bd">
+        <div className="section-body">
           {orders.open_orders.length === 0 ? (
-            <div className="a-i">No open orders</div>
+            <div className="alert-item">No open orders</div>
           ) : (
             <table>
               <thead>
@@ -1018,9 +1018,9 @@ function OrdersSections({
                   <SortTh<OpenOrderKey> label="Symbol" sortKey="symbol" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Action" sortKey="action" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Type" sortKey="orderType" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="rg" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="rg" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="rg" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                  <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                  <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                  <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Status" sortKey="status" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="TIF" sortKey="tif" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <th className="actions-th">Actions</th>
@@ -1035,7 +1035,7 @@ function OrdersSections({
                     <tr key={`${o.orderId}-${i}`} className={isPendingCancel ? "row-pending-cancel" : isPendingModify ? "row-pending-modify" : undefined}>
                       <td>
                         <TickerLink ticker={o.symbol} />
-                        {isPending && <Loader2 size={12} className="cs" />}
+                        {isPending && <Loader2 size={12} className="cancel-spinner" />}
                       </td>
                       <td>
                         <span className={`pill ${o.action === "BUY" ? "accum" : "distrib"}`}>
@@ -1043,10 +1043,10 @@ function OrdersSections({
                         </span>
                       </td>
                       <td>{o.orderType}</td>
-                      <td className="rg">{o.totalQuantity}</td>
-                      <td className="rg">
+                      <td className="right">{o.totalQuantity}</td>
+                      <td className="right">
                         {isPendingModify ? (
-                          <span className="sm">Modifying...</span>
+                          <span className="status-modifying">Modifying...</span>
                         ) : (
                           o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"
                         )}
@@ -1054,21 +1054,21 @@ function OrdersSections({
                       <OrderPriceCell price={resolveOrderLastPrice(o, prices, portfolio)} />
                       <td>
                         {isPendingCancel ? (
-                          <span className="sc92">Cancelling...</span>
+                          <span className="status-cancelling">Cancelling...</span>
                         ) : isPendingModify ? (
-                          <span className="sm">Modifying...</span>
+                          <span className="status-modifying">Modifying...</span>
                         ) : (
                           o.status
                         )}
                       </td>
                       <td>{o.tif}</td>
-                      <td className="ac162">
+                      <td className="actions-cell">
                         {isPending ? (
-                          <span className="cl52">PENDING</span>
+                          <span className="cancel-pending-label">PENDING</span>
                         ) : (
                           <>
                             <button
-                              className="b-oa btn-modify"
+                              className="btn-order-action btn-modify"
                               disabled={!canModify(o)}
                               title={canModify(o) ? "Modify limit price" : "Only LMT orders can be modified"}
                               onClick={() => setModifyTarget(o)}
@@ -1076,7 +1076,7 @@ function OrdersSections({
                               MODIFY
                             </button>
                             <button
-                              className="b-oa btn-cancel"
+                              className="btn-order-action btn-cancel"
                               onClick={() => setCancelTarget(o)}
                             >
                               CANCEL
@@ -1093,28 +1093,28 @@ function OrdersSections({
         </div>
       </div>
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <CheckCircle2 size={14} />
             Today&apos;s Executed Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Today's Executed Orders"]} />
           </div>
           <span className="pill neutral">{execCount} {execCount === 1 ? "ENTRY" : "ENTRIES"}</span>
         </div>
-        <div className="s-bd">
+        <div className="section-body">
           {allExecutedRows.length === 0 ? (
-            <div className="a-i">No fills this session</div>
+            <div className="alert-item">No fills this session</div>
           ) : (
             <table>
               <thead>
                 <tr>
                   <SortTh<ExecOrderKey> label="Symbol" sortKey="symbol" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
                   <SortTh<ExecOrderKey> label="Action" sortKey="side" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Quantity" sortKey="quantity" className="rg" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Avg Fill Price" sortKey="avgPrice" className="rg" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Commission" sortKey="commission" className="rg" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Realized P&L" sortKey="realizedPNL" className="rg" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
+                  <SortTh<ExecOrderKey> label="Quantity" sortKey="quantity" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
+                  <SortTh<ExecOrderKey> label="Avg Fill Price" sortKey="avgPrice" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
+                  <SortTh<ExecOrderKey> label="Commission" sortKey="commission" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
+                  <SortTh<ExecOrderKey> label="Realized P&L" sortKey="realizedPNL" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
                   <SortTh<ExecOrderKey> label="Time" sortKey="time" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
                   <th style={{ width: "32px" }}></th>
                 </tr>
@@ -1127,17 +1127,17 @@ function OrdersSections({
                     <tr key={`${e.execId}-${i}`} className={isCancelled ? "row-cancelled" : undefined}>
                       <td>
                         <TickerLink ticker={e.symbol} />
-                        {isCancelled && <XCircle size={12} className="ci134" />}
+                        {isCancelled && <XCircle size={12} className="cancelled-icon" />}
                       </td>
                       <td>
                         <span className={`pill ${isCancelled ? "cancelled" : displaySide === "BUY" ? "accum" : "distrib"}`}>
                           {displaySide}
                         </span>
                       </td>
-                      <td className="rg">{e.quantity}</td>
-                      <td className="rg">{e.avgPrice != null ? fmtPrice(e.avgPrice) : "—"}</td>
-                      <td className="rg">{e.commission != null ? fmtPrice(e.commission) : "—"}</td>
-                      <td className={`rg ${e.realizedPNL != null ? (e.realizedPNL >= 0 ? "positive" : "negative") : ""}`}>
+                      <td className="right">{e.quantity}</td>
+                      <td className="right">{e.avgPrice != null ? fmtPrice(e.avgPrice) : "—"}</td>
+                      <td className="right">{e.commission != null ? fmtPrice(e.commission) : "—"}</td>
+                      <td className={`right ${e.realizedPNL != null ? (e.realizedPNL >= 0 ? "positive" : "negative") : ""}`}>
                         {e.realizedPNL != null ? `${e.realizedPNL >= 0 ? "+" : ""}${fmtPrice(e.realizedPNL)}` : "—"}
                       </td>
                       <td>{new Date(e.time).toLocaleTimeString()}</td>
@@ -1156,8 +1156,8 @@ function OrdersSections({
       </div>
 
       {orders.last_sync && (
-        <div className="sx">
-          <div className="rm">
+        <div className="section">
+          <div className="report-meta">
             Last Sync: {new Date(orders.last_sync).toLocaleString()} • Source: IB Gateway (4001)
           </div>
         </div>
@@ -1224,22 +1224,22 @@ function HistoricalTradesSection() {
   const hasData = data && (data.as_of || totalCount > 0);
 
   return (
-    <div className="sx">
-      <div className="s-hd">
-        <div className="s-tt">
+    <div className="section">
+      <div className="section-header">
+        <div className="section-title">
           <ClipboardList size={14} />
           Historical Trades (30 Days)
           <InfoTooltip text={SECTION_TOOLTIPS["Historical Trades (30 Days)"]} />
         </div>
-        <div className="fc" style={{ gap: "0.75rem" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {data?.as_of && (
-            <span className="rm" style={{ margin: 0, padding: 0, border: "none" }}>
+            <span className="report-meta" style={{ margin: 0, padding: 0, border: "none" }}>
               {new Date(data.as_of).toLocaleDateString()}
             </span>
           )}
           <span className="pill neutral">{totalCount} TRADES</span>
           <button
-            className="sb"
+            className="sync-button"
             disabled={syncing}
             onClick={() => syncNow()}
           >
@@ -1247,11 +1247,11 @@ function HistoricalTradesSection() {
           </button>
         </div>
       </div>
-      <div className="s-bd">
-        {error && <div className="a-i smg be">{error}</div>}
+      <div className="section-body">
+        {error && <div className="alert-item section-message bearish">{error}</div>}
         {loading && <div className="p-6"><TableSkeleton rows={5} columns={8} /></div>}
         {!loading && !hasData && !error && (
-          <div className="a-i smg">No historical trades. Click REFRESH to fetch from IB.</div>
+          <div className="alert-item section-message">No historical trades. Click REFRESH to fetch from IB.</div>
         )}
         {!loading && pageRows.length > 0 && (
           <>
@@ -1263,11 +1263,11 @@ function HistoricalTradesSection() {
                   <SortTh<BlotterSortKey> label="Description" sortKey="contract_desc" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Type" sortKey="sec_type" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Side" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<BlotterSortKey> label="Qty" sortKey="net_quantity" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<BlotterSortKey> label="Commission" sortKey="total_commission" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<BlotterSortKey> label="Realized P&L" sortKey="realized_pnl" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<BlotterSortKey> label="Cost Basis" sortKey="cost_basis" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<BlotterSortKey> label="Proceeds" sortKey="proceeds" className="rg" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Qty" sortKey="net_quantity" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Commission" sortKey="total_commission" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Cost Basis" sortKey="cost_basis" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Proceeds" sortKey="proceeds" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <th style={{ width: "32px" }}></th>
                 </tr>
               </thead>
@@ -1283,13 +1283,13 @@ function HistoricalTradesSection() {
                         {t.is_closed ? "Closed" : "Open"}
                       </span>
                     </td>
-                    <td className="rg">{t.net_quantity}</td>
-                    <td className="rg">{fmtPrice(t.total_commission)}</td>
-                    <td className={`rg ${t.realized_pnl >= 0 ? "positive" : "negative"}`}>
+                    <td className="right">{t.net_quantity}</td>
+                    <td className="right">{fmtPrice(t.total_commission)}</td>
+                    <td className={`right ${t.realized_pnl >= 0 ? "positive" : "negative"}`}>
                       {t.realized_pnl >= 0 ? "+" : ""}{fmtPrice(t.realized_pnl)}
                     </td>
-                    <td className="rg">{fmtPrice(t.cost_basis)}</td>
-                    <td className="rg">{fmtPrice(t.proceeds)}</td>
+                    <td className="right">{fmtPrice(t.cost_basis)}</td>
+                    <td className="right">{fmtPrice(t.proceeds)}</td>
                     <td>
                       {t.is_closed && <SharePnlButton data={blotterShareData(t)} />}
                     </td>

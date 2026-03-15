@@ -63,8 +63,8 @@ type RatingsTabProps = {
 
 function gradePillClass(grade: string): string {
   const g = grade.toLowerCase();
-  if (g.includes("buy") || g.includes("outperform") || g.includes("overweight")) return "bu";
-  if (g.includes("sell") || g.includes("underperform") || g.includes("underweight")) return "be";
+  if (g.includes("buy") || g.includes("outperform") || g.includes("overweight")) return "bullish";
+  if (g.includes("sell") || g.includes("underperform") || g.includes("underweight")) return "bearish";
   return "neutral";
 }
 
@@ -104,13 +104,13 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
   }, [active, fetched, fetchRatings]);
 
   if (loading) {
-    return <div className="tl"><div className="tl-t">Loading ratings...</div></div>;
+    return <div className="tab-loading"><div className="tab-loading-text">Loading ratings...</div></div>;
   }
   if (error) {
-    return <div className="te">{error}</div>;
+    return <div className="tab-error">{error}</div>;
   }
   if (!data) {
-    return <div className="ty">No analyst data for {ticker}</div>;
+    return <div className="tab-empty">No analyst data for {ticker}</div>;
   }
 
   // Normalize: handle both nested (UW) and flat (legacy) shapes
@@ -146,30 +146,30 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
   return (
     <div className="ratings-tab">
       {/* Recommendation + summary */}
-      <div className="rh144">
+      <div className="ratings-header">
         {rec && (
           <span className={`ratings-rec-pill ${gradePillClass(rec)}`}>
             {rec.toUpperCase()}
           </span>
         )}
-        <div className="rs123">
-          {analystCount > 0 && <span className="rc160">{analystCount} analysts</span>}
-          {buyPct != null && <span className="ratings-pct bu">{buyPct}% buy</span>}
-          {sellPct != null && sellPct > 0 && <span className="ratings-pct be">{sellPct}% sell</span>}
+        <div className="ratings-summary">
+          {analystCount > 0 && <span className="ratings-count">{analystCount} analysts</span>}
+          {buyPct != null && <span className="ratings-pct bullish">{buyPct}% buy</span>}
+          {sellPct != null && sellPct > 0 && <span className="ratings-pct bearish">{sellPct}% sell</span>}
         </div>
       </div>
 
       {/* Ratings distribution bar */}
       {total > 0 && (
-        <div className="rw108">
+        <div className="ratings-bar-wrap">
           <div className="ratings-bar">
-            {strongBuy > 0 && <div className="rb-s rb83" style={{ flex: strongBuy }}>{strongBuy}</div>}
-            {buy > 0 && <div className="rb-s ratings-buy" style={{ flex: buy }}>{buy}</div>}
-            {hold > 0 && <div className="rb-s rh173" style={{ flex: hold }}>{hold}</div>}
-            {sell > 0 && <div className="rb-s rs174" style={{ flex: sell }}>{sell}</div>}
-            {strongSell > 0 && <div className="rb-s rs70" style={{ flex: strongSell }}>{strongSell}</div>}
+            {strongBuy > 0 && <div className="ratings-bar-seg ratings-strong-buy" style={{ flex: strongBuy }}>{strongBuy}</div>}
+            {buy > 0 && <div className="ratings-bar-seg ratings-buy" style={{ flex: buy }}>{buy}</div>}
+            {hold > 0 && <div className="ratings-bar-seg ratings-hold" style={{ flex: hold }}>{hold}</div>}
+            {sell > 0 && <div className="ratings-bar-seg ratings-sell" style={{ flex: sell }}>{sell}</div>}
+            {strongSell > 0 && <div className="ratings-bar-seg ratings-strong-sell" style={{ flex: strongSell }}>{strongSell}</div>}
           </div>
-          <div className="rl84">
+          <div className="ratings-bar-labels">
             <span>Strong Buy</span>
             <span>Buy</span>
             <span>Hold</span>
@@ -181,43 +181,43 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
 
       {/* Price targets */}
       {hasPriceTargets && (
-        <div className="rt124">
-          <div className="rt-t">Price Targets</div>
-          <div className="rg62">
+        <div className="ratings-targets">
+          <div className="ratings-targets-title">Price Targets</div>
+          <div className="ratings-targets-grid">
             {ptLow != null && (
-              <div className="ps">
-                <span className="ps-l">Low</span>
-                <span className="ps-v">{fmtPrice(ptLow)}</span>
+              <div className="pos-stat">
+                <span className="pos-stat-label">Low</span>
+                <span className="pos-stat-value">{fmtPrice(ptLow)}</span>
               </div>
             )}
             {ptMedian != null && (
-              <div className="ps">
-                <span className="ps-l">Median</span>
-                <span className="ps-v">{fmtPrice(ptMedian)}</span>
+              <div className="pos-stat">
+                <span className="pos-stat-label">Median</span>
+                <span className="pos-stat-value">{fmtPrice(ptMedian)}</span>
               </div>
             )}
             {ptMean != null && (
-              <div className="ps">
-                <span className="ps-l">Mean</span>
-                <span className="ps-v">{fmtPrice(ptMean)}</span>
+              <div className="pos-stat">
+                <span className="pos-stat-label">Mean</span>
+                <span className="pos-stat-value">{fmtPrice(ptMean)}</span>
               </div>
             )}
             {ptHigh != null && (
-              <div className="ps">
-                <span className="ps-l">High</span>
-                <span className="ps-v">{fmtPrice(ptHigh)}</span>
+              <div className="pos-stat">
+                <span className="pos-stat-label">High</span>
+                <span className="pos-stat-value">{fmtPrice(ptHigh)}</span>
               </div>
             )}
             {currentPrice != null && (
-              <div className="ps">
-                <span className="ps-l">Current</span>
-                <span className="ps-v">{fmtPrice(currentPrice)}</span>
+              <div className="pos-stat">
+                <span className="pos-stat-label">Current</span>
+                <span className="pos-stat-value">{fmtPrice(currentPrice)}</span>
               </div>
             )}
             {upsideDownside != null && (
-              <div className="ps">
-                <span className="ps-l">vs Mean</span>
-                <span className={`ps-v ${upsideDownside >= 0 ? "positive" : "negative"}`}>
+              <div className="pos-stat">
+                <span className="pos-stat-label">vs Mean</span>
+                <span className={`pos-stat-value ${upsideDownside >= 0 ? "positive" : "negative"}`}>
                   {upsideDownside >= 0 ? "+" : ""}{upsideDownside.toFixed(1)}%
                 </span>
               </div>
@@ -228,9 +228,9 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
 
       {/* Upgrade/downgrade history */}
       {changes.length > 0 && (
-        <div className="rc125">
-          <div className="rt-t">Recent Analyst Actions</div>
-          <table className="plt">
+        <div className="ratings-changes">
+          <div className="ratings-targets-title">Recent Analyst Actions</div>
+          <table className="pos-legs-table">
             <thead>
               <tr>
                 <th>Date</th>
@@ -266,7 +266,7 @@ export default function RatingsTab({ ticker, active, currentPrice }: RatingsTabP
 
       {/* Source indicator */}
       {data.source && (
-        <div className="nfn">via {data.source === "uw" ? "Unusual Whales" : data.source}</div>
+        <div className="news-fallback-notice">via {data.source === "uw" ? "Unusual Whales" : data.source}</div>
       )}
     </div>
   );

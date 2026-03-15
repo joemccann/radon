@@ -134,7 +134,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
     <Modal open={!!order} onClose={onClose} title="Modify Order">
       <div className="modify-dialog">
         {/* Order info header */}
-        <div className="mi91">
+        <div className="modify-order-info">
           <strong>{order.symbol}</strong>
           <span className={`pill ${order.action === "BUY" ? "accum" : "distrib"}`}>
             {order.action}
@@ -148,22 +148,22 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
 
         {/* Stop price (read-only for STP LMT) */}
         {order.orderType === "STP LMT" && order.auxPrice != null && (
-          <div className="mr110">
+          <div className="modify-stop-row">
             <span className="modify-market-label">STOP PRICE</span>
             <span className="modify-market-value">{fmtPrice(order.auxPrice)}</span>
           </div>
         )}
 
         {/* Price input */}
-        <div className="ms51">
-          <label className="ml74" htmlFor="mxi">
+        <div className="modify-price-section">
+          <label className="modify-price-label" htmlFor="modify-price-input">
             New Limit Price
           </label>
-          <div className="mp-ir">
-            <span className="mp-p">$</span>
+          <div className="modify-price-input-row">
+            <span className="modify-price-prefix">$</span>
             <input
-              id="mxi"
-              className="mxi"
+              id="modify-price-input"
+              className="modify-price-input"
               type="number"
               step="0.01"
               min="0.01"
@@ -174,23 +174,23 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
           </div>
 
           {/* Quick-set buttons */}
-          <div className="mq-b">
+          <div className="modify-quick-buttons">
             <button
-              className="bq"
+              className="btn-quick"
               disabled={!hasPriceData || bid == null}
               onClick={() => bid != null && setNewPrice(bid.toFixed(2))}
             >
               BID
             </button>
             <button
-              className="bq"
+              className="btn-quick"
               disabled={!hasPriceData || mid == null}
               onClick={() => mid != null && setNewPrice(mid.toFixed(2))}
             >
               MID
             </button>
             <button
-              className="bq"
+              className="btn-quick"
               disabled={!hasPriceData || ask == null}
               onClick={() => ask != null && setNewPrice(ask.toFixed(2))}
             >
@@ -199,14 +199,14 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
           </div>
 
           {/* Extended hours toggle */}
-          <label className="mrt">
+          <label className="modify-rth-toggle">
             <input
               type="checkbox"
               checked={outsideRth}
               onChange={(e) => setOutsideRth(e.target.checked)}
             />
-            <span className="ml103">FILL OUTSIDE RTH</span>
-            <span className="mh111">Pre-market &amp; after hours</span>
+            <span className="modify-rth-label">FILL OUTSIDE RTH</span>
+            <span className="modify-rth-hint">Pre-market &amp; after hours</span>
           </label>
 
           {/* Change indicator */}
@@ -218,11 +218,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
         </div>
 
         {/* Actions */}
-        <div className="ma131">
-          <button className="bt-s" onClick={onClose} disabled={loading}>
+        <div className="modify-actions">
+          <button className="btn-secondary" onClick={onClose} disabled={loading}>
             Cancel
           </button>
-          <button className="bp" onClick={() => canSubmit && onConfirm(parsedNew, outsideRth || undefined)} disabled={!canSubmit}>
+          <button className="btn-primary" onClick={() => canSubmit && onConfirm(parsedNew, outsideRth || undefined)} disabled={!canSubmit}>
             {loading ? "Modifying..." : "Modify Order"}
           </button>
         </div>

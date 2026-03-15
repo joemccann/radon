@@ -49,17 +49,17 @@ export default function Header({
       <div className="breadcrumb">
         WORKSPACE / <span>{activeLabel.toUpperCase()}</span>
       </div>
-      <div className="ha136" suppressHydrationWarning>
+      <div className="header-actions" suppressHydrationWarning>
         {children}
         <TickerSearch
           ref={searchRef}
           onSelect={handleSelect}
           placeholder="CMD+K to search..."
-          className="sw58"
+          className="search-input-wrapper"
         />
         <button
           suppressHydrationWarning
-          className="ft97"
+          className="fullscreen-toggle"
           onClick={onToggleFullscreen}
           title={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}
           aria-label={isFullscreen ? "Exit fullscreen" : "Enter fullscreen"}

@@ -16,14 +16,14 @@ export function CircularScan({ status = "Standby" }: CircularScanProps) {
         padding: 24,
       }}
     >
-      <div className="flex jb ix" style={{ marginBottom: 24 }}>
+      <div className="flex justify-between items-start" style={{ marginBottom: 24 }}>
         <div>
           <p
             style={{
               fontFamily: "var(--font-mono)",
               fontSize: 10,
               letterSpacing: "0.1em",
-              textTransform: "uc",
+              textTransform: "uppercase",
               color: "var(--text-muted)",
               marginBottom: 4,
             }}
@@ -45,7 +45,7 @@ export function CircularScan({ status = "Standby" }: CircularScanProps) {
             fontFamily: "var(--font-mono)",
             fontSize: 10,
             letterSpacing: "0.1em",
-            textTransform: "uc",
+            textTransform: "uppercase",
             color: isScanning ? "var(--signal-core)" : "var(--text-muted)",
           }}
         >
@@ -53,7 +53,7 @@ export function CircularScan({ status = "Standby" }: CircularScanProps) {
         </span>
       </div>
 
-      <div className="flex ic justify-center" style={{ height: 192 }}>
+      <div className="flex items-center justify-center" style={{ height: 192 }}>
         <div style={{ position: "relative", width: 160, height: 160 }}>
           <svg viewBox="0 0 160 160" width="160" height="160">
             <circle cx="80" cy="80" r="75" fill="none" stroke="var(--border-dim)" strokeWidth="1" />

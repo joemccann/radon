@@ -18,51 +18,51 @@ export default function CancelOrderDialog({ order, loading, onConfirm, onClose }
 
   return (
     <Modal open={!!order} onClose={onClose} title="Cancel Order">
-      <div className="cd145">
-        <div className="cd50">
-          <div className="cd-r">
-            <span className="cl">Symbol</span>
-            <span className="cv"><strong>{order.symbol}</strong></span>
+      <div className="cancel-dialog">
+        <div className="cancel-order-details">
+          <div className="cancel-detail-row">
+            <span className="cancel-label">Symbol</span>
+            <span className="cancel-value"><strong>{order.symbol}</strong></span>
           </div>
-          <div className="cd-r">
-            <span className="cl">Action</span>
-            <span className="cv">
+          <div className="cancel-detail-row">
+            <span className="cancel-label">Action</span>
+            <span className="cancel-value">
               <span className={`pill ${order.action === "BUY" ? "accum" : "distrib"}`}>
                 {order.action}
               </span>
             </span>
           </div>
-          <div className="cd-r">
-            <span className="cl">Type</span>
-            <span className="cv">{order.orderType}</span>
+          <div className="cancel-detail-row">
+            <span className="cancel-label">Type</span>
+            <span className="cancel-value">{order.orderType}</span>
           </div>
-          <div className="cd-r">
-            <span className="cl">Quantity</span>
-            <span className="cv">{order.totalQuantity}</span>
+          <div className="cancel-detail-row">
+            <span className="cancel-label">Quantity</span>
+            <span className="cancel-value">{order.totalQuantity}</span>
           </div>
           {order.limitPrice != null && (
-            <div className="cd-r">
-              <span className="cl">Limit Price</span>
-              <span className="cv">{fmtPrice(order.limitPrice)}</span>
+            <div className="cancel-detail-row">
+              <span className="cancel-label">Limit Price</span>
+              <span className="cancel-value">{fmtPrice(order.limitPrice)}</span>
             </div>
           )}
-          <div className="cd-r">
-            <span className="cl">Status</span>
-            <span className="cv">{order.status}</span>
+          <div className="cancel-detail-row">
+            <span className="cancel-label">Status</span>
+            <span className="cancel-value">{order.status}</span>
           </div>
         </div>
 
         {partiallyFilled && (
-          <div className="cw126">
+          <div className="cancel-warning">
             Partially filled ({order.filled} of {order.totalQuantity}). Only the remaining {order.remaining} will be cancelled.
           </div>
         )}
 
-        <div className="ca127">
-          <button className="bt-s" onClick={onClose} disabled={loading}>
+        <div className="cancel-actions">
+          <button className="btn-secondary" onClick={onClose} disabled={loading}>
             Keep Order
           </button>
-          <button className="bd" onClick={onConfirm} disabled={loading}>
+          <button className="btn-danger" onClick={onConfirm} disabled={loading}>
             {loading ? "Cancelling..." : "Cancel Order"}
           </button>
         </div>

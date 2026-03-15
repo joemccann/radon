@@ -1,7 +1,6 @@
 "use client";
 
 import { AlertTriangle, Gauge, ShieldAlert, Sigma, TrendingDown } from "lucide-react";
-import AttributionPanel from "./AttributionPanel";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   DEFAULT_PERFORMANCE_CHART_HEIGHT,
@@ -9,12 +8,41 @@ import {
   DEFAULT_PERFORMANCE_CHART_WIDTH,
   buildPerformanceChartModel,
 } from "@/lib/performanceChart";
-import { fmtUsd, fmtUsdExact, fmtPct, fmtRatio, toneClass } from "@/lib/format";
 import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import type { PerformanceData, PerformanceSeriesPoint } from "@/lib/types";
 import { usePerformance } from "@/lib/usePerformance";
 import ChartPanel from "./charts/ChartPanel";
 import MetricDefinitionModal from "./MetricDefinitionModal";
+
+function fmtUsd(value: number): string {
+  const abs = Math.abs(value);
+  if (abs >= 1_000_000) {
+    return `${value < 0 ? "-" : ""}$${(abs / 1_000_000).toFixed(2)}M`;
+  }
+  return `${value < 0 ? "-" : ""}$${abs.toLocaleString("en-US", {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 0,
+  })}`;
+}
+
+function fmtUsdExact(value: number): string {
+  return `${value < 0 ? "-" : ""}$${Math.abs(value).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`;
+}
+
+function fmtPct(value: number, digits = 2): string {
+  return `${value >= 0 ? "+" : ""}${(value * 100).toFixed(digits)}%`;
+}
+
+function fmtRatio(value: number): string {
+  return Number.isFinite(value) ? value.toFixed(2) : "---";
+}
+
+function toneClass(value: number): "positive" | "negative" | "neutral" {
+  return value > 0 ? "positive" : value < 0 ? "negative" : "neutral";
+}
 
 type PerformanceCardConfig = {
   id: string;
@@ -49,16 +77,16 @@ function StatCard({
   return (
     <button
       type="button"
-      className="metric-card metric-card-clickable pt18"
+      className="metric-card metric-card-clickable performance-card-trigger"
       data-testid={`performance-card-${id}`}
       aria-label={`${label} metric details`}
       data-definition={definition}
       data-formula={formula}
       onClick={onClick}
     >
-      <div className="ml">{label}</div>
-      <div className={`mv ${tone !== "neutral" ? tone : ""}`}>{value}</div>
-      <div className={`mc ${tone}`}>{change}</div>
+      <div className="metric-label">{label}</div>
+      <div className={`metric-value ${tone !== "neutral" ? tone : ""}`}>{value}</div>
+      <div className={`metric-change ${tone}`}>{change}</div>
     </button>
   );
 }
@@ -114,7 +142,7 @@ function PerformanceChart({ data }: { data: PerformanceData }) {
                 x2={plotRight}
                 y1={tick.y}
                 y2={tick.y}
-                className={isBaseline ? "pa-l" : "performance-grid-line"}
+                className={isBaseline ? "performance-axis-line" : "performance-grid-line"}
               />
             );
           })}
@@ -124,11 +152,11 @@ function PerformanceChart({ data }: { data: PerformanceData }) {
               x2={plotLeft}
               y1={DEFAULT_PERFORMANCE_CHART_MARGINS.top}
               y2={plotBottom}
-              className="pa-l"
+              className="performance-axis-line"
             />
             {yAxisTicks.map((tick) => (
-              <g key={`y-${tick.value}`}>
-                <line x1={plotLeft - 6} x2={plotLeft} y1={tick.y} y2={tick.y} className="pa-l" />
+              <g key={`y-${tick.value}`} className="performance-axis-tick">
+                <line x1={plotLeft - 6} x2={plotLeft} y1={tick.y} y2={tick.y} className="performance-axis-line" />
                 <text
                   x={plotLeft - 12}
                   y={tick.y}
@@ -144,12 +172,12 @@ function PerformanceChart({ data }: { data: PerformanceData }) {
           </g>
           <path d={areaPath} fill="url(#performanceAreaGradient)" />
           <path d={benchmarkPath} className="performance-line performance-line-benchmark" />
-          <path d={equityPath} className="performance-line pe27" />
+          <path d={equityPath} className="performance-line performance-line-equity" />
           <g data-testid="performance-x-axis">
-            <line x1={plotLeft} x2={plotRight} y1={plotBottom} y2={plotBottom} className="pa-l" />
+            <line x1={plotLeft} x2={plotRight} y1={plotBottom} y2={plotBottom} className="performance-axis-line" />
             {xAxisTicks.map((tick, index) => (
-              <g key={`x-${tick.index}`}>
-                <line x1={tick.x} x2={tick.x} y1={plotBottom} y2={plotBottom + 6} className="pa-l" />
+              <g key={`x-${tick.index}`} className="performance-axis-tick">
+                <line x1={tick.x} x2={tick.x} y1={plotBottom} y2={plotBottom + 6} className="performance-axis-line" />
                 <text
                   x={tick.x}
                   y={plotBottom + 18}
@@ -165,16 +193,16 @@ function PerformanceChart({ data }: { data: PerformanceData }) {
         </svg>
         <div className="performance-chart-meta">
           <div className="performance-meta-item">
-            <span className="pm-l">Portfolio</span>
-            <span className="pm-v">{fmtUsdExact(latestEquity)}</span>
+            <span className="performance-meta-label">Portfolio</span>
+            <span className="performance-meta-value">{fmtUsdExact(latestEquity)}</span>
           </div>
           <div className="performance-meta-item">
-            <span className="pm-l">{data.benchmark} Rebased</span>
-            <span className="pm-v">{fmtUsdExact(latestBenchmark)}</span>
+            <span className="performance-meta-label">{data.benchmark} Rebased</span>
+            <span className="performance-meta-value">{fmtUsdExact(latestBenchmark)}</span>
           </div>
           <div className="performance-meta-item">
-            <span className="pm-l">Benchmark Return</span>
-            <span className={`pm-v ${toneClass(data.benchmark_total_return)}`}>{fmtPct(data.benchmark_total_return)}</span>
+            <span className="performance-meta-label">Benchmark Return</span>
+            <span className={`performance-meta-value ${toneClass(data.benchmark_total_return)}`}>{fmtPct(data.benchmark_total_return)}</span>
           </div>
         </div>
     </ChartPanel>
@@ -317,15 +345,15 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
 
   if (loading && !data) {
     return (
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Gauge size={14} />
             Performance
           </div>
           <span className="pill neutral">LOADING</span>
         </div>
-        <div className="s-bd pe">
+        <div className="section-body performance-empty">
           Reconstructing YTD portfolio performance...
         </div>
       </div>
@@ -334,15 +362,15 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
 
   if (!data) {
     return (
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <ShieldAlert size={14} />
             Performance
           </div>
           <span className="pill undefined">UNAVAILABLE</span>
         </div>
-        <div className="s-bd pe">
+        <div className="section-body performance-empty">
           {error ?? "No performance data available."}
         </div>
       </div>
@@ -353,18 +381,18 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
 
   return (
     <div className="performance-panel" data-testid="performance-panel">
-      <div className="sx ph">
-        <div className="s-bd pb43">
+      <div className="section performance-hero">
+        <div className="section-body performance-hero-body">
           <div>
             <div className="section-label-mono">RECONSTRUCTED {data.period_label}</div>
-            <div className="pv32">
+            <div className="performance-hero-value">
               <span className={toneClass(summary.total_return)}>{fmtPct(summary.total_return)}</span>
             </div>
-            <div className="ps13">
+            <div className="performance-hero-subtitle">
               Ending equity {fmtUsdExact(summary.ending_equity)} • {data.benchmark} {fmtPct(data.benchmark_total_return)} • as of {data.as_of}
             </div>
           </div>
-          <div className="pp33">
+          <div className="performance-hero-pills">
             <span className="pill neutral">{data.trades_source === "ib_flex" ? "IB FLEX" : "CACHE"}</span>
             <span className="pill neutral">{summary.trading_days} DAYS</span>
             <span className={`pill ${summary.max_drawdown < -0.1 ? "undefined" : "defined"}`}>MAX DD {fmtPct(summary.max_drawdown)}</span>
@@ -372,22 +400,22 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
         </div>
       </div>
 
-      <div className="sx">
-        <div className="s-hd">
-          <div className="s-tt">
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
             <Gauge size={14} />
             Core Performance
           </div>
           <span className="pill defined">INSTITUTIONAL</span>
         </div>
-        <div className="s-bd">
-          <div className="mg">
+        <div className="section-body">
+          <div className="metrics-grid">
             {cardConfigs.slice(0, 4).map((card) => (
               <StatCard key={card.id} {...card} onClick={() => setActiveCardId(card.id)} />
             ))}
           </div>
 
-          <div className="mg">
+          <div className="metrics-grid">
             {cardConfigs.slice(4).map((card) => (
               <StatCard key={card.id} {...card} onClick={() => setActiveCardId(card.id)} />
             ))}
@@ -397,17 +425,17 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
 
       <PerformanceChart data={data} />
 
-      <div className="pg-2">
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+      <div className="performance-grid-2">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <TrendingDown size={14} />
               Tail And Path Risk
             </div>
             <span className="pill neutral">DAILY</span>
           </div>
-          <div className="s-bd">
-            <div className="pml">
+          <div className="section-body">
+            <div className="performance-metric-list">
               <div><span>VaR 95%</span><strong>{fmtPct(summary.var_95)}</strong></div>
               <div><span>CVaR 95%</span><strong>{fmtPct(summary.cvar_95)}</strong></div>
               <div><span>Tail Ratio</span><strong>{fmtRatio(summary.tail_ratio)}</strong></div>
@@ -418,16 +446,16 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
           </div>
         </div>
 
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <Sigma size={14} />
               Distribution And Capture
             </div>
             <span className="pill neutral">{data.benchmark}</span>
           </div>
-          <div className="s-bd">
-            <div className="pml">
+          <div className="section-body">
+            <div className="performance-metric-list">
               <div><span>Hit Rate</span><strong>{fmtPct(summary.hit_rate)}</strong></div>
               <div><span>Upside Capture</span><strong>{fmtRatio(summary.upside_capture)}</strong></div>
               <div><span>Downside Capture</span><strong>{fmtRatio(summary.downside_capture)}</strong></div>
@@ -439,45 +467,45 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
         </div>
       </div>
 
-      <div className="pg-2">
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+      <div className="performance-grid-2">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <AlertTriangle size={14} />
               Methodology
             </div>
             <span className="pill neutral">{data.methodology.return_basis.replace(/_/g, " ").toUpperCase()}</span>
           </div>
-          <div className="s-bd pg44">
+          <div className="section-body performance-meta-grid">
             <div className="performance-meta-item">
-              <span className="pm-l">Curve Type</span>
-              <span className="pm-v">{data.methodology.curve_type.replace(/_/g, " ")}</span>
+              <span className="performance-meta-label">Curve Type</span>
+              <span className="performance-meta-value">{data.methodology.curve_type.replace(/_/g, " ")}</span>
             </div>
             <div className="performance-meta-item">
-              <span className="pm-l">Stock History</span>
-              <span className="pm-v">{data.price_sources.stocks}</span>
+              <span className="performance-meta-label">Stock History</span>
+              <span className="performance-meta-value">{data.price_sources.stocks}</span>
             </div>
             <div className="performance-meta-item">
-              <span className="pm-l">Option History</span>
-              <span className="pm-v">{data.price_sources.options}</span>
+              <span className="performance-meta-label">Option History</span>
+              <span className="performance-meta-value">{data.price_sources.options}</span>
             </div>
             <div className="performance-meta-item">
-              <span className="pm-l">Risk-Free Assumption</span>
-              <span className="pm-v">{fmtPct(data.methodology.risk_free_rate)}</span>
+              <span className="performance-meta-label">Risk-Free Assumption</span>
+              <span className="performance-meta-value">{fmtPct(data.methodology.risk_free_rate)}</span>
             </div>
           </div>
         </div>
 
-        <div className="sx">
-          <div className="s-hd">
-            <div className="s-tt">
+        <div className="section">
+          <div className="section-header">
+            <div className="section-title">
               <AlertTriangle size={14} />
               Warnings
             </div>
             <span className="pill undefined">{data.warnings.length} FLAGS</span>
           </div>
-          <div className="s-bd">
-            <ul className="pnl2">
+          <div className="section-body">
+            <ul className="performance-note-list">
               {data.warnings.map((warning) => (
                 <li key={warning}>{warning}</li>
               ))}
@@ -488,8 +516,6 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
           </div>
         </div>
       </div>
-
-      <AttributionPanel />
 
       {activeCard && (
         <MetricDefinitionModal

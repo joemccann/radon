@@ -1,9 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
-import { scaleLinear } from "@/lib/scales";
-import { linePath } from "@/lib/svgPath";
-import { extent, mean } from "@/lib/arrayUtils";
+import * as d3 from "d3";
 import InfoTooltip from "./InfoTooltip";
 import ChartLegend from "./charts/ChartLegend";
 import ChartPanel from "./charts/ChartPanel";
@@ -28,7 +26,9 @@ const CHART_HEIGHT = 240;
 const MARGIN = { top: 16, right: 20, bottom: 32, left: 44 };
 const DATE_FORMATTER = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
 
-import { fmtSigned } from "@/lib/format";
+function fmtSigned(value: number, digits = 2): string {
+  return `${value >= 0 ? "+" : ""}${value.toFixed(digits)}`;
+}
 
 function formatDateLabel(value: string): string {
   const date = new Date(`${value}T00:00:00`);
@@ -125,7 +125,7 @@ export default function RegimeRelationshipView({
 
   const innerWidth = CHART_WIDTH - MARGIN.left - MARGIN.right;
   const innerHeight = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
-  const xScale = scaleLinear().domain([0, entries.length - 1]).range([0, innerWidth]);
+  const xScale = d3.scaleLinear().domain([0, entries.length - 1]).range([0, innerWidth]);
   const tickIndices = buildTickIndices(entries.length);
 
   const spreadMax = Math.max(
@@ -133,40 +133,50 @@ export default function RegimeRelationshipView({
     Math.abs(summary.meanSpread),
     1,
   );
-  const spreadScale = scaleLinear()
+  const spreadScale = d3
+    .scaleLinear()
     .domain([-(spreadMax * 1.15), spreadMax * 1.15])
     .range([innerHeight, 0]);
-  const spreadLine = linePath<(typeof entries)[number]>()
-    .x((_entry, index) => xScale(index))
-    .y((entry) => spreadScale(entry.spread))(entries);
+  const spreadLine = d3
+    .line<(typeof entries)[number]>()
+    .x((entry, index) => xScale(index))
+    .y((entry) => spreadScale(entry.spread))
+    .curve(d3.curveMonotoneX)(entries);
 
-  const realizedExtent = extent(entries, (entry) => entry.realizedVol) as [number, number];
-  const cor1mExtent = extent(entries, (entry) => entry.cor1m) as [number, number];
+  const realizedExtent = d3.extent(entries, (entry) => entry.realizedVol) as [number, number];
+  const cor1mExtent = d3.extent(entries, (entry) => entry.cor1m) as [number, number];
   const realizedPad = (realizedExtent[1] - realizedExtent[0]) * 0.18 || 1;
   const cor1mPad = (cor1mExtent[1] - cor1mExtent[0]) * 0.18 || 1;
-  const scatterXScale = scaleLinear()
+  const scatterXScale = d3
+    .scaleLinear()
     .domain([realizedExtent[0] - realizedPad, realizedExtent[1] + realizedPad])
     .range([0, innerWidth]);
-  const scatterYScale = scaleLinear()
+  const scatterYScale = d3
+    .scaleLinear()
     .domain([cor1mExtent[0] - cor1mPad, cor1mExtent[1] + cor1mPad])
     .range([innerHeight, 0]);
-  const realizedMean = mean(entries, (entry) => entry.realizedVol) ?? 0;
-  const cor1mMean = mean(entries, (entry) => entry.cor1m) ?? 0;
+  const realizedMean = d3.mean(entries, (entry) => entry.realizedVol) ?? 0;
+  const cor1mMean = d3.mean(entries, (entry) => entry.cor1m) ?? 0;
 
   const zMax = Math.max(
     ...entries.map((entry) => Math.max(Math.abs(entry.realizedVolZ), Math.abs(entry.cor1mZ))),
     Math.abs(summary.latestDivergence),
     1,
   );
-  const zScale = scaleLinear()
+  const zScale = d3
+    .scaleLinear()
     .domain([-(zMax * 1.15), zMax * 1.15])
     .range([innerHeight, 0]);
-  const zRvolLine = linePath<(typeof entries)[number]>()
-    .x((_entry, index) => xScale(index))
-    .y((entry) => zScale(entry.realizedVolZ))(entries);
-  const zCor1mLine = linePath<(typeof entries)[number]>()
-    .x((_entry, index) => xScale(index))
-    .y((entry) => zScale(entry.cor1mZ))(entries);
+  const zRvolLine = d3
+    .line<(typeof entries)[number]>()
+    .x((entry, index) => xScale(index))
+    .y((entry) => zScale(entry.realizedVolZ))
+    .curve(d3.curveMonotoneX)(entries);
+  const zCor1mLine = d3
+    .line<(typeof entries)[number]>()
+    .x((entry, index) => xScale(index))
+    .y((entry) => zScale(entry.cor1mZ))
+    .curve(d3.curveMonotoneX)(entries);
 
   const latest = entries[entries.length - 1];
   const spreadColor = spreadStateColor(summary.spreadState);
@@ -218,45 +228,45 @@ export default function RegimeRelationshipView({
         </>
       }
       badge={
-        <div className="rm19">
-          <span className="rrc" style={{ color: spreadColor }}>
+        <div className="regime-relationship-meta">
+          <span className="regime-relationship-chip" style={{ color: spreadColor }}>
             {displaySpreadState(summary.spreadState)}
           </span>
-          <span className="rrc" style={{ color: quadrantColor }}>
+          <span className="regime-relationship-chip" style={{ color: quadrantColor }}>
             {summary.latestQuadrant}
           </span>
         </div>
       }
-      className="cp-i regime-relationship-view"
+      className="chart-panel-inline regime-relationship-view"
       contentClassName="regime-relationship-content"
       dataTestId="regime-relationship-view"
     >
-      <div className="rg20">
+      <div className="regime-relationship-grid">
         <section
-          className="rr-pa rw4"
+          className="regime-relationship-panel regime-relationship-panel-wide"
           data-testid="regime-spread-card"
         >
-          <div className="rr-ph">
+          <div className="regime-relationship-panel-head">
             <div>
-              <div className="rp-t">CORRELATION RISK PREMIUM</div>
-              <div className="rr-n">Spread = COR1M - RVOL</div>
+              <div className="regime-panel-title">CORRELATION RISK PREMIUM</div>
+              <div className="regime-relationship-note">Spread = COR1M - RVOL</div>
             </div>
-            <div className="rr-su">
+            <div className="regime-relationship-summary">
               <div
-                className="rr-va"
+                className="regime-relationship-value"
                 data-testid="regime-current-spread"
                 style={{ color: spreadColor }}
               >
                 {fmtSigned(summary.latestSpread)} pts
               </div>
-              <div className="rr-n">
+              <div className="regime-relationship-note">
                 {relationshipBiasLabel(summary.spreadState, summary.priorSpread, summary.latestSpread)}
               </div>
             </div>
           </div>
 
           <svg
-            className="rr-ch"
+            className="regime-relationship-chart"
             data-testid="regime-spread-chart"
             viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
             role="img"
@@ -270,13 +280,13 @@ export default function RegimeRelationshipView({
                     x2={innerWidth}
                     y1={spreadScale(tick)}
                     y2={spreadScale(tick)}
-                    className="rr-gl"
+                    className="regime-relationship-grid-line"
                   />
                   <text
                     x={-10}
                     y={spreadScale(tick) + 4}
                     textAnchor="end"
-                    className="rr-al"
+                    className="regime-relationship-axis-label"
                   >
                     {fmtSigned(tick, 1)}
                   </text>
@@ -288,7 +298,7 @@ export default function RegimeRelationshipView({
                 x2={innerWidth}
                 y1={spreadScale(0)}
                 y2={spreadScale(0)}
-                className="rr-bl"
+                className="regime-relationship-baseline"
               />
 
               {entries.map((entry, index) => {
@@ -310,13 +320,13 @@ export default function RegimeRelationshipView({
                 );
               })}
 
-              <path d={spreadLine ?? ""} className="rr-li rs2" />
+              <path d={spreadLine ?? ""} className="regime-relationship-line regime-relationship-line-spread" />
 
               <circle
                 cx={xScale(entries.length - 1)}
                 cy={spreadScale(latest.spread)}
                 r={5}
-                className="rr-m rr-m-spread"
+                className="regime-relationship-marker regime-relationship-marker-spread"
               />
 
               {tickIndices.map((index) => (
@@ -326,13 +336,13 @@ export default function RegimeRelationshipView({
                     x2={xScale(index)}
                     y1={innerHeight}
                     y2={innerHeight + 6}
-                    className="rr-ak"
+                    className="regime-relationship-axis-tick"
                   />
                   <text
                     x={xScale(index)}
                     y={innerHeight + 20}
                     textAnchor="middle"
-                    className="rr-al"
+                    className="regime-relationship-axis-label"
                   >
                     {formatDateLabel(entries[index]?.date ?? "")}
                   </text>
@@ -342,28 +352,28 @@ export default function RegimeRelationshipView({
           </svg>
         </section>
 
-        <section className="rr-pa" data-testid="regime-quadrant-card">
-          <div className="rr-ph">
+        <section className="regime-relationship-panel" data-testid="regime-quadrant-card">
+          <div className="regime-relationship-panel-head">
             <div>
-              <div className="rp-t">REGIME QUADRANTS</div>
-              <div className="rr-n">RVOL on X, COR1M on Y</div>
+              <div className="regime-panel-title">REGIME QUADRANTS</div>
+              <div className="regime-relationship-note">RVOL on X, COR1M on Y</div>
             </div>
-            <div className="rr-su">
+            <div className="regime-relationship-summary">
               <div
-                className="rr-va rr-vc"
+                className="regime-relationship-value regime-relationship-value-compact"
                 data-testid="regime-current-quadrant"
                 style={{ color: quadrantColor }}
               >
                 {summary.latestQuadrant.toUpperCase()}
               </div>
-              <div className="rr-n">
+              <div className="regime-relationship-note">
                 Latest: RVOL {latest.realizedVol.toFixed(2)} | COR1M {latest.cor1m.toFixed(2)}
               </div>
             </div>
           </div>
 
           <svg
-            className="rr-ch"
+            className="regime-relationship-chart"
             data-testid="regime-quadrant-chart"
             viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
             role="img"
@@ -377,13 +387,13 @@ export default function RegimeRelationshipView({
                     x2={scatterXScale(tick)}
                     y1={0}
                     y2={innerHeight}
-                    className="rr-gl"
+                    className="regime-relationship-grid-line"
                   />
                   <text
                     x={scatterXScale(tick)}
                     y={innerHeight + 20}
                     textAnchor="middle"
-                    className="rr-al"
+                    className="regime-relationship-axis-label"
                   >
                     {tick.toFixed(1)}
                   </text>
@@ -396,13 +406,13 @@ export default function RegimeRelationshipView({
                     x2={innerWidth}
                     y1={scatterYScale(tick)}
                     y2={scatterYScale(tick)}
-                    className="rr-gl"
+                    className="regime-relationship-grid-line"
                   />
                   <text
                     x={-10}
                     y={scatterYScale(tick) + 4}
                     textAnchor="end"
-                    className="rr-al"
+                    className="regime-relationship-axis-label"
                   >
                     {tick.toFixed(1)}
                   </text>
@@ -414,20 +424,20 @@ export default function RegimeRelationshipView({
                 x2={scatterXScale(realizedMean)}
                 y1={0}
                 y2={innerHeight}
-                className="rr-bl"
+                className="regime-relationship-baseline"
               />
               <line
                 x1={0}
                 x2={innerWidth}
                 y1={scatterYScale(cor1mMean)}
                 y2={scatterYScale(cor1mMean)}
-                className="rr-bl"
+                className="regime-relationship-baseline"
               />
 
-              <text x={10} y={18} className="rr-ql">Fragile Calm</text>
-              <text x={innerWidth - 10} y={18} textAnchor="end" className="rr-ql">Systemic Panic</text>
-              <text x={10} y={innerHeight - 10} className="rr-ql">Goldilocks</text>
-              <text x={innerWidth - 10} y={innerHeight - 10} textAnchor="end" className="rr-ql">Stock Picker&apos;s</text>
+              <text x={10} y={18} className="regime-relationship-quadrant-label">Fragile Calm</text>
+              <text x={innerWidth - 10} y={18} textAnchor="end" className="regime-relationship-quadrant-label">Systemic Panic</text>
+              <text x={10} y={innerHeight - 10} className="regime-relationship-quadrant-label">Goldilocks</text>
+              <text x={innerWidth - 10} y={innerHeight - 10} textAnchor="end" className="regime-relationship-quadrant-label">Stock Picker&apos;s</text>
 
               {entries.map((entry, index) => {
                 const isLatest = index === entries.length - 1;
@@ -440,7 +450,7 @@ export default function RegimeRelationshipView({
                     fill={isLatest ? latestQuadrantColor : "var(--signal-core)"}
                     opacity={isLatest ? 1 : 0.18 + (index / entries.length) * 0.45}
                     stroke={isLatest ? latestQuadrantColor : "none"}
-                    className={isLatest ? "rr-m" : undefined}
+                    className={isLatest ? "regime-relationship-marker" : undefined}
                   />
                 );
               })}
@@ -449,7 +459,7 @@ export default function RegimeRelationshipView({
                 x={innerWidth / 2}
                 y={innerHeight + 30}
                 textAnchor="middle"
-                className="rr-at"
+                className="regime-relationship-axis-title"
               >
                 RVOL
               </text>
@@ -458,7 +468,7 @@ export default function RegimeRelationshipView({
                 y={-30}
                 textAnchor="middle"
                 transform="rotate(-90)"
-                className="rr-at"
+                className="regime-relationship-axis-title"
               >
                 COR1M
               </text>
@@ -466,8 +476,8 @@ export default function RegimeRelationshipView({
           </svg>
 
           <div className="regime-state-key" data-testid="regime-state-key">
-            <div className="rp-t">STATE KEY</div>
-            <div className="rg46">
+            <div className="regime-panel-title">STATE KEY</div>
+            <div className="regime-state-key-grid">
               {QUADRANT_DISPLAY_ORDER.map((quadrant) => {
                 const slug = quadrantSlug(quadrant);
                 const isCurrent = summary.latestQuadrant === quadrant;
@@ -478,7 +488,7 @@ export default function RegimeRelationshipView({
                     data-testid={`regime-state-item-${slug}`}
                   >
                     <span
-                      className="rl34"
+                      className="regime-state-key-label"
                       style={{ color: quadrantTone(quadrant) }}
                     >
                       {quadrant.toUpperCase()}
@@ -496,10 +506,10 @@ export default function RegimeRelationshipView({
           </div>
         </section>
 
-        <section className="rr-pa" data-testid="regime-zscore-card">
-          <div className="rr-ph">
+        <section className="regime-relationship-panel" data-testid="regime-zscore-card">
+          <div className="regime-relationship-panel-head">
             <div>
-              <div className="rp-t">
+              <div className="regime-panel-title">
                 NORMALIZED DIVERGENCE
                 <InfoTooltip
                   text={SECTION_TOOLTIPS["NORMALIZED DIVERGENCE"]}
@@ -508,31 +518,31 @@ export default function RegimeRelationshipView({
                   contentTestId="regime-zscore-tooltip-bubble"
                 />
               </div>
-              <div className="rr-n">20-session z-score overlay</div>
+              <div className="regime-relationship-note">20-session z-score overlay</div>
             </div>
-            <div className="rr-su">
+            <div className="regime-relationship-summary">
               <div
-                className="rr-va rr-vc"
+                className="regime-relationship-value regime-relationship-value-compact"
                 data-testid="regime-current-zgap"
                 style={{ color: spreadStateColor(summary.zScoreBias) }}
               >
                 {fmtSigned(summary.latestDivergence)}σ
               </div>
-              <div className="rr-n">
+              <div className="regime-relationship-note">
                 {summary.zScoreBias} | COR1M z - RVOL z
               </div>
             </div>
           </div>
 
           <div
-            className="rs3"
+            className="regime-relationship-chart-shell"
             data-testid="regime-zscore-chart-shell"
             onMouseMove={handleZScoreHover}
             onMouseLeave={() => setZScoreHover(null)}
           >
             <svg
               ref={zScoreSvgRef}
-              className="rr-ch"
+              className="regime-relationship-chart"
               data-testid="regime-zscore-chart"
               viewBox={`0 0 ${CHART_WIDTH} ${CHART_HEIGHT}`}
               role="img"
@@ -546,13 +556,13 @@ export default function RegimeRelationshipView({
                       x2={innerWidth}
                       y1={zScale(tick)}
                       y2={zScale(tick)}
-                      className="rr-gl"
+                      className="regime-relationship-grid-line"
                     />
                     <text
                       x={-10}
                       y={zScale(tick) + 4}
                       textAnchor="end"
-                      className="rr-al"
+                      className="regime-relationship-axis-label"
                     >
                       {fmtSigned(tick, 1)}
                     </text>
@@ -564,23 +574,23 @@ export default function RegimeRelationshipView({
                   x2={innerWidth}
                   y1={zScale(0)}
                   y2={zScale(0)}
-                  className="rr-bl"
+                  className="regime-relationship-baseline"
                 />
 
-                <path d={zRvolLine ?? ""} className="rr-li rr7" />
-                <path d={zCor1mLine ?? ""} className="rr-li rc5" />
+                <path d={zRvolLine ?? ""} className="regime-relationship-line regime-relationship-line-rvol" />
+                <path d={zCor1mLine ?? ""} className="regime-relationship-line regime-relationship-line-cor1m" />
 
                 <circle
                   cx={xScale(entries.length - 1)}
                   cy={zScale(latest.realizedVolZ)}
                   r={4}
-                  className="rr-m rr-m-rvol"
+                  className="regime-relationship-marker regime-relationship-marker-rvol"
                 />
                 <circle
                   cx={xScale(entries.length - 1)}
                   cy={zScale(latest.cor1mZ)}
                   r={4}
-                  className="rr-m rr-m-cor1m"
+                  className="regime-relationship-marker regime-relationship-marker-cor1m"
                 />
 
                 {zScoreHover && (
@@ -590,19 +600,19 @@ export default function RegimeRelationshipView({
                       x2={xScale(zScoreHover.index)}
                       y1={0}
                       y2={innerHeight}
-                      className="rl6"
+                      className="regime-relationship-hover-line"
                     />
                     <circle
                       cx={xScale(zScoreHover.index)}
                       cy={zScale(zScoreHover.entry.realizedVolZ)}
                       r={5}
-                      className="rr-m rr-m-rvol"
+                      className="regime-relationship-marker regime-relationship-marker-rvol"
                     />
                     <circle
                       cx={xScale(zScoreHover.index)}
                       cy={zScale(zScoreHover.entry.cor1mZ)}
                       r={5}
-                      className="rr-m rr-m-cor1m"
+                      className="regime-relationship-marker regime-relationship-marker-cor1m"
                     />
                   </>
                 )}
@@ -614,13 +624,13 @@ export default function RegimeRelationshipView({
                       x2={xScale(index)}
                       y1={innerHeight}
                       y2={innerHeight + 6}
-                      className="rr-ak"
+                      className="regime-relationship-axis-tick"
                     />
                     <text
                       x={xScale(index)}
                       y={innerHeight + 20}
                       textAnchor="middle"
-                      className="rr-al"
+                      className="regime-relationship-axis-label"
                     >
                       {formatDateLabel(entries[index]?.date ?? "")}
                     </text>
@@ -634,7 +644,7 @@ export default function RegimeRelationshipView({
                   height={innerHeight}
                   fill="transparent"
                   pointerEvents="all"
-                  className="ro0"
+                  className="regime-relationship-chart-overlay"
                   data-testid="regime-zscore-chart-overlay"
                   onMouseMove={handleZScoreHover}
                 />
@@ -643,27 +653,27 @@ export default function RegimeRelationshipView({
 
             {zScoreHover && (
               <div
-                className="chart-tooltip rt1"
+                className="chart-tooltip regime-relationship-chart-tooltip"
                 data-testid="regime-zscore-hover-tooltip"
                 style={{
                   top: `${zScoreTooltipTop}px`,
                   ...zScoreTooltipSideStyle,
                 }}
               >
-                <div className="ctd" data-testid="regime-zscore-hover-date">
+                <div className="chart-tooltip-date" data-testid="regime-zscore-hover-date">
                   {formatDateLabel(zScoreHover.entry.date)}
                 </div>
-                <div className="ct-r">
-                  <span className="ct-l">RVOL z-score</span>
-                  <span className="ct-v">{fmtSigned(zScoreHover.entry.realizedVolZ)}σ</span>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">RVOL z-score</span>
+                  <span className="chart-tooltip-value">{fmtSigned(zScoreHover.entry.realizedVolZ)}σ</span>
                 </div>
-                <div className="ct-r">
-                  <span className="ct-l">COR1M z-score</span>
-                  <span className="ct-v">{fmtSigned(zScoreHover.entry.cor1mZ)}σ</span>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">COR1M z-score</span>
+                  <span className="chart-tooltip-value">{fmtSigned(zScoreHover.entry.cor1mZ)}σ</span>
                 </div>
-                <div className="ct-r">
-                  <span className="ct-l">Divergence</span>
-                  <span className="ct-v">{fmtSigned(zScoreHover.entry.zDivergence)}σ</span>
+                <div className="chart-tooltip-row">
+                  <span className="chart-tooltip-label">Divergence</span>
+                  <span className="chart-tooltip-value">{fmtSigned(zScoreHover.entry.zDivergence)}σ</span>
                 </div>
               </div>
             )}
