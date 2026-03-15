@@ -1279,6 +1279,33 @@ python3 scripts/garch_convergence.py --preset all --no-open # Don't open browser
 
 **Strategy spec:** `docs/strategy-garch-convergence.md`
 
+## FastAPI Server Architecture
+
+Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `localhost:8321`) via `radonFetch()` (`web/lib/radonApi.ts`) instead of spawning Python processes.
+
+**Three-Service Dev Stack** (`npm run dev`):
+
+| Service | Port | Process |
+|---------|------|---------|
+| Next.js | 3000 | `next dev` |
+| IB WS relay | 8765 | `ib_realtime_server.js` (real-time price streaming) |
+| FastAPI | 8321 | `uvicorn scripts.api.server:app` (Python script execution) |
+
+**Graceful degradation:** FastAPI down → Next.js serves cached files with `is_stale: true`. No spawn fallback.
+
+**IB Gateway auto-recovery:** FastAPI detects Gateway down at startup and auto-restarts via `~/ibc/bin/restart-secure-ibc-service.sh`. IB-dependent endpoints detect `ECONNREFUSED`, auto-restart Gateway, reconnect pool, retry once. Manual: `POST http://localhost:8321/ib/restart`.
+
+**Health check:** `curl http://localhost:8321/health` — returns `ib_gateway`, `ib_pool`, `uw` status.
+
+| FastAPI File | Purpose |
+|------|---------|
+| `scripts/api/server.py` | FastAPI app — 17 endpoints, CORS, IB pool, health check |
+| `scripts/api/ib_pool.py` | Role-based IB connection pool (sync=0, orders=11, data=31) |
+| `scripts/api/ib_gateway.py` | IB Gateway health check + auto-restart via IBC launchd |
+| `scripts/api/subprocess.py` | Async subprocess helper (`run_script`, `run_module`) |
+
+---
+
 ## Scripts
 
 | Script | Purpose |
@@ -1406,6 +1433,17 @@ This workflow triggers on ANY of these events:
 
 ## Interactive Brokers Integration
 
+### Auto-Recovery (FastAPI)
+
+The FastAPI server (`scripts/api/ib_gateway.py`) handles IB Gateway recovery automatically:
+
+1. **Startup:** Checks port 4001 → if down, runs `~/ibc/bin/restart-secure-ibc-service.sh`, polls up to 45s
+2. **Runtime:** IB-dependent endpoints detect `ECONNREFUSED` → auto-restart Gateway → reconnect pool → retry once
+3. **Manual:** `curl -X POST http://localhost:8321/ib/restart` or `POST /ib/restart`
+4. **Health:** `curl http://localhost:8321/health` → shows `ib_gateway.port_listening` + `ib_pool` status
+
+**2FA requirement:** Cold starts (Gateway was fully stopped) require approving push notification on IBKR Mobile. Warm restarts (IBC nightly 11:58 PM) reuse auth session — no 2FA needed.
+
 ### Connection Troubleshooting
 
 **Full runbook:** `docs/ib-connection-troubleshooting.md`
@@ -1413,19 +1451,17 @@ This workflow triggers on ANY of these events:
 **Quick triage (run these in order):**
 
 ```bash
-# 1. Gateway process running?
+# 1. FastAPI health check (preferred — shows Gateway + pool status)
+curl -s http://localhost:8321/health | python3 -m json.tool
+
+# 2. Gateway process running?
 ~/ibc/bin/status-secure-ibc-service.sh | grep -E "state|pid"
 
-# 2. Port 4001 listening?
+# 3. Port 4001 listening?
 lsof -iTCP:4001 -sTCP:LISTEN
 
-# 3. Port accepting connections?
-python3 -c "
-import socket; s = socket.socket(); s.settimeout(3)
-try: s.connect(('127.0.0.1', 4001)); print('OK')
-except Exception as e: print(f'FAIL: {e}')
-finally: s.close()
-"
+# 4. Manual restart if auto-recovery failed
+curl -X POST http://localhost:8321/ib/restart
 ```
 
 **Common failure scenarios:**
@@ -1447,7 +1483,7 @@ finally: s.close()
 | Cached fallback read | <50ms | Serves `data/portfolio.json` or `data/orders.json` |
 | **Total API response** | **~3.5s** | Returns 200 with `X-Sync-Warning` header |
 
-**Automated recovery layers:** IBClient reconnect (5 attempts, exponential backoff) > WS server reconnect (5s interval, client ID rotation) > syncMutex (coalesce concurrent calls) > cached fallback (serve stale data as 200) > IBC auto-restart (nightly 11:58 PM) > 2FA retry (`TWOFA_TIMEOUT_ACTION=restart`).
+**Automated recovery layers:** FastAPI Gateway auto-restart on ECONNREFUSED (retry once) > IBClient reconnect (5 attempts, exponential backoff) > WS server reconnect (5s interval, client ID rotation) > cached fallback (serve stale data as 200 with `is_stale: true`) > IBC auto-restart (nightly 11:58 PM) > 2FA retry (`TWOFA_TIMEOUT_ACTION=restart`).
 
 ### Client ID Strategy
 
@@ -1455,8 +1491,13 @@ finally: s.close()
 
 | clientId | Privileges | Scripts |
 |----------|-----------|---------|
-| **0** (master) | Can cancel/modify ANY order | `ib_sync`, `ib_orders`, `ib_reconcile`, `ib_order_manage` |
-| 2+ (unique) | Can only manage own orders | `ib_order`, `ib_fill_monitor`, `exit_order_service`, `ib_realtime_server` |
+| **0** (master) | Can cancel/modify ANY order | `ib_sync`, `ib_reconcile`, `ib_order_manage` — also FastAPI pool `sync` role |
+| **11** | Orders visibility | `ib_orders` — also FastAPI pool `orders` role |
+| **26** | Order placement | `ib_place_order` (on-demand connect/disconnect) |
+| **31** | Data queries | `cri_scan` — also FastAPI pool `data` role |
+| **40** | Portfolio sync subprocess | FastAPI `/portfolio/sync` (avoids pool collision) |
+| **41** | Orders sync subprocess | FastAPI `/orders/refresh` (avoids pool collision) |
+| **100** | Streaming | `ib_realtime_server` (WS relay) |
 
 **Why master client:**
 - Can cancel orders placed via TWS (which have `orderId=0`)
