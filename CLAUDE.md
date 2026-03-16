@@ -571,6 +571,21 @@ Capital at Risk:
 
 **Tests**: `test_covered_call_detection.py` (7), `test_all_long_combo.py` (8), `complex-risk-profile.test.ts` (5)
 
+### IB Combo (BAG) Order Leg Convention
+
+**ComboLeg.action defines the SPREAD STRUCTURE, not the trade direction.** `Order.action` (BUY/SELL) controls whether you're opening or closing the spread. IB reverses all leg actions when `Order.action = SELL`.
+
+| Intent | Order.action | ComboLeg actions | IB effective execution |
+|--------|-------------|-----------------|----------------------|
+| Open bull call spread | BUY | BUY lower, SELL upper | BUY lower, SELL upper |
+| Close bull call spread | SELL | BUY lower, SELL upper | SELL lower, BUY upper |
+
+**Rule**: Always set `ComboLeg.action = BUY` for LONG legs and `ComboLeg.action = SELL` for SHORT legs, regardless of whether you're opening or closing. Never flip leg actions based on the order direction — that creates a double-reversal and triggers IB error 201 ("Riskless combination orders are not allowed").
+
+**Implementation**: `ComboOrderForm` in `web/components/ticker-detail/OrderTab.tsx`. The `legsWithActions` memo always maps `LONG → BUY`, `SHORT → SELL`.
+
+**Applies to**: `ComboOrderForm` (OrderTab), `OrderBuilder` (OptionsChainTab), and any future code that places BAG orders via `/api/orders/place`.
+
 ### Data Normalization
 
 **Ticker key**: Always use `"ticker"` as the key name in JSON data files. Never use `"symbol"` — that's for IB contract objects only.

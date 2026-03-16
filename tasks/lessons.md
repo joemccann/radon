@@ -1,5 +1,12 @@
 # Lessons
 
+## 2026-03-16
+
+- IB BAG (combo) orders use `ComboLeg.action` to define the spread structure and `Order.action` (BUY/SELL) to control direction. When `Order.action=SELL`, IB reverses all leg actions. Never flip `ComboLeg.action` based on the trade direction — that creates a double-reversal and triggers IB error 201 ("Riskless combination orders are not allowed"). Always: `LONG → BUY`, `SHORT → SELL` in `ComboLeg.action`.
+- When reconstructing a portfolio equity curve from trade fills, snap weekend/holiday trade dates to the next valid calendar trading day. Trades on non-calendar dates get counted in the back-solve equation but never applied during simulation, causing the ending equity to diverge from IB net liquidation.
+- The `formatExpiry()` function adds dashes (`"20260327"` → `"2026-03-27"`), but IB's `Option` constructor expects the raw `"20260327"` format. Never call `formatExpiry()` in order payloads sent to IB — it causes "Could not qualify contract" 502 errors.
+- BAG orders in `orders.json` don't include combo leg contract details by default. To resolve BID/MID/ASK for spread modify modals, qualify each `ComboLeg.conId` during order sync to store full contract details (symbol, strike, right, expiry). Without this, the modify modal shows "No real-time market data available" for spreads.
+
 ## 2026-03-15
 
 - IB Gateway's CLOSE tick on weekends returns the penultimate session's close, not the last trading day's close (e.g. Wednesday's $106.19 instead of Friday's $96.81). Never use IB's `close` field as a reliable "previous close" for stocks; only cash indexes (VIX, VVIX) report their actual value via the CLOSE tick. Use the previous-close API (UW/Yahoo) instead.
