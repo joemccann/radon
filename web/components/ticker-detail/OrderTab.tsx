@@ -373,24 +373,24 @@ function ComboOrderForm({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  // Derive leg actions based on the combo action
-  // SELL (closing): LONG leg → SELL, SHORT leg → BUY
-  // BUY (opening): LONG leg → BUY, SHORT leg → SELL
+  // Combo leg actions define the SPREAD STRUCTURE, not the trade direction.
+  // IB reverses all leg actions when Order.action = SELL.
+  // Always: LONG leg → BUY, SHORT leg → SELL (the spread definition).
+  // Order.action (BUY/SELL) controls open vs close.
   const legsWithActions = useMemo(() => {
     return position.legs.map((leg) => {
-      let legAction: "BUY" | "SELL";
-      if (action === "SELL") {
-        legAction = leg.direction === "LONG" ? "SELL" : "BUY";
-      } else {
-        legAction = leg.direction === "LONG" ? "BUY" : "SELL";
-      }
+      const legAction: "BUY" | "SELL" = leg.direction === "LONG" ? "BUY" : "SELL";
       const right = leg.type === "Call" ? "C" : "P";
       const expiryClean = position.expiry.replace(/-/g, "");
       return { ...leg, legAction, right: right as "C" | "P", expiry: expiryClean };
     });
-  }, [position, action]);
+  }, [position]);
 
-  // Compute net BID / ASK / MID for the combo
+  // Compute net BID / ASK / MID for the combo.
+  // IB reverses leg actions when Order.action = SELL, so the EFFECTIVE
+  // execution direction depends on the combo action:
+  //   BUY combo: LONG leg → BUY (pay ask), SHORT leg → SELL (receive bid)
+  //   SELL combo: LONG leg → SELL (receive bid), SHORT leg → BUY (pay ask)
   const netPrices = useMemo(() => {
     let netBid = 0;
     let netAsk = 0;
@@ -402,12 +402,9 @@ function ComboOrderForm({
       const lp = prices[key];
       if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
 
-      // For a SELL combo: SELL legs contribute +bid/+ask, BUY legs contribute -ask/-bid
-      // sign = +1 for legs we're selling, -1 for legs we're buying
-      const legAction = action === "SELL"
-        ? (leg.direction === "LONG" ? "SELL" : "BUY")
-        : (leg.direction === "LONG" ? "BUY" : "SELL");
-      if (legAction === "SELL") {
+      // Effective execution after IB's reversal for SELL orders:
+      const effectivelySelling = (action === "SELL") === (leg.direction === "LONG");
+      if (effectivelySelling) {
         netBid += lp.bid;
         netAsk += lp.ask;
       } else {
