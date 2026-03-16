@@ -31,6 +31,7 @@ Large institutional players accumulate or distribute positions through dark pool
 - **Dark pool prints**: Off-exchange block trades that signal institutional intent
 - **OTC flow**: Dealer positioning data showing net buying/selling pressure
 - **Options flow**: Unusual volume, sweeps, and premium imbalances
+- **News & catalysts**: Material events (buybacks, M&A, earnings, FDA) that explain or contextualize flow patterns. A $25B buyback, for example, creates structural dark pool buying that might otherwise appear as noise.
 
 ### Signal Criteria
 

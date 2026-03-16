@@ -5,10 +5,11 @@ Runs all 7 evaluation milestones:
   M1  — Ticker validation
   M1B — Seasonality (context)
   M1C — Analyst ratings (context)
+  M1D — News & catalysts (context — buybacks, M&A, earnings, material events)
   M2  — Dark pool flow (including today)
   M3  — Options chain + institutional flow
   M3B — OI change analysis
-  M4  — Edge determination   (depends on M2, M3, M3B, Price)
+  M4  — Edge determination   (depends on M2, M3, M3B, Price, News)
   M5  — Structure proposal    (depends on M4 PASS)
   M6  — Kelly sizing          (depends on M5)
   M7  — Final decision        (depends on all above)
@@ -46,6 +47,7 @@ from fetch_flow import fetch_flow
 from fetch_options import fetch_options
 from fetch_oi_changes import fetch_ticker_oi_changes, categorize_signal
 from fetch_analyst_ratings import fetch_analyst_ratings
+from fetch_news import fetch_news
 
 
 # ---------------------------------------------------------------------------
@@ -75,6 +77,7 @@ class EvaluationResult:
     kelly: Optional[Dict] = None
     seasonality: Optional[Dict] = None
     analyst: Optional[Dict] = None
+    news: Optional[Dict] = None
 
 
 # ---------------------------------------------------------------------------
@@ -264,12 +267,14 @@ def determine_edge(
     options: Optional[Dict],
     oi_changes: List[Dict],
     price_history: List[Dict],
+    news: Optional[Dict] = None,
 ) -> Dict:
     """Evaluate whether an actionable edge exists.
 
     Returns dict with:
       passed (bool), reason (str), sustained_days (int),
-      flow_strength (float), options_conflict (bool), ...
+      flow_strength (float), options_conflict (bool),
+      news_catalysts (list), news_sentiment (str), ...
 
     Criteria (ALL must be met, OR alternative):
       Primary:
@@ -280,6 +285,12 @@ def determine_edge(
 
       Alternative (can replace criterion 1):
         1a. Most recent day flow strength > 70
+
+      News catalyst boost:
+        - Material catalysts (buyback, M&A, earnings beat, etc.) that align
+          with flow direction provide additional context but do NOT override
+          failing quantitative gates.
+        - News is reported in the output for operator judgment.
     """
     dp = flow.get("dark_pool", {})
     agg = dp.get("aggregate", {})
@@ -321,6 +332,27 @@ def determine_edge(
         if expected_dp and expected_dp != agg_direction:
             options_conflict = True
 
+    # ── News / Catalyst analysis ────────────────────────────────────────
+    news_summary = (news or {}).get("summary", {})
+    news_catalysts = news_summary.get("material_catalysts", {})
+    news_sentiment = news_summary.get("sentiment_bias", "NEUTRAL")
+    news_material_count = news_summary.get("material_count", 0)
+
+    # Check if news sentiment aligns with flow direction
+    news_aligns = False
+    if agg_direction == "ACCUMULATION" and news_sentiment in ("BULLISH", "LEAN_BULLISH"):
+        news_aligns = True
+    elif agg_direction == "DISTRIBUTION" and news_sentiment in ("BEARISH", "LEAN_BEARISH"):
+        news_aligns = True
+
+    # Identify high-impact catalysts
+    high_impact_catalysts = [
+        cat for cat in news_catalysts
+        if cat in ("BUYBACK", "M&A", "EARNINGS_BEAT", "EARNINGS_MISS",
+                    "GUIDANCE_UP", "GUIDANCE_DOWN", "FDA", "SPINOFF",
+                    "DIVIDEND", "STOCK_SPLIT")
+    ]
+
     # Build result
     result = {
         "passed": False,
@@ -333,6 +365,11 @@ def determine_edge(
         "options_conflict": options_conflict,
         "signal_priced_in": signal_priced_in,
         "oi_summary": categorize_oi_signals(oi_changes),
+        "news_sentiment": news_sentiment,
+        "news_catalysts": list(news_catalysts.keys()),
+        "news_material_count": news_material_count,
+        "news_aligns_with_flow": news_aligns,
+        "high_impact_catalysts": high_impact_catalysts,
     }
 
     # Gate checks
@@ -433,9 +470,12 @@ def _run_parallel_milestones(ticker: str, bankroll: float) -> Dict[str, Any]:
     def _m3b():
         return ("M3B", fetch_ticker_oi_changes(ticker))
 
-    tasks = [_m1, _m1b, _m1c, _m2, _m3, _m3b]
+    def _m1d():
+        return ("M1D", fetch_news(ticker, days=7, limit=20))
 
-    with ThreadPoolExecutor(max_workers=6) as pool:
+    tasks = [_m1, _m1b, _m1c, _m1d, _m2, _m3, _m3b]
+
+    with ThreadPoolExecutor(max_workers=7) as pool:
         futures = {pool.submit(fn): fn.__name__ for fn in tasks}
         for future in as_completed(futures):
             try:
@@ -459,9 +499,9 @@ def run_evaluation(
     """Run a full 7-milestone evaluation for *ticker*.
 
     Steps:
-      1. Fetch milestones M1, M1B, M1C, M2, M3, M3B, Price in parallel.
+      1. Fetch milestones M1, M1B, M1C, M1D, M2, M3, M3B, Price in parallel.
       2. Check M1 (ticker valid + options available). Abort if fail.
-      3. Run M4 (edge determination) using M2, M3, M3B, Price.
+      3. Run M4 (edge determination) using M2, M3, M3B, Price, News.
       4. If edge passes, proceed to M5 (structure) and M6 (Kelly).
       5. Return EvaluationResult with full audit trail.
     """
@@ -506,6 +546,13 @@ def run_evaluation(
     eval_result.analyst = m1c_data
     eval_result.milestones["M1C"] = MilestoneResult(
         name="analyst_ratings", passed=True, data=m1c_data,
+    )
+
+    # ── M1D: News & Catalysts ────────────────────────────────────────────
+    m1d_data = raw.get("M1D", {})
+    eval_result.news = m1d_data
+    eval_result.milestones["M1D"] = MilestoneResult(
+        name="news_catalysts", passed=True, data=m1d_data,
     )
 
     # ── M2: Dark Pool Flow ───────────────────────────────────────────────
@@ -554,6 +601,7 @@ def run_evaluation(
         options=m3_data,
         oi_changes=enriched_oi,
         price_history=price_history,
+        news=m1d_data,
     )
     eval_result.edge_details = edge
     eval_result.milestones["M4"] = MilestoneResult(
@@ -615,7 +663,7 @@ def format_report(result: EvaluationResult) -> str:
     # Milestone summary
     lines.append("MILESTONES")
     lines.append("-" * 40)
-    milestone_order = ["M1", "M1B", "M1C", "M2", "M3", "M3B", "M4", "M5", "M6"]
+    milestone_order = ["M1", "M1B", "M1C", "M1D", "M2", "M3", "M3B", "M4", "M5", "M6"]
     for key in milestone_order:
         ms = result.milestones.get(key)
         if ms:
@@ -639,6 +687,15 @@ def format_report(result: EvaluationResult) -> str:
         lines.append(f"  Recent Strength: {m4.data.get('recent_strength', 'N/A')}")
         lines.append(f"  Options Conflict:{m4.data.get('options_conflict', False)}")
         lines.append(f"  Signal Priced In:{m4.data.get('signal_priced_in', False)}")
+        # News context in edge
+        news_cats = m4.data.get("high_impact_catalysts", [])
+        news_sent = m4.data.get("news_sentiment", "N/A")
+        news_aligns = m4.data.get("news_aligns_with_flow", False)
+        if news_cats or news_sent != "NEUTRAL":
+            lines.append(f"  News Sentiment:  {news_sent}")
+            if news_cats:
+                lines.append(f"  Key Catalysts:   {', '.join(news_cats)}")
+            lines.append(f"  News↔Flow Align: {'YES' if news_aligns else 'NO'}")
         lines.append("")
 
     # Dark pool daily
@@ -675,6 +732,33 @@ def format_report(result: EvaluationResult) -> str:
             lines.append(f"  LARGE:       {summary.get('large_count', 0)}")
             lines.append(f"  SIGNIFICANT: {summary.get('significant_count', 0)}")
             lines.append(f"  Total:       ${summary.get('total_premium', 0):,.0f}")
+            lines.append("")
+
+    # News & Catalysts (M1D)
+    m1d = result.milestones.get("M1D")
+    if m1d and m1d.data:
+        news_data = m1d.data
+        ns = news_data.get("summary", {})
+        if ns.get("total", 0) > 0:
+            lines.append("NEWS & CATALYSTS (7 days)")
+            lines.append("-" * 60)
+            lines.append(f"  Headlines:   {ns.get('total', 0)} "
+                         f"({ns.get('bullish', 0)} bull, "
+                         f"{ns.get('bearish', 0)} bear, "
+                         f"{ns.get('neutral', 0)} neutral)")
+            lines.append(f"  Sentiment:   {ns.get('sentiment_bias', 'N/A')} "
+                         f"(score: {ns.get('avg_sentiment_score', 0):.2f})")
+            cats = ns.get("material_catalysts", {})
+            if cats:
+                lines.append(f"  Catalysts:   {', '.join(f'{k}({v})' for k, v in cats.items())}")
+            # Show material headlines
+            headlines = news_data.get("headlines", [])
+            material = [h for h in headlines if h.get("is_material")]
+            if material:
+                lines.append("  Material Headlines:")
+                for h in material[:5]:
+                    cat_str = f" [{', '.join(h.get('catalysts', []))}]"
+                    lines.append(f"    {h.get('sentiment', '?'):8s} {h.get('title', '')[:70]}{cat_str}")
             lines.append("")
 
     # Structure (M5) if present

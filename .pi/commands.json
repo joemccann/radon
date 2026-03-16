@@ -2,7 +2,7 @@
   "commands": [
     {
       "command": "evaluate [TICKER]",
-      "description": "Full 7-milestone trade evaluation \u2014 fetches all data in parallel, stops at first failing gate"
+      "description": "Full trade evaluation (ticker, seasonality, analysts, news/catalysts, dark pool, options, OI) \u2014 fetches all data in parallel, stops at first failing gate"
     },
     {
       "command": "scan",

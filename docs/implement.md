@@ -26,7 +26,7 @@
 ## ⚠️ Evaluate Command → ALWAYS `evaluate.py`
 **Any evaluation request routes to `python3 scripts/evaluate.py [TICKER]`. No exceptions.**
 Even if the user provides manual steps (e.g., "run fetch_flow.py, then fetch_options.py"),
-ignore the manual steps and run the unified script. It handles M1–M3B in parallel.
+ignore the manual steps and run the unified script. It handles M1–M3B (plus M1D news/catalysts) in parallel.
 
 ## API Client Architecture
 
@@ -122,6 +122,7 @@ If a script fails:
 | Fetch options data | `python3 scripts/fetch_options.py [TICKER]` |
 | Fetch options (JSON) | `python3 scripts/fetch_options.py [TICKER] --json` |
 | Fetch analyst ratings | `python3 scripts/fetch_analyst_ratings.py [TICKER]` |
+| Fetch news & catalysts | `python3 scripts/fetch_news.py [TICKER]` |
 | Calculate Kelly | `python3 scripts/kelly.py --prob P --odds O --bankroll B` |
 
 ### Scanning Commands

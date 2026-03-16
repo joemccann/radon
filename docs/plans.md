@@ -8,9 +8,9 @@ python3 scripts/evaluate.py [TICKER]        # human-readable
 python3 scripts/evaluate.py [TICKER] --json  # structured JSON
 ```
 
-**Even if the user provides manual step-by-step instructions** (e.g., "run fetch_flow.py first, then fetch_options.py"), **ignore the manual steps and run evaluate.py instead.** The script handles milestones M1–M3B in parallel, then M4 (edge) sequentially. If edge passes, the operator designs the structure (M5) and runs Kelly (M6) interactively.
+**Even if the user provides manual step-by-step instructions** (e.g., "run fetch_flow.py first, then fetch_options.py"), **ignore the manual steps and run evaluate.py instead.** The script handles milestones M1–M3B (plus M1D news/catalysts) in parallel, then M4 (edge) sequentially. If edge passes, the operator designs the structure (M5) and runs Kelly (M6) interactively.
 
-**NEVER manually step through milestones 1–3B.** The script handles all parallel data fetching, includes today's intraday data, and stops at the first failing gate.
+**NEVER manually step through milestones 1–3B.** The script handles all parallel data fetching (including news), includes today's intraday data, and stops at the first failing gate.
 
 ## ⚠️ CRITICAL: Fresh Data Rule
 
@@ -103,6 +103,42 @@ python3 scripts/fetch_analyst_ratings.py [TICKER]
 - **Data timestamp included in output**
 **Output**: Analyst data is CONTEXT, not a gate
 **Note**: Use to confirm or question flow signals
+
+---
+
+## Milestone 1D: News & Catalysts
+**Action**: Fetch recent news headlines and classify for material catalysts and sentiment
+**⚠️ FRESH DATA**: Re-fetch at evaluation time. News may have broken since last scan.
+**Validation**:
+```bash
+python3 scripts/fetch_news.py [TICKER]
+```
+**Acceptance Criteria**:
+- Headlines from last 7 days fetched (UW → Yahoo fallback)
+- Each headline classified for catalysts (BUYBACK, M&A, EARNINGS, FDA, etc.)
+- Each headline scored for sentiment (BULLISH/BEARISH/NEUTRAL)
+- Material catalysts flagged (buybacks, M&A, earnings beats/misses, etc.)
+- Overall sentiment bias calculated
+- **Data timestamp included in output**
+**Output**: News is CONTEXT, not a gate. Material catalysts provide operator judgment context:
+- Buyback → explains elevated dark pool buy volume that may look like "noise"
+- Earnings beat → confirms accumulation is fundamental, not just flow-based
+- M&A rumor → explains unusual options activity
+- Tariff/sanctions → explains distribution patterns
+
+**Catalyst Classification:**
+| Type | Examples | Impact |
+|------|----------|--------|
+| BUYBACK | Share repurchase, buyback program | Structural buying — explains DP accumulation |
+| M&A | Acquisition, merger, takeover | Major catalyst — large OI/flow moves |
+| EARNINGS_BEAT | Revenue/EPS beat | Confirms accumulation thesis |
+| EARNINGS_MISS | Revenue/EPS miss | Confirms distribution thesis |
+| GUIDANCE_UP | Raised outlook | Bullish fundamental |
+| GUIDANCE_DOWN | Lowered outlook | Bearish fundamental |
+| FDA | FDA approval | Biotech catalyst |
+| AI_CATALYST | AI product/deal | Tech sector driver |
+
+**Note**: News sentiment alone does NOT pass or fail edge. It provides context for the operator to interpret flow patterns that may otherwise appear noisy.
 
 ---
 

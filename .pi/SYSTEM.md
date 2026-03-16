@@ -73,16 +73,17 @@ Every trade candidate runs through 7 sequential milestones. Failure at any gate 
 1.  Validate Ticker       → Confirm identity, sector, liquidity, options availability
 1B. Seasonality           → Monthly historical performance (context, not a gate)
 1C. Analyst Ratings       → Consensus, targets, recent changes (context, not a gate)
+1D. News & Catalysts      → Recent headlines, buybacks, M&A, earnings, material events (context, not a gate)
 2.  Dark Pool Flow        → 5-day DP data including today — direction, strength, sustained days
 3.  Options Flow          → Chain activity, institutional flow alerts, combined bias
 3B. OI Change Analysis    → Raw open interest positioning (catches signals flow alerts miss)
-4.  Edge Decision         → Synthesize all data → PASS or FAIL (stop if FAIL)
+4.  Edge Decision         → Synthesize all data (flow + options + OI + news context) → PASS or FAIL (stop if FAIL)
 5.  Structure Proposal    → Design convex options position with R:R ≥ 2:1 (live IB quotes)
 6.  Kelly Sizing          → Calculate optimal size, apply fractional Kelly, enforce 2.5% cap
 7.  Log & Execute         → Trade log, portfolio update, exit orders
 ```
 
-`evaluate.py` orchestrates milestones 1–3B in parallel and stops at the first failing gate.
+`evaluate.py` orchestrates milestones 1–3B (plus 1D) in parallel and stops at the first failing gate.
 
 ## Data Source Priority
 

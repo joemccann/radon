@@ -1,0 +1,12 @@
+{
+  "id": "fact-infra-news-milestone",
+  "key": "infra.news-milestone",
+  "value": "Milestone M1D (News & Catalysts) added to evaluate.py on 2026-03-16. fetch_news.py fetches headlines from UW (Yahoo fallback), classifies each for material catalysts (BUYBACK, M&A, EARNINGS_BEAT, EARNINGS_MISS, GUIDANCE, FDA, etc.) and sentiment (BULLISH/BEARISH/NEUTRAL). Integrated as parallel milestone in evaluate.py. Context-only \u2014 does NOT gate edge determination, but surfaces catalysts and sentiment alignment in the edge output for operator judgment. Key insight: CRM 5B buyback was invisible without news context, making alternating DP flow look like noise when it was actually buyback-driven accumulation.",
+  "confidence": 0.95,
+  "source": "session-2026-03-16-news-milestone",
+  "extractedBy": "context-evaluator",
+  "createdAt": "2026-03-16T15:17:08.972195+00:00",
+  "updatedAt": "2026-03-16T15:17:08.972195+00:00",
+  "revisionId": 1,
+  "expiresAt": null
+}

@@ -275,8 +275,10 @@ All portfolio state writes use `scripts/utils/atomic_io.py`:
 1.  Validate Ticker   → python3 scripts/fetch_ticker.py [TICKER]
 1B. Seasonality       → curl seasonal chart (context only, not a gate)
 1C. Analyst Ratings   → python3 scripts/fetch_analyst_ratings.py [TICKER] (context only)
+1D. News & Catalysts  → python3 scripts/fetch_news.py [TICKER] (context — buybacks, M&A, earnings, etc.)
 2.  Dark Pool Flow    → python3 scripts/fetch_flow.py [TICKER]
 3.  Options Flow      → python3 scripts/fetch_options.py [TICKER]
+3B. OI Changes        → python3 scripts/fetch_oi_changes.py [TICKER] (REQUIRED)
 4.  Edge Decision     → PASS/FAIL with explicit reasoning (FAIL = stop)
 5.  Structure         → Design convex position (R:R < 2:1 = stop)
 6.  Kelly Sizing      → Calculate + enforce 2.5% bankroll cap

@@ -235,7 +235,7 @@ export const executionItems: ExecutionItem[] = [
     step: "Evaluate",
     summary:
       "Every candidate is forced through a structured gate sequence instead of discretionary skipping.",
-    metadata: "Ticker, seasonality, analysts, dark pool, options, OI",
+    metadata: "Ticker, seasonality, analysts, news & catalysts, dark pool, options, OI",
   },
   {
     step: "Structure",
@@ -273,7 +273,8 @@ export const surfaceItems: SurfaceItem[] = [
     ],
     details: [
       "Dark pool flow scored against sustained direction and buy ratio.",
-      "Options flow and OI changes brought into the same decision surface.",
+      "Options flow, OI changes, and news catalysts brought into the same decision surface.",
+      "Material events like buybacks and M&A surface alongside flow to explain institutional patterns.",
       "Candidates ranked for action instead of dumped into a watchlist graveyard.",
     ],
   },

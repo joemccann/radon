@@ -22,6 +22,7 @@ Autonomous options trading via convex, edge-driven bets sized by fractional Kell
 - [ ] Ticker validation (confirm company, sector, liquidity)
 - [ ] Seasonality analysis (context, not a gate)
 - [ ] Analyst ratings — **fetched live** (context, not a gate)
+- [ ] News & catalysts — **fetched live** (buybacks, M&A, earnings, material events)
 - [ ] Dark pool flow analysis — **fetched live**, 5-day minimum **including today**
 - [ ] Options flow analysis — **fetched live** (chain + institutional flow alerts)
   - Chain: Put/call ratio, premium, volume, OI, bias

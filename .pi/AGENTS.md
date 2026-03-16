@@ -64,11 +64,11 @@ When fetching ANY market data (quotes, options, fundamentals, analyst ratings, e
 python3 scripts/evaluate.py [TICKER]
 ```
 
-This is non-negotiable. The script handles all data fetching (M1–M3B) in parallel, includes today's intraday data, and stops at the first failing gate.
+This is non-negotiable. The script handles all data fetching (M1–M3B plus M1D news/catalysts) in parallel, includes today's intraday data, and stops at the first failing gate.
 
 **Even if the user provides manual steps** (e.g., "run fetch_flow.py, then fetch_options.py"), **ignore the manual steps and run evaluate.py instead.** The unified script replaces all manual milestone stepping.
 
-**NEVER manually call** `fetch_flow.py`, `fetch_options.py`, `fetch_oi_changes.py`, or `kelly.py` **as part of an evaluation.** Those scripts exist for standalone use — during an evaluation, `evaluate.py` orchestrates them automatically.
+**NEVER manually call** `fetch_flow.py`, `fetch_options.py`, `fetch_oi_changes.py`, `fetch_news.py`, or `kelly.py` **as part of an evaluation.** Those scripts exist for standalone use — during an evaluation, `evaluate.py` orchestrates them automatically.
 
 **Trigger phrases** (all route to `evaluate.py`):
 - `evaluate TICKER`
@@ -92,6 +92,7 @@ This is the #1 process rule. Violating it means the evaluation is invalid.
 | 1 — Ticker | Company info, market cap, price | `fetch_ticker.py` | Run at evaluation start |
 | 1B — Seasonality | Monthly historical performance | `curl` EquityClock | Static data, OK to cache |
 | 1C — Analysts | Ratings, price targets, changes | `fetch_analyst_ratings.py` | Re-fetch; may have changed today |
+| 1D — News | Headlines, catalysts, sentiment | `fetch_news.py` | Re-fetch; news breaks continuously |
 | 2 — Dark Pool | 5-day DP flow including TODAY | `fetch_flow.py` | **MUST include today's date** |
 | 3 — Options Flow | Chain activity, flow alerts | `fetch_options.py` | **MUST be today's chain data** |
 | 3B — OI Changes | Open interest changes | `fetch_oi_changes.py` | **MUST be today's OI snapshot** |
@@ -433,7 +434,7 @@ python3 scripts/evaluate.py AAPL --bankroll 1200000
 ```
 
 **What the script does automatically:**
-- Fetches M1 (ticker), M1B (seasonality), M1C (analysts), M2 (dark pool), M3 (options), M3B (OI changes) **in parallel**
+- Fetches M1 (ticker), M1B (seasonality), M1C (analysts), M1D (news/catalysts), M2 (dark pool), M3 (options), M3B (OI changes) **in parallel**
 - Fetches IB price history on main thread (ib_insync requirement)
 - Always includes **today's** intraday dark pool data
 - Runs edge determination (M4) against all fetched data
@@ -653,6 +654,7 @@ Always follow in order. Stop immediately if a gate fails.
 1. **Validate Ticker** → `python3 scripts/fetch_ticker.py [TICKER]`
 1B. **Seasonality** → Fetch & analyze (does not affect score, but report in analysis)
 1C. **Analyst Ratings** → `python3 scripts/fetch_analyst_ratings.py [TICKER]` (context, not a gate)
+1D. **News & Catalysts** → `python3 scripts/fetch_news.py [TICKER]` (context — buybacks, M&A, earnings, material events)
 2. **Dark Pool Flow** → `python3 scripts/fetch_flow.py [TICKER]`
 3. **Options Flow** → `python3 scripts/fetch_options.py [TICKER]`
 3B. **OI Change Analysis** → `python3 scripts/fetch_oi_changes.py [TICKER]` (ALWAYS — reveals hidden institutional positioning)
@@ -1194,7 +1196,7 @@ reports/goog-evaluation-2026-03-04.html
 3. Milestone Summary with pass/fail status for all 7 milestones
 4. Dark Pool Flow Section: daily breakdown + aggregate analysis
 5. Options Flow Section: chain bias, institutional flow, combined signal
-6. Context Section: seasonality + analyst ratings
+6. Context Section: seasonality + analyst ratings + news & catalysts
 7. Structure & Kelly: position structure and Kelly sizing
 8. Trade Specification: exact order details ready for execution
 9. Thesis & Risk Factors callouts
@@ -1317,6 +1319,7 @@ Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `loca
 | `scripts/fetch_oi_changes.py` | **⭐ Fetch OI changes to find hidden institutional positioning (REQUIRED)** |
 | `scripts/verify_options_oi.py` | Verify specific options flow claims via Open Interest |
 | `scripts/fetch_analyst_ratings.py` | Fetch analyst ratings, changes, and price targets |
+| `scripts/fetch_news.py` | **Fetch news headlines, classify catalysts (buyback, M&A, earnings), score sentiment** |
 | `scripts/scanner.py` | Scan watchlist, rank by signal strength |
 | `scripts/discover.py` | **Discovery scanner: market-wide (default), targeted tickers, or presets** |
 | `scripts/kelly.py` | Kelly criterion calculator |

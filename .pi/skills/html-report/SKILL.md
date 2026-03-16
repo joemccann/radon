@@ -651,7 +651,7 @@ Replace these placeholders with actual values:
 
 ### Milestone Variables
 
-For each milestone (M1, M1B, M1C, M2, M3, M4, M5, M6):
+For each milestone (M1, M1B, M1C, M1D, M2, M3, M3B, M4, M5, M6):
 
 | Variable Pattern | Values |
 |------------------|--------|
@@ -985,7 +985,7 @@ See: `scripts/scenario_report.py` (full report generation with narratives)
 2. [ ] Replace header variables: `{{TICKER}}`, `{{COMPANY_NAME}}`, `{{SECTOR}}`, `{{CURRENT_PRICE}}`, `{{DATE}}`, `{{TIMESTAMP}}`
 3. [ ] Set gate status: `{{STATUS_TEXT}}` and `{{STATUS_CLASS}}` (`positive` / `negative` / `warning`)
 4. [ ] Fill all 6 summary metrics: signal score, buy ratio, flow strength, R:R, position size, max gain
-5. [ ] Fill milestone summary (M1–M6): `{{MX_CLASS}}`, `{{MX_DESCRIPTION}}`, `{{MX_GATE_CLASS}}`, `{{MX_RESULT}}`
+5. [ ] Fill milestone summary (M1–M6 including M1D): `{{MX_CLASS}}`, `{{MX_DESCRIPTION}}`, `{{MX_GATE_CLASS}}`, `{{MX_RESULT}}`
 6. [ ] Build dark pool flow section with daily breakdown **including today's data**
 7. [ ] Build options flow section with chain bias + institutional flow + combined signal
 8. [ ] Build context section: seasonality rating + analyst ratings
