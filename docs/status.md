@@ -4,6 +4,7 @@
 2026-03-17T08:50:00-07:00
 
 ## Recent Commits
+- 2026-03-17 — **fix: Normalize open-order combo net credit by leg size for ratio spreads.** 1x2 risk-reversal entries (for example, short puts + long calls) now compute true weighted net credit in the combo last-price cell; added regression coverage in `web/tests/open-order-combos.test.ts`.
 - 2026-03-17 — **ui: Update share PnL defaults and card emphasis.** X/share card rendering now scales single-value hero text larger (`$` or `%` only) while default share toggle state is now `%` only for cleaner default image output.
 - 2026-03-16 — **feat: News & Catalysts milestone (M1D) — fetch_news.py classifies headlines for material catalysts (buyback, M&A, earnings, FDA, etc.) and sentiment. Integrated into evaluate.py as parallel milestone. Context-only (not a gate) but surfaces in edge determination output for operator judgment. CRM's $25B buyback now visible in evaluation.**
 - 2026-03-14 — **fix: Post-bundle-optimization audit — reconnect 27 missing CSS classes, remove 4 orphaned rules, add 4 brand variables.** E2E browser verification (9 pages, dark+light themes) confirmed no visual regressions. Fixed 14 component classNames pointing to pre-rename names (e.g., `mono`→`fm`, `metric-value`→`mv`, `modal-backdrop`→`mb135`). Restored 10 accidentally deleted CSS rules. Removed 3 dead className refs. Added `--signal-deep`, `--extreme`, `--neutral`, `--line-grid` to both theme blocks. Fixed `--line-grid` which was referenced in ~15 rules but never defined.

@@ -7,6 +7,7 @@
 - Python 3.9 does not support the `int | str` union type syntax (requires 3.10+). Use `Union[int, str]` from `typing` or omit the annotation. This caused `TypeError: unsupported operand type(s) for |` when subprocess scripts were spawned.
 - IB executed orders should be grouped by position (opening/closing) rather than shown as flat fills. Group by underlying symbol + time bucket (60s). BAG fills are the combo envelope (quantity, net price); OPT fills are the legs (P&L, commission). P&L and share data belong on the closing position group, not individual fills.
 - When computing P&L % for a position group share card, use the aggregated OPT leg notional (avgPrice × qty × multiplier per leg), not the BAG envelope price. BAG fills have commission=0 and realizedPNL=0 — they're metadata, not execution data.
+- Combo net credit on open-order rows is quantity-aware: scale each leg by its effective ratio/size before summing quote values. Ignoring this turns 1x2 risk reversals (for example 25 short puts / 50 long calls) into incorrect net credit/debit values and can mislead execution/hedge decisions.
 
 ## 2026-03-16
 
