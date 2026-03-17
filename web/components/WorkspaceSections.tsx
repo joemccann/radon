@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bell,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Circle,
   ClipboardList,
@@ -92,6 +93,136 @@ function execOrderShareData(e: ExecutedOrder): SharePnlData {
     fillPrice: e.avgPrice,
     time: e.time ? new Date(e.time).toLocaleString() : "",
   };
+}
+
+/* ─── Executed Orders: Position Grouping ───────────────────────────────────
+ * Groups individual IB fills into position-level rows (opening / closing).
+ * BAG fills are the combo order envelope; OPT fills are the individual legs.
+ * Fills within 60s of each other for the same underlying are one position group.
+ */
+type PositionFillGroup = {
+  id: string;
+  symbol: string;
+  description: string;
+  isClosing: boolean;
+  totalQuantity: number;
+  netPrice: number | null;
+  totalCommission: number;
+  totalPnL: number | null;
+  time: string;
+  fills: ExecutedOrder[];
+};
+
+function deriveGroupDescription(fills: ExecutedOrder[], isClosing: boolean): string {
+  // Collect unique OPT legs (skip BAG envelope fills)
+  const legs = fills.filter((f) => f.contract.secType === "OPT");
+  if (legs.length === 0) {
+    // Stock or single-contract fills
+    const first = fills[0];
+    const side = first.side === "BOT" ? (isClosing ? "Closed" : "Bought") : (isClosing ? "Closed" : "Sold");
+    return `${side} ${first.contract.symbol}`;
+  }
+
+  // Dedupe legs by conId to get unique contracts
+  const uniqueLegs = new Map<number | null, ExecutedOrder>();
+  for (const l of legs) uniqueLegs.set(l.contract.conId, l);
+
+  const parts: string[] = [];
+  for (const leg of uniqueLegs.values()) {
+    const c = leg.contract;
+    const right = c.right === "C" || c.right === "CALL" ? "Call" : "Put";
+    const side = leg.side === "SLD" ? "Short" : "Long";
+    parts.push(`${side} $${c.strike} ${right}`);
+  }
+
+  const prefix = isClosing ? "Closed" : "Opened";
+  const structure = parts.length === 2 ? "Risk Reversal" : parts.length > 2 ? "Combo" : "";
+  return `${prefix} ${fills[0].contract.symbol} ${structure} (${parts.join(" / ")})`.trim();
+}
+
+function groupExecutedOrders(fills: ExecutedOrder[]): PositionFillGroup[] {
+  if (fills.length === 0) return [];
+
+  // Separate cancelled orders (keep as-is, ungrouped)
+  const cancelled = fills.filter((f) => f.side === "CANCELLED");
+  const real = fills.filter((f) => f.side !== "CANCELLED");
+
+  // Group by: underlying symbol + time bucket (60s window) + isClosing
+  const groups = new Map<string, ExecutedOrder[]>();
+  for (const fill of real) {
+    const sym = fill.contract.symbol;
+    const t = new Date(fill.time);
+    // Round time to nearest minute for grouping
+    const bucket = new Date(t.getFullYear(), t.getMonth(), t.getDate(), t.getHours(), t.getMinutes()).toISOString();
+    // Determine closing: OPT fills with non-zero PnL are closing
+    const isClosing = fill.contract.secType === "OPT" && fill.realizedPNL != null && Math.abs(fill.realizedPNL) > 0.01;
+    // For BAG fills, check if this time bucket has closing OPT fills
+    const key = `${sym}_${bucket}`;
+    const existing = groups.get(key) ?? [];
+    existing.push(fill);
+    groups.set(key, existing);
+  }
+
+  // Resolve each group: split into opening/closing if mixed
+  const result: PositionFillGroup[] = [];
+  for (const [key, groupFills] of groups) {
+    const optFills = groupFills.filter((f) => f.contract.secType !== "BAG");
+    const hasClosingPnL = optFills.some((f) => f.realizedPNL != null && Math.abs(f.realizedPNL) > 0.01);
+    const isClosing = hasClosingPnL;
+    const sym = groupFills[0].contract.symbol;
+
+    // Sum quantities from BAG fills (they represent the combo-level quantity)
+    const bagFills = groupFills.filter((f) => f.contract.secType === "BAG");
+    const totalQty = bagFills.length > 0
+      ? bagFills.reduce((sum, f) => sum + f.quantity, 0)
+      : optFills.reduce((sum, f) => sum + f.quantity, 0);
+
+    // Net price from BAG fills
+    const netPrice = bagFills.length > 0 && bagFills[0].avgPrice != null
+      ? bagFills[0].avgPrice
+      : null;
+
+    // Sum commission + PnL from OPT fills (BAG commission is 0)
+    const totalCommission = optFills.reduce((sum, f) => sum + (f.commission ?? 0), 0);
+    const totalPnL = isClosing
+      ? optFills.reduce((sum, f) => sum + (f.realizedPNL ?? 0), 0)
+      : null;
+
+    const earliestTime = groupFills.reduce((min, f) => f.time < min ? f.time : min, groupFills[0].time);
+
+    result.push({
+      id: key,
+      symbol: sym,
+      description: deriveGroupDescription(groupFills, isClosing),
+      isClosing,
+      totalQuantity: totalQty,
+      netPrice,
+      totalCommission,
+      totalPnL,
+      time: earliestTime,
+      fills: groupFills,
+    });
+  }
+
+  // Add cancelled orders as individual groups
+  for (const c of cancelled) {
+    result.push({
+      id: c.execId,
+      symbol: c.contract.symbol || c.symbol,
+      description: `Cancelled ${c.symbol}`,
+      isClosing: false,
+      totalQuantity: c.quantity,
+      netPrice: c.avgPrice,
+      totalCommission: 0,
+      totalPnL: null,
+      time: c.time,
+      fills: [c],
+    });
+  }
+
+  // Sort by time descending
+  result.sort((a, b) => b.time.localeCompare(a.time));
+  return result;
 }
 
 function blotterShareData(t: BlotterTrade): SharePnlData {
@@ -961,6 +1092,22 @@ function OrdersSections({
 
   const execSortWithCancelled = useSort<ExecutedOrder, ExecOrderKey>(allExecutedRows, execOrderExtract, "time", "desc");
 
+  // Group fills into position-level rows
+  const positionGroups = useMemo(
+    () => groupExecutedOrders(allExecutedRows),
+    [allExecutedRows],
+  );
+
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  const toggleGroup = useCallback((groupId: string) => {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupId)) next.delete(groupId);
+      else next.add(groupId);
+      return next;
+    });
+  }, []);
+
   if (!orders) {
     return (
       <div className="section">
@@ -1100,53 +1247,108 @@ function OrdersSections({
             Today&apos;s Executed Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Today's Executed Orders"]} />
           </div>
-          <span className="pill neutral">{execCount} {execCount === 1 ? "ENTRY" : "ENTRIES"}</span>
+          <span className="pill neutral">{positionGroups.length} {positionGroups.length === 1 ? "POSITION" : "POSITIONS"}</span>
         </div>
         <div className="section-body">
-          {allExecutedRows.length === 0 ? (
+          {positionGroups.length === 0 ? (
             <div className="alert-item">No fills this session</div>
           ) : (
             <table>
               <thead>
                 <tr>
-                  <SortTh<ExecOrderKey> label="Symbol" sortKey="symbol" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Action" sortKey="side" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Quantity" sortKey="quantity" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Avg Fill Price" sortKey="avgPrice" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Commission" sortKey="commission" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Realized P&L" sortKey="realizedPNL" className="right" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
-                  <SortTh<ExecOrderKey> label="Time" sortKey="time" activeKey={execSortWithCancelled.sort.key} direction={execSortWithCancelled.sort.direction} onToggle={execSortWithCancelled.toggle} />
+                  <th style={{ width: "24px" }}></th>
+                  <th>Position</th>
+                  <th>Action</th>
+                  <th className="right">Quantity</th>
+                  <th className="right">Net Price</th>
+                  <th className="right">Commission</th>
+                  <th className="right">Realized P&L</th>
+                  <th>Time</th>
                   <th style={{ width: "32px" }}></th>
                 </tr>
               </thead>
               <tbody>
-                {execSortWithCancelled.sorted.map((e, i) => {
-                  const isCancelled = e.side === "CANCELLED";
-                  const displaySide = isCancelled ? "CANCELLED" : e.side === "BOT" ? "BUY" : e.side === "SLD" ? "SELL" : e.side;
+                {positionGroups.map((group) => {
+                  const isExpanded = expandedGroups.has(group.id);
+                  const isCancelled = group.fills[0]?.side === "CANCELLED";
                   return (
-                    <tr key={`${e.execId}-${i}`} className={isCancelled ? "row-cancelled" : undefined}>
-                      <td>
-                        <TickerLink ticker={e.contract.symbol} />
-                        {isCancelled && <XCircle size={12} className="cancelled-icon" />}
-                      </td>
-                      <td>
-                        <span className={`pill ${isCancelled ? "cancelled" : displaySide === "BUY" ? "accum" : "distrib"}`}>
-                          {displaySide}
-                        </span>
-                      </td>
-                      <td className="right">{e.quantity}</td>
-                      <td className="right">{e.avgPrice != null ? fmtPrice(e.avgPrice) : "—"}</td>
-                      <td className="right">{e.commission != null ? fmtPrice(e.commission) : "—"}</td>
-                      <td className={`right ${e.realizedPNL != null ? (e.realizedPNL >= 0 ? "positive" : "negative") : ""}`}>
-                        {e.realizedPNL != null ? `${e.realizedPNL >= 0 ? "+" : ""}${fmtPrice(e.realizedPNL)}` : "—"}
-                      </td>
-                      <td>{new Date(e.time).toLocaleTimeString()}</td>
-                      <td>
-                        {!isCancelled && e.realizedPNL != null && (
-                          <SharePnlButton data={execOrderShareData(e)} />
-                        )}
-                      </td>
-                    </tr>
+                    <React.Fragment key={group.id}>
+                      {/* Position group header row */}
+                      <tr
+                        className={`exec-group-header ${isCancelled ? "row-cancelled" : ""}`}
+                        style={{ cursor: group.fills.length > 1 ? "pointer" : "default" }}
+                        onClick={() => group.fills.length > 1 && toggleGroup(group.id)}
+                      >
+                        <td style={{ width: "24px", textAlign: "center" }}>
+                          {group.fills.length > 1 && (
+                            isExpanded
+                              ? <ChevronDown size={14} style={{ color: "var(--text-secondary)" }} />
+                              : <ChevronRight size={14} style={{ color: "var(--text-secondary)" }} />
+                          )}
+                        </td>
+                        <td>
+                          <TickerLink ticker={group.symbol} />
+                          <span style={{ marginLeft: "8px", fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
+                            {group.description.replace(/^(Opened|Closed)\s+\w+\s*/, "")}
+                          </span>
+                          {isCancelled && <XCircle size={12} className="cancelled-icon" />}
+                        </td>
+                        <td>
+                          <span className={`pill ${isCancelled ? "cancelled" : group.isClosing ? "distrib" : "accum"}`}>
+                            {isCancelled ? "CANCELLED" : group.isClosing ? "CLOSE" : "OPEN"}
+                          </span>
+                        </td>
+                        <td className="right">{group.totalQuantity}</td>
+                        <td className="right">{group.netPrice != null ? fmtPrice(group.netPrice) : "—"}</td>
+                        <td className="right">{group.totalCommission !== 0 ? fmtPrice(group.totalCommission) : "—"}</td>
+                        <td className={`right ${group.totalPnL != null ? (group.totalPnL >= 0 ? "positive" : "negative") : ""}`}>
+                          {group.totalPnL != null ? `${group.totalPnL >= 0 ? "+" : ""}${fmtPrice(group.totalPnL)}` : "—"}
+                        </td>
+                        <td>{new Date(group.time).toLocaleTimeString()}</td>
+                        <td>
+                          {group.isClosing && group.totalPnL != null && (
+                            <SharePnlButton data={{
+                              description: group.description,
+                              pnl: group.totalPnL,
+                              pnlPct: null,
+                              commission: group.totalCommission,
+                              fillPrice: group.netPrice,
+                              time: new Date(group.time).toLocaleString(),
+                            }} />
+                          )}
+                        </td>
+                      </tr>
+                      {/* Expanded fill detail rows */}
+                      {isExpanded && group.fills.map((e, i) => {
+                        const displaySide = e.side === "BOT" ? "BUY" : e.side === "SLD" ? "SELL" : e.side;
+                        const isBAG = e.contract.secType === "BAG";
+                        return (
+                          <tr key={`${e.execId}-${i}`} className="exec-fill-row">
+                            <td></td>
+                            <td style={{ paddingLeft: "24px" }}>
+                              <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
+                                {isBAG ? `${e.symbol}` : e.symbol}
+                              </span>
+                            </td>
+                            <td>
+                              <span className={`pill ${displaySide === "BUY" ? "accum" : "distrib"}`} style={{ fontSize: "9px" }}>
+                                {displaySide}
+                              </span>
+                            </td>
+                            <td className="right" style={{ color: "var(--text-secondary)" }}>{e.quantity}</td>
+                            <td className="right" style={{ color: "var(--text-secondary)" }}>{e.avgPrice != null ? fmtPrice(e.avgPrice) : "—"}</td>
+                            <td className="right" style={{ color: "var(--text-secondary)" }}>{e.commission != null && e.commission !== 0 ? fmtPrice(e.commission) : "—"}</td>
+                            <td className="right" style={{ color: "var(--text-secondary)" }}>
+                              {e.realizedPNL != null && Math.abs(e.realizedPNL) > 0.01
+                                ? `${e.realizedPNL >= 0 ? "+" : ""}${fmtPrice(e.realizedPNL)}`
+                                : "—"}
+                            </td>
+                            <td style={{ color: "var(--text-secondary)" }}>{new Date(e.time).toLocaleTimeString()}</td>
+                            <td></td>
+                          </tr>
+                        );
+                      })}
+                    </React.Fragment>
                   );
                 })}
               </tbody>
