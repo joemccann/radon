@@ -1302,7 +1302,7 @@ Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `loca
 | FastAPI File | Purpose |
 |------|---------|
 | `scripts/api/server.py` | FastAPI app — 17 endpoints, CORS, IB pool, health check |
-| `scripts/api/ib_pool.py` | Role-based IB connection pool (sync=0, orders=11, data=31) |
+| `scripts/api/ib_pool.py` | Role-based IB connection pool (sync=0, orders=1, data=2) |
 | `scripts/api/ib_gateway.py` | IB Gateway health check + auto-restart via IBC launchd |
 | `scripts/api/subprocess.py` | Async subprocess helper (`run_script`, `run_module`) |
 

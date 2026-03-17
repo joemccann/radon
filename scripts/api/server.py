@@ -202,7 +202,7 @@ async def attribution():
 async def portfolio_sync():
     """Sync portfolio from IB via subprocess.
 
-    Uses client_id 40 to avoid conflict with pool's client_id 0 (sync role).
+    Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
     result = await _run_ib_script_with_recovery(
@@ -241,7 +241,7 @@ async def _bg_sync_via_subprocess():
 async def orders_refresh():
     """Sync orders from IB via subprocess.
 
-    Uses client_id 41 to avoid conflict with pool's client_id 11 (orders role).
+    Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
     result = await _run_ib_script_with_recovery(

@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional, Sequence, Set
+from typing import Any, Dict, List, Optional, Sequence, Set, Union
 
 from ib_insync import IB, FlexReport, Option
 
@@ -204,7 +204,7 @@ class IBClient:
         self,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_GATEWAY_PORT,
-        client_id: Optional[int | str] = None,
+        client_id: Optional[Union[int, str]] = None,
         client_name: Optional[str] = None,
         timeout: int = 3,
         max_retries: int = 1,

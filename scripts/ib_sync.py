@@ -36,7 +36,7 @@ DEFAULT_CLIENT_ID = CLIENT_IDS["ib_sync"]
 PORTFOLIO_PATH = Path(__file__).parent.parent / "data" / "portfolio.json"
 
 
-def connect_ib(host: str, port: int, client_id: int | str = "auto") -> IBClient:
+def connect_ib(host: str, port: int, client_id="auto") -> IBClient:
     """Connect to TWS/IB Gateway, return an IBClient."""
     client = IBClient()
     try:
