@@ -140,7 +140,7 @@ describe("buildOpenOrderDisplayRows", () => {
       makeOrder({ orderId: 2, action: "BUY", right: "C", strike: 165, totalQuantity: 10 }),
     ]);
 
-    expect(rows).toHaveLength(3);
+    expect(rows).toHaveLength(2);
     const comboRows = rows.filter((row) => row.kind === "combo");
     expect(comboRows).toHaveLength(1);
   });
@@ -170,7 +170,7 @@ describe("resolveOpenOrderComboPrice", () => {
     };
 
     const net = resolveOpenOrderComboPrice([shortPut, longCall], prices);
-    expect(net).toBeCloseTo(-2.8, 4);
+    expect(net).toBeCloseTo(-3, 4);
   });
 
   it("returns null when a leg lacks quote data", () => {

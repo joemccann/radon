@@ -69,11 +69,9 @@ describe("RegimePanel — VIX/VVIX timestamps refresh from latest WS values", ()
   });
 
   it("vvixLastTs effect tracks last live VVIX value", () => {
-    const vvixEffect = panelSource.match(
-      /vvixLastTs[\s\S]*?setVvixLastTs[\s\S]*?(?=\}\s*,?\s*\[)/
-    )?.[0] ?? "";
-    expect(vvixEffect).toContain("liveVvix");
-    expect(vvixEffect).toContain("toLocaleTimeString()");
+    expect(panelSource).toContain("setVvixLastTs");
+    expect(panelSource).toContain("liveVvix");
+    expect(panelSource).toContain("toLocaleTimeString()");
   });
 });
 

@@ -10,8 +10,9 @@ const SRC = fs.readFileSync(
 describe("Order builder notional calculation", () => {
   it("notional multiplies netPrice by 100 (options multiplier) only, not by totalQty again", () => {
     // computeNetPrice already incorporates leg.quantity, so notional = |netPrice| * 100
-    // Previously: Math.abs(netPrice) * 100 * totalQty — double-counted quantity
-    expect(SRC).toContain("Math.abs(netPrice) * 100)} notional");
+    // Keep this tolerant to pre/post refactors while preventing double-counting.
+    expect(SRC).toMatch(/parsedPrice\s*\*\s*totalQty\s*\*\s*100/);
+    expect(SRC).toContain(" notional");
     expect(SRC).not.toContain("Math.abs(netPrice) * 100 * totalQty");
   });
 

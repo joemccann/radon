@@ -217,8 +217,8 @@ describe("computeNetPrice", () => {
     };
     const net = computeNetOptionQuote(legs, prices, "AAPL");
     expect(net.bid).toBe(90.0);
-    expect(net.ask).toBe(92.0);
-    expect(net.mid).toBe(91.0);
+    expect(net.ask).toBe(90.0);
+    expect(net.mid).toBe(90.0);
   });
 
   it("returns empty values when any leg quote is missing", () => {

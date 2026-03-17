@@ -12,8 +12,7 @@
  * IB's reqPnLSingle. The UI prefers this over its own WS-close calculation.
  */
 
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, expect } from "vitest";
 
 /* ─── Types matching the real code ───────────────────────────── */
 
@@ -126,10 +125,10 @@ describe("Today P&L — blended intraday additions", () => {
     // The WS calculation treats ALL 50 contracts as overnight:
     // (12.85 - 14.00) * 50 * 100 = -$5,750
     const result = computeOptionsRt(pos.legs, prices, keys);
-    assert.notEqual(result, null);
+    expect(result).not.toBeNull();
     // This is the WRONG number — too negative because it treats 25 new
     // contracts as having yesterday's close of $14.00
-    assert.equal(result!.dailyPnl, (12.85 - 14.00) * 50 * 100); // -5750
+    expect(result!.dailyPnl).toBe((12.85 - 14.00) * 50 * 100); // -5750
     // The correct number from IB would be much less negative:
     // Overnight 25: (12.85 - 14.00) * 25 * 100 = -$2,875
     // Intraday 25: (12.85 - 11.95) * 25 * 100 = +$2,250
@@ -144,7 +143,7 @@ describe("Today P&L — blended intraday additions", () => {
     const wsResult = computeOptionsRt(pos.legs, prices, keys);
     const todayPnl = resolveTodayPnl(ibPos, wsResult!.dailyPnl!);
     // Should use IB's number, not the WS calculation
-    assert.equal(todayPnl, -625);
+    expect(todayPnl).toBe(-625);
   });
 
   it("resolveTodayPnl falls back to WS when IB daily PnL is null", () => {
@@ -155,7 +154,7 @@ describe("Today P&L — blended intraday additions", () => {
     const wsResult = computeOptionsRt(pos.legs, prices, keys);
     const todayPnl = resolveTodayPnl(noIbPos, wsResult!.dailyPnl!);
     // Falls back to WS calculation
-    assert.equal(todayPnl, (12.85 - 14.00) * 50 * 100); // -5750
+    expect(todayPnl).toBe((12.85 - 14.00) * 50 * 100); // -5750
   });
 
   it("resolveTodayPnl falls back to WS when ib_daily_pnl is undefined", () => {
@@ -163,7 +162,7 @@ describe("Today P&L — blended intraday additions", () => {
     delete oldPos.ib_daily_pnl;
     const wsResult = computeOptionsRt(pos.legs, prices, keys);
     const todayPnl = resolveTodayPnl(oldPos, wsResult!.dailyPnl!);
-    assert.equal(todayPnl, (12.85 - 14.00) * 50 * 100);
+    expect(todayPnl).toBe((12.85 - 14.00) * 50 * 100);
   });
 
   it("resolveTodayPnl uses IB value of zero when IB says 0", () => {
@@ -174,7 +173,7 @@ describe("Today P&L — blended intraday additions", () => {
     const wsResult = computeOptionsRt(pos.legs, prices, keys);
     const todayPnl = resolveTodayPnl(zeroPos, wsResult!.dailyPnl!);
     // IB says 0, should use 0 (not fall through to WS)
-    assert.equal(todayPnl, 0);
+    expect(todayPnl).toBe(0);
   });
 
   it("handles spread with IB daily PnL", () => {
@@ -190,7 +189,7 @@ describe("Today P&L — blended intraday additions", () => {
       ib_daily_pnl: -1500,
     };
     const todayPnl = resolveTodayPnl(spreadPos, -3000);
-    assert.equal(todayPnl, -1500);
+    expect(todayPnl).toBe(-1500);
   });
 
   it("handles stock positions (no IB daily PnL needed, WS is correct)", () => {
@@ -204,7 +203,7 @@ describe("Today P&L — blended intraday additions", () => {
     };
     // For stocks, WS close-based calc is always correct (no per-lot issue)
     const todayPnl = resolveTodayPnl(stockPos, 250);
-    assert.equal(todayPnl, 250);
+    expect(todayPnl).toBe(250);
   });
 });
 
@@ -218,6 +217,6 @@ describe("Today P&L % — blended daily change", () => {
     // Better: just show the dollar amount from IB and skip % for blended positions.
     // For now, verify the dollar amount is correct.
     const ibDailyPnl = -625;
-    assert.equal(ibDailyPnl, -625);
+    expect(ibDailyPnl).toBe(-625);
   });
 });

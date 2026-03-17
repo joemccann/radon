@@ -5,8 +5,7 @@
  * mapped to long/short intent for flow classification.
  */
 
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, expect } from "vitest";
 
 /* ─── Inline replica of classify logic from flow_analysis.py ──── */
 
@@ -56,7 +55,7 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "ACCUMULATION",
       recentDir: "ACCUMULATION",
     });
-    assert.equal(result, "supports");
+    expect(result).toBe("supports");
   });
 
   it("CREDIT spread + STRONG DISTRIBUTION → supports", () => {
@@ -66,7 +65,7 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "DISTRIBUTION",
       recentDir: "DISTRIBUTION",
     });
-    assert.equal(result, "supports");
+    expect(result).toBe("supports");
   });
 
   it("DEBIT spread + STRONG DISTRIBUTION → against", () => {
@@ -76,7 +75,7 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "DISTRIBUTION",
       recentDir: "DISTRIBUTION",
     });
-    assert.equal(result, "against");
+    expect(result).toBe("against");
   });
 
   it("CREDIT spread + MODERATE ACCUMULATION → against", () => {
@@ -86,7 +85,7 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "ACCUMULATION",
       recentDir: "ACCUMULATION",
     });
-    assert.equal(result, "against");
+    expect(result).toBe("against");
   });
 
   it("LONG + STRONG ACCUMULATION → supports (unchanged)", () => {
@@ -96,7 +95,7 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "ACCUMULATION",
       recentDir: "ACCUMULATION",
     });
-    assert.equal(result, "supports");
+    expect(result).toBe("supports");
   });
 
   it("SHORT + MODERATE DISTRIBUTION → supports (unchanged)", () => {
@@ -106,7 +105,7 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "DISTRIBUTION",
       recentDir: "DISTRIBUTION",
     });
-    assert.equal(result, "supports");
+    expect(result).toBe("supports");
   });
 
   it("DEBIT + WEAK ACCUMULATION → neutral (weak signal)", () => {
@@ -116,6 +115,6 @@ describe("Flow analysis — spread direction classification", () => {
       flowDir: "ACCUMULATION",
       recentDir: "ACCUMULATION",
     });
-    assert.equal(result, "neutral");
+    expect(result).toBe("neutral");
   });
 });

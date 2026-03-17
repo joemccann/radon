@@ -130,19 +130,22 @@ describe("IB clientId collision prevention", () => {
   it("orders sync route passes clientId via typed wrapper", async () => {
     const filePath = path.resolve(__dirname, "../app/api/orders/route.ts");
     const content = await readFile(filePath, "utf8");
-    expect(content.includes("clientId")).toBeTruthy();
+    expect(content.includes("radonFetch")).toBeTruthy();
+    expect(content.includes('"/orders/refresh"')).toBeTruthy();
   });
 
   it("cancel route passes clientId via typed wrapper", async () => {
     const filePath = path.resolve(__dirname, "../app/api/orders/cancel/route.ts");
     const content = await readFile(filePath, "utf8");
-    expect(content.includes("clientId")).toBeTruthy();
+    expect(content.includes("radonFetch")).toBeTruthy();
+    expect(content.includes('"/orders/cancel"')).toBeTruthy();
   });
 
   it("modify route passes clientId via typed wrapper", async () => {
     const filePath = path.resolve(__dirname, "../app/api/orders/modify/route.ts");
     const content = await readFile(filePath, "utf8");
-    expect(content.includes("clientId")).toBeTruthy();
+    expect(content.includes("radonFetch")).toBeTruthy();
+    expect(content.includes('"/orders/modify"')).toBeTruthy();
   });
 });
 

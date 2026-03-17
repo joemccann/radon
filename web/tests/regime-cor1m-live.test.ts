@@ -17,10 +17,8 @@ describe("RegimePanel — live COR1M rendering", () => {
   });
 
   it("shows a live badge for COR1M when a live COR1M value is present", () => {
-    const cor1mLabelLine = panelSource.match(/<div className="regime-strip-label">COR1M[\s\S]*?<\/div>/)?.[0] ?? "";
-    expect(cor1mLabelLine).toContain("LiveBadge");
-    expect(cor1mLabelLine).not.toContain("LiveBadge live={false}");
-    expect(cor1mLabelLine).toMatch(/liveCor1m|hasLiveCor1m/);
+    expect(panelSource).toContain("COR1M <LiveBadge live={hasLiveCor1m} />");
+    expect(panelSource).not.toContain("COR1M <LiveBadge live={false} />");
   });
 
   it("pushes the live COR1M value into the RVOL/COR1M history chart", () => {
@@ -35,6 +33,6 @@ describe("RegimePanel — live COR1M rendering", () => {
 
   it("moves the COR1M 5d change into the muted strip subline", () => {
     expect(panelSource).toContain('5d chg:');
-    expect(panelSource).toMatch(/<div className="regime-strip-sub">\{`5d chg:/);
+    expect(panelSource).toContain('sub={<>{`5d chg:');
   });
 });

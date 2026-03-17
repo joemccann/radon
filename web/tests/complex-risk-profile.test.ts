@@ -10,8 +10,7 @@
  * 2. WorkspaceSections.tsx: include "complex" in the undefined bucket as fallback
  */
 
-import { describe, it } from "node:test";
-import { strict as assert } from "node:assert";
+import { describe, it, expect } from "vitest";
 
 // Simulate the filtering logic from WorkspaceSections.tsx PortfolioSections
 function filterPositions(positions: Array<{ ticker: string; risk_profile: string }>) {
@@ -48,12 +47,8 @@ describe("Complex risk profile handling", () => {
       ...result.undefined,
     ];
     // AAOI was silently dropped!
-    assert.equal(
-      allRendered.find((p) => p.ticker === "AAOI"),
-      undefined,
-      "Old buggy filter should have dropped AAOI"
-    );
-    assert.equal(allRendered.length, 3, "Only 3 of 4 rendered with old filter");
+    expect(allRendered.find((p) => p.ticker === "AAOI")).toBeUndefined();
+    expect(allRendered.length).toBe(3);
   });
 
   it("FIX: new filter includes complex in undefined bucket", () => {
@@ -64,26 +59,20 @@ describe("Complex risk profile handling", () => {
       ...result.undefined,
     ];
     // AAOI now appears
-    assert.ok(
-      allRendered.find((p) => p.ticker === "AAOI"),
-      "AAOI should be rendered after fix"
-    );
-    assert.equal(allRendered.length, 4, "All 4 positions rendered");
+    expect(allRendered.find((p) => p.ticker === "AAOI")).toBeTruthy();
+    expect(allRendered.length).toBe(4);
   });
 
   it("complex positions land in undefined bucket specifically", () => {
     const result = filterPositions(MOCK_POSITIONS);
-    assert.ok(
-      result.undefined.find((p) => p.ticker === "AAOI"),
-      "AAOI should be in the undefined bucket"
-    );
+    expect(result.undefined.find((p) => p.ticker === "AAOI")).toBeTruthy();
   });
 
   it("all standard risk profiles still route correctly", () => {
     const result = filterPositions(MOCK_POSITIONS);
-    assert.deepEqual(result.defined.map((p) => p.ticker), ["AAPL"]);
-    assert.deepEqual(result.equity.map((p) => p.ticker), ["MSFT"]);
-    assert.ok(result.undefined.map((p) => p.ticker).includes("IGV"));
+    expect(result.defined.map((p) => p.ticker)).toEqual(["AAPL"]);
+    expect(result.equity.map((p) => p.ticker)).toEqual(["MSFT"]);
+    expect(result.undefined.map((p) => p.ticker)).toContain("IGV");
   });
 
   it("no positions lost when all are standard profiles", () => {
@@ -94,6 +83,6 @@ describe("Complex risk profile handling", () => {
     ];
     const result = filterPositions(standard);
     const all = [...result.defined, ...result.equity, ...result.undefined];
-    assert.equal(all.length, 3);
+    expect(all.length).toBe(3);
   });
 });

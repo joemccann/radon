@@ -1,4 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { runScript, resolveProjectRoot, _resetRootCache } from "../runner";
 
 describe("resolveProjectRoot", () => {
@@ -7,8 +9,8 @@ describe("resolveProjectRoot", () => {
   it("returns a path containing scripts/ and data/", () => {
     const root = resolveProjectRoot();
     expect(root).toBeTruthy();
-    // Root should end with convex-scavenger or be a valid project dir
-    expect(root).toMatch(/convex-scavenger/);
+    expect(existsSync(join(root, "scripts"))).toBe(true);
+    expect(existsSync(join(root, "data"))).toBe(true);
   });
 
   it("caches the result", () => {

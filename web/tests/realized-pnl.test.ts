@@ -12,7 +12,14 @@ import type { ExecutedOrder } from "../lib/types";
 // Import the utility we are about to create
 import { computeRealizedPnlFromFills } from "../lib/realized-pnl";
 
-const makeFill = (realizedPNL: number | null, time = "2026-03-09T10:00:00"): ExecutedOrder => ({
+const todaysDate = new Date().toLocaleDateString("sv", {
+  timeZone: "America/New_York",
+});
+
+const makeFill = (
+  realizedPNL: number | null,
+  time = `${todaysDate}T10:00:00`,
+): ExecutedOrder => ({
   execId: "test-exec-1",
   symbol: "AAPL",
   contract: { symbol: "AAPL", secType: "STK", conId: null, strike: null, right: null, expiry: null },

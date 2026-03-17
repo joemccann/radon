@@ -3,47 +3,18 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /**
  * sync-fallback.test.ts
  *
- * When POST /api/portfolio or POST /api/orders sync fails (e.g. IB Gateway
- * unreachable), the routes must fall back to cached data files and return 200
- * instead of 502.  502 should only occur when both sync AND cache fail.
+ * When sync fails, routes must fall back to cached data and return 200.
+ * 502 should only happen when both sync and cache are unavailable.
  */
 
-// ---------------------------------------------------------------------------
-// Module-level mocks
-// ---------------------------------------------------------------------------
-
 const mockStat = vi.fn();
-vi.mock("fs/promises", () => ({
-  stat: mockStat,
-}));
-
-vi.mock("child_process", () => ({
-  spawn: vi.fn().mockReturnValue({
-    stdout: { on: vi.fn() },
-    stderr: { on: vi.fn() },
-    on: vi.fn(),
-    unref: vi.fn(),
-  }),
-}));
+vi.mock("fs/promises", () => ({ stat: mockStat }));
 
 const mockReadDataFile = vi.fn();
-vi.mock("@tools/data-reader", () => ({
-  readDataFile: mockReadDataFile,
-}));
+vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
 
-const mockIbSync = vi.fn();
-vi.mock("@tools/wrappers/ib-sync", () => ({
-  ibSync: (...args: unknown[]) => mockIbSync(...args),
-}));
-
-const mockIbOrders = vi.fn();
-vi.mock("@tools/wrappers/ib-orders", () => ({
-  ibOrders: (...args: unknown[]) => mockIbOrders(...args),
-}));
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+const mockRadonFetch = vi.fn();
+vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
 function makePortfolio(lastSync: string) {
   return {
@@ -71,29 +42,16 @@ function makeOrders(lastSync: string) {
   };
 }
 
-// ---------------------------------------------------------------------------
-// POST /api/portfolio — sync failure fallback
-// ---------------------------------------------------------------------------
-
-describe("POST /api/portfolio — sync failure falls back to cached data", () => {
+describe("POST /api/portfolio — sync failure fallback", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    // Fresh file (not stale) to prevent background sync from firing
     mockStat.mockResolvedValue({ mtimeMs: Date.now() });
   });
 
   it("returns cached portfolio data with 200 when ibSync fails", async () => {
     const cached = makePortfolio("2026-03-13T14:00:00Z");
-
-    // ibSync fails (IB Gateway unreachable)
-    mockIbSync.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: 'Connect call failed (\'127.0.0.1\', 4001)',
-    });
-
-    // But cached data file exists
+    mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
     mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
 
     const { POST } = await import("../app/api/portfolio/route");
@@ -103,16 +61,12 @@ describe("POST /api/portfolio — sync failure falls back to cached data", () =>
     expect(response.status).toBe(200);
     expect(body.last_sync).toBe("2026-03-13T14:00:00Z");
     expect(body.positions).toEqual([]);
+    expect(mockRadonFetch).toHaveBeenCalledWith("/portfolio/sync", expect.objectContaining({ method: "POST" }));
   });
 
   it("sets X-Sync-Warning header when falling back to cached data", async () => {
     const cached = makePortfolio("2026-03-13T14:00:00Z");
-
-    mockIbSync.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "Connection refused",
-    });
+    mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
     mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
 
     const { POST } = await import("../app/api/portfolio/route");
@@ -122,13 +76,7 @@ describe("POST /api/portfolio — sync failure falls back to cached data", () =>
   });
 
   it("returns 502 only when sync fails AND no cached data exists", async () => {
-    mockIbSync.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "Connection refused",
-    });
-
-    // Cache file also missing
+    mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
     mockReadDataFile.mockResolvedValue({ ok: false, error: "File not found" });
 
     const { POST } = await import("../app/api/portfolio/route");
@@ -137,10 +85,10 @@ describe("POST /api/portfolio — sync failure falls back to cached data", () =>
     expect(response.status).toBe(502);
   });
 
-  it("returns fresh synced data with 200 when ibSync succeeds", async () => {
-    const fresh = makePortfolio("2026-03-13T15:00:00Z");
-
-    mockIbSync.mockResolvedValue({ ok: true, data: fresh });
+  it("returns cached portfolio data with 200 when sync succeeds", async () => {
+    const synced = makePortfolio("2026-03-13T15:00:00Z");
+    mockRadonFetch.mockResolvedValue(synced);
+    mockReadDataFile.mockResolvedValue({ ok: true, data: synced });
 
     const { POST } = await import("../app/api/portfolio/route");
     const response = await POST();
@@ -152,27 +100,16 @@ describe("POST /api/portfolio — sync failure falls back to cached data", () =>
   });
 });
 
-// ---------------------------------------------------------------------------
-// POST /api/orders — sync failure fallback
-// ---------------------------------------------------------------------------
-
-describe("POST /api/orders — sync failure falls back to cached data", () => {
+describe("POST /api/orders — sync failure fallback", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
+    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
   });
 
   it("returns cached orders data with 200 when ibOrders sync fails", async () => {
     const cached = makeOrders("2026-03-13T14:00:00Z");
-
-    // ibOrders sync fails
-    mockIbOrders.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: 'Connect call failed (\'127.0.0.1\', 4001)',
-    });
-
-    // But cached orders file exists
+    mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
     mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
 
     const { POST } = await import("../app/api/orders/route");
@@ -182,16 +119,12 @@ describe("POST /api/orders — sync failure falls back to cached data", () => {
     expect(response.status).toBe(200);
     expect(body.last_sync).toBe("2026-03-13T14:00:00Z");
     expect(body.open_orders).toEqual([]);
+    expect(mockRadonFetch).toHaveBeenCalledWith("/orders/refresh", expect.objectContaining({ method: "POST" }));
   });
 
   it("sets X-Sync-Warning header when falling back to cached orders", async () => {
     const cached = makeOrders("2026-03-13T14:00:00Z");
-
-    mockIbOrders.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "Connection refused",
-    });
+    mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
     mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
 
     const { POST } = await import("../app/api/orders/route");
@@ -201,13 +134,7 @@ describe("POST /api/orders — sync failure falls back to cached data", () => {
   });
 
   it("returns 502 only when sync fails AND no cached orders exist", async () => {
-    mockIbOrders.mockResolvedValue({
-      ok: false,
-      exitCode: 1,
-      stderr: "Connection refused",
-    });
-
-    // Cache file also missing
+    mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
     mockReadDataFile.mockResolvedValue({ ok: false, error: "File not found" });
 
     const { POST } = await import("../app/api/orders/route");
@@ -216,10 +143,9 @@ describe("POST /api/orders — sync failure falls back to cached data", () => {
     expect(response.status).toBe(502);
   });
 
-  it("returns fresh synced data with 200 when ibOrders succeeds", async () => {
+  it("returns orders data with 200 when sync succeeds", async () => {
     const cached = makeOrders("2026-03-13T15:00:00Z");
-
-    mockIbOrders.mockResolvedValue({ ok: true, stderr: "" });
+    mockRadonFetch.mockResolvedValue({ ok: true });
     mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
 
     const { POST } = await import("../app/api/orders/route");

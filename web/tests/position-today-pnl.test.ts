@@ -8,8 +8,7 @@
  *   fall back to synced `market_price`.
  */
 
-import { describe, it } from "node:test";
-import assert from "node:assert/strict";
+import { describe, it, expect } from "vitest";
 
 /* ─── Inline replicas of PositionTable logic ─────────────────── */
 
@@ -80,12 +79,12 @@ describe("Today P&L — option position fallback", () => {
       SYM_20260320_120_C: { last: 2.5, close: 2.2, bid: 2.3, ask: 2.7 },
     };
     const result = computeOptionsRt(legs, prices, keys);
-    assert.notEqual(result, null);
+    expect(result).not.toBeNull();
     // LONG leg daily: (6.0 - 5.5) * 10 * 100 = 500
     // SHORT leg daily: -1 * (2.5 - 2.2) * 10 * 100 = -300
     // Net daily P&L = 200
-    assert.ok(Math.abs(result!.dailyPnl! - 200) < 0.01);
-    assert.notEqual(result!.closeValue, 0);
+    expect(Math.abs(result!.dailyPnl! - 200)).toBeLessThan(0.01);
+    expect(result!.closeValue).not.toBe(0);
   });
 
   it("returns null dailyPnl when WS has last but NO close (after hours)", () => {
@@ -94,11 +93,11 @@ describe("Today P&L — option position fallback", () => {
       SYM_20260320_120_C: { last: 2.5, close: null, bid: 2.3, ask: 2.7 },
     };
     const result = computeOptionsRt(legs, prices, keys);
-    assert.notEqual(result, null);
+    expect(result).not.toBeNull();
     // MV should still compute
-    assert.equal(result!.mv, (6.0 * 10 * 100) - (2.5 * 10 * 100)); // 3500
+    expect(result!.mv).toBe((6.0 * 10 * 100) - (2.5 * 10 * 100)); // 3500
     // dailyPnl should be null (no close data), NOT 0
-    assert.equal(result!.dailyPnl, null);
+    expect(result!.dailyPnl).toBeNull();
   });
 
   it("falls back to synced market_price when WS has no last", () => {
@@ -107,10 +106,10 @@ describe("Today P&L — option position fallback", () => {
       SYM_20260320_120_C: { last: null, close: null, bid: null, ask: null },
     };
     const result = computeOptionsRt(legs, prices, keys);
-    assert.notEqual(result, null);
+    expect(result).not.toBeNull();
     // Should use market_price from legs: LONG 5.0, SHORT 2.0
-    assert.equal(result!.mv, (5.0 * 10 * 100) - (2.0 * 10 * 100)); // 3000
-    assert.equal(result!.dailyPnl, null); // no close data
+    expect(result!.mv).toBe((5.0 * 10 * 100) - (2.0 * 10 * 100)); // 3000
+    expect(result!.dailyPnl).toBeNull(); // no close data
   });
 
   it("returns null when WS has no data AND synced market_price is null", () => {
@@ -121,7 +120,7 @@ describe("Today P&L — option position fallback", () => {
       SYM_20260320_100_C: { last: null, close: null, bid: null, ask: null },
     };
     const result = computeOptionsRt(noSyncLegs, prices, ["SYM_20260320_100_C"]);
-    assert.equal(result, null);
+    expect(result).toBeNull();
   });
 
   it("uses cached close when available with WS last", () => {
@@ -130,9 +129,9 @@ describe("Today P&L — option position fallback", () => {
       SYM_20260320_120_C: { last: 2.5, close: 2.2, bid: 2.3, ask: 2.7 },
     };
     const result = computeOptionsRt(legs, prices, keys);
-    assert.notEqual(result, null);
-    assert.notEqual(result!.dailyPnl, null);
-    assert.ok(Math.abs(result!.dailyPnl! - 200) < 0.01);
+    expect(result).not.toBeNull();
+    expect(result!.dailyPnl).not.toBeNull();
+    expect(Math.abs(result!.dailyPnl! - 200)).toBeLessThan(0.01);
   });
 
   it("works with mixed WS + synced data (partial WS coverage)", () => {
@@ -142,10 +141,10 @@ describe("Today P&L — option position fallback", () => {
       SYM_20260320_120_C: { last: null, close: null, bid: null, ask: null },
     };
     const result = computeOptionsRt(legs, prices, keys);
-    assert.notEqual(result, null);
+    expect(result).not.toBeNull();
     // LONG leg uses WS last=6.0, SHORT uses synced market_price=2.0
-    assert.equal(result!.mv, (6.0 * 10 * 100) - (2.0 * 10 * 100)); // 4000
+    expect(result!.mv).toBe((6.0 * 10 * 100) - (2.0 * 10 * 100)); // 4000
     // Only LONG leg has close data, so dailyPnl reflects only that leg
-    assert.equal(result!.dailyPnl, (6.0 - 5.5) * 10 * 100); // 500
+    expect(result!.dailyPnl).toBe((6.0 - 5.5) * 10 * 100); // 500
   });
 });
