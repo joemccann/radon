@@ -300,6 +300,51 @@ let nextRequestId = 1;
 let statusBroadcastTick = null;
 let ibConnectionIssue = null;
 
+/* ─── Stale Data Detection ─────────────────────────────────────────────────
+ * IB Gateway can enter a state where the TCP connection is alive but the
+ * data plane stops delivering ticks. Detect this by tracking the last tick
+ * timestamp: if we have active subscriptions during market hours but haven't
+ * received a tick in STALE_DATA_THRESHOLD_MS, restart IB Gateway.
+ */
+const STALE_DATA_THRESHOLD_MS = 45_000; // 45s without a tick during market hours
+const STALE_CHECK_INTERVAL_MS = 30_000; // Check every 30s
+let lastTickTimestamp = Date.now();
+let staleCheckTimer = null;
+let ibGatewayRestarting = false;
+
+function isUSMarketHours() {
+  // Convert to ET and check if within 9:30-16:00 Mon-Fri
+  const now = new Date();
+  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
+  const et = new Date(etStr);
+  const day = et.getDay(); // 0=Sun, 6=Sat
+  if (day === 0 || day === 6) return false;
+  const hours = et.getHours();
+  const minutes = et.getMinutes();
+  const timeMinutes = hours * 60 + minutes;
+  return timeMinutes >= 9 * 60 + 30 && timeMinutes <= 16 * 60;
+}
+
+async function restartIBGateway() {
+  if (ibGatewayRestarting) return;
+  ibGatewayRestarting = true;
+  console.log("\x1b[31m[stale-data] No ticks received during market hours — restarting IB Gateway\x1b[0m");
+  try {
+    const { execSync } = require("child_process");
+    const homeDir = require("os").homedir();
+    execSync(`${homeDir}/ibc/bin/restart-secure-ibc-service.sh`, {
+      timeout: 60_000,
+      stdio: "pipe",
+    });
+    console.log("[stale-data] IB Gateway restart initiated — waiting for reconnect");
+  } catch (err) {
+    console.error("[stale-data] Failed to restart IB Gateway:", err.message);
+  } finally {
+    // Allow another restart attempt after 120s cooldown
+    setTimeout(() => { ibGatewayRestarting = false; }, 120_000);
+  }
+}
+
 /* ─── Batched Price Relay ──────────────────────────────────────────────────
  * Buffers price ticks per symbol (last-write-wins) and flushes to each
  * subscribed client as a single {"type": "batch", "updates": {...}} message
@@ -633,6 +678,7 @@ function hydrateAndBroadcast(symbol) {
 }
 
 function onTickPrice(tickerId, tickType, price) {
+  lastTickTimestamp = Date.now();
   const symbol = requestIdToSymbol.get(tickerId);
   const liveState = symbol ? symbolStates.get(symbol) : null;
   const snapshotState = snapshotRequests.get(tickerId);
@@ -650,6 +696,7 @@ function onTickPrice(tickerId, tickType, price) {
 }
 
 function onTickSize(tickerId, sizeType, size) {
+  lastTickTimestamp = Date.now();
   const symbol = requestIdToSymbol.get(tickerId);
   const liveState = symbol ? symbolStates.get(symbol) : null;
   const snapshotState = snapshotRequests.get(tickerId);
@@ -1166,6 +1213,26 @@ statusBroadcastTick = setInterval(() => {
   }
 }, 5000);
 
+/* ─── Stale Data Health Check ──────────────────────────────────────────────
+ * If connected to IB with active subscriptions during market hours but no
+ * ticks received in STALE_DATA_THRESHOLD_MS, auto-restart IB Gateway.
+ */
+staleCheckTimer = setInterval(() => {
+  if (!ibConnected || shuttingDown || ibGatewayRestarting) return;
+  if (!isUSMarketHours()) return;
+
+  const activeSubscriptions = symbolSubscribers.size;
+  if (activeSubscriptions === 0) return;
+
+  const elapsed = Date.now() - lastTickTimestamp;
+  if (elapsed > STALE_DATA_THRESHOLD_MS) {
+    console.warn(
+      `\x1b[33m[stale-data] No ticks for ${Math.round(elapsed / 1000)}s with ${activeSubscriptions} active subscriptions during market hours\x1b[0m`,
+    );
+    restartIBGateway();
+  }
+}, STALE_CHECK_INTERVAL_MS);
+
 process.on("SIGINT", () => {
   if (shuttingDown) process.exit(0);
   shuttingDown = true;
@@ -1179,6 +1246,10 @@ process.on("SIGINT", () => {
   if (pingIntervalTimer) {
     clearInterval(pingIntervalTimer);
     pingIntervalTimer = null;
+  }
+  if (staleCheckTimer) {
+    clearInterval(staleCheckTimer);
+    staleCheckTimer = null;
   }
   snapshotLimiter.clear();
   for (const client of clients) {

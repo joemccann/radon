@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-03-17
+
+- IB Gateway's market data feed can go stale: the TCP connection stays alive (port 4001 listening, control plane responding to `qualifyContracts`) but the data plane stops delivering ticks. All `reqMktData` calls return nan indefinitely. The fix is restarting IB Gateway. This happens when the internal session expires overnight. The WS relay server should detect this condition (subscriptions active but zero ticks received for >30s during market hours) and auto-restart the gateway.
+
 ## 2026-03-16
 
 - IB BAG (combo) orders use `ComboLeg.action` to define the spread structure and `Order.action` (BUY/SELL) to control direction. When `Order.action=SELL`, IB reverses all leg actions. Never flip `ComboLeg.action` based on the trade direction — that creates a double-reversal and triggers IB error 201 ("Riskless combination orders are not allowed"). Always: `LONG → BUY`, `SHORT → SELL` in `ComboLeg.action`.

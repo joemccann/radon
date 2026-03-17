@@ -234,6 +234,8 @@ All portfolio state writes use `scripts/utils/atomic_io.py`:
 
 **Impact**: 500 symbols x 10 ticks/sec = 5000 msg/s → 10 batched updates/s. Initial subscription state still sent immediately (not batched).
 
+**Stale Data Health Check**: IB Gateway can enter a state where the TCP connection is alive but the data plane stops delivering ticks (session expired overnight). The relay tracks `lastTickTimestamp` and checks every 30s during market hours (9:30-16:00 ET, Mon-Fri). If no ticks arrive for 45s with active subscriptions, it auto-restarts IB Gateway via `~/ibc/bin/restart-secure-ibc-service.sh` with a 120s cooldown between attempts.
+
 ### WebSocket Connection State Machine
 
 `usePrices.ts` uses a connection state machine (`idle → connecting → open → closed`) to prevent WebSocket teardown/recreate cycles when React subscription data changes during page load. Key design:
