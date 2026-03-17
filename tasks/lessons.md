@@ -5,6 +5,8 @@
 - IB Gateway's market data feed can go stale: the TCP connection stays alive (port 4001 listening, control plane responding to `qualifyContracts`) but the data plane stops delivering ticks. All `reqMktData` calls return nan indefinitely. The fix is restarting IB Gateway. This happens when the internal session expires overnight. The WS relay server should detect this condition (subscriptions active but zero ticks received for >30s during market hours) and auto-restart the gateway.
 - Static IB client ID registries are fragile — they cause recurring collision bugs when persistent pool connections hold IDs that subprocess scripts also try to use. The durable fix is range-based allocation: partition the ID space (pool=0-9, relay=10-19, subprocess=20-49, scanners=50-69, daemons=70-89, CLI=90-99) and have on-demand scripts use `client_id="auto"` which picks a random ID from the range and retries on conflict.
 - Python 3.9 does not support the `int | str` union type syntax (requires 3.10+). Use `Union[int, str]` from `typing` or omit the annotation. This caused `TypeError: unsupported operand type(s) for |` when subprocess scripts were spawned.
+- IB executed orders should be grouped by position (opening/closing) rather than shown as flat fills. Group by underlying symbol + time bucket (60s). BAG fills are the combo envelope (quantity, net price); OPT fills are the legs (P&L, commission). P&L and share data belong on the closing position group, not individual fills.
+- When computing P&L % for a position group share card, use the aggregated OPT leg notional (avgPrice × qty × multiplier per leg), not the BAG envelope price. BAG fills have commission=0 and realizedPNL=0 — they're metadata, not execution data.
 
 ## 2026-03-16
 

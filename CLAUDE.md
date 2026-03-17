@@ -267,7 +267,7 @@ All portfolio state writes use `scripts/utils/atomic_io.py`:
 
 `scripts/utils/incremental_sync.py` — compares current `portfolio.json` positions against IB by `(ticker, expiry)` key + contract count. Skips full sync when nothing changed.
 
-**Tests**: 125 total (87 Python + 38 TypeScript) across `scripts/tests/test_{scanner_parallel,discover_parallel,atomic_io,kelly_vectorized,vectorized_greeks,batched_relay,ib_resilient,ib_error_handling,incremental_sync}.py`, `web/tests/batched-prices.test.ts`, `web/tests/use-prices-ws-stability.test.ts` (25 unit), and `web/e2e/ws-connection-stability.spec.ts` (4 E2E).
+**Tests**: 159 total (104 Python + 55 TypeScript) across `scripts/tests/test_{scanner_parallel,discover_parallel,atomic_io,kelly_vectorized,vectorized_greeks,batched_relay,ib_resilient,ib_error_handling,incremental_sync,client_id_allocation}.py`, `web/tests/batched-prices.test.ts`, `web/tests/use-prices-ws-stability.test.ts` (25 unit), `web/tests/share-pnl.test.ts` (24 unit), and `web/e2e/ws-connection-stability.spec.ts` (4 E2E).
 
 ---
 
@@ -442,12 +442,14 @@ API Route : web/app/api/share/pnl/route.tsx
 Component : web/components/SharePnlButton.tsx
 Fonts     : web/lib/og-fonts.ts (IBM Plex Mono .woff from @fontsource)
 Theme     : web/lib/og-theme.ts (Radon brand colors for Satori)
-Tests     : web/tests/share-pnl.test.ts (12 unit), web/e2e/share-pnl.spec.ts (6 E2E)
+Tests     : web/tests/share-pnl.test.ts (24 unit), web/e2e/share-pnl.spec.ts (6 E2E)
 ```
 
-**Card layout:** Contract description (e.g. "Long AAOI 2026-04-17 Call $45.00") → Hero P&L $ + % → Fill/Commission/Time details → Radon icon + "Executed with Radon" footer.
+**Card layout:** Position description (e.g. "Closed AAOI Risk Reversal (Short $92 Call / Long $88 Put)") → Hero P&L $ + % → Commission/Net Price/Time details → Radon icon + "Executed with Radon" footer.
 
-**Wired into:** Executed Orders table + Historical Trades (Blotter) table on `/orders` page. Share button appears for non-cancelled fills (executed orders) and closed trades (blotter).
+**Wired into:** Executed Orders table (position groups) + Historical Trades (Blotter) table on `/orders` page. Share button appears on closing position groups and closed blotter trades.
+
+**Position grouping:** Today's executed fills are grouped by underlying symbol + time bucket (60s window) into position-level rows (OPEN / CLOSE). Individual fills are expandable via chevron. P&L rolls up to the closing position group. Share data uses `positionGroupShareData()` which computes P&L % from aggregated OPT leg notional. Helper functions: `groupExecutedOrders()`, `positionGroupShareData()`, `deriveGroupDescription()` in `WorkspaceSections.tsx`.
 
 **Clipboard copy:** `navigator.clipboard.write()` with `ClipboardItem({ "image/png": blob })`.
 
