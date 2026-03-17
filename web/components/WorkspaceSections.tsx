@@ -30,6 +30,11 @@ import { useScanner } from "@/lib/useScanner";
 import { useBlotter } from "@/lib/useBlotter";
 import { useSort, type SortDirection } from "@/lib/useSort";
 import { fmtPrice, fmtUsd, legPriceKey } from "@/lib/positionUtils";
+import {
+  buildOpenOrderDisplayRows,
+  type OpenOrderDisplayRow,
+  resolveOpenOrderComboPrice,
+} from "@/lib/openOrderCombos";
 import PositionTable from "./PositionTable";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import CancelOrderDialog from "./CancelOrderDialog";
@@ -1037,17 +1042,25 @@ function resolveOrderLastPrice(
   return Math.round(netMid * 100) / 100;
 }
 
-function makeOpenOrderExtract(prices?: Record<string, PriceData>, portfolio?: PortfolioData | null) {
-  return (item: OpenOrder, key: OpenOrderKey): string | number | null => {
+function makeOpenOrderExtract(
+  prices?: Record<string, PriceData>,
+  portfolio?: PortfolioData | null,
+) {
+  return (item: OpenOrderDisplayRow, key: OpenOrderKey): string | number | null => {
     switch (key) {
-      case "symbol": return item.symbol;
-      case "action": return item.action;
-      case "orderType": return item.orderType;
-      case "totalQuantity": return item.totalQuantity;
-      case "limitPrice": return item.limitPrice;
-      case "lastPrice": return resolveOrderLastPrice(item, prices, portfolio);
-      case "status": return item.status;
-      case "tif": return item.tif;
+      case "symbol": {
+        return item.kind === "combo" ? item.symbol : item.order.contract.symbol;
+      }
+      case "action": return item.kind === "combo" ? "COMBO" : item.order.action;
+      case "orderType": return item.kind === "combo" ? item.structure : item.order.orderType;
+      case "totalQuantity": return item.kind === "combo" ? item.totalQuantity : item.order.totalQuantity;
+      case "limitPrice": return item.kind === "combo" ? item.limitPrice : item.order.limitPrice;
+      case "lastPrice":
+        return item.kind === "combo"
+          ? resolveOpenOrderComboPrice(item.orders, prices)
+          : resolveOrderLastPrice(item.order, prices, portfolio);
+      case "status": return item.kind === "combo" ? item.status : item.order.status;
+      case "tif": return item.kind === "combo" ? item.tif : item.order.tif;
       case "actions": return null;
       default: return null;
     }
@@ -1092,7 +1105,11 @@ function OrdersSections({
 }) {
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
   const openOrderExtract = useMemo(() => makeOpenOrderExtract(prices, portfolio), [prices, portfolio]);
-  const openSort = useSort(orders?.open_orders ?? [], openOrderExtract);
+  const openOrderRows = useMemo(() => {
+    if (!orders) return [];
+    return buildOpenOrderDisplayRows(orders.open_orders);
+  }, [orders]);
+  const openSort = useSort(openOrderRows, openOrderExtract);
 
   const [cancelTarget, setCancelTarget] = useState<OpenOrder | null>(null);
   const [modifyTarget, setModifyTarget] = useState<OpenOrder | null>(null);
@@ -1113,6 +1130,17 @@ function OrdersSections({
     setActionLoading(false);
     setModifyTarget(null);
   }, [modifyTarget, requestModify]);
+
+  const handleCancelCombo = useCallback(async (comboOrders: OpenOrder[]) => {
+    setActionLoading(true);
+    try {
+      for (const order of comboOrders) {
+        await requestCancel(order);
+      }
+    } finally {
+      setActionLoading(false);
+    }
+  }, [requestCancel]);
 
   // Merge cancelled orders into executed list for display (dedupe by permId)
   const allExecutedRows = useMemo(() => {
@@ -1203,7 +1231,7 @@ function OrdersSections({
           <span className="pill defined">{orders.open_count} ORDERS</span>
         </div>
         <div className="section-body">
-          {orders.open_orders.length === 0 ? (
+          {openOrderRows.length === 0 ? (
             <div className="alert-item">No open orders</div>
           ) : (
             <table>
@@ -1221,41 +1249,122 @@ function OrdersSections({
                 </tr>
               </thead>
               <tbody>
-                {openSort.sorted.map((o, i) => {
-                  const isPendingCancel = pendingCancels.has(o.permId);
-                  const isPendingModify = pendingModifies.has(o.permId);
+                {openSort.sorted.map((o) => {
+                  if (o.kind === "combo") {
+                    const isPendingCancel = o.orders.some((order) => pendingCancels.has(order.permId));
+                    const isPendingModify = o.orders.some((order) => pendingModifies.has(order.permId));
+                    const isPending = isPendingCancel || isPendingModify;
+
+                    return (
+                      <tr
+                        key={o.id}
+                        className={isPendingCancel
+                          ? "row-pending-cancel"
+                          : isPendingModify
+                            ? "row-pending-modify"
+                            : undefined}
+                      >
+                        <td>
+                          <TickerLink ticker={o.symbol} />
+                          <span
+                            style={{
+                              marginLeft: "8px",
+                              fontFamily: "var(--font-mono)",
+                              fontSize: "11px",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {o.summary}
+                          </span>
+                          {isPending && <Loader2 size={12} className="cancel-spinner" />}
+                        </td>
+                        <td>
+                          <span className="pill neutral">COMBO</span>
+                        </td>
+                        <td>{o.structure}</td>
+                        <td className="right">{o.totalQuantity}</td>
+                        <td className="right">
+                          <span className={isPendingModify ? "status-modifying" : ""}>
+                            {isPendingModify ? "—" : o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"}
+                          </span>
+                        </td>
+                        <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
+                        <td>
+                          {isPendingCancel ? (
+                            <span className="status-cancelling">Cancelling...</span>
+                          ) : isPendingModify ? (
+                            <span className="status-modifying">Modifying...</span>
+                          ) : (
+                            o.status
+                          )}
+                        </td>
+                        <td>{o.tif}</td>
+                        <td className="actions-cell">
+                          {isPending ? (
+                            <span className="cancel-pending-label">PENDING</span>
+                          ) : (
+                            <>
+                              <button
+                                className="btn-order-action btn-modify"
+                                disabled
+                                title="Modify not available for combined orders"
+                              >
+                                MODIFY
+                              </button>
+                              <button
+                                className="btn-order-action btn-cancel"
+                                onClick={() => void handleCancelCombo(o.orders)}
+                              >
+                                CANCEL ALL
+                              </button>
+                            </>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  }
+
+                  const isPendingCancel = pendingCancels.has(o.order.permId);
+                  const isPendingModify = pendingModifies.has(o.order.permId);
                   const isPending = isPendingCancel || isPendingModify;
                   return (
-                    <tr key={`${o.orderId}-${i}`} className={isPendingCancel ? "row-pending-cancel" : isPendingModify ? "row-pending-modify" : undefined}>
+                    <tr
+                      key={`${o.order.orderId}-${o.order.permId}`}
+                      className={isPendingCancel
+                        ? "row-pending-cancel"
+                        : isPendingModify
+                          ? "row-pending-modify"
+                          : undefined}
+                    >
                       <td>
-                        <TickerLink ticker={o.contract.symbol} />
+                        <TickerLink ticker={o.order.contract.symbol} />
                         {isPending && <Loader2 size={12} className="cancel-spinner" />}
                       </td>
                       <td>
-                        <span className={`pill ${o.action === "BUY" ? "accum" : "distrib"}`}>
-                          {o.action}
+                        <span className={`pill ${o.order.action === "BUY" ? "accum" : "distrib"}`}>
+                          {o.order.action}
                         </span>
                       </td>
-                      <td>{o.orderType}</td>
-                      <td className="right">{o.totalQuantity}</td>
+                      <td>{o.order.orderType}</td>
+                      <td className="right">{o.order.totalQuantity}</td>
                       <td className="right">
-                        {isPendingModify ? (
+                        {isPendingModify && o.order.orderType === "STP LMT" ? (
                           <span className="status-modifying">Modifying...</span>
                         ) : (
-                          o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"
+                          o.order.limitPrice != null ? fmtPrice(o.order.limitPrice) : "—"
                         )}
                       </td>
-                      <OrderPriceCell price={resolveOrderLastPrice(o, prices, portfolio)} />
+                      <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
                       <td>
                         {isPendingCancel ? (
                           <span className="status-cancelling">Cancelling...</span>
                         ) : isPendingModify ? (
                           <span className="status-modifying">Modifying...</span>
                         ) : (
-                          o.status
+                          o.order.status
                         )}
                       </td>
-                      <td>{o.tif}</td>
+                      <td>{o.order.tif}</td>
                       <td className="actions-cell">
                         {isPending ? (
                           <span className="cancel-pending-label">PENDING</span>
@@ -1263,15 +1372,15 @@ function OrdersSections({
                           <>
                             <button
                               className="btn-order-action btn-modify"
-                              disabled={!canModify(o)}
-                              title={canModify(o) ? "Modify limit price" : "Only LMT orders can be modified"}
-                              onClick={() => setModifyTarget(o)}
+                              disabled={!canModify(o.order)}
+                              title={canModify(o.order) ? "Modify limit price" : "Only LMT orders can be modified"}
+                              onClick={() => setModifyTarget(o.order)}
                             >
                               MODIFY
                             </button>
                             <button
                               className="btn-order-action btn-cancel"
-                              onClick={() => setCancelTarget(o)}
+                              onClick={() => setCancelTarget(o.order)}
                             >
                               CANCEL
                             </button>

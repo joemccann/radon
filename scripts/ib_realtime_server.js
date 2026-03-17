@@ -897,6 +897,13 @@ async function handleClientMessage(client, data) {
           unsubscribed.push(symbol);
         }
       }
+      for (const idx of indexes) {
+        if (unsubscribeClientFromSymbol(client, idx.symbol)) {
+          if (!unsubscribed.includes(idx.symbol)) {
+            unsubscribed.push(idx.symbol);
+          }
+        }
+      }
       sendUnsubscribedConfirmation(client, unsubscribed);
       return;
     }

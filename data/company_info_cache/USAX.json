@@ -1,21 +1,21 @@
 {
   "ticker": "USAX",
   "profile_expires": null,
-  "stats_expires": "2026-03-10T14:02:41.845Z",
+  "stats_expires": "2026-03-17T12:40:49.139Z",
   "uw_info": {
     "symbol": "USAX",
     "logo": null,
-    "beta": "3.4924",
+    "beta": "4.3328",
     "full_name": "Tradr 2X Long USAR Daily ETF",
     "sector": null,
+    "outstanding": "15000",
     "has_options": true,
     "marketcap_size": null,
-    "outstanding": "15000",
     "announce_time": null,
     "issue_type": "ETF",
     "marketcap": null,
     "next_earnings_date": null,
-    "avg30_volume": "188995.095238095238",
+    "avg30_volume": "174283.190476190476",
     "uw_tags": [],
     "short_name": "Tradr 2X Long USAR Daily ETF",
     "short_description": null,
@@ -24,17 +24,28 @@
     "has_earnings_history": false
   },
   "stock_state": {
-    "close": "18.98",
-    "high": "18.98",
-    "low": "17.92",
-    "open": "18.07",
-    "volume": 19321,
-    "market_time": "regular",
-    "tape_time": "2026-03-09T14:01:05Z",
-    "total_volume": 27938,
-    "prev_close": "18.25"
+    "close": "23.16",
+    "high": "23.35",
+    "low": "22.96",
+    "open": "23.35",
+    "volume": 1935,
+    "market_time": "premarket",
+    "tape_time": "2026-03-16T12:01:35Z",
+    "total_volume": 1935,
+    "prev_close": "22.66"
   },
-  "exa_profile": {},
-  "exa_stats": {},
-  "fetched_at": "2026-03-09T14:02:41.845Z"
+  "exa_profile": {
+    "ceo": "William Eric Fuller",
+    "employees": "—",
+    "headquarters": "Chattanooga, Tennessee",
+    "founded": "1985"
+  },
+  "exa_stats": {
+    "pe_ratio": "-5.42",
+    "dividend_yield": "—",
+    "avg_volume": "1.56M",
+    "week_52_high": 6.15,
+    "week_52_low": 1.34
+  },
+  "fetched_at": "2026-03-16T12:40:49.139Z"
 }

@@ -45,7 +45,7 @@ export function createPriceData(symbol) {
 // Cash indexes report value via CLOSE tick, not LAST. Stocks should NOT
 // fall back to CLOSE — IB's close is the PREVIOUS session's close and can
 // be days stale on weekends, giving wildly inaccurate "underlying" prices.
-const CASH_INDEX_SYMBOLS = new Set(["VIX", "VVIX", "SPX", "NDX", "RUT", "DJX", "OVX", "MOVE"]);
+const CASH_INDEX_SYMBOLS = new Set(["VIX", "VVIX", "COR1M", "SPX", "NDX", "RUT", "DJX", "OVX", "MOVE"]);
 
 export function updateDerivedLast(data) {
   if (data.last == null && data.bid != null && data.ask != null) {

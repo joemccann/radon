@@ -197,13 +197,18 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       if (currentHash === lastSentHashRef.current) return; // No change
 
       // Parse last-sent state to compute diff
-      const [lastSyms = "", lastCts = ""] = lastSentHashRef.current.split("|");
+      const [lastSyms = "", lastCts = "", lastIdxs = ""] = lastSentHashRef.current.split("|");
       const prevSymbolSet = new Set(lastSyms.split(",").filter(Boolean));
       const prevContractSet = new Set(lastCts.split(",").filter(Boolean));
+      const prevIndexSet = new Set(lastIdxs.split(",").filter(Boolean));
 
       const currSymbolSet = new Set(desired.symbols);
       const currContractKeys = desired.contracts.map(optionKey);
       const currContractSet = new Set(currContractKeys);
+      const currIndexPairs = desired.indexes
+        .map((idx) => `${idx.symbol}@${idx.exchange}`)
+        .sort();
+      const currIndexSet = new Set(currIndexPairs);
 
       // Compute adds
       const addedSymbols = desired.symbols.filter((s) => !prevSymbolSet.has(s));
@@ -216,19 +221,27 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       const removedContractKeys = [...prevContractSet].filter(
         (k) => !currContractSet.has(k),
       );
+      const removedIndexKeys = [...prevIndexSet].filter((k) => !currIndexSet.has(k));
+      const removedIndexSymbols = [...new Set(removedIndexKeys.map((indexKey) => indexKey.split("@")[0]))];
+
+      const addedIndexes = desired.indexes.filter(
+        (idx) => !prevIndexSet.has(`${idx.symbol}@${idx.exchange}`),
+      );
 
       wsLog("sync-diff", {
         addedSymbols,
         addedContracts: addedContracts.map(optionKey),
         removedSymbols,
         removedContractKeys,
+        addedIndexes,
+        removedIndexSymbols,
       });
 
-      // Subscribe new (indexes always sent in full — small & stable)
+      // Subscribe new (including any newly-added indexes)
       if (
         addedSymbols.length > 0 ||
         addedContracts.length > 0 ||
-        desired.indexes.length > 0
+        addedIndexes.length > 0
       ) {
         ws.send(
           JSON.stringify({
@@ -237,26 +250,39 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
             ...(addedContracts.length > 0
               ? { contracts: addedContracts }
               : {}),
-            ...(desired.indexes.length > 0
-              ? { indexes: desired.indexes }
+            ...(addedIndexes.length > 0
+              ? { indexes: addedIndexes }
               : {}),
           }),
         );
       }
 
       // Unsubscribe old
-      if (removedSymbols.length > 0 || removedContractKeys.length > 0) {
+      if (
+        removedSymbols.length > 0 ||
+        removedContractKeys.length > 0 ||
+        removedIndexSymbols.length > 0
+      ) {
         ws.send(
           JSON.stringify({
             action: "unsubscribe",
-            symbols: [...removedSymbols, ...removedContractKeys],
+            symbols: [
+              ...removedSymbols,
+              ...removedContractKeys,
+              ...removedIndexSymbols,
+            ],
           }),
         );
         // Evict stale price entries
         setPrices((prev) => {
           const next = { ...prev };
-          for (const k of [...removedSymbols, ...removedContractKeys])
+          for (const k of [
+            ...removedSymbols,
+            ...removedContractKeys,
+            ...removedIndexSymbols,
+          ]) {
             delete next[k];
+          }
           return next;
         });
       }

@@ -11,8 +11,8 @@ const helperSource = readFileSync(HELPER_PATH, "utf-8");
 
 describe("RegimePanel — live COR1M rendering", () => {
   it("prefers the live COR1M websocket price over cached CRI COR1M when available", () => {
-    expect(helperSource).toContain("const liveCor1m = marketOpen ? (prices.COR1M?.last ?? null) : null;");
-    expect(helperSource).toContain("const cor1mValue = liveCor1m ?? data?.cor1m ?? 0;");
+    expect(helperSource).toContain("const liveCor1m = prices.COR1M?.last ?? null;");
+    expect(helperSource).toContain("const cor1mValue = liveCor1m ?? data?.cor1m ?? null;");
     expect(panelSource).toContain("cor1mValue: activeCorr");
   });
 

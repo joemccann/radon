@@ -4,9 +4,8 @@ import { join } from "path";
 import { fileURLToPath } from "url";
 
 /**
- * Source-inspection tests confirming RegimePanel correctly gates live
- * data behind `market_open` — when the market is closed the component
- * must fall back to static EOD CRI values and hide all LIVE badges.
+ * Source-inspection tests confirming RegimePanel keeps the closed-market
+ * indicator while allowing websocket values to render when available.
  *
  * Tests parse component source (no DOM environment needed).
  */
@@ -37,19 +36,12 @@ describe("RegimePanel — market closed static fallback", () => {
     expect(source).toMatch(/MARKET CLOSED/i);
   });
 
-  it("hides LIVE badge on VIX strip cell when market is closed", () => {
-    // The VIX strip LiveBadge must be suppressed when market is closed.
-    // Either the badge receives live={false} unconditionally, or it is
-    // wrapped in a conditional that checks marketOpen.
-    //
-    // Simplest verifiable contract: the strip-vix cell's LiveBadge live prop
-    // must evaluate to false (not just liveVix != null) when market is closed.
-    // We verify this by checking that marketOpen gates the live prop for VIX/VVIX.
-    expect(source).toMatch(/marketOpen.*liveVix|liveVix.*marketOpen|marketOpen && liveVix|marketOpen \? liveVix/);
+  it("does not gate VIX live badge on marketOpen", () => {
+    expect(source).not.toMatch(/marketOpen\s*&&\s*hasLiveVix|marketOpen\s*\?\s*hasLiveVix/);
   });
 
-  it("hides LIVE badge on VVIX strip cell when market is closed", () => {
-    expect(source).toMatch(/marketOpen.*liveVvix|liveVvix.*marketOpen|marketOpen && liveVvix|marketOpen \? liveVvix/);
+  it("does not gate VVIX live badge on marketOpen", () => {
+    expect(source).not.toMatch(/marketOpen\s*&&\s*hasLiveVvix|marketOpen\s*\?\s*hasLiveVvix/);
   });
 
   it("renders COR1M as a daily field, not an intraday sector proxy", () => {

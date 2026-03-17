@@ -92,14 +92,14 @@ function TriggerRow({ label, met, value, live }: { label: string; met: boolean; 
 export default function RegimePanel({ prices }: RegimePanelProps) {
   const { data, syncing, lastSync } = useRegime(true);
 
-  // market_open flag from CRI data — gates live vs static behaviour.
-  // Default true (live) when undefined so behaviour is unchanged until the
-  // flag propagates from the first CRI scan response.
+  // market_open flag from CRI data — controls session-close display and
+  // whether intraday realized-vol is computed from live SPY ticks.
+  // Default true (live) until the first CRI payload arrives.
   const marketOpen = data?.market_open ?? true;
 
   const stripState = useMemo(
-    () => resolveRegimeStripLiveState({ marketOpen, prices, data }),
-    [marketOpen, prices, data],
+    () => resolveRegimeStripLiveState({ prices, data }),
+    [prices, data],
   );
   const {
     liveVix,
@@ -122,19 +122,27 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
     vvixVixRatio,
     spxDistancePct: spxDistPct,
   } = stripState;
-  const hasLive = marketOpen && (hasLiveVix || hasLiveVvix || hasLiveSpy || hasLiveCor1m);
+  const hasLive = hasLiveVix || hasLiveVvix || hasLiveSpy || hasLiveCor1m;
 
   // Timestamps for last live VIX / VVIX value received
   const [vixLastTs, setVixLastTs] = useState<string | null>(null);
   const [vvixLastTs, setVvixLastTs] = useState<string | null>(null);
 
   useEffect(() => {
-    if (marketOpen && liveVix != null) setVixLastTs(new Date().toLocaleTimeString());
-  }, [marketOpen, liveVix]);
+    if (liveVix == null) {
+      setVixLastTs(null);
+      return;
+    }
+    setVixLastTs(new Date().toLocaleTimeString());
+  }, [liveVix]);
 
   useEffect(() => {
-    if (marketOpen && liveVvix != null) setVvixLastTs(new Date().toLocaleTimeString());
-  }, [marketOpen, liveVvix]);
+    if (liveVvix == null) {
+      setVvixLastTs(null);
+      return;
+    }
+    setVvixLastTs(new Date().toLocaleTimeString());
+  }, [liveVvix]);
 
   // ── Intraday realized vol ────────────────────────────────────────────────
   // Replace today's last close in the 21-day SPY series with the live price,
@@ -166,13 +174,11 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
   const correlationTriggerMet =
     data?.crash_trigger?.conditions.cor1m_gt_60 ?? activeCorr > 60;
 
-  // Merge live + cached into CRI inputs.
-  // When market is closed, return null so `cri` falls back to data?.cri
-  // (the authoritative EOD values from cri_scan.py — do not recompute with
-  // stale WS prices that linger after close).
+  // Merge live + cached into CRI inputs. If any live values are present,
+  // recompute CRI from them to avoid waiting for the scan loop.
   const liveCri: CriResult | null = useMemo(() => {
     if (!data) return null;
-    if (!marketOpen) return null;
+    if (!hasLive) return null;
 
     const vix = liveVix ?? data.vix;
     const vvix = liveVvix ?? data.vvix;
@@ -190,7 +196,7 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
       corr5dChange: activeCorrChange,
       spxDistancePct,
     });
-  }, [data, marketOpen, liveVix, liveVvix, liveSpy, activeCorr, activeCorrChange]);
+  }, [data, hasLive, liveVix, liveVvix, liveSpy, activeCorr, activeCorrChange]);
 
   const cri = liveCri ?? (data?.cri ? { ...data.cri, level: data.cri.level as CriLevel } : { score: 0, level: "LOW" as CriLevel, components: { vix: 0, vvix: 0, correlation: 0, momentum: 0 } });
   const color = levelColor(cri.level);
@@ -331,7 +337,7 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
               label="SPX < 100d MA"
               met={spxBelowMa}
               value={`${fmtPct(spxDistPct)} (MA: $${fmt(ma)})`}
-              live={marketOpen && liveSpy != null}
+              live={liveSpy != null}
             />
             <TriggerRow
               label="Realized Vol > 25%"
@@ -361,8 +367,8 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
         ];
         // Live values for today's data point (VIX/VVIX chart)
         const vixVvixLive: Partial<Record<keyof CriHistoryEntry, number>> = {};
-        if (marketOpen && liveVix != null) vixVvixLive.vix = liveVix;
-        if (marketOpen && liveVvix != null) vixVvixLive.vvix = liveVvix;
+        if (liveVix != null) vixVvixLive.vix = liveVix;
+        if (liveVvix != null) vixVvixLive.vvix = liveVvix;
         // Live values for today's data point (RVOL/COR1M chart)
         const rvolCorrLive: Partial<Record<keyof CriHistoryEntry, number>> = {};
         if (intradayRvol != null) rvolCorrLive.realized_vol = intradayRvol;
@@ -380,7 +386,7 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
                   contentTestId="regime-history-tooltip-bubble"
                 />
               </div>
-              {marketOpen && hasLive && (
+              {hasLive && (
                 <span className="regime-badge" style={{ background: "var(--chart-live-badge-bg)", color: "var(--chart-live-badge-text)" }}>LIVE</span>
               )}
             </div>

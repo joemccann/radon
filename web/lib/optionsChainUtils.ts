@@ -96,6 +96,47 @@ export function computeNetPrice(legs: OrderLeg[], prices: Record<string, PriceDa
   return net;
 }
 
+export type NetOptionQuote = {
+  bid: number | null;
+  ask: number | null;
+  mid: number | null;
+};
+
+export function computeNetOptionQuote(
+  legs: OrderLeg[],
+  prices: Record<string, PriceData>,
+  ticker: string,
+): NetOptionQuote {
+  if (legs.length === 0) return { bid: null, ask: null, mid: null };
+
+  let netBid = 0;
+  let netAsk = 0;
+  for (const leg of legs) {
+    const key = optionKey({
+      symbol: ticker,
+      expiry: leg.expiry,
+      strike: leg.strike,
+      right: leg.right,
+    });
+    const pd = prices[key];
+    if (!pd || pd.bid == null || pd.ask == null) {
+      return { bid: null, ask: null, mid: null };
+    }
+
+    const sign = leg.action === "BUY" ? 1 : -1;
+    netBid += sign * pd.bid;
+    netAsk += sign * pd.ask;
+  }
+
+  const absBid = Math.abs(netBid);
+  const absAsk = Math.abs(netAsk);
+  const bid = Math.min(absBid, absAsk);
+  const ask = Math.max(absBid, absAsk);
+  const mid = (bid + ask) / 2;
+
+  return { bid, ask, mid };
+}
+
 /* ─── ATM strike finder ─── */
 
 export function findAtmStrike(strikes: number[], currentPrice: number): number | null {

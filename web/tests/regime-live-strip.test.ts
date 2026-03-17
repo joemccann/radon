@@ -30,9 +30,8 @@ function makePrice(symbol: string, last: number, close: number): PriceData {
 }
 
 describe("resolveRegimeStripLiveState", () => {
-  it("prefers live VIX, VVIX, SPY, and COR1M websocket prices when the market is open", () => {
+  it("prefers live VIX, VVIX, SPY, and COR1M websocket prices when available", () => {
     const state = resolveRegimeStripLiveState({
-      marketOpen: true,
       prices: {
         VIX: makePrice("VIX", 26.4, 24.8),
         VVIX: makePrice("VVIX", 118.2, 120.4),
@@ -68,9 +67,8 @@ describe("resolveRegimeStripLiveState", () => {
     expect(state.spxDistancePct).toBeCloseTo(((561.5 / 555.0) - 1) * 100, 6);
   });
 
-  it("ignores live websocket values when the market is closed", () => {
+  it("continues preferring live websocket values when market state is marked closed", () => {
     const state = resolveRegimeStripLiveState({
-      marketOpen: false,
       prices: {
         VIX: makePrice("VIX", 26.4, 24.8),
         VVIX: makePrice("VVIX", 118.2, 120.4),
@@ -91,22 +89,21 @@ describe("resolveRegimeStripLiveState", () => {
       },
     });
 
-    expect(state.vixValue).toBe(22.1);
-    expect(state.vvixValue).toBe(110.5);
-    expect(state.spyValue).toBe(552.2);
-    expect(state.cor1mValue).toBe(28.4);
-    expect(state.vixClose).toBeNull();
-    expect(state.vvixClose).toBeNull();
-    expect(state.spyClose).toBeNull();
-    expect(state.cor1mPreviousClose).toBeNull();
-    expect(state.hasLiveVix).toBe(false);
-    expect(state.hasLiveVvix).toBe(false);
-    expect(state.hasLiveCor1m).toBe(false);
+    expect(state.vixValue).toBe(26.4);
+    expect(state.vvixValue).toBe(118.2);
+    expect(state.spyValue).toBe(561.5);
+    expect(state.cor1mValue).toBe(31.25);
+    expect(state.vixClose).toBe(24.8);
+    expect(state.vvixClose).toBe(120.4);
+    expect(state.spyClose).toBe(557.2);
+    expect(state.cor1mPreviousClose).toBe(30.9);
+    expect(state.hasLiveVix).toBe(true);
+    expect(state.hasLiveVvix).toBe(true);
+    expect(state.hasLiveCor1m).toBe(true);
   });
 
   it("falls back to the last history COR1M close when an explicit previous close is absent", () => {
     const state = resolveRegimeStripLiveState({
-      marketOpen: true,
       prices: {
         COR1M: makePrice("COR1M", 31.25, 29.8),
       },

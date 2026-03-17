@@ -4,6 +4,7 @@ import {
   formatExpiry,
   detectStructure,
   computeNetPrice,
+  computeNetOptionQuote,
   findAtmStrike,
   getVisibleStrikes,
 } from "../lib/optionsChainUtils";
@@ -203,6 +204,34 @@ describe("computeNetPrice", () => {
     const legs = [makeLeg({ strike: 200, right: "C", action: "BUY", limitPrice: 5.5 })];
     const net = computeNetPrice(legs, {});
     expect(net).toBeCloseTo(5.5, 4);
+  });
+
+  it("keeps BID <= ASK when both bid/ask should remain ordered after signed combination", () => {
+    const legs = [
+      makeLeg({ strike: 200, right: "C", action: "BUY" }),
+      makeLeg({ strike: 190, right: "P", action: "SELL" }),
+    ];
+    const prices: Record<string, PriceData> = {
+      AAPL_20260417_200_C: makePriceData(10.0, 12.0),
+      AAPL_20260417_190_P: makePriceData(100.0, 102.0),
+    };
+    const net = computeNetOptionQuote(legs, prices, "AAPL");
+    expect(net.bid).toBe(90.0);
+    expect(net.ask).toBe(92.0);
+    expect(net.mid).toBe(91.0);
+  });
+
+  it("returns empty values when any leg quote is missing", () => {
+    const legs = [
+      makeLeg({ strike: 200, right: "C", action: "BUY" }),
+      makeLeg({ strike: 190, right: "P", action: "SELL" }),
+    ];
+    const net = computeNetOptionQuote(legs, {
+      AAPL_20260417_200_C: makePriceData(10.0, 12.0),
+    }, "AAPL");
+    expect(net.bid).toBeNull();
+    expect(net.ask).toBeNull();
+    expect(net.mid).toBeNull();
   });
 });
 

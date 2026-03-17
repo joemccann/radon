@@ -12,7 +12,7 @@ describe("RegimePanel — 20-session history header contract", () => {
   it("groups the title text and info icon together before any live badge", () => {
     const titleIndex = panelSource.indexOf('data-testid="regime-history-title"');
     const iconIndex = panelSource.indexOf('triggerTestId="regime-history-tooltip-trigger"');
-    const badgeIndex = panelSource.indexOf('{marketOpen && hasLive');
+    const badgeIndex = panelSource.indexOf('{hasLive &&');
 
     expect(titleIndex).toBeGreaterThan(-1);
     expect(iconIndex).toBeGreaterThan(titleIndex);

@@ -176,9 +176,7 @@ describe("market_open override for stale data", () => {
   }
 
   function applyOverride(data: Record<string, unknown>, todayET: string, now: Date): Record<string, unknown> {
-    if (data.date !== todayET) {
-      data.market_open = isMarketOpenNow(now);
-    }
+    data.market_open = isMarketOpenNow(now);
     return data;
   }
 
@@ -190,11 +188,11 @@ describe("market_open override for stale data", () => {
     expect(result.market_open).toBe(true);
   });
 
-  it("does NOT override when data date matches today", () => {
+  it("overrides to current market state even when data date matches today", () => {
     const now = new Date("2026-03-11T14:30:00Z");
     const data = { date: "2026-03-11", market_open: false, cri: { score: 25 } };
     const result = applyOverride(data, "2026-03-11", now);
-    expect(result.market_open).toBe(false); // today's data — trust the scan
+    expect(result.market_open).toBe(true); // trust current market clock, not stale scan flag
   });
 
   it("overrides to false on weekends even with stale data", () => {

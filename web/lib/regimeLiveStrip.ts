@@ -17,7 +17,6 @@ type RegimeStripData = Pick<
 };
 
 type ResolveRegimeStripLiveStateInput = {
-  marketOpen: boolean;
   prices: Record<string, PriceData>;
   data?: Partial<RegimeStripData> | null;
 };
@@ -31,48 +30,48 @@ export type RegimeStripLiveState = {
   hasLiveVvix: boolean;
   hasLiveSpy: boolean;
   hasLiveCor1m: boolean;
-  vixValue: number;
-  vvixValue: number;
-  spyValue: number;
-  cor1mValue: number;
+  vixValue: number | null;
+  vvixValue: number | null;
+  spyValue: number | null;
+  cor1mValue: number | null;
   vixClose: number | null;
   vvixClose: number | null;
   spyClose: number | null;
   cor1mPreviousClose: number | null;
   corr5dChange: number | null;
-  vvixVixRatio: number;
-  spxDistancePct: number;
+  vvixVixRatio: number | null;
+  spxDistancePct: number | null;
 };
 
 export function resolveRegimeStripLiveState({
-  marketOpen,
   prices,
   data,
 }: ResolveRegimeStripLiveStateInput): RegimeStripLiveState {
-  const liveVix = marketOpen ? (prices.VIX?.last ?? null) : null;
-  const liveVvix = marketOpen ? (prices.VVIX?.last ?? null) : null;
-  const liveSpy = marketOpen ? (prices.SPY?.last ?? null) : null;
-  const liveCor1m = marketOpen ? (prices.COR1M?.last ?? null) : null;
+  const liveVix = prices.VIX?.last ?? null;
+  const liveVvix = prices.VVIX?.last ?? null;
+  const liveSpy = prices.SPY?.last ?? null;
+  const liveCor1m = prices.COR1M?.last ?? null;
 
-  const vixClose = marketOpen ? (prices.VIX?.close ?? null) : null;
-  const vvixClose = marketOpen ? (prices.VVIX?.close ?? null) : null;
-  const spyClose = marketOpen ? (prices.SPY?.close ?? null) : null;
+  const vixClose = prices.VIX?.close ?? data?.vix ?? null;
+  const vvixClose = prices.VVIX?.close ?? data?.vvix ?? null;
+  const spyClose = prices.SPY?.close ?? data?.spy ?? null;
 
-  const vixValue = liveVix ?? data?.vix ?? 0;
-  const vvixValue = liveVvix ?? data?.vvix ?? 0;
-  const spyValue = liveSpy ?? data?.spy ?? 0;
-  const cor1mValue = liveCor1m ?? data?.cor1m ?? 0;
+  const vixValue = liveVix ?? data?.vix ?? null;
+  const vvixValue = liveVvix ?? data?.vvix ?? null;
+  const spyValue = liveSpy ?? data?.spy ?? null;
+  const cor1mValue = liveCor1m ?? data?.cor1m ?? null;
 
   const lastHistoryCor1m = data?.history && data.history.length > 0
     ? data.history[data.history.length - 1]?.cor1m ?? null
     : null;
-  const cor1mPreviousClose = marketOpen
-    ? data?.cor1m_previous_close ?? lastHistoryCor1m ?? null
-    : null;
+  const cor1mPreviousClose = data?.cor1m_previous_close ?? lastHistoryCor1m ?? null;
 
-  const vvixVixRatio = vixValue > 0 ? vvixValue / vixValue : data?.vvix_vix_ratio ?? 0;
+  const vvixVixRatio =
+    vixValue != null && vvixValue != null && vixValue > 0 ? vvixValue / vixValue : data?.vvix_vix_ratio ?? null;
   const ma = data?.spx_100d_ma ?? null;
-  const spxDistancePct = ma && ma > 0 ? ((spyValue / ma) - 1) * 100 : data?.spx_distance_pct ?? 0;
+  const spxDistancePct = ma && ma > 0 && spyValue != null
+    ? ((spyValue / ma) - 1) * 100
+    : data?.spx_distance_pct ?? null;
 
   return {
     liveVix,

@@ -1,5 +1,5 @@
 /**
- * Unit tests: IB delayed tick type handling for VIX/VVIX
+ * Unit tests: IB delayed tick type handling for VIX/VVIX/COR1M
  *
  * Problem: ib_realtime_server.js calls reqMarketDataType(4) (Delayed-Frozen).
  * For indexes without a real-time subscription (VIX, VVIX), IB sends delayed
@@ -102,6 +102,14 @@ describe("updatePriceFromTickPrice — delayed tick types (VIX/VVIX bug fix)", (
     expect(d.close).toBe(18.50);
     // No bid/ask → derived last falls back to close
     expect(d.last).toBe(18.50);
+    expect(d.lastIsCalculated).toBe(true);
+  });
+
+  it("DELAYED_CLOSE (75) sets close and derives last for COR1M", () => {
+    const d = createPriceData("COR1M");
+    updatePriceFromTickPrice(d, TICK.DELAYED_CLOSE, 31.48);
+    expect(d.close).toBe(31.48);
+    expect(d.last).toBe(31.48);
     expect(d.lastIsCalculated).toBe(true);
   });
 
