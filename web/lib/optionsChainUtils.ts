@@ -77,6 +77,37 @@ export function detectStructure(legs: OrderLeg[]): string {
   return `${legs.length}-Leg Combo`;
 }
 
+function greatestCommonDivisor(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a)) || 1;
+  let y = Math.abs(Math.trunc(b)) || 1;
+  while (y !== 0) {
+    const remainder = x % y;
+    x = y;
+    y = remainder;
+  }
+  return x || 1;
+}
+
+export type NormalizedComboOrder = {
+  quantity: number;
+  legs: OrderLeg[];
+};
+
+export function normalizeComboOrder(legs: OrderLeg[]): NormalizedComboOrder {
+  if (legs.length === 0) return { quantity: 1, legs: [] };
+
+  const quantities = legs.map((leg) => Math.max(1, Math.trunc(leg.quantity)));
+  const quantity = quantities.reduce((acc, value) => greatestCommonDivisor(acc, value));
+
+  return {
+    quantity,
+    legs: legs.map((leg, index) => ({
+      ...leg,
+      quantity: quantities[index] / quantity,
+    })),
+  };
+}
+
 /* ─── Net price calculation ─── */
 
 export function computeNetPrice(legs: OrderLeg[], prices: Record<string, PriceData>): number | null {
@@ -135,8 +166,8 @@ export function computeNetOptionQuote(
     }
 
     const sign = leg.action === "BUY" ? 1 : -1;
-    netBid += sign * bid;
-    netAsk += sign * ask;
+    netBid += sign * bid * leg.quantity;
+    netAsk += sign * ask * leg.quantity;
   }
 
   const absBid = Math.abs(netBid);

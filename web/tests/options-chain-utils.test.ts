@@ -3,6 +3,7 @@ import {
   type OrderLeg,
   formatExpiry,
   detectStructure,
+  normalizeComboOrder,
   computeNetPrice,
   computeNetOptionQuote,
   findAtmStrike,
@@ -160,6 +161,30 @@ describe("detectStructure", () => {
   });
 });
 
+/* ─── normalizeComboOrder ─── */
+
+describe("normalizeComboOrder", () => {
+  it("reduces a 1x2 risk reversal into combo quantity plus per-leg ratios", () => {
+    const normalized = normalizeComboOrder([
+      makeLeg({ strike: 85, right: "P", action: "SELL", quantity: 25 }),
+      makeLeg({ strike: 90, right: "C", action: "BUY", quantity: 50 }),
+    ]);
+
+    expect(normalized.quantity).toBe(25);
+    expect(normalized.legs.map((leg) => leg.quantity)).toEqual([1, 2]);
+  });
+
+  it("preserves irreducible ratios when no shared quantity divisor exists", () => {
+    const normalized = normalizeComboOrder([
+      makeLeg({ strike: 85, right: "P", action: "SELL", quantity: 2 }),
+      makeLeg({ strike: 90, right: "C", action: "BUY", quantity: 3 }),
+    ]);
+
+    expect(normalized.quantity).toBe(1);
+    expect(normalized.legs.map((leg) => leg.quantity)).toEqual([2, 3]);
+  });
+});
+
 /* ─── computeNetPrice ─── */
 
 describe("computeNetPrice", () => {
@@ -271,6 +296,21 @@ describe("computeNetPrice", () => {
     expect(net.bid).toBeCloseTo(2.4);
     expect(net.ask).toBeCloseTo(2.4);
     expect(net.mid).toBeCloseTo(2.4);
+  });
+
+  it("prices ratio combos from normalized leg quantities instead of raw leg size", () => {
+    const normalized = normalizeComboOrder([
+      makeLeg({ strike: 85, right: "P", action: "SELL", quantity: 25 }),
+      makeLeg({ strike: 90, right: "C", action: "BUY", quantity: 50 }),
+    ]);
+    const net = computeNetOptionQuote(normalized.legs, {
+      AAPL_20260417_85_P: makePriceData(5.2, 5.4),
+      AAPL_20260417_90_C: makePriceData(2.5, 2.7),
+    }, "AAPL");
+
+    expect(net.bid).toBeCloseTo(0.0, 4);
+    expect(net.ask).toBeCloseTo(0.2, 4);
+    expect(net.mid).toBeCloseTo(0.1, 4);
   });
 });
 

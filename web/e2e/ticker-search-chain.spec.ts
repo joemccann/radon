@@ -228,4 +228,58 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
       await expect(legRow).toHaveCount(1);
     }
   });
+
+  test("ratio combos show normalized net credit and place normalized leg ratios", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    stubApis(page);
+
+    let placedBody: Record<string, unknown> | null = null;
+    await page.route("**/api/orders/place", async (route) => {
+      placedBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", orderId: 12345, initialStatus: "Submitted" }),
+      });
+    });
+
+    await page.goto("/AAPL?tab=chain");
+
+    const detail = page.locator(".ticker-detail-page");
+    await detail.waitFor({ timeout: 5_000 });
+    await detail.locator(".chain-grid").waitFor();
+
+    const putRow = detail.getByRole("row", { name: /\$200\.00/ }).first();
+    await putRow.locator(".chain-bid.chain-clickable").last().click();
+
+    const callRow = detail.getByRole("row", { name: /\$210\.00/ }).first();
+    await callRow.locator(".chain-mid.chain-clickable").first().click();
+
+    const orderBuilder = detail.locator(".order-builder");
+    await expect(orderBuilder).toBeVisible();
+
+    const legRows = orderBuilder.locator(".order-builder-leg");
+    await expect(legRows).toHaveCount(2);
+
+    await legRows.nth(0).locator('input[type="number"]').first().fill("25");
+    await legRows.nth(1).locator('input[type="number"]').first().fill("50");
+    await legRows.nth(0).locator('input[type="number"]').nth(1).fill("5.30");
+    await legRows.nth(1).locator('input[type="number"]').nth(1).fill("2.60");
+
+    await orderBuilder.getByRole("button", { name: /MID/i }).click();
+    const limitPriceInput = orderBuilder.locator(".modify-price-input");
+    await expect(limitPriceInput).toHaveValue("0.10");
+    await expect(orderBuilder.getByText("$250.00 notional")).toBeVisible();
+
+    await orderBuilder.getByRole("button", { name: /Place Risk Reversal/i }).click();
+    await orderBuilder.getByRole("button", { name: /Confirm: Risk Reversal @ \$0.10/i }).click();
+
+    expect(placedBody).not.toBeNull();
+    expect(placedBody?.quantity).toBe(25);
+    expect(placedBody?.type).toBe("combo");
+
+    const comboLegs = Array.isArray(placedBody?.legs) ? placedBody.legs as Array<Record<string, unknown>> : [];
+    expect(comboLegs).toHaveLength(2);
+    expect(comboLegs.map((leg) => leg.ratio)).toEqual([1, 2]);
+  });
 });

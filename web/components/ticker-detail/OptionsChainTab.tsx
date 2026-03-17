@@ -13,6 +13,7 @@ import {
   detectStructure,
   computeNetPrice,
   computeNetOptionQuote,
+  normalizeComboOrder,
   findAtmStrike,
   getVisibleStrikes,
 } from "@/lib/optionsChainUtils";
@@ -175,16 +176,18 @@ function OrderBuilder({
   const [success, setSuccess] = useState<string | null>(null);
   const [confirmStep, setConfirmStep] = useState(false);
 
-  const structure = detectStructure(legs);
-  const netPrice = computeNetPrice(legs, prices);
-  const isDebit = netPrice != null && netPrice > 0;
-  const totalQty = legs.length > 0 ? legs[0].quantity : 1;
   const isCombo = legs.length > 1;
+  const normalizedOrder = useMemo(() => (isCombo ? normalizeComboOrder(legs) : null), [isCombo, legs]);
+  const pricingLegs = normalizedOrder?.legs ?? legs;
+  const structure = detectStructure(legs);
+  const netPrice = computeNetPrice(pricingLegs, prices);
+  const isDebit = netPrice != null && netPrice > 0;
+  const totalQty = normalizedOrder?.quantity ?? (legs.length > 0 ? legs[0].quantity : 1);
 
   // Compute net BID / ASK / MID from leg WS prices
   const netPrices = useMemo(() => {
-    return computeNetOptionQuote(legs, prices, ticker);
-  }, [legs, prices, ticker]);
+    return computeNetOptionQuote(pricingLegs, prices, ticker);
+  }, [pricingLegs, prices, ticker]);
 
   // Auto-populate limit price to mid when prices first become available
   useEffect(() => {
@@ -208,6 +211,7 @@ function OrderBuilder({
 
     try {
       const isCombo = legs.length > 1;
+      const comboOrder = normalizedOrder ?? normalizeComboOrder(legs);
       const body = isCombo
         ? {
             type: "combo",
@@ -216,14 +220,14 @@ function OrderBuilder({
             quantity: totalQty,
             limitPrice: parsedPrice,
             tif,
-            legs: legs.map((l) => ({
+            legs: comboOrder.legs.map((l) => ({
               symbol: ticker,
               secType: "OPT",
               expiry: l.expiry,
               strike: l.strike,
               right: l.right === "C" ? "CALL" : "PUT",
               action: l.action,
-              ratio: 1,
+              ratio: l.quantity,
               ...(l.limitPrice != null ? { limitPrice: l.limitPrice } : {}),
             })),
           }
@@ -256,7 +260,7 @@ function OrderBuilder({
     } finally {
       setLoading(false);
     }
-  }, [confirmStep, ticker, legs, parsedPrice, isDebit, totalQty, tif, structure]);
+  }, [confirmStep, ticker, legs, parsedPrice, isDebit, normalizedOrder, totalQty, tif, structure]);
 
   if (legs.length === 0) return null;
 

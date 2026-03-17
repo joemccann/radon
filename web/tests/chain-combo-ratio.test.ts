@@ -2,22 +2,43 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import { normalizeComboOrder } from "../lib/optionsChainUtils";
+
 const SRC = fs.readFileSync(
   path.resolve(__dirname, "../components/ticker-detail/OptionsChainTab.tsx"),
   "utf-8",
 );
 
-describe("Combo order leg ratio", () => {
-  it("sets ratio to 1 for each leg, not leg.quantity", () => {
-    // IB combo legs must have ratio: 1 for vertical spreads.
-    // The overall position size is controlled by the top-level `quantity` field.
-    // Using leg.quantity as ratio causes IB error 321 "Invalid leg ratio".
-    expect(SRC).toContain("ratio: 1,");
-    expect(SRC).not.toContain("ratio: l.quantity");
+describe("Combo order sizing", () => {
+  it("derives combo quantity plus per-leg ratios from entered leg sizes", () => {
+    const normalized = normalizeComboOrder([
+      {
+        id: "AAOI_20260417_85_P",
+        action: "SELL",
+        right: "P",
+        strike: 85,
+        expiry: "20260417",
+        quantity: 25,
+        limitPrice: 9.05,
+      },
+      {
+        id: "AAOI_20260417_90_C",
+        action: "BUY",
+        right: "C",
+        strike: 90,
+        expiry: "20260417",
+        quantity: 50,
+        limitPrice: 4.2,
+      },
+    ]);
+
+    expect(normalized.quantity).toBe(25);
+    expect(normalized.legs.map((leg) => leg.quantity)).toEqual([1, 2]);
   });
 
-  it("passes totalQty as the top-level order quantity", () => {
-    // The top-level quantity field controls how many spreads to trade
-    expect(SRC).toContain("quantity: totalQty,");
+  it("builds combo payload from normalized ratios instead of hardcoding 1x1", () => {
+    expect(SRC).toContain("const normalizedOrder = useMemo(() => (isCombo ? normalizeComboOrder(legs) : null), [isCombo, legs]);");
+    expect(SRC).toContain("ratio: l.quantity,");
+    expect(SRC).not.toContain("ratio: 1,");
   });
 });

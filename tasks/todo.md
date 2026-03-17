@@ -1,5 +1,29 @@
 # TODO
 
+## Session: Fix Options-Chain Combo Ratio Pricing And Order Sizing (2026-03-17)
+
+### Goal
+Fix the options-chain order builder so ratio combos price correctly in the UI and place correctly sized combo orders. The displayed net credit/debit, notional, top-level combo quantity, and per-leg IB ratios must all reflect the entered leg quantities instead of assuming every combo is 1x1.
+
+### Dependency Graph
+- T1 (Inspect the current combo quote helper, options-chain builder, and existing ratio/notional tests to pin down the broken assumptions) depends_on: []
+- T2 (Drive the bug red with regression coverage for unequal leg quantities in both quote math and combo order payload construction) depends_on: [T1]
+- T3 (Implement quantity normalization so combo quotes, net notional, and outbound combo ratios all share the same ratio model) depends_on: [T2]
+- T4 (Run targeted verification for the updated Vitest and Playwright coverage, then capture review notes and lessons) depends_on: [T3]
+
+### Checklist
+- [x] T1 Inspect the current combo quote helper, options-chain builder, and existing ratio/notional tests to pin down the broken assumptions
+- [x] T2 Drive the bug red with regression coverage for unequal leg quantities in both quote math and combo order payload construction
+- [x] T3 Implement quantity normalization so combo quotes, net notional, and outbound combo ratios all share the same ratio model
+- [x] T4 Run targeted verification for the updated Vitest and Playwright coverage, then capture review notes and lessons
+
+### Review
+- Root cause: the options-chain builder mixed two incompatible models. The UI stored absolute leg counts (`25` puts / `50` calls), but combo quoting still treated every leg as `1x1` and the POST body hardcoded every IB leg ratio to `1`. That made the displayed net credit wrong and submitted the wrong combo structure.
+- Added `normalizeComboOrder()` in [optionsChainUtils.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/optionsChainUtils.ts) to reduce entered leg sizes into `top-level combo quantity + per-leg ratios` via the leg-quantity GCD. A `25x/50x` risk reversal now becomes `quantity: 25` with leg ratios `1` and `2`.
+- Updated [OptionsChainTab.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/ticker-detail/OptionsChainTab.tsx) so combo pricing and outbound payload construction both use the normalized combo view. The order builder now quotes the per-combo net credit/debit, keeps the notional as `limitPrice * comboQuantity * 100`, and sends the correct IB leg ratios instead of a hardcoded `1`.
+- Fixed [optionsChainUtils.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/optionsChainUtils.ts) so `computeNetOptionQuote()` scales each leg by `leg.quantity`, matching the existing `computeNetPrice()` behavior once the legs are normalized to ratios.
+- Replaced the old source-string-only ratio test with real normalization coverage in [chain-combo-ratio.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/chain-combo-ratio.test.ts), expanded helper coverage in [options-chain-utils.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/options-chain-utils.test.ts), and added a browser regression in [ticker-search-chain.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/ticker-search-chain.spec.ts) that proves a manually-priced `25x/50x` risk reversal displays `$0.10` net credit, `$250.00` notional, and submits `{ quantity: 25, ratios: [1, 2] }`.
+
 ## Session: Document And Ship The `/api/performance` ET-Session Route Refresh Fix (2026-03-13)
 
 ### Goal
