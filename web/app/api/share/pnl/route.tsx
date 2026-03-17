@@ -110,7 +110,7 @@ export async function GET(request: Request) {
                 {heroDollar ? (
                   <span
                     style={{
-                      fontSize: heroPct ? "96px" : "108px",
+                      fontSize: heroPct ? "92px" : "192px",
                       fontWeight: 700,
                       color: accentColor,
                       lineHeight: "1",
@@ -122,12 +122,12 @@ export async function GET(request: Request) {
                 {heroPct ? (
                   <span
                     style={{
-                      fontSize: heroDollar ? "48px" : "108px",
+                      fontSize: heroDollar ? "86px" : "192px",
                       fontWeight: 700,
                       color: accentColor,
                       opacity: heroDollar ? 0.75 : 1,
                       lineHeight: "1",
-                      marginLeft: heroDollar ? "28px" : "0",
+                      marginLeft: heroDollar ? "18px" : "0",
                     }}
                   >
                     {heroPct}

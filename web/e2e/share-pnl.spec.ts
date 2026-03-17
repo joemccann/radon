@@ -55,8 +55,8 @@ test.describe("Share PnL", () => {
     // Should have two checkboxes
     const checkboxes = popover.locator("input[type='checkbox']");
     await expect(checkboxes).toHaveCount(2);
-    // Both should be checked by default
-    await expect(checkboxes.nth(0)).toBeChecked();
+    // P&L $ should be off, P&L % on by default
+    await expect(checkboxes.nth(0)).not.toBeChecked();
     await expect(checkboxes.nth(1)).toBeChecked();
   });
 
@@ -89,10 +89,14 @@ test.describe("Share PnL", () => {
     await expect(popover).toBeVisible({ timeout: 3000 });
     const dollarCheckbox = popover.locator("input[type='checkbox']").nth(0);
     const pctCheckbox = popover.locator("input[type='checkbox']").nth(1);
-    // Uncheck dollar
+    // Toggle states to verify % remains enabled
     await dollarCheckbox.uncheck();
     await expect(dollarCheckbox).not.toBeChecked();
     await expect(pctCheckbox).toBeChecked();
+    await dollarCheckbox.check();
+    await expect(dollarCheckbox).toBeChecked();
+    await dollarCheckbox.uncheck();
+    await expect(dollarCheckbox).not.toBeChecked();
   });
 
   test("popover closes when clicking outside", async ({ page }) => {

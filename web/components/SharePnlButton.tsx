@@ -44,7 +44,7 @@ export function buildTweetText(
 
 export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {
   const [open, setOpen] = useState(false);
-  const [showDollar, setShowDollar] = useState(true);
+  const [showDollar, setShowDollar] = useState(false);
   const [showPct, setShowPct] = useState(true);
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);

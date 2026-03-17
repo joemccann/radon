@@ -209,6 +209,7 @@ Tests cover:
 - PI command entrypoints (`fetch_ticker`, `fetch_flow`, `discover`, `scanner`)
 - `kelly.py` output parsing
 - Real-time price utilities and state management
+- Share P&L popover defaults and share image rendering behavior (`web/e2e/share-pnl.spec.ts`, `web/tests/share-pnl.test.ts`, `/api/share/pnl`)
 
 ### Python Tests
 
