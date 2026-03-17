@@ -716,6 +716,19 @@ IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gat
 
 IB error `10358` = Reuters Fundamentals subscription inactive → auto-fallback to next source.
 
+**Client ID Ranges** (partitioned to prevent collisions):
+
+| Range | Zone | Type | Usage |
+|-------|------|------|-------|
+| 0-9 | Pool | Persistent | FastAPI IBPool: sync=0, orders=1, data=2 |
+| 10-19 | Relay | Persistent | WS relay: 10, 11, 12 (rotates on conflict) |
+| 20-49 | Subprocess | On-demand | Scripts use `client_id="auto"` — random start + retry on conflict |
+| 50-69 | Scanners | Ad-hoc | CRI/VCG rotating pools |
+| 70-89 | Daemons | Background | Fill monitor=70, exit service=71 |
+| 90-99 | CLI | Manual | Standalone scripts (analyst ratings, blotter) |
+
+**Rule**: On-demand scripts (ib_place_order, ib_order_manage, ib_sync, ib_orders) MUST use `client_id="auto"` to auto-allocate from the 20-49 range. Never hardcode a fixed ID for subprocess scripts — the pool holds persistent connections that can collide. Constants: `POOL_ID_RANGE`, `RELAY_ID_RANGE`, `SUBPROCESS_ID_RANGE` in `scripts/clients/ib_client.py`. Tests: `test_client_id_allocation.py` (17 tests).
+
 ---
 
 ## Output Rules

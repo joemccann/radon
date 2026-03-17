@@ -57,23 +57,46 @@ class IBContractError(IBError):
 # Constants — re-exported from ib_connection for backward compat
 # ---------------------------------------------------------------------------
 
-CLIENT_IDS: dict = {
-    "ib_order_manage": 42,
-    "ib_sync": 40,
-    "ib_orders": 41,
-    "ib_reconcile": 43,
-    "ib_order": 2,
-    "ib_execute": 25,
-    "ib_fill_monitor": 52,
-    "exit_order_service": 60,
-    "fetch_analyst_ratings": 99,
-    "ib_place_order": 26,
-    "vcg_scanner": 30,
-    "cri_scanner": 44,
-    "ib_realtime_server": 100,
+# ---------------------------------------------------------------------------
+# Client ID Range Allocation
+# ---------------------------------------------------------------------------
+# IB allows client IDs 0-999. We partition the space into non-overlapping
+# zones so persistent services and on-demand scripts never collide.
+#
+#   0-9     Pool (persistent connections held by FastAPI IBPool)
+#   10-19   WS relay (persistent, ib_realtime_server.js)
+#   20-49   Subprocess scripts (on-demand, auto-allocated with retry)
+#   50-69   Scanners (CRI/VCG ad-hoc pools)
+#   70-89   Daemons (fill monitor, exit service)
+#   90-99   Standalone CLI (manual runs)
+#
+POOL_ID_RANGE = (0, 9)
+RELAY_ID_RANGE = (10, 19)
+SUBPROCESS_ID_RANGE = (20, 49)
+
+# Pool roles — persistent connections held by FastAPI IBPool
+POOL_ROLES: dict = {
+    "sync": 0,
+    "orders": 1,
+    "data": 2,
 }
-# Pool holds persistent connections: sync=0, orders=11, data=31
-# Subprocess scripts MUST use different IDs to avoid conflicts
+
+# Legacy registry — kept for backward compat with scripts that use client_name
+CLIENT_IDS: dict = {
+    "ib_order_manage": 20,     # subprocess range (auto-allocate preferred)
+    "ib_sync": 0,              # pool role
+    "ib_orders": 1,            # pool role
+    "ib_reconcile": 21,        # subprocess range
+    "ib_order": 22,            # subprocess range
+    "ib_execute": 23,          # subprocess range
+    "ib_fill_monitor": 70,     # daemon range
+    "exit_order_service": 71,  # daemon range
+    "fetch_analyst_ratings": 90, # standalone CLI range
+    "ib_place_order": 24,      # subprocess range
+    "vcg_scanner": 50,         # scanner range
+    "cri_scanner": 2,          # pool data role
+    "ib_realtime_server": 10,  # relay range
+}
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_GATEWAY_PORT = 4001
@@ -181,7 +204,7 @@ class IBClient:
         self,
         host: str = DEFAULT_HOST,
         port: int = DEFAULT_GATEWAY_PORT,
-        client_id: Optional[int] = None,
+        client_id: Optional[int | str] = None,
         client_name: Optional[str] = None,
         timeout: int = 3,
         max_retries: int = 1,
@@ -191,11 +214,15 @@ class IBClient:
         Args:
             host: IB Gateway / TWS host.
             port: IB Gateway / TWS port.
-            client_id: Explicit client ID override.
-            client_name: Lookup client ID from ``CLIENT_IDS`` registry.
+            client_id: Explicit client ID (int), ``"auto"`` for range-based
+                allocation from :data:`SUBPROCESS_ID_RANGE`, or *None*.
+            client_name: Lookup client ID from ``CLIENT_IDS`` registry, or
+                from ``POOL_ROLES`` if the name matches a pool role.
             timeout: Connection timeout in seconds (default 3s for fast
                 fallback when Gateway is unreachable).
-            max_retries: Number of attempts before giving up.
+            max_retries: Number of attempts before giving up (applies per-ID
+                for explicit IDs; ignored for ``"auto"`` which retries across
+                the full range).
 
         Raises:
             ValueError: If *client_name* is not in the registry and no
@@ -203,13 +230,20 @@ class IBClient:
             IBConnectionError: If the connection cannot be established.
         """
         # Resolve client ID
+        if client_id == "auto":
+            return self._connect_auto_allocate(host, port, timeout)
+
         if client_id is None and client_name is not None:
-            if client_name not in CLIENT_IDS:
+            # Check pool roles first, then legacy registry
+            if client_name in POOL_ROLES:
+                client_id = POOL_ROLES[client_name]
+            elif client_name in CLIENT_IDS:
+                client_id = CLIENT_IDS[client_name]
+            else:
                 raise ValueError(
                     f"Unknown client name '{client_name}'. "
-                    f"Known names: {sorted(CLIENT_IDS.keys())}"
+                    f"Known names: {sorted(set(list(CLIENT_IDS.keys()) + list(POOL_ROLES.keys())))}"
                 )
-            client_id = CLIENT_IDS[client_name]
         elif client_id is None:
             client_id = 0
 
@@ -241,6 +275,50 @@ class IBClient:
         raise IBConnectionError(
             f"Failed to connect to IB on {host}:{port} after "
             f"{max_retries} attempt(s): {last_exc}"
+        )
+
+    def _connect_auto_allocate(
+        self, host: str, port: int, timeout: int,
+    ) -> None:
+        """Try each ID in SUBPROCESS_ID_RANGE starting from a random offset.
+
+        On 'client id is already in use' errors, rotates to the next ID.
+        Non-conflict errors abort immediately.
+        """
+        import random
+
+        lo, hi = SUBPROCESS_ID_RANGE
+        range_size = hi - lo + 1
+        start = random.randint(lo, hi)
+
+        for i in range(range_size):
+            cid = lo + (start - lo + i) % range_size
+            try:
+                self._ib.connect(host, port, clientId=cid, timeout=timeout)
+                self._last_host = host
+                self._last_port = port
+                self._last_client_id = cid
+                self._last_timeout = timeout
+                self.logger.info(
+                    "Connected to IB on %s:%s (clientId=%s, auto-allocated)",
+                    host, port, cid,
+                )
+                return
+            except Exception as exc:
+                if "client id is already in use" in str(exc).lower():
+                    self.logger.debug(
+                        "Client ID %d in use, trying next", cid,
+                    )
+                    continue
+                # Non-conflict error — don't rotate, just fail
+                raise IBConnectionError(
+                    f"Failed to connect to IB on {host}:{port} after "
+                    f"1 attempt(s): {exc}"
+                ) from exc
+
+        raise IBConnectionError(
+            f"Failed to connect to IB on {host}:{port}: "
+            f"all client IDs {lo}-{hi} in use"
         )
 
     def disconnect(self) -> None:

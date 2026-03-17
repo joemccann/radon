@@ -206,7 +206,7 @@ async def portfolio_sync():
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
     result = await _run_ib_script_with_recovery(
-        "ib_sync.py", ["--sync", "--port", "4001", "--client-id", "40"], timeout=30
+        "ib_sync.py", ["--sync", "--port", "4001"], timeout=30
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
@@ -229,7 +229,7 @@ async def portfolio_background_sync(bg: BackgroundTasks):
 async def _bg_sync_via_subprocess():
     """Background task: run ib_sync.py as subprocess with auto-recovery."""
     result = await _run_ib_script_with_recovery(
-        "ib_sync.py", ["--sync", "--port", "4001", "--client-id", "40"], timeout=30
+        "ib_sync.py", ["--sync", "--port", "4001"], timeout=30
     )
     if result.ok:
         logger.info("Background portfolio sync complete")
@@ -245,7 +245,7 @@ async def orders_refresh():
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
     result = await _run_ib_script_with_recovery(
-        "ib_orders.py", ["--sync", "--port", "4001", "--client-id", "41"], timeout=30
+        "ib_orders.py", ["--sync", "--port", "4001"], timeout=30
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)

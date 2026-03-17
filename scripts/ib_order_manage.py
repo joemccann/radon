@@ -200,7 +200,7 @@ def main():
 
     client = IBClient()
     try:
-        client.connect(host=args.host, port=args.port, client_id=DEFAULT_CLIENT_ID)
+        client.connect(host=args.host, port=args.port, client_id="auto")
     except Exception as e:
         output("error", f"IB connection failed: {e}")
 

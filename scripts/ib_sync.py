@@ -36,7 +36,7 @@ DEFAULT_CLIENT_ID = CLIENT_IDS["ib_sync"]
 PORTFOLIO_PATH = Path(__file__).parent.parent / "data" / "portfolio.json"
 
 
-def connect_ib(host: str, port: int, client_id: int) -> IBClient:
+def connect_ib(host: str, port: int, client_id: int | str = "auto") -> IBClient:
     """Connect to TWS/IB Gateway, return an IBClient."""
     client = IBClient()
     try:
@@ -799,14 +799,14 @@ def main():
     parser.add_argument("--host", default=DEFAULT_HOST, help="TWS/Gateway host")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, 
                         help="TWS/Gateway port (7497=paper, 7496=live, 4001=gateway)")
-    parser.add_argument("--client-id", type=int, default=DEFAULT_CLIENT_ID, help="Client ID")
+    parser.add_argument("--client-id", type=int, default=None, help="Client ID (omit for auto-allocation)")
     parser.add_argument("--sync", action="store_true", help="Sync to portfolio.json")
     parser.add_argument("--no-prices", action="store_true", help="Skip market price fetch")
-    
+
     args = parser.parse_args()
-    
+
     # Connect
-    client = connect_ib(args.host, args.port, args.client_id)
+    client = connect_ib(args.host, args.port, args.client_id or "auto")
 
     try:
         # ── Phase 1: Account summary (fast, no sleep needed) ──

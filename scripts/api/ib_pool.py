@@ -21,15 +21,7 @@ SCRIPTS_DIR = Path(__file__).parent.parent
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
-
-
-# Role → client_id mapping (subset of CLIENT_IDS relevant for pool)
-POOL_ROLES = {
-    "sync": CLIENT_IDS["ib_sync"],       # 0
-    "orders": CLIENT_IDS["ib_orders"],   # 11
-    "data": CLIENT_IDS.get("cri_scanner", 31),  # 31
-}
+from clients.ib_client import IBClient, POOL_ROLES, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
 
 def _connect_in_thread(host: str, port: int, client_id: int, timeout: int = 5) -> IBClient:

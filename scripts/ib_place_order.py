@@ -43,7 +43,7 @@ def place_order(params: dict) -> dict:
     client = IBClient()
 
     try:
-        client.connect(host=DEFAULT_HOST, port=PORT, client_id=CLIENT_ID, timeout=10)
+        client.connect(host=DEFAULT_HOST, port=PORT, client_id="auto", timeout=10)
     except Exception as e:
         return {"status": "error", "message": f"Connection failed: {e}"}
 

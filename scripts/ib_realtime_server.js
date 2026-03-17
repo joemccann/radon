@@ -38,7 +38,7 @@ function parseArgs(argv) {
     port: DEFAULT_WS_PORT,
     ibHost: DEFAULT_IB_HOST,
     ibPort: DEFAULT_IB_PORT,
-    ibClientId: 100,
+    ibClientId: 10,  // RELAY_ID_RANGE start (10-19)
     verbose: false,
   };
 
