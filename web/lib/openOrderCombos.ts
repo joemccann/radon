@@ -19,6 +19,7 @@ export type OpenOrderSingleRow = {
   kind: "single";
   order: OpenOrder;
   index: number;
+  summary: string | null;
 };
 
 export type OpenOrderComboRow = {
@@ -69,6 +70,10 @@ function normalizeExpiry(expiry: string | null): string | null {
   return `${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}`;
 }
 
+function formatStrike(strike: number): string {
+  return Number.isInteger(strike) ? String(strike) : String(strike);
+}
+
 function findPortfolioLegDirection(
   positions: readonly PortfolioPosition[] | undefined,
   symbol: string,
@@ -89,6 +94,59 @@ function findPortfolioLegDirection(
     }
   }
   return null;
+}
+
+function findSingleStockDirection(
+  positions: readonly PortfolioPosition[] | undefined,
+  symbol: string,
+): "LONG" | "SHORT" | null {
+  if (!positions) return null;
+  const targetSymbol = symbol.toUpperCase();
+  for (const position of positions) {
+    if (position.ticker.toUpperCase() !== targetSymbol) continue;
+    if (position.legs.length !== 1) continue;
+    const leg = position.legs[0];
+    if (leg?.type !== "Stock") continue;
+    if (leg.direction === "LONG" || leg.direction === "SHORT") return leg.direction;
+  }
+  return null;
+}
+
+function buildSingleOrderSummary(
+  order: OpenOrder,
+  portfolioPositions?: readonly PortfolioPosition[],
+): string | null {
+  if (order.contract.secType === "OPT") {
+    const right = normalizeRight(order.contract.right);
+    const expiry = normalizeExpiry(order.contract.expiry);
+    const strike = order.contract.strike;
+    if (!right || expiry == null || strike == null) return "Option";
+
+    const portfolioDirection = findPortfolioLegDirection(
+      portfolioPositions,
+      order.contract.symbol,
+      expiry,
+      strike,
+      right,
+    );
+    const direction = portfolioDirection ?? (order.action === "BUY" ? "LONG" : "SHORT");
+    const directionLabel = direction === "LONG" ? "Long" : "Short";
+    const optionType = right === "C" ? "Call" : "Put";
+
+    return `${directionLabel} $${formatStrike(strike)} ${optionType} ${expiry}`;
+  }
+
+  if (order.contract.secType === "STK") {
+    const portfolioDirection = findSingleStockDirection(portfolioPositions, order.contract.symbol);
+    const direction = portfolioDirection ?? (order.action === "BUY" ? "LONG" : "SHORT");
+    return `${direction === "LONG" ? "Long" : "Short"} Stock`;
+  }
+
+  if (order.contract.secType === "BAG") {
+    return "Combo";
+  }
+
+  return order.contract.secType || null;
 }
 
 function formatExecutedLegDirection(
@@ -429,7 +487,12 @@ export function buildOpenOrderDisplayRows(
   const singleRows: OpenOrderSingleRow[] = [];
   orders.forEach((order, index) => {
     if (groupedIndices.has(index)) return;
-    singleRows.push({ kind: "single", order, index });
+    singleRows.push({
+      kind: "single",
+      order,
+      index,
+      summary: buildSingleOrderSummary(order, portfolioPositions),
+    });
   });
 
   const allRows: OpenOrderDisplayRow[] = [...singleRows, ...comboRows];

@@ -1539,6 +1539,18 @@ function OrdersSections({
                     >
                       <td>
                         <TickerLink ticker={o.order.contract.symbol} />
+                        {o.summary ? (
+                          <span
+                            style={{
+                              marginLeft: "8px",
+                              fontFamily: "var(--font-mono)",
+                              fontSize: "11px",
+                              color: "var(--text-secondary)",
+                            }}
+                          >
+                            {o.summary}
+                          </span>
+                        ) : null}
                         {isPending && <Loader2 size={12} className="cancel-spinner" />}
                       </td>
                       <td>

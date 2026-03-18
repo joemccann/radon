@@ -12,6 +12,10 @@
 - Option expiries must be canonicalized at the shared contract layer, not ad hoc at individual call sites. If portfolio positions use `YYYYMMDD` but the chain page or websocket client keeps dashed expiries from `/api/options/expirations`, held option legs can miss quotes even though the same contract is already subscribed elsewhere in the app.
 - For closed combo share cards, never source the entry basis from the first open BAG on the same symbol. Match opening fills to the closing combo's exact option contracts and quantities, then derive the signed basis from opening cash flow so net-credit risk reversals render negative entry prices and correct return percentages.
 
+## 2026-03-18
+
+- When the backend already preserves descriptive order metadata, do not let the open-order display model throw it away for single rows. Trace the full path first: IB open orders -> sync serialization -> cached JSON -> API -> renderer. If the API already has `secType/right/strike/expiry`, build a frontend summary from that contract instead of rendering only the bare ticker.
+
 ## 2026-03-16
 
 - IB BAG (combo) orders use `ComboLeg.action` to define the spread structure and `Order.action` (BUY/SELL) to control direction. When `Order.action=SELL`, IB reverses all leg actions. Never flip `ComboLeg.action` based on the trade direction — that creates a double-reversal and triggers IB error 201 ("Riskless combination orders are not allowed"). Always: `LONG → BUY`, `SHORT → SELL` in `ComboLeg.action`.

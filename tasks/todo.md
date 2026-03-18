@@ -1,5 +1,33 @@
 # TODO
 
+## Session: Fix Missing Detail On Single Open Orders (2026-03-18)
+
+### Goal
+Fix the `/orders` open-orders table so single-leg rows show the missing contract detail already present in the synced orders payload. Each row should surface the order structure and leg detail it represents, including long/short direction, stock vs option, strike, right, expiry, and combo context where applicable.
+
+### Dependency Graph
+- T1 (Inspect the live `/orders` page and trace the AAOI single-leg row from Chrome/CDP through `/api/orders`, `data/orders.json`, and the IB sync path to isolate where detail is lost) depends_on: []
+- T2 (Add a red unit regression and browser regression proving single-leg open orders must render descriptive detail, while combo rows remain intact) depends_on: [T1]
+- T3 (Implement the minimal display-model and renderer fix so single rows carry and render their contract summary using portfolio direction when available) depends_on: [T2]
+- T4 (Run focused verification, re-check the live browser via Chrome CDP, and record review notes plus the prevention lesson) depends_on: [T3]
+
+### Checklist
+- [x] T1 Inspect the live `/orders` page and trace the AAOI single-leg row from Chrome/CDP through `/api/orders`, `data/orders.json`, and the IB sync path to isolate where detail is lost
+- [x] T2 Add a red unit regression and browser regression proving single-leg open orders must render descriptive detail, while combo rows remain intact
+- [x] T3 Implement the minimal display-model and renderer fix so single rows carry and render their contract summary using portfolio direction when available
+- [x] T4 Run focused verification, re-check the live browser via Chrome CDP, and record review notes plus the prevention lesson
+
+### Review
+- Root cause trace:
+  - Third-party provider: Interactive Brokers already returned the full AAOI contract through `reqAllOpenOrders()` / `openTrades()` in [ib_client.py](/Users/joemccann/dev/apps/finance/radon/scripts/clients/ib_client.py).
+  - Backend sync: [ib_orders.py](/Users/joemccann/dev/apps/finance/radon/scripts/ib_orders.py) preserved that metadata in both the formatted `symbol` (`AAOI C105`) and the serialized contract (`secType=OPT`, `strike=105`, `right=C`, `expiry=2026-03-20`).
+  - Cache/API: the same detail was present in [orders.json](/Users/joemccann/dev/apps/finance/radon/data/orders.json) and served unchanged by [route.ts](/Users/joemccann/dev/apps/finance/radon/web/app/api/orders/route.ts).
+  - Frontend break: [openOrderCombos.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/openOrderCombos.ts) gave single rows no summary at all, and [WorkspaceSections.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/WorkspaceSections.tsx) rendered only `contract.symbol`, so the UI collapsed `AAOI C105 / 2026-03-20 / long call` down to bare `AAOI`.
+- Fixed [openOrderCombos.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/openOrderCombos.ts) so single rows now carry a descriptive summary. Options use portfolio leg direction when available and otherwise fall back to BUY/SELL semantics, producing strings like `Long $105 Call 2026-03-20`; equities now surface `Long Stock` / `Short Stock`; combos remain unchanged.
+- Fixed [WorkspaceSections.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/WorkspaceSections.tsx) so the single-order symbol cell renders that summary next to the ticker, matching the existing combo-row information density.
+- Locked the regression with [open-order-single-detail.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/open-order-single-detail.test.ts) and [open-order-single-detail.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/open-order-single-detail.spec.ts).
+- Verification passed with `npx vitest run web/tests/open-order-single-detail.test.ts`, `cd web && npx playwright test e2e/open-order-single-detail.spec.ts --config playwright.no-server.config.ts`, and a live Chrome/CDP check against `http://localhost:3000/orders` showing `AAOI Long $105 Call 2026-03-20`.
+
 ## Session: Fix Signed Entry Basis For Closed Combo Share PnL (2026-03-17)
 
 ### Goal
