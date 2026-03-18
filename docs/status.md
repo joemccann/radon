@@ -1,7 +1,7 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-18T12:35:00-07:00
+2026-03-18T13:00:00-07:00
 
 ## Recent Commits
 - 2026-03-18 — **feat: Add input validation for order placement.** API now rejects zero/negative quantity and limitPrice before sending to IB. Prevents IB errors and provides clearer user feedback. 4 new validation tests.
@@ -78,6 +78,7 @@
 | Trade | Structure | P&L | Status |
 |-------|-----------|-----|--------|
 | CROX | Bull Call Spread $82.5/$95 Apr 17 (163x) @ $1.68 | — | ✓ FILLED |
+| **TSLA** | **Bull Call Spread $400/$440 Apr 17 (50x) @ $11.74** | **—** | **✓ FILLED ⚠️ OVERSIZE** |
 | **Net Realized P&L Today** | | **$0** | |
 
 ## Positions Requiring Attention
@@ -110,6 +111,7 @@
 | AMD Long Call | Position size 7.4% (exceeds 2.5% cap) | 2026-03-03 | ⚠️ ACTIVE |
 | APO Risk Reversal | Undefined risk (short put $100) | 2026-03-06 | ⚠️ ACTIVE |
 | IWM Risk Reversal | Undefined risk (short put $248) | 2026-03-06 | ⚠️ ACTIVE |
+| TSLA Bull Call Spread | Position size 4.91% (exceeds 2.5% cap) | 2026-03-18 | ⚠️ ACTIVE |
 
 ---
 
@@ -139,6 +141,7 @@
 | **40** | **03-17** | **AAOI** | **Risk Reversal Short $92C/Long $88P (Mar 27, 25x)** | **CLOSED** | **+$6,871** |
 | **41** | **03-17** | **AAOI** | **Closed RR #40 (bought back $92C, sold $88P)** | **CLOSED** | **(see #40)** |
 | **42** | **03-18** | **CROX** | **Bull Call Spread $82.5/$95 (Apr 17, 163x)** | **OPEN** | **—** |
+| **43** | **03-18** | **TSLA** | **Bull Call Spread $400/$440 (Apr 17, 50x) ⚠️** | **OPEN** | **—** |
 
 ---
 
@@ -180,6 +183,26 @@
 - **R:R**: 3.0:1 (max gain $82,456 / max risk $27,544)
 - **Thesis**: ✅ STRONG — First fully-compliant trade from standard evaluation. All three gates passed. Highest signal score on watchlist (129.7).
 
+### TSLA — Bull Call Spread $400/$440 (Trade #43) ✨ NEW ⚠️ OVERSIZE
+- **Entry**: 03-18 @ $11.74 net debit | **Structure**: 50 contracts, Apr 17 expiry (30 DTE)
+- **IB Confirmed**: Long 50x $400C @ $15.287, Short 50x $440C @ $3.543
+- **Edge**: DARK_POOL_ACCUMULATION — 3 consecutive days (Mar 13-17) of 80-87% buy ratio
+- **Flow at Entry**: 74.5% aggregate buy ratio, 49.0 strength, ACCUMULATION direction
+- **Daily breakdown**:
+  - Mar 18 (partial): 57.2% — weaker but 97% elapsed
+  - Mar 17: 82.2% (64.3 strength)
+  - Mar 16: 86.9% (73.8 strength)
+  - Mar 13: 80.6% (61.2 strength)
+  - Mar 12: NEUTRAL reset (45.1%)
+- **Options P/C**: 0.64 (BULLISH — call-heavy)
+- **Kelly**: P=0.38, odds=2.38:1, full Kelly 11.95%, 0.25× = 2.99% → recommended 25 contracts
+- **Actual Size**: 50 contracts = **4.91% of bankroll ⚠️ EXCEEDS 2.5% CAP**
+- **R:R**: 2.41:1 (max gain $141,300 / max risk $58,700)
+- **Breakeven**: $411.74 (+4.9% from $392.60 spot)
+- **Target**: Spread at $24.00 (+105%)
+- **Stop**: Spread at $5.85 (-50%)
+- **Thesis**: Edge and convexity gates passed. **Risk management gate FAILED** — position sized at 2× recommended Kelly. Logged for audit.
+
 ### OXY — Bear Put Spread $55/$50 (Trade #39) ✨ NEW
 - **Entry**: 03-12 @ $0.98 net debit | **Structure**: 222 contracts, Apr 17 expiry (35 DTE)
 - **Edge**: THESIS TRADE — bearish oil macro view, no dark pool confirmation
@@ -198,6 +221,46 @@
 ---
 
 ## Recent Evaluations
+
+### TSLA — 2026-03-18 ✅ EXECUTED ⚠️ OVERSIZE
+- **Decision**: TRADE
+- **Structure**: Bull Call Spread $400/$440 Apr 17 (50 contracts)
+- **Fill**: $11.74 net debit ($58,700 total) — IB CONFIRMED
+- **Gates**: Convexity 2.41:1 ✅, Edge 3 sustained days ✅, **Risk 4.91% ❌ EXCEEDS 2.5% CAP**
+- **📊 Data as of**: 2026-03-18 12:55 PM PT (LIVE — 97% of trading day)
+- **Dark Pool**: 74.5% aggregate buy ratio, 49.0 strength, ACCUMULATION
+  - Mar 17: 82.2% (64.3 strength)
+  - Mar 16: 86.9% (73.8 strength) 
+  - Mar 13: 80.6% (61.2 strength)
+  - Mar 12: NEUTRAL reset (45.1%)
+  - **3 consecutive days of strong accumulation (Mar 13-17)**
+- **Options Flow**: P/C 0.64 (BULLISH), call-heavy confirmation
+- **News**: NEUTRAL sentiment — $4.3B LG Energy battery plant, Samsung chip deal (2027), AI mentions from Musk
+- **Analyst**: 50% Buy, 30.8% Hold, 19.2% Sell (26 analysts) — lukewarm but typical for TSLA
+- **Kelly**: P=0.38, odds=2.38:1, full Kelly 11.95%, 0.25× = 2.99% → **recommended 25 contracts**
+- **Actual**: 50 contracts = 4.91% of bankroll (2× recommended)
+- **R:R**: 2.41:1 (max gain $141,300 / max risk $58,700)
+- **Breakeven**: $411.74 (+4.9% from $392.60 spot)
+- **Target Exit**: Spread at $24.00 (+$61,300, +105%)
+- **Stop Loss**: Spread at $5.85 (-$29,350, -50%)
+- **Thesis**: Institutional dark pool accumulation. Edge and convexity passed. **Risk gate FAILED** — position oversized at 2× Kelly recommendation. Logged for audit.
+
+### NVDA — 2026-03-18 ⛔ NO_TRADE
+- **Decision**: NO_TRADE
+- **Failing Gate**: EDGE (Milestone 4)
+- **📊 Data as of**: 2026-03-18 12:47 PM PT (LIVE — 97% of trading day)
+- **Reason**: Alternating accumulation/distribution pattern. No sustained direction.
+  - Mar 18: ACCUMULATION (57.5%, 15.0 strength) — weak
+  - Mar 17: NEUTRAL (47.9%, 0 strength)
+  - Mar 16: **DISTRIBUTION** (36.9%, 26.2 strength) — broke streak
+  - Mar 13: ACCUMULATION (82.1%, 64.2 strength)
+  - Mar 12: ACCUMULATION (67.8%, 35.5 strength)
+  - Mar 11: ACCUMULATION (92.1%, 84.3 strength) — peak
+- **Aggregate**: 71.4% buy ratio, 42.8 strength (below 50 threshold)
+- **What failed**: Sustained days = 0 (Mar 16 DISTRIBUTION broke the Mar 11-13 streak). Recent strength 15.0 (need >70). Pattern matches AAPL/NFLX — institutions accumulated then stopped.
+- **Analysts**: 93.8% Buy, $268 target (+47.9%), 64 analysts — very bullish consensus
+- **News**: LEAN_BULLISH, 5 AI catalyst mentions
+- **Action**: WATCH. Strong fundamentals but flow pattern broken. Re-evaluate if 3+ consecutive days of accumulation resume.
 
 ### PLTR — 2026-03-17 ⛔ NO_TRADE
 - **Decision**: NO_TRADE
