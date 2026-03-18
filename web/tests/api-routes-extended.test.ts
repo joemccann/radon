@@ -620,6 +620,17 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns success when modify succeeds", async () => {
+    mockReadDataFile.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        open_orders: [
+          { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.5 },
+        ],
+        executed_orders: [],
+        open_count: 1,
+        executed_count: 0,
+      },
+    });
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Order 101 modified to 5.50" })
       .mockResolvedValueOnce({});
@@ -672,7 +683,115 @@ describe("POST /api/orders/modify — extended", () => {
     expect(body.error).toContain("orderId");
   });
 
-  it("returns 400 when newPrice is missing", async () => {
+  it("returns success when quantity-only modify succeeds", async () => {
+    mockReadDataFile.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        open_orders: [
+          { orderId: 101, permId: 0, totalQuantity: 75, limitPrice: 5.0 },
+        ],
+        executed_orders: [],
+        open_count: 1,
+        executed_count: 0,
+      },
+    });
+    mockRadonFetch
+      .mockResolvedValueOnce({ status: "ok", message: "Order 101 quantity modified to 75" })
+      .mockResolvedValueOnce({});
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const res = await POST(
+      new Request("http://localhost/api/orders/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: 101, newQuantity: 75 }),
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const [path, options] = mockRadonFetch.mock.calls[0];
+    expect(path).toBe("/orders/modify");
+    expect(JSON.parse(String(options.body))).toMatchObject({ orderId: 101, permId: 0, newQuantity: 75 });
+  });
+
+  it("returns 502 when refreshed orders do not confirm the modified price", async () => {
+    mockReadDataFile.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        open_orders: [
+          { orderId: 95, permId: 653624857, totalQuantity: 50, limitPrice: 5.7 },
+        ],
+        executed_orders: [],
+        open_count: 1,
+        executed_count: 0,
+      },
+    });
+    mockRadonFetch
+      .mockResolvedValueOnce({ status: "ok", message: "Order modified: $5.7 → $5.55" })
+      .mockResolvedValueOnce({});
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const res = await POST(
+      new Request("http://localhost/api/orders/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderId: 95, permId: 653624857, newPrice: 5.55 }),
+      }),
+    );
+    expect(res.status).toBe(502);
+
+    const body = await res.json();
+    expect(String(body.error).toLowerCase()).toContain("not confirmed");
+  });
+
+  it("replaces combo orders via cancel then place when replacement payload provided", async () => {
+    mockRadonFetch
+      .mockResolvedValueOnce({ status: "ok", message: "Order cancelled" })
+      .mockResolvedValueOnce({ status: "ok", message: "Replacement placed", orderId: 202, permId: 999 })
+      .mockResolvedValueOnce({});
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const res = await POST(
+      new Request("http://localhost/api/orders/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: 77,
+          permId: 653611587,
+          replaceOrder: {
+            type: "combo",
+            symbol: "AAOI",
+            action: "SELL",
+            quantity: 75,
+            limitPrice: 0.75,
+            tif: "DAY",
+            legs: [
+              { expiry: "20260327", strike: 90, right: "P", action: "SELL", ratio: 1 },
+              { expiry: "20260327", strike: 100, right: "C", action: "BUY", ratio: 1 },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    expect(mockRadonFetch).toHaveBeenCalledTimes(3);
+    expect(mockRadonFetch.mock.calls[0][0]).toBe("/orders/cancel");
+    expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/place");
+    expect(JSON.parse(String(mockRadonFetch.mock.calls[1][1].body))).toMatchObject({
+      type: "combo",
+      symbol: "AAOI",
+      action: "SELL",
+      quantity: 75,
+      limitPrice: 0.75,
+      legs: [
+        { expiry: "20260327", strike: 90, right: "P", action: "SELL", ratio: 1 },
+        { expiry: "20260327", strike: 100, right: "C", action: "BUY", ratio: 1 },
+      ],
+    });
+  });
+
+  it("returns 400 when modify fields are missing", async () => {
     const { POST } = await import("../app/api/orders/modify/route");
     const res = await POST(
       new Request("http://localhost/api/orders/modify", {
@@ -684,7 +803,7 @@ describe("POST /api/orders/modify — extended", () => {
     expect(res.status).toBe(400);
 
     const body = await res.json();
-    expect(body.error).toContain("newPrice");
+    expect(String(body.error).toLowerCase()).toContain("modify");
   });
 });
 

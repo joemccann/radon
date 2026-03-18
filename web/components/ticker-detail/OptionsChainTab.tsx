@@ -13,6 +13,8 @@ import {
   detectStructure,
   computeNetPrice,
   computeNetOptionQuote,
+  getComboEntryAction,
+  getOrderBuilderStructureKey,
   normalizeComboOrder,
   findAtmStrike,
   getVisibleStrikes,
@@ -179,6 +181,8 @@ function OrderBuilder({
   const isCombo = legs.length > 1;
   const normalizedOrder = useMemo(() => (isCombo ? normalizeComboOrder(legs) : null), [isCombo, legs]);
   const pricingLegs = normalizedOrder?.legs ?? legs;
+  const structureKey = useMemo(() => getOrderBuilderStructureKey(legs), [legs]);
+  const lastStructureKeyRef = useRef("");
   const structure = detectStructure(legs);
   const netPrice = computeNetPrice(pricingLegs, prices);
   const isDebit = netPrice != null && netPrice > 0;
@@ -196,12 +200,21 @@ function OrderBuilder({
     return computeNetOptionQuote(quotingLegs, prices, ticker);
   }, [quotingLegs, prices, ticker]);
 
+  useEffect(() => {
+    if (structureKey === lastStructureKeyRef.current) return;
+    lastStructureKeyRef.current = structureKey;
+    setPriceManuallySet(false);
+    if (!structureKey) {
+      setLimitPrice("");
+    }
+  }, [structureKey]);
+
   // Auto-populate limit price to mid when prices first become available
   useEffect(() => {
     if (!priceManuallySet && netPrices.mid != null) {
       setLimitPrice(netPrices.mid.toFixed(2));
     }
-  }, [netPrices.mid, priceManuallySet]);
+  }, [netPrices.mid, priceManuallySet, structureKey]);
 
   const parsedPrice = parseFloat(limitPrice);
   const isValidPrice = !isNaN(parsedPrice) && parsedPrice > 0;
@@ -223,7 +236,7 @@ function OrderBuilder({
         ? {
             type: "combo",
             symbol: ticker,
-            action: isDebit ? "BUY" : "SELL",
+            action: getComboEntryAction(comboOrder.legs),
             quantity: totalQty,
             limitPrice: parsedPrice,
             tif,

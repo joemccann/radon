@@ -116,11 +116,82 @@ function stubApis(page: import("@playwright/test").Page) {
   page.route("**/api/prices", (route) => route.abort());
 }
 
+function installMockWebSocket(
+  page: import("@playwright/test").Page,
+  priceFixtures: Record<string, ReturnType<typeof makePriceData>>,
+) {
+  return page.addInitScript((fixtures) => {
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      url: string;
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event?: unknown) => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.({});
+          this.emit({
+            type: "status",
+            ib_connected: true,
+            ib_issue: null,
+            ib_status_message: null,
+            subscriptions: [],
+          });
+        }, 0);
+      }
+
+      send(raw: string) {
+        const message = JSON.parse(raw) as {
+          action?: string;
+          symbols?: string[];
+          contracts?: Array<{ symbol: string; expiry: string; strike: number; right: "C" | "P" }>;
+        };
+        if (message.action !== "subscribe") return;
+
+        const updates: Record<string, unknown> = {};
+        for (const symbol of message.symbols ?? []) {
+          if (fixtures[symbol]) updates[symbol] = fixtures[symbol];
+        }
+        for (const contract of message.contracts ?? []) {
+          const expiry = String(contract.expiry).replace(/-/g, "");
+          const key = `${String(contract.symbol).toUpperCase()}_${expiry}_${Number(contract.strike)}_${contract.right}`;
+          if (fixtures[key]) updates[key] = fixtures[key];
+        }
+
+        if (Object.keys(updates).length > 0) {
+          this.emit({ type: "batch", updates });
+        }
+      }
+
+      close() {
+        this.readyState = MockWebSocket.CLOSED;
+        this.onclose?.({});
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.({ data: JSON.stringify(payload) });
+      }
+    }
+
+    // @ts-expect-error test-only replacement
+    window.WebSocket = MockWebSocket;
+  }, priceFixtures);
+}
+
 test.describe("Ticker Search → Detail Page → Chain", () => {
   test("search input focuses on CMD+K and opens detail page on selection", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
-    await page.goto("/portfolio");
+    await page.goto("http://127.0.0.1:3000/portfolio");
 
     // Focus search via keyboard shortcut
     await page.keyboard.press("Meta+k");
@@ -131,7 +202,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
   test("Book tab shows L1 order book with bid/ask/spread", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
-    await page.goto("/portfolio");
+    await page.goto("http://127.0.0.1:3000/portfolio");
 
     // Inject prices for AAPL
     await page.evaluate((pd) => {
@@ -153,7 +224,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
   test("Chain tab loads expirations and shows strike grid", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
-    await page.goto("/portfolio");
+    await page.goto("http://127.0.0.1:3000/portfolio");
 
     // Inject underlying price for ATM centering
     await page.evaluate((pd) => {
@@ -163,7 +234,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     }, makePriceData("AAPL", 205.50, 205.40, 205.60));
 
     // Navigate directly to ticker detail page with chain tab
-    await page.goto("/AAPL?tab=chain");
+    await page.goto("http://127.0.0.1:3000/AAPL?tab=chain");
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });
@@ -188,7 +259,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
   test("clicking chain bid/ask adds legs to order builder", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
-    await page.goto("/portfolio");
+    await page.goto("http://127.0.0.1:3000/portfolio");
 
     // Inject prices
     const prices = [
@@ -206,7 +277,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     }, prices);
 
     // Navigate directly to ticker detail page with chain tab
-    await page.goto("/AAPL?tab=chain");
+    await page.goto("http://127.0.0.1:3000/AAPL?tab=chain");
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });
@@ -243,7 +314,7 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
       });
     });
 
-    await page.goto("/AAPL?tab=chain");
+    await page.goto("http://127.0.0.1:3000/AAPL?tab=chain");
 
     const detail = page.locator(".ticker-detail-page");
     await detail.waitFor({ timeout: 5_000 });
@@ -281,5 +352,59 @@ test.describe("Ticker Search → Detail Page → Chain", () => {
     const comboLegs = Array.isArray(placedBody?.legs) ? placedBody.legs as Array<Record<string, unknown>> : [];
     expect(comboLegs).toHaveLength(2);
     expect(comboLegs.map((leg) => leg.ratio)).toEqual([1, 2]);
+  });
+
+  test("risk reversals auto-price from the combo quote and place a BUY combo envelope", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    stubApis(page);
+    await installMockWebSocket(page, {
+      AAPL: makePriceData("AAPL", 205.5, 205.4, 205.6),
+      AAPL_20260417_200_P: makePriceData("AAPL_20260417_200_P", 4.8, 4.8, 4.8),
+      AAPL_20260417_210_C: makePriceData("AAPL_20260417_210_C", 5.1, 5.1, 5.1),
+    });
+
+    let placedBody: Record<string, unknown> | null = null;
+    await page.route("**/api/orders/place", async (route) => {
+      placedBody = JSON.parse(route.request().postData() ?? "{}") as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", orderId: 12346, initialStatus: "Submitted" }),
+      });
+    });
+
+    await page.goto("http://127.0.0.1:3000/AAPL?tab=chain");
+
+    const detail = page.locator(".ticker-detail-page");
+    await detail.waitFor({ timeout: 5_000 });
+    await detail.locator(".chain-grid").waitFor();
+
+    const putRow = detail.getByRole("row", { name: /\$200\.00/ }).first();
+    await putRow.locator(".chain-bid.chain-clickable").last().click();
+
+    const orderBuilder = detail.locator(".order-builder");
+    await expect(orderBuilder).toBeVisible();
+
+    const limitPriceInput = orderBuilder.locator(".modify-price-input");
+    await limitPriceInput.fill("8.88");
+
+    const callRow = detail.getByRole("row", { name: /\$210\.00/ }).first();
+    await callRow.locator(".chain-mid.chain-clickable").first().click();
+
+    const midButton = orderBuilder.getByRole("button", { name: /^MID /i });
+    await expect(midButton).toContainText("MID 0.30");
+
+    const comboMid = "0.30";
+    await expect(limitPriceInput).not.toHaveValue("8.88");
+    await expect(limitPriceInput).toHaveValue(comboMid);
+
+    await orderBuilder.getByRole("button", { name: /Place Risk Reversal/i }).click();
+    await orderBuilder.getByRole("button", { name: /Confirm: Risk Reversal @ /i }).click();
+
+    expect(placedBody).not.toBeNull();
+    expect(placedBody?.action).toBe("BUY");
+
+    const comboLegs = Array.isArray(placedBody?.legs) ? placedBody.legs as Array<Record<string, unknown>> : [];
+    expect(comboLegs.map((leg) => leg.action)).toEqual(["SELL", "BUY"]);
   });
 });

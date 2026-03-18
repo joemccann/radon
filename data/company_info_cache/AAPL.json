@@ -1,22 +1,22 @@
 {
   "ticker": "AAPL",
   "profile_expires": null,
-  "stats_expires": "2026-03-14T18:06:34.564Z",
+  "stats_expires": "2026-03-19T15:14:58.424Z",
   "uw_info": {
     "symbol": "AAPL",
     "logo": "https://storage.googleapis.com/uwassets/logos/AAPL.png",
-    "beta": "1.288",
+    "beta": "1.292",
     "full_name": "APPLE",
     "sector": "Technology",
     "has_options": true,
     "marketcap_size": "big",
     "outstanding": "14681140000",
-    "uw_tags": [],
-    "issue_type": "Common Stock",
-    "marketcap": "3754848366400",
-    "avg30_volume": "44019946.952380952381",
-    "next_earnings_date": "2026-05-07",
     "announce_time": "unknown",
+    "issue_type": "Common Stock",
+    "marketcap": "3704785679000",
+    "next_earnings_date": "2026-05-07",
+    "uw_tags": [],
+    "avg30_volume": "38242386.5",
     "short_name": "APPLE",
     "short_description": "Apple Inc. is an American multinational technology company headquartered in Cupertino, California. Apple is the worlds largest technology company by ...",
     "has_investment_arm": false,
@@ -24,15 +24,15 @@
     "has_earnings_history": true
   },
   "stock_state": {
-    "close": "251.01",
-    "high": "256.33",
-    "low": "250.83",
-    "open": "255.4",
-    "volume": 17842443,
+    "close": "252.53",
+    "high": "254.94",
+    "low": "251.38",
+    "open": "252.72",
+    "volume": 6584873,
     "market_time": "regular",
-    "tape_time": "2026-03-13T18:06:32Z",
-    "total_volume": 18085229,
-    "prev_close": "255.4"
+    "tape_time": "2026-03-18T15:14:55Z",
+    "total_volume": 6870337,
+    "prev_close": "252.49"
   },
   "exa_profile": {
     "ceo": "Timothy Donald Cook",
@@ -41,11 +41,11 @@
     "founded": "1976"
   },
   "exa_stats": {
-    "pe_ratio": "33.00",
-    "dividend_yield": "0.40%",
-    "avg_volume": "41.07M",
+    "pe_ratio": "31.99",
+    "dividend_yield": "0.41%",
+    "avg_volume": "36.78M",
     "week_52_high": 288.62,
     "week_52_low": 169.21
   },
-  "fetched_at": "2026-03-13T18:06:34.564Z"
+  "fetched_at": "2026-03-18T15:14:58.424Z"
 }

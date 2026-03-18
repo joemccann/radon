@@ -309,11 +309,12 @@ async def orders_cancel(request: Request):
 
 @app.post("/orders/modify")
 async def orders_modify(request: Request):
-    """Modify an open order's price via IB."""
+    """Modify an open order via IB."""
     body = await request.json()
     order_id = body.get("orderId", 0)
     perm_id = body.get("permId", 0)
     new_price = body.get("newPrice")
+    new_quantity = body.get("newQuantity")
     outside_rth = body.get("outsideRth")
 
     args = ["modify"]
@@ -323,6 +324,8 @@ async def orders_modify(request: Request):
         args.extend(["--perm-id", str(perm_id)])
     if new_price is not None:
         args.extend(["--new-price", str(new_price)])
+    if new_quantity is not None:
+        args.extend(["--new-quantity", str(new_quantity)])
     if outside_rth is True:
         args.append("--outside-rth")
     elif outside_rth is False:

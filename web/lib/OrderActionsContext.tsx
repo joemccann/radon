@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import type { OpenOrder, OrdersData } from "@/lib/types";
+import type { ModifyOrderRequest } from "@/lib/orderModify";
 
 /** Snapshot of a cancelled order for the executed table */
 export type CancelledOrder = {
@@ -16,7 +17,8 @@ export type CancelledOrder = {
 
 export type PendingModify = {
   order: OpenOrder;
-  newPrice: number;
+  newPrice?: number;
+  newQuantity?: number;
 };
 
 type Notification = {
@@ -30,7 +32,7 @@ type OrderActionsContextValue = {
   pendingModifies: Map<number, PendingModify>;
   cancelledOrders: CancelledOrder[];
   requestCancel: (order: OpenOrder) => Promise<void>;
-  requestModify: (order: OpenOrder, newPrice: number, outsideRth?: boolean) => Promise<void>;
+  requestModify: (order: OpenOrder, request: ModifyOrderRequest) => Promise<void>;
   drainNotifications: () => Notification[];
   setOrdersUpdater: (fn: ((data: OrdersData) => void) | null) => void;
 };
@@ -71,7 +73,12 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
       ...data,
       open_orders: data.open_orders.map((o) => {
         const pm = currentModifies.get(o.permId);
-        return pm ? { ...o, limitPrice: pm.newPrice } : o;
+        if (!pm) return o;
+        return {
+          ...o,
+          limitPrice: pm.newPrice ?? o.limitPrice,
+          totalQuantity: pm.newQuantity ?? o.totalQuantity,
+        };
       }),
     };
     ordersUpdaterRef.current?.(patched);
@@ -176,7 +183,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
 
   /* ── Modify polling ─────────────────────────────────── */
 
-  const startModifyPoll = useCallback((order: OpenOrder, newPrice: number) => {
+  const startModifyPoll = useCallback((order: OpenOrder, request: ModifyOrderRequest) => {
     const permId = order.permId;
     pollCountsRef.current.set(permId, 0);
 
@@ -194,8 +201,11 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
 
         const ibOrder = data.open_orders.find((o) => o.permId === permId);
 
-        // Check if IB now shows the new price (within $0.001 tolerance)
-        const confirmed = ibOrder && ibOrder.limitPrice != null && Math.abs(ibOrder.limitPrice - newPrice) < 0.001;
+        const priceConfirmed = request.newPrice == null
+          || (ibOrder?.limitPrice != null && Math.abs(ibOrder.limitPrice - request.newPrice) < 0.001);
+        const quantityConfirmed = request.newQuantity == null
+          || ibOrder?.totalQuantity === request.newQuantity;
+        const confirmed = Boolean(ibOrder && priceConfirmed && quantityConfirmed);
 
         if (confirmed) {
           pollTimersRef.current.delete(permId);
@@ -209,9 +219,18 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
 
           // Push the real data (no overlay needed — IB already shows new price)
           ordersUpdaterRef.current?.(data);
+          const messageParts: string[] = [];
+          if (request.newPrice != null) {
+            messageParts.push(`price $${request.newPrice.toFixed(2)}`);
+          }
+          if (request.newQuantity != null) {
+            messageParts.push(`qty ${request.newQuantity}`);
+          }
           pushNotification({
             type: "success",
-            message: `${order.symbol} order confirmed at $${newPrice.toFixed(2)}`,
+            message: messageParts.length > 0
+              ? `${order.symbol} order confirmed (${messageParts.join(", ")})`
+              : `${order.symbol} order confirmed`,
           });
         } else if (count >= POLL_MAX_COUNT) {
           pollTimersRef.current.delete(permId);
@@ -227,7 +246,7 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
           ordersUpdaterRef.current?.(data);
           pushNotification({
             type: "error",
-            message: `${order.symbol} modify not confirmed by IB — price may not have changed`,
+            message: `${order.symbol} modify not confirmed by IB`,
             duration: 0,
           });
         } else {
@@ -248,27 +267,44 @@ export function OrderActionsProvider({ children }: { children: ReactNode }) {
     scheduleNext();
   }, [pushNotification, pushOrdersData]);
 
-  const requestModify = useCallback(async (order: OpenOrder, newPrice: number, outsideRth?: boolean) => {
+  const requestModify = useCallback(async (order: OpenOrder, request: ModifyOrderRequest) => {
     try {
       const res = await fetch("/api/orders/modify", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ orderId: order.orderId, permId: order.permId, newPrice, outsideRth }),
+        body: JSON.stringify({ orderId: order.orderId, permId: order.permId, ...request }),
       });
       const json = await res.json();
       if (!res.ok) {
         pushNotification({ type: "error", message: json.error || "Modify failed" });
       } else {
-        // Optimistically update the limit price in the UI
-        const pm: PendingModify = { order, newPrice };
-        setPendingModifies((prev) => new Map(prev).set(order.permId, pm));
-
-        // Push optimistic data immediately
-        if (json.orders) {
-          pushOrdersData(json.orders);
+        if (request.newPrice != null || request.newQuantity != null) {
+          const pm: PendingModify = {
+            order,
+            newPrice: request.newPrice,
+            newQuantity: request.newQuantity,
+          };
+          setPendingModifies((prev) => new Map(prev).set(order.permId, pm));
         }
 
-        startModifyPoll(order, newPrice);
+        if (json.orders) {
+          if (request.replaceOrder) {
+            ordersUpdaterRef.current?.(json.orders);
+          } else {
+            pushOrdersData(json.orders);
+          }
+        }
+
+        if (request.replaceOrder) {
+          pushNotification({ type: "success", message: `${order.symbol} order replaced` });
+          return;
+        }
+
+        if (request.newPrice != null || request.newQuantity != null) {
+          startModifyPoll(order, request);
+        } else {
+          pushNotification({ type: "success", message: `${order.symbol} order modified` });
+        }
       }
     } catch {
       pushNotification({ type: "error", message: "Modify request failed" });

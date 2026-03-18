@@ -77,7 +77,7 @@ describe("POST /api/orders/modify validation", () => {
     expect(res.status).toBe(400);
   });
 
-  it("rejects missing newPrice", async () => {
+  it("rejects missing modify fields", async () => {
     const req = new NextRequest("http://localhost/api/orders/modify", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -87,7 +87,7 @@ describe("POST /api/orders/modify validation", () => {
     const res = await modifyPOST(req);
     expect(res.status).toBe(400);
     const body = await res.json();
-    expect((body as { error: string }).error.includes("newPrice")).toBeTruthy();
+    expect((body as { error: string }).error.toLowerCase().includes("modify")).toBeTruthy();
   });
 
   it("rejects newPrice of zero", async () => {

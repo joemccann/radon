@@ -1,5 +1,38 @@
 # TODO
 
+## Session: Fix False Modify Confirmation On `/orders` (2026-03-18)
+
+### Goal
+Fix the `/orders` price-modify flow so the app does not claim success unless Interactive Brokers and the refreshed orders snapshot both reflect the requested new price. The trace must cover the provider boundary, the backend modify script, the Next API route, and the `/orders` optimistic UI so the false-success path is explicit and eliminated.
+
+### Dependency Graph
+- T1 (Reproduce the stale modify-confirmation flow in the live `/orders` page and trace the existing confirmation boundary through the IB modify script and API route) depends_on: []
+- T2 (Add failing regressions for false-positive modify success at the Python script, API route, and browser layers) depends_on: [T1]
+- T3 (Implement the confirmation-based fix so modify only returns success after refreshed IB open orders reflect the requested change) depends_on: [T2]
+- T4 (Run focused verification, confirm the live `/orders` behavior in Chrome/CDP, and record review notes plus the prevention lesson) depends_on: [T3]
+
+### Checklist
+- [x] T1 Reproduce the stale modify-confirmation flow in the live `/orders` page and trace the existing confirmation boundary through the IB modify script and API route
+- [x] T2 Add failing regressions for false-positive modify success at the Python script, API route, and browser layers
+- [x] T3 Implement the confirmation-based fix so modify only returns success after refreshed IB open orders reflect the requested change
+- [x] T4 Run focused verification, confirm the live `/orders` behavior in Chrome/CDP, and record review notes plus the prevention lesson
+
+### Review
+- Root cause trace:
+  - Third-party provider boundary: Interactive Brokers keeps an already-open order in `Submitted` status before and after a modify request. In [ib_order_manage.py](/Users/joemccann/dev/apps/finance/radon/scripts/ib_order_manage.py), the old loop treated `Submitted` / `PreSubmitted` as confirmation immediately after `place_order()`, but the order was often already in `Submitted` beforehand. That made the script return `"status":"ok"` without any refreshed IB evidence that the new price was accepted.
+  - Backend route boundary: [web/app/api/orders/modify/route.ts](/Users/joemccann/dev/apps/finance/radon/web/app/api/orders/modify/route.ts) trusted the script's `"ok"` response, refreshed `orders.json`, and still returned `200` even when the refreshed order snapshot kept the old price.
+  - Frontend behavior: [OrderActionsContext.tsx](/Users/joemccann/dev/apps/finance/radon/web/lib/OrderActionsContext.tsx) then started optimistic modify polling because the route said success. The browser eventually contradicted that success because `/api/orders` never reflected the requested price. That is exactly what your screenshot showed: the network preview said the order was modified, while a reload and the live `/api/orders` snapshot still showed the AAOI `P90` sell order at `5.70`.
+- Fixed the provider confirmation boundary in [ib_order_manage.py](/Users/joemccann/dev/apps/finance/radon/scripts/ib_order_manage.py) by requiring a refreshed open-order snapshot to match the requested `newPrice` / `newQuantity` before returning success. If the refetched IB order still shows the old values, the script now returns an error instead of a false positive.
+- Fixed the Next route in [web/app/api/orders/modify/route.ts](/Users/joemccann/dev/apps/finance/radon/web/app/api/orders/modify/route.ts) so it independently validates the refreshed `orders.json` snapshot. If the refreshed order does not reflect the requested modify, the route now returns `502 Modify not confirmed by refreshed orders` instead of `200`.
+- Locked the regression in [test_ib_order_manage.py](/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_ib_order_manage.py), [api-routes-extended.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/api-routes-extended.test.ts), and [modify-order-confirmation.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/modify-order-confirmation.spec.ts).
+- Verification passed with:
+  - `python3 -m pytest scripts/tests/test_ib_order_manage.py -q`
+  - `npx vitest run web/tests/api-routes-extended.test.ts`
+  - `cd web && npx playwright test e2e/modify-order-confirmation.spec.ts --config playwright.no-server.config.ts`
+- Live verification:
+  - A real snapshot from `curl http://127.0.0.1:3000/api/orders` still showed the AAOI `P90` sell order at `5.70`, matching the reported bug.
+  - A final Chrome/CDP verification on a fresh `/orders` tab with a mocked stale-confirmation response proved the fixed UI path no longer enters a fake pending state: the row stayed at `$5.70`, did not show `$5.55`, and did not show `Modifying...` / `PENDING`.
+
 ## Session: Remove Combo Modify Modal Overflow On `/orders` (2026-03-18)
 
 ### Goal

@@ -1,426 +1,282 @@
 # RADON — CLAUDE.md
 
-## ⛔ Mandatory Rules — Every Session, No Exceptions
+## ⛔ Mandatory Rules
 
-These rules apply to ALL work in this project. Violating any rule is a blocking failure.
-
-1. **Be concise.** Get straight to the point. No preamble, no filler, no restating what was asked. Long output only when explicitly requested.
-
-2. **E2E browser verification for ALL UI work.** Any change touching UI code (components, styles, layouts, modals, tooltips, charts) MUST be verified in a real browser before marking complete. **Primary**: use the `chrome-cdp` skill for live browser automation and visual confirmation. **Fallback**: Playwright E2E tests (`@playwright/test` in `web/`, config: `web/playwright.config.ts`) when chrome-cdp is unavailable. No UI change is done until visually confirmed in a real browser.
-
-3. **Red/green TDD for ALL code.** Every bug fix, feature, and refactor follows test-driven development: write a failing test first (red), implement the fix (green), then refactor. No exceptions. Unit tests via Vitest, E2E via chrome-cdp skill (primary) or Playwright (fallback).
-
-4. **95% test coverage target.** Always create, update, or delete tests (unit, integration, E2E) to maintain ≥95% coverage. Every PR-worthy change must include corresponding tests.
-
-5. **API keys.** Project API keys live in `.env` files (see Credentials Architecture below). If a key is missing from `.env`, check `~/.zshrc` as a fallback source.
-
----
+1. **Be concise.** No preamble, no filler.
+2. **E2E browser verification for ALL UI work.** Primary: `chrome-cdp`. Fallback: Playwright (`web/playwright.config.ts`). No UI change done until visually confirmed. Don't assume code changes produce the expected visual result — verify rendered output in the browser before committing.
+3. **Red/green TDD for ALL code.** Failing test → fix → green → refactor. Unit: Vitest, E2E: chrome-cdp/Playwright.
+4. **95% test coverage target.** Every change includes corresponding tests.
+5. **API keys** in `.env` files (see Credentials below). Fallback: `~/.zshrc`.
 
 ## Identity
 
-**Radon** — market structure reconstruction system. Surfaces convex opportunities from noisy datasets: options flow, volatility surfaces, and cross-asset positioning. Detects institutional positioning via dark pool/OTC flow, constructs convex options structures, sizes with fractional Kelly. **No narrative trades. No TA trades. Flow signal or nothing.**
+**Radon** — market structure reconstruction system. Surfaces convex opportunities from dark pool/OTC flow, vol surfaces, cross-asset positioning. Detects institutional positioning, constructs convex options structures, sizes with fractional Kelly. **Flow signal or nothing.**
 
 Brand spec: `docs/brand-identity.md`
 
----
+## ⛔ Three Gates — Sequential, No Exceptions
 
-## ⛔ Three Gates — Mandatory, Sequential, No Exceptions
+1. **CONVEXITY**: Gain ≥ 2× loss. Defined-risk only.
+2. **EDGE**: Specific dark pool/OTC signal not yet in price.
+3. **RISK MGMT**: Fractional Kelly. Hard cap 2.5% bankroll/position.
 
-```
-GATE 1 — CONVEXITY  : Potential gain ≥ 2× potential loss. Defined-risk only (long options, verticals).
-GATE 2 — EDGE       : Specific, data-backed dark pool/OTC signal that hasn't moved price yet.
-GATE 3 — RISK MGMT  : Fractional Kelly sizing. Hard cap: 2.5% of bankroll per position.
-```
+**Any gate fails → stop. No rationalization.**
 
-**Any gate fails → stop. No rationalization. No "close enough."**
+## Data Source Priority
 
----
+1. Interactive Brokers (TWS/Gateway) — real-time
+2. Unusual Whales (`$UW_TOKEN`) — dark pool, sweeps, alerts
+3. Yahoo Finance — fallback only
+4. Web scrape — last resort
 
-## ⚠️ Data Source Priority — Always Obey
+**Never skip to Yahoo/web without trying IB → UW first.**
 
-| Priority | Source | Notes |
-|----------|--------|-------|
-| **1** | Interactive Brokers (TWS/Gateway) | Real-time quotes, options chains |
-| **2** | Unusual Whales (`$UW_TOKEN`) | Dark pool flow, sweeps, flow alerts |
-| **3** | Yahoo Finance | Fallback only; delayed, rate-limited |
-| **4** | Web scrape | Last resort |
+**Clients:** `scripts/clients/` — `IBClient`, `UWClient`, `MenthorQClient`. Legacy `scripts/utils/{ib_connection,uw_api}.py` preserved; new code uses clients.
 
-**Never skip to Yahoo or web without trying IB → UW first.**
+**Credentials:**
 
-**API Clients:** All scripts use `scripts/clients/` — `IBClient` for IB, `UWClient` for UW. Legacy `scripts/utils/ib_connection.py` and `scripts/utils/uw_api.py` preserved for backward compat but new code should use the clients.
+| File | Loader | Contains |
+|------|--------|----------|
+| `.env` (root) | `python-dotenv` | `MENTHORQ_USER`, `MENTHORQ_PASS` |
+| `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY` |
 
-**Credentials — two `.env` files (both gitignored):**
-
-| File | Loaded by | Contains |
-|------|-----------|----------|
-| `.env` (project root) | Python scripts via `python-dotenv` | `MENTHORQ_USER`, `MENTHORQ_PASS` |
-| `web/.env` | Next.js built-in | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY` |
-
-**Never commit credentials to source.** All secrets live in `.env` files only.
-
----
-
-## ⚠️ Market Hours Rule — Always Fetch Fresh Data
+## Market Hours
 
 ```bash
-TZ=America/New_York date +"%A %H:%M"   # Check if market open (9:30–16:00 ET, Mon–Fri)
+TZ=America/New_York date +"%A %H:%M"   # 9:30–16:00 ET, Mon–Fri
 ```
 
-- **Market OPEN**: Fetch fresh before ANY analysis. Cache TTL: flow data 5 min, ratings 15 min.
-- **Market CLOSED**: Use latest available. Note: `"Market closed — using last available data."`
-- **Never analyze stale data without flagging it.**
+- **Open**: Fetch fresh. Cache TTL: flow 5min, ratings 15min.
+- **Closed**: Use latest. Flag stale data.
 
-### CRI / Regime Staleness Rule — Market-Hours Aware
+### CRI/Regime Staleness
 
-**`/api/regime` only triggers background `cri_scan.py` during market hours.**
+`/api/regime` triggers `cri_scan.py` during market hours only. Logic: `web/lib/criStaleness.ts` (single source of truth). Tests: `web/tests/regime-cri-staleness.test.ts`.
 
 | Condition | Stale? | Action |
 |-----------|--------|--------|
-| `data.date !== today (ET)` | YES | Trigger background scan (new trading day) |
-| `market_open === true` + mtime > 60s | YES | Trigger background scan (intraday refresh) |
-| `market_open === false` + date = today | **NO** | Serve cached EOD data — launchd handles schedule |
+| `data.date !== today (ET)` | YES | Background scan |
+| `market_open + mtime > 60s` | YES | Background scan |
+| `market_open === false + date = today` | NO | Serve cached EOD |
 
-**Rule**: When `cri_scan.py` sets `market_open: false`, the API must treat that data as final and stop triggering re-scans. The launchd CRI service (every 30 min, 4:05 AM–8 PM ET) provides the EOD calculation automatically.
+### RegimePanel Market-Closed Rules
 
-**Implementation**: `web/lib/criStaleness.ts` — `isCriDataStale(data, mtimeMs, todayET)` is the single source of truth for this logic. Tests in `web/tests/regime-cri-staleness.test.ts`. **Do not inline this logic in the route.**
+When `market_open === false`:
+- Use `data.vix`/`data.vvix`/`data.spy` only (never WS `last`)
+- `activeCorr` = `data.cor1m` (not rebuilt from sector ETFs)
+- `liveCri` / `intradayRvol` = `null` (use `data.cri` / `data.realized_vol`)
+- Don't update VIX/VVIX timestamps
+- COR1M badge = DAILY
 
-### RegimePanel Market-Closed Value Rules
+Tests: `regime-market-closed-values.test.ts`, `regime-market-closed-eod.spec.ts`, `regime-cor1m.spec.ts`
 
-When `market_open === false`, the component **must**:
+### RegimePanel Day Change (Market Open)
 
-| What | Rule |
-|------|------|
-| `vixVal` / `vvixVal` / `spyVal` | Use `data.vix` / `data.vvix` / `data.spy` only — never WS `last` |
-| `activeCorr` | Use `data.cor1m` from the CRI payload — do not rebuild or infer correlation from sector ETFs in the UI |
-| `liveCri` | Return `null` — use `data.cri` (authoritative EOD values) |
-| `intradayRvol` | Return `null` — use `data.realized_vol` |
-| VIX/VVIX timestamps | Do not update (gate `setVixLastTs`/`setVvixLastTs` on `marketOpen`) |
-| COR1M badge | Must show DAILY — COR1M is displayed from the CRI scan payload, not an intraday sector proxy |
+| Metric | Source | Display |
+|--------|--------|---------|
+| VIX/VVIX/SPY | WS `last` vs `close` | `+1.50 (+6.25%) ↑` |
+| RVOL | `intradayRvol - data.realized_vol` | `-0.01% intraday ↓` |
+| COR1M | `data.cor1m_5d_change` (always visible) | `+6.88 pts 5d chg ↑` |
 
-**Tests**: `web/tests/regime-market-closed-values.test.ts`, `web/e2e/regime-market-closed-eod.spec.ts`, `web/e2e/regime-cor1m.spec.ts`
-
-### RegimePanel Day Change Indicators
-
-During market hours (`market_open === true`), the regime strip shows day change for live metrics:
-
-| Metric | Component | Source | Display |
-|--------|-----------|--------|---------|
-| VIX | `DayChange` | WS `last` vs WS `close` | `+1.50 (+6.25%) ↑` |
-| VVIX | `DayChange` | WS `last` vs WS `close` | `-5.00 (-4.35%) ↓` |
-| SPY | `DayChange` | WS `last` vs WS `close` | `$+0.47 (+0.07%) ↑` |
-| RVOL | `PointChange` | `intradayRvol - data.realized_vol` | `-0.01% intraday ↓` |
-| COR1M | `PointChange` | `data.cor1m_5d_change` (always visible) | `+6.88 pts 5d chg ↑` |
-
-**Arrow placement**: Arrow icon is always to the **right** of the change text (not left, not above). Uses `display: flex` with `gap: 4px` in `.regime-strip-day-chg`.
-
-**Tests**: `web/tests/regime-day-change.test.ts` (12 unit), `web/e2e/regime-day-change.spec.ts` (3 E2E)
+Arrow always **right** of text. CSS: `display: flex; gap: 4px` in `.regime-strip-day-chg`. Tests: `regime-day-change.test.ts` (12), `regime-day-change.spec.ts` (3).
 
 ### Regime History Charts
 
-Two side-by-side D3 charts showing 20 trading sessions:
-- **Left**: VIX (`#05AD98`) + VVIX (`#8B5CF6`) — dual Y-axes
-- **Right**: RVOL (`#F5A623`) + COR1M (`#D946A8`) — dual Y-axes
+Two D3 charts, 20 sessions. Left: VIX (`#05AD98`) + VVIX (`#8B5CF6`), dual Y. Right: RVOL (`#F5A623`) + COR1M (`#D946A8`), dual Y. Height 440px. Component: `CriHistoryChart.tsx`.
 
-Charts inject live WS values into today's data point for real-time updates. Height: 440px. Component: `CriHistoryChart.tsx` (configurable via `series` prop).
+### Portfolio Table Arrows
 
-### Portfolio Table Arrow Alignment
-
-Price trend arrows (↑↓) in `PositionTable.tsx` and `WorkspaceSections.tsx` must stay inline with values — never wrap to a new line. CSS: `td.last-price-cell { white-space: nowrap }`. Arrow icon class: `.price-trend-icon` with `margin-left: 4px`.
+Price arrows in `PositionTable.tsx`/`WorkspaceSections.tsx`: `td.last-price-cell { white-space: nowrap }`, `.price-trend-icon { margin-left: 4px }`.
 
 ### Options Chain Sticky Header
 
-The chain table (`OptionsChainTab.tsx`) uses a two-row sticky `<thead>`: row 1 = column headers (Δ, IV, Vol, Bid, Mid, Ask, Last, Strike), row 2 = CALLS/PUTS labels. Three CSS requirements prevent data rows from overlapping the header:
+`OptionsChainTab.tsx` — three required CSS rules:
+1. `background: var(--bg-panel-raised)` on `.chain-header` + `.chain-side-label`
+2. `position: sticky; top: 0` / `top: 24px`
+3. `.chain-grid thead { position: relative; z-index: 10 }`
 
-| Requirement | CSS | Why |
-|-------------|-----|-----|
-| Opaque background | `background: var(--bg-panel-raised)` on `.chain-header` + `.chain-side-label` | Transparent headers let scrolling data show through |
-| Sticky cells | `position: sticky; top: 0` on `.chain-header`, `top: 24px` on `.chain-side-label` | Pins headers during scroll |
-| thead stacking context | `.chain-grid thead { position: relative; z-index: 10 }` | Elevates entire header group above tbody paint order |
-
-**Critical**: All three are required. Removing the thead stacking context or the `--bg-panel-raised` variable definition will re-introduce the overlap bug.
-
-**Tests**: `web/tests/chain-sticky-header.test.ts` (8 tests)
-
----
+All three required or overlap bug returns. Tests: `chain-sticky-header.test.ts` (8).
 
 ## Exposure Delta Sign Rule
 
-**Short option legs must display negative rawDelta.** The `rawDelta` field in `ExposureBreakdownLeg` reflects direction: `sign * lp.delta` where `sign = -1` for SHORT legs.
-
-| Leg Direction | rawDelta Sign | Example |
-|--------------|---------------|---------|
-| LONG Call | Positive | +0.36 |
-| SHORT Call | **Negative** | -0.08 |
-| LONG Put | Negative | -0.45 |
-| SHORT Put | **Positive** | +0.20 |
-
-**Implementation**: `web/lib/exposureBreakdown.ts` — applies `sign` to both IB delta and approx delta paths.
-**Tests**: `web/tests/exposure-breakdown.test.ts` (3 tests)
-
----
+`rawDelta = sign * lp.delta` where `sign = -1` for SHORT. LONG Call → +, SHORT Call → −, LONG Put → −, SHORT Put → +. Impl: `web/lib/exposureBreakdown.ts`. Tests: `exposure-breakdown.test.ts` (3).
 
 ## FastAPI Server Architecture
 
-Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `localhost:8321`) via `radonFetch()` (`web/lib/radonApi.ts`) instead of spawning Python processes. Eliminates per-request fork overhead (~200-500ms) and IB Gateway reconnection (~500ms-2s).
+Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/radonApi.ts`). No `spawn()`.
 
-### Three-Service Dev Stack
+### Three-Service Dev Stack (`npm run dev`)
 
-```bash
-npm run dev   # starts all three:
-```
+| Service | Port |
+|---------|------|
+| Next.js | 3000 |
+| IB WS relay | 8765 |
+| FastAPI | 8321 |
 
-| Service | Port | Process |
-|---------|------|---------|
-| Next.js | 3000 | `next dev` |
-| IB WS relay | 8765 | `ib_realtime_server.js` (real-time price streaming) |
-| FastAPI | 8321 | `uvicorn scripts.api.server:app` (Python script execution) |
-
-All `dev:verbose*` variants also include FastAPI.
-
-### FastAPI Server (`scripts/api/`)
+### FastAPI Files (`scripts/api/`)
 
 | File | Purpose |
 |------|---------|
-| `server.py` | FastAPI app — 19 endpoints, CORS, IB pool, health check, IB Gateway auto-restart. Includes `POST /performance/background` — fire-and-forget performance rebuild, 202 response, task registry deduplication (no duplicate builds) |
-| `ib_pool.py` | Role-based IB connection pool (sync/orders/data) with auto-reconnect |
-| `ib_gateway.py` | IB Gateway health check + auto-restart via IBC launchd service |
-| `subprocess.py` | Async subprocess helper (`run_script`, `run_module`) |
+| `server.py` | 19 endpoints, CORS, IB pool, health, auto-restart. `POST /performance/background` = fire-and-forget, 202, dedup |
+| `ib_pool.py` | Role-based IB pool (sync/orders/data), auto-reconnect |
+| `ib_gateway.py` | Health check + auto-restart via IBC launchd |
+| `subprocess.py` | Async `run_script()`, `run_module()` |
 
 ### Graceful Degradation
 
-| Scenario | GET behavior | POST behavior |
-|---|---|---|
-| FastAPI up + IB up | Normal | Normal |
-| FastAPI up + IB down | Cached data | Auto-restart Gateway, retry once, else 503 + cached |
-| FastAPI down | Cached data from disk | Cached data with `is_stale: true` |
+| Scenario | Behavior |
+|----------|----------|
+| FastAPI + IB up | Normal |
+| FastAPI up, IB down | Auto-restart Gateway, retry once, else 503 + cached |
+| FastAPI down | Cached from disk, `is_stale: true` |
 
-Next.js routes always try FastAPI first. On failure, they serve the last-known-good cached file. No spawn fallback.
+No spawn fallback. Always try FastAPI first.
 
 ### IB Gateway Auto-Recovery
 
-On startup, FastAPI checks if port 4001 is listening. If not, runs `~/ibc/bin/restart-secure-ibc-service.sh` and polls for up to 45s. At runtime, IB-dependent endpoints (`/portfolio/sync`, `/orders/refresh`) detect `ECONNREFUSED` in subprocess output, auto-restart Gateway, reconnect pool, and retry once. Manual restart: `POST /ib/restart`.
+Startup: check port 4001, restart if needed, poll 45s. Runtime: IB endpoints detect `ECONNREFUSED`, auto-restart + retry once. Manual: `POST /ib/restart`.
 
 ### Health Check
 
 ```bash
 curl http://localhost:8321/health
-# Returns: ib_gateway (port_listening, service_state), ib_pool (sync, orders, data), uw
+# Returns: ib_gateway, ib_pool (sync/orders/data), uw
 ```
-
----
 
 ## High-Throughput Architecture
 
-Radon is optimized for 500+ symbol monitoring with <500ms signal-to-order latency.
+500+ symbols, <500ms signal-to-order.
 
-### Parallel Scanning
+**Parallel scanning:** `scanner.py` (15 workers), `discover.py` (10 workers). `--workers N` CLI. `UWRateLimitError` skips ticker, doesn't crash batch.
 
-`scanner.py` and `discover.py` use `ThreadPoolExecutor` for concurrent UW API calls. Default 15 workers (scanner), 10 workers (discover). CLI: `--workers N`.
+**Atomic state:** `scripts/utils/atomic_io.py` — `atomic_save()` (temp + `os.replace()` + SHA-256), `verified_load()`. Writers: `ib_sync.py`. Readers: reconcile, flow, free_trade, performance, leap scanner.
 
-**Rate limit handling**: Per-ticker exception catching — `UWRateLimitError` skips the ticker, doesn't crash the batch. UWClient's built-in retry + exponential backoff still applies per-request.
+**Batched WS relay:** `ib_realtime_server.js` — per-client last-write-wins, 100ms flush. 5000 msg/s → 10 batched/s. Initial state immediate.
 
-### Atomic State Persistence
+**Stale tick detection:** Relay tracks `lastTickTimestamp`, checks every 30s during market hours. No ticks for 45s → auto-restart Gateway (120s cooldown).
 
-All portfolio state writes use `scripts/utils/atomic_io.py`:
-- `atomic_save(path, data)` — temp file + `os.replace()` (POSIX atomic) + SHA-256 checksum
-- `verified_load(path)` — loads + verifies checksum, graceful fallback for legacy files without checksum
+### WebSocket Connection State Machine (`usePrices.ts`)
 
-**Writers**: `ib_sync.py`, any script that modifies `portfolio.json`
-**Readers**: `ib_reconcile.py`, `flow_analysis.py`, `free_trade_analyzer.py`, `portfolio_performance.py`, `leap_iv_scanner.py`
+`idle → connecting → open → closed`. Key design:
+- `connStateRef` (ref) — `connect()` idempotent
+- `socketGenRef` — ignores stale socket events
+- Diff-based subscribe/unsubscribe over existing connection
+- Callback refs eliminate stale closures
+- Exponential backoff: `min(1000 * 2^n, 30000) + jitter`, max 10 attempts
 
-### Batched WebSocket Relay
+Tests: `use-prices-ws-stability.test.ts` (25), `ws-connection-stability.spec.ts` (4).
 
-`ib_realtime_server.js` buffers price ticks per client (last-write-wins) and flushes every 100ms as `{"type": "batch", "updates": {...}}`. Client (`usePrices.ts`) applies all updates in a single `setPrices()` call.
+**Vectorized math:** `kelly_size_batch()` (NumPy), `portfolio_greeks_vectorized()`. Cross-validated with TS `approxDelta()` to 10⁻¹².
 
-**Impact**: 500 symbols x 10 ticks/sec = 5000 msg/s → 10 batched updates/s. Initial subscription state still sent immediately (not batched).
+**Resilient IBClient** (`scripts/clients/ib_client.py`): Subscription tracking, disconnect recovery (5 attempts, 2ⁿs capped 30s), pacing violations (162/366: 10s backoff, 3 retries), invalid contracts (200/354: no retry, added to `_failed_contracts`).
 
-**Stale Data Health Check**: IB Gateway can enter a state where the TCP connection is alive but the data plane stops delivering ticks (session expired overnight). The relay tracks `lastTickTimestamp` and checks every 30s during market hours (9:30-16:00 ET, Mon-Fri). If no ticks arrive for 45s with active subscriptions, it auto-restarts IB Gateway via `~/ibc/bin/restart-secure-ibc-service.sh` with a 120s cooldown between attempts.
+**Incremental sync:** `scripts/utils/incremental_sync.py` — diff by `(ticker, expiry)` + contract count, skip full sync when unchanged.
 
-### WebSocket Connection State Machine
+### Performance Page Optimization
 
-`usePrices.ts` uses a connection state machine (`idle → connecting → open → closed`) to prevent WebSocket teardown/recreate cycles when React subscription data changes during page load. Key design:
+`scripts/portfolio_performance.py` — two-phase parallel fetch:
+- **Phase A** (sequential): IB stock history + cache checks
+- **Phase B** (ThreadPoolExecutor): UW/Yahoo fallbacks + option history. Per-worker `UWClient`.
 
-- **State machine** in `connStateRef` (ref, not state) — `connect()` is idempotent (no-op if `connecting` or `open`)
-- **Socket generation guard** (`socketGenRef`) — event handlers ignore stale socket events
-- **Diff-based subscription sync** — computes added/removed symbols and sends `subscribe`/`unsubscribe` over existing connection instead of full teardown
-- **Callback refs** (`onPriceUpdateRef`, `onConnectionChangeRef`) — eliminates stale closures in WS handlers
-- **Exponential backoff reconnect** — `min(1000 * 2^attempt, 30000) + jitter`, max 10 attempts, resets on successful open
-- **Two effects**: lifecycle (connect/disconnect based on `enabled` + `hasSubscriptions`) + subscription sync (diffs over open connection)
+`PERF_FETCH_WORKERS` env (default 8, clamped 1-20). Disk cache: `data/price_history_cache/`, SHA-256 filenames, TTL 15min/24h. SWR: cached → background rebuild via `POST /performance/background`. Cold start blocks on sync `POST /performance` (180s). Tests: 211 total (160 Python + 51 TS).
 
-**Tests**: `web/tests/use-prices-ws-stability.test.ts` (25 unit), `web/e2e/ws-connection-stability.spec.ts` (4 E2E)
+## Evaluation — 7 Milestones (Stop on Failure)
 
-### Vectorized Math
-
-- `kelly_size_batch()` in `kelly.py` — NumPy batch sizing for N candidates
-- `portfolio_greeks_vectorized()` in `scripts/utils/vectorized_greeks.py` — NumPy delta across all positions
-- Cross-validated against TypeScript `approxDelta()` to 10⁻¹² tolerance
-
-### Resilient IB Client
-
-`IBClient` in `scripts/clients/ib_client.py` includes:
-- **Subscription tracking**: streaming `get_quote()` calls recorded in `_subscriptions[]`
-- **Disconnect recovery**: `_on_disconnect()` with exponential backoff (5 attempts, 2ⁿs capped at 30s), restores all tracked subscriptions
-- **Pacing violations** (codes 162, 366): per-reqId retry with 10s base backoff, max 3 retries
-- **Invalid contracts** (codes 200, 354): no retry, added to `_failed_contracts` set
-
-### Incremental Sync
-
-`scripts/utils/incremental_sync.py` — compares current `portfolio.json` positions against IB by `(ticker, expiry)` key + contract count. Skips full sync when nothing changed.
-
-### Performance Page Speed Optimization
-
-`scripts/portfolio_performance.py` parallelizes price history fetches to reduce cold-path load time from 30-90s to 10-20s.
-
-**Two-phase fetch architecture:**
-- **Phase A** (main thread, sequential): IB stock history attempts + cache checks
-- **Phase B** (`ThreadPoolExecutor`): Failed-stock UW/Yahoo fallbacks + all option history fetches in parallel. Each worker creates its own `UWClient` instance (thread-safe).
-
-**Configurable workers:** `PERF_FETCH_WORKERS` env var (default 8, clamped 1-20). Invalid values fall back to default.
-
-**Disk cache** (`scripts/utils/price_cache.py`): Per-contract JSON files in `data/price_history_cache/{stocks,options}/` with SHA-256 filenames. Written via `atomic_save()`. TTL: 15 min during market hours, 24h after close. `prune_cache()` called once after all parallel writes complete (thread-safe).
-
-**FastAPI task registry:** `POST /performance` piggybacks on in-flight builds (no duplicate rebuilds). `POST /performance/background` returns 202 + `already_running` dedup. Single asyncio task — single-worker constraint documented.
-
-**Stale-while-revalidate (SWR):** Next.js `GET /api/performance` returns cached data immediately when stale + fires background rebuild via `POST /performance/background` (5s timeout, swallowed errors). Cold start (no cache) blocks on synchronous `POST /performance` (180s timeout).
-
-**Atomic cache writes:** `_write_cache()` in `server.py` uses temp file + `os.replace()` — no `_checksum` metadata (lightweight, separate from `atomic_save`).
-
-**Tests**: 211 total (160 Python + 51 TypeScript) across `scripts/tests/test_{scanner_parallel,discover_parallel,atomic_io,kelly_vectorized,vectorized_greeks,batched_relay,ib_resilient,ib_error_handling,incremental_sync,client_id_allocation,price_cache,portfolio_performance,performance_lock}.py`, `web/tests/batched-prices.test.ts`, `web/tests/use-prices-ws-stability.test.ts` (25 unit), `web/tests/share-pnl.test.ts` (24 unit), `web/tests/performance-route.test.ts` (9 unit), and `web/e2e/ws-connection-stability.spec.ts` (4 E2E).
-
----
-
-## Evaluation — 7 Milestones (Stop on Any Failure)
-
-```
-1.  Validate Ticker   → python3 scripts/fetch_ticker.py [TICKER]
-1B. Seasonality       → curl seasonal chart (context only, not a gate)
-1C. Analyst Ratings   → python3 scripts/fetch_analyst_ratings.py [TICKER] (context only)
-1D. News & Catalysts  → python3 scripts/fetch_news.py [TICKER] (context — buybacks, M&A, earnings, etc.)
-2.  Dark Pool Flow    → python3 scripts/fetch_flow.py [TICKER]
-3.  Options Flow      → python3 scripts/fetch_options.py [TICKER]
-3B. OI Changes        → python3 scripts/fetch_oi_changes.py [TICKER] (REQUIRED)
-4.  Edge Decision     → PASS/FAIL with explicit reasoning (FAIL = stop)
-5.  Structure         → Design convex position (R:R < 2:1 = stop)
-6.  Kelly Sizing      → Calculate + enforce 2.5% bankroll cap
-7.  Log               → Executed trades → trade_log.json | NO_TRADE → docs/status.md
-```
-
----
+1. Validate ticker → `scripts/fetch_ticker.py`
+1B. Seasonality (context) | 1C. Analyst ratings (context) | 1D. News/catalysts (context)
+2. Dark pool flow → `scripts/fetch_flow.py`
+3. Options flow → `scripts/fetch_options.py`
+3B. OI changes → `scripts/fetch_oi_changes.py` (REQUIRED)
+4. Edge decision — PASS/FAIL (FAIL = stop)
+5. Structure — convex position (R:R < 2:1 = stop)
+6. Kelly sizing — enforce 2.5% cap
+7. Log → `trade_log.json` or `docs/status.md`
 
 ## Commands
 
 | Command | Action |
 |---------|--------|
-| `scan` | Watchlist dark pool flow scan |
-| `discover` | Market-wide options flow for new candidates |
-| `evaluate [TICKER]` | Full 7-milestone evaluation |
+| `scan` | Watchlist dark pool scan |
+| `discover` | Market-wide flow for new candidates |
+| `evaluate [TICKER]` | Full 7-milestone eval |
 | `portfolio` | Positions, exposure, capacity |
 | `journal` | Recent trade log |
 | `sync` | Pull live portfolio from IB |
 | `blotter` | Today's fills + P&L |
-| `blotter-history` | Historical trades via Flex Query |
-| `leap-scan [TICKERS]` | LEAP IV mispricing opportunities |
-| `garch-convergence [TICKERS]` | Cross-asset GARCH vol divergence scan |
-| `seasonal [TICKERS]` | Monthly seasonality assessment |
-| `x-scan [@ACCOUNT]` | Extract ticker sentiment from X posts |
-| `analyst-ratings [TICKERS]` | Ratings, changes, price targets |
-| `vcg-scan` | Cross-asset volatility-credit gap divergence signal |
-| `cri-scan` | Crash Risk Index — systematic CTA deleveraging detection |
-| `menthorq-cta` | Fetch MenthorQ institutional CTA positioning data |
-| `menthorq-dashboard [COMMAND]` | Fetch MenthorQ dashboard image (vol, forex, eod, intraday, futures, cryptos_technical, cryptos_options). Supports `--ticker` for eod/intraday/futures/crypto dashboards (16 tickers: spx, vix, ndx, etc.) |
-| `menthorq-screener [CATEGORY] [SLUG]` | Fetch MenthorQ screener data (6 categories, 45 sub-screeners). Categories: gamma (5), gamma_levels (5), open_interest (7), volatility (6), volume (6), qscore (16) |
-| `menthorq-forex` | Fetch MenthorQ forex gamma levels + blindspot data (14 pairs, 20+ fields per pair) |
-| `menthorq-summary [CATEGORY]` | Fetch MenthorQ summary tables (futures: 93 rows, cryptos: 16 rows) |
-| `menthorq-quin [PROMPT]` | QUIN AI screener — natural-language query across 97+ metrics. Preset prompts: `docs/menthorq-prompts.md` |
-
----
+| `blotter-history` | Historical trades (Flex Query) |
+| `leap-scan [TICKERS]` | LEAP IV mispricing |
+| `garch-convergence [TICKERS]` | Cross-asset GARCH vol divergence |
+| `seasonal [TICKERS]` | Monthly seasonality |
+| `x-scan [@ACCOUNT]` | X post sentiment |
+| `analyst-ratings [TICKERS]` | Ratings + targets |
+| `vcg-scan` | Vol-credit gap divergence |
+| `cri-scan` | Crash Risk Index (CTA deleveraging) |
+| `menthorq-cta` | MenthorQ CTA positioning |
+| `menthorq-dashboard [CMD]` | Dashboard image (vol/forex/eod/intraday/futures/cryptos_technical/cryptos_options). `--ticker` for eod/intraday/futures/crypto (16 tickers) |
+| `menthorq-screener [CAT] [SLUG]` | Screener (6 categories, 45 sub-screeners) |
+| `menthorq-forex` | Forex gamma levels + blindspot (14 pairs) |
+| `menthorq-summary [CAT]` | Summary tables (futures: 93 rows, cryptos: 16) |
+| `menthorq-quin [PROMPT]` | QUIN AI screener. Presets: `docs/menthorq-prompts.md` |
 
 ## Key Scripts
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/api/server.py` | **FastAPI server** — 19 endpoints on `localhost:8321`. Replaces `spawn()` calls from Next.js. IB pool, auto-restart, health check |
-| `scripts/api/ib_pool.py` | **IB connection pool** — Role-based persistent connections (sync=0, orders=11, data=31) with auto-reconnect |
-| `scripts/api/ib_gateway.py` | **IB Gateway manager** — Health check, auto-restart via IBC launchd, port polling |
-| `scripts/api/subprocess.py` | **Async subprocess** — `run_script()`, `run_module()` with JSON extraction, timeout, error filtering |
-| `scripts/clients/ib_client.py` | **IBClient** — Primary IB API client (connection, orders, quotes, options, fills, flex). Includes resilient reconnection (subscription tracking, auto-restore), pacing violation handling (codes 162/366), invalid contract tracking (200/354) |
-| `scripts/clients/uw_client.py` | **UWClient** — Primary UW API client (dark pool, flow, chain, ratings, seasonality, 50+ endpoints) |
-| `scripts/clients/menthorq_client.py` | **MenthorQClient** — MenthorQ browser automation client. Constants: `DASHBOARD_COMMANDS` (8 commands), `TICKER_TAB_COMMANDS` (5), `DASHBOARD_TICKERS` (16), `SCREENER_SLUGS` (6 categories, 45 slugs), `SUMMARY_CATEGORIES` (2), `FOREX_CARD_SLUGS` (2). Methods: `get_cta()`, `get_eod()`, `get_dashboard_image()`, `get_forex_levels()`, `get_summary()`, `get_screener()`, `get_screener_category()`, `get_all_screener_data()`, `discover_screener_cards()`, `get_futures_list/detail/contracts()`, `get_forex_list/detail()`, `get_crypto_list/detail()`, `get_intraday()`. |
-| `scripts/fetch_ticker.py` | Ticker validation |
-| `scripts/fetch_flow.py` | Dark pool + options flow |
-| `scripts/fetch_options.py` | Options chain + institutional flow |
-| `scripts/fetch_analyst_ratings.py` | Ratings, upgrades/downgrades |
-| `scripts/scanner.py` | Watchlist batch scan (ThreadPoolExecutor, 15 workers default, `--workers` CLI arg) |
-| `scripts/discover.py` | Market-wide flow scanner (parallel by ticker + by day) |
-| `scripts/kelly.py` | Kelly calculator — scalar `kelly_size()` + vectorized `kelly_size_batch()` (NumPy) |
-| `scripts/ib_sync.py` | Sync live IB portfolio (atomic writes via `atomic_save()`). Auto-detects: covered calls, verticals, synthetics, risk reversals, straddles/strangles, **all-long combos** (defined risk). Tests: `test_covered_call_detection.py` (7), `test_all_long_combo.py` (8) |
+| `scripts/api/server.py` | FastAPI — 19 endpoints, IB pool, auto-restart |
+| `scripts/api/ib_pool.py` | Role-based IB pool (sync=0, orders=1, data=2) |
+| `scripts/api/ib_gateway.py` | IB Gateway health + auto-restart |
+| `scripts/api/subprocess.py` | Async subprocess helper |
+| `scripts/clients/ib_client.py` | IBClient — orders, quotes, options, fills, flex, resilient reconnect |
+| `scripts/clients/uw_client.py` | UWClient — dark pool, flow, chain, ratings, seasonality, 50+ endpoints |
+| `scripts/clients/menthorq_client.py` | MenthorQClient — browser automation, dashboards, screeners, CTA |
+| `scripts/scanner.py` | Watchlist batch scan (ThreadPoolExecutor) |
+| `scripts/discover.py` | Market-wide flow scanner |
+| `scripts/kelly.py` | Kelly calc — scalar + vectorized batch |
+| `scripts/ib_sync.py` | Sync IB portfolio (atomic writes). Detects: covered calls, verticals, synthetics, risk reversals, straddles, all-long combos |
 | `scripts/ib_reconcile.py` | Reconcile fills vs trade_log |
-| `scripts/blotter.py` | Today's fill P&L |
-| `scripts/trade_blotter/flex_query.py` | Historical fills (365d via Flex) |
-| `scripts/leap_scanner_uw.py` | LEAP scanner (UW + Yahoo, no IB) |
-| `scripts/exit_order_service.py` | Place pending exit orders when IB accepts |
-| `scripts/ib_order_manage.py` | Cancel or modify open IB orders |
-| `scripts/ib_place_order.py` | JSON-in/JSON-out order placement for web API (client ID 26) |
-| `scripts/fetch_x_watchlist.py` | X account tweet sentiment |
-| `scripts/vcg_scan.py` | Volatility-Credit Gap divergence scanner |
-| `scripts/cri_scan.py` | Crash Risk Index — CTA deleveraging detection |
-| `scripts/fetch_menthorq_cta.py` | MenthorQ CTA positioning (S3 image download + Vision extraction) |
-| `scripts/fetch_menthorq_dashboard.py` | MenthorQ dashboard charts (S3 download → screenshot fallback + Vision) |
-| `scripts/setup_ibc.sh` | **Legacy** — superseded by `local.ibc-gateway` global service (see IB Gateway & IBC section) |
-| `scripts/setup_cri_service.sh` | CRI Scan launchd service (every 30 min, 4:05 AM–8 PM ET, Mon-Fri trading days) |
-| `scripts/run_cri_scan.sh` | Holiday-aware CRI scan wrapper for launchd |
-| `scripts/utils/atomic_io.py` | Atomic JSON save/load with SHA-256 checksum verification |
-| `scripts/utils/vectorized_greeks.py` | NumPy vectorized portfolio delta/gamma engine |
-| `scripts/utils/incremental_sync.py` | Diff-based portfolio sync (skip full sync when positions unchanged) |
-| `scripts/utils/price_cache.py` | **Price history cache** — SHA-256 filenames, atomic writes, TTL (15min market / 24h close), thread-safe pruning |
-| `scripts/batched_relay.py` | Async WebSocket batch buffer (configurable flush interval, last-write-wins) |
-| `scripts/ib_realtime_server.js` | WS relay server — per-client batch buffers, 100ms flush, initial state immediate |
-| `scripts/clients/inspect_dashboard.py` | MenthorQ DOM inspector — finds chart containers, S3 image URLs per command |
-| `scripts/clients/map_nav.py` | MenthorQ navigation tree mapper — discovers all sidebar links and pages |
-| `scripts/clients/map_screeners.py` | MenthorQ screener slug discovery — maps all sub-slugs and ticker tab clicks |
-| `scripts/clients/map_subnav.py` | MenthorQ sub-navigation mapper — checks ticker tabs and selectors per page |
-
----
+| `scripts/ib_place_order.py` | JSON-in/out order placement (client ID 26) |
+| `scripts/ib_order_manage.py` | Cancel/modify open orders |
+| `scripts/exit_order_service.py` | Pending exit orders |
+| `scripts/portfolio_performance.py` | Parallel price history + performance calc |
+| `scripts/cri_scan.py` | Crash Risk Index |
+| `scripts/vcg_scan.py` | Vol-Credit Gap scanner |
+| `scripts/fetch_menthorq_cta.py` | MenthorQ CTA (S3 + Vision) |
+| `scripts/fetch_menthorq_dashboard.py` | MenthorQ dashboards (S3/screenshot + Vision) |
+| `scripts/ib_realtime_server.js` | WS relay — batched, 100ms flush |
+| `scripts/utils/atomic_io.py` | Atomic JSON save/load + SHA-256 |
+| `scripts/utils/vectorized_greeks.py` | NumPy portfolio delta/gamma |
+| `scripts/utils/incremental_sync.py` | Diff-based portfolio sync |
+| `scripts/utils/price_cache.py` | Price cache — SHA-256 filenames, atomic, TTL, thread-safe prune |
+| `scripts/run_cri_scan.sh` | Holiday-aware CRI wrapper for launchd |
 
 ## Critical Data Files
 
 | File | Purpose |
 |------|---------|
 | `data/portfolio.json` | Open positions, bankroll, exposure |
-| `data/trade_log.json` | **Append-only** executed trade journal |
-| `data/watchlist.json` | Tickers under surveillance |
-| `data/ticker_cache.json` | Ticker → company name cache |
-| `data/reconciliation.json` | IB reconciliation results |
-| `data/seasonality_cache/{TICKER}.json` | Cached seasonality (UW + EquityClock Vision fallback) |
-| `data/menthorq_cache/cta_{DATE}.json` | Cached MenthorQ CTA positioning (daily, S3 image + Vision) |
-| `data/menthorq_cache/{command}_{DATE}.json` | Cached MenthorQ dashboard data (S3/screenshot + Vision) |
-| `data/cri_scheduled/cri-{TIMESTAMP}.json` | Scheduled CRI scan readings (intraday time-series) |
-| `data/price_history_cache/` | Cached stock + option price histories (stocks/ and options/ subdirs, auto-pruned at 500 files) |
+| `data/trade_log.json` | **Append-only** trade journal |
+| `data/watchlist.json` | Surveillance tickers |
+| `data/ticker_cache.json` | Ticker → company cache |
+| `data/reconciliation.json` | IB reconciliation |
+| `data/seasonality_cache/` | Per-ticker seasonality |
+| `data/menthorq_cache/` | CTA + dashboard cache (daily) |
+| `data/cri_scheduled/` | Intraday CRI time-series |
+| `data/price_history_cache/` | Stock + option price histories (auto-pruned at 500) |
 
----
+## Seasonality Fallback
 
-## Seasonality Fallback: UW → EquityClock Vision → Cache
+UW → EquityClock Vision → Cache. Route: `web/app/api/ticker/seasonality/route.ts`.
+1. Cache check (`data/seasonality_cache/{TICKER}.json`)
+2. UW API — all 12 months valid → done
+3. Missing months → EquityClock chart → Claude Haiku Vision extraction
+4. Merge (UW priority), cache as `uw+equityclock`, expires 1st of next month
+5. Vision fails → return UW partial
 
-When UW returns incomplete seasonality data (missing months), the API route falls back to EquityClock chart image extraction via Claude Haiku Vision.
+API key: `resolveApiKey()` checks `ANTHROPIC_API_KEY`, `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`.
 
-**Flow** (`web/app/api/ticker/seasonality/route.ts`):
-1. Check cache: `data/seasonality_cache/{TICKER}.json` — if valid (not expired), return immediately
-2. Fetch UW API — if all 12 months have `years > 0`, cache as `source: "uw"`, return
-3. Missing months → download `https://charts.equityclock.com/seasonal_charts/{TICKER}_sheet.png`
-4. Send image to Claude Haiku Vision (`claude-haiku-4-5-20251001`) for structured extraction
-5. Merge: UW data takes priority (years > 0), Vision fills gaps
-6. Cache as `source: "uw+equityclock"` — expires 1st of next month UTC
-7. If Vision fails → return UW data as-is (partial)
+## ⭐ Trade Specification Report — MANDATORY
 
-**Cache**: `data/seasonality_cache/{TICKER}.json` — auto-expires monthly. Delete file to force refresh.
-
-**API key**: Uses `resolveApiKey()` — checks `ANTHROPIC_API_KEY`, `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`.
-
----
-
-## ⭐ Trade Specification HTML Report — MANDATORY
-
-**Required for ANY evaluation reaching Milestone 5 (Structure).**
+Required for any eval reaching Milestone 5.
 
 ```
 Template : .pi/skills/html-report/trade-specification-template.html
@@ -428,398 +284,235 @@ Output   : reports/{ticker}-evaluation-{YYYY-MM-DD}.html
 Reference: reports/goog-evaluation-2026-03-04.html
 ```
 
-**10 required sections:** Header + gate status | 6 Summary Metrics | Milestone pass/fail | Dark Pool Flow | Options Flow | Context (seasonality + ratings) | Structure & Kelly | Trade Spec (exact order) | Thesis & Risk | Three Gates table.
+10 sections: Header+gates | 6 Summary Metrics | Milestone pass/fail | Dark Pool | Options Flow | Context | Structure+Kelly | Trade Spec | Thesis+Risk | Three Gates table.
 
-**Workflow:**
-1. Complete milestones 1–6
-2. Generate HTML report
-3. Present for user confirmation
-4. On "execute" → place via IB
-5. On fill → update `trade_log.json`, `portfolio.json`, `docs/status.md`
+Workflow: Complete M1-6 → Generate HTML → User confirmation → Execute via IB → Update `trade_log.json`, `portfolio.json`, `docs/status.md`.
 
----
-
-## P&L Report Template
+## P&L Report
 
 ```
-Template : .pi/skills/html-report/pnl-template.html
-Output   : reports/pnl-{TICKER}-{YYYY-MM-DD}.html
-
-Return on Risk = Realized P&L / Capital at Risk
-  Debit spread  → Net debit paid
-  Credit spread → Width − credit received
-  Long option   → Premium paid
+Template: .pi/skills/html-report/pnl-template.html
+Output:   reports/pnl-{TICKER}-{YYYY-MM-DD}.html
+Return on Risk = P&L / Capital at Risk (debit=net debit, credit=width−credit, long=premium)
 ```
 
----
+## Share PnL Card
 
-## Share PnL Card (Image Generation)
+1200x630 PNG via `next/og` (Satori). Route: `web/app/api/share/pnl/route.tsx`. Component: `SharePnlButton.tsx`. Fonts: IBM Plex Mono `.woff` (Satori requires woff, not ttf). Theme: `web/lib/og-theme.ts`.
 
-Generates a branded 1200x630 PNG card for sharing trade P&L on social media. Uses `next/og` (Satori) for server-side rendering.
+Wired into Executed Orders + Historical Trades on `/orders`. Position grouping: `groupExecutedOrders()`, `positionGroupShareData()`, `deriveGroupDescription()` in `WorkspaceSections.tsx`. Clipboard: `navigator.clipboard.write()` with `ClipboardItem`.
 
-```
-API Route : web/app/api/share/pnl/route.tsx
-Component : web/components/SharePnlButton.tsx
-Fonts     : web/lib/og-fonts.ts (IBM Plex Mono .woff from @fontsource)
-Theme     : web/lib/og-theme.ts (Radon brand colors for Satori)
-Tests     : web/tests/share-pnl.test.ts (24 unit), web/e2e/share-pnl.spec.ts (6 E2E)
-```
-
-**Card layout:** Position description (e.g. "Closed AAOI Risk Reversal (Short $92 Call / Long $88 Put)") → Hero P&L $ + % → Commission/Net Price/Time details → Radon icon + "Executed with Radon" footer.
-
-**Wired into:** Executed Orders table (position groups) + Historical Trades (Blotter) table on `/orders` page. Share button appears on closing position groups and closed blotter trades.
-
-**Position grouping:** Today's executed fills are grouped by underlying symbol + time bucket (60s window) into position-level rows (OPEN / CLOSE). Individual fills are expandable via chevron. P&L rolls up to the closing position group. Share data uses `positionGroupShareData()` which computes P&L % from aggregated OPT leg notional. Helper functions: `groupExecutedOrders()`, `positionGroupShareData()`, `deriveGroupDescription()` in `WorkspaceSections.tsx`.
-
-**Clipboard copy:** `navigator.clipboard.write()` with `ClipboardItem({ "image/png": blob })`.
-
-**Font note:** Satori does NOT support `.ttf` parsed by `@vercel/og` in Next.js 16 — use `.woff` format. Font files from `@fontsource/ibm-plex-mono` npm package.
-
----
-
-## Bug Fix Workflow — Mandatory
-
-**Red/green TDD for every bug fix, no exceptions:**
-
-1. Write a failing test that reproduces the bug (test must be RED before any code change)
-2. Implement the minimal fix
-3. Confirm the test turns GREEN
-4. For UI bugs: verify with chrome-cdp skill (primary) for live browser confirmation, then add a Playwright E2E test as regression coverage. Unit tests alone are not sufficient
-
----
+Tests: `share-pnl.test.ts` (24), `share-pnl.spec.ts` (6).
 
 ## Calculations — Correctness Rules
 
-Financial calculations in the web UI must follow these rules exactly. Bugs here mislead trading decisions.
+### Credit/Debit Sign Convention
 
-### Daily Change % (Day Chg column)
+**Preserve the sign throughout the entire display pipeline.** Never use `Math.abs()` or equivalent on option prices/values without explicit approval. Credits must display as negative, debits as positive. This applies to P&L cards, share images, order forms, and all price displays.
+
+### Daily Change %
 
 ```
 Day Chg % = Daily P&L / |Yesterday's Close Value| × 100
-
-NEVER divide by entry cost. Entry cost is for total P&L, not daily change.
+NEVER divide by entry cost.
 ```
 
-**Why this matters**: A spread bought at $0.52 that's now worth $8.50 has a close value ~16x the entry cost. Dividing a $800 daily move by $2,600 (entry) gives -206%; dividing by $42,500 (close) gives the correct +1.88%.
+Per-leg: `sign × (last - close) × contracts × 100`. Denominator: `sign × close × contracts × 100`. Impl: `getOptionDailyChg()` in `WorkspaceSections.tsx`. Tests: `daily-chg.test.ts`.
 
-| Position Type | Daily P&L | Denominator |
-|--------------|-----------|-------------|
-| Stock | `(last - close) × qty` | `close × qty` |
-| Single option | `(last - close) × contracts × 100` | `close × contracts × 100` |
-| Spread/combo | `SUM(sign × (last - close) × contracts × 100)` per leg | `SUM(sign × close × contracts × 100)` per leg |
-
-Where `sign = +1` for LONG legs, `-1` for SHORT legs.
-
-**Implementation**: `getOptionDailyChg()` in `WorkspaceSections.tsx`. Tests in `lib/tools/__tests__/daily-chg.test.ts`.
-
-### Spread Net Mid (Last Price for BAG orders)
+### Spread Net Mid
 
 ```
 Spread Mid = SUM(sign × (bid + ask) / 2) per leg
 ```
 
-Resolve each leg's WS bid/ask via `legPriceKey()`, compute per-leg mid, combine sign-aware. Do NOT use the underlying stock price for spread orders.
+Via `legPriceKey()` WS bid/ask. Never use underlying for spread orders. Impl: `resolveOrderLastPrice()`.
 
-**Implementation**: `resolveOrderLastPrice()` in `WorkspaceSections.tsx`.
-
-### Total P&L % (P&L column)
+### Total P&L %
 
 ```
 P&L % = (Market Value - Entry Cost) / |Entry Cost| × 100
 ```
 
-This correctly uses entry cost as the denominator because it measures return on capital deployed over the life of the position.
-
 ### Per-Leg P&L (expanded combo rows)
 
 ```
-Leg P&L = sign × (|Market Value| − |Entry Cost|)
-
-Where sign = +1 for LONG legs, −1 for SHORT legs
+Leg P&L = sign × (|MV| − |EC|)   // LONG: MV−EC, SHORT: EC−MV
 ```
 
-| Leg Direction | Interpretation |
-|---------------|----------------|
-| LONG | Profit when option appreciates: MV − EC |
-| SHORT | Profit when option decays: EC − MV |
-
-Sum of per-leg P&L equals the position-level P&L. Uses RT WS price when available, falls back to IB sync `market_value`.
-
-**Implementation**: `LegRow` in `PositionTable.tsx`.
-
-### Return on Risk (trade log)
-
-```
-Return on Risk = Realized P&L / Capital at Risk
-
-Capital at Risk:
-  Debit spread  → Net debit paid
-  Credit spread → Width − credit received
-  Long option   → Premium paid
-```
+Sum of legs = position P&L. Uses WS price, fallback IB sync. Impl: `LegRow` in `PositionTable.tsx`.
 
 ### Price Resolution Priority
 
-| Context | Price Source |
-|---------|-------------|
-| Stock position | `prices[ticker].last` |
-| Single-leg option | `prices[optionKey(...)].last` (option contract, NOT underlying) |
-| Multi-leg spread | Compute net from each leg's `prices[legPriceKey(...)]` |
-| BAG order last price | `resolveOrderLastPrice()` — net mid from portfolio legs |
-| BAG modify modal BID/MID/ASK | `resolveOrderPriceData()` in `ModifyOrderModal.tsx` — synthetic `PriceData` from per-leg WS bid/ask |
-| Order form BID/MID/ASK | Same resolved price data as PriceBar (option-level for options) |
+| Context | Source |
+|---------|--------|
+| Stock | `prices[ticker].last` |
+| Single-leg option | `prices[optionKey(...)].last` |
+| Multi-leg spread | Net from each leg's `prices[legPriceKey(...)]` |
+| BAG order last | `resolveOrderLastPrice()` — net mid from legs |
+| BAG modify BID/MID/ASK | `resolveOrderPriceData()` in `ModifyOrderModal.tsx` |
+| Order form BID/MID/ASK | Same as PriceBar |
 | PriceBar in modal | `resolvePriceBar()` — option-level for single-leg, underlying for multi-leg |
 
-**Rule**: Never show the underlying stock price where the user expects an option or spread price. If option prices aren't available, show "---" rather than a misleading underlying price.
+**Never show underlying price where user expects option/spread price. Show "---" if unavailable.**
 
 ### Position Structure Classification (`ib_sync.py`)
 
-`detect_structure_type()` classifies multi-leg positions into structures with `risk_profile`:
+`detect_structure_type()`:
 
-| Structure | Legs | Risk Profile |
-|-----------|------|--------------|
-| Stock | 1 STK | `equity` |
-| Long Call / Long Put | 1 long OPT | `defined` |
-| Short Call / Short Put | 1 short OPT | `undefined` |
-| Bull/Bear Call/Put Spread | 2 same-type, 1 long + 1 short | `defined` |
-| Synthetic Long/Short | 1 call + 1 put, opposite directions, same strike | `undefined` |
-| Risk Reversal | 1 call + 1 put, opposite directions, diff strikes | `undefined` |
-| Straddle/Strangle | 1 long call + 1 long put | `defined` |
-| Covered Call | Long stock + short calls (shares ≥ contracts × 100) | `defined` |
-| **Long Call/Put/Mixed Combo** | **All legs long (no shorts, no stock)** | **`defined`** |
-| Unrecognized | Anything else | `complex` |
+| Structure | Risk Profile |
+|-----------|-------------|
+| Stock | `equity` |
+| Long Call/Put | `defined` |
+| Short Call/Put | `undefined` |
+| Bull/Bear Spread | `defined` |
+| Synthetic Long/Short | `undefined` |
+| Risk Reversal | `undefined` |
+| Straddle/Strangle (both long) | `defined` |
+| Covered Call | `defined` |
+| **All-long combo** (no shorts, no stock) | **`defined`** |
+| Unrecognized | `complex` → routed to Undefined Risk table |
 
-**All-long combo rule**: If every option leg has `position > 0` (no short legs, no stock), the position is fully defined risk (max loss = total premium). Named: `Long Call Combo`, `Long Put Combo`, or `Long Combo`.
-
-**Web UI fallback**: `WorkspaceSections.tsx` routes `risk_profile === "complex"` into the Undefined Risk table as defense-in-depth — positions with unrecognized profiles are never silently dropped.
-
-**Tests**: `test_covered_call_detection.py` (7), `test_all_long_combo.py` (8), `complex-risk-profile.test.ts` (5)
+Tests: `test_covered_call_detection.py` (7), `test_all_long_combo.py` (8), `complex-risk-profile.test.ts` (5).
 
 ### IB Combo (BAG) Order Leg Convention
 
-**ComboLeg.action defines the SPREAD STRUCTURE, not the trade direction.** `Order.action` (BUY/SELL) controls whether you're opening or closing the spread. IB reverses all leg actions when `Order.action = SELL`.
+**ComboLeg.action = spread structure, NOT trade direction.** `Order.action` (BUY/SELL) controls open/close; IB reverses legs when SELL.
 
-| Intent | Order.action | ComboLeg actions | IB effective execution |
-|--------|-------------|-----------------|----------------------|
-| Open bull call spread | BUY | BUY lower, SELL upper | BUY lower, SELL upper |
-| Close bull call spread | SELL | BUY lower, SELL upper | SELL lower, BUY upper |
+**Rule:** Always `LONG → BUY`, `SHORT → SELL` in ComboLeg.action regardless of order direction. Never flip — causes double-reversal → IB error 201.
 
-**Rule**: Always set `ComboLeg.action = BUY` for LONG legs and `ComboLeg.action = SELL` for SHORT legs, regardless of whether you're opening or closing. Never flip leg actions based on the order direction — that creates a double-reversal and triggers IB error 201 ("Riskless combination orders are not allowed").
-
-**Implementation**: `ComboOrderForm` in `web/components/ticker-detail/OrderTab.tsx`. The `legsWithActions` memo always maps `LONG → BUY`, `SHORT → SELL`.
-
-**Applies to**: `ComboOrderForm` (OrderTab), `OrderBuilder` (OptionsChainTab), and any future code that places BAG orders via `/api/orders/place`.
+Impl: `ComboOrderForm` (`OrderTab.tsx`), `OrderBuilder` (`OptionsChainTab.tsx`).
 
 ### Data Normalization
 
-**Ticker key**: Always use `"ticker"` as the key name in JSON data files. Never use `"symbol"` — that's for IB contract objects only.
+JSON data files: always `"ticker"`. IB contracts: `"symbol"`. Read defensively: `t.get("ticker") or t.get("symbol")`.
 
-| File | Key | Example |
-|------|-----|---------|
-| `watchlist.json` entries | `ticker` | `{"ticker": "AAPL", ...}` |
-| `portfolio.json` positions | `ticker` | `{"ticker": "GOOG", ...}` |
-| `trade_log.json` entries | `ticker` | `{"ticker": "AMD", ...}` |
-| IB order contracts | `symbol` | `{"symbol": "AAPL", "secType": "STK"}` |
-| Discover candidates | `ticker` | `{"ticker": "NET", ...}` |
-
-Scripts that write to data files must use `"ticker"`. Scripts that read must handle both defensively (`t.get("ticker") or t.get("symbol")`).
-
----
-
-## Unusual Whales API Quick Reference
+## UW API Quick Reference
 
 ```
-Base URL : https://api.unusualwhales.com
-Auth     : Authorization: Bearer $UW_TOKEN
+Base: https://api.unusualwhales.com | Auth: Bearer $UW_TOKEN
 ```
 
 | Endpoint | Use |
 |----------|-----|
-| `GET /api/darkpool/{ticker}` | Dark pool flow (primary edge) |
-| `GET /api/option-trades/flow-alerts` | Sweeps, blocks, unusual activity |
-| `GET /api/stock/{ticker}/info` | Ticker validation |
-| `GET /api/stock/{ticker}/option-contracts` | Options chain |
-| `GET /api/stock/{ticker}/greek-exposure` | GEX |
-| `GET /api/screener/analysts` | Analyst ratings |
-| `GET /api/seasonality/{ticker}/monthly` | Monthly seasonality |
-| `GET /api/shorts/{ticker}/interest-float/v2` | Short interest |
+| `/api/darkpool/{ticker}` | Dark pool (primary edge) |
+| `/api/option-trades/flow-alerts` | Sweeps, blocks |
+| `/api/stock/{ticker}/info` | Validation |
+| `/api/stock/{ticker}/option-contracts` | Chain |
+| `/api/stock/{ticker}/greek-exposure` | GEX |
+| `/api/screener/analysts` | Ratings |
+| `/api/seasonality/{ticker}/monthly` | Seasonality |
+| `/api/shorts/{ticker}/interest-float/v2` | Short interest |
 
-Full spec: `docs/unusual_whales_api.md` | `docs/unusual_whales_api_spec.yaml`
-
----
+Full spec: `docs/unusual_whales_api.md`
 
 ## Signal Interpretation
 
-**Put/Call Ratio → Bias:**
-`>2.0` BEARISH | `1.2–2.0` LEAN_BEARISH | `0.8–1.2` NEUTRAL | `0.5–0.8` LEAN_BULLISH | `<0.5` BULLISH
+**P/C Ratio:** >2.0 BEARISH | 1.2–2.0 LEAN_BEAR | 0.8–1.2 NEUTRAL | 0.5–0.8 LEAN_BULL | <0.5 BULLISH
+**Flow Side:** Ask-dominant = buying | Bid-dominant = selling
+**Analyst Buy%:** ≥70% BULL | 50–69% LEAN_BULL | 30–49% LEAN_BEAR | <30% BEAR
+**Discovery Score:** 60–100 Strong | 40–59 Monitor | 20–39 Weak | <20 None
+**Seasonality:** >60% FAVORABLE | 50–60% NEUTRAL | <50% UNFAVORABLE
 
-**Flow Side:**
-- Ask-side dominant → buying pressure (opening longs)
-- Bid-side dominant → selling pressure (closing longs or opening shorts)
-
-**Analyst Buy %:**
-`≥70%` BULLISH | `50–69%` LEAN_BULLISH | `30–49%` LEAN_BEARISH | `<30%` BEARISH
-
-**Discovery Score (0–100):**
-`60–100` Strong (full eval) | `40–59` Monitor | `20–39` Weak | `<20` No signal
-
-**Seasonality Rating:**
-`FAVORABLE` = win rate >60% | `NEUTRAL` = 50–60% | `UNFAVORABLE` = win rate <50%
-
-> Seasonality and analyst ratings are **context, not gates.** Strong flow can override weak seasonality. Weak flow + weak seasonality = pass entirely.
-
----
+> Seasonality/ratings = context, not gates. Strong flow overrides weak seasonality.
 
 ## IB Gateway & IBC
 
-**Auto-recovery:** FastAPI server (`scripts/api/ib_gateway.py`) detects when IB Gateway is down at startup and auto-restarts the IBC service. IB-dependent endpoints also auto-restart on `ECONNREFUSED` and retry once. Manual restart: `POST http://localhost:8321/ib/restart` or `curl -X POST http://localhost:8321/ib/restart`.
-
-**Troubleshooting:** `docs/ib-connection-troubleshooting.md` — full diagnostic runbook for connection failures, timeout budget, cached fallback behavior, and architecture diagram.
-
-IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gateway`), shared with [market-data-warehouse](https://github.com/joemccann/market-data-warehouse). IBC install lives at `~/ibc-install/`, config and wrappers at `~/ibc/`.
-
-**Credentials:** Stored in macOS Keychain (not on disk). The runner reads credentials at launch, writes a temporary `0600` runtime config, and removes it after IBC exits.
-
-**Service commands:**
+Global service: `local.ibc-gateway` (shared with market-data-warehouse). Install: `~/ibc-install/`, config: `~/ibc/`. Credentials in macOS Keychain.
 
 | Command | Action |
 |---------|--------|
-| `~/ibc/bin/start-secure-ibc-service.sh` | Start Gateway via launchd |
-| `~/ibc/bin/stop-secure-ibc-service.sh` | Stop Gateway |
-| `~/ibc/bin/restart-secure-ibc-service.sh` | Restart Gateway |
-| `~/ibc/bin/status-secure-ibc-service.sh` | Check service status |
-| `~/ibc-install/stop.sh` | Clean shutdown (while running) |
-| `~/ibc-install/reconnectdata.sh` | Reconnect market data |
-| `~/ibc-install/reconnectaccount.sh` | Reconnect to IB login server |
+| `~/ibc/bin/start-secure-ibc-service.sh` | Start |
+| `~/ibc/bin/stop-secure-ibc-service.sh` | Stop |
+| `~/ibc/bin/restart-secure-ibc-service.sh` | Restart |
+| `~/ibc/bin/status-secure-ibc-service.sh` | Status |
 
-**LaunchAgent:** `~/Library/LaunchAgents/local.ibc-gateway.plist`
+**Lifecycle:** Mon-Fri 00:00 start → 2FA approve on IBKR Mobile → 11:58 PM daily restart (no 2FA) → Sunday 07:05 cold restart (2FA).
 
-**Lifecycle (automated via launchd):**
-- **Mon-Fri 00:00** — launchd starts Gateway via IBC, reads Keychain credentials
-- **2FA** — approve once on IBKR Mobile; IBC retries if missed (`TWOFA_TIMEOUT_ACTION=restart`)
-- **11:58 PM daily** — IBC auto-restarts Gateway (reuses auth session, no 2FA needed)
-- **Sunday 07:05** — Cold restart: full shutdown + fresh login (weekly re-auth, 2FA required)
+**Key config:** `ExistingSessionDetectedAction=primary`, `AcceptIncomingConnectionAction=accept`, `CommandServerPort=7462`.
 
-**Key config (`~/ibc/config.secure.ini`):**
-- `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped by another session
-- `AcceptIncomingConnectionAction=accept` — no popup for API connections
-- `CommandServerPort=7462` — IBC command server for stop/restart
-- No `IbLoginId`/`IbPassword` — credentials are in Keychain only
+### Ports
 
-**Ports:**
-
-| Port | Connection |
-|------|-----------|
-| 3000 | Next.js dev server |
-| 8321 | FastAPI (Radon API — Python script execution) |
-| 8765 | IB WebSocket relay (real-time price streaming) |
+| Port | Service |
+|------|---------|
+| 3000 | Next.js |
+| 8321 | FastAPI |
+| 8765 | IB WS relay |
 | 4001 | IB Gateway Live |
 | 4002 | IB Gateway Paper |
-| 7496 | TWS Live |
-| 7497 | TWS Paper (default) |
-| 7462 | IBC Command Server (stop/restart Gateway) |
+| 7496/7497 | TWS Live/Paper |
+| 7462 | IBC Command Server |
 
-**Phase 1 remote access (working path):**
-- Canonical remote control surface is the secure wrapper set in `~/ibc/bin/`
-- Transport is **standard macOS SSH over Tailscale**, not Tailscale SSH server mode
-- Dependencies:
-  - `Tailscale.app` on the Mac
-  - Tailscale on the iPhone, connected to the same tailnet
-  - macOS `Remote Login` enabled
-  - iPhone SSH client such as Termius, Blink Shell, or Prompt
-  - Optional: dedicated public key in `~/.ssh/authorized_keys` for key-based login
-- Example direct remote commands:
-  - `ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'`
-  - `ssh joemccann@macbook-pro '~/ibc/bin/restart-secure-ibc-service.sh'`
-- Optional repo helper: `scripts/ibc_remote_control.sh`
-- Detailed runbook: `docs/ibc-remote-access.md`
+### Client ID Ranges
 
-**Legacy:** The old `com.convex-scavenger.ibc-gateway` LaunchAgent and `scripts/setup_ibc.sh` are superseded by the global `local.ibc-gateway` service. The legacy plist was migrated automatically by the market-data-warehouse installer.
+| Range | Usage |
+|-------|-------|
+| 0-9 | FastAPI IBPool (sync=0, orders=1, data=2) |
+| 10-19 | WS relay (rotates on conflict) |
+| 20-49 | Subprocess scripts (`client_id="auto"`) |
+| 50-69 | Scanners (CRI/VCG rotating) |
+| 70-89 | Daemons (fill=70, exit=71) |
+| 90-99 | CLI/standalone |
 
-IB error `10358` = Reuters Fundamentals subscription inactive → auto-fallback to next source.
+**Rule:** On-demand scripts MUST use `client_id="auto"` (range 20-49). Never hardcode — pool holds persistent connections. Tests: `test_client_id_allocation.py` (17).
 
-**Client ID Ranges** (partitioned to prevent collisions):
+### Remote Access (Phase 1)
 
-| Range | Zone | Type | Usage |
-|-------|------|------|-------|
-| 0-9 | Pool | Persistent | FastAPI IBPool: sync=0, orders=1, data=2 |
-| 10-19 | Relay | Persistent | WS relay: 10, 11, 12 (rotates on conflict) |
-| 20-49 | Subprocess | On-demand | Scripts use `client_id="auto"` — random start + retry on conflict |
-| 50-69 | Scanners | Ad-hoc | CRI/VCG rotating pools |
-| 70-89 | Daemons | Background | Fill monitor=70, exit service=71 |
-| 90-99 | CLI | Manual | Standalone scripts (analyst ratings, blotter) |
+macOS SSH over Tailscale. Requires: Tailscale on Mac + iPhone, macOS Remote Login, SSH client (Termius/Blink/Prompt). Runbook: `docs/ibc-remote-access.md`.
 
-**Rule**: On-demand scripts (ib_place_order, ib_order_manage, ib_sync, ib_orders) MUST use `client_id="auto"` to auto-allocate from the 20-49 range. Never hardcode a fixed ID for subprocess scripts — the pool holds persistent connections that can collide. Constants: `POOL_ID_RANGE`, `RELAY_ID_RANGE`, `SUBPROCESS_ID_RANGE` in `scripts/clients/ib_client.py`. Tests: `test_client_id_allocation.py` (17 tests).
-
----
+IB error `10358` = Reuters inactive → auto-fallback.
 
 ## Output Rules
 
-- Always show: `signal → structure → Kelly math → decision`
-- State probability estimates explicitly; flag uncertainty
-- Failing gate = immediate stop with the failing gate named
+- Always: `signal → structure → Kelly math → decision`
+- State probabilities; flag uncertainty
+- Failing gate = immediate stop, name the gate
 - **Never rationalize a bad trade**
-- Executed trades → `trade_log.json`
-- NO_TRADE decisions → `docs/status.md` (Recent Evaluations)
-
----
+- Executed → `trade_log.json` | NO_TRADE → `docs/status.md`
 
 ## Startup Checklist
 
-- [ ] `npm run dev` starts all 3 services (Next.js + IB WS relay + FastAPI)
-- [ ] FastAPI auto-restarts IB Gateway if down — approve 2FA on IBKR Mobile if cold start
-- [ ] Health check: `curl http://localhost:8321/health` — verify `ib_gateway.port_listening: true`
-- [ ] IB reconciliation auto-runs (`scripts/ib_reconcile.py`) — check `data/reconciliation.json`
-- [ ] Exit order service auto-runs — checks `PENDING_MANUAL` positions
-- [ ] CRI scan service running (`./scripts/setup_cri_service.sh status`) — 30-min intervals, premarket-close
-- [ ] X account scan: if last scan >12h ago, run `x-scan` for flagged accounts
-- [ ] Check market hours before any analysis
+- [ ] `npm run dev` (3 services)
+- [ ] FastAPI auto-restarts IB Gateway if down — approve 2FA if cold start
+- [ ] `curl http://localhost:8321/health` — verify `ib_gateway.port_listening: true`
+- [ ] Reconciliation auto-runs → `data/reconciliation.json`
+- [ ] Exit order service auto-runs (PENDING_MANUAL)
+- [ ] CRI scan service running (30-min intervals)
+- [ ] X scan if >12h stale
+- [ ] Check market hours
 
----
+## ⛔ Brand Identity — Mandatory for UI Work
 
-## ⛔ Radon Brand Identity — Mandatory for ALL UI Work
+Full spec: `docs/brand-identity.md` + `brand/radon-brand-system.md`. Tokens: `brand/radon-design-tokens.json`. Tailwind: `brand/radon-tailwind-theme.ts`. Kit: `/kit` route. Logo: `brand/radon-app-icon.svg`.
 
-**Full specification:** `docs/brand-identity.md` (reference) + `brand/radon-brand-system.md` (complete spec).
-**Design tokens:** `brand/radon-design-tokens.json` | **Tailwind theme:** `brand/radon-tailwind-theme.ts`
-**Component reference:** `brand/radon-component-kit.html` | **Live kit:** `/kit` route (`web/components/kit/`) | **Terminal mockup:** `brand/radon-terminal-mockup.html`
-**Logo assets:** `brand/radon-app-icon.svg`, `radon-monogram.svg`, `radon-wordmark.svg`, `radon-lockup-horizontal.svg` | **Hero:** `.github/hero.png`
+**System name:** Radon (not "Convex Scavenger" in UI).
 
-Any change touching UI code (components, styles, layouts, modals, charts, empty states, system messages) MUST comply with the Radon Brand Identity. Violations are blocking failures equivalent to a broken test.
+**Typography:** Inter (UI) + IBM Plex Mono (numeric tables, telemetry) + Söhne (display only).
 
-### Quick Reference (see `docs/brand-identity.md` for full details)
+**Radon Spectrum:**
 
-**System name:** Radon (not "Convex Scavenger" in UI). Hierarchy: Radon Terminal, Flow, Signals, Exposure, Surface, Structure, Sets.
-
-**Typography:** Inter (UI, titles, labels, metrics) + IBM Plex Mono (dense numeric tables, status/meta telemetry) + Söhne (display/wordmark only).
-
-**Radon Spectrum (color — clarity scale, not P&L):**
 | Token | Hex | Meaning |
 |-------|-----|---------|
-| `signal.core` | **`#05AD98`** | **Core Radon discovery layer (flagship accent)** |
-| `signal.strong` | `#0FCFB5` | High-confidence signal |
-| `signal.deep` | `#048A7A` | Deep data / selected states |
-| `warn` | `#F5A623` | Quality / caution |
-| `fault` | `#E85D6C` | Feed fault / integrity problem |
-| `violet.extreme` | `#8B5CF6` | Extreme dislocation / rare state |
+| `signal.core` | `#05AD98` | Core accent |
+| `signal.strong` | `#0FCFB5` | High-confidence |
+| `signal.deep` | `#048A7A` | Deep data / selected |
+| `warn` | `#F5A623` | Caution |
+| `fault` | `#E85D6C` | Feed fault |
+| `violet.extreme` | `#8B5CF6` | Extreme dislocation |
 | `magenta.dislocation` | `#D946A8` | Structural dislocation |
-| `neutral` | `#94a3b8` | Neutral comparative states |
+| `neutral` | `#94a3b8` | Neutral |
 
-**Surfaces (dark):** `bg.canvas: #0a0f14` | `bg.panel: #0f1519` | `bg.panelRaised: #151c22` | `line.grid: #1e293b`
-**Surfaces (light):** `bg.canvas: #FFFFFF` | `bg.panel: #FFFFFF` | `bg.panelRaised: #F1F5F9` | `line.grid: #BBBFBF`
+**Surfaces (dark):** canvas `#0a0f14` | panel `#0f1519` | raised `#151c22` | grid `#1e293b`
+**Surfaces (light):** canvas `#FFFFFF` | panel `#FFFFFF` | raised `#F1F5F9` | grid `#BBBFBF`
 
-**CSS surface variables:** `--bg-base`, `--bg-panel`, `--bg-panel-raised`, `--bg-hover`, `--border-dim`, `--line-grid` — defined in both `[data-theme="dark"]` and `[data-theme="light"]` blocks in `globals.css`.
+**CSS variables:** `--bg-base`, `--bg-panel`, `--bg-panel-raised`, `--bg-hover`, `--border-dim`, `--line-grid`, `--signal-core`, `--signal-strong`, `--signal-deep`, `--dislocation`, `--extreme`, `--fault`, `--neutral`, `--text-secondary` — all auto-adapt dark/light in `globals.css`.
 
-**CSS signal variables:** `--signal-core`, `--signal-strong`, `--signal-deep`, `--dislocation`, `--extreme`, `--fault`, `--neutral`, `--text-secondary` — all auto-adapt to dark/light theme via `globals.css`.
-
-**Non-negotiable rules:**
-- **4px max** `border-radius` on panels (badges use `999px` capsule) — no soft consumer rounding
-- All colors reference design tokens — no raw hex in components
-- Mono for machine (numbers, telemetry), sans for product (titles, labels) — never reversed
-- Empty states describe the measurement condition, not generic placeholders
-- Brand voice: precise, calm, scientific, unsensational — no hype, no emojis, no emotional punctuation
-- Grid: 8px base unit, 4px micro unit, 16px gutters, 32px section gaps
-- No decorative elements: no glassmorphism, heavy gradients, soft consumer shadows, or icons-as-decoration
-- Panels feel like mountable instrument modules with hairline borders, matte surfaces, device-label headers
-- Signal semantics use clarity scale (Baseline → Emerging → Clear → Strong → Dislocated → Extreme)
-
-**Contributor acceptance (verify before any UI PR):** See `docs/brand-identity.md` Section 9.
+**Non-negotiable:**
+- 4px max border-radius on panels (badges: 999px capsule)
+- All colors via tokens — no raw hex
+- Mono for machine, sans for product — never reversed
+- Empty states describe measurement condition, not generic placeholders
+- Voice: precise, calm, scientific — no hype/emojis
+- Grid: 8px base, 4px micro, 16px gutters, 32px section gaps
+- No decorative elements (glassmorphism, gradients, soft shadows)
+- Panels = instrument modules (hairline borders, matte, device-label headers)
+- Signal semantics: Baseline → Emerging → Clear → Strong → Dislocated → Extreme

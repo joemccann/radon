@@ -1,7 +1,7 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-18T08:25:00-07:00
+2026-03-18T08:30:00-07:00
 
 ## Recent Commits
 - 2026-03-18 — **fix: Share PnL entry/exit data for multi-day trades.** `positionGroupShareData()` now falls back to portfolio position data when opening fills aren't in today's executed orders (position opened on prior day). Entry price from `leg.avg_cost`, entry time from `entry_date`. Share image now correctly shows ENTRY/EXIT with PST times, no commission. 8 unit tests + 5 E2E tests.
@@ -71,12 +71,11 @@
 - ⚠️ *This section is a cache — verify against IB for current state*
 - **Today's Realized P&L**: +$6,513 (AAOI call sale)
 
-## Today's Trades (2026-03-17)
+## Today's Trades (2026-03-18)
 | Trade | Structure | P&L | Status |
 |-------|-----------|-----|--------|
-| AAOI | Opened Risk Reversal Short $92C / Long $88P Mar 27 (25x) @ $0.25 cr | — | ✓ FILLED |
-| AAOI | Closed Risk Reversal Short $92C / Long $88P Mar 27 (25x) @ $2.50 cr | +$6,871 | ✓ CLOSED |
-| **Net Realized P&L Today** | | **+$6,871** | |
+| CROX | Bull Call Spread $82.5/$95 Apr 17 (163x) @ $1.68 | — | ✓ FILLED |
+| **Net Realized P&L Today** | | **$0** | |
 
 ## Positions Requiring Attention
 
@@ -136,6 +135,7 @@
 | **39** | **03-12** | **OXY** | **Bear Put Spread P$55/P$50 (Apr 17, 222x)** | **OPEN** | — |
 | **40** | **03-17** | **AAOI** | **Risk Reversal Short $92C/Long $88P (Mar 27, 25x)** | **CLOSED** | **+$6,871** |
 | **41** | **03-17** | **AAOI** | **Closed RR #40 (bought back $92C, sold $88P)** | **CLOSED** | **(see #40)** |
+| **42** | **03-18** | **CROX** | **Bull Call Spread $82.5/$95 (Apr 17, 163x)** | **OPEN** | **—** |
 
 ---
 

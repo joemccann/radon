@@ -1,0 +1,12 @@
+{
+  "id": "fact-infra-share-pnl-portfolio-fallback",
+  "key": "infra.share-pnl-portfolio-fallback",
+  "value": "positionGroupShareData() accepts optional portfolioPositions parameter. For closing trades where opening fills aren't in allGroups (multi-day trades), it falls back to portfolio position data: entry price from leg.avg_cost, entry time from position.entry_date. This ensures share cards display ENTRY/EXIT data even when the position was opened on a prior day. Times are formatted in PST via fmtTimePST() in the API route.",
+  "confidence": 0.95,
+  "source": "fix-share-pnl-2026-03-18",
+  "extractedBy": "context-evaluator",
+  "createdAt": "2026-03-18T15:27:35.683759+00:00",
+  "updatedAt": "2026-03-18T15:27:35.683759+00:00",
+  "revisionId": 1,
+  "expiresAt": null
+}

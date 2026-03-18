@@ -298,6 +298,23 @@ describe("computeNetPrice", () => {
     expect(net.mid).toBeCloseTo(2.4);
   });
 
+  it("single-leg quote uses per-unit price when normalized (not aggregate)", () => {
+    // BUG regression: 50x $200 Call with bid=$1.39 was showing $69.50 (50 * 1.39)
+    const rawLeg = makeLeg({ strike: 200, right: "C", action: "BUY", quantity: 50 });
+    const normalized = normalizeComboOrder([rawLeg]);
+    // normalizeComboOrder reduces single leg to quantity=1
+    expect(normalized.legs[0].quantity).toBe(1);
+    expect(normalized.quantity).toBe(50);
+
+    const net = computeNetOptionQuote(normalized.legs, {
+      AAPL_20260417_200_C: makePriceData(1.39, 1.53),
+    }, "AAPL");
+    // Should show per-unit: bid=1.39, ask=1.53, mid=1.46
+    expect(net.bid).toBeCloseTo(1.39, 2);
+    expect(net.ask).toBeCloseTo(1.53, 2);
+    expect(net.mid).toBeCloseTo(1.46, 2);
+  });
+
   it("prices ratio combos from normalized leg quantities instead of raw leg size", () => {
     const normalized = normalizeComboOrder([
       makeLeg({ strike: 85, right: "P", action: "SELL", quantity: 25 }),

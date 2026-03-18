@@ -21,6 +21,8 @@ def make_trade(order_id=10, perm_id=12345, status="Submitted", order_type="LMT",
     trade.order.permId = perm_id
     trade.order.orderType = order_type
     trade.order.lmtPrice = lmt_price
+    trade.order.totalQuantity = 50
+    trade.order.outsideRth = False
     trade.order.clientId = 0
     trade.orderStatus.status = status
     trade.contract = MagicMock()
@@ -160,7 +162,9 @@ class TestCancelOrder:
 class TestModifyOrder:
     def test_modify_success(self):
         t = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
-        client = make_client([t])
+        confirmed = make_trade(status="Submitted", order_type="LMT", lmt_price=22.50)
+        client = make_client()
+        client.get_open_orders.side_effect = [[t], [confirmed]]
         client.place_order = MagicMock()
 
         with pytest.raises(SystemExit) as exc:
@@ -202,7 +206,9 @@ class TestModifyOrder:
 
     def test_modify_stp_lmt_allowed(self):
         t = make_trade(status="Submitted", order_type="STP LMT", lmt_price=18.00)
-        client = make_client([t])
+        confirmed = make_trade(status="Submitted", order_type="STP LMT", lmt_price=19.00)
+        client = make_client()
+        client.get_open_orders.side_effect = [[t], [confirmed]]
         client.place_order = MagicMock()
 
         with pytest.raises(SystemExit) as exc:
@@ -210,11 +216,45 @@ class TestModifyOrder:
         assert exc.value.code == 0
         assert t.order.lmtPrice == 19.00
 
+    def test_modify_quantity_success(self):
+        t = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
+        t.order.totalQuantity = 50
+        confirmed = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
+        confirmed.order.totalQuantity = 75
+        client = make_client()
+        client.get_open_orders.side_effect = [[t], [confirmed]]
+        client.place_order = MagicMock()
+
+        with pytest.raises(SystemExit) as exc:
+            modify_order(client, 10, 12345, 20.00, "127.0.0.1", 4001, new_quantity=75)
+        assert exc.value.code == 0
+        assert t.order.totalQuantity == 75
+        client.place_order.assert_called_once_with(t.contract, t.order)
+
+    def test_modify_errors_when_refreshed_order_keeps_old_price(self, capsys):
+        t = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
+        stale = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
+        client = make_client()
+        client.get_open_orders.side_effect = [[t]] + [[stale]] * 10
+        client.place_order = MagicMock()
+
+        with pytest.raises(SystemExit) as exc:
+            modify_order(client, 10, 12345, 22.50, "127.0.0.1", 4001)
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        data = json.loads(captured.out)
+        assert data["status"] == "error"
+        assert "not confirmed" in data["message"].lower()
+        assert data["currentPrice"] == 20.00
+
     def test_modify_with_outside_rth_sets_flag(self):
         """When outside_rth=True, the order's outsideRth attribute should be set to True."""
         t = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
         t.order.outsideRth = False  # Default
-        client = make_client([t])
+        confirmed = make_trade(status="Submitted", order_type="LMT", lmt_price=22.50)
+        confirmed.order.outsideRth = True
+        client = make_client()
+        client.get_open_orders.side_effect = [[t], [confirmed]]
         client.place_order = MagicMock()
 
         with pytest.raises(SystemExit) as exc:
@@ -228,7 +268,10 @@ class TestModifyOrder:
         """When outside_rth is not set, the order's existing outsideRth should be preserved."""
         t = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
         t.order.outsideRth = False
-        client = make_client([t])
+        confirmed = make_trade(status="Submitted", order_type="LMT", lmt_price=22.50)
+        confirmed.order.outsideRth = False
+        client = make_client()
+        client.get_open_orders.side_effect = [[t], [confirmed]]
         client.place_order = MagicMock()
 
         with pytest.raises(SystemExit) as exc:
@@ -240,7 +283,10 @@ class TestModifyOrder:
         """When outside_rth=False explicitly, clear the outsideRth flag even if it was True."""
         t = make_trade(status="Submitted", order_type="LMT", lmt_price=20.00)
         t.order.outsideRth = True  # Was previously set
-        client = make_client([t])
+        confirmed = make_trade(status="Submitted", order_type="LMT", lmt_price=22.50)
+        confirmed.order.outsideRth = False
+        client = make_client()
+        client.get_open_orders.side_effect = [[t], [confirmed]]
         client.place_order = MagicMock()
 
         with pytest.raises(SystemExit) as exc:

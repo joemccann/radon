@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { normalizeComboOrder } from "../lib/optionsChainUtils";
+import { getComboEntryAction, normalizeComboOrder } from "../lib/optionsChainUtils";
 
 const SRC = fs.readFileSync(
   path.resolve(__dirname, "../components/ticker-detail/OptionsChainTab.tsx"),
@@ -40,5 +40,30 @@ describe("Combo order sizing", () => {
     expect(SRC).toContain("const normalizedOrder = useMemo(() => (isCombo ? normalizeComboOrder(legs) : null), [isCombo, legs]);");
     expect(SRC).toContain("ratio: l.quantity,");
     expect(SRC).not.toContain("ratio: 1,");
+  });
+
+  it("keeps chain combo entries on BUY so IB preserves the entered leg directions", () => {
+    expect(
+      getComboEntryAction([
+        {
+          id: "EWY_20260327_133_P",
+          action: "SELL",
+          right: "P",
+          strike: 133,
+          expiry: "20260327",
+          quantity: 1,
+          limitPrice: 4.8,
+        },
+        {
+          id: "EWY_20260327_136_C",
+          action: "BUY",
+          right: "C",
+          strike: 136,
+          expiry: "20260327",
+          quantity: 1,
+          limitPrice: 4.55,
+        },
+      ]),
+    ).toBe("BUY");
   });
 });

@@ -18,6 +18,7 @@
 - For `/orders` modify flows, separate "mutate the existing order" from "change the structure of the order." Price and quantity can ride the IB modify path; combo leg edits cannot. If the operator needs to change BAG legs, the UI and API must switch to cancel-and-replace instead of pretending a price-only modify modal is sufficient.
 - When a modal graduates from a single-field dialog to a structured order editor, do not keep it inside the default narrow shell or reuse summary-row flex styles for input rows. Give it a dedicated modal width and field-grid layout as soon as it contains multiple logical sections, or the UI will become technically functional but operationally unusable.
 - When widening a modal for a new editor, do not stop at the shell width. Measure the usable width of each inner panel and compare it to the minimum width implied by the field grid. A modal can be “wide” and still clip badly if a nested grid keeps desktop-style column minimums that exceed the panel it lives in.
+- For IB order modification, never treat an unchanged `Submitted` / `PreSubmitted` status as proof that the modify succeeded. An already-open order starts in `Submitted`, so success must be confirmed against a refreshed open-order snapshot that reflects the requested price or quantity; otherwise the API can report a false positive that the `/orders` UI later contradicts.
 
 ## 2026-03-16
 

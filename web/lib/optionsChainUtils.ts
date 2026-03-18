@@ -93,6 +93,25 @@ export type NormalizedComboOrder = {
   legs: OrderLeg[];
 };
 
+export function getComboEntryAction(_legs: OrderLeg[]): "BUY" {
+  // IB combo legs already encode the intended structure.
+  // The BAG envelope must stay BUY for entry orders or IB reverses the leg actions.
+  return "BUY";
+}
+
+export function getOrderBuilderStructureKey(legs: OrderLeg[]): string {
+  return legs
+    .map((leg) => [
+      leg.id,
+      leg.action,
+      leg.right,
+      leg.strike,
+      leg.expiry,
+      Math.max(1, Math.trunc(leg.quantity)),
+    ].join(":"))
+    .join("|");
+}
+
 export function normalizeComboOrder(legs: OrderLeg[]): NormalizedComboOrder {
   if (legs.length === 0) return { quantity: 1, legs: [] };
 
