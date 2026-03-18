@@ -115,6 +115,9 @@ function resolveOrderPriceData(
   }
 
   // BAG: compute net bid/ask/mid from combo legs (order data or portfolio fallback)
+  // Natural market calculation:
+  //   netBid = proceeds if we SELL at market (receive bid on BUY legs, pay ask on SELL legs)
+  //   netAsk = cost if we BUY at market (pay ask on BUY legs, receive bid on SELL legs)
   if (c.secType === "BAG") {
     let netBid = 0;
     let netAsk = 0;
@@ -143,9 +146,16 @@ function resolveOrderPriceData(
         });
         const lp = prices[key];
         if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
+        
+        // Natural market: BUY leg = pay ask / receive bid, SELL leg = receive bid / pay ask
+        if (cl.action === "BUY") {
+          netAsk += lp.ask;  // To BUY combo: pay ask on BUY legs
+          netBid += lp.bid;  // To SELL combo: receive bid on BUY legs
+        } else {
+          netAsk -= lp.bid;  // To BUY combo: receive bid on SELL legs
+          netBid -= lp.ask;  // To SELL combo: pay ask on SELL legs
+        }
         const sign = cl.action === "BUY" ? 1 : -1;
-        netBid += sign * lp.bid;
-        netAsk += sign * lp.ask;
         netLast += sign * (lp.last ?? (lp.bid + lp.ask) / 2);
       }
       resolved = allAvailable;
@@ -166,9 +176,16 @@ function resolveOrderPriceData(
           if (!key) { allAvailable = false; break; }
           const lp = prices[key];
           if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
+          
+          // Natural market: LONG leg = pay ask / receive bid, SHORT leg = receive bid / pay ask
+          if (leg.direction === "LONG") {
+            netAsk += lp.ask;  // To BUY combo: pay ask on LONG legs
+            netBid += lp.bid;  // To SELL combo: receive bid on LONG legs
+          } else {
+            netAsk -= lp.bid;  // To BUY combo: receive bid on SHORT legs
+            netBid -= lp.ask;  // To SELL combo: pay ask on SHORT legs
+          }
           const sign = leg.direction === "LONG" ? 1 : -1;
-          netBid += sign * lp.bid;
-          netAsk += sign * lp.ask;
           netLast += sign * (lp.last ?? (lp.bid + lp.ask) / 2);
         }
         resolved = allAvailable;
@@ -177,9 +194,9 @@ function resolveOrderPriceData(
 
     if (!resolved) return null;
 
-    // For debit spreads net natural bid < ask; ensure correct ordering
-    const lo = Math.min(netBid, netAsk);
-    const hi = Math.max(netBid, netAsk);
+    // Ensure bid < ask (natural market ordering)
+    const lo = Math.min(Math.abs(netBid), Math.abs(netAsk));
+    const hi = Math.max(Math.abs(netBid), Math.abs(netAsk));
 
     return {
       symbol: c.symbol,

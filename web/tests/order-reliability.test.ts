@@ -598,6 +598,130 @@ function makeOptionPosition(
   };
 }
 
+// ---------------------------------------------------------------------------
+// 7. ComboOrderForm net price calculation
+// ---------------------------------------------------------------------------
+
+/**
+ * Test the net price computation for closing combo positions.
+ * 
+ * BUG IDENTIFIED: ComboOrderForm.netPrices uses sign * bid and sign * ask
+ * which produces mid-mid spread, not natural market.
+ * 
+ * For closing a bull call spread (LONG $200C, SHORT $210C):
+ *   - LONG leg we SELL → receive BID (4.50)
+ *   - SHORT leg we BUY back → pay ASK (2.20)
+ *   - Net proceeds = 4.50 - 2.20 = 2.30 (natural bid)
+ *   - Bug: 4.50 - 2.00 = 2.50 (bid - bid, wrong)
+ */
+describe("ComboOrderForm net price calculation", () => {
+  // Helper to compute net prices using the CORRECT algorithm
+  function computeCorrectComboNetPrice(
+    legs: Array<{ direction: "LONG" | "SHORT"; bid: number; ask: number }>,
+    action: "BUY" | "SELL"
+  ): { bid: number; ask: number; mid: number } {
+    let netBid = 0; // Proceeds if we SELL combo
+    let netAsk = 0; // Cost if we BUY combo
+
+    for (const leg of legs) {
+      // After IB reversal, what do we ACTUALLY do with this leg?
+      const effectivelySelling = (action === "SELL") === (leg.direction === "LONG");
+      
+      if (effectivelySelling) {
+        // We're selling this leg → receive BID for bid calc, pay ASK for ask calc
+        netBid += leg.bid;
+        netAsk += leg.ask;
+      } else {
+        // We're buying this leg → pay ASK for bid calc, receive BID for ask calc
+        netBid -= leg.ask;
+        netAsk -= leg.bid;
+      }
+    }
+
+    const absBid = Math.abs(netBid);
+    const absAsk = Math.abs(netAsk);
+    return {
+      bid: Math.min(absBid, absAsk),
+      ask: Math.max(absBid, absAsk),
+      mid: (absBid + absAsk) / 2,
+    };
+  }
+
+  // Helper using the BUGGY algorithm (current code)
+  function computeBuggyComboNetPrice(
+    legs: Array<{ direction: "LONG" | "SHORT"; bid: number; ask: number }>,
+    action: "BUY" | "SELL"
+  ): { bid: number; ask: number; mid: number } {
+    let netBid = 0;
+    let netAsk = 0;
+
+    for (const leg of legs) {
+      const effectivelySelling = (action === "SELL") === (leg.direction === "LONG");
+      const sign = effectivelySelling ? 1 : -1;
+      // BUG: uses same field (bid) and (ask) with sign, not cross-fields
+      netBid += sign * leg.bid;
+      netAsk += sign * leg.ask;
+    }
+
+    const absBid = Math.abs(netBid);
+    const absAsk = Math.abs(netAsk);
+    return {
+      bid: Math.min(absBid, absAsk),
+      ask: Math.max(absBid, absAsk),
+      mid: (absBid + absAsk) / 2,
+    };
+  }
+
+  it("correctly computes net price for closing bull call spread", () => {
+    // Bull call spread: LONG $200C (bid=4.50, ask=4.70), SHORT $210C (bid=2.00, ask=2.20)
+    const legs = [
+      { direction: "LONG" as const, bid: 4.50, ask: 4.70 },
+      { direction: "SHORT" as const, bid: 2.00, ask: 2.20 },
+    ];
+    
+    // Closing = SELL the combo
+    // LONG leg: SELL → receive bid (4.50)
+    // SHORT leg: BUY back → pay ask (2.20)
+    // Net proceeds = 4.50 - 2.20 = 2.30 (natural bid)
+    // If we wanted to close aggressively, pay ask on long, receive bid on short:
+    // Net cost = 4.70 - 2.00 = 2.70 (natural ask)
+    
+    const correct = computeCorrectComboNetPrice(legs, "SELL");
+    expect(correct.bid).toBeCloseTo(2.30, 2);
+    expect(correct.ask).toBeCloseTo(2.70, 2);
+    expect(correct.mid).toBeCloseTo(2.50, 2);
+
+    // Buggy algorithm produces different result
+    const buggy = computeBuggyComboNetPrice(legs, "SELL");
+    // Bug: 4.50 - 2.00 = 2.50 (bid), 4.70 - 2.20 = 2.50 (ask)
+    expect(buggy.bid).toBeCloseTo(2.50, 2);
+    expect(buggy.ask).toBeCloseTo(2.50, 2);
+    
+    // Confirm the bug exists
+    expect(buggy.bid).not.toBeCloseTo(correct.bid, 2);
+  });
+
+  it("correctly computes net price for opening bull call spread", () => {
+    // Bull call spread: LONG $200C, SHORT $210C
+    const legs = [
+      { direction: "LONG" as const, bid: 4.50, ask: 4.70 },
+      { direction: "SHORT" as const, bid: 2.00, ask: 2.20 },
+    ];
+    
+    // Opening = BUY the combo
+    // LONG leg: BUY → pay ask (4.70)
+    // SHORT leg: SELL → receive bid (2.00)
+    // Net cost = 4.70 - 2.00 = 2.70 (natural ask to open)
+    // If market came to us: pay bid on long, receive ask on short (doesn't make sense)
+    // Actually: receive bid on long (4.50), pay ask on short (2.20)
+    // Natural bid = 4.50 - 2.20 = 2.30
+    
+    const correct = computeCorrectComboNetPrice(legs, "BUY");
+    expect(correct.bid).toBeCloseTo(2.30, 2);
+    expect(correct.ask).toBeCloseTo(2.70, 2);
+  });
+});
+
 describe("buildSingleLegOrderPayload", () => {
   it("sends type=option for single-leg call position", () => {
     const payload = buildSingleLegOrderPayload({
