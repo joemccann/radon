@@ -2625,9 +2625,33 @@ tr.leg-row td {
 .order-submit { margin-top: 4px; }
 .order-confirm-row { display: flex; gap: 8px; }
 .order-confirm-row .btn-primary { flex: 1; font-size: 10px; }
+/* Spread price strip */
+.spread-price-strip { display: flex; gap: 16px; padding: 10px 12px; background: var(--bg-panel); border: 1px solid var(--line-grid); margin-bottom: 12px; }
+.spread-price-item { display: flex; flex-direction: column; gap: 2px; }
+.spread-price-item.spread-price-width { margin-left: auto; }
+.spread-price-label { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.05em; color: var(--text-muted); text-transform: uppercase; }
+.spread-price-value { font-family: var(--font-mono); font-size: 14px; font-weight: 500; color: var(--text-primary); }
+.spread-price-bid { color: var(--positive); }
+.spread-price-ask { color: var(--negative); }
+.spread-pct { font-size: 11px; color: var(--text-muted); font-weight: 400; }
+
+/* Combo leg pills */
+.combo-legs-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+.combo-leg-pill { display: flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 999px; font-family: var(--font-mono); font-size: 11px; }
+.combo-leg-long { background: rgba(34, 197, 94, 0.1); }
+.combo-leg-short { background: rgba(239, 68, 68, 0.1); }
+.combo-leg-dir { font-weight: 600; }
+.combo-leg-long .combo-leg-dir { color: var(--positive); }
+.combo-leg-short .combo-leg-dir { color: var(--negative); }
+.combo-leg-strike { color: var(--text-primary); }
+
+/* Legacy combo leg styles (kept for compatibility) */
 .combo-legs-summary { display: flex; flex-direction: column; gap: 4px; }
 .combo-leg-row { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 11px; padding: 4px 6px; background: var(--bg-elevated); }
 .combo-leg-desc { color: var(--text-secondary); }
+
+/* New order section at top */
+.new-order-section-top { margin-bottom: 16px; }
 
 /* Existing orders in ticker detail */
 .existing-orders-section { margin-bottom: 16px; }

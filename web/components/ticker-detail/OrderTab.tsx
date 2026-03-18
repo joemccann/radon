@@ -480,20 +480,56 @@ function ComboOrderForm({
     }
   }, [confirmStep, ticker, action, parsedQty, parsedPrice, tif, legsWithActions, position.structure, onOrderPlaced]);
 
+  // Calculate spread width for display
+  const spreadWidth = netPrices.bid != null && netPrices.ask != null 
+    ? (netPrices.ask - netPrices.bid).toFixed(2) 
+    : null;
+  const spreadPct = netPrices.mid != null && spreadWidth != null
+    ? ((parseFloat(spreadWidth) / netPrices.mid) * 100).toFixed(1)
+    : null;
+
+  // Calculate order summary for confirmation
+  const totalCost = isValid ? (parsedQty * parsedPrice * 100).toFixed(0) : null;
+
   return (
     <div className="order-form">
-      {/* Leg summary (read-only) */}
+      {/* Spread price strip — always visible at top */}
+      <div className="spread-price-strip">
+        <div className="spread-price-item">
+          <span className="spread-price-label">BID</span>
+          <span className="spread-price-value spread-price-bid">
+            {netPrices.bid != null ? `$${netPrices.bid.toFixed(2)}` : "---"}
+          </span>
+        </div>
+        <div className="spread-price-item">
+          <span className="spread-price-label">MID</span>
+          <span className="spread-price-value">
+            {netPrices.mid != null ? `$${netPrices.mid.toFixed(2)}` : "---"}
+          </span>
+        </div>
+        <div className="spread-price-item">
+          <span className="spread-price-label">ASK</span>
+          <span className="spread-price-value spread-price-ask">
+            {netPrices.ask != null ? `$${netPrices.ask.toFixed(2)}` : "---"}
+          </span>
+        </div>
+        <div className="spread-price-item spread-price-width">
+          <span className="spread-price-label">SPREAD</span>
+          <span className="spread-price-value">
+            {spreadWidth != null ? `$${spreadWidth}` : "---"}
+            {spreadPct != null && <span className="spread-pct"> ({spreadPct}%)</span>}
+          </span>
+        </div>
+      </div>
+
+      {/* Leg summary (compact pills) */}
       <div className="order-field">
         <label className="order-label">Legs</label>
-        <div className="combo-legs-summary">
+        <div className="combo-legs-pills">
           {legsWithActions.map((leg, i) => (
-            <div key={i} className="combo-leg-row">
-              <span className={`pill ${leg.legAction === "SELL" ? "distrib" : "accum"}`} style={{ fontSize: "9px" }}>
-                {leg.legAction}
-              </span>
-              <span className="combo-leg-desc">
-                {leg.type} ${leg.strike}
-              </span>
+            <div key={i} className={`combo-leg-pill ${leg.direction === "LONG" ? "combo-leg-long" : "combo-leg-short"}`}>
+              <span className="combo-leg-dir">{leg.direction === "LONG" ? "+" : "−"}</span>
+              <span className="combo-leg-strike">${leg.strike} {leg.type}</span>
             </div>
           ))}
         </div>
@@ -624,29 +660,30 @@ export default function OrderTab({ ticker, position, portfolio, prices, openOrde
       />
 
       <div className="order-tab">
-        {/* Existing open orders for this ticker */}
-        {openOrders.length > 0 && (
-          <div className="existing-orders-section">
-            <div className="existing-orders-title">Open Orders</div>
-            {openOrders.map((o) => (
-              <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={setModifyTarget} />
-            ))}
-          </div>
-        )}
-
+        {/* NEW ORDER FORM FIRST — always visible above the fold */}
         {/* Combo order form for multi-leg positions */}
         {isCombo && (
-          <div className={openOrders.length > 0 ? "new-order-section" : ""}>
-            {openOrders.length > 0 && <div className="existing-orders-title">Combo Order</div>}
+          <div className="new-order-section-top">
+            <div className="existing-orders-title">Close Position</div>
             <ComboOrderForm ticker={ticker} position={position!} prices={prices} />
           </div>
         )}
 
         {/* Stock / single-leg order form */}
         {!isCombo && (
-          <div className={openOrders.length > 0 ? "new-order-section" : ""}>
-            {openOrders.length > 0 && <div className="existing-orders-title">New Order</div>}
+          <div className="new-order-section-top">
+            <div className="existing-orders-title">{position ? "Close Position" : "New Order"}</div>
             <NewOrderForm ticker={ticker} position={position} tickerPriceData={tickerPriceData} />
+          </div>
+        )}
+
+        {/* Existing open orders for this ticker — below the form */}
+        {openOrders.length > 0 && (
+          <div className="existing-orders-section">
+            <div className="existing-orders-title">Open Orders ({openOrders.length})</div>
+            {openOrders.map((o) => (
+              <ExistingOrderRow key={o.permId || o.orderId} order={o} prices={prices} onModify={setModifyTarget} />
+            ))}
           </div>
         )}
       </div>
