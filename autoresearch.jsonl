@@ -31,3 +31,4 @@
 {"run":31,"commit":"06c4cdf","metric":6213,"metrics":{"single_ms":2020},"status":"keep","description":"Final documentation - optimization complete","timestamp":1773892366719,"segment":0}
 {"run":32,"commit":"68e2619","metric":14325,"metrics":{"single_ms":17789},"status":"keep","description":"Verification run - rate limited (expected variability)","timestamp":1773892460520,"segment":0}
 {"run":33,"commit":"68e2619","metric":32822,"metrics":{"single_ms":17801},"status":"discard","description":"Token bucket rate limiter - doesn't help with UW server-side rate limiting","timestamp":1773893290794,"segment":0}
+{"run":34,"commit":"3ab68db","metric":6213,"metrics":{"single_ms":2020},"status":"keep","description":"Documented rate limiter failure - no solution to UW server-side limits","timestamp":1773893320034,"segment":0}
