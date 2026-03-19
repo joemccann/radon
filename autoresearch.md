@@ -87,9 +87,26 @@ evaluate.py
 - Caused UW rate limiting — worse performance
 - Sequential per-ticker is more reliable
 
-### Key Bottlenecks Remaining
-1. Network variability (UW API, IB Gateway)
-2. M2 flow: 0.87s (5 days × UW calls)
-3. M1 ticker: 0.54s (3 days × UW + flow alerts)
-4. IB batch: 2-6s (connection + data)
+### Experiment 4: --fast Flag (Skip IB Price History) ✅ KEEP
+- Added `--fast` CLI flag to skip IB price history fetch
+- Skips `signal_priced_in` check (rarely triggers in practice)
+- Best case: 6.6s (54% improvement from 14.5s baseline)
+- Worst case: 50s+ due to UW rate limiting
+
+### Experiment 5: Rate Limit Delays ❌ DISCARD
+- Tried 0.3s delay between tickers
+- Doesn't fix rate limiting variability
+- UW API throttles at ~35 requests burst
+
+### Key Findings
+1. **IB connection pooling works** — saves 1.8s × (N-1) tickers
+2. **UW rate limiting is the main variability source** — hitting limits causes 40s+ delays
+3. **--fast mode achieves target** — 7s average when no rate limiting
+4. **Parallel evaluation doesn't work** — UW can't handle 35 concurrent requests
+
+### Bottlenecks Remaining (for future work)
+1. UW rate limiting (need request caching or smarter batching)
+2. M2 flow makes 5+ UW calls per ticker
+3. M1 ticker makes 3+ UW calls per ticker
+4. No request deduplication between evaluations
 

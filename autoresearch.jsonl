@@ -4,3 +4,5 @@
 {"run":3,"commit":"2e09dd8","metric":8506,"metrics":{"single_ms":3164},"status":"keep","description":"Fix single-ticker path, handle None values","timestamp":1773888288593,"segment":0}
 {"run":4,"commit":"2e09dd8","metric":11755,"metrics":{"single_ms":4888},"status":"discard","description":"Parallel eval with 2 workers — worse due to UW rate limiting","timestamp":1773888341706,"segment":0}
 {"run":5,"commit":"2e09dd8","metric":25025,"metrics":{"single_ms":2439},"status":"discard","description":"Reduce M1 to 1 trading day — no improvement (network variability)","timestamp":1773888673673,"segment":0}
+{"run":6,"commit":"6d67146","metric":6657,"metrics":{"single_ms":3425},"status":"keep","description":"--fast flag to skip IB price history (52% improvement, high network variability)","timestamp":1773888924272,"segment":0}
+{"run":7,"commit":"6d67146","metric":9574,"metrics":{"single_ms":5253},"status":"discard","description":"Add 0.3s delay between tickers — doesn't help with rate limiting variability","timestamp":1773889102505,"segment":0}
