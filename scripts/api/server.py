@@ -362,6 +362,15 @@ async def regime_scan():
     return result.data
 
 
+@app.post("/regime/share")
+async def regime_share():
+    """Generate Regime/CRI X share report (4 cards + preview HTML). Returns output path."""
+    result = await run_script("generate_regime_share.py", ["--json", "--no-open"], timeout=120)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data
+
+
 @app.post("/blotter")
 async def blotter_sync():
     """Run IB Flex Query for historical trades. 120s timeout."""
