@@ -242,7 +242,7 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
     const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
     if (current == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
-    if (lp.close != null && lp.close > 0) {
+    if (lp?.close != null && lp.close > 0) {
       wsDailyPnl += sign * (current - lp.close) * leg.contracts * 100;
       closeValue += sign * lp.close * leg.contracts * 100;
       hasClose = true;

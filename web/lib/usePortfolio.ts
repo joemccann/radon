@@ -91,5 +91,21 @@ export function usePortfolio(): UsePortfolioReturn {
     };
   }, [fetchPortfolio, scheduleNext]);
 
+  // Reset backoff & force sync when tab becomes visible again.
+  // Prevents stale data when user returns after FastAPI outage
+  // pushed backoff to 5 min.
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        backoffRef.current = BASE_INTERVAL_MS;
+        if (!syncingRef.current) {
+          scheduleNext(500); // sync almost immediately
+        }
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [scheduleNext]);
+
   return { data, loading, syncing, error, lastSync, syncNow };
 }

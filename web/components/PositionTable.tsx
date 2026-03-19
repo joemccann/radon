@@ -284,18 +284,18 @@ function PositionRow({ pos, showExpiry = true, showStrike = false, showUnderlyin
   const ibDailyPnl = (!isStock && pos.ib_daily_pnl != null) ? pos.ib_daily_pnl : null;
   const effectiveDailyPnl = ibDailyPnl ?? wsDailyPnl;
 
+  // Same-day positions opened today: yesterday's close is meaningless.
+  // Use entry-cost-based P&L instead (Today's P&L = Total P&L).
   const dailyChg = isStock
     ? getDailyChange(realtimePrice)
-    : effectiveDailyPnl != null && wsCloseValue !== 0
-      ? (effectiveDailyPnl / Math.abs(wsCloseValue)) * 100
-      : null;
+    : getOptionDailyChg(pos, prices);
 
-  // Today's P&L in dollars — prefer IB's authoritative number
+  // Today's P&L in dollars
   const todayPnl = isStock
     ? (realtimePrice?.last != null && realtimePrice.last > 0 && realtimePrice?.close != null && realtimePrice.close > 0
         ? (realtimePrice.last - realtimePrice.close) * pos.contracts
         : null)
-    : effectiveDailyPnl;
+    : getTodayPnlDollars(pos, prices);
 
   // For single-leg options, show strike in structure column
   const isSingleLegOption = pos.legs.length === 1 && pos.structure_type !== "Stock";
