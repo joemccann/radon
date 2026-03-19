@@ -379,7 +379,8 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
     }
 
 
-def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] = None) -> Dict:
+def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] = None, 
+               skip_options_flow: bool = False) -> Dict:
     """Full flow analysis: dark pool prints + options flow alerts.
 
     Fetches dark pool data for each of the last N TRADING days and aggregates,
@@ -397,6 +398,7 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
         ticker: Stock symbol
         lookback_days: Number of trading days to fetch (default 5)
         _client: Optional UWClient to reuse (avoids connection overhead)
+        skip_options_flow: If True, skip flow_alerts API call (saves 1 call/ticker)
     """
     ticker = ticker.upper()
 
@@ -424,6 +426,9 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
                 day_analysis["date"] = date
                 daily_signals.append(day_analysis)
                 all_dp_trades.extend(trades)
+        # Skip flow_alerts if not needed (saves API call for scanning)
+        if skip_options_flow:
+            return []
         return fetch_flow_alerts(ticker, _client=client)
 
     # Use provided client or create new one

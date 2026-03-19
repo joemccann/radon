@@ -32,6 +32,7 @@ function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): Nak
       structure_type: p.structure_type,
       contracts: p.contracts,
       direction: p.direction,
+      expiry: p.expiry,
       legs: p.legs.map((l) => ({
         direction: l.direction,
         type: l.type,

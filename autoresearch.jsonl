@@ -2,3 +2,4 @@
 {"run":40,"commit":"e77000c","metric":51293,"metrics":{"per_ticker_ms":2699},"status":"keep","description":"Baseline: 51s for 19 tickers (~2.7s/ticker)","timestamp":1773927362684,"segment":1}
 {"run":41,"commit":"40d360a","metric":8312,"metrics":{"per_ticker_ms":437},"status":"keep","description":"3 days instead of 5 + shared client + 5 workers — 84% improvement when not rate limited","timestamp":1773927779239,"segment":1}
 {"run":42,"commit":"b3807e2","metric":3959,"metrics":{"per_ticker_ms":208},"status":"keep","description":"NEW BEST: 4s — 92% improvement when UW not rate limiting","timestamp":1773927793029,"segment":1}
+{"run":43,"commit":"5d2222b","metric":3959,"metrics":{"per_ticker_ms":208},"status":"keep","description":"Optimization complete — 92% improvement","timestamp":1773927890871,"segment":1}

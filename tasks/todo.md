@@ -1,5 +1,25 @@
 # TODO
 
+## Session: Fix CROX Bull Call Spread Pricing On Portfolio Positions (2026-03-19)
+
+### Goal
+Trace why the CROX bull call spread row on `/portfolio` can render an inflated spread last price and market value, following the path from IB-synced portfolio data through the realtime quote/provider boundary into the frontend row math. Reproduce the stale-leg pricing bug with regression coverage, implement the minimal shared fix so multi-leg rows reject stale option last trades outside the live market, and verify the corrected rendering locally.
+
+### Dependency Graph
+- T1 (Trace the CROX spread data path across IB sync, realtime quote payloads, and the portfolio row calculation to identify the exact stale-price failure mode) depends_on: []
+- T2 (Add failing regression coverage for CROX-style stale option leg lasts at the shared pricing/unit layer and browser row layer) depends_on: [T1]
+- T3 (Implement the minimal shared fix so multi-leg portfolio rows and related spread pricing helpers use guarded realtime option marks instead of stale out-of-market lasts) depends_on: [T2]
+- T4 (Run focused verification, confirm the corrected CROX row rendering locally, and document review notes) depends_on: [T3]
+
+### Checklist
+- [ ] T1 Trace the CROX spread data path across IB sync, realtime quote payloads, and the portfolio row calculation to identify the exact stale-price failure mode
+- [ ] T2 Add failing regression coverage for CROX-style stale option leg lasts at the shared pricing/unit layer and browser row layer
+- [ ] T3 Implement the minimal shared fix so multi-leg portfolio rows and related spread pricing helpers use guarded realtime option marks instead of stale out-of-market lasts
+- [ ] T4 Run focused verification, confirm the corrected CROX row rendering locally, and document review notes
+
+### Review
+- Pending.
+
 ## Session: Fix False Naked-Short Warning On WULF Close Order (2026-03-19)
 
 ### Goal
@@ -14,11 +34,20 @@ Fix the WULF ticker order tab so selling the currently-held long Jan 2027 $17 ca
 ### Checklist
 - [x] T1 Trace the WULF close-position data path from IB-backed portfolio data through the naked-short guard, order tab, and place-order route to reproduce the false warning
 - [x] T2 Add failing regression coverage for the false-positive close-position block at the guard, API, and browser layers
-- [ ] T3 Implement the root-cause fix so selling an owned option contract to close is allowed while true naked short openings stay blocked
-- [ ] T4 Run focused verification, confirm the browser flow on the WULF order tab, and document review notes
+- [x] T3 Implement the root-cause fix so selling an owned option contract to close is allowed while true naked short openings stay blocked
+- [x] T4 Run focused verification, confirm the browser flow on the WULF order tab, and document review notes
 
 ### Review
-- Pending
+- Root cause trace:
+  - Third-party/provider boundary: Interactive Brokers sync already persisted the held WULF Jan 2027 $17 long call in [portfolio.json](/Users/joemccann/dev/apps/finance/radon/data/portfolio.json) with the exact closeable contract identity: ticker `WULF`, expiry `2027-01-15`, strike `17`, right `Call`, quantity `77`.
+  - Frontend boundary: [TickerDetailContent.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/TickerDetailContent.tsx) correctly resolved that held contract from `?posId=23`, and [OrderTab.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/ticker-detail/OrderTab.tsx) correctly built a `type:"option"` `SELL` payload for that exact WULF call when the operator switched the action to `SELL`.
+  - Shared-guard/backend boundary: [nakedShortGuard.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/nakedShortGuard.ts) treated every single-leg `SELL` call as a new short call that must be stock-covered. It had no concept of consuming a matching held long option first, and the client-side [toNakedShortPortfolio](/Users/joemccann/dev/apps/finance/radon/web/components/ticker-detail/OrderTab.tsx) adapter also dropped `expiry`, so both the reactive warning and [POST /api/orders/place](/Users/joemccann/dev/apps/finance/radon/web/app/api/orders/place/route.ts) misclassified the WULF close order as naked.
+- Fixed [nakedShortGuard.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/nakedShortGuard.ts) so single-leg `SELL` calls and open-order audits first consume matching held long option contracts by exact identity (`ticker + expiry + strike + right`) before applying stock-coverage naked-short checks. True uncovered residual call exposure is still blocked.
+- Fixed [OrderTab.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/ticker-detail/OrderTab.tsx) so the client-side guard portfolio preserves `expiry`, allowing the reactive warning path to match the actual held option contract instead of collapsing all WULF calls to ticker-level exposure.
+- Locked the regression in [naked-short-guard.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/naked-short-guard.test.ts), [order-place-close-held-option.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/order-place-close-held-option.test.ts), and [wulf-close-order-naked-short.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/wulf-close-order-naked-short.spec.ts).
+- Focused verification passed with:
+  - `npx vitest run web/tests/naked-short-guard.test.ts web/tests/order-place-close-held-option.test.ts --config vitest.config.ts`
+  - `cd web && npx playwright test e2e/wulf-close-order-naked-short.spec.ts`
 
 ## Session: Fix Incorrect Positive Day Move On Account Dashboard (2026-03-19)
 
@@ -40,21 +69,23 @@ Trace why the account dashboard's Day Move can render as positive when the under
 ### Review
 - Root-cause trace:
   - Third-party provider boundary: Interactive Brokers already exposes authoritative daily P&L through `reqPnL()` at the account level and `reqPnLSingle()` at the position level. In the live snapshot, WULF carried negative `ib_daily_pnl` while the account summary `daily_pnl` was also negative, so IB itself was not the source of the positive sign.
-  - Backend shaping boundary: [ib_sync.py](/Users/joemccann/dev/apps/finance/radon/scripts/ib_sync.py) persists per-position `ib_daily_pnl` into [portfolio.json](/Users/joemccann/dev/apps/finance/radon/data/portfolio.json). For WULF, that field stayed negative even when the option’s current mark was above the prior close, because IB correctly uses fill basis for same-day adds rather than treating them as overnight inventory.
-  - Frontend calculation boundary: [dayMoveBreakdown.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/dayMoveBreakdown.ts) already preferred `ib_daily_pnl` for option rows in the dirty worktree, but the stock path still recomputed `(last - close) * shares` unconditionally. That left the helper internally inconsistent and allowed intraday stock adds to drift from IB semantics.
-  - Frontend render boundary: [MetricCards.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/MetricCards.tsx) used compact signed formatting for the Day Move and Total cards. The live bundle had been rendering negative compact values without an explicit minus in that path, which made negative day P&L read as unsigned/positive at a glance.
+  - Backend shaping boundary: [ib_sync.py](/Users/joemccann/dev/apps/finance/radon/scripts/ib_sync.py) persists both the correct per-position `ib_daily_pnl` and the synced option mark into [portfolio.json](/Users/joemccann/dev/apps/finance/radon/data/portfolio.json). For WULF, the cached position showed `ib_daily_pnl < 0` and `market_price ≈ 4.475`, which already contradicted the positive Day Move in the browser.
+  - Live quote boundary: the realtime websocket feed for `WULF_20270115_17_C` was publishing a stale `last=21.015` while the actionable market was `bid=4.20 / ask=4.75 / close=4.78`. That stale last trade was the provider-side anomaly that made the WULF row and any naive `last-close` math explode positive.
+  - Frontend render boundary: [MetricCards.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/MetricCards.tsx) used compact signed formatting for the Day Move and Total cards. The live bundle had been rendering negative compact values without an explicit minus in that path, which made negative day P&L read as unsigned/positive at a glance even when the underlying total was already negative.
+  - Frontend position boundary: [PositionTable.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/PositionTable.tsx) still trusted websocket option `last` ahead of the synced mark, so the WULF row rendered `$21.02` and a six-figure market value instead of the live market around `$4.48` / `$34,458`.
 - Fixes:
-  - Extended [dayMoveBreakdown.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/dayMoveBreakdown.ts) so stock positions now also prefer `pos.ib_daily_pnl` over naive close-based math when IB already supplied authoritative daily P&L.
-  - Normalized the remaining compact-sign rendering in [MetricCards.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/MetricCards.tsx) so negative card values and the total-proof formula always print an explicit minus.
-  - Added regression coverage in [day-move-mid-fallback.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/day-move-mid-fallback.test.ts) for both the stock and option branches, and added browser coverage in [day-move-ib-daily-pnl.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/day-move-ib-daily-pnl.spec.ts) for a WULF-style same-day long call position where `last > prior close` but `ib_daily_pnl < 0`.
+  - Preserved the option-side `ib_daily_pnl` preference in [dayMoveBreakdown.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/dayMoveBreakdown.ts) and routed its “current price” labels through the same stale-last guard used by the portfolio row, so Day Move proof no longer contradicts the live market.
+  - Added [resolveRealtimePrice](/Users/joemccann/dev/apps/finance/radon/web/lib/positionUtils.ts) and wired it into [PositionTable.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/PositionTable.tsx) plus [dayMoveBreakdown.ts](/Users/joemccann/dev/apps/finance/radon/web/lib/dayMoveBreakdown.ts). Options now fall back to the bid/ask midpoint when `last` sits far outside the live market, while stocks still preserve their raw `last`.
+  - Normalized the compact signed rendering in [MetricCards.tsx](/Users/joemccann/dev/apps/finance/radon/web/components/MetricCards.tsx) so negative Day Move and Total cards always print an explicit minus.
+  - Added regression coverage in [prices.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/prices.test.ts) and [day-move-mid-fallback.test.ts](/Users/joemccann/dev/apps/finance/radon/web/tests/day-move-mid-fallback.test.ts) for WULF-style stale option last trades, and browser coverage in [account-day-move-ib-daily-pnl.spec.ts](/Users/joemccann/dev/apps/finance/radon/web/e2e/account-day-move-ib-daily-pnl.spec.ts) for both the Day Move card and the WULF portfolio row.
 - Verification:
-  - Focused unit: `npx vitest run web/tests/day-move-mid-fallback.test.ts --config vitest.config.ts`
-  - Focused browser: `cd web && npx playwright test e2e/day-move-ib-daily-pnl.spec.ts --config playwright.no-server.config.ts`
-  - Live browser fallback verification: the bundled `chrome-cdp` skill script at `/Users/joemccann/.agents/skills/chrome-cdp/scripts/cdp.mjs` is a zero-byte file, so direct CDP automation was unavailable in this runtime. I used the required Playwright fallback against the live app at `http://127.0.0.1:3000/portfolio`, which rendered `Day Move -$22,793`, `Total -$22,793`, and a negative WULF row (`-$3,472.02`) inside the Day Move modal.
+  - Focused unit: `npx vitest run web/tests/prices.test.ts web/tests/day-move-mid-fallback.test.ts --config vitest.config.ts`
+  - Focused browser: `cd web && npx playwright test e2e/account-day-move-ib-daily-pnl.spec.ts --config playwright.config.ts`
+  - Live browser fallback verification: the bundled `chrome-cdp` skill script at `/Users/joemccann/.agents/skills/chrome-cdp/scripts/cdp.mjs` is a zero-byte file, so direct CDP automation was unavailable in this runtime. I used the required Playwright fallback against the live app at `http://127.0.0.1:3000/portfolio`, which rendered `Day Move -$28,458`, `Total -$28,458`, and a live WULF row of `$4.48`, `$34,458`, and `-$3,013`.
   - Full-suite attempts:
-    - `python3 -m pytest -q` is currently blocked by an unrelated import error in `scripts/tests/test_scenario_analysis.py` (`cannot import name 'approx_delta' from 'scenario_analysis'`).
-    - `npx vitest run --config vitest.config.ts` currently has unrelated existing failures in `fastapi-migration.test.ts`, `modify-order-ticker-detail.test.ts`, `naked-short-guard.test.ts`, `order-place-close-held-option.test.ts`, and `prices.test.ts`.
-    - `npm test` at repo root has no `test` script, `cd web && npm test` is misconfigured and finds no tests, and the full Playwright runner currently fails to spawn its configured web server (`spawn /bin/sh ENOENT`). None of those failures were introduced by this Day Move patch.
+    - `python3 -m pytest` is currently blocked by an unrelated import error in `scripts/tests/test_scenario_analysis.py` (`cannot import name 'approx_delta' from 'scenario_analysis'`).
+    - `cd web && npm test` is misconfigured in this checkout and exits with `No test files found`.
+    - `cd web && npm run test:e2e` currently fails before executing specs because its harness cannot spawn the configured shell (`spawn /bin/sh ENOENT`).
 
 ## Session: Fix False Modify Confirmation On `/orders` (2026-03-18)
 

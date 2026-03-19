@@ -144,10 +144,12 @@ export function resolveSpreadPriceData(
     if (!key) return null;
     const lp = prices[key];
     if (!lp || lp.bid == null || lp.ask == null) return null;
+    const resolved = resolveRealtimePrice(lp);
+    if (resolved.price == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
     netBid += sign * lp.bid;
     netAsk += sign * lp.ask;
-    netLast += sign * (lp.last ?? (lp.bid + lp.ask) / 2);
+    netLast += sign * resolved.price;
   }
 
   const lo = Math.min(netBid, netAsk);

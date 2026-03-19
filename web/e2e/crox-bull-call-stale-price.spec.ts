@@ -5,7 +5,7 @@ const PORTFOLIO_MOCK = {
   peak_value: 1_089_652.28,
   last_sync: new Date().toISOString(),
   total_deployed_pct: 3.68,
-  total_deployed_dollars: 40_076.51,
+  total_deployed_dollars: 27_612.88,
   remaining_capacity_pct: 96.32,
   position_count: 1,
   defined_risk_count: 1,
@@ -13,27 +13,40 @@ const PORTFOLIO_MOCK = {
   avg_kelly_optimal: null,
   positions: [
     {
-      id: 23,
-      ticker: "WULF",
-      structure: "Long Call",
-      structure_type: "Long Call",
+      id: 8,
+      ticker: "CROX",
+      structure: "Bull Call Spread $82.5/$95.0",
+      structure_type: "Bull Call Spread",
       risk_profile: "defined",
-      expiry: "2027-01-15",
-      contracts: 77,
-      direction: "LONG",
-      entry_cost: 40_076.51,
-      max_risk: 40_076.51,
-      market_value: 34_457.5,
+      expiry: "2026-04-17",
+      contracts: 163,
+      direction: "DEBIT",
+      entry_cost: 27_612.88,
+      max_risk: 27_612.88,
+      market_value: 26_895,
+      market_price_is_calculated: false,
+      ib_daily_pnl: 1_083.95,
       legs: [
         {
           direction: "LONG",
-          contracts: 77,
+          contracts: 163,
           type: "Call",
-          strike: 17,
-          entry_cost: 40_076.51,
-          avg_cost: 520.4741844,
-          market_price: 4.475,
-          market_value: 34_457.5,
+          strike: 82.5,
+          entry_cost: 33_529.17,
+          avg_cost: 205.70045,
+          market_price: 1.925,
+          market_value: 31_377.5,
+          market_price_is_calculated: false,
+        },
+        {
+          direction: "SHORT",
+          contracts: 163,
+          type: "Call",
+          strike: 95,
+          entry_cost: 5_916.29,
+          avg_cost: 36.29626,
+          market_price: 0.275,
+          market_value: 4_482.5,
           market_price_is_calculated: false,
         },
       ],
@@ -45,6 +58,17 @@ const PORTFOLIO_MOCK = {
   ],
   exposure: {},
   violations: [],
+  account_summary: {
+    net_liquidation: 1_089_652.28,
+    daily_pnl: -58_090.38,
+    unrealized_pnl: -374_253.59,
+    realized_pnl: 0,
+    settled_cash: 206_956.63,
+    maintenance_margin: 248_269.61,
+    excess_liquidity: 474_890.55,
+    buying_power: 1_899_562.19,
+    dividends: 0,
+  },
 };
 
 const ORDERS_EMPTY = {
@@ -56,19 +80,19 @@ const ORDERS_EMPTY = {
 };
 
 const PRICE_FIXTURES = {
-  WULF: {
-    symbol: "WULF",
-    last: 7.91,
+  CROX: {
+    symbol: "CROX",
+    last: 77.96,
     lastIsCalculated: false,
-    bid: 7.9,
-    ask: 7.92,
-    bidSize: 100,
-    askSize: 80,
-    volume: 1_250_000,
-    high: 8.12,
-    low: 7.45,
-    open: 7.61,
-    close: 7.84,
+    bid: 77.9,
+    ask: 78.02,
+    bidSize: 10,
+    askSize: 10,
+    volume: 1_000,
+    high: null,
+    low: null,
+    open: null,
+    close: 73.81,
     week52High: null,
     week52Low: null,
     avgVolume: null,
@@ -80,28 +104,52 @@ const PRICE_FIXTURES = {
     undPrice: null,
     timestamp: new Date().toISOString(),
   },
-  WULF_20270115_17_C: {
-    symbol: "WULF_20270115_17_C",
-    last: 4.47,
+  "CROX_20260417_82.5_C": {
+    symbol: "CROX_20260417_82.5_C",
+    last: 7.8,
     lastIsCalculated: false,
-    bid: 4.2,
-    ask: 4.75,
-    bidSize: 12,
-    askSize: 8,
-    volume: 71,
+    bid: 1.85,
+    ask: 2.0,
+    bidSize: 40,
+    askSize: 40,
+    volume: 0,
     high: null,
     low: null,
     open: null,
-    close: 4.41,
+    close: 2.0,
     week52High: null,
     week52Low: null,
     avgVolume: null,
-    delta: 0.52,
+    delta: null,
     gamma: null,
     theta: null,
     vega: null,
-    impliedVol: 0.88,
-    undPrice: 7.91,
+    impliedVol: null,
+    undPrice: 77.96,
+    timestamp: new Date().toISOString(),
+  },
+  "CROX_20260417_95_C": {
+    symbol: "CROX_20260417_95_C",
+    last: 2.55,
+    lastIsCalculated: false,
+    bid: 0.22,
+    ask: 0.33,
+    bidSize: 40,
+    askSize: 40,
+    volume: 0,
+    high: null,
+    low: null,
+    open: null,
+    close: 0.39,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: 77.96,
     timestamp: new Date().toISOString(),
   },
 };
@@ -145,11 +193,9 @@ async function installMockWebSocket(page: import("@playwright/test").Page) {
         if (message.action !== "subscribe") return;
 
         const updates: Record<string, unknown> = {};
-
         for (const symbol of message.symbols ?? []) {
           if (priceFixtures[symbol]) updates[symbol] = priceFixtures[symbol];
         }
-
         for (const contract of message.contracts ?? []) {
           const expiry = String(contract.expiry).replace(/-/g, "");
           const key = `${String(contract.symbol).toUpperCase()}_${expiry}_${Number(contract.strike)}_${contract.right}`;
@@ -193,22 +239,6 @@ async function stubApis(page: import("@playwright/test").Page) {
       body: JSON.stringify(ORDERS_EMPTY),
     }),
   );
-  await page.route("**/api/orders/place", async (route) => {
-    const payload = await route.request().postDataJSON();
-    await route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
-        status: "ok",
-        orderId: 99123,
-        permId: 88123,
-        initialStatus: "Submitted",
-        message: "Order placed successfully",
-        payload,
-        orders: ORDERS_EMPTY,
-      }),
-    });
-  });
   await page.route("**/api/regime", (route) =>
     route.fulfill({
       status: 200,
@@ -237,27 +267,20 @@ async function stubApis(page: import("@playwright/test").Page) {
   );
 }
 
-test("WULF close-position order tab does not show a false naked-short warning", async ({ page }) => {
+test("portfolio row uses guarded spread marks for CROX instead of stale leg last trades", async ({ page }) => {
   await installMockWebSocket(page);
   await stubApis(page);
 
-  await page.goto("/WULF?posId=23&tab=order");
+  await page.goto("http://127.0.0.1:3000/portfolio");
 
-  await expect(page.locator(".existing-orders-title").first()).toContainText("Close Position");
+  const croxRow = page.locator("table tbody tr").filter({ hasText: "CROX" }).first();
+  await expect(croxRow).toBeVisible();
 
-  await page.getByRole("button", { name: "SELL" }).click();
-  await page.locator(".order-input").fill("77");
-  await page.locator(".modify-price-input").fill("4.47");
-  await expect(page.locator(".order-error").filter({ hasText: /Naked short call/i })).toHaveCount(0);
-
-  const placeButton = page.getByRole("button", { name: "Place Order" });
-  await expect(placeButton).toBeEnabled();
-  await placeButton.click();
-
-  const confirmButton = page.getByRole("button", { name: "Confirm Order" });
-  await expect(confirmButton).toBeEnabled();
-  await confirmButton.click();
-
-  await expect(page.locator(".order-success")).toContainText(/Order placed: SELL 77 WULF/i);
-  await expect(page.locator(".order-error").filter({ hasText: /Naked short call/i })).toHaveCount(0);
+  const cells = croxRow.locator("td");
+  await expect(cells.nth(4)).toContainText("$77.96");
+  await expect(cells.nth(6)).toContainText("C$1.65");
+  await expect(cells.nth(9)).toContainText("$27,613");
+  await expect(cells.nth(10)).toContainText("$26,895");
+  await expect(croxRow).not.toContainText("$5.25");
+  await expect(croxRow).not.toContainText("$85,575");
 });

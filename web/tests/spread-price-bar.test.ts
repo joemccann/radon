@@ -84,6 +84,19 @@ describe("resolveSpreadPriceData", () => {
     expect(result!.last).toBeCloseTo(4.55, 2);
   });
 
+  it("uses guarded leg marks when stale option lasts sit far outside the live market", () => {
+    const prices: Record<string, PriceData> = {
+      "GOOG_20260320_315_C": makePriceData({ symbol: "GOOG_20260320_315_C", bid: 1.85, ask: 2.00, last: 7.80 }),
+      "GOOG_20260320_340_C": makePriceData({ symbol: "GOOG_20260320_340_C", bid: 0.22, ask: 0.33, last: 2.55 }),
+    };
+
+    const result = resolveSpreadPriceData("GOOG", bullCallSpread, prices);
+    expect(result).not.toBeNull();
+    // Long leg resolves to mid 1.925, short leg resolves to mid 0.275.
+    // Net last should reflect the live spread mark, not the stale 7.80 - 2.55 print.
+    expect(result!.last).toBeCloseTo(1.65, 2);
+  });
+
   it("returns null for single-leg positions", () => {
     const singleLeg: PortfolioPosition = {
       ...bullCallSpread,

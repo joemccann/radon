@@ -41,6 +41,7 @@ export type NakedShortPortfolioPosition = {
   structure_type: string;
   contracts: number;
   direction: string;
+  expiry?: string | null;
   legs: {
     direction: "LONG" | "SHORT";
     type: "Call" | "Put" | "Stock";
@@ -97,6 +98,43 @@ function countExistingShortCalls(ticker: string, portfolio: NakedShortPortfolio)
       }
     }
   }
+  return contracts;
+}
+
+function normalizeExpiry(expiry: string | null | undefined): string | null {
+  if (!expiry) return null;
+  const clean = expiry.replace(/-/g, "");
+  return clean.length === 8 ? clean : null;
+}
+
+/** Count long option contracts that match the exact option being sold to close. */
+function countMatchingLongOptionContracts(
+  ticker: string,
+  expiry: string | null | undefined,
+  strike: number | null | undefined,
+  right: "C" | "P" | null | undefined,
+  portfolio: NakedShortPortfolio,
+): number {
+  const normalizedExpiry = normalizeExpiry(expiry);
+  if (!normalizedExpiry || strike == null || !right) return 0;
+
+  const expectedType = right === "C" ? "Call" : "Put";
+  let contracts = 0;
+
+  for (const pos of portfolio.positions) {
+    if (pos.ticker !== ticker) continue;
+    if (normalizeExpiry(pos.expiry) !== normalizedExpiry) continue;
+    for (const leg of pos.legs) {
+      if (
+        leg.direction === "LONG" &&
+        leg.type === expectedType &&
+        leg.strike === strike
+      ) {
+        contracts += leg.contracts;
+      }
+    }
+  }
+
   return contracts;
 }
 
@@ -177,22 +215,38 @@ export function checkNakedShortRisk(
 
     // SELL call → need long shares to cover
     if (order.right === "C") {
+      const closingLongCalls = countMatchingLongOptionContracts(
+        sym,
+        order.expiry,
+        order.strike ?? null,
+        order.right,
+        portfolio,
+      );
+      const remainingShortContracts = Math.max(order.quantity - closingLongCalls, 0);
+      if (remainingShortContracts === 0) {
+        return { allowed: true };
+      }
+
       const shares = countLongShares(sym, portfolio);
       if (shares === 0) {
         return {
           allowed: false,
-          reason: `Naked short call: no long shares held to cover ${sym} calls`,
+          reason: closingLongCalls > 0
+            ? `Naked short call: selling ${order.quantity} calls closes ${closingLongCalls} long contracts but leaves ${remainingShortContracts} uncovered for ${sym}`
+            : `Naked short call: no long shares held to cover ${sym} calls`,
         };
       }
 
       const existingShortCalls = countExistingShortCalls(sym, portfolio);
-      const totalShortContracts = existingShortCalls + order.quantity;
+      const totalShortContracts = existingShortCalls + remainingShortContracts;
       const coveredContracts = Math.floor(shares / 100);
 
       if (totalShortContracts > coveredContracts) {
         return {
           allowed: false,
-          reason: `Short a tail: selling ${order.quantity} calls but only ${shares} shares cover ${coveredContracts} contracts for ${sym}`,
+          reason: closingLongCalls > 0
+            ? `Short a tail: selling ${order.quantity} calls closes ${closingLongCalls} long contracts but still opens ${remainingShortContracts} uncovered calls for ${sym}; ${shares} shares cover ${coveredContracts} contracts`
+            : `Short a tail: selling ${order.quantity} calls but only ${shares} shares cover ${coveredContracts} contracts for ${sym}`,
         };
       }
       return { allowed: true };
@@ -216,13 +270,25 @@ export function auditOpenOrders(
     if (order.contract.secType !== "OPT" || order.contract.right !== "C") continue;
 
     const sym = order.symbol;
+    const closingLongCalls = countMatchingLongOptionContracts(
+      sym,
+      order.contract.expiry,
+      order.contract.strike,
+      order.contract.right === "C" || order.contract.right === "P" ? order.contract.right : null,
+      portfolio,
+    );
+    const remainingShortContracts = Math.max(order.totalQuantity - closingLongCalls, 0);
+    if (remainingShortContracts === 0) continue;
+
     const shares = countLongShares(sym, portfolio);
 
     if (shares === 0) {
       violations.push({
         orderId: order.orderId,
         permId: order.permId,
-        reason: `Naked short call: no long shares held to cover ${sym} calls`,
+        reason: closingLongCalls > 0
+          ? `Naked short call: open SELL closes ${closingLongCalls} long contracts but leaves ${remainingShortContracts} uncovered for ${sym}`
+          : `Naked short call: no long shares held to cover ${sym} calls`,
       });
       continue;
     }
@@ -230,11 +296,13 @@ export function auditOpenOrders(
     const existingShortCalls = countExistingShortCalls(sym, portfolio);
     const coveredContracts = Math.floor(shares / 100);
 
-    if (existingShortCalls + order.totalQuantity > coveredContracts) {
+    if (existingShortCalls + remainingShortContracts > coveredContracts) {
       violations.push({
         orderId: order.orderId,
         permId: order.permId,
-        reason: `Short a tail: selling ${order.totalQuantity} calls but only ${shares} shares cover ${coveredContracts} contracts for ${sym} (${existingShortCalls} already short)`,
+        reason: closingLongCalls > 0
+          ? `Short a tail: open SELL closes ${closingLongCalls} long contracts but still leaves ${remainingShortContracts} uncovered calls for ${sym}; ${shares} shares cover ${coveredContracts} contracts (${existingShortCalls} already short)`
+          : `Short a tail: selling ${order.totalQuantity} calls but only ${shares} shares cover ${coveredContracts} contracts for ${sym} (${existingShortCalls} already short)`,
       });
     }
   }
