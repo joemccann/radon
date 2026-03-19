@@ -8,3 +8,5 @@
 {"run":7,"commit":"6d67146","metric":9574,"metrics":{"single_ms":5253},"status":"discard","description":"Add 0.3s delay between tickers — doesn't help with rate limiting variability","timestamp":1773889102505,"segment":0}
 {"run":8,"commit":"06467eb","metric":40555,"metrics":{"single_ms":3042},"status":"discard","description":"Try 3 tickers — still hit rate limits","timestamp":1773889220529,"segment":0}
 {"run":9,"commit":"db8ef06","metric":6657,"metrics":{"single_ms":3425},"status":"keep","description":"Final: 54% improvement achieved (14.5s → 6.6s best case)","timestamp":1773889249360,"segment":0}
+{"run":10,"commit":"71fe4b5","metric":6336,"metrics":{"single_ms":3058},"status":"keep","description":"Verification run: 56% improvement confirmed","timestamp":1773889270320,"segment":0}
+{"run":11,"commit":"71fe4b5","metric":7954,"metrics":{"single_ms":2081},"status":"discard","description":"Reduce M2 lookback to 3 days — semantic change (could miss 4-5 day patterns)","timestamp":1773889426903,"segment":0}

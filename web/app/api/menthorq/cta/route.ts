@@ -266,12 +266,9 @@ function triggerBackgroundSync(expectedDate: string): void {
 }
 
 export async function GET(): Promise<Response> {
-  const defaultExpectedDate = latestClosedTradingDay();
+  const expectedDate = latestClosedTradingDay();
   const latest = await readLatestCta();
-  const syncHealth = await readSyncHealth(defaultExpectedDate);
-  const expectedDate = syncHealth?.target_date && syncHealth.target_date > defaultExpectedDate
-    ? syncHealth.target_date
-    : defaultExpectedDate;
+  const syncHealth = await readSyncHealth(expectedDate);
   const latestAvailableDate = latest.data.date
     ?? latest.latestFile?.replace(/^cta_/, "").replace(/\.json$/, "")
     ?? null;

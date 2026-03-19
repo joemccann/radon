@@ -99,7 +99,7 @@ def classify_sync_error(stderr: str) -> tuple[str, str]:
     message = sanitize_sync_message(stderr)
     lowered = message.lower()
 
-    if "username or password was incorrect" in lowered or "login failed" in lowered:
+    if "username or password was incorrect" in lowered or "login failed" in lowered or "unauthorized" in lowered:
         return "auth_rejected", message
     if "captcha" in lowered or "verify you are human" in lowered or "cloudflare" in lowered:
         return "challenge_page", message

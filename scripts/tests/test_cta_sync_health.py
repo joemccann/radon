@@ -18,6 +18,21 @@ def test_classify_auth_rejection():
     assert "username or password was incorrect" in message
 
 
+def test_classify_unauthorized_page():
+    """Detect 'You are unauthorized' MenthorQ page as auth_rejected."""
+    stderr = "No img src found for card slug: cta_table You are unauthorized to view this page"
+    error_type, message = classify_sync_error(stderr)
+    assert error_type == "auth_rejected"
+    assert "unauthorized" in message.lower()
+
+
+def test_classify_unauthorized_short():
+    """Even short 'unauthorized' substring should trigger auth_rejected."""
+    stderr = "page_excerpt=You are unauthorized to view this page. Email Password"
+    error_type, message = classify_sync_error(stderr)
+    assert error_type == "auth_rejected"
+
+
 def test_classify_timeout():
     stderr = "Timeout 30000ms exceeded while waiting for networkidle"
     error_type, message = classify_sync_error(stderr)

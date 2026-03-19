@@ -505,13 +505,23 @@ class MenthorQClient:
         Uses ``domcontentloaded`` instead of ``networkidle`` because
         chart-heavy pages (EOD, dashboards) have persistent network
         activity that prevents networkidle from resolving.
+
+        Detects mid-session auth expiry: if MenthorQ redirects to the
+        login page, re-authenticates and retries the navigation once.
         """
         query = "&".join(f"{k}={v}" for k, v in params.items())
         url = f"{BASE_URL}?{query}"
         logger.info(f"Navigating to: {url}")
         self._page.goto(url, wait_until="domcontentloaded", timeout=60000)
-        # Allow dynamic content (charts, cards) to render after DOM ready
         time.sleep(5)
+
+        current_url = (self._page.url or "").lower()
+        if "/login" in current_url or "/wp-login" in current_url:
+            logger.warning("Session expired mid-flow — re-authenticating")
+            self._login()
+            self._page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            time.sleep(5)
+
         return self._page
 
     # ══════════════════════════════════════════════════════════════

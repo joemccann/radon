@@ -464,7 +464,7 @@ def _run_parallel_milestones(ticker: str, bankroll: float, skip_ib: bool = False
         return ("M1B", fetch_seasonality(ticker))
 
     def _m1c():
-        return ("M1C", fetch_analyst_ratings(ticker, use_cache=False))
+        return ("M1C", fetch_analyst_ratings(ticker, use_cache=True))
 
     def _m2():
         return ("M2", fetch_flow(ticker))

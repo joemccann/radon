@@ -145,6 +145,47 @@ describe("GET /api/menthorq/cta — freshness contract", () => {
     expect(mockSpawn).not.toHaveBeenCalled();
   });
 
+  it("ignores a stale sync health target_date that is ahead of the computed trading day", async () => {
+    // Bug reproduction: sync health had target_date "2026-03-12" from a previous
+    // bad run, but the actual latest closed trading day is "2026-03-11".
+    // The route must use the computed date, not the stale sync health override.
+    mockReaddir.mockResolvedValue(["cta_2026-03-10.json"]);
+    mockReadFile.mockImplementation(async (path: string | Buffer | URL) => {
+      const target = String(path);
+      if (target.includes("cta-sync.json")) {
+        return JSON.stringify({
+          service: "cta-sync",
+          state: "degraded",
+          target_date: "2026-03-12",
+          latest_available_date: "2026-03-10",
+          last_attempt_started_at: "2026-03-12T02:55:58Z",
+          last_error: { type: "unexpected_failure", message: "S3 download failed" },
+          attempt_count: 1,
+        });
+      }
+      return JSON.stringify(makeCtaPayload("2026-03-10"));
+    });
+    mockStat.mockResolvedValue({
+      mtimeMs: makeMtime(86_400).getTime(),
+      mtime: makeMtime(86_400),
+    });
+
+    const { GET } = await import("../app/api/menthorq/cta/route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    // Key assertion: target_date must be the computed "2026-03-11", NOT the
+    // stale sync health "2026-03-12"
+    expect(body.cache_meta.target_date).toBe("2026-03-11");
+    expect(body.cache_meta.is_stale).toBe(true);
+    expect(body.cache_meta.stale_reason).toBe("behind_target");
+    expect(mockSpawn).toHaveBeenCalledOnce();
+    // Background sync should use the correct date
+    const [, args] = mockSpawn.mock.calls[0] as [string, string[]];
+    expect(args).toContain("2026-03-11");
+  });
+
   it("returns a degraded 503 response with stale metadata when no CTA cache exists yet", async () => {
     mockReaddir.mockResolvedValue([]);
     mockReadFile.mockRejectedValue(new Error("ENOENT"));
