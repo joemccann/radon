@@ -27,12 +27,15 @@ export function resolveRealtimePrice(
   const ask = isPositiveNumber(priceData?.ask) ? priceData.ask : null;
 
   if (last != null) {
+    // For options (symbol contains "_"): when last is outside the bid-ask
+    // spread, the last trade is stale and the live bid/ask better reflects
+    // current value. Use mid instead. This catches cases like IWM weeklies
+    // where last=3.24 but bid=3.49/ask=3.53 — displaying 3.24 is misleading.
     if (priceData?.symbol?.includes("_") && bid != null && ask != null) {
       const lo = Math.min(bid, ask);
       const hi = Math.max(bid, ask);
-      const mid = Number(((bid + ask) / 2).toFixed(4));
-      const divergence = Math.abs(mid - last) / last;
-      if ((last < lo || last > hi) && divergence > 0.2) {
+      if (last < lo || last > hi) {
+        const mid = Number(((bid + ask) / 2).toFixed(4));
         return { price: mid, isCalculated: true };
       }
     }

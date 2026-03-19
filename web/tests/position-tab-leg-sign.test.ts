@@ -133,12 +133,14 @@ describe("PositionTab leg sign display", () => {
 
     const longRow = screen.getByText("LONG").closest("tr");
     expect(longRow?.textContent).toContain("$3.46");
-    expect(longRow?.textContent).toContain("$3.63");
+    // last=3.63 > ask=3.46 → resolveRealtimePrice uses mid=(3.40+3.46)/2=3.43
+    expect(longRow?.textContent).toContain("$3.43");
     expect(longRow?.querySelector("td.positive")).not.toBeNull();
 
     const shortRow = screen.getByText("SHORT").closest("tr");
     expect(shortRow?.textContent).toContain("-$3.57");
-    expect(shortRow?.textContent).toContain("-$3.88");
+    // last=3.88 > ask=3.86 → resolveRealtimePrice uses mid=(3.80+3.86)/2=3.83
+    expect(shortRow?.textContent).toContain("-$3.83");
     expect(shortRow?.querySelector("td.negative")).not.toBeNull();
   });
 });
