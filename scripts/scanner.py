@@ -147,8 +147,8 @@ def _process_ticker(item: dict, client=None) -> dict:
     try:
         # Pass client to fetch_flow if provided
         # Use 5 days to match evaluate.py edge criteria (sustained direction detection)
-        # Include options flow to detect conflicts (matches evaluate.py criteria)
-        flow = fetch_flow_module(ticker, lookback_days=5, _client=client, skip_options_flow=False)
+        # Skip options flow for speed — evaluate.py does full conflict detection
+        flow = fetch_flow_module(ticker, lookback_days=5, _client=client, skip_options_flow=True)
         analysis = analyze_signal(flow)
         return {
             "ticker": ticker,
