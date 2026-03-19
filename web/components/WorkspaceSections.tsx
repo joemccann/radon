@@ -440,9 +440,15 @@ function groupExecutedOrders(
       ? bagFills.reduce((sum, f) => sum + f.quantity, 0)
       : optFills.reduce((sum, f) => sum + f.quantity, 0);
 
-    const netPrice = bagFills.length > 0 && bagFills[0].avgPrice != null
-      ? bagFills[0].avgPrice
-      : null;
+    // Net price: BAG fill has the combo price, single-leg uses weighted avg
+    let netPrice: number | null = null;
+    if (bagFills.length > 0 && bagFills[0].avgPrice != null) {
+      netPrice = bagFills[0].avgPrice;
+    } else if (optFills.length > 0) {
+      const totalQty = optFills.reduce((s, f) => s + f.quantity, 0);
+      const weightedSum = optFills.reduce((s, f) => s + (f.avgPrice ?? 0) * f.quantity, 0);
+      netPrice = totalQty > 0 ? Number((weightedSum / totalQty).toFixed(4)) : null;
+    }
 
     const totalCommission = optFills.reduce((sum, f) => sum + (f.commission ?? 0), 0);
     const totalPnL = isClosing
