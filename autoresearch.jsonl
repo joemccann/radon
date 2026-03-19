@@ -19,3 +19,4 @@
 {"run":18,"commit":"b0fc647","metric":7971,"metrics":{"single_ms":2229},"status":"keep","description":"Good run: 8.0s multi, 2.2s single (best single ticker so far)","timestamp":1773890358022,"segment":0}
 {"run":19,"commit":"46a832c","metric":7296,"metrics":{"single_ms":9852},"status":"keep","description":"Good multi-ticker run: 7.3s (50% improvement)","timestamp":1773890472511,"segment":0}
 {"run":20,"commit":"2ed070f","metric":7296,"metrics":{"single_ms":2229},"status":"keep","description":"Final summary update: 56% improvement achieved","timestamp":1773890493346,"segment":0}
+{"run":21,"commit":"9796aad","metric":8317,"metrics":{"single_ms":3345},"status":"keep","description":"Reduce M1 to 1 trading day validation — saves 2 API calls/ticker","timestamp":1773890729457,"segment":0}

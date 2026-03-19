@@ -141,6 +141,12 @@ evaluate.py
 - Single ticker improved: 2.3s vs 2.8s baseline
 - Deduplicates M1/M2 overlapping darkpool requests (3 days overlap)
 
+### Experiment 9: Reduce M1 Ticker Validation to 1 Day ✅ KEEP
+- Changed from 3 trading days to 1 trading day for validation
+- Saves 2 UW API calls per ticker
+- For validation, 1 day of activity is sufficient to confirm ticker exists
+- M2 flow still uses 5 days for edge determination
+
 ### Bottlenecks Remaining (for future work)
 1. **UW rate limiting is the dominant factor** — 8s when not limited, 50s+ when limited
 2. M2 flow makes 5+ UW calls per ticker (5 days of darkpool + flow alerts)
