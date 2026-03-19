@@ -11,7 +11,6 @@ import { useOrders } from "@/lib/useOrders";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
-import { useBlotter } from "@/lib/useBlotter";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
 import { usePreviousClose } from "@/lib/usePreviousClose";
 import { type OptionContract, type IndexContract, optionKey, portfolioLegToContract, uniqueOptionContracts } from "@/lib/pricesProtocol";
@@ -178,9 +177,6 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
 
   // Backfill missing previous-close from Yahoo Finance / UW for day-change calc
   const prices = usePreviousClose(rawPrices);
-
-  // Blotter (historical flex query — kept for legacy reference)
-  const { data: blotterData } = useBlotter();
 
   // Realized P&L derived from today's session fills (executed_orders), not IB account summary.
   // IB's reqPnL().realizedPnL can include non-trade events and diverges from fill-level data.

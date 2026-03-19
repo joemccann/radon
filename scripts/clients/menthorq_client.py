@@ -301,6 +301,16 @@ class MenthorQClient:
             logger.info("MenthorQ storage state present but no longer authenticated.")
             return False
 
+        # Also check page content — MenthorQ may redirect to account URL but show
+        # "You are unauthorized to view this page" when the session has expired.
+        try:
+            page_text = (self._page.evaluate("() => document.body.innerText") or "").lower()
+            if "unauthorized to view this page" in page_text or ("email" in page_text and "password" in page_text and "log in" in page_text):
+                logger.info("MenthorQ storage state expired (unauthorized content detected).")
+                return False
+        except Exception:
+            pass
+
         logger.info("MenthorQ session restored from saved storage state.")
         return True
 

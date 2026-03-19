@@ -10,8 +10,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import List, Optional, Dict
-import requests
 import time
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 from ib_insync import Fill
 
@@ -23,6 +25,20 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from clients.ib_client import IBClient
+
+
+def _http_get_text(url: str, params: dict, timeout: int = 30) -> str:
+    """Small stdlib HTTP helper so historical fetchers do not require requests."""
+    request_url = f"{url}?{urlencode(params)}"
+    try:
+        with urlopen(request_url, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        raise RuntimeError(f"HTTP {e.code}: {body[:300] or e.reason}") from e
+    except URLError as e:
+        reason = getattr(e, "reason", e)
+        raise RuntimeError(f"Request failed: {reason}") from e
 
 
 class ExecutionFetcher(ABC):
@@ -161,12 +177,11 @@ class FlexQueryFetcher(ExecutionFetcher):
             "q": self.query_id,
             "v": "3",
         }
-        
-        response = requests.get(request_url, params=params)
-        response.raise_for_status()
+
+        response_text = _http_get_text(request_url, params)
         
         # Parse reference code from response
-        root = ET.fromstring(response.text)
+        root = ET.fromstring(response_text)
         status = root.find(".//Status")
         
         if status is None or status.text != "Success":
@@ -187,14 +202,14 @@ class FlexQueryFetcher(ExecutionFetcher):
                 "q": reference_code,
                 "v": "3",
             }
-            
-            response = requests.get(statement_url, params=params)
+
+            response_text = _http_get_text(statement_url, params)
             
             # Check if still processing
-            if "FlexStatementResponse" not in response.text:
+            if "FlexStatementResponse" not in response_text:
                 continue
             
-            return self._parse_xml(response.text)
+            return self._parse_xml(response_text)
         
         raise RuntimeError("Flex Query timed out")
     

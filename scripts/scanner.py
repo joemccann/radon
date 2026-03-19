@@ -131,9 +131,9 @@ def _process_ticker(item: dict, client=None) -> dict:
     ticker = item["ticker"]
     try:
         # Pass client to fetch_flow if provided
-        # Use 3 days for scanning (faster) - full 5 days used in evaluate.py
+        # Use 5 days to match evaluate.py edge criteria (sustained direction detection)
         # Skip options flow - scanner only uses darkpool data for ranking
-        flow = fetch_flow_module(ticker, lookback_days=3, _client=client, skip_options_flow=True)
+        flow = fetch_flow_module(ticker, lookback_days=5, _client=client, skip_options_flow=True)
         analysis = analyze_signal(flow)
         return {
             "ticker": ticker,

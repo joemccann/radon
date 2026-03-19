@@ -1881,7 +1881,7 @@ const blotterExtract = (item: BlotterTrade, key: BlotterSortKey): string | numbe
 };
 
 function HistoricalTradesSection() {
-  const { data, loading, syncing, error, syncNow } = useBlotter();
+  const { data, loading, syncing, error, syncNow } = useBlotter(true);
   const [page, setPage] = useState(0);
 
   const allTrades = useMemo(() => {

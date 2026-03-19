@@ -6,3 +6,4 @@
 {"run":44,"commit":"130d85c","metric":11178,"metrics":{"per_ticker_ms":588},"status":"keep","description":"Skip options flow_alerts in scanner — saves 1 API call per ticker","timestamp":1773928273966,"segment":1}
 {"run":45,"commit":"bd30d0f","metric":3959,"metrics":{"per_ticker_ms":208},"status":"keep","description":"Documentation update — best still 4s (92% improvement)","timestamp":1773928307645,"segment":1}
 {"run":46,"commit":"798cda1","metric":4064,"metrics":{"per_ticker_ms":213},"status":"keep","description":"Verification run — 4s when not rate limited","timestamp":1773928374190,"segment":1}
+{"run":47,"commit":"b6f59d8","metric":7843,"metrics":{"per_ticker_ms":412},"status":"keep","description":"Session verification — 8s typical, optimization complete","timestamp":1773928461887,"segment":1}

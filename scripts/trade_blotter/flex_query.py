@@ -29,13 +29,28 @@ import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Optional
-import requests
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode
+from urllib.request import urlopen
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from models import Execution, Trade, TradeBlotter, Side, SecurityType
-from blotter_service import BlotterService
 from formatting import format_currency, format_pnl
+
+
+def _http_get_text(url: str, params: dict, timeout: int = 30) -> str:
+    """Small stdlib HTTP helper so the CLI works without third-party deps."""
+    request_url = f"{url}?{urlencode(params)}"
+    try:
+        with urlopen(request_url, timeout=timeout) as response:
+            return response.read().decode("utf-8", errors="replace")
+    except HTTPError as e:
+        body = e.read().decode("utf-8", errors="replace") if hasattr(e, "read") else ""
+        raise RuntimeError(f"HTTP {e.code}: {body[:300] or e.reason}") from e
+    except URLError as e:
+        reason = getattr(e, "reason", e)
+        raise RuntimeError(f"Request failed: {reason}") from e
 
 
 class FlexQueryFetcher:
@@ -60,25 +75,21 @@ class FlexQueryFetcher:
             "q": self.query_id,
             "v": "3",
         }
-        
-        try:
-            response = requests.get(request_url, params=params, timeout=30)
-            response.raise_for_status()
-        except requests.exceptions.RequestException as e:
-            raise RuntimeError(f"Failed to request Flex Query: {e}")
+
+        response_text = _http_get_text(request_url, params, timeout=30)
         
         # Parse response
         try:
-            root = ET.fromstring(response.text)
+            root = ET.fromstring(response_text)
         except ET.ParseError:
-            raise RuntimeError(f"Invalid XML response: {response.text[:500]}")
+            raise RuntimeError(f"Invalid XML response: {response_text[:500]}")
         
         status = root.find(".//Status")
         if status is None:
             # Check if it's a direct FlexStatement response
             if root.tag == "FlexQueryResponse" or root.find(".//FlexStatements") is not None:
-                return self._parse_xml(response.text)
-            raise RuntimeError(f"Unexpected response format: {response.text[:500]}")
+                return self._parse_xml(response_text)
+            raise RuntimeError(f"Unexpected response format: {response_text[:500]}")
         
         if status.text != "Success":
             error_msg = root.find(".//ErrorMessage")
@@ -107,20 +118,20 @@ class FlexQueryFetcher:
                 "q": reference_code.text,
                 "v": "3",
             }
-            
+
             try:
-                response = requests.get(statement_url, params=params, timeout=30)
-            except requests.exceptions.RequestException as e:
+                response_text = _http_get_text(statement_url, params, timeout=30)
+            except RuntimeError:
                 print(f"  Attempt {attempt + 1}: Request failed, retrying...")
                 continue
             
             # Check if still processing
-            if "<Status>Success</Status>" not in response.text and "<FlexStatements>" not in response.text:
+            if "<Status>Success</Status>" not in response_text and "<FlexStatements>" not in response_text:
                 print(f"  Attempt {attempt + 1}: Still processing...")
                 continue
             
             print("Report ready. Parsing...")
-            return self._parse_xml(response.text)
+            return self._parse_xml(response_text)
         
         raise RuntimeError("Flex Query timed out after 60 seconds")
     
