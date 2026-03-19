@@ -16,3 +16,4 @@
 {"run":54,"commit":"d8a7673","metric":16811,"metrics":{"per_ticker_ms":884},"status":"keep","description":"Documentation updated — 67% improvement final","timestamp":1773929779161,"segment":1}
 {"run":55,"commit":"49418ad","metric":25704,"metrics":{"per_ticker_ms":1352},"status":"keep","description":"Verification — 26s (50% improvement), optimization complete","timestamp":1773930097974,"segment":1}
 {"run":56,"commit":"3d2420d","metric":25704,"metrics":{"per_ticker_ms":1352},"status":"keep","description":"docs: clarify scan vs evaluate commands in strategies","timestamp":1773930242884,"segment":1}
+{"run":57,"commit":"0487d78","metric":15633,"metrics":{"per_ticker_ms":822},"status":"keep","description":"New best: 15.6s (69% improvement) — optimization complete","timestamp":1773930374672,"segment":1}
