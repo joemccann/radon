@@ -136,6 +136,41 @@ Fix: inspect leg *types*, not just leg *directions*, in `nakedShortGuard.ts` com
 
 ---
 
+## Order System — Unified Components
+
+All order entry forms use shared components from `web/lib/order/`:
+
+| Component | Purpose |
+|-----------|---------|
+| `OrderPriceStrip` | BID/MID/ASK/SPREAD display for combos |
+| `OrderLegPills` | Colored leg pills with +/− direction indicators |
+| `OrderConfirmSummary` | Total cost, max gain/loss in confirm step |
+| `OrderPriceButtons` | Quick-fill BID/MID/ASK buttons |
+| `OrderActionToggle` | BUY/SELL toggle |
+| `OrderTifSelector` | DAY/GTC selector |
+| `OrderQuantityInput` | Quantity input with validation |
+| `OrderPriceInput` | Price input with $ prefix |
+
+**Hooks:** `useOrderPrices`, `useOrderValidation`
+
+**Order entry locations using these components:**
+1. `OrderTab > NewOrderForm` — Stock/single option
+2. `OrderTab > ComboOrderForm` — Multi-leg spreads
+3. `OptionsChainTab > OrderBuilder` — Chain builder
+4. `BookTab > StockOrderForm` — Stock orders
+5. `InstrumentDetailModal` — Single leg orders
+6. `ModifyOrderModal` — Order modification
+
+**OrderConfirmSummary calculations:**
+- Debit spread: `maxLoss = premium`, `maxGain = width - premium`
+- Credit spread: `maxGain = premium`, `maxLoss = width - premium`
+- Single option: `maxLoss = premium` (for buys)
+- Stock: `totalCost = qty × price` (no multiplier)
+
+**Analysis doc:** `web/lib/order/ORDER_SYSTEM_ANALYSIS.md`
+
+---
+
 ## ⚠️ Data Fetching Priority (ALWAYS follow this order)
 
 When fetching ANY market data (quotes, options, fundamentals, analyst ratings, etc.):

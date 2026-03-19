@@ -1,0 +1,12 @@
+{
+  "id": "fact-infra-order-system-unified-components",
+  "key": "infra.order-system-unified-components",
+  "value": "Order system migrated to unified component architecture in web/lib/order/. 8 reusable components: OrderPriceStrip (BID/MID/ASK/SPREAD), OrderLegPills (colored +/\u2212 direction), OrderConfirmSummary (total cost, max gain/loss), OrderPriceButtons, OrderActionToggle, OrderTifSelector, OrderQuantityInput, OrderPriceInput. 2 hooks: useOrderPrices, useOrderValidation. All 6 order entry locations now use these components: OrderTab (New/Combo), ChainBuilder, BookTab, InstrumentModal, ModifyModal. OrderConfirmSummary shows spread max gain/loss calculations (debit: maxLoss=premium, maxGain=width-premium; credit: inverse). Price values now shown in BID/MID/ASK buttons everywhere.",
+  "confidence": 0.98,
+  "source": "order-migration-2026-03-18",
+  "extractedBy": "context-evaluator",
+  "createdAt": "2026-03-19T01:42:49.957418+00:00",
+  "updatedAt": "2026-03-19T01:42:49.957418+00:00",
+  "revisionId": 1,
+  "expiresAt": null
+}
