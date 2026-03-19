@@ -12,3 +12,4 @@
 {"run":11,"commit":"71fe4b5","metric":7954,"metrics":{"single_ms":2081},"status":"discard","description":"Reduce M2 lookback to 3 days — semantic change (could miss 4-5 day patterns)","timestamp":1773889426903,"segment":0}
 {"run":12,"commit":"60157f3","metric":7767,"metrics":{"single_ms":4585},"status":"keep","description":"Enable analyst ratings cache (use_cache=True) — reduces API calls","timestamp":1773889590937,"segment":0}
 {"run":13,"commit":"60157f3","metric":47612,"metrics":{"single_ms":4546},"status":"discard","description":"Reduce thread pool to 4 workers — doesn't help with rate limiting","timestamp":1773889696862,"segment":0}
+{"run":14,"commit":"0118c95","metric":8075,"metrics":{"single_ms":3054},"status":"keep","description":"Documentation update + stable run at 8.0s","timestamp":1773889982487,"segment":0}
