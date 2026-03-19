@@ -65,16 +65,28 @@ export default function CtaPage() {
     setSharing(true);
     setShareError(null);
     try {
+      // Step 1: trigger generation
       const res = await fetch("/api/menthorq/cta/share", { method: "POST" });
-      const data = await res.json();
+      const data = await res.json() as { preview_path?: string; error?: string };
       if (!res.ok) {
         setShareError(data?.error ?? "Share generation failed");
         return;
       }
-      // Open the generated preview file in browser
+      // Step 2: fetch the generated HTML and open as blob URL (avoids file:// CORS)
       const previewPath = data?.preview_path;
       if (previewPath) {
-        window.open(`file://${previewPath}`, "_blank");
+        const htmlRes = await fetch(`/api/menthorq/cta/share/content?path=${encodeURIComponent(previewPath)}`);
+        if (htmlRes.ok) {
+          const html = await htmlRes.text();
+          const blob = new Blob([html], { type: "text/html" });
+          const url = URL.createObjectURL(blob);
+          window.open(url, "_blank");
+          // Clean up after a delay
+          setTimeout(() => URL.revokeObjectURL(url), 60_000);
+        } else {
+          // Fallback: use the OS open command via a server-side trigger
+          setShareError("Preview generated. Open: " + previewPath);
+        }
       }
     } catch (e) {
       setShareError(e instanceof Error ? e.message : "Unknown error");

@@ -10,6 +10,8 @@ Usage:
   python3 scripts/generate_cta_share.py --date 2026-03-19
 """
 
+from __future__ import annotations
+
 import argparse
 import base64
 import json
@@ -19,8 +21,9 @@ import sys
 import tempfile
 from datetime import date, datetime
 from pathlib import Path
+from typing import Optional
 
-PROJECT_ROOT = Path(__file__).parent.parent
+PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 CACHE_DIR = PROJECT_ROOT / "data" / "menthorq_cache"
 REPORTS_DIR = PROJECT_ROOT / "reports"
 REPORTS_DIR.mkdir(exist_ok=True)
@@ -28,7 +31,7 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 # ── Data loading ─────────────────────────────────────────────────────────────
 
-def load_cta(target_date: str | None = None) -> dict:
+def load_cta(target_date: Optional[str] = None) -> dict:
     files = sorted(CACHE_DIR.glob("cta_????-??-??.json"))
     if not files:
         raise FileNotFoundError("No CTA cache files found.")
@@ -42,7 +45,7 @@ def load_cta(target_date: str | None = None) -> dict:
         return json.load(f)
 
 
-def get_row(rows: list, *keywords: str) -> dict | None:
+def get_row(rows: list, *keywords: str) -> Optional[dict]:
     kw_lower = [k.lower() for k in keywords]
     for r in rows:
         name = r["underlying"].lower()
@@ -355,7 +358,7 @@ def card4_bonds(data: dict, ds: str) -> str:
         <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#475569">10-Year T-Note</div>
       </div>
       <div style="background:#0f1519;padding:14px 10px;text-align:center">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:700;color:#E85D6C;margin-bottom:3px">{b30['position_today'] if b30 else '—':.2f}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:24px;font-weight:700;color:#E85D6C;margin-bottom:3px">{f"{b30['position_today']:.2f}" if b30 else '—'}</div>
         <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.08em;color:#475569">30Y T-Bond</div>
       </div>
     </div>
@@ -391,7 +394,7 @@ def screenshot_card(html_path: str, png_path: str) -> bool:
 
 # ── Preview HTML ──────────────────────────────────────────────────────────────
 
-def build_preview(cards_b64: list[str], tweet_text: str, ds: str) -> str:
+def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
     imgs_html = ""
     labels = [
         ("The Coil Is Set · Squeeze Meter", "cta-card-1-squeeze-meter.png"),
