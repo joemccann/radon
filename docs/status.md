@@ -1,9 +1,10 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-18T20:15:00-07:00
+2026-03-19T06:45:00-07:00
 
 ## Recent Commits
+- 2026-03-19 — **fix: CTA staleness — four compounding bugs resolved.** (1) `cta_sync_health.py` glob `cta_*.json` matched `cta_sync_status.json`, corrupting `latest_available_date` to `"sync_status"` — fixed with date-specific glob `cta_????-??-??.json`. (2) Stale lock held by dead PID after SIGKILL — fixed with `_pid_is_alive()` + `_clear_stale_lock()` in `cta_sync_service.py`. (3) API gate `state !== "syncing"` caused permanent deadlock — fixed with `syncingIsStale` (>5 min TTL). (4) `_restore_session()` missed "unauthorized" content at non-login URLs — fixed with page body check. 16 new tests green.
 - 2026-03-18 — **fix: CTA timezone double-conversion bug + stale sync health propagation.** `latestClosedTradingDay()` in route.ts and ctaFreshness.ts used `new Date(localeString)` which JS parses in system TZ (PDT), not ET — 3h offset pushed dates past midnight producing wrong target date (2026-03-19 instead of 2026-03-18). Fixed with `Intl.DateTimeFormat.formatToParts()`. Also: removed sync health target_date override feedback loop, added session-expiry re-auth in MenthorQ `_navigate()`, classified "unauthorized" as retryable auth error. 3 new tests (1 TS + 2 Python), 78 CTA tests green.
 - 2026-03-18 — **feat: Complete Order System Migration (Steps 3-5).** ModifyOrderModal: price strip + leg pills for combos. OrderConfirmSummary: total cost, max gain/loss for spreads in confirm step. Standardized leg pills across ChainBuilder, OrderTab, ModifyModal. Price values in BID/MID/ASK buttons everywhere. 137 order tests.
 - 2026-03-18 — **feat: Integrate OrderPriceStrip and OrderLegPills into OptionsChainTab.** OrderBuilder now shows price strip (BID/MID/ASK/SPREAD) for combo orders when prices available, plus colored leg pills with +/− direction. 137 order tests (21 new migration tests).

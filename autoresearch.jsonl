@@ -11,3 +11,4 @@
 {"run":49,"commit":"4f2961b","metric":29801,"metrics":{"per_ticker_ms":1568},"status":"keep","description":"Documentation updated — 42% improvement is final (signal accuracy preserved)","timestamp":1773928779928,"segment":1}
 {"run":50,"commit":"6b96cd1","metric":25676,"metrics":{"per_ticker_ms":1351},"status":"keep","description":"Session verification — 25.7s best (50% improvement when not rate limited)","timestamp":1773928983152,"segment":1}
 {"run":51,"commit":"120fb25","metric":25676,"metrics":{"per_ticker_ms":1351},"status":"keep","description":"Documentation updated — 50% target achieved","timestamp":1773929017571,"segment":1}
+{"run":52,"commit":"df5ce23","metric":51318,"metrics":{"per_ticker_ms":2700},"status":"keep","description":"Restored options flow for conflict detection — slower but more accurate","timestamp":1773929225130,"segment":1}
