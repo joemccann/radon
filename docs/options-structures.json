@@ -951,10 +951,10 @@
     "has_naked_short_stock": false,
     "short_put_only": true,
     "guard_decision": "ALLOW",
-    "guard_reason": "Combo with both BUY and SELL legs; SELL put is cash-secured",
-    "guard_correct": false,
-    "guard_gap": "CRITICAL GAP: Risk reversal (bullish) has unlimited loss on the short put side if underlying crashes. However, guard allows because it detects both BUY and SELL legs. The short put creates undefined risk that is NOT offset by a long call at a different strike. Guard logic is insufficient for asymmetric risk reversal.",
-    "notes": "ib_sync correctly detects as 'Risk Reversal (undefined risk)' but nakedShortGuard.ts allows it. Guard should either: (1) Block, (2) Require stock collateral for the short put, or (3) Explicitly model the short put assignment liability."
+    "guard_reason": "SELL put is cash-secured \u2192 ALLOW. BUY call \u2192 ALLOW. No naked short call.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Bullish skew trade. Short put is cash-secured (defined risk). Guard correctly allows."
   },
   {
     "name": "Short Risk Reversal",
@@ -985,10 +985,10 @@
     "has_naked_short_stock": false,
     "short_put_only": false,
     "guard_decision": "BLOCK",
-    "guard_reason": "SELL call without stock coverage \u2192 no long shares to cover",
+    "guard_reason": "sellCallRatio=1, buyCallRatio=0, uncoveredRatio=1 \u2192 needs stock coverage. BLOCK if uncovered. Fixed 2026-03-18: combo check now inspects leg types, moved before BUY early-return.",
     "guard_correct": true,
     "guard_gap": null,
-    "notes": "Guard blocks due to naked short call (long put does not cover short call)."
+    "notes": "Synthetic short stock. BUY BAG envelope with legs [SELL C, BUY P]. Guard correctly blocks: SELL C with no matching BUY C \u2192 stock coverage required."
   },
   {
     "name": "Diagonal Call Spread",
@@ -1165,10 +1165,10 @@
     "has_naked_short_stock": false,
     "short_put_only": false,
     "guard_decision": "ALLOW",
-    "guard_reason": "Combo with both BUY and SELL legs \u2192 hedges present",
-    "guard_correct": false,
-    "guard_gap": "CRITICAL GAP: Jade Lizard is defined-gap (no stock), and involves SELL call + SELL put. While guard detects BUY + SELL, it does not verify that the BUY legs are sufficient to cover the SELL legs at ALL price levels. A Jade Lizard with wide SELL strikes may create naked exposure if underlying breaks the long call or long put strikes.",
-    "notes": "Advanced 4-leg structure. Guard allows due to both BUY and SELL present, but risk depends on strike widths and assignment scenarios."
+    "guard_reason": "SELL call offset by BUY call (sellCallRatio==buyCallRatio). SELL put is cash-secured. Guard correctly allows.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "Short put + call spread. The SELL call is covered by the BUY call leg. Short put is cash-secured."
   },
   {
     "name": "Broken Wing Butterfly",
@@ -1890,10 +1890,10 @@
     "has_naked_short_stock": false,
     "short_put_only": true,
     "guard_decision": "ALLOW",
-    "guard_reason": "Combo with BUY call + SELL call + SELL put. BUY and SELL present.",
-    "guard_correct": false,
-    "guard_gap": "CRITICAL GAP: Seagull has a short put with no hedge. The short call is covered by the long call, but the short put is naked. Guard allows because it detects both BUY and SELL, but does not verify that each SELL leg has a corresponding BUY leg of sufficient width.",
-    "notes": "3-leg structure. Long call at highest strike covers short call at middle strike. Short put at lowest strike is unhedged and exposes to assignment below the short strike."
+    "guard_reason": "SELL call offset by BUY call (sellCallRatio==buyCallRatio). SELL put is cash-secured. Guard correctly allows.",
+    "guard_correct": true,
+    "guard_gap": null,
+    "notes": "BUY call + bear call spread + short put. SELL call is covered by BUY call. Short put is cash-secured."
   },
   {
     "name": "Iron Albatross",

@@ -97,7 +97,7 @@ To SELL combo: receive BID on BUY legs, pay ASK on SELL legs
 
 ## ⚠️ Options Structure Catalog — Reference
 
-**Canonical file:** `data/options-structures.json` | **Human reference:** `docs/options-structures.md`
+**Canonical file:** `docs/options-structures.json` | **Human reference:** `docs/options-structures.md`
 
 58 structures across 12 categories. Use for:
 - Order entry: structure classification, default leg actions, bias labels
@@ -106,23 +106,26 @@ To SELL combo: receive BID on BUY legs, pay ASK on SELL legs
 
 **Guard decision quick-reference:**
 ```
-BUY anything          → ALLOW
-SELL put              → ALLOW (cash-secured)
-Vertical spread       → ALLOW (long leg covers short)
-SELL call, covered    → ALLOW (covered call — 100 shares per contract)
-SELL call, naked      → BLOCK
-SELL stock, no shares → BLOCK
-Short risk reversal   → ⚠ GUARD GAP (SELL C + BUY P passes combo check — fix pending)
-Jade Lizard           → ⚠ GUARD GAP (short put tail uncovered at extremes)
-Seagull Spread        → ⚠ GUARD GAP (short put uncovered — fix pending)
+Combo (BAG) orders — checked before BUY early-return (IB BAG always uses BUY envelope):
+  Combo closing (action=SELL)          → ALLOW  (reduces exposure)
+  sellCallRatio == buyCallRatio         → ALLOW  (vertical spread / Jade Lizard / Seagull)
+  sellCallRatio > buyCallRatio          → check stock (BLOCK if uncovered)
+  Only SELL put legs, no SELL calls    → ALLOW  (cash-secured)
+
+Single-leg:
+  BUY anything                         → ALLOW
+  SELL put                             → ALLOW  (cash-secured)
+  SELL call, stock covers              → ALLOW  (covered call)
+  SELL call, naked                     → BLOCK
+  SELL stock, shares ≥ qty             → ALLOW
+  SELL stock, naked                    → BLOCK
 ```
 
-**Known guard gaps** (combo check sees hasBuy && hasSell → ALLOW, but short call is naked):
-1. **Short Risk Reversal** (SELL C + BUY P) — synthetic short stock
-2. **Jade Lizard** (BUY C spread + SELL P) — uncovered put tail
-3. **Seagull Spread** (BUY C + SELL higher C + SELL P) — uncovered short put
-
-Fix: inspect leg *types*, not just leg *directions*, in `nakedShortGuard.ts` combo check.
+**All gaps resolved 2026-03-18** (`web/lib/nakedShortGuard.ts`):
+- Short Risk Reversal (SELL C + BUY P): now correctly **BLOCK** unless stock-covered
+- 1x2 ratio spread (BUY 1C + SELL 2C): now correctly **BLOCK** for uncovered call
+- Jade Lizard / Seagull: correctly **ALLOW** (call spread is covered; were false positives)
+- 21 unit tests passing (see `web/tests/naked-short-guard.test.ts`, tests 14–20)
 
 ---
 

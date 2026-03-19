@@ -185,11 +185,15 @@ curl http://localhost:8321/health
 
 | Scenario | Rule | Action |
 |----------|------|--------|
-| SELL stock, no long shares | Naked short stock | BLOCK + cancel |
-| SELL call, no long shares | Naked short call | BLOCK + cancel |
-| SELL N call contracts, shares < N × 100 | Short a tail | BLOCK + cancel |
-| SELL put (cash-secured) | Allowed | ALLOW |
-| Spread (BUY+SELL legs) | Covered by long leg | ALLOW |
+| SELL stock, no long shares | Naked short stock | BLOCK |
+| SELL call, no long shares | Naked short call | BLOCK |
+| SELL N call contracts, shares < N × 100 | Short a tail | BLOCK |
+| SELL put (cash-secured) | Defined risk | ALLOW |
+| Vertical spread (BUY C + SELL C) | Long call covers short | ALLOW |
+| Short risk reversal (SELL C + BUY P) | Naked short call — long put does not cover | BLOCK |
+| 1x2 ratio spread (BUY 1C + SELL 2C) | 1 uncovered short call | BLOCK (unless stock covers) |
+| Jade Lizard / Seagull (BUY C + SELL C + SELL P) | Call spread covers short call; put is cash-secured | ALLOW |
+| Combo closing (action=SELL) | Reduces exposure | ALLOW |
 | BUY anything | No short exposure | ALLOW |
 
 **Enforcement layers:**
@@ -197,10 +201,10 @@ curl http://localhost:8321/health
 2. **API gate** — `orders/place/route.ts` returns 403 if guard fails
 3. **Post-sync audit** — `naked_short_audit.py` runs after every `ib_sync`, cancels violating open orders
 
-**"Short a tail"**: Selling more call contracts than shares can cover. Example: 500 shares of MSFT + selling 10 call contracts (1000 shares worth) = 5 contracts uncovered = short a tail.
+**Combo check design**: IB BAG orders always use `action=BUY` envelope. Guard inspects leg-level `right` and `action` fields. `sellCallRatio - buyCallRatio` = uncovered short calls. Checked before the BUY early-return.
 
 **Implementation**: `web/lib/nakedShortGuard.ts` (shared guard), `scripts/naked_short_audit.py` (audit + cancel)
-**Tests**: `web/tests/naked-short-guard.test.ts`, `scripts/tests/test_naked_short_audit.py`
+**Tests**: `web/tests/naked-short-guard.test.ts` (21 tests), `scripts/tests/test_naked_short_audit.py`
 
 ---
 
