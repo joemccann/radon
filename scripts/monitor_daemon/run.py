@@ -30,6 +30,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from monitor_daemon.daemon import MonitorDaemon
 from monitor_daemon.handlers import FillMonitorHandler, ExitOrdersHandler, PresetRebalanceHandler
+from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
 
 # Paths
 PROJECT_DIR = Path(__file__).parent.parent.parent
@@ -85,6 +86,8 @@ def create_daemon() -> MonitorDaemon:
     ))
     
     daemon.register(PresetRebalanceHandler())
+    
+    daemon.register(FlexTokenCheck())
     
     # Load previous state
     daemon.load_state()

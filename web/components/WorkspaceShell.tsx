@@ -21,6 +21,7 @@ import MetricCards from "@/components/MetricCards";
 import WorkspaceSections from "@/components/WorkspaceSections";
 import ToastContainer from "@/components/Toast";
 import ConnectionBanner from "@/components/ConnectionBanner";
+import FlexTokenBanner from "@/components/FlexTokenBanner";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 
 type WorkspaceShellProps = {
@@ -335,6 +336,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           ibIssue={ibIssue}
           ibStatusMessage={ibStatusMessage}
         />
+        <FlexTokenBanner />
 
         <div className="content">
           {activeSection === "dashboard" ? <ChatPanel activeSection={activeSection} /> : null}

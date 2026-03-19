@@ -1,0 +1,15 @@
+{
+  "token_masked": "4613...6358",
+  "activated_at": "2026-03-19T19:16:57-04:00",
+  "expires_at": "2027-02-18T19:16:57-05:00",
+  "renewal_url": "https://portal.interactivebrokers.com/AccountManagement/AmAuthentication?action=FlexQueries#!#cadd80dc-45ac-4f6e-be5b-e55beb8d6dc8",
+  "breadcrumb": "Performance & Reports \u2192 Flex Queries \u2192 Flex Queries Delivery \u2192 Flex Queries \u2192 Configure Flex Web Service",
+  "reminder_days": [
+    30,
+    14,
+    7,
+    1
+  ],
+  "reminders_sent": {},
+  "notes": "Token valid for ~11 months (2026-03-19 to 2027-02-18). Regenerate before expiry at the renewal_url. After regenerating, update IB_FLEX_TOKEN in ~/.zshrc and this file."
+}
