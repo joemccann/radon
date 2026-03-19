@@ -94,10 +94,22 @@ python3 scripts/fetch_options.py [TICKER]
 - **Time decay**: Close if <5 DTE with no momentum
 - **Signal reversal**: Flow direction flips
 
+### Commands: Scan vs Evaluate
+
+| Command | Data Fetched | Purpose | Speed |
+|---------|-------------|---------|-------|
+| `scan` | Dark pool only (5 days) | Quick ranking of watchlist | ~17-25s for 19 tickers |
+| `evaluate [TICKER]` | Dark pool + options flow + OI + news + analysts | Full trade decision | ~6-15s per ticker |
+| `discover` | Flow alerts market-wide | Find new candidates | Variable |
+
+**Key difference**: `scan` skips options flow for speed. It ranks tickers by dark pool signal strength but does NOT detect conflicts with options flow. Use `evaluate` for trade decisions — it does full 7-milestone analysis including conflict detection.
+
+**Workflow**: `scan` → identify top candidates → `evaluate [TICKER]` → trade decision
+
 ### Scripts
 
 ```bash
-# Scan watchlist for flow signals
+# Scan watchlist for flow signals (dark pool only, fast)
 python3 scripts/scanner.py
 
 # Discover new candidates market-wide (default)

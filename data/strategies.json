@@ -11,6 +11,11 @@
     "target_rr": "≥2:1",
     "risk_type": "defined",
     "commands": ["scan", "evaluate [TICKER]", "discover"],
+    "command_details": {
+      "scan": "Quick dark pool ranking — fetches 5-day dark pool data only, skips options flow for speed. Use to identify candidates.",
+      "evaluate": "Full 7-milestone analysis — dark pool + options flow + OI changes + news/catalysts + analyst ratings. Detects conflicts between dark pool and options flow. Use for trade decisions.",
+      "discover": "Market-wide candidate discovery — scans flow alerts across all tickers, excludes watchlist/portfolio."
+    },
     "doc": "docs/strategies.md"
   },
   {
