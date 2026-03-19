@@ -10,6 +10,7 @@ import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
+import { OrderConfirmSummary, type OrderSummary } from "@/lib/order";
 
 type OrderTabProps = {
   ticker: string;
@@ -248,6 +249,24 @@ function NewOrderForm({
   const parsedPrice = parseFloat(limitPrice);
   const isValid = !isNaN(parsedQty) && parsedQty > 0 && !isNaN(parsedPrice) && parsedPrice > 0;
 
+  // Calculate order summary for confirmation (single leg: stock or single option)
+  const orderSummary: OrderSummary | null = useMemo(() => {
+    if (!isValid) return null;
+    
+    const isOption = position?.legs?.length === 1;
+    const multiplier = isOption ? 100 : 1;
+    const totalCost = parsedQty * parsedPrice * multiplier;
+    const type = isOption ? position?.structure ?? "Option" : "Stock";
+    const description = `${action} ${parsedQty}${isOption ? "x" : ""} ${ticker} ${type} @ ${fmtPrice(parsedPrice)}`;
+    
+    return {
+      description,
+      totalCost: action === "SELL" ? -totalCost : totalCost,
+      // Single options: max loss = premium paid (for buys)
+      ...(isOption && action === "BUY" ? { maxLoss: totalCost } : {}),
+    };
+  }, [isValid, parsedQty, parsedPrice, action, ticker, position]);
+
   // Naked short guard — reactive warning when action is SELL
   const nakedShortWarning = useMemo(() => {
     if (action !== "SELL") return null;
@@ -386,6 +405,11 @@ function NewOrderForm({
       {error && <div className="order-error">{error}</div>}
       {success && <div className="order-success">{success}</div>}
 
+      {/* Order Summary (shown in confirm step) */}
+      {confirmStep && orderSummary && (
+        <OrderConfirmSummary summary={orderSummary} variant="info" />
+      )}
+
       <div className="order-submit">
         {confirmStep ? (
           <div className="order-confirm-row">
@@ -395,7 +419,7 @@ function NewOrderForm({
               onClick={handlePlace}
               disabled={!isValid || loading || !!nakedShortWarning}
             >
-              {loading ? "Placing..." : `Confirm: ${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}`}
+              {loading ? "Placing..." : "Confirm Order"}
             </button>
           </div>
         ) : (
@@ -590,7 +614,48 @@ function ComboOrderForm({
     : null;
 
   // Calculate order summary for confirmation
-  const totalCost = isValid ? (parsedQty * parsedPrice * 100).toFixed(0) : null;
+  const orderSummary: OrderSummary | null = useMemo(() => {
+    if (!isValid) return null;
+    
+    const totalCost = parsedQty * parsedPrice * 100;
+    const description = `${action} ${parsedQty}x ${position.structure} @ ${fmtPrice(parsedPrice)}`;
+    
+    // For vertical spreads, calculate max gain/loss
+    // Bull Call Spread: LONG lower strike call, SHORT higher strike call
+    // Bear Put Spread: LONG higher strike put, SHORT lower strike put
+    const strikes = position.legs.map((l) => l.strike).filter((s): s is number => s != null);
+    const hasSpread = strikes.length === 2 && position.legs.length === 2;
+    
+    if (hasSpread) {
+      const width = Math.abs(strikes[0] - strikes[1]);
+      const netDebit = parsedPrice;
+      const maxWidth = width * parsedQty * 100;
+      
+      // For closing a position (SELL), the P&L is inverse
+      if (action === "SELL") {
+        // Selling means we receive premium — this closes the position
+        return {
+          description,
+          totalCost: -totalCost, // Negative because we receive
+          maxGain: totalCost, // Receive the credit
+          maxLoss: null, // Position is closed
+        };
+      } else {
+        // Buying to open
+        return {
+          description,
+          totalCost,
+          maxGain: maxWidth - totalCost,
+          maxLoss: totalCost,
+        };
+      }
+    }
+    
+    return {
+      description,
+      totalCost: action === "SELL" ? -totalCost : totalCost,
+    };
+  }, [isValid, parsedQty, parsedPrice, action, position]);
 
   return (
     <div className="order-form">
@@ -716,6 +781,11 @@ function ComboOrderForm({
       {error && <div className="order-error">{error}</div>}
       {success && <div className="order-success">{success}</div>}
 
+      {/* Order Summary (shown in confirm step) */}
+      {confirmStep && orderSummary && (
+        <OrderConfirmSummary summary={orderSummary} variant="info" />
+      )}
+
       {/* Submit / Confirm */}
       <div className="order-submit">
         {confirmStep ? (
@@ -726,7 +796,7 @@ function ComboOrderForm({
               onClick={handlePlace}
               disabled={!isValid || loading || !!nakedShortWarning}
             >
-              {loading ? "Placing..." : `Confirm: ${action} ${parsedQty}x ${position.structure} @ ${fmtPrice(parsedPrice)}`}
+              {loading ? "Placing..." : "Confirm Order"}
             </button>
           </div>
         ) : (

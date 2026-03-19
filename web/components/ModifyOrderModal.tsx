@@ -10,6 +10,7 @@ import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
 import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 import { ModifyOrderQuoteTelemetry } from "./QuoteTelemetry";
+import { OrderPriceStrip, OrderLegPills, type OrderLeg as UnifiedOrderLeg } from "@/lib/order";
 
 type EditableComboLeg = {
   action: "BUY" | "SELL";
@@ -337,6 +338,21 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
           <div className="modify-primary-panel">
             <ModifyOrderQuoteTelemetry priceData={priceData} />
 
+            {/* Price strip for combo orders */}
+            {isComboOrder && hasPriceData && bid != null && ask != null && mid != null && (
+              <OrderPriceStrip
+                prices={{
+                  bid,
+                  mid,
+                  ask,
+                  spread: ask - bid,
+                  spreadPct: mid > 0 ? ((ask - bid) / mid) * 100 : null,
+                  available: true,
+                }}
+                compact
+              />
+            )}
+
             {order.orderType === "STP LMT" && order.auxPrice != null && (
               <div className="modify-stop-row">
                 <span className="modify-market-label">STOP PRICE</span>
@@ -428,9 +444,27 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
 
           {isComboOrder && (
             <div className="modify-secondary-panel">
+              {/* Leg pills summary (read-only view) */}
+              {(() => {
+                const unifiedLegs: UnifiedOrderLeg[] = editableLegs.map((leg, i) => ({
+                  id: `leg-${i}`,
+                  action: leg.action,
+                  direction: leg.action === "BUY" ? "LONG" : "SHORT" as const,
+                  strike: Number.parseFloat(leg.strike) || 0,
+                  type: leg.right === "C" ? "Call" : "Put" as const,
+                  expiry: leg.expiry,
+                  quantity: Number.parseInt(leg.ratio, 10) || 1,
+                }));
+                return (
+                  <div style={{ marginBottom: "12px" }}>
+                    <OrderLegPills legs={unifiedLegs} />
+                  </div>
+                );
+              })()}
+
               <div className="modify-section-heading">
-                <span className="modify-price-label">Combo Legs</span>
-                <span className="modify-section-hint">Edit each leg before replacing the order</span>
+                <span className="modify-price-label">Edit Legs</span>
+                <span className="modify-section-hint">Modify each leg before replacing the order</span>
               </div>
 
               <div className="modify-combo-legs">
