@@ -23,3 +23,4 @@
 {"run":22,"commit":"89788d5","metric":7156,"metrics":{"single_ms":2504},"status":"keep","description":"Best multi-ticker: 7.1s (51% improvement from 14.5s baseline)","timestamp":1773890844844,"segment":0}
 {"run":23,"commit":"07494a7","metric":42269,"metrics":{"single_ms":2020},"status":"keep","description":"Best single ticker: 2.0s (-28% from baseline), multi rate limited","timestamp":1773891023300,"segment":0}
 {"run":24,"commit":"866f851","metric":6774,"metrics":{"single_ms":5294},"status":"keep","description":"NEW BEST: 6.8s multi (53% improvement from 14.5s baseline)","timestamp":1773891046713,"segment":0}
+{"run":25,"commit":"2a71fb6","metric":6213,"metrics":{"single_ms":5950},"status":"keep","description":"NEW BEST: 6.2s multi (57% improvement from 14.5s baseline)","timestamp":1773891203970,"segment":0}

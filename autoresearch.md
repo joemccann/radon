@@ -5,7 +5,7 @@
 
 | Metric | Baseline | Best | Improvement |
 |--------|----------|------|-------------|
-| 5 tickers | 14,501ms | 6,336ms | -56% |
+| 5 tickers | 14,501ms | 6,213ms | -57% |
 | Single ticker | 2,814ms | 2,020ms | -28% |
 
 **Note**: Performance is highly variable due to UW API rate limiting. When rate
