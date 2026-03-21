@@ -5,7 +5,7 @@ import type { PriceData } from "./pricesProtocol";
 
 /**
  * Detects stock symbols with null `close` in WS prices and backfills
- * previous close from Yahoo Finance / UW via /api/previous-close.
+ * previous close from IB / UW / Yahoo via /api/previous-close.
  *
  * Returns a new prices record with `close` patched in for affected symbols.
  */

@@ -17,6 +17,12 @@ import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 
 type RegimePanelProps = {
   prices: Record<string, PriceData>;
+  dataEndpoint?: string;
+  shareEndpoint?: string;
+  shareContentEndpoint?: string;
+  shareModalTitle?: string;
+  shareButtonTitle?: string;
+  shareContentTitle?: string;
 };
 
 /* ─── Helpers ────────────────────────────────────────── */
@@ -90,8 +96,16 @@ function TriggerRow({ label, met, value, live }: { label: string; met: boolean; 
 
 /* ─── Main Panel ─────────────────────────────────────── */
 
-export default function RegimePanel({ prices }: RegimePanelProps) {
-  const { data, syncing, lastSync } = useRegime(true);
+export default function RegimePanel({
+  prices,
+  dataEndpoint,
+  shareEndpoint,
+  shareContentEndpoint,
+  shareModalTitle = "REGIME REPORT — SHARE TO X",
+  shareButtonTitle = "Share Regime report to X",
+  shareContentTitle = "Regime Share Preview",
+}: RegimePanelProps) {
+  const { data, syncing, lastSync } = useRegime(true, { endpoint: dataEndpoint });
 
   // market_open flag from CRI data — controls session-close display and
   // whether intraday realized-vol is computed from live SPY ticks.
@@ -170,6 +184,8 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
 
   const hasIntradayRvol = intradayRvol != null;
   const activeRvol = intradayRvol ?? data?.realized_vol ?? null;
+  const nqSkew = data?.nq_skew ?? data?.nasdaq_skew ?? null;
+  const formattedNqSkew = fmtSigned(nqSkew, 3);
 
   const activeCorrChange = corr5dChange ?? 0;
   const safeActiveCorr = activeCorr ?? 0;
@@ -238,11 +254,12 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
             </span>
           )}
           <ShareReportModal
-            modalTitle="REGIME REPORT — SHARE TO X"
-            shareEndpoint="/api/regime/share"
-            buttonTitle="Share Regime report to X"
+            modalTitle={shareModalTitle}
+            shareEndpoint={shareEndpoint ?? "/api/regime/share"}
+            contentEndpoint={shareContentEndpoint}
+            buttonTitle={shareButtonTitle}
             iconSize={11}
-            shareContentTitle="Regime Share Preview"
+            shareContentTitle={shareContentTitle}
           />
         </div>
         <div className="regime-hero-bar">
@@ -320,6 +337,15 @@ export default function RegimePanel({ prices }: RegimePanelProps) {
           change={<DayChange last={liveCor1m} close={cor1mPreviousClose} />}
           sub={<>{`5d chg: ${corr5dChange != null ? `${fmtSigned(corr5dChange)} pts` : "---"}`}</>}
         />
+        {nqSkew != null ? (
+          <RegimeStripCell
+            testId="strip-nq-skew"
+            label={<>NQ SKEW <LiveBadge live={false} /></>}
+            value={`${formattedNqSkew}`}
+            change={null}
+            sub={<>NQ - SPX</>}
+          />
+        ) : null}
       </RegimeStrip>
 
       {/* ── Row 3+4: Components + Crash Trigger side by side ── */}

@@ -384,7 +384,7 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
       <div className="section performance-hero">
         <div className="section-body performance-hero-body">
           <div>
-            <div className="section-label-mono">RECONSTRUCTED {data.period_label}</div>
+            <div className="section-label-mono">{data.methodology?.curve_type === "ib_daily_nav" ? "IB NAV" : "RECONSTRUCTED"} {data.period_label}</div>
             <div className="performance-hero-value">
               <span className={toneClass(summary.total_return)}>{fmtPct(summary.total_return)}</span>
             </div>
@@ -393,7 +393,7 @@ export default function PerformancePanel({ portfolioLastSync = null }: { portfol
             </div>
           </div>
           <div className="performance-hero-pills">
-            <span className="pill neutral">{data.trades_source === "ib_flex" ? "IB FLEX" : "CACHE"}</span>
+            <span className="pill neutral">{data.trades_source === "ib_nav" ? "IB NAV" : data.trades_source === "ib_flex" ? "IB FLEX" : "CACHE"}</span>
             <span className="pill neutral">{summary.trading_days} DAYS</span>
             <span className={`pill ${summary.max_drawdown < -0.1 ? "undefined" : "defined"}`}>MAX DD {fmtPct(summary.max_drawdown)}</span>
           </div>

@@ -84,6 +84,7 @@ test("resolveSectionFromPath maps URL paths to sections", () => {
   expect(resolveSectionFromPath("/scanner", "dashboard")).toBe("scanner");
   expect(resolveSectionFromPath("/discover", "dashboard")).toBe("discover");
   expect(resolveSectionFromPath("/journal", "dashboard")).toBe("journal");
+  expect(resolveSectionFromPath("/internals", "dashboard")).toBe("internals");
   expect(resolveSectionFromPath("/unknown", "dashboard")).toBe("dashboard");
   expect(resolveSectionFromPath(null, "dashboard")).toBe("dashboard");
 });

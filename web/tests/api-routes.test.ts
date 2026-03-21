@@ -93,6 +93,21 @@ vi.mock("child_process", () => ({
   spawn: vi.fn().mockReturnValue(spawnStub),
 }));
 
+// Mock ws — WebSocket used by /api/previous-close for IB snapshots
+// Default: emit error so IB source fails gracefully in validation tests
+vi.mock("ws", () => {
+  class MockWebSocket {
+    handlers: Record<string, Function> = {};
+    constructor() {
+      setTimeout(() => { this.handlers.error?.(); }, 0);
+    }
+    on(event: string, fn: Function) { this.handlers[event] = fn; return this; }
+    send() { /* no-op */ }
+    close() { this.handlers.close?.(); }
+  }
+  return { WebSocket: MockWebSocket };
+});
+
 // Mock global fetch for routes that call external APIs directly
 const mockFetch = vi.fn().mockResolvedValue({
   ok: false,

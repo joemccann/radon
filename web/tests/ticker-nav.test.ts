@@ -8,7 +8,7 @@ import { resolveSectionFromPath } from "@/lib/chat";
 
 const RESERVED = new Set([
   "api", "dashboard", "flow-analysis", "portfolio", "performance",
-  "orders", "scanner", "discover", "journal", "regime", "cta", "kit",
+  "orders", "scanner", "discover", "journal", "regime", "internals", "cta", "kit",
   "_next", "favicon",
 ]);
 
@@ -87,6 +87,10 @@ describe("TICKER_RE — format validation", () => {
 describe("RESERVED — blocks reserved paths", () => {
   it("blocks api", () => {
     expect(RESERVED.has("api")).toBe(true);
+  });
+
+  it("blocks internals", () => {
+    expect(RESERVED.has("internals")).toBe(true);
   });
 
   it("blocks dashboard", () => {

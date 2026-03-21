@@ -138,6 +138,7 @@ describe("navItems", () => {
     expect(routeMap.get("scanner")).toBe("/scanner");
     expect(routeMap.get("discover")).toBe("/discover");
     expect(routeMap.get("journal")).toBe("/journal");
+    expect(routeMap.get("internals")).toBe("/internals");
   });
 
   it("has unique routes", () => {
@@ -166,6 +167,7 @@ describe("quickPromptsBySection", () => {
     "discover",
     "journal",
     "regime",
+    "internals",
     "cta",
     "ticker-detail",
   ];
@@ -215,6 +217,7 @@ describe("sectionDescription", () => {
     "discover",
     "journal",
     "regime",
+    "internals",
     "cta",
     "ticker-detail",
   ];

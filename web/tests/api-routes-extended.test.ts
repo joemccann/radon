@@ -67,6 +67,64 @@ vi.mock("@/lib/syncMutex", () => ({
   createSyncMutex: (fn: () => Promise<unknown>) => fn,
 }));
 
+// Mock ws — WebSocket used by /api/previous-close for IB snapshots
+// Default: emit error so IB source fails and tests fall through to UW/Yahoo
+const mockWsInstances: Array<{ handlers: Record<string, Function>; sentMessages: string[] }> = [];
+let mockWsBehavior: "error" | "snapshot" = "error";
+let mockWsSnapshotData: Record<string, number> = {};
+
+vi.mock("ws", () => {
+  class MockWebSocket {
+    handlers: Record<string, Function> = {};
+    sentMessages: string[] = [];
+    readyState = 1; // OPEN
+    OPEN = 1;
+
+    constructor() {
+      mockWsInstances.push({ handlers: this.handlers, sentMessages: this.sentMessages });
+      // Schedule events asynchronously like a real WebSocket
+      setTimeout(() => {
+        if (mockWsBehavior === "error") {
+          this.handlers.error?.();
+        } else if (mockWsBehavior === "snapshot") {
+          this.handlers.open?.();
+        }
+      }, 0);
+    }
+
+    on(event: string, fn: Function) {
+      this.handlers[event] = fn;
+      return this;
+    }
+
+    send(data: string) {
+      this.sentMessages.push(data);
+      // If in snapshot mode, reply with snapshot messages
+      if (mockWsBehavior === "snapshot") {
+        const msg = JSON.parse(data);
+        if (msg.action === "snapshot" && Array.isArray(msg.symbols)) {
+          for (const sym of msg.symbols) {
+            const close = mockWsSnapshotData[sym];
+            setTimeout(() => {
+              this.handlers.message?.(JSON.stringify({
+                type: "snapshot",
+                symbol: sym,
+                data: close != null ? { close, last: close + 1, bid: close + 0.5, ask: close + 1.5 } : { close: null, last: null },
+              }));
+            }, 5);
+          }
+        }
+      }
+    }
+
+    close() {
+      this.handlers.close?.();
+    }
+  }
+
+  return { WebSocket: MockWebSocket };
+});
+
 // Mock global fetch
 const mockFetch = vi.fn();
 vi.stubGlobal("fetch", mockFetch);
@@ -413,6 +471,9 @@ describe("POST /api/previous-close — extended", () => {
   beforeEach(() => {
     vi.resetModules();
     mockFetch.mockReset();
+    mockWsInstances.length = 0;
+    mockWsBehavior = "error"; // Default: IB unavailable, falls through to UW/Yahoo
+    mockWsSnapshotData = {};
     saveEnv();
     process.env.UW_TOKEN = "test-uw-token";
   });
@@ -421,7 +482,29 @@ describe("POST /api/previous-close — extended", () => {
     restoreEnv();
   });
 
-  it("returns closes from UW when available", async () => {
+  it("returns closes from IB when snapshot has close data", async () => {
+    mockWsBehavior = "snapshot";
+    mockWsSnapshotData = { AAPL: 182.52 };
+
+    const { POST } = await import("../app/api/previous-close/route");
+    const res = await POST(
+      new Request("http://localhost/api/previous-close", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ symbols: ["AAPL"] }),
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    const body = await res.json();
+    expect(body.closes.AAPL).toBe(182.52);
+    // Should NOT have called UW or Yahoo since IB succeeded
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it("falls back to UW when IB connection fails", async () => {
+    mockWsBehavior = "error"; // IB unavailable
+
     mockFetch.mockImplementation(async (url: string | URL) => {
       const urlStr = typeof url === "string" ? url : url.toString();
       if (urlStr.includes("unusualwhales.com")) {
