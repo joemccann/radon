@@ -164,6 +164,86 @@ function RiskRow({
   );
 }
 
+/* ─── Margin row (EWL / SMA) ───────────────────────────────── */
+
+function MarginRow({
+  acct,
+  onEwlClick,
+  onPrevEwlClick,
+  onRegTClick,
+  onSmaClick,
+}: {
+  acct: AccountSummary;
+  onEwlClick: () => void;
+  onPrevEwlClick: () => void;
+  onRegTClick: () => void;
+  onSmaClick: () => void;
+}) {
+  return (
+    <>
+      <div className="section-label-mono">MARGIN</div>
+      <div className="metrics-grid">
+        <MetricCard
+          card={{ label: "Equity With Loan", value: acct.equity_with_loan != null ? fmtExact(acct.equity_with_loan) : "---", change: "EWL", tone: "neutral" }}
+          onClick={onEwlClick}
+        />
+        <MetricCard
+          card={{ label: "Previous Day EWL", value: acct.previous_day_ewl != null ? fmtExact(acct.previous_day_ewl) : "---", change: "PRIOR SESSION", tone: "neutral" }}
+          onClick={onPrevEwlClick}
+        />
+        <MetricCard
+          card={{ label: "Reg T Equity", value: acct.reg_t_equity != null ? fmtExact(acct.reg_t_equity) : "---", change: "REGULATION T", tone: "neutral" }}
+          onClick={onRegTClick}
+        />
+        <MetricCard
+          card={{ label: "SMA", value: acct.sma != null ? fmtExact(acct.sma) : "---", change: "SPECIAL MEMORANDUM", tone: "neutral" }}
+          onClick={onSmaClick}
+        />
+      </div>
+    </>
+  );
+}
+
+/* ─── Capital row (cash / funds / position value) ──────────── */
+
+function CapitalRow({
+  acct,
+  onCashClick,
+  onAvailFundsClick,
+  onInitMarginClick,
+  onGrossPosClick,
+}: {
+  acct: AccountSummary;
+  onCashClick: () => void;
+  onAvailFundsClick: () => void;
+  onInitMarginClick: () => void;
+  onGrossPosClick: () => void;
+}) {
+  return (
+    <>
+      <div className="section-label-mono">CAPITAL</div>
+      <div className="metrics-grid">
+        <MetricCard
+          card={{ label: "Cash", value: acct.cash != null ? fmtSignedExact(acct.cash) : "---", change: "TOTAL CASH", tone: acct.cash != null ? tone(acct.cash) : "neutral" }}
+          onClick={onCashClick}
+        />
+        <MetricCard
+          card={{ label: "Available Funds", value: acct.available_funds != null ? fmtExact(acct.available_funds) : "---", change: "EWL - INITIAL MARGIN", tone: "neutral" }}
+          onClick={onAvailFundsClick}
+        />
+        <MetricCard
+          card={{ label: "Initial Margin", value: acct.initial_margin != null ? fmtExact(acct.initial_margin) : "---", change: "REQUIRED", tone: "neutral" }}
+          onClick={onInitMarginClick}
+        />
+        <MetricCard
+          card={{ label: "Gross Position Value", value: acct.gross_position_value != null ? fmtExact(acct.gross_position_value) : "---", change: "SECURITIES", tone: "neutral" }}
+          onClick={onGrossPosClick}
+        />
+      </div>
+    </>
+  );
+}
+
 /* ─── Exposure row (real-time computed, clickable) ────────── */
 
 function ExposureRow({
@@ -321,6 +401,16 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   const [marginModalOpen, setMarginModalOpen] = useState(false);
   const [excessLiqModalOpen, setExcessLiqModalOpen] = useState(false);
   const [settledCashModalOpen, setSettledCashModalOpen] = useState(false);
+  // Margin row modals
+  const [ewlModalOpen, setEwlModalOpen] = useState(false);
+  const [prevEwlModalOpen, setPrevEwlModalOpen] = useState(false);
+  const [regTModalOpen, setRegTModalOpen] = useState(false);
+  const [smaModalOpen, setSmaModalOpen] = useState(false);
+  // Capital row modals
+  const [cashModalOpen, setCashModalOpen] = useState(false);
+  const [availFundsModalOpen, setAvailFundsModalOpen] = useState(false);
+  const [initMarginModalOpen, setInitMarginModalOpen] = useState(false);
+  const [grossPosModalOpen, setGrossPosModalOpen] = useState(false);
 
   const isPortfolio = section === "portfolio";
   if (!portfolio) {
@@ -403,7 +493,29 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         />
       )}
 
-      {/* Row 3: EXPOSURE (real-time, all 4 clickable) */}
+      {/* Row 3: MARGIN (EWL / SMA — only when data present) */}
+      {acct && acct.equity_with_loan != null && (
+        <MarginRow
+          acct={acct}
+          onEwlClick={() => setEwlModalOpen(true)}
+          onPrevEwlClick={() => setPrevEwlModalOpen(true)}
+          onRegTClick={() => setRegTModalOpen(true)}
+          onSmaClick={() => setSmaModalOpen(true)}
+        />
+      )}
+
+      {/* Row 4: CAPITAL (cash / funds / position value — only when data present) */}
+      {acct && acct.available_funds != null && (
+        <CapitalRow
+          acct={acct}
+          onCashClick={() => setCashModalOpen(true)}
+          onAvailFundsClick={() => setAvailFundsModalOpen(true)}
+          onInitMarginClick={() => setInitMarginModalOpen(true)}
+          onGrossPosClick={() => setGrossPosModalOpen(true)}
+        />
+      )}
+
+      {/* Row 5: EXPOSURE (real-time, all 4 clickable) */}
       <ExposureRow exposure={exposure} onCardClick={setActiveMetric} />
 
       {/* Row 4: TODAY'S P&L — renamed "Unrealized" → "Day Move" */}
@@ -575,6 +687,127 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
             "Negative = you've spent unsettled funds (cash from recent sells not yet settled)"
           }
           onClose={() => setSettledCashModalOpen(false)}
+        />
+      )}
+
+      {/* MARGIN: Equity With Loan */}
+      {acct && (
+        <AccountMetricModal
+          open={ewlModalOpen}
+          title="Equity With Loan Value"
+          value={acct.equity_with_loan != null ? fmtExact(acct.equity_with_loan) : "---"}
+          formula={
+            "EWL = Cash + Stock Value + Bond Value + Fund Value + European & Asian Options Value\n" +
+            "Source: Interactive Brokers accountValues (EquityWithLoanValue)\n" +
+            "Excludes US options market value. Used as basis for margin calculations"
+          }
+          onClose={() => setEwlModalOpen(false)}
+        />
+      )}
+
+      {/* MARGIN: Previous Day EWL */}
+      {acct && (
+        <AccountMetricModal
+          open={prevEwlModalOpen}
+          title="Previous Day Equity With Loan"
+          value={acct.previous_day_ewl != null ? fmtExact(acct.previous_day_ewl) : "---"}
+          formula={
+            "Previous Day EWL = Equity With Loan at prior session close\n" +
+            "Source: Interactive Brokers accountValues (PreviousDayEquityWithLoanValue)\n" +
+            "Used for intraday margin checks and SMA calculation"
+          }
+          onClose={() => setPrevEwlModalOpen(false)}
+        />
+      )}
+
+      {/* MARGIN: Reg T Equity */}
+      {acct && (
+        <AccountMetricModal
+          open={regTModalOpen}
+          title="Regulation T Equity"
+          value={acct.reg_t_equity != null ? fmtExact(acct.reg_t_equity) : "---"}
+          formula={
+            "Reg T Equity = Cash + Stock Value + Bond Value + Fund Value\n" +
+            "Source: Interactive Brokers accountValues (RegTEquity)\n" +
+            "Federal Reserve Board Regulation T equity for margin requirements"
+          }
+          onClose={() => setRegTModalOpen(false)}
+        />
+      )}
+
+      {/* MARGIN: SMA */}
+      {acct && (
+        <AccountMetricModal
+          open={smaModalOpen}
+          title="Special Memorandum Account"
+          value={acct.sma != null ? fmtExact(acct.sma) : "---"}
+          formula={
+            "SMA = max(SMA_prior_day, EWL - Initial Margin)\n" +
+            "Source: Interactive Brokers accountValues (SMA)\n" +
+            "SMA never decreases due to market fluctuations, only from new trades.\n" +
+            "Reg T requires SMA >= 0 for new positions"
+          }
+          onClose={() => setSmaModalOpen(false)}
+        />
+      )}
+
+      {/* CAPITAL: Cash */}
+      {acct && (
+        <AccountMetricModal
+          open={cashModalOpen}
+          title="Total Cash"
+          value={acct.cash != null ? fmtSignedExact(acct.cash) : "---"}
+          formula={
+            "Cash = Total cash balance including unsettled proceeds\n" +
+            "Source: Interactive Brokers accountValues (TotalCashValue)\n" +
+            "Includes cash from recent sells that haven't settled yet (T+1/T+2)"
+          }
+          onClose={() => setCashModalOpen(false)}
+        />
+      )}
+
+      {/* CAPITAL: Available Funds */}
+      {acct && (
+        <AccountMetricModal
+          open={availFundsModalOpen}
+          title="Available Funds"
+          value={acct.available_funds != null ? fmtExact(acct.available_funds) : "---"}
+          formula={
+            "Available Funds = Equity With Loan - Initial Margin Requirement\n" +
+            "Source: Interactive Brokers accountValues (AvailableFunds)\n" +
+            "Amount available to open new positions without triggering a margin call"
+          }
+          onClose={() => setAvailFundsModalOpen(false)}
+        />
+      )}
+
+      {/* CAPITAL: Initial Margin */}
+      {acct && (
+        <AccountMetricModal
+          open={initMarginModalOpen}
+          title="Initial Margin"
+          value={acct.initial_margin != null ? fmtExact(acct.initial_margin) : "---"}
+          formula={
+            "Initial Margin = Margin required to open current positions\n" +
+            "Source: Interactive Brokers accountValues (InitMarginReq)\n" +
+            "Higher than Maintenance Margin — must be met when entering a trade"
+          }
+          onClose={() => setInitMarginModalOpen(false)}
+        />
+      )}
+
+      {/* CAPITAL: Gross Position Value */}
+      {acct && (
+        <AccountMetricModal
+          open={grossPosModalOpen}
+          title="Securities Gross Position Value"
+          value={acct.gross_position_value != null ? fmtExact(acct.gross_position_value) : "---"}
+          formula={
+            "Gross Position Value = |Long Stock Value| + |Short Stock Value| + |Options Value|\n" +
+            "Source: Interactive Brokers accountValues (GrossPositionValue)\n" +
+            "Total absolute value of all securities positions"
+          }
+          onClose={() => setGrossPosModalOpen(false)}
         />
       )}
 

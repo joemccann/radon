@@ -55,11 +55,13 @@ def connect_ib(host: str, port: int, client_id="auto") -> IBClient:
 
 
 ACCOUNT_TAGS = [
-    'NetLiquidation', 'TotalCashValue',
+    'NetLiquidation', 'TotalCashValue', 'SettledCash',
     'UnrealizedPnL', 'RealizedPnL',
     'AccruedCash', 'NetDividend',
-    'MaintMarginReq', 'ExcessLiquidity', 'BuyingPower',
+    'MaintMarginReq', 'InitMarginReq', 'ExcessLiquidity', 'BuyingPower',
     'AvailableFunds', 'Cushion',
+    'EquityWithLoanValue', 'PreviousDayEquityWithLoanValue',
+    'RegTEquity', 'SMA', 'GrossPositionValue',
 ]
 
 
@@ -742,10 +744,22 @@ def display_portfolio(account: dict, positions: list, collapsed: list = None):
 def build_account_summary(account: dict, pnl_data: dict) -> dict:
     """Build account_summary dict from account values and PnL data.
 
-    Tag mapping:
-      settled_cash → TotalCashValue (not SettledCash — that tag doesn't exist in accountSummary)
-      dividends    → NetDividend (not AccruedCash — that's margin interest)
-      daily_pnl    → reqPnL().dailyPnL (only source for daily P&L)
+    Tag mapping (IB accountValues tags → Radon fields):
+      net_liquidation  → NetLiquidation
+      cash             → TotalCashValue (unsettled + settled)
+      settled_cash     → SettledCash (falls back to TotalCashValue if IB omits)
+      dividends        → NetDividend (not AccruedCash — that's margin interest)
+      daily_pnl        → reqPnL().dailyPnL (only source for daily P&L)
+      equity_with_loan → EquityWithLoanValue
+      previous_day_ewl → PreviousDayEquityWithLoanValue
+      reg_t_equity     → RegTEquity
+      sma              → SMA (Special Memorandum Account)
+      gross_position_value → GrossPositionValue
+      available_funds  → AvailableFunds
+      initial_margin   → InitMarginReq
+      maintenance_margin → MaintMarginReq
+      excess_liquidity → ExcessLiquidity
+      buying_power     → BuyingPower
     """
     def safe_float(val, default=0.0):
         if val is None:
@@ -763,16 +777,29 @@ def build_account_summary(account: dict, pnl_data: dict) -> dict:
     if realized is None:
         realized = account.get('RealizedPnL')
 
+    # SettledCash may not always be present; fall back to TotalCashValue
+    settled = account.get('SettledCash')
+    if settled is None:
+        settled = account.get('TotalCashValue')
+
     return {
         "net_liquidation": safe_float(account.get('NetLiquidation')),
         "daily_pnl": pnl_data.get('dailyPnL'),  # None when unavailable, not 0
         "unrealized_pnl": safe_float(unrealized),
         "realized_pnl": safe_float(realized),
-        "settled_cash": safe_float(account.get('TotalCashValue')),
+        "cash": safe_float(account.get('TotalCashValue')),
+        "settled_cash": safe_float(settled),
         "maintenance_margin": safe_float(account.get('MaintMarginReq')),
+        "initial_margin": safe_float(account.get('InitMarginReq')),
         "excess_liquidity": safe_float(account.get('ExcessLiquidity')),
         "buying_power": safe_float(account.get('BuyingPower')),
+        "available_funds": safe_float(account.get('AvailableFunds')),
         "dividends": safe_float(account.get('NetDividend')),
+        "equity_with_loan": safe_float(account.get('EquityWithLoanValue')),
+        "previous_day_ewl": safe_float(account.get('PreviousDayEquityWithLoanValue')),
+        "reg_t_equity": safe_float(account.get('RegTEquity')),
+        "sma": safe_float(account.get('SMA')),
+        "gross_position_value": safe_float(account.get('GrossPositionValue')),
     }
 
 
@@ -858,6 +885,45 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     return result
 
 
+NAV_HISTORY_PATH = PORTFOLIO_PATH.parent / "nav_history.jsonl"
+
+
+def _append_nav_snapshot(net_liq: float, daily_pnl=None) -> None:
+    """Append today's NAV to the daily history file (JSONL, one entry per day)."""
+    import pytz
+
+    et = pytz.timezone("America/New_York")
+    today = datetime.now(et).strftime("%Y-%m-%d")
+    entry = {"date": today, "nav": round(net_liq, 2)}
+    if daily_pnl is not None:
+        entry["daily_pnl"] = round(float(daily_pnl), 2)
+
+    # Read existing, update-or-append for today
+    existing = []
+    if NAV_HISTORY_PATH.exists():
+        for line in NAV_HISTORY_PATH.read_text().strip().splitlines():
+            try:
+                existing.append(json.loads(line))
+            except (json.JSONDecodeError, ValueError):
+                continue
+
+    found = False
+    for e in existing:
+        if e.get("date") == today:
+            e["nav"] = entry["nav"]
+            if "daily_pnl" in entry:
+                e["daily_pnl"] = entry["daily_pnl"]
+            found = True
+            break
+    if not found:
+        existing.append(entry)
+
+    with open(NAV_HISTORY_PATH, "w") as f:
+        for e in sorted(existing, key=lambda x: x.get("date", "")):
+            f.write(json.dumps(e) + "\n")
+    print(f"✓ NAV snapshot: {today} → ${net_liq:,.2f}")
+
+
 def save_portfolio(portfolio: dict):
     """Save portfolio to JSON file (atomic write with SHA-256 checksum)."""
     from utils.atomic_io import atomic_save
@@ -870,6 +936,15 @@ def save_portfolio(portfolio: dict):
 
     checksum = atomic_save(str(PORTFOLIO_PATH), portfolio)
     print(f"✓ Saved portfolio to {PORTFOLIO_PATH} (checksum: {checksum[:12]}…)")
+
+    # Track daily NAV for performance history
+    acct = portfolio.get("account_summary", {})
+    net_liq = acct.get("net_liquidation") or portfolio.get("bankroll")
+    if net_liq:
+        try:
+            _append_nav_snapshot(float(net_liq), acct.get("daily_pnl"))
+        except Exception as exc:
+            print(f"  Warning: NAV snapshot failed: {exc}")
 
 
 def main():

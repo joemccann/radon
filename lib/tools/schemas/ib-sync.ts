@@ -55,11 +55,19 @@ const AccountSummary = Type.Object({
   daily_pnl: Type.Union([Type.Number(), Type.Null()]),
   unrealized_pnl: Type.Number(),
   realized_pnl: Type.Number(),
+  cash: Type.Optional(Type.Number()),
   settled_cash: Type.Number(),
   maintenance_margin: Type.Number(),
+  initial_margin: Type.Optional(Type.Number()),
   excess_liquidity: Type.Number(),
   buying_power: Type.Number(),
+  available_funds: Type.Optional(Type.Number()),
   dividends: Type.Number(),
+  equity_with_loan: Type.Optional(Type.Number()),
+  previous_day_ewl: Type.Optional(Type.Number()),
+  reg_t_equity: Type.Optional(Type.Number()),
+  sma: Type.Optional(Type.Number()),
+  gross_position_value: Type.Optional(Type.Number()),
 });
 
 export const PortfolioData = Type.Object({

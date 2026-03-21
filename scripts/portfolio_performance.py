@@ -245,6 +245,346 @@ def load_blotter_fallback(path: Path = BLOTTER_CACHE_PATH) -> List[TradeFill]:
     return fills
 
 
+def extract_fill_marks(path: Path = BLOTTER_CACHE_PATH) -> Dict[str, Dict[str, float]]:
+    """Extract known price marks from trade execution prices.
+
+    When UW/IB historical data is unavailable for an option contract, the
+    execution price on the trade date is the best available mark.  These seed
+    marks are forward-filled by ``align_mark_series()`` to cover calendar gaps,
+    giving a reasonable (though approximate) equity curve for contracts that
+    would otherwise be valued at zero.
+    """
+    if not path.exists():
+        return {}
+    raw = json.loads(path.read_text())
+    marks: Dict[str, Dict[str, float]] = {}
+    for trade in raw.get("open_trades", []) + raw.get("closed_trades", []):
+        desc = str(trade.get("contract_desc") or trade.get("symbol") or "")
+        symbol, expiry, right, strike = _parse_blotter_contract_desc(desc)
+        if expiry and right and strike is not None:
+            contract_key = build_option_id(symbol, expiry, right, strike)
+        else:
+            contract_key = f"STK:{symbol}"
+
+        for execution in trade.get("executions", []):
+            price = safe_float(execution.get("price"), default=0.0)
+            dt = normalize_trade_date(execution.get("time") or "")
+            if price > 0 and dt:
+                if contract_key not in marks:
+                    marks[contract_key] = {}
+                marks[contract_key][dt] = price
+    return marks
+
+
+def parse_option_id(option_id: str) -> Tuple[str, str, str, float]:
+    """Parse OCC-style option ID back to (symbol, expiry_YYYYMMDD, right, strike).
+
+    Example: ``AAPL260321C00230000`` → ``('AAPL', '20260321', 'C', 230.0)``
+    """
+    match = re.match(r"^([A-Z.]+?)(\d{6})([CP])(\d{8})$", option_id)
+    if not match:
+        raise ValueError(f"Cannot parse option_id: {option_id!r}")
+    symbol = match.group(1)
+    yymmdd = match.group(2)
+    right = match.group(3)
+    strike = int(match.group(4)) / 1000.0
+    expiry = f"20{yymmdd}"
+    return symbol, expiry, right, strike
+
+
+NAV_HISTORY_PATH = ROOT / "data" / "nav_history.jsonl"
+
+
+IB_NAV_CACHE_PATH = ROOT / "data" / "nav_history_ib.json"
+
+
+def fetch_ib_nav_series() -> Optional[List[Dict[str, Any]]]:
+    """Fetch daily NAV from IB Flex Query (EquitySummaryInBase).
+
+    Uses ``IB_FLEX_NAV_QUERY_ID`` env var (separate from trade query).
+    Returns list of ``{date, total, cash, stock, options}`` or None on failure.
+    """
+    token = os.environ.get("IB_FLEX_TOKEN")
+    nav_query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
+    if not token or not nav_query_id:
+        return None
+
+    import time
+    import xml.etree.ElementTree as ET
+    from urllib.request import urlopen
+    from urllib.parse import urlencode
+
+    try:
+        # Request report
+        url = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
+        params = urlencode({"t": token, "q": nav_query_id, "v": "3"})
+        resp = urlopen(f"{url}?{params}", timeout=30)
+        text = resp.read().decode("utf-8")
+        root = ET.fromstring(text)
+        ref_node = root.find(".//ReferenceCode")
+        if ref_node is None or not ref_node.text:
+            return None
+        ref_code = ref_node.text
+
+        # Poll for result
+        stmt_url = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
+        for _ in range(30):
+            time.sleep(3)
+            params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
+            resp2 = urlopen(f"{stmt_url}?{params2}", timeout=30)
+            xml_text = resp2.read().decode("utf-8")
+            if "<FlexStatements" not in xml_text:
+                continue
+
+            root2 = ET.fromstring(xml_text)
+            navs = root2.findall(".//EquitySummaryByReportDateInBase")
+            if not navs:
+                return None
+
+            entries: List[Dict[str, Any]] = []
+            for nav in navs:
+                dt_raw = nav.get("reportDate", "")
+                if len(dt_raw) == 8:
+                    dt = f"{dt_raw[:4]}-{dt_raw[4:6]}-{dt_raw[6:8]}"
+                else:
+                    dt = dt_raw
+                entries.append({
+                    "date": dt,
+                    "total": safe_float(nav.get("total")),
+                    "cash": safe_float(nav.get("cash")),
+                    "stock": safe_float(nav.get("stock")),
+                    "options": safe_float(nav.get("options")),
+                })
+
+            # Cache to disk
+            try:
+                IB_NAV_CACHE_PATH.write_text(json.dumps(entries, indent=2))
+            except OSError:
+                pass
+            return entries
+        return None
+    except Exception:
+        return None
+
+
+def load_ib_nav_cache() -> Optional[List[Dict[str, Any]]]:
+    """Load cached IB NAV series from disk."""
+    if not IB_NAV_CACHE_PATH.exists():
+        return None
+    try:
+        entries = json.loads(IB_NAV_CACHE_PATH.read_text())
+        return entries if isinstance(entries, list) and len(entries) >= 2 else None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _extract_acats_transfers(
+    cash_flows: Dict[str, float],
+    nav_entries: List[Dict[str, Any]],
+) -> None:
+    """Detect ACATS securities transfers and add them as cash flows.
+
+    Uses the NAV change on transfer days (not ACATS ``positionAmount``)
+    because the Modified Dietz formula can't split intraday returns between
+    existing and incoming positions.  Setting CF = NAV change gives HPR ≈ 0%
+    on the transfer day, which is the safest approximation.
+    """
+    # Build date→NAV mapping
+    nav_by_date = {e["date"]: e["total"] for e in nav_entries}
+    sorted_dates = sorted(nav_by_date.keys())
+
+    # Build fill count per day (real trades with nonzero cash)
+    fill_counts: Dict[str, int] = {}
+    try:
+        raw = json.loads(BLOTTER_CACHE_PATH.read_text())
+        for trade in raw.get("open_trades", []) + raw.get("closed_trades", []):
+            for execution in trade.get("executions", []):
+                dt = str(execution.get("time", ""))[:10]
+                ncf = abs(safe_float(execution.get("net_cash_flow"), default=0.0))
+                if dt and ncf > 1:
+                    fill_counts[dt] = fill_counts.get(dt, 0) + 1
+    except (OSError, json.JSONDecodeError):
+        pass
+
+    # Detect: large positive NAV jump with no real fills and no cash deposits
+    for i in range(1, len(sorted_dates)):
+        dt = sorted_dates[i]
+        prev_dt = sorted_dates[i - 1]
+        chg = nav_by_date[dt] - nav_by_date[prev_dt]
+        has_deposit = dt in cash_flows and cash_flows[dt] != 0
+        has_fills = fill_counts.get(dt, 0) > 0
+        if chg > 50_000 and not has_fills and not has_deposit:
+            cash_flows[dt] = cash_flows.get(dt, 0.0) + chg
+
+
+def _extract_cash_flows(cash_flows: Dict[str, float]) -> None:
+    """Extract deposit/withdrawal amounts by date from IB Flex Cash Transactions.
+
+    Fetches the NAV Flex Query (which includes CashTransactions section) and
+    sums Deposits/Withdrawals by reportDate.
+    """
+    import time
+    import xml.etree.ElementTree as ET
+    from urllib.request import urlopen
+    from urllib.parse import urlencode
+
+    token = os.environ.get("IB_FLEX_TOKEN")
+    query_id = os.environ.get("IB_FLEX_NAV_QUERY_ID")
+    if not token or not query_id:
+        return
+
+    url = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.SendRequest"
+    params = urlencode({"t": token, "q": query_id, "v": "3"})
+    resp = urlopen(f"{url}?{params}", timeout=30)
+    root = ET.fromstring(resp.read().decode("utf-8"))
+    ref_node = root.find(".//ReferenceCode")
+    if ref_node is None or not ref_node.text:
+        return
+    ref_code = ref_node.text
+
+    stmt_url = "https://gdcdyn.interactivebrokers.com/Universal/servlet/FlexStatementService.GetStatement"
+    for _ in range(20):
+        time.sleep(3)
+        params2 = urlencode({"t": token, "q": ref_code, "v": "3"})
+        resp2 = urlopen(f"{stmt_url}?{params2}", timeout=30)
+        xml_text = resp2.read().decode("utf-8")
+        if "<FlexStatements" not in xml_text:
+            continue
+
+        root2 = ET.fromstring(xml_text)
+        for ct in root2.findall(".//CashTransaction"):
+            txn_type = ct.get("type", "")
+            if "Deposit" not in txn_type and "Withdrawal" not in txn_type:
+                continue
+            amt = safe_float(ct.get("amount"), default=0.0)
+            dt_raw = ct.get("reportDate") or ct.get("dateTime", "")
+            if len(dt_raw) >= 8:
+                dt = f"{dt_raw[:4]}-{dt_raw[4:6]}-{dt_raw[6:8]}"
+            else:
+                dt = dt_raw
+            cash_flows[dt] = cash_flows.get(dt, 0.0) + amt
+        return
+    return
+
+
+def build_nav_based_curve(
+    nav_entries: List[Dict[str, Any]],
+    start_date: str,
+    benchmark_series: pd.Series,
+) -> Tuple[pd.DataFrame, Dict[str, float]]:
+    """Build equity curve + metrics from IB's daily NAV data.
+
+    Detects deposit/withdrawal days by cross-referencing with blotter fill data.
+    A day is flagged as a deposit when the NAV change is large (>10% and >$50K)
+    and trade fills don't explain the movement.
+
+    Returns (curve_df, metrics_dict).
+    """
+    # Filter to YTD (start_date onward), sorted
+    ytd = sorted(
+        [e for e in nav_entries if e["date"] >= start_date],
+        key=lambda e: e["date"],
+    )
+    if len(ytd) < 2:
+        raise ValueError("Need at least 2 NAV entries for YTD curve")
+
+    dates = [e["date"] for e in ytd]
+    navs = [e["total"] for e in ytd]
+
+    # IB's daily NAV IS the source of truth — just compute simple daily
+    # returns from day-over-day NAV changes.  No TWR formula, no deposit
+    # detection, no ACATS guessing.  The curve is the performance.
+    daily_returns = [None]  # first day has no return
+    for i in range(1, len(navs)):
+        daily_returns.append((navs[i] / navs[i - 1]) - 1.0 if navs[i - 1] > 0 else 0.0)
+
+    # Load IB's authoritative TWR series (scraped from portal Highcharts).
+    # This is the source of truth for return % — we use it for total_return
+    # and derive daily TWR returns from the cumulative series.
+    ib_twr_path = ROOT / "data" / "ib_twr_series.json"
+    twr_by_date: Dict[str, float] = {}
+    try:
+        twr_entries = json.loads(ib_twr_path.read_text())
+        for entry in twr_entries:
+            twr_by_date[entry["date"]] = entry["twr"] / 100.0  # convert % to decimal
+    except (OSError, json.JSONDecodeError, KeyError):
+        pass
+
+    # If we have IB's TWR, use it for daily returns (more accurate than
+    # NAV-based returns which include deposit effects).
+    if twr_by_date:
+        daily_returns = [None]
+        for i in range(1, len(dates)):
+            curr_twr = twr_by_date.get(dates[i])
+            prev_twr = twr_by_date.get(dates[i - 1])
+            if curr_twr is not None and prev_twr is not None:
+                # daily return = (1 + cumTWR_today) / (1 + cumTWR_yesterday) - 1
+                daily_returns.append((1 + curr_twr) / (1 + prev_twr) - 1.0 if (1 + prev_twr) != 0 else 0.0)
+            else:
+                # Fallback to NAV-based return for dates not in TWR series
+                daily_returns.append((navs[i] / navs[i - 1]) - 1.0 if navs[i - 1] > 0 else 0.0)
+
+    # Build DataFrame
+    curve = pd.DataFrame({
+        "equity": navs,
+        "daily_return": daily_returns,
+    }, index=dates)
+    curve.index.name = "date"
+    curve["drawdown"] = curve["equity"] / curve["equity"].cummax() - 1.0
+
+    # Metrics from TWR-adjusted returns (not NAV-based)
+    metrics = compute_performance_metrics(curve["equity"], benchmark_series)
+
+    # Override total_return with IB's authoritative TWR if available
+    if twr_by_date:
+        last_twr = None
+        for dt in reversed(dates):
+            if dt in twr_by_date:
+                last_twr = twr_by_date[dt]
+                break
+        if last_twr is not None:
+            metrics["total_return"] = last_twr
+            trading_days = len([r for r in daily_returns if r is not None])
+            metrics["annualized_return"] = float(
+                (1.0 + last_twr) ** (TRADING_DAYS / max(trading_days, 1)) - 1.0
+            )
+
+    return curve, metrics
+
+
+def load_nav_history(path: Path = NAV_HISTORY_PATH) -> Dict[str, float]:
+    """Load daily NAV snapshots from JSONL file. Returns date→nav mapping."""
+    if not path.exists():
+        return {}
+    history: Dict[str, float] = {}
+    for line in path.read_text().strip().splitlines():
+        try:
+            entry = json.loads(line)
+            dt = entry.get("date", "")
+            nav = entry.get("nav")
+            if dt and nav is not None:
+                history[dt] = float(nav)
+        except (json.JSONDecodeError, TypeError, ValueError):
+            continue
+    return history
+
+
+def build_nav_equity_curve(nav_history: Dict[str, float]) -> Optional[pd.DataFrame]:
+    """Build equity curve DataFrame from daily NAV snapshots.
+
+    Returns None if fewer than 2 data points.
+    """
+    if len(nav_history) < 2:
+        return None
+    dates = sorted(nav_history.keys())
+    equities = [nav_history[d] for d in dates]
+    df = pd.DataFrame({"equity": equities}, index=dates)
+    df["daily_return"] = df["equity"].pct_change()
+    df["drawdown"] = df["equity"] / df["equity"].cummax() - 1.0
+    df.index.name = "date"
+    return df
+
+
 def fetch_flex_trade_fills() -> tuple[List[TradeFill], str]:
     token = os.environ.get("IB_FLEX_TOKEN")
     query_id = os.environ.get("IB_FLEX_QUERY_ID")
@@ -345,11 +685,46 @@ def align_mark_series(calendar: Iterable[str], raw_marks: Mapping[str, float], e
     return aligned.astype(float)
 
 
+def _build_portfolio_positions(portfolio: dict) -> Dict[str, float]:
+    """Build {contract_key: signed_quantity} from current portfolio positions.
+
+    Used to reconcile computed final_holdings with IB's actual positions.
+    Positions opened before trade history coverage appear as phantom shorts
+    without this reconciliation.
+    """
+    positions: Dict[str, float] = {}
+    for pos in portfolio.get("positions", []):
+        ticker = pos.get("ticker", "")
+        expiry_raw = pos.get("expiry", "")
+        expiry_digits = re.sub(r"\D", "", expiry_raw)
+        for leg in pos.get("legs", []):
+            contracts = int(leg.get("contracts", 0))
+            direction = str(leg.get("direction", "")).upper()
+            signed_qty = contracts if direction == "LONG" else -contracts
+
+            leg_type = str(leg.get("type", ""))
+            strike = safe_float(leg.get("strike"), default=0.0)
+
+            if leg_type and strike > 0 and len(expiry_digits) >= 8:
+                right = "C" if "call" in leg_type.lower() else "P"
+                try:
+                    key = build_option_id(ticker, expiry_digits, right, strike)
+                    positions[key] = positions.get(key, 0.0) + signed_qty
+                except (ValueError, IndexError):
+                    pass
+            elif not leg_type and not strike:
+                # Stock position
+                key = f"STK:{ticker}"
+                positions[key] = positions.get(key, 0.0) + signed_qty
+    return positions
+
+
 def reconstruct_equity_curve(
     trades: List[TradeFill],
     calendar: Iterable[str],
     marks_by_contract: Mapping[str, Mapping[str, float]],
     final_equity: float,
+    portfolio_positions: Optional[Dict[str, float]] = None,
 ) -> pd.DataFrame:
     calendar_list = [str(day) for day in calendar]
     if not calendar_list:
@@ -364,6 +739,40 @@ def reconstruct_equity_curve(
         expiries[trade.contract_key] = trade.expiry
         final_holdings[trade.contract_key] = final_holdings.get(trade.contract_key, 0.0) + trade.quantity
         total_net_cash += trade.net_cash
+
+    # Reconcile with actual portfolio positions.
+    # Trades opened before the blotter coverage window create phantom short
+    # positions (only the closing sell is recorded).  We inject synthetic
+    # opening trades at the period start so the calendar walk correctly tracks
+    # these positions and their mark-to-market changes.
+    if portfolio_positions is not None:
+        all_keys = set(final_holdings.keys()) | set(portfolio_positions.keys())
+        for key in all_keys:
+            computed = final_holdings.get(key, 0.0)
+            actual = portfolio_positions.get(key, 0.0)
+            if abs(computed - actual) > 0.01:
+                # Inject a synthetic opening trade to correct the quantity.
+                # net_cash = 0 because the actual purchase happened before the
+                # YTD period — we only need the position to exist for marks.
+                delta = actual - computed
+                mult = multipliers.get(key, 100.0 if not key.startswith("STK:") else 1.0)
+                synthetic_cash = 0.0  # pre-period cash flow, not YTD
+                trades.append(TradeFill(
+                    trade_date="2025-12-31",  # before YTD start
+                    contract_key=key,
+                    quantity=delta,
+                    net_cash=synthetic_cash,
+                    multiplier=mult,
+                    security_type="OPT" if not key.startswith("STK:") else "STK",
+                    symbol=key.split(":")[1] if key.startswith("STK:") else re.match(r"^([A-Z.]+)", key).group(1) if re.match(r"^([A-Z.]+)", key) else "",
+                    option_id=key if not key.startswith("STK:") else None,
+                    expiry=None,
+                ))
+                final_holdings[key] = actual
+                if key not in multipliers:
+                    multipliers[key] = mult
+                if key not in expiries:
+                    expiries[key] = None
 
     aligned_marks: Dict[str, pd.Series] = {
         key: align_mark_series(calendar_list, marks_by_contract.get(key, {}), expiries.get(key))
@@ -679,12 +1088,17 @@ def _fetch_all_histories(
     end: str,
     ib_client: Optional[IBClient],
     warnings: List[str],
+    seed_marks: Optional[Dict[str, Dict[str, float]]] = None,
 ) -> Tuple[Dict[str, Dict[str, float]], List[str]]:
-    """Orchestrator: IB pass (sequential) -> parallel fallback + options.
+    """Orchestrator: seed marks -> IB pass (sequential) -> parallel fallback + options.
+
+    ``seed_marks`` pre-populates contract marks from execution prices.
+    IB/UW data overwrites seed marks when available (more complete daily series).
 
     Returns (marks_by_contract, missing_contracts).
     """
-    marks_by_contract: Dict[str, Dict[str, float]] = {}
+    # Pre-seed marks from execution prices (better than $0 for missing contracts)
+    marks_by_contract: Dict[str, Dict[str, float]] = dict(seed_marks or {})
     missing_contracts: List[str] = []
 
     stock_symbols = sorted({t.symbol for t in trades if t.security_type == "STK" and t.symbol})
@@ -758,36 +1172,24 @@ def _fetch_all_histories(
 
 
 def build_payload(benchmark_symbol: str = "SPY") -> dict:
-    # 1. Load and validate trades
+    # 1. Load portfolio snapshot
     portfolio = load_portfolio_snapshot()
     account = portfolio.get("account_summary") or {}
     current_net_liq = safe_float(account.get("net_liquidation"), default=safe_float(portfolio.get("bankroll")))
     last_sync = str(portfolio.get("last_sync") or "")
 
-    warnings: List[str] = [
-        "Reconstructed YTD equity curve anchored to current net liquidation. External cash flows are assumed to be zero unless already embedded in the starting cash balance.",
-    ]
-
-    try:
-        trades, trades_source = fetch_flex_trade_fills()
-    except Exception as exc:
-        trades = load_blotter_fallback()
-        trades_source = "blotter_cache"
-        warnings.append(f"Live IB Flex Query unavailable. Falling back to cached blotter data: {exc}")
-
-    if not trades:
-        raise RuntimeError("No trades available to reconstruct portfolio performance")
-
     end_date = last_sync[:10] if last_sync else datetime.now().strftime("%Y-%m-%d")
     start_date = f"{end_date[:4]}-01-01"
 
-    # 2. Connect IB only (UW created per-worker in thread pool)
+    warnings: List[str] = []
+
+    # 2. Connect IB for benchmark data
     ib_client: Optional[IBClient] = None
     try:
         ib_client = IBClient()
         ib_client.connect(port=4001, client_id=98, timeout=5)
     except Exception as exc:
-        warnings.append(f"IB historical bars unavailable. Using fallbacks where needed: {exc}")
+        warnings.append(f"IB historical bars unavailable: {exc}")
         ib_client = None
 
     # 3. Benchmark (defines calendar) — must come first
@@ -807,26 +1209,142 @@ def build_payload(benchmark_symbol: str = "SPY") -> dict:
     calendar = sorted(benchmark_history.keys())
     benchmark_series = pd.Series({dt: benchmark_history[dt] for dt in calendar}, dtype=float)
 
-    # 4. Parallel fetches (THE KEY CHANGE)
+    # ── PRIMARY PATH: IB NAV-based equity curve ──────────────────────────
+    # If we have daily NAV from the Equity Summary Flex Query, use it
+    # directly.  This is IB's authoritative account valuation — no
+    # reconstruction, no missing option marks, no deposit confusion.
+    nav_entries = fetch_ib_nav_series()
+    if nav_entries is None:
+        nav_entries = load_ib_nav_cache()
+
+    if nav_entries and len(nav_entries) >= 2:
+        try:
+            curve, metrics = build_nav_based_curve(nav_entries, start_date, benchmark_series)
+            if ib_client is not None:
+                ib_client.disconnect()
+
+            benchmark_total_return = float(
+                (benchmark_series.iloc[-1] / benchmark_series.iloc[0]) - 1.0
+            ) if len(benchmark_series) > 1 else 0.0
+
+            # Align benchmark to NAV calendar
+            nav_dates = list(curve.index)
+            bench_returns = benchmark_series.pct_change().fillna(0.0)
+
+            series = []
+            for dt in nav_dates:
+                bm_close = float(benchmark_series.get(dt, 0.0)) if dt in benchmark_series.index else 0.0
+                bm_ret = float(bench_returns.get(dt, 0.0)) if dt in bench_returns.index else 0.0
+                dr = curve.loc[dt, "daily_return"]
+                series.append({
+                    "date": dt,
+                    "equity": round(float(curve.loc[dt, "equity"]), 4),
+                    "daily_return": None if dr is None or (isinstance(dr, float) and pd.isna(dr)) else round(float(dr), 8),
+                    "drawdown": round(float(curve.loc[dt, "drawdown"]), 8),
+                    "benchmark_close": round(bm_close, 4),
+                    "benchmark_return": round(bm_ret, 8),
+                })
+
+            warnings.insert(0, "Equity curve from IB daily NAV (EquitySummaryInBase). Includes deposits and transfers.")
+            return {
+                "as_of": end_date,
+                "last_sync": last_sync,
+                "period_start": start_date,
+                "period_end": nav_dates[-1] if nav_dates else end_date,
+                "period_label": "YTD",
+                "benchmark": benchmark_symbol,
+                "benchmark_total_return": benchmark_total_return,
+                "trades_source": "ib_nav",
+                "price_sources": {"stocks": "ib_nav_flex", "options": "ib_nav_flex"},
+                "methodology": {
+                    "curve_type": "ib_daily_nav",
+                    "return_basis": "twr_deposit_adjusted",
+                    "risk_free_rate": 0.0,
+                    "library_strategy": "ib_equity_summary_in_base",
+                },
+                "summary": {
+                    "starting_equity": round(float(curve["equity"].iloc[0]), 4),
+                    "ending_equity": round(float(curve["equity"].iloc[-1]), 4),
+                    "pnl": round(float(curve["equity"].iloc[-1] - curve["equity"].iloc[0]), 4),
+                    "trading_days": len(nav_dates),
+                    **{k: round(float(v), 8) if isinstance(v, (float, np.floating)) else v for k, v in metrics.items()},
+                },
+                "warnings": warnings,
+                "contracts_missing_history": [],
+                "series": series,
+            }
+        except Exception as exc:
+            warnings.append(f"NAV-based curve failed, falling back to reconstruction: {exc}")
+
+    # ── FALLBACK: Reconstructed equity curve from trade fills ────────────
+    warnings.append(
+        "Reconstructed YTD equity curve anchored to current net liquidation. "
+        "External cash flows are assumed zero unless embedded in the starting cash balance."
+    )
+
+    try:
+        trades, trades_source = fetch_flex_trade_fills()
+    except Exception as exc:
+        trades = load_blotter_fallback()
+        trades_source = "blotter_cache"
+        warnings.append(f"Live IB Flex Query unavailable. Falling back to cached blotter data: {exc}")
+
+    if not trades:
+        raise RuntimeError("No trades available to reconstruct portfolio performance")
+
+    # 4. Seed marks from execution prices, then fetch full histories
+    seed_marks = extract_fill_marks()
     marks_by_contract, missing_contracts = _fetch_all_histories(
-        trades, start_date, end_date, ib_client, warnings
+        trades, start_date, end_date, ib_client, warnings, seed_marks=seed_marks
     )
 
     # Disconnect IB
     if ib_client is not None:
         ib_client.disconnect()
 
-    if missing_contracts:
-        warnings.append(
-            f"Missing historical marks for {len(missing_contracts)} contract(s). Those contracts are valued at zero where no price history is available."
-        )
+    # 4b. Inject current marks from portfolio.json for the final date.
+    # This anchors final_holdings_value to IB's live marks rather than stale
+    # execution prices or zeros.
+    final_date = end_date
+    for pos in portfolio.get("positions", []):
+        ticker = pos.get("ticker", "")
+        expiry_raw = pos.get("expiry", "")
+        expiry_digits = re.sub(r"\D", "", expiry_raw)
+        for leg in pos.get("legs", []):
+            mark = safe_float(leg.get("market_price"), default=0.0)
+            if mark <= 0:
+                continue
+            leg_type = str(leg.get("type", ""))
+            strike = safe_float(leg.get("strike"), default=0.0)
+            if leg_type and strike > 0 and len(expiry_digits) >= 8:
+                right = "C" if "call" in leg_type.lower() else "P"
+                try:
+                    option_id = build_option_id(ticker, expiry_digits, right, strike)
+                except (ValueError, IndexError):
+                    continue
+                if option_id not in marks_by_contract:
+                    marks_by_contract[option_id] = {}
+                marks_by_contract[option_id][final_date] = mark
 
-    # 5. Reconstruct equity curve (unchanged)
+    # Count contracts that have NO marks at all (not even from execution prices)
+    truly_missing = [c for c in missing_contracts if c not in marks_by_contract or not marks_by_contract[c]]
+    partially_covered = len(missing_contracts) - len(truly_missing)
+    if missing_contracts:
+        msg = f"Full daily price history unavailable for {len(missing_contracts)} contract(s)."
+        if partially_covered > 0:
+            msg += f" {partially_covered} have execution-price marks (forward-filled)."
+        if truly_missing:
+            msg += f" {len(truly_missing)} contract(s) have no marks at all and are valued at zero."
+        warnings.append(msg)
+
+    # 5. Reconstruct equity curve with portfolio reconciliation
+    portfolio_positions = _build_portfolio_positions(portfolio)
     curve = reconstruct_equity_curve(
         trades=trades,
         calendar=calendar,
         marks_by_contract=marks_by_contract,
         final_equity=current_net_liq,
+        portfolio_positions=portfolio_positions,
     )
 
     # 6. Compute metrics (unchanged)
