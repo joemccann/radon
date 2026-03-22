@@ -148,3 +148,6 @@ vendor/
 *.seed
 *.pid.lock
 .cache/
+
+# Autoresearch
+autoresearch.*
