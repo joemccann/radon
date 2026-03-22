@@ -6,7 +6,7 @@ cd /Users/joemccann/dev/apps/finance/radon
 # Verify test count hasn't dropped
 result=$(python3.13 -m pytest scripts/tests/ scripts/trade_blotter/test_blotter.py scripts/trade_blotter/test_integration.py \
   --ignore=scripts/tests/test_menthorq_integration.py \
-  -n 4 --dist loadscope -q --tb=short --no-header 2>&1)
+  -n 4 -q --tb=short --no-header 2>&1)
 
 passed=$(echo "$result" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")
 failed=$(echo "$result" | grep -oE '[0-9]+ failed' | grep -oE '[0-9]+' || echo "0")

@@ -3,10 +3,10 @@ set -euo pipefail
 
 cd /Users/joemccann/dev/apps/finance/radon
 
-# Run pytest with parallel execution (-n 4 loadscope is the measured sweet spot)
+# Run pytest with parallel execution (-n 4 is the measured sweet spot)
 result=$(python3.13 -m pytest scripts/tests/ scripts/trade_blotter/test_blotter.py scripts/trade_blotter/test_integration.py \
   --ignore=scripts/tests/test_menthorq_integration.py \
-  -n 4 --dist loadscope -q --tb=no --no-header 2>&1)
+  -n 4 -q --tb=no --no-header 2>&1)
 
 # Parse results
 passed=$(echo "$result" | grep -oE '[0-9]+ passed' | grep -oE '[0-9]+' || echo "0")

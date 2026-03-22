@@ -104,7 +104,7 @@ async def test_background_dedup_returns_already_running(client):
     import api.server
 
     # Simulate an in-flight task
-    never_done = asyncio.get_event_loop().create_future()
+    never_done = asyncio.get_running_loop().create_future()
     fake_task = asyncio.ensure_future(never_done)
     api.server._running_build = fake_task
 
