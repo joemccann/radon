@@ -36,18 +36,35 @@ Optimize the Python test suite (`scripts/tests/` + `scripts/trade_blotter/test_*
 
 ## What's Been Tried
 
-### Baseline (~22s)
-The main bottlenecks are:
-1. `test_uw_client.py::test_500_raises_server_error` — 7s (UW client retries 500 with real `time.sleep`, backoff 1+2+4=7s)
-2. `test_api_subprocess.py::test_module_error_falls_back_to_stdout_when_stderr_is_empty` — 5s (spawns real subprocess with 5s timeout)
-3. `test_ib_client.py::test_connect_exhausts_retries` — 3s (IB connect retry with real `time.sleep`)
-4. `test_ib_client.py::test_connect_retries_on_transient_error` — 1s (same pattern)
-5. `test_client_id_allocation.py::test_explicit_id_no_retry_on_conflict` — 1s (real sleep)
-6. `test_api_subprocess.py::test_timeout_kills_process` — 0.5s (real timeout)
+### Baseline → 2.2s (90% reduction)
 
-Total from top-30 slow tests: ~18s out of 22s.
+**Wins (in order of impact):**
 
-Root causes:
-- Tests use real `time.sleep()` during retry logic instead of patching it
-- Tests spawn real subprocesses with real timeouts instead of mocking
-- No parallelism — single process execution
+1. **Patch time.sleep in retry tests** (-15s, 68%)
+   - `test_uw_client::test_500_raises_server_error`: UW client retried 500 with real backoff (1+2+4=7s). Added `patch('time.sleep')`.
+   - `test_ib_client::test_connect_exhausts_retries` and `test_connect_retries_on_transient_error`: IB connect retry with real sleep (3+1=4s). Added `@patch('time.sleep')`.
+   - `test_client_id_allocation::test_explicit_id_no_retry_on_conflict`: Real sleep in retry (1s). Added `@patch('time.sleep')`.
+
+2. **pytest-xdist parallel execution** (-4s, 18%)
+   - `-n 4` is the sweet spot (benchmarked n=2..12). Fewer workers under-utilize; more workers add spawn overhead.
+   - Default `load` distribution is most consistent (vs loadscope/loadfile/worksteal).
+
+3. **Replace slow subprocess test** (-2s, 9%)
+   - `test_module_error_falls_back` was running `trade_blotter.flex_query` (5s timeout). Replaced with `json.tool --no-such-arg` (0.07s).
+
+4. **Reduce async test sleep times** (-0.5s, 2%)
+   - batched_relay: flush_interval 50→10ms, sleep 100→30ms
+   - performance_lock: sleep 100→10ms
+   - timeout_kills_process: 500→100ms
+
+5. **Fix xdist flake** (stability, not speed)
+   - `asyncio.get_event_loop().run_until_complete()` → `asyncio.run()` in 13 subprocess tests.
+   - Python 3.13 deprecates `get_event_loop()`, causing intermittent RuntimeError in xdist workers.
+
+### Dead ends / diminishing returns
+- `-p no:warnings`, `-p no:cacheprovider` — negligible impact
+- `--import-mode=importlib` — no measurable gain
+- Worker counts >4 or <4 — slower due to spawn overhead or under-utilization
+- `loadscope`/`loadfile`/`worksteal` distribution — all worse or noisier than default `load`
+- pyproject.toml `addopts` — conflicts with script CLI flags
+- Reducing ThreadPoolExecutor overhead in evaluate.py — would require production code changes
