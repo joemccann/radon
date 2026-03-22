@@ -1,6 +1,0 @@
-scripts/clients/__pycache__	__pycache__ directory
-scripts/utils/__pycache__	__pycache__ directory
-scripts/trade_blotter/__pycache__	__pycache__ directory
-scripts/__pycache__	__pycache__ directory
-scripts/utils/ib_connection.py	superseded by clients/
-scripts/utils/uw_api.py	superseded by clients/

@@ -3814,6 +3814,23 @@ tr {
   width: 100%;
 }
 
+/* Internals skew chart — focus + context with brush zoom */
+.skew-chart-panel { padding: 16px; }
+.skew-chart-content { min-width: 0; }
+.skew-chart-shell { position: relative; width: 100%; }
+.skew-chart-surface { min-height: 408px; }
+.skew-chart-empty { height: 408px; }
+.skew-chart-svg { display: block; width: 100%; }
+.skew-chart-tooltip { z-index: 20; }
+
+/* Brush handle styling */
+.context-brush .selection {
+  rx: 2;
+}
+.context-brush .overlay {
+  cursor: crosshair;
+}
+
 .regime-relationship-meta {
   display: flex;
   align-items: center;
