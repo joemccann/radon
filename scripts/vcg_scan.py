@@ -49,7 +49,7 @@ Z_WINDOW = 63          # Standardisation lookback (business days)
 MIN_BARS = OLS_WINDOW + Z_WINDOW + 10   # Minimum price history needed
 VIX_PANIC_LOW = 40.0   # Panic overlay lower bound (Pi clamp)
 VIX_PANIC_HIGH = 48.0  # Panic overlay upper bound (Pi clamp)
-# VCG-R (v2) signal thresholds — VIX gate is now a FLOOR (elevated stress), not a ceiling
+# VCG signal thresholds — VIX gate is a FLOOR (elevated stress), not a ceiling
 VIX_FLOOR = 28.0       # RO gate: VIX must be ABOVE this (overrideable via --vix-floor)
 VIX_EDR = 25.0         # EDR watch gate: VIX must be above this
 VCG_TRIGGER = 2.0      # EDR / Watch VCG z-score threshold
@@ -363,7 +363,7 @@ def evaluate_signal(
     vix_floor: float = VIX_FLOOR,
     vcg_trigger: float = VCG_RO_TRIGGER,
 ) -> Dict[str, Any]:
-    """Evaluate the VCG-R signal for the most recent bar.
+    """Evaluate the VCG signal for the most recent bar.
 
     VIX gate is now a FLOOR (stress must be elevated), not a ceiling.
     HDR has been removed; replaced by RO/EDR/tier/bounce/vvix_severity.
@@ -497,7 +497,7 @@ def backtest_signals(
     vix_floor: float = VIX_FLOOR,
     vcg_trigger: float = VCG_RO_TRIGGER,
 ) -> List[Dict[str, Any]]:
-    """Run the VCG-R signal evaluation over the last N trading days."""
+    """Run the VCG signal evaluation over the last N trading days."""
     n = len(model["vcg"])
     start = max(0, n - days)
     results = []
@@ -819,13 +819,13 @@ def generate_html_report(
   </div>
 </div>""")
 
-    # Signal conditions panel (VCG-R v2 — VIX is now a floor, not a ceiling)
+    # Signal conditions panel
     ro_vix_pass = signal['vix'] > VIX_FLOOR
     ro_vcg_pass = signal['vcg'] is not None and signal['vcg'] > VCG_RO_TRIGGER
     edr_vix_pass = signal['vix'] > VIX_EDR
     edr_vcg_pass = signal['vcg'] is not None and signal['vcg'] > VCG_TRIGGER
     vvix_sev = signal['vvix_severity'].upper()
-    body_parts.append("""<div class="section-header">VCG-R Signal Conditions</div>""")
+    body_parts.append("""<div class="section-header">VCG Signal Conditions</div>""")
     body_parts.append("""<div class="panel"><table>
 <thead><tr><th>Condition</th><th class="text-center">Required</th><th class="text-center">Actual</th>"""
                       """<th class="text-center">RO</th><th class="text-center">EDR</th></tr></thead><tbody>""")

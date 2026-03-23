@@ -148,7 +148,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           <div className="section-title">
             <Zap size={14} />
             VCG Signal
-            <InfoTooltip text="Volatility-Credit Gap v2: detects divergence between the vol complex (VIX/VVIX) and credit markets (HYG). Signals: RISK_OFF (tier 1–2), EDR (early divergence), BOUNCE (counter-signal), NORMAL." />
+            <InfoTooltip text="Volatility-Credit Gap: detects divergence between the vol complex (VIX/VVIX) and credit markets (HYG). Signals: RISK_OFF (tier 1–2), EDR (early divergence), BOUNCE (counter-signal), NORMAL." />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
             {/* Regime badge */}

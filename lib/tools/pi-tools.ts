@@ -119,7 +119,7 @@ export function registerTradingTools(pi: ExtensionAPI) {
     name: "vcg_scan",
     label: "VCG Scanner",
     description:
-      "Cross-Asset Volatility-Credit Gap scan (VCG-R v2). Fetches 1Y daily bars for VIX, VVIX, HYG, runs rolling 21-day OLS, computes VCG z-score. Returns JSON with signal state (RISK_OFF/EDR/WATCH/BOUNCE/NORMAL/SUPPRESSED/PANIC), severity tier (1=critical/2=high/3=elevated), EDR flag, bounce flag, VVIX severity amplifier (extreme/elevated/moderate), model betas, attribution, and 10-day history. Key fields: vcg_adj (panic-adjusted z-score, was vcg_div), ro (0|1), edr (0|1), tier (1|2|3|null), bounce (0|1), vvix_severity.",
+      "Cross-Asset Volatility-Credit Gap scan. Fetches 1Y daily bars for VIX, VVIX, HYG, runs rolling 21-day OLS, computes VCG z-score. Returns JSON with signal state (RISK_OFF/EDR/WATCH/BOUNCE/NORMAL/SUPPRESSED/PANIC), severity tier (1=critical/2=high/3=elevated), EDR flag, bounce flag, VVIX severity amplifier (extreme/elevated/moderate), model betas, attribution, and 10-day history. Key fields: vcg_adj (panic-adjusted z-score), ro (0|1), edr (0|1), tier (1|2|3|null), bounce (0|1), vvix_severity.",
     parameters: Type.Object({
       proxy: Type.Optional(
         Type.String({ description: "Credit proxy: HYG (default), JNK, or LQD" }),
