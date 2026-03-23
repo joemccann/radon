@@ -79,6 +79,23 @@ TZ=America/New_York date +"%A %H:%M"   # 9:30–16:00 ET, Mon–Fri
 | `market_open + mtime > 60s` | YES | Background scan |
 | `market_open === false + date = today` | NO | Serve cached EOD |
 
+### VCG (Volatility-Credit Gap) Tab
+
+Tabbed into `/regime` page alongside CRI. Detects divergence between vol complex (VIX/VVIX) and credit markets (HYG).
+
+| Component | File |
+|-----------|------|
+| Hook | `web/lib/useVcg.ts` (`VcgData` type, adaptive polling) |
+| Staleness | `web/lib/vcgStaleness.ts` (anchored to `scan_time` age) |
+| API route | `web/app/api/vcg/route.ts` (GET cached + SWR) |
+| Panel | `web/components/VcgPanel.tsx` |
+| Scanner | `scripts/vcg_scan.py` (20-session history) |
+| Share | `scripts/generate_vcg_share.py` (4 cards + tweet) |
+| FastAPI | `POST /vcg/scan` (60s cooldown), `POST /vcg/share` |
+| Cache | `data/vcg.json` |
+
+**VCG thresholds:** VCG > +2.0 = CREDIT_ARTIFICIALLY_CALM, VCG < -2.0 = CREDIT_OVERSHOT. HDR requires: VVIX > 110 + Credit 5d > -0.5% + VIX < 40. RO = HDR + VCG > +2.0.
+
 ### RegimePanel Market-Closed Rules
 
 When `market_open === false`:
@@ -153,7 +170,7 @@ Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/rado
 
 | File | Purpose |
 |------|---------|
-| `server.py` | 19 endpoints, CORS, IB pool, health, auto-restart. `POST /performance/background` = fire-and-forget, 202, dedup |
+| `server.py` | 21 endpoints, CORS, IB pool, health, auto-restart. `POST /performance/background` = fire-and-forget, 202, dedup |
 | `ib_pool.py` | Role-based IB pool (sync/orders/data), auto-reconnect |
 | `ib_gateway.py` | Health check + auto-restart via IBC launchd |
 | `subprocess.py` | Async `run_script()`, `run_module()` — uses `sys.executable` (not `python3`) to match server interpreter |
@@ -378,7 +395,7 @@ Use **interpolated values** for edge determination, but flag confidence level:
 
 | Script | Purpose |
 |--------|---------|
-| `scripts/api/server.py` | FastAPI — 19 endpoints, IB pool, auto-restart |
+| `scripts/api/server.py` | FastAPI — 21 endpoints, IB pool, auto-restart |
 | `scripts/api/ib_pool.py` | Role-based IB pool (sync=0, orders=1, data=2) |
 | `scripts/api/ib_gateway.py` | IB Gateway health + auto-restart |
 | `scripts/api/subprocess.py` | Async subprocess helper |
@@ -395,7 +412,8 @@ Use **interpolated values** for edge determination, but flag confidence level:
 | `scripts/exit_order_service.py` | Pending exit orders |
 | `scripts/portfolio_performance.py` | Parallel price history + performance calc |
 | `scripts/cri_scan.py` | Crash Risk Index |
-| `scripts/vcg_scan.py` | Vol-Credit Gap scanner |
+| `scripts/vcg_scan.py` | Vol-Credit Gap scanner (20-session history) |
+| `scripts/generate_vcg_share.py` | VCG X share report (4 cards + preview) |
 | `scripts/fetch_menthorq_cta.py` | MenthorQ CTA (S3 + Vision) |
 | `scripts/fetch_menthorq_dashboard.py` | MenthorQ dashboards (S3/screenshot + Vision) |
 | `scripts/ib_realtime_server.js` | WS relay — batched, 100ms flush |
@@ -420,6 +438,7 @@ Use **interpolated values** for edge determination, but flag confidence level:
 | `data/seasonality_cache/` | Per-ticker seasonality |
 | `data/menthorq_cache/` | CTA + dashboard cache (daily) |
 | `data/cri_scheduled/` | Intraday CRI time-series |
+| `data/vcg.json` | VCG scan cache (signal, 20-session history) |
 | `data/price_history_cache/` | Stock + option price histories (auto-pruned at 500) |
 
 ## Seasonality Fallback
