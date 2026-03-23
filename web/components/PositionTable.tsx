@@ -6,8 +6,6 @@ import type { PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import InstrumentDetailModal from "./InstrumentDetailModal";
 import { useSort, type SortDirection } from "@/lib/useSort";
-import { useTableFilter } from "@/lib/useTableFilter";
-import TableSearch from "./TableSearch";
 import TickerLink from "./TickerLink";
 import {
   fmtUsd,
@@ -378,15 +376,9 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
 
 /* ─── Position table ───────────────────────────────────── */
 
-export default function PositionTable({ positions, showExpiry = true, showUnderlying = false, prices, showSearch = false }: { positions: PortfolioPosition[]; showExpiry?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData>; showSearch?: boolean }) {
+export default function PositionTable({ positions, showExpiry = true, showUnderlying = false, prices }: { positions: PortfolioPosition[]; showExpiry?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData> }) {
   const positionExtract = useMemo(() => makePositionExtract(prices), [prices]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
-
-  const extractSearchText = useCallback(
-    (pos: PortfolioPosition) => `${pos.ticker} ${pos.structure} ${pos.direction} ${pos.expiry}`,
-    [],
-  );
-  const { filtered, query, setQuery } = useTableFilter(sorted, extractSearchText);
 
   // Instrument detail modal state
   const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
@@ -397,11 +389,6 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
 
   return (
     <>
-      {showSearch && (
-        <div style={{ marginBottom: 8, display: "flex", justifyContent: "flex-end" }}>
-          <TableSearch query={query} setQuery={setQuery} placeholder="Filter positions..." resultCount={filtered.length} totalCount={sorted.length} />
-        </div>
-      )}
       <table>
         <thead>
           <tr>
@@ -421,7 +408,7 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
           </tr>
         </thead>
         <tbody>
-          {filtered.map((pos) => (
+          {sorted.map((pos) => (
             <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} onLegClick={handleLegClick} />
           ))}
         </tbody>

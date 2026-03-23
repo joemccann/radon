@@ -935,6 +935,14 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
   const equityPositions = portfolio.positions.filter((p) => p.risk_profile === "equity");
   const undefinedPositions = portfolio.positions.filter((p) => p.risk_profile === "undefined" || p.risk_profile === "complex");
 
+  const extractPositionSearchText = useCallback(
+    (p: PortfolioPosition) => `${p.ticker} ${p.structure} ${p.direction} ${p.expiry}`,
+    [],
+  );
+  const definedFilter = useTableFilter(definedPositions, extractPositionSearchText);
+  const undefinedFilter = useTableFilter(undefinedPositions, extractPositionSearchText);
+  const equityFilter = useTableFilter(equityPositions, extractPositionSearchText);
+
   return (
     <>
       {definedPositions.length > 0 && (
@@ -945,10 +953,19 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
               Defined Risk Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
             </div>
-            <span className="pill defined">{definedPositions.length} POSITIONS</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <TableSearch
+                query={definedFilter.query}
+                setQuery={definedFilter.setQuery}
+                placeholder="Filter positions..."
+                resultCount={definedFilter.filtered.length}
+                totalCount={definedPositions.length}
+              />
+              <span className="pill defined">{definedPositions.length} POSITIONS</span>
+            </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={definedPositions} showUnderlying={true} prices={prices} showSearch={true} />
+            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} />
           </div>
         </div>
       )}
@@ -961,10 +978,19 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
               Undefined Risk Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Undefined Risk Positions"]} />
             </div>
-            <span className="pill undefined">{undefinedPositions.length} POSITIONS</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <TableSearch
+                query={undefinedFilter.query}
+                setQuery={undefinedFilter.setQuery}
+                placeholder="Filter positions..."
+                resultCount={undefinedFilter.filtered.length}
+                totalCount={undefinedPositions.length}
+              />
+              <span className="pill undefined">{undefinedPositions.length} POSITIONS</span>
+            </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={undefinedPositions} showUnderlying={true} prices={prices} showSearch={true} />
+            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} />
           </div>
         </div>
       )}
@@ -977,10 +1003,19 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
               Equity Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Equity Positions"]} />
             </div>
-            <span className="pill neutral">{equityPositions.length} POSITIONS</span>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <TableSearch
+                query={equityFilter.query}
+                setQuery={equityFilter.setQuery}
+                placeholder="Filter positions..."
+                resultCount={equityFilter.filtered.length}
+                totalCount={equityPositions.length}
+              />
+              <span className="pill neutral">{equityPositions.length} POSITIONS</span>
+            </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={equityPositions} showExpiry={false} prices={prices} showSearch={true} />
+            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} />
           </div>
         </div>
       )}
@@ -1310,18 +1345,18 @@ function JournalSections() {
                   : "UP TO DATE"}
               </span>
             )}
+            {trades.length > 0 ? (
+              <TableSearch
+                query={query}
+                setQuery={setQuery}
+                placeholder="Filter trades..."
+                resultCount={filtered.length}
+                totalCount={trades.length}
+              />
+            ) : null}
             <span className="pill defined">{trades.length} TRADES</span>
           </div>
         </div>
-        {trades.length > 0 && (
-          <TableSearch
-            query={query}
-            setQuery={setQuery}
-            placeholder="Filter trades..."
-            resultCount={filtered.length}
-            totalCount={trades.length}
-          />
-        )}
         {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
         {syncError && <div className="section-body"><div className="alert-item bearish">IB Sync: {syncError}</div></div>}
         {loading && <div className="section-body p-6"><TableSkeleton rows={4} columns={6} /></div>}
