@@ -141,15 +141,7 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
             return "Stock", "equity"
         direction = "Long" if leg['position'] > 0 else "Short"
         right = "Call" if leg.get('right') == 'C' else "Put"
-        # Per options-structures.json: Short Put = defined (cash-secured),
-        # Short Call = undefined (naked). All longs are defined.
-        if direction == "Long":
-            risk = "defined"
-        elif right == "Put":
-            risk = "defined"   # Short Put is cash-secured
-        else:
-            risk = "undefined"  # Short Call is naked
-        return f"{direction} {right}", risk
+        return f"{direction} {right}", "defined" if direction == "Long" else "undefined"
     
     # Sort legs by strike for consistent ordering
     opt_legs = [l for l in legs if l['secType'] == 'OPT']

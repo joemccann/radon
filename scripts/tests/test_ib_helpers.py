@@ -152,14 +152,13 @@ class TestDetectStructureType:
         assert risk == "defined"
 
     def test_single_short_put(self):
-        """Short Put (Cash-Secured) is defined risk per options-structures.json"""
+        """Short Put is undefined risk — shows in undefined risk table"""
         legs = [{"secType": "OPT", "position": -1, "right": "P", "strike": 180}]
         name, risk = detect_structure_type(legs)
         assert name == "Short Put"
-        assert risk == "defined"
+        assert risk == "undefined"
 
     def test_single_short_call_is_undefined(self):
-        """Short Call (Naked) is undefined risk per options-structures.json"""
         legs = [{"secType": "OPT", "position": -1, "right": "C", "strike": 200}]
         name, risk = detect_structure_type(legs)
         assert name == "Short Call"
