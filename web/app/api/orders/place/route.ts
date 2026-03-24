@@ -9,7 +9,10 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { firstPlaceOrderSchemaErrorMessage } from "@/lib/placeOrderBodySchema";
+import {
+  firstPlaceOrderSchemaErrorMessage,
+  normalizeOptionRight,
+} from "@/lib/placeOrderBodySchema";
 
 export const runtime = "nodejs";
 
@@ -80,6 +83,17 @@ export async function POST(request: Request): Promise<Response> {
 
     const body = parsed as PlaceBody;
     body.type = body.type ?? "stock";
+
+    // Chain UI sends CALL/PUT; IB + naked-short guard expect C/P
+    if (body.type === "option" && body.right != null) {
+      body.right = normalizeOptionRight(body.right as unknown as string);
+    }
+    if (body.type === "combo" && body.legs) {
+      body.legs = body.legs.map((leg) => ({
+        ...leg,
+        right: normalizeOptionRight(leg.right as unknown as string),
+      }));
+    }
 
     // Required fields (schema ensures presence; trim rejects whitespace-only symbol)
     if (!body.symbol?.trim() || !body.action) {
@@ -178,7 +192,18 @@ export async function POST(request: Request): Promise<Response> {
       limitPrice: body.limitPrice,
       tif: body.tif || "DAY",
       ...(body.type === "option" ? { expiry: body.expiry, strike: body.strike, right: body.right } : {}),
-      ...(body.type === "combo" ? { legs: body.legs } : {}),
+      ...(body.type === "combo" && body.legs
+        ? {
+            legs: body.legs.map((l) => ({
+              expiry: l.expiry,
+              strike: l.strike,
+              right: l.right,
+              action: l.action,
+              ratio: l.ratio,
+              ...(l.limitPrice != null ? { limitPrice: l.limitPrice } : {}),
+            })),
+          }
+        : {}),
     };
 
     const orderResult = await radonFetch<Record<string, unknown>>("/orders/place", {

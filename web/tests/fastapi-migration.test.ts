@@ -510,6 +510,64 @@ describe("POST /api/orders/place (via radonFetch)", () => {
     expect(body.orderId).toBe(42);
     expect(body.initialStatus).toBe("Submitted");
   });
+
+  it("normalizes CALL/PUT combo legs to C/P for FastAPI payload", async () => {
+    mockRadonFetch
+      .mockResolvedValueOnce({
+        status: "ok",
+        orderId: 99,
+        permId: 100,
+        initialStatus: "Submitted",
+      })
+      .mockResolvedValueOnce({});
+    mockReadDataFile
+      .mockResolvedValueOnce({ ok: true, data: { positions: [] } })
+      .mockResolvedValueOnce({ ok: true, data: { open_orders: [], executed_orders: [] } });
+
+    const { POST } = await import("../app/api/orders/place/route");
+    const req = makeRequest("http://localhost/api/orders/place", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type: "combo",
+        symbol: "AAPL",
+        action: "BUY",
+        quantity: 1,
+        limitPrice: 2.5,
+        legs: [
+          {
+            symbol: "AAPL",
+            secType: "OPT",
+            expiry: "20260417",
+            strike: 100,
+            right: "CALL",
+            action: "BUY",
+            ratio: 1,
+          },
+          {
+            symbol: "AAPL",
+            secType: "OPT",
+            expiry: "20260417",
+            strike: 110,
+            right: "CALL",
+            action: "SELL",
+            ratio: 1,
+          },
+        ],
+      }),
+    });
+    const res = await POST(req);
+    expect(res.status).toBe(200);
+
+    const placeCall = mockRadonFetch.mock.calls.find((c) => c[0] === "/orders/place");
+    expect(placeCall).toBeDefined();
+    const payload = JSON.parse((placeCall![1] as { body: string }).body) as {
+      legs: { right: string; symbol?: string }[];
+    };
+    expect(payload.legs[0].right).toBe("C");
+    expect(payload.legs[1].right).toBe("C");
+    expect(payload.legs[0].symbol).toBeUndefined();
+  });
 });
 
 // =============================================================================
