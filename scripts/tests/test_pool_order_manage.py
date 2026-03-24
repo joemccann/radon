@@ -182,6 +182,29 @@ class TestPoolModifyOrder:
         client.disconnect.assert_not_called()
 
     @pytest.mark.asyncio
+    async def test_modify_clears_vol_fields_on_lmt_order(self):
+        """Modify must reset volatility/volatilityType sentinels to prevent IB error 321."""
+        from api.pool_order_manage import pool_modify_order
+
+        trade = _make_trade(lmt_price=5.0)
+        # Simulate IB populating VOL fields on open order snapshot
+        trade.order.volatility = 0.25
+        trade.order.volatilityType = 1
+
+        modified = _make_trade(lmt_price=5.0)
+        modified.order.totalQuantity = 50
+        client = MagicMock()
+        client.get_open_orders.side_effect = [[trade], [modified]]
+        client.ib.client.clientId = 0
+
+        result = await pool_modify_order(
+            client, order_id=10, perm_id=12345, new_quantity=50
+        )
+        # Verify the VOL fields were reset before place_order was called
+        assert trade.order.volatility == 1.7976931348623157e+308
+        assert trade.order.volatilityType == 2147483647
+
+    @pytest.mark.asyncio
     async def test_modify_rejects_non_limit_order(self):
         """Modify fails for non-LMT order types."""
         from api.pool_order_manage import pool_modify_order

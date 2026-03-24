@@ -128,6 +128,13 @@ async def pool_modify_order(
     if outside_rth is not None:
         trade.order.outsideRth = outside_rth
 
+    # Clear VOL-related fields to prevent IB error 321 on non-VOL orders.
+    # IB populates these on open order snapshots; re-submitting them on a
+    # LMT order causes "VOL order requires non-negative floating point value".
+    if order_type not in ("VOL",):
+        trade.order.volatility = 1.7976931348623157e+308  # IB sentinel = unset
+        trade.order.volatilityType = 2147483647            # IB sentinel = unset
+
     await asyncio.to_thread(client.place_order, trade.contract, trade.order)
 
     # Poll for confirmation

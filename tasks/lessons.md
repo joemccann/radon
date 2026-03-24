@@ -7,6 +7,7 @@
 - For order-placement failures, never dump transport-layer strings like `Radon API 502: ...` into the UI. Preserve upstream status/detail at the Next route boundary, then convert broker prose into short operator-facing summary/detail copy in a shared banner.
 - When UI verification guidance prefers `chrome-cdp`, check whether that skill is actually available in the current Codex runtime before planning around it. If it is unavailable, explicitly reuse any already-running dev server and fall back cleanly instead of trying to boot a duplicate app instance.
 - IB Gateway CLOSE_WAIT (port listening but upstream IB session dead) causes `TimeoutError` on every API call but was NOT caught by the auto-recovery pattern matcher which only matched `ECONNREFUSED`. Fix: add `TimeoutError` and `API connection failed` to `_IB_CONN_REFUSED_PATTERNS`, add `_has_close_wait()` via `lsof` to detect dead upstream at startup, and have the restart script kill lingering IB/IBC Java processes (`pgrep -f 'ibgateway|IBC|ibcontroller'` + `kill -9`) before restarting.
+- When modifying an IB order by re-submitting via `placeOrder`, the open-order snapshot may contain stale VOL fields (`volatility`, `volatilityType`) populated by IB. Re-submitting these on a LMT order causes IB error 321 ("VOL order requires non-negative floating point value for volatility"). Fix: reset both fields to IB sentinel values (`1.7976931348623157e+308` and `2147483647`) before `placeOrder` on non-VOL orders.
 
 ## 2026-03-22
 
