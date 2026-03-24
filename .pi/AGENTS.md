@@ -1700,8 +1700,8 @@ This workflow triggers on ANY of these events:
 
 The FastAPI server (`scripts/api/ib_gateway.py`) handles IB Gateway recovery automatically:
 
-1. **Startup:** Checks port 4001 + CLOSE_WAIT detection (`lsof`) → if down or upstream dead, runs `~/ibc/bin/restart-secure-ibc-service.sh` (kills lingering processes first), polls up to 45s
-2. **Runtime:** IB-dependent endpoints detect `ECONNREFUSED`, `TimeoutError`, `API connection failed` → auto-restart Gateway → reconnect pool → retry once
+1. **Startup:** Checks port 4001 + CLOSE_WAIT detection (`lsof`) → if down or upstream dead, runs `~/ibc/bin/restart-secure-ibc-service.sh`, polls up to 45s
+2. **Runtime:** Subprocess errors trigger Gateway health check FIRST (port + CLOSE_WAIT). Only restart if Gateway is genuinely unreachable. Subprocess failures from client ID collisions, VOL errors, or transient timeouts do NOT trigger restart.
 3. **Manual:** `curl -X POST http://localhost:8321/ib/restart` or `POST /ib/restart`
 4. **Health:** `curl http://localhost:8321/health` → shows `ib_gateway.port_listening`, `ib_gateway.upstream_dead` + `ib_pool` status
 
@@ -1746,7 +1746,9 @@ curl -X POST http://localhost:8321/ib/restart
 | Cached fallback read | <50ms | Serves `data/portfolio.json` or `data/orders.json` |
 | **Total API response** | **~3.5s** | Returns 200 with `X-Sync-Warning` header |
 
-**Automated recovery layers:** FastAPI Gateway auto-restart on ECONNREFUSED/TimeoutError/CLOSE_WAIT (kill lingering processes, retry once) > IBClient reconnect (5 attempts, exponential backoff) > WS server reconnect (5s interval, client ID rotation) > WS stale tick detection (45s no data → restart Gateway) > cached fallback (serve stale data as 200 with `is_stale: true`) > IBC auto-restart (nightly 11:58 PM) > 2FA retry (`TWOFA_TIMEOUT_ACTION=restart`).
+**Automated recovery layers:** FastAPI Gateway health-gated restart (detect error → verify port+CLOSE_WAIT → restart only if genuinely down, retry once) > IBClient reconnect (5 attempts, exponential backoff) > WS server reconnect (5s interval, client ID rotation) > WS stale tick detection (45s no data → restart Gateway) > cached fallback (serve stale data as 200 with `is_stale: true`) > IBC auto-restart (nightly 11:58 PM) > 2FA retry (`TWOFA_TIMEOUT_ACTION=restart`).
+
+**Critical: IB clientId scoping.** Cancel and modify are scoped by the clientId that placed the order. Master client (clientId=0) can SEE all orders but CANNOT cancel/modify them (Error 10147/103). Cancel/modify MUST use subprocess (`ib_order_manage.py`) which reconnects as the original clientId. Never route through the pool.
 
 ### Client ID Strategy
 

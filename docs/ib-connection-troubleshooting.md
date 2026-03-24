@@ -227,8 +227,8 @@ These mechanisms handle transient failures without intervention:
 | Mechanism | Where | Behavior |
 |-----------|-------|----------|
 | CLOSE_WAIT detection | `ib_gateway.py` | `lsof` detects dead upstream at startup + health checks; auto-restart |
-| TimeoutError recovery | `server.py` | Detects `TimeoutError`/`API connection failed` → restart Gateway + retry once |
-| Process cleanup | `restart-secure-ibc-service.sh` | Kills lingering IB/IBC Java processes (`kill -9`) before restart |
+| Health-gated recovery | `server.py` | Subprocess error → verify Gateway health first → restart only if genuinely down |
+| Process cleanup | `restart-secure-ibc-service.sh` | Snapshots pre-existing PIDs, force-kills only survivors after SIGTERM |
 | `_on_disconnect()` | `IBClient` (Python) | 5 attempts, exponential backoff (2^n, cap 30s), restores subscriptions |
 | Stale tick detection | `ib_realtime_server.js` | No ticks for 45s during market hours → restart Gateway (120s cooldown) |
 | Reconnect loop | `ib_realtime_server.js` | 5s interval, client ID rotation on collision, subscription restoration |
