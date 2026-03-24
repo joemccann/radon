@@ -297,6 +297,20 @@ class TestConnectionErrorPatterns:
         from api.server import _is_ib_connection_error
         assert not _is_ib_connection_error("")
 
+    def test_make_sure_api_port_detected(self):
+        from api.server import _is_ib_connection_error
+        assert _is_ib_connection_error("Make sure API port on TWS/IBG is open")
+
+    def test_connectivity_lost_detected(self):
+        from api.server import _is_ib_connection_error
+        assert _is_ib_connection_error(
+            "Connectivity between IBKR and Trader Workstation has been lost."
+        )
+
+    def test_request_timed_out_detected(self):
+        from api.server import _is_ib_connection_error
+        assert _is_ib_connection_error("account updates for U4698258 request timed out")
+
 
 # ---------------------------------------------------------------------------
 # CLOSE_WAIT detection

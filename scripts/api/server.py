@@ -1106,7 +1106,15 @@ _IB_CONN_REFUSED_PATTERNS = (
     "API connection failed",
     "Failed to connect to IB",
     "IBConnectionError",
+    "Make sure API port",
+    "Connectivity between IBKR and",
+    "request timed out",
 )
+
+# Cooldown: after an IB subprocess fails with a connection error, skip
+# subsequent attempts for this many seconds to avoid churn.
+_IB_SCRIPT_COOLDOWN_SECS = 15.0
+_ib_last_failure: float = 0.0  # monotonic timestamp of last IB connection failure
 
 
 def _is_ib_connection_error(error_msg: str) -> bool:
@@ -1131,19 +1139,36 @@ def _pool_has_any_connection() -> bool:
 async def _run_ib_script_with_recovery(
     script: str, args: list, timeout: float = 30
 ) -> ScriptResult:
-    """Run an IB-dependent script with pre-flight health check.
+    """Run an IB-dependent script with pre-flight health check and cooldown.
 
-    Fast-fails if Gateway is known to be down (pool disconnected + port
-    not listening) to avoid wasting 3-30s on a doomed subprocess.
-    On genuine connection errors, verifies health before restarting.
+    Three layers of fast-fail:
+    1. Cooldown: if a recent IB script failed, skip for _IB_SCRIPT_COOLDOWN_SECS
+    2. Pool check: if pool is disconnected, verify Gateway before spawning
+    3. Post-failure: verify Gateway health before restarting
     """
-    # Pre-flight: if pool is disconnected, check Gateway before spawning
+    global _ib_last_failure
+
+    # Layer 1: Cooldown — skip if a recent failure occurred
+    now = time.monotonic()
+    if _ib_last_failure > 0 and (now - _ib_last_failure) < _IB_SCRIPT_COOLDOWN_SECS:
+        elapsed = now - _ib_last_failure
+        logger.debug(
+            "Skipping %s — IB cooldown active (%.1fs since last failure, %ds cooldown)",
+            script, elapsed, _IB_SCRIPT_COOLDOWN_SECS,
+        )
+        return ScriptResult(
+            ok=False,
+            error="IB Gateway connection recently failed. Retrying shortly.",
+        )
+
+    # Layer 2: Pre-flight pool check
     if not _pool_has_any_connection():
         gw_status = await check_ib_gateway()
         port_ok = gw_status.get("port_listening", False)
         upstream_dead = gw_status.get("upstream_dead", False)
 
         if not port_ok or upstream_dead:
+            _ib_last_failure = now
             logger.warning(
                 "Skipping %s — Gateway down (port=%s, upstream_dead=%s), pool disconnected",
                 script, port_ok, upstream_dead,
@@ -1155,7 +1180,14 @@ async def _run_ib_script_with_recovery(
 
     result = await run_script(script, args, timeout=timeout)
 
+    # Clear cooldown on success
+    if result.ok:
+        _ib_last_failure = 0.0
+
     if not result.ok and _is_ib_connection_error(result.error):
+        # Set cooldown to prevent churn from repeated failures
+        _ib_last_failure = time.monotonic()
+
         # Verify Gateway is actually down before restarting
         gw_status = await check_ib_gateway()
         port_ok = gw_status.get("port_listening", False)
@@ -1164,8 +1196,8 @@ async def _run_ib_script_with_recovery(
         if port_ok and not upstream_dead:
             # Gateway is healthy — subprocess failed for other reasons
             logger.warning(
-                "Script %s failed but Gateway is healthy — not restarting",
-                script,
+                "Script %s failed but Gateway is healthy — not restarting (cooldown %ds)",
+                script, _IB_SCRIPT_COOLDOWN_SECS,
             )
             return result
 
@@ -1177,6 +1209,7 @@ async def _run_ib_script_with_recovery(
 
         if gw_result.get("restarted") and gw_result.get("port_listening"):
             logger.info("IB Gateway restarted, retrying %s", script)
+            _ib_last_failure = 0.0  # Clear cooldown after successful restart
             if ib_pool:
                 await ib_pool.disconnect_all()
                 await ib_pool.connect_all()
