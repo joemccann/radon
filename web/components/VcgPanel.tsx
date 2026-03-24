@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { AlertTriangle, TrendingUp, Zap } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ShareReportModal from "./ShareReportModal";
@@ -97,10 +98,52 @@ function vvixSeverityDesc(sev: string): string {
   }
 }
 
+/* ─── Sortable history ───────────────────────────────── */
+
+type VcgSortCol = "date" | "vcg" | "vcg_adj" | "residual" | "beta1" | "beta2" | "vix" | "vvix" | "credit";
+type SortDir = "asc" | "desc";
+
+function sortIndicator(col: VcgSortCol, activeCol: VcgSortCol | null, dir: SortDir): string {
+  if (col !== activeCol) return "";
+  return dir === "asc" ? " ↑" : " ↓";
+}
+
+function sortHistory(
+  rows: VcgHistoryEntry[],
+  col: VcgSortCol | null,
+  dir: SortDir,
+): VcgHistoryEntry[] {
+  if (!col) return rows;
+  const sorted = [...rows].sort((a, b) => {
+    const av = col === "date" ? a.date : (a[col] ?? -Infinity);
+    const bv = col === "date" ? b.date : (b[col] ?? -Infinity);
+    if (av < bv) return dir === "asc" ? -1 : 1;
+    if (av > bv) return dir === "asc" ? 1 : -1;
+    return 0;
+  });
+  return sorted;
+}
+
 /* ─── Main component ─────────────────────────────────── */
 
 export default function VcgPanel({ marketState }: VcgPanelProps) {
   const { data, loading, error, lastSync } = useVcg(marketState ?? null);
+  const [sortCol, setSortCol] = useState<VcgSortCol | null>(null);
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  function handleSort(col: VcgSortCol) {
+    if (sortCol === col) {
+      if (sortDir === "desc") {
+        setSortDir("asc");
+      } else {
+        setSortCol(null);
+        setSortDir("desc");
+      }
+    } else {
+      setSortCol(col);
+      setSortDir("desc");
+    }
+  }
 
   if (loading && !data) {
     return (
@@ -349,7 +392,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
         </div>
       </div>
 
-      {/* ── History table ─────────────────────────────────── */}
+      {/* ── History table (sortable) ────────────────────── */}
       <div className="section">
         <div className="section-header">
           <div className="section-title">VCG History (20d)</div>
@@ -358,19 +401,30 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
           <table>
             <thead>
               <tr>
-                <th>Date</th>
-                <th className="right">VCG</th>
-                <th className="right">VCG Adj</th>
-                <th className="right">Residual</th>
-                <th className="right">β₁ (VVIX)</th>
-                <th className="right">β₂ (VIX)</th>
-                <th className="right">VIX</th>
-                <th className="right">VVIX</th>
-                <th className="right">{data.credit_proxy}</th>
+                {([
+                  ["date", "Date", false],
+                  ["vcg", "VCG", true],
+                  ["vcg_adj", "VCG Adj", true],
+                  ["residual", "Residual", true],
+                  ["beta1", "β₁ (VVIX)", true],
+                  ["beta2", "β₂ (VIX)", true],
+                  ["vix", "VIX", true],
+                  ["vvix", "VVIX", true],
+                  ["credit", data.credit_proxy, true],
+                ] as [VcgSortCol, string, boolean][]).map(([col, label, isRight]) => (
+                  <th
+                    key={col}
+                    className={`${isRight ? "right" : ""} sortable-th`}
+                    onClick={() => handleSort(col)}
+                    style={{ cursor: "pointer", userSelect: "none", whiteSpace: "nowrap" }}
+                  >
+                    {label}{sortIndicator(col, sortCol, sortDir)}
+                  </th>
+                ))}
               </tr>
             </thead>
             <tbody>
-              {data.history.map((h: VcgHistoryEntry) => (
+              {sortHistory(data.history, sortCol, sortDir).map((h: VcgHistoryEntry) => (
                 <tr key={h.date}>
                   <td>{h.date}</td>
                   <td className="right" style={{ color: (h.vcg ?? 0) > 2 ? "var(--fault)" : (h.vcg ?? 0) < -2 ? "var(--warning)" : "var(--text-primary)" }}>
