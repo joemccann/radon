@@ -1,9 +1,10 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-23T09:00:00-07:00
+2026-03-24T06:05:00-07:00
 
 ## Recent Commits
+- 2026-03-24 — **fix: preserve literal MenthorQ credentials in CTA launchd sync wrapper.** `scripts/run_cta_sync.sh` no longer `source`s `.env` through `bash`, which was expanding shell metacharacters inside `MENTHORQ_PASS` and breaking background/API CTA auth while direct Python fetches still worked. The wrapper now parses `.env` literally, added a regression test for passwords containing `$HOME`, and CTA cache/health recovered to `2026-03-23`.
 - 2026-03-23 — **feat: VCG-R strategy overhaul — inverted VIX gate, severity tiers, counter-signal.** Complete rewrite from 19-year backtest. VIX gate inverted from <40 to >28 (original caught 0 crashes; inverted catches avg -7.6% over 10d). VCG trigger raised from >2.0σ to >2.5σ. HDR concept removed. Added severity tiers (T1=VIX>30, T2=VIX>28, T3=VIX>25), EDR watch state, bounce counter-signal (VCG<-3.5). VVIX now severity amplifier only, not a gate. 17 files, 1409 tests.
 - 2026-03-23 — **feat: Narrative-driven tweet copy for VCG, CRI, and CTA share reports.** Each signal state gets a distinct hook → thesis → data → action. VCG: 6 states with backtest stats as credibility hooks. CRI: 5 regime narratives (TRIGGERED through LOW). CTA: dynamic positioning analysis with cross-asset context (commodities, bonds, gold). All data-driven from live scan results, no hardcoded values.
 - 2026-03-23 — **hide: Remove /internals route from nav.** Skew charts used wrong metric (UW risk-reversal vs correct QQQ 25d/50d call vol ratio). Route redirects to /regime. Components preserved for future use.

@@ -1,5 +1,47 @@
 # TODO
 
+## Session: Fix CTA Sync Wrapper Credential Mangling (2026-03-24)
+
+### Goal
+Restore fresh MenthorQ CTA cache updates by fixing the background/API CTA sync path so it preserves literal `.env` credential values instead of letting shell expansion corrupt `MENTHORQ_PASS`.
+
+### Dependency Graph
+- T1 (Reproduce the CTA wrapper env-loading bug and confirm the background sync path mangles `.env` values containing shell metacharacters) depends_on: []
+- T2 (Add red regression coverage for the CTA sync wrapper so shell-metacharacter passwords survive into the Python runtime unchanged) depends_on: [T1]
+- T3 (Patch `scripts/run_cta_sync.sh` to load `.env` values literally, without shell expansion or truncation) depends_on: [T2]
+- T4 (Run focused verification, full required suites, and a live CTA sync/backfill check if auth succeeds) depends_on: [T3]
+
+### Checklist
+- [x] T1 Reproduce the CTA wrapper env-loading bug and confirm the background sync path mangles `.env` values containing shell metacharacters
+- [x] T2 Add red regression coverage for the CTA sync wrapper so shell-metacharacter passwords survive into the Python runtime unchanged
+- [x] T3 Patch `scripts/run_cta_sync.sh` to load `.env` values literally, without shell expansion or truncation
+- [x] T4 Run focused verification, full required suites, and a live CTA sync/backfill check if auth succeeds
+
+### Replan
+- Live verification after the wrapper fix exposed a second blocker: direct `python3.13 scripts/fetch_menthorq_cta.py --date 2026-03-23 --json` no longer fails on login, but CTA extraction now fails with `No img src found for card slug: cta_table` and `Card not found for slug: ...`.
+- New focus: capture the authenticated CTA page DOM/artifacts, add a regression for the current card structure, patch card discovery/download/screenshot logic, then rerun live fetch/sync verification.
+
+### Review
+- Root cause:
+  - [scripts/run_cta_sync.sh](/Users/joemccann/dev/apps/finance/radon/scripts/run_cta_sync.sh) loaded `.env` by rewriting it to a temp file and `source`-ing it in `bash`.
+  - The repo’s current `MENTHORQ_PASS` is unquoted and contains shell metacharacters, so the wrapper-expanded value seen by the child Python process was shorter than the literal `.env` value.
+  - This only affected the background/API CTA sync path; direct Python execution used [env_loader.py](/Users/joemccann/dev/apps/finance/radon/scripts/utils/env_loader.py) and preserved the full credential.
+- Fix:
+  - Replaced the shell `source`-based loader in [run_cta_sync.sh](/Users/joemccann/dev/apps/finance/radon/scripts/run_cta_sync.sh) with a literal line parser that trims whitespace, strips matching quotes, and exports `KEY=VALUE` without evaluating shell syntax.
+- Regression coverage:
+  - Added [test_run_cta_sync_wrapper.py](/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_run_cta_sync_wrapper.py), which runs the wrapper in a temp repo fixture with an unquoted password like `Abc$HOME!xyz%42` and proves the child Python process receives the exact literal value.
+  - Red before fix: the captured password expanded `$HOME` and failed the assertion.
+  - Green after fix: the wrapper preserved the exact literal credential.
+- Verification:
+  - Focused regression: `python3.13 -m pytest -q scripts/tests/test_run_cta_sync_wrapper.py` passed.
+  - Full JS suite: `npx vitest run --config vitest.config.ts` passed (`148` files, `1411` tests).
+  - Full Python suite: `python3.13 -m pytest -q` failed on unrelated live MenthorQ integration coverage:
+    - [test_menthorq_integration.py](/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_menthorq_integration.py): `TestMenthorQIntegrationScreenerVolume::test_unusual_activity` returned zero live rows.
+    - Isolated rerun confirmed the same external-data failure.
+  - Live CTA validation:
+    - `python3.13 scripts/fetch_menthorq_cta.py --date 2026-03-23 --json` completed and wrote [cta_2026-03-23.json](/Users/joemccann/dev/apps/finance/radon/data/menthorq_cache/cta_2026-03-23.json).
+    - [cta-sync-latest.json](/Users/joemccann/dev/apps/finance/radon/data/menthorq_cache/health/cta-sync-latest.json) and [cta-sync.json](/Users/joemccann/dev/apps/finance/radon/data/service_health/cta-sync.json) now both show `state=healthy`, `latest_available_date=2026-03-23`, and the successful cache path.
+
 ## Session: Audit Closed-Market Cached Route Loads (2026-03-22)
 
 ### Goal

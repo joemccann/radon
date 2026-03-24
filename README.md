@@ -157,6 +157,7 @@ MENTHORQ_PASS=your-menthorq-password
 ```
 
 The dedicated CTA sync service and wrapper scripts source the project root `.env` directly. Keep MenthorQ credentials there so the scheduled `4:15 PM ET` and `5:00 PM ET` CTA runs, plus any `RunAtLoad` catch-up execution after reboot/login/wake, use the same auth context as manual CLI fetches.
+`scripts/run_cta_sync.sh` now parses `.env` values literally instead of shell-sourcing them, so unquoted secrets containing shell metacharacters such as `$` remain intact in the scheduled/background CTA path.
 
 **Optional shell exports**:
 
@@ -380,7 +381,7 @@ CTA freshness is now an explicit contract:
 
 - `data/menthorq_cache/cta_{DATE}.json` remains the daily cache artifact.
 - `data/menthorq_cache/health/cta-sync-latest.json` is the primary machine-readable health record, and `data/menthorq_cache/health/history/cta-sync-*.json` preserves run history. For older tooling, the latest record is also mirrored to `data/service_health/cta-sync.json`.
-- `scripts/run_cta_sync.sh` is the launchd-safe wrapper. It resolves the repo Python runtime, sources the root `.env`, and delegates to `scripts/cta_sync_service.py`.
+- `scripts/run_cta_sync.sh` is the launchd-safe wrapper. It resolves the repo Python runtime, parses the root `.env` literally without shell expansion, and delegates to `scripts/cta_sync_service.py`.
 - `/api/menthorq/cta` compares the latest cache date against the latest closed trading day, triggers one background CTA sync when stale, and returns explicit `cache_meta` plus `sync_health` metadata (with a `sync_status` compatibility alias) so `/cta` can show stale/degraded state instead of silently presenting old data as current.
 
 For the `/regime` RVOL/COR1M chart, the CRI cache now preserves enough trailing SPY closes to rebuild the full prior 20 sessions of realized volatility. COR1M history now falls back to the official Cboe dashboard feed before Yahoo, and the API prefers the richer CRI cache candidate when scheduled snapshots lag and backfills missing `history[].realized_vol` values from cached closes before rendering the chart.

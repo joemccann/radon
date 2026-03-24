@@ -13,14 +13,31 @@ cd "$(dirname "$0")/.."
 _load_env() {
     local f="$1"
     [ -f "$f" ] || return
-    local tmp
-    tmp=$(mktemp)
-    grep -v '^#' "$f" | grep -v '^\s*$' | sed 's/^export //' > "$tmp"
-    set -a
-    # shellcheck disable=SC1090
-    . "$tmp"
-    set +a
-    rm -f "$tmp"
+    local line key value first last
+    while IFS= read -r line || [ -n "$line" ]; do
+        line="${line#"${line%%[![:space:]]*}"}"
+        line="${line%"${line##*[![:space:]]}"}"
+        [ -n "$line" ] || continue
+        case "$line" in
+            \#*) continue ;;
+            export\ *) line="${line#export }" ;;
+        esac
+        [[ "$line" == *=* ]] || continue
+        key="${line%%=*}"
+        value="${line#*=}"
+        key="${key%"${key##*[![:space:]]}"}"
+        value="${value#"${value%%[![:space:]]*}"}"
+        value="${value%"${value##*[![:space:]]}"}"
+        [ -n "$key" ] || continue
+        if [ "${#value}" -ge 2 ]; then
+            first="${value:0:1}"
+            last="${value: -1}"
+            if { [ "$first" = "'" ] && [ "$last" = "'" ]; } || { [ "$first" = '"' ] && [ "$last" = '"' ]; }; then
+                value="${value:1:${#value}-2}"
+            fi
+        fi
+        export "$key=$value"
+    done < "$f"
 }
 
 _load_env "web/.env"
