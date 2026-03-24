@@ -792,10 +792,11 @@ async def orders_place(request: Request):
 
 @app.post("/orders/cancel")
 async def orders_cancel(request: Request):
-    """Cancel an open order via IB pool (no subprocess).
+    """Cancel an open order via subprocess.
 
-    Uses sync role (clientId=0, master) which can cancel ANY order
-    regardless of which clientId placed it.
+    IB scopes cancelOrder by clientId — only the clientId that placed the
+    order can cancel it. The subprocess detects the original clientId and
+    reconnects as that client before cancelling.
     """
     body = await request.json()
     if test_mode:
@@ -808,15 +809,18 @@ async def orders_cancel(request: Request):
     order_id = body.get("orderId", 0)
     perm_id = body.get("permId", 0)
 
-    if not ib_pool or not ib_pool.is_connected("sync"):
-        raise HTTPException(status_code=503, detail="IB pool sync connection unavailable")
+    args = ["cancel"]
+    if order_id:
+        args.extend(["--order-id", str(order_id)])
+    if perm_id:
+        args.extend(["--perm-id", str(perm_id)])
 
-    async with ib_pool.acquire("sync") as client:
-        result = await pool_cancel_order(client, order_id=order_id, perm_id=perm_id)
-
-    if result["status"] == "error":
-        raise HTTPException(status_code=502, detail=result["message"])
-    return result
+    result = await _run_ib_script_with_recovery("ib_order_manage.py", args, timeout=15)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    if result.data and result.data.get("status") == "error":
+        raise HTTPException(status_code=502, detail=result.data.get("message", "Cancel failed"))
+    return result.data
 
 
 @app.post("/orders/modify")
