@@ -330,3 +330,46 @@ class TestCloseWaitDetection:
         from api.ib_gateway import _has_close_wait
         mock_lsof.side_effect = subprocess.SubprocessError("lsof not found")
         assert _has_close_wait() is False
+
+
+# ---------------------------------------------------------------------------
+# Pre-flight pool check
+# ---------------------------------------------------------------------------
+
+
+class TestPoolPreflightCheck:
+    """Test _pool_has_any_connection fast-fail logic."""
+
+    def test_returns_false_when_no_pool(self):
+        from api.server import _pool_has_any_connection
+        import api.server as srv
+        original = srv.ib_pool
+        srv.ib_pool = None
+        try:
+            assert _pool_has_any_connection() is False
+        finally:
+            srv.ib_pool = original
+
+    def test_returns_true_when_any_role_connected(self):
+        from api.server import _pool_has_any_connection
+        import api.server as srv
+        mock_pool = MagicMock()
+        mock_pool.is_connected.side_effect = lambda r: r == "sync"
+        original = srv.ib_pool
+        srv.ib_pool = mock_pool
+        try:
+            assert _pool_has_any_connection() is True
+        finally:
+            srv.ib_pool = original
+
+    def test_returns_false_when_all_disconnected(self):
+        from api.server import _pool_has_any_connection
+        import api.server as srv
+        mock_pool = MagicMock()
+        mock_pool.is_connected.return_value = False
+        original = srv.ib_pool
+        srv.ib_pool = mock_pool
+        try:
+            assert _pool_has_any_connection() is False
+        finally:
+            srv.ib_pool = original

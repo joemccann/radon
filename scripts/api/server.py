@@ -1114,30 +1114,58 @@ def _is_ib_connection_error(error_msg: str) -> bool:
     return any(p in (error_msg or "") for p in _IB_CONN_REFUSED_PATTERNS)
 
 
+def _pool_has_any_connection() -> bool:
+    """Quick check: does the pool have at least one live IB connection?
+
+    If yes, the Gateway is up and subprocesses should be able to connect.
+    If no, the Gateway is likely down — subprocess will also fail.
+    """
+    if not ib_pool:
+        return False
+    for role in ("sync", "orders", "data"):
+        if ib_pool.is_connected(role):
+            return True
+    return False
+
+
 async def _run_ib_script_with_recovery(
     script: str, args: list, timeout: float = 30
 ) -> ScriptResult:
-    """Run an IB-dependent script. On connection error, verify Gateway health before restarting.
+    """Run an IB-dependent script with pre-flight health check.
 
-    Only restarts if the Gateway is genuinely unreachable (port not listening
-    or CLOSE_WAIT detected). Subprocess failures from client ID collisions,
-    VOL errors, or transient timeouts do NOT trigger a restart.
+    Fast-fails if Gateway is known to be down (pool disconnected + port
+    not listening) to avoid wasting 3-30s on a doomed subprocess.
+    On genuine connection errors, verifies health before restarting.
     """
+    # Pre-flight: if pool is disconnected, check Gateway before spawning
+    if not _pool_has_any_connection():
+        gw_status = await check_ib_gateway()
+        port_ok = gw_status.get("port_listening", False)
+        upstream_dead = gw_status.get("upstream_dead", False)
+
+        if not port_ok or upstream_dead:
+            logger.warning(
+                "Skipping %s — Gateway down (port=%s, upstream_dead=%s), pool disconnected",
+                script, port_ok, upstream_dead,
+            )
+            return ScriptResult(
+                ok=False,
+                error="IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval.",
+            )
+
     result = await run_script(script, args, timeout=timeout)
 
     if not result.ok and _is_ib_connection_error(result.error):
-        # Verify Gateway is actually down before restarting — don't restart
-        # for subprocess-level failures when Gateway is healthy
+        # Verify Gateway is actually down before restarting
         gw_status = await check_ib_gateway()
         port_ok = gw_status.get("port_listening", False)
         upstream_dead = gw_status.get("upstream_dead", False)
 
         if port_ok and not upstream_dead:
-            # Gateway is healthy — subprocess failed for other reasons.
-            # Don't restart; just return the error.
+            # Gateway is healthy — subprocess failed for other reasons
             logger.warning(
-                "Script %s failed but Gateway is healthy (port=%s, upstream_dead=%s) — not restarting",
-                script, port_ok, upstream_dead,
+                "Script %s failed but Gateway is healthy — not restarting",
+                script,
             )
             return result
 
@@ -1149,7 +1177,6 @@ async def _run_ib_script_with_recovery(
 
         if gw_result.get("restarted") and gw_result.get("port_listening"):
             logger.info("IB Gateway restarted, retrying %s", script)
-            # Reconnect pool too
             if ib_pool:
                 await ib_pool.disconnect_all()
                 await ib_pool.connect_all()
