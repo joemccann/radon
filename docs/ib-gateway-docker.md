@@ -109,6 +109,24 @@ nc -z localhost 4003
 
 Check via: `scripts/docker_ib_gateway.sh status` or `curl localhost:8321/health`
 
+## Autoheal (Automatic Unhealthy Restart)
+
+Docker's `restart: unless-stopped` only restarts containers that **exit**. When IB Gateway's API becomes unresponsive (session drop, 2FA expiry), the Java process stays alive but the healthcheck fails — the container goes `unhealthy` but never exits.
+
+The `autoheal` sidecar container watches for this and restarts unhealthy containers automatically:
+
+- Checks every 30s for containers labeled `autoheal=true`
+- 180s grace period after container start (allows for IB's slow startup + 2FA)
+- When unhealthy detected: `docker restart` the container
+- IB Gateway re-authenticates on restart (`RELOGIN_AFTER_TWOFA_TIMEOUT: yes`)
+
+This eliminates the infinite 502 loop where the API keeps trying to connect to an unresponsive Gateway.
+
+**Autoheal logs:**
+```bash
+docker logs ib-gateway-autoheal-1
+```
+
 ## Credential Security
 
 - Password stored via Docker secrets at `docker/ib-gateway/secrets/ib_password.txt`
