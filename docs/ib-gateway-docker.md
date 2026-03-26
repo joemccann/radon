@@ -100,8 +100,10 @@ If you prefer to keep precautions active instead of bypassing, increase the limi
 
 Docker's built-in healthcheck runs every 30s:
 ```
-nc -z localhost 4003
+bash -c 'echo > /dev/tcp/localhost/4001'
 ```
+
+**Important:** Uses bash `/dev/tcp` builtin, NOT `nc`/`netcat` — the `gnzsnz/ib-gateway` image doesn't include netcat. Using `nc` causes the healthcheck to always fail, making the container permanently unhealthy and triggering autoheal restart loops.
 
 - **healthy**: IB Gateway API is accepting connections
 - **unhealthy**: API not responding (2FA pending, login failed, or Gateway crashed)
