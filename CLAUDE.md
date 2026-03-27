@@ -634,7 +634,11 @@ Full spec: `docs/unusual_whales_api.md`
 
 ## IB Gateway
 
-Two modes controlled by `IB_GATEWAY_MODE` env var (default: `launchd`):
+Three modes controlled by `IB_GATEWAY_MODE` env var (default: `docker`):
+
+### Cloud Mode (Primary — Tailscale)
+
+Gateway runs on a cloud VM accessible via Tailscale MagicDNS at `ib-gateway:4001`. Set `IB_GATEWAY_HOST=ib-gateway` in root `.env`. Both Python (`ib_client.py` loads dotenv at import) and Node (`ib_realtime_server.js` loads dotenv at startup) read this automatically. All scripts import `DEFAULT_HOST` from `ib_client` — no hardcoded `127.0.0.1` in IB connection code.
 
 ### Docker Mode (Primary)
 
@@ -668,7 +672,7 @@ Global service: `local.ibc-gateway` (shared with market-data-warehouse). Install
 | Variable | Default | Purpose |
 |----------|---------|---------|
 | `IB_GATEWAY_MODE` | `docker` | `docker` or `launchd` |
-| `IB_GATEWAY_HOST` | `127.0.0.1` | Gateway host |
+| `IB_GATEWAY_HOST` | `127.0.0.1` (fallback), `ib-gateway` (cloud, in `.env`) | Gateway host |
 | `IB_GATEWAY_PORT` | `4001` | Gateway port |
 
 ### Ports

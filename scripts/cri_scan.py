@@ -43,6 +43,8 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+from clients.ib_client import DEFAULT_HOST
+
 # ── constants ─────────────────────────────────────────────────────
 ALL_TICKERS = ["VIX", "VVIX", "SPY", "COR1M"]
 
@@ -92,7 +94,7 @@ def _connect_ib_with_retry(
     for client_id in client_ids:
         for port in ports:
             try:
-                ib.connect("127.0.0.1", port, clientId=client_id, timeout=timeout)
+                ib.connect(DEFAULT_HOST, port, clientId=client_id, timeout=timeout)
                 return True
             except Exception as exc:
                 print(

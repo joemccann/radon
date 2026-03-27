@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
+from clients.ib_client import DEFAULT_HOST
 from cri_scan import (
     _extract_ib_quote_value,
     _connect_ib_with_retry,
@@ -92,8 +93,8 @@ class TestIBConnectionRetry:
 
         assert connected is True
         assert attempts == [
-            ("127.0.0.1", 4001, 50, 8),
-            ("127.0.0.1", 4001, 52, 8),
+            (DEFAULT_HOST, 4001, 50, 8),
+            (DEFAULT_HOST, 4001, 52, 8),
         ]
 
     def test_returns_false_when_all_ports_and_client_ids_fail(self):
@@ -108,10 +109,10 @@ class TestIBConnectionRetry:
 
         assert connected is False
         assert attempts == [
-            ("127.0.0.1", 4001, 50, 5),
-            ("127.0.0.1", 7497, 50, 5),
-            ("127.0.0.1", 4001, 52, 5),
-            ("127.0.0.1", 7497, 52, 5),
+            (DEFAULT_HOST, 4001, 50, 5),
+            (DEFAULT_HOST, 7497, 50, 5),
+            (DEFAULT_HOST, 4001, 52, 5),
+            (DEFAULT_HOST, 7497, 52, 5),
         ]
 
 

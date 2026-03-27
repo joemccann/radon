@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from clients.ib_client import IBClient
+from clients.ib_client import IBClient, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
 
 def _http_get_text(url: str, params: dict, timeout: int = 30) -> str:
@@ -59,7 +59,7 @@ class IBFetcher(ExecutionFetcher):
     - Completed orders
     """
 
-    def __init__(self, host: str = "127.0.0.1", port: int = 4001, client_id: int = 90):
+    def __init__(self, host: str = DEFAULT_HOST, port: int = DEFAULT_GATEWAY_PORT, client_id: int = 90):
         self.host = host
         self.port = port
         self.client_id = client_id
@@ -345,8 +345,8 @@ class BlotterService:
 
 def create_blotter_service(
     source: str = "ib",
-    host: str = "127.0.0.1",
-    port: int = 4001,
+    host: str = DEFAULT_HOST,
+    port: int = DEFAULT_GATEWAY_PORT,
     client_id: int = 90,
     flex_token: str = None,
     flex_query_id: str = None,

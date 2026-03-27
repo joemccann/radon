@@ -158,6 +158,7 @@ def fetch_price_history(ticker: str, days: int = 10) -> List[Dict]:
         import asyncio
         import logging
         from ib_insync import IB, Stock, util
+        from clients.ib_client import DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
         # Suppress noisy ib_insync connection logs in worker threads
         logging.getLogger("ib_insync").setLevel(logging.CRITICAL)
@@ -167,7 +168,7 @@ def fetch_price_history(ticker: str, days: int = 10) -> List[Dict]:
         asyncio.set_event_loop(loop)
 
         ib = IB()
-        ib.connect(os.environ.get("IB_GATEWAY_HOST", "127.0.0.1"), int(os.environ.get("IB_GATEWAY_PORT", "4001")), clientId=18, timeout=8)
+        ib.connect(DEFAULT_HOST, DEFAULT_GATEWAY_PORT, clientId=18, timeout=8)
         ib.reqMarketDataType(4)  # frozen+delayed if market closed
 
         contract = Stock(ticker, "SMART", "USD")
@@ -520,6 +521,7 @@ def _fetch_all_prices(tickers: List[str], days: int = 10) -> Dict[str, List[Dict
         import asyncio
         import logging
         from ib_insync import IB, Stock
+        from clients.ib_client import DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
         logging.getLogger("ib_insync").setLevel(logging.CRITICAL)
 
@@ -527,7 +529,7 @@ def _fetch_all_prices(tickers: List[str], days: int = 10) -> Dict[str, List[Dict
         asyncio.set_event_loop(loop)
 
         ib = IB()
-        ib.connect(os.environ.get("IB_GATEWAY_HOST", "127.0.0.1"), int(os.environ.get("IB_GATEWAY_PORT", "4001")), clientId=18, timeout=8)
+        ib.connect(DEFAULT_HOST, DEFAULT_GATEWAY_PORT, clientId=18, timeout=8)
         ib.reqMarketDataType(4)
 
         results = {}

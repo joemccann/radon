@@ -19,6 +19,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from blotter_service import create_blotter_service, IBFetcher
+from clients.ib_client import DEFAULT_HOST
 from formatting import format_currency, format_pnl
 from models import TradeBlotter, Trade
 
@@ -210,7 +211,7 @@ def blotter_to_dict(blotter: TradeBlotter) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Trade Blotter - IB Trade Reconciliation")
-    parser.add_argument("--host", default="127.0.0.1", help="IB Gateway/TWS host")
+    parser.add_argument("--host", default=DEFAULT_HOST, help="IB Gateway/TWS host")
     parser.add_argument("--port", type=int, default=4001, help="IB Gateway/TWS port")
     parser.add_argument("--client-id", type=int, default=88, help="IB client ID")
     parser.add_argument("--json", action="store_true", help="Output as JSON")

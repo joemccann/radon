@@ -28,7 +28,7 @@ IB_PORTS = [4001, 7496, 7497, 4002]  # Gateway Live, TWS Live, TWS Paper, Gatewa
 # Try to import ib_insync
 try:
     from ib_insync import Stock, util
-    from clients.ib_client import IBClient
+    from clients.ib_client import IBClient, DEFAULT_HOST
     IB_AVAILABLE = True
 except ImportError:
     IB_AVAILABLE = False
@@ -40,7 +40,7 @@ def check_ib_connection(port: int) -> bool:
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     sock.settimeout(1)
     try:
-        result = sock.connect_ex(('127.0.0.1', port))
+        result = sock.connect_ex((DEFAULT_HOST, port))
         return result == 0
     finally:
         sock.close()
@@ -66,7 +66,7 @@ def fetch_ib_options(ticker: str, port: int = 4001) -> Optional[Dict]:
     
     try:
         client = IBClient()
-        client.connect(host='127.0.0.1', port=available_port, client_id=98)
+        client.connect(host=DEFAULT_HOST, port=available_port, client_id=98)
 
         stock = Stock(ticker, 'SMART', 'USD')
         client.qualify_contracts(stock)

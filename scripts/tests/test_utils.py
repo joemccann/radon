@@ -257,7 +257,8 @@ class TestClientIds:
 class TestIbDefaults:
     def test_default_host(self):
         from utils.ib_connection import DEFAULT_HOST
-        assert DEFAULT_HOST == "127.0.0.1"
+        # DEFAULT_HOST comes from env/dotenv — verify it's a non-empty string
+        assert isinstance(DEFAULT_HOST, str) and len(DEFAULT_HOST) > 0
 
     def test_default_gateway_port(self):
         from utils.ib_connection import DEFAULT_GATEWAY_PORT
@@ -278,8 +279,9 @@ class TestConnectIb:
         result = connect_ib("ib_sync")
 
         # ib_sync uses master client (0) for full order visibility
+        from utils.ib_connection import DEFAULT_HOST as _DH
         mock_ib.connect.assert_called_once_with(
-            "127.0.0.1", 4001, clientId=0, timeout=10
+            _DH, 4001, clientId=0, timeout=10
         )
         assert result is mock_ib
 
@@ -303,8 +305,9 @@ class TestConnectIb:
 
         result = connect_ib("ib_sync", client_id=999)
 
+        from utils.ib_connection import DEFAULT_HOST as _DH
         mock_ib.connect.assert_called_once_with(
-            "127.0.0.1", 4001, clientId=999, timeout=10
+            _DH, 4001, clientId=999, timeout=10
         )
 
     @patch("utils.ib_connection.IB")
@@ -315,8 +318,9 @@ class TestConnectIb:
 
         result = connect_ib("ib_sync", timeout=30)
 
+        from utils.ib_connection import DEFAULT_HOST as _DH
         mock_ib.connect.assert_called_once_with(
-            "127.0.0.1", 4001, clientId=0, timeout=30
+            _DH, 4001, clientId=0, timeout=30
         )
 
     @patch("utils.ib_connection.IB")

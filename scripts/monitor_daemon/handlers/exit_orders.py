@@ -18,7 +18,7 @@ from typing import Dict, Any, List, Optional
 from ib_insync import Option, LimitOrder
 
 from .base import BaseHandler
-from clients.ib_client import IBClient
+from clients.ib_client import IBClient, DEFAULT_HOST
 
 logger = logging.getLogger(__name__)
 
@@ -149,7 +149,7 @@ class ExitOrdersHandler(BaseHandler):
         client = IBClient()
 
         try:
-            client.connect(host='127.0.0.1', port=self.ib_port, client_id=self.client_id)
+            client.connect(host=DEFAULT_HOST, port=self.ib_port, client_id=self.client_id)
             logger.debug("Connected to IB")
 
             for order_info in pending:

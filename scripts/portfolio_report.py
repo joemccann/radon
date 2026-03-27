@@ -42,6 +42,9 @@ from typing import Any, Dict, List, Optional, Tuple
 # ---------------------------------------------------------------------------
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
+
+sys.path.insert(0, str(SCRIPT_DIR))
+from clients.ib_client import DEFAULT_HOST
 TEMPLATE_PATH = PROJECT_DIR / ".pi/skills/html-report/portfolio-template.html"
 TRADE_LOG_PATH = PROJECT_DIR / "data/trade_log.json"
 REPORTS_DIR = PROJECT_DIR / "reports"
@@ -59,7 +62,7 @@ def connect_ib(port: int = 4001, client_id: int = 55):
     sys.path.insert(0, str(SCRIPT_DIR))
     from ib_insync import IB
     ib = IB()
-    ib.connect('127.0.0.1', port, clientId=client_id)
+    ib.connect(DEFAULT_HOST, port, clientId=client_id)
     ib.reqMarketDataType(4)  # frozen data fallback
     return ib
 

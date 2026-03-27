@@ -195,7 +195,8 @@ class TestConstants:
         assert "ib_order_manage" in CLIENT_IDS
 
     def test_default_ports(self):
-        assert DEFAULT_HOST == "127.0.0.1"
+        # DEFAULT_HOST comes from env/dotenv — verify it's a non-empty string
+        assert isinstance(DEFAULT_HOST, str) and len(DEFAULT_HOST) > 0
         assert DEFAULT_GATEWAY_PORT == 4001
         assert DEFAULT_TWS_PORT == 7497
 
@@ -264,7 +265,7 @@ class TestConnection:
         client = IBClient()
         client.connect(port=4001, client_id=1, timeout=30)
 
-        mock_ib.connect.assert_called_once_with("127.0.0.1", 4001, clientId=1, timeout=30)
+        mock_ib.connect.assert_called_once_with(DEFAULT_HOST, 4001, clientId=1, timeout=30)
 
     @patch("clients.ib_client.IB")
     def test_disconnect(self, MockIB):
