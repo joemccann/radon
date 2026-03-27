@@ -1555,7 +1555,7 @@ Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `loca
 
 **Graceful degradation:** FastAPI down → Next.js serves cached files with `is_stale: true`. No spawn fallback.
 
-**IB Gateway auto-recovery:** FastAPI detects Gateway down OR CLOSE_WAIT (upstream dead) at startup and auto-restarts via `~/ibc/bin/restart-secure-ibc-service.sh`. IB-dependent endpoints detect `ECONNREFUSED`, `TimeoutError`, and `API connection failed` — auto-restart Gateway, reconnect pool, retry once. Restart script kills lingering IB/IBC Java processes before restarting. Manual: `POST http://localhost:8321/ib/restart`.
+**IB Gateway:** Runs on Hetzner cloud VM via Tailscale MagicDNS at `ib-gateway:4001`. `IB_GATEWAY_MODE=cloud` disables all local restart/lifecycle logic — health check is TCP probe only. `POST /ib/restart` returns 503 in cloud mode. For Docker/launchd modes, FastAPI detects Gateway down and auto-restarts. Stale tick detection in WS relay disconnects and reconnects (no restart in cloud mode).
 
 **Health check:** `curl http://localhost:8321/health` — returns `ib_gateway` (including `upstream_dead` for CLOSE_WAIT detection), `ib_pool`, `uw`, and `test_mode` status.
 
@@ -1564,8 +1564,8 @@ Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `loca
 | FastAPI File | Purpose |
 |------|---------|
 | `scripts/api/server.py` | FastAPI app — 17 endpoints, CORS, IB pool, health check |
-| `scripts/api/ib_pool.py` | Role-based IB connection pool (sync=0, orders=1, data=2) |
-| `scripts/api/ib_gateway.py` | IB Gateway health check + auto-restart via IBC launchd. Detects CLOSE_WAIT (upstream dead) |
+| `scripts/api/ib_pool.py` | Role-based IB connection pool (sync=3, orders=4, data=5), retry with backoff |
+| `scripts/api/ib_gateway.py` | IB Gateway health — cloud (TCP probe), docker (compose), launchd (IBC scripts) |
 | `scripts/api/subprocess.py` | Async subprocess helper (`run_script`, `run_module`) |
 | `web/tests/fastapiHarness.ts` | Vitest-only FastAPI launcher for isolated order-route integration tests |
 
@@ -1699,81 +1699,66 @@ This workflow triggers on ANY of these events:
 
 ## Interactive Brokers Integration
 
+### Gateway Modes (`IB_GATEWAY_MODE`)
+
+| Mode | Default | Behavior |
+|------|---------|----------|
+| `cloud` | **Yes** | Remote Gateway on Hetzner via Tailscale (`ib-gateway:4001`). Health = TCP probe. No restart. |
+| `docker` | | Local Docker Compose. `restart: unless-stopped` handles crashes. |
+| `launchd` | | Legacy IBC/launchd scripts. Full auto-restart on failure. |
+
 ### Auto-Recovery (FastAPI)
 
-The FastAPI server (`scripts/api/ib_gateway.py`) handles IB Gateway recovery automatically:
+**Cloud mode:** No local restart capability. Subprocess errors set cooldown (15s). Health check is TCP port probe only. `POST /ib/restart` returns 503 with "manage on remote host".
 
-1. **Startup:** Checks port 4001 + CLOSE_WAIT detection (`lsof`) → if down or upstream dead, runs `~/ibc/bin/restart-secure-ibc-service.sh`, polls up to 45s
-2. **Runtime:** Subprocess errors trigger Gateway health check FIRST (port + CLOSE_WAIT). Only restart if Gateway is genuinely unreachable. Subprocess failures from client ID collisions, VOL errors, or transient timeouts do NOT trigger restart.
-3. **Manual:** `curl -X POST http://localhost:8321/ib/restart` or `POST /ib/restart`
-4. **Health:** `curl http://localhost:8321/health` → shows `ib_gateway.port_listening`, `ib_gateway.upstream_dead` + `ib_pool` status
+**Docker/launchd modes:** Full recovery — detect error → verify port health → restart if genuinely down → reconnect pool → retry once.
 
-**2FA requirement:** Cold starts (Gateway was fully stopped) require approving push notification on IBKR Mobile. Warm restarts (IBC nightly 11:58 PM) reuse auth session — no 2FA needed.
+**Health:** `curl http://localhost:8321/health` → `ib_gateway.port_listening`, `ib_gateway.gateway_mode`, `ib_pool` status.
 
 ### Connection Troubleshooting
 
-**Full runbook:** `docs/ib-connection-troubleshooting.md`
-
-**Quick triage (run these in order):**
+**Quick triage:**
 
 ```bash
-# 1. FastAPI health check (preferred — shows Gateway + pool status)
+# 1. FastAPI health check
 curl -s http://localhost:8321/health | python3.13 -m json.tool
 
-# 2. Gateway process running?
-~/ibc/bin/status-secure-ibc-service.sh | grep -E "state|pid"
+# 2. Remote Gateway reachable?
+bash -c 'echo > /dev/tcp/ib-gateway/4001' && echo OK || echo FAIL
 
-# 3. Port 4001 listening?
-lsof -iTCP:4001 -sTCP:LISTEN
+# 3. Check connections on remote host
+ssh root@ib-gateway "ss -tnp | grep 4001"
 
-# 4. Manual restart if auto-recovery failed
-curl -X POST http://localhost:8321/ib/restart
+# 4. Test a fresh client ID
+python3.13 -c "from ib_insync import IB; ib=IB(); ib.connect('ib-gateway',4001,clientId=99,timeout=5); print('OK'); ib.disconnect()"
 ```
 
 **Common failure scenarios:**
 
-| Scenario | Process? | Port listening? | Connects? | Fix |
-|----------|----------|----------------|-----------|-----|
-| Gateway down | No | No | No | `~/ibc/bin/start-secure-ibc-service.sh` + approve 2FA |
-| **Zombie/CLOSE_WAIT** | Yes | Yes | **No** | `~/ibc/bin/restart-secure-ibc-service.sh` (kills lingering processes) + approve 2FA |
-| Client ID collision | Yes | Yes | Yes | Kill stale script holding the client ID |
-| 2FA pending | Yes | Yes | No | Approve push notification on IBKR Mobile |
+| Scenario | Fix |
+|----------|-----|
+| Gateway unreachable | Check Tailscale status, remote host, Docker container |
+| Client ID collision | Kill stale process or wait for IB reservation timeout (~2 min) |
+| 2FA pending | Approve push notification on IBKR Mobile |
+| Pool fails on restart | Pool IDs 3/4/5 avoid stale reservations; retry handles transients |
 
-**Zombie/CLOSE_WAIT state is the most common failure.** The Java process is alive and the socket is bound, but the API layer stopped accepting connections (session expired, 2FA timeout, IBC nightly restart failed, upstream IB connection dropped with CLOSE_WAIT). Auto-detected at startup and runtime via `lsof` CLOSE_WAIT check and `TimeoutError` pattern matching.
-
-**Timeout budget when Gateway is unreachable:**
-
-| Layer | Time | Notes |
-|-------|------|-------|
-| `IBClient.connect()` | 3s | Default timeout (lowered from 10s) |
-| Cached fallback read | <50ms | Serves `data/portfolio.json` or `data/orders.json` |
-| **Total API response** | **~3.5s** | Returns 200 with `X-Sync-Warning` header |
-
-**Automated recovery layers:** FastAPI Gateway health-gated restart (detect error → verify port+CLOSE_WAIT → restart only if genuinely down, retry once) > IBClient reconnect (5 attempts, exponential backoff) > WS server reconnect (5s interval, client ID rotation) > WS stale tick detection (45s no data → restart Gateway) > cached fallback (serve stale data as 200 with `is_stale: true`) > IBC auto-restart (nightly 11:58 PM) > 2FA retry (`TWOFA_TIMEOUT_ACTION=restart`).
+**Automated recovery layers:** Pool retry (3 attempts, 2s backoff) > IBClient reconnect (5 attempts, exponential backoff) > WS relay reconnect (5s interval, client ID rotation) > WS stale tick detection (45s → disconnect + reconnect) > cached fallback (serve stale data with `is_stale: true`).
 
 **Critical: IB clientId scoping.** Cancel and modify are scoped by the clientId that placed the order. Master client (clientId=0) can SEE all orders but CANNOT cancel/modify them (Error 10147/103). Cancel/modify MUST use subprocess (`ib_order_manage.py`) which reconnects as the original clientId. Never route through the pool.
 
-### Client ID Strategy
+### Client ID Ranges
 
-**Default to `clientId=0` (master client)** for full order control.
+| Range | Usage |
+|-------|-------|
+| 0-2 | Reserved (avoid — stale after unclean restarts) |
+| 3-5 | FastAPI IBPool (sync=3, orders=4, data=5) |
+| 10-19 | WS relay (rotates on conflict) |
+| 20-49 | Subprocess scripts (`client_id="auto"`) |
+| 50-69 | Scanners (CRI/VCG rotating) |
+| 70-89 | Daemons (fill=70, exit=71) |
+| 90-99 | CLI/standalone |
 
-| clientId | Privileges | Scripts |
-|----------|-----------|---------|
-| **0** (master) | Can cancel/modify ANY order | `ib_sync`, `ib_reconcile`, `ib_order_manage` — also FastAPI pool `sync` role |
-| **11** | Orders visibility | `ib_orders` — also FastAPI pool `orders` role |
-| **26** | Order placement | `ib_place_order` (on-demand connect/disconnect) |
-| **31** | Data queries | `cri_scan` — also FastAPI pool `data` role |
-| **40** | Portfolio sync subprocess | FastAPI `/portfolio/sync` (avoids pool collision) |
-| **41** | Orders sync subprocess | FastAPI `/orders/refresh` (avoids pool collision) |
-| **100** | Streaming | `ib_realtime_server` (WS relay) |
-
-**Why master client:**
-- Can cancel orders placed via TWS (which have `orderId=0`)
-- Full visibility into all account orders
-- Required for `ib_order_manage.py` cancel/modify operations
-
-**When to use unique clientId:**
-- Long-running services (streaming, monitoring) that shouldn't block other connections
+**Cancel/modify uses the original subprocess clientId** (range 20-49), not the pool. `ib_order_manage.py` detects `trade.order.clientId` and reconnects as that client. The pool is read-only (positions, orders, data).
 - Order placement (tags orders with clientId for tracking)
 - Multiple concurrent connections required
 
