@@ -406,7 +406,7 @@ Use **interpolated values** for edge determination, but flag confidence level:
 | Script | Purpose |
 |--------|---------|
 | `scripts/api/server.py` | FastAPI — 21 endpoints, IB pool, auto-restart |
-| `scripts/api/ib_pool.py` | Role-based IB pool (sync=0, orders=1, data=2) |
+| `scripts/api/ib_pool.py` | Role-based IB pool (sync=3, orders=4, data=5) |
 | `scripts/api/ib_gateway.py` | IB Gateway health + auto-restart |
 | `scripts/api/subprocess.py` | Async subprocess helper |
 | `scripts/clients/ib_client.py` | IBClient — orders, quotes, options, fills, flex, resilient reconnect |
@@ -693,7 +693,7 @@ Global service: `local.ibc-gateway` (shared with market-data-warehouse). Install
 
 | Range | Usage |
 |-------|-------|
-| 0-9 | FastAPI IBPool (sync=0, orders=1, data=2) |
+| 0-9 | FastAPI IBPool (sync=3, orders=4, data=5) |
 | 10-19 | WS relay (rotates on conflict) |
 | 20-49 | Subprocess scripts (`client_id="auto"`) |
 | 50-69 | Scanners (CRI/VCG rotating) |

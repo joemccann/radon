@@ -76,20 +76,32 @@ class IBPool:
         IB-dependent endpoints will return 503; UW-only endpoints still work.
         """
         status = {}
-        for role, client_id in POOL_ROLES.items():
-            try:
-                client = await asyncio.to_thread(
-                    _connect_in_thread,
-                    self._host, self._port, client_id, 5,
-                )
-                self._clients[role] = client
-                self._connected[role] = True
-                status[role] = True
-                logger.info("IB pool: %s connected (client_id=%d)", role, client_id)
-            except Exception as e:
-                self._connected[role] = False
-                status[role] = False
-                logger.warning("IB pool: %s failed to connect: %s", role, e)
+        for i, (role, client_id) in enumerate(POOL_ROLES.items()):
+            # IB Gateway rate-limits rapid successive connections — stagger by 1s
+            if i > 0:
+                await asyncio.sleep(1)
+
+            connected = False
+            for attempt in range(3):
+                try:
+                    client = await asyncio.to_thread(
+                        _connect_in_thread,
+                        self._host, self._port, client_id, 10,
+                    )
+                    self._clients[role] = client
+                    self._connected[role] = True
+                    status[role] = True
+                    connected = True
+                    logger.info("IB pool: %s connected (client_id=%d)", role, client_id)
+                    break
+                except Exception as e:
+                    if attempt < 2:
+                        logger.info("IB pool: %s attempt %d failed, retrying in 2s: %s", role, attempt + 1, e)
+                        await asyncio.sleep(2)
+                    else:
+                        self._connected[role] = False
+                        status[role] = False
+                        logger.warning("IB pool: %s failed to connect after 3 attempts: %s", role, e)
 
         return status
 

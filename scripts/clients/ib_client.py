@@ -82,17 +82,18 @@ RELAY_ID_RANGE = (10, 19)
 SUBPROCESS_ID_RANGE = (20, 49)
 
 # Pool roles — persistent connections held by FastAPI IBPool
+# IDs 3-5 avoid collisions with stale clientId 0 reservations after unclean restarts
 POOL_ROLES: dict = {
-    "sync": 0,
-    "orders": 1,
-    "data": 2,
+    "sync": 3,
+    "orders": 4,
+    "data": 5,
 }
 
 # Legacy registry — kept for backward compat with scripts that use client_name
 CLIENT_IDS: dict = {
     "ib_order_manage": 20,     # subprocess range (auto-allocate preferred)
-    "ib_sync": 0,              # pool role
-    "ib_orders": 1,            # pool role
+    "ib_sync": 3,              # pool role
+    "ib_orders": 4,            # pool role
     "ib_reconcile": 21,        # subprocess range
     "ib_order": 22,            # subprocess range
     "ib_execute": 23,          # subprocess range
@@ -101,7 +102,7 @@ CLIENT_IDS: dict = {
     "fetch_analyst_ratings": 90, # standalone CLI range
     "ib_place_order": 24,      # subprocess range
     "vcg_scanner": 50,         # scanner range
-    "cri_scanner": 2,          # pool data role
+    "cri_scanner": 5,          # pool data role
     "ib_realtime_server": 10,  # relay range
 }
 
