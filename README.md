@@ -123,7 +123,7 @@ At a high level:
 
 - Python `3.13` (Python 3.14 has ib_insync/eventkit incompatibility)
 - Node.js `18+`
-- [Interactive Brokers](https://ibkr.com/referral/joseph5632) TWS or Gateway running locally
+- [Interactive Brokers](https://ibkr.com/referral/joseph5632) Gateway (cloud via Tailscale, Docker, or local TWS)
 - [Unusual Whales](https://unusualwhales.com/referral#39985a64-656c-4642-a051-db89f6324d64) API access
 
 **Install and run**
@@ -149,11 +149,16 @@ UW_TOKEN=your-unusual-whales-key
 EXA_API_KEY=your-exa-key
 ```
 
-**Python scripts** in the project root `.env`:
+**Python scripts and IB Gateway** in the project root `.env`:
 
 ```bash
 MENTHORQ_USER=your-menthorq-email
 MENTHORQ_PASS=your-menthorq-password
+
+# IB Gateway connection
+IB_GATEWAY_HOST=ib-gateway    # Cloud (Tailscale MagicDNS) or 127.0.0.1 (local)
+IB_GATEWAY_PORT=4001
+IB_GATEWAY_MODE=cloud          # "cloud" | "docker" | "launchd"
 ```
 
 The dedicated CTA sync service and wrapper scripts source the project root `.env` directly. Keep MenthorQ credentials there so the scheduled `4:15 PM ET` and `5:00 PM ET` CTA runs, plus any `RunAtLoad` catch-up execution after reboot/login/wake, use the same auth context as manual CLI fetches.
@@ -174,7 +179,7 @@ pip install playwright httpx
 playwright install chromium
 ```
 
-[Interactive Brokers](https://ibkr.com/referral/joseph5632) connects locally on port `4001` for Gateway or `7497` for TWS. No broker API key is required, but TWS or Gateway must be running before live workflows.
+[Interactive Brokers](https://ibkr.com/referral/joseph5632) connects on port `4001` (Gateway) or `7497` (TWS). No broker API key is required, but a Gateway instance must be reachable before live workflows. See the IB Gateway section below for cloud, Docker, and local setup options.
 
 ## Radon Terminal
 
@@ -373,7 +378,7 @@ The repo includes background-service support for the live trading environment:
 
 | Service | Purpose |
 |---------|---------|
-| Secure IBC service (`local.ibc-gateway`) | Maintains the local broker session for live quotes, execution, and reports |
+| IB Gateway (cloud/Docker/launchd) | Broker session for live quotes, execution, and reports — cloud mode via Tailscale, Docker with auto-restart, or legacy IBC launchd |
 | CRI scan service | Refreshes crash-risk regime data intraday and writes atomic CRI cache snapshots |
 | CTA sync service | Refreshes the latest closed-session MenthorQ CTA cache at `4:15 PM ET` and `5:00 PM ET`, with `RunAtLoad` catch-up after reboot/login/wake, and writes machine-readable health state for stale-data detection |
 | Monitor daemon | Tracks fills and exit orders during market hours, plus off-hours preset rebalance and Flex token checks (logs auto-rotated at 10MB) |
@@ -392,28 +397,39 @@ For the `/regime` RVOL/COR1M chart, the CRI cache now preserves enough trailing 
 
 For `/internals`, the skew charts use the live `/internals/skew-history` backfill only during active ET market hours. On weekends and other closed sessions, `/api/internals` skips the live skew fetch and serves the newest shared long-range cache artifact from `data/cache/internals_skew_history_*.json` so the page keeps its full SPX/NDX history without attempting a non-trading-day refresh.
 
-### Phase 1 Remote IBC Access
+### IB Gateway
 
-The current working path for iPhone control is **standard macOS SSH over Tailscale** to the secure machine-local IBC wrappers in `~/ibc/bin/`.
+Three deployment modes controlled by `IB_GATEWAY_MODE` in the root `.env`:
 
-Dependencies:
+| Mode | Description |
+|------|-------------|
+| **`cloud`** (default) | Gateway runs on a Hetzner VM via Tailscale MagicDNS at `ib-gateway:4001`. No local restart capability — health check is TCP port probe only. |
+| `docker` | Local Docker Compose with `restart: unless-stopped` and healthcheck. |
+| `launchd` | Legacy IBC launchd service on macOS. |
 
-- `Tailscale.app` on the Mac
-- Tailscale on the iPhone, connected to the same tailnet
-- macOS `Remote Login`
-- iPhone SSH client such as Termius, Blink Shell, or Prompt
-- Optional: dedicated public key in `~/.ssh/authorized_keys` for key-based login
+**Cloud setup** requires Tailscale on both the Gateway host and development machine. The Gateway host runs `ghcr.io/gnzsnz/ib-gateway` in Docker with IBC for automated 2FA handling.
 
-Reference docs:
+**How it connects:** `ib_client.py` loads the root `.env` via `dotenv` at import time, setting `DEFAULT_HOST` before any module reads it. The Node WS relay (`ib_realtime_server.js`) also loads `.env` at startup. All scripts use `DEFAULT_HOST` — no hardcoded `127.0.0.1` in IB connection code.
 
-- [docs/ibc-remote-access.md](docs/ibc-remote-access.md)
-- [reports/ibc-remote-control-and-cloud-options-2026-03-10.html](reports/ibc-remote-control-and-cloud-options-2026-03-10.html)
+**Connection pool:** FastAPI maintains three persistent connections (sync=3, orders=4, data=5) with retry (3 attempts, 2s backoff) and 1s stagger between roles.
 
-Direct command example:
+**Troubleshooting:**
 
 ```bash
-ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
+# Health check
+curl -s http://localhost:8321/health | python3.13 -m json.tool
+
+# Gateway reachable?
+bash -c 'echo > /dev/tcp/ib-gateway/4001' && echo OK || echo FAIL
+
+# Check connections on remote host
+ssh root@ib-gateway "ss -tnp | grep 4001"
+
+# Test a fresh client ID
+python3.13 -c "from ib_insync import IB; ib=IB(); ib.connect('ib-gateway',4001,clientId=99,timeout=10); print('OK'); ib.disconnect()"
 ```
+
+**Rollback to local:** Set `IB_GATEWAY_HOST=127.0.0.1` and `IB_GATEWAY_MODE=docker` (or `launchd`) in `.env`.
 
 ## Glossary
 
