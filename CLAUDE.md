@@ -195,18 +195,22 @@ All FastAPI routes are protected by Clerk JWT middleware. Next.js routes are pro
 | Component | File | Purpose |
 |-----------|------|---------|
 | FastAPI auth middleware | `scripts/api/auth.py` | Validates Clerk JWTs via JWKS, enforces `ALLOWED_USER_IDS` allowlist |
+| FastAPI auth dependency | `scripts/api/auth.py` | `verify_clerk_jwt` — used by `/ws-ticket` endpoint via `Depends()` |
 | WS ticket service | `scripts/api/ws_ticket.py` | Issues 30s single-use tickets for WS auth |
+| WS ticket proxy | `web/app/api/ib/ws-ticket/route.ts` | Next.js route proxies to FastAPI (same-origin for browser) |
 | Next.js middleware | `web/middleware.ts` | Clerk `auth.protect()` on all routes except public share pages |
-| WS ticket client | `web/lib/wsTicket.ts` | Browser obtains ticket before WS connect |
+| WS ticket client | `web/lib/wsTicket.ts` | Browser calls `/api/ib/ws-ticket` (same-origin) before WS connect |
 | `radonApi.ts` | `web/lib/radonApi.ts` | Attaches Clerk Bearer token to all `radonFetch()` calls |
 
 **Auth-exempt paths:** `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`.
+
+**Localhost bypass:** Both the auth middleware and `verify_clerk_jwt` dependency skip validation for requests from `127.0.0.1`/`::1` (server-to-server). The WS relay also skips ticket validation for localhost connections. This enables local dev without Clerk sign-in.
 
 **Graceful fallback:** When `CLERK_JWKS_URL` is not set, auth middleware passes all requests through (local dev without Clerk).
 
 **Public share routes:** `/api/regime/share`, `/api/vcg/share`, `/api/internals/share`, `/api/menthorq/cta/share` are public (no auth).
 
-**Tests:** `scripts/api/tests/test_auth.py` (Python), `web/tests/auth-integration.test.ts` (TS).
+**Tests:** `scripts/api/tests/test_auth.py` (Python), `web/tests/auth-integration.test.ts`, `web/tests/ws-ticket-local.test.ts` (TS).
 
 ### IB Gateway Auto-Recovery
 
@@ -427,6 +431,7 @@ Use **interpolated values** for edge determination, but flag confidence level:
 
 | Script | Purpose |
 |--------|---------|
+| `local.sh` | Switch from VPS to local dev (stop VPS gateway, start Docker, launch dev) |
 | `scripts/api/server.py` | FastAPI — 21 endpoints, IB pool, auto-restart |
 | `scripts/api/ib_pool.py` | Role-based IB pool (sync=3, orders=4, data=5) |
 | `scripts/api/ib_gateway.py` | IB Gateway health + auto-restart |
@@ -790,8 +795,8 @@ When deployed on the Hetzner VPS via radon-cloud:
 
 ## Startup Checklist
 
-- [ ] `npm run dev` (3 services)
-- [ ] FastAPI auto-restarts IB Gateway if down — approve 2FA if cold start
+- [ ] `./local.sh` (stops VPS gateway, starts local Docker, waits for healthy, launches dev) — OR `cd web && npm run dev` if Docker gateway is already running
+- [ ] Approve 2FA on IBKR mobile if cold start
 - [ ] `curl http://localhost:8321/health` — verify `ib_gateway.port_listening: true`
 - [ ] Reconciliation auto-runs → `data/reconciliation.json`
 - [ ] Exit order service auto-runs (PENDING_MANUAL)

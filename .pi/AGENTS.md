@@ -1553,7 +1553,7 @@ Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `loca
 | IB WS relay | 8765 | `ib_realtime_server.js` (real-time price streaming) |
 | FastAPI | 8321 | `uvicorn scripts.api.server:app` (Python script execution) |
 
-**Authentication (Clerk):** All FastAPI routes are protected by Clerk JWT middleware (`scripts/api/auth.py`). Next.js routes are protected by Clerk middleware (`web/middleware.ts`). WS connections use ticket-based auth (`scripts/api/ws_ticket.py` — 30s TTL, single-use) to avoid JWTs in URLs. Auth-exempt: `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`. Public share routes (`/api/regime/share`, `/api/vcg/share`, etc.) exempt in Next.js middleware. When `CLERK_JWKS_URL` is unset, auth is bypassed (local dev). Tests: `scripts/api/tests/test_auth.py`, `web/tests/auth-integration.test.ts`.
+**Authentication (Clerk):** All FastAPI routes are protected by Clerk JWT middleware (`scripts/api/auth.py`). Next.js routes are protected by Clerk middleware (`web/middleware.ts`). WS connections use ticket-based auth (`scripts/api/ws_ticket.py` — 30s TTL, single-use) to avoid JWTs in URLs. Browser obtains tickets via same-origin `/api/ib/ws-ticket` (Next.js proxy → FastAPI server-to-server). Auth-exempt: `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`. Public share routes exempt in Next.js middleware. **Localhost bypass:** FastAPI middleware, `verify_clerk_jwt` dependency, and WS relay all skip auth for `127.0.0.1`/`::1` connections — enables local dev without Clerk sign-in. Tests: `scripts/api/tests/test_auth.py`, `web/tests/auth-integration.test.ts`, `web/tests/ws-ticket-local.test.ts`.
 
 **Graceful degradation:** FastAPI down → Next.js serves cached files with `is_stale: true`. No spawn fallback.
 

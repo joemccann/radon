@@ -133,8 +133,19 @@ git clone https://github.com/joemccann/radon.git
 cd radon
 pip install -r requirements.txt
 cd web && npm install && cd ..
-python scripts/ib_sync.py
-python scripts/scanner.py --top 15
+```
+
+**Local development** (stops VPS gateway, starts local Docker, launches dev):
+
+```bash
+./local.sh
+```
+
+Or manually:
+
+```bash
+scripts/docker_ib_gateway.sh start   # Start IB Gateway Docker, approve 2FA
+cd web && npm run dev                 # Next.js + FastAPI + WS relay
 ```
 
 ## Setup Details
