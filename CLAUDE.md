@@ -678,9 +678,13 @@ Image: `ghcr.io/gnzsnz/ib-gateway` (pinned to digest). Config: `docker/ib-gatewa
 
 Docker handles reliability via `restart: unless-stopped` + healthcheck. `READ_ONLY_API=no` (Radon places orders). Password via Docker secrets (`docker/ib-gateway/secrets/ib_password.txt`, chmod 600).
 
-### Cloud Mode (Tailscale)
+### Cloud Mode (Tailscale) — Default for Development
 
 Gateway runs on a Hetzner VM accessible via Tailscale MagicDNS at `ib-gateway:4001`. Set `IB_GATEWAY_HOST=ib-gateway` and `IB_GATEWAY_MODE=cloud` in root `.env`. Both Python (`ib_client.py` loads dotenv at import) and Node (`ib_realtime_server.js` loads dotenv at startup) read this automatically. All scripts import `DEFAULT_HOST` from `ib_client` — no hardcoded `127.0.0.1` in IB connection code.
+
+**VPS port mapping:** `0.0.0.0:4001 → container:4003` (socat). The gnzsnz image runs Java Gateway on localhost:4001 inside the container, with socat on 4003 forwarding to it. External connections (Tailscale) go through socat.
+
+**VPS IB Gateway GUI requirement:** "Allow connections from localhost only" must be **unchecked** in Configure → API → Settings (via VNC at `localhost:5900`). This setting persists in the Docker volume. Without it, Tailscale connections are rejected with `ECONNRESET`.
 
 **Cloud mode behavior:** Health check = TCP port probe only. No local restart, no CLOSE_WAIT detection, no docker/launchd lifecycle management. `POST /ib/restart` returns 503 with "manage it on the remote host". Stale tick detection in the WS relay disconnects and reconnects (no restart attempt).
 

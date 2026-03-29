@@ -1,5 +1,14 @@
 # Lessons
 
+## 2026-03-29
+
+- gnzsnz IB Gateway Docker image uses socat on port 4003 to proxy to Java Gateway on localhost:4001 inside the container. External port mapping must be `host:4001 → container:4003`, not `4001:4001`. The `4001:4001` mapping only works from localhost because Java binds to `127.0.0.1`.
+- IB Gateway's "Allow connections from localhost only" GUI checkbox (`jts.ini` `TrustedIPs`) cannot be reliably overridden via config.ini or sed — the GUI setting wins. Must uncheck via VNC (Configure → API → Settings). Setting persists in Docker volume.
+- FastAPI's `Depends(verify_clerk_jwt)` runs independently of middleware. Both need localhost bypass for server-to-server calls to work. Adding bypass to middleware alone is insufficient.
+- WS relay ticket validation also needs its own localhost bypass, separate from FastAPI. The relay is a Node process with its own auth logic.
+- `NEXT_PUBLIC_RADON_API_URL` (browser env var) doesn't work for cross-origin ws-ticket in local dev (browser on :3000, FastAPI on :8321). Solution: route through Next.js API proxy (`/api/ib/ws-ticket`) which calls FastAPI server-to-server.
+- When switching gateway modes, `.env` is gitignored so each environment (Mac, VPS) manages its own. Code defaults to `docker` but VPS overrides via systemd `EnvironmentFile=`.
+
 ## 2026-03-24
 
 - Do not default to `python3.13 -m pytest -q` for every scoped fix in this repo. Use an affected-file runner first so Python verification tracks only the changed surfaces, then escalate to broader pytest only when the change genuinely crosses many Python modules.

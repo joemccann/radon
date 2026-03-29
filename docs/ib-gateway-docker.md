@@ -79,7 +79,7 @@ These should already be set by the Docker image, but verify:
 
 - **Enable ActiveX and Socket Clients**: checked
 - **Socket port**: 4001 (live) or 4002 (paper)
-- **Allow connections from localhost only**: checked
+- **Allow connections from localhost only**: **unchecked** if using cloud mode (Tailscale remote access). Checked for local-only Docker mode.
 - **Read-Only API**: unchecked (Radon places orders)
 
 ### Presets (if not bypassing precautions)
