@@ -44,7 +44,13 @@ async def verify_clerk_jwt(request: Request) -> dict:
     Returns the decoded payload on success.
     Raises HTTPException(401) for missing/invalid tokens.
     Raises HTTPException(403) for non-allowlisted users.
+    Bypasses validation for localhost requests (server-to-server).
     """
+    # Skip auth for server-to-server calls from localhost (Next.js → FastAPI)
+    client_host = request.client.host if request.client else None
+    if client_host in ("127.0.0.1", "::1"):
+        return {"sub": "localhost", "local": True}
+
     import jwt as pyjwt
 
     auth_header = request.headers.get("Authorization", "")
