@@ -1,9 +1,11 @@
-"""Clerk JWT verification middleware for FastAPI.
+"""Authentication middleware for FastAPI.
 
-Validates Bearer tokens against Clerk's JWKS endpoint.
-Single-tenant: only allowlisted user IDs can access trading endpoints.
+Supports two auth methods:
+1. Clerk JWT — browser-based user auth via JWKS
+2. API key — headless machine-to-machine auth (scoped to read-only data endpoints)
 """
 
+import hmac
 import os
 import logging
 
@@ -93,3 +95,32 @@ def auth_required():
     Usage: @app.get("/protected", dependencies=[Depends(auth_required())])
     """
     return Depends(verify_clerk_jwt)
+
+
+# ---------------------------------------------------------------------------
+# API key auth — scoped to read-only historical/contract endpoints
+# ---------------------------------------------------------------------------
+
+API_KEY_ALLOWED_PATHS = frozenset({
+    "/contract/qualify",
+    "/historical/head-timestamp",
+    "/historical/bars",
+})
+
+
+def verify_api_key(request: Request) -> dict | None:
+    """Check X-API-Key header against MDW_API_KEY env var.
+
+    Returns service identity dict if valid AND path is allowed.
+    Returns None if no key provided or path not in scope.
+    API key cannot access trading/order endpoints.
+    """
+    api_key = request.headers.get("X-API-Key")
+    mdw_key = os.environ.get("MDW_API_KEY")
+    if not api_key or not mdw_key:
+        return None
+    if not hmac.compare_digest(api_key.encode(), mdw_key.encode()):
+        return None
+    if request.url.path not in API_KEY_ALLOWED_PATHS:
+        return None
+    return {"sub": "mdw-service", "service": True}

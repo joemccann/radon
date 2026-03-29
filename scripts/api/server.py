@@ -40,8 +40,9 @@ from api.subprocess import run_script, run_module, ScriptResult
 from api.ib_gateway import check_ib_gateway, ensure_ib_gateway, restart_ib_gateway, is_docker_mode, is_cloud_mode
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
-from api.auth import verify_clerk_jwt
+from api.auth import verify_clerk_jwt, verify_api_key
 from api.ws_ticket import create_ticket, validate_ticket
+from api.routes.historical import router as historical_router
 
 # Load .env from project root for Python scripts
 try:
@@ -116,6 +117,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
+app.include_router(historical_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -140,6 +142,12 @@ async def auth_middleware(request: Request, call_next):
     # Skip auth for server-to-server calls from localhost (Next.js → FastAPI)
     client_host = request.client.host if request.client else None
     if client_host in ("127.0.0.1", "::1"):
+        return await call_next(request)
+
+    # API key auth — scoped to historical/contract endpoints only
+    service_identity = verify_api_key(request)
+    if service_identity:
+        request.state.user = service_identity
         return await call_next(request)
 
     try:
