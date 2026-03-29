@@ -754,6 +754,18 @@ Two layers prevent log bloat in `logs/`:
 
 Python rotation handles `monitor-daemon.log` (the largest writer). System newsyslog catches launchd stdout/stderr (`*.out.log`, `*.err.log`) that Python doesn't control.
 
+## Cloud Deployment Notes
+
+When deployed on the Hetzner VPS via radon-cloud:
+
+- **FastAPI auth**: Clerk JWT validated on all external requests. Localhost requests (Next.js → FastAPI on 127.0.0.1:8321) bypass auth — port is never public.
+- **Clerk middleware**: API routes (`/api/*`) are excluded from Next.js Clerk middleware `protect()`. Server-side fetches from pages don't carry session cookies, so middleware must not block them. Auth is handled by FastAPI for external API access.
+- **`NEXT_PUBLIC_*` env vars**: Baked at build time. After changing `.env`, rebuild Next.js: `cd web && npm run build`
+- **Root `node_modules`**: The root `package.json` has shared deps (`@sinclair/typebox`) used by `lib/tools/`. Must be installed before `web/` build.
+- **`requirements.txt`**: Includes `cryptography` (needed by PyJWT for RS256), `fastapi`, `uvicorn`, `python-dotenv`, `numpy`, `pytz`, `playwright`.
+- **`@sinclair/typebox`**: Pinned to exact `0.34.48` in both root and web `package.json` to prevent version mismatch build failures.
+- **Production Clerk**: Uses different user IDs than dev. `ALLOWED_USER_IDS` must be updated. Requires own Google/GitHub OAuth credentials and 5 CNAME DNS records.
+
 ## Output Rules
 
 - Always: `signal → structure → Kelly math → decision`

@@ -1,5 +1,8 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
+// API routes are public at the middleware level because server-side page
+// fetches don't carry Clerk session cookies. External API access is still
+// protected by FastAPI's Clerk JWT auth middleware.
 const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
