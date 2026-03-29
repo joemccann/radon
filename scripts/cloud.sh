@@ -16,7 +16,8 @@ log_warn()  { echo -e "${YELLOW}[cloud]${NC} $*"; }
 log_error() { echo -e "${RED}[cloud]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$PROJECT_ROOT/.env"
 
 # -- Step 1: Verify Tailscale connectivity -----------------------------------
 
@@ -44,7 +45,7 @@ fi
 
 if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "ib-gateway"; then
   log_info "Stopping local Docker IB Gateway..."
-  "$SCRIPT_DIR/scripts/docker_ib_gateway.sh" stop
+  "$SCRIPT_DIR/docker_ib_gateway.sh" stop
 fi
 
 # -- Step 4: Switch .env to cloud mode --------------------------------------
@@ -66,5 +67,5 @@ fi
 # -- Step 6: Start dev services ----------------------------------------------
 
 log_info "Starting dev services (Next.js + FastAPI + WS relay)..."
-cd "$SCRIPT_DIR/web"
+cd "$PROJECT_ROOT/web"
 exec npm run dev

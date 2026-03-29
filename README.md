@@ -138,11 +138,11 @@ cd web && npm install && cd ..
 **Development** (two modes):
 
 ```bash
-./cloud.sh    # Default — local dev services + VPS IB Gateway via Tailscale
-./local.sh    # Fully local — local Docker gateway + local dev services
+scripts/cloud.sh    # Default — local dev services + VPS IB Gateway via Tailscale
+scripts/local.sh    # Fully local — local Docker gateway + local dev services
 ```
 
-`cloud.sh` is the typical workflow: IB Gateway stays running on the VPS, you develop locally against it. `local.sh` is for offline dev or when the VPS is unavailable.
+`scripts/cloud.sh` is the typical workflow: IB Gateway stays running on the VPS, you develop locally against it. `scripts/local.sh` is for offline dev or when the VPS is unavailable.
 
 Or manually:
 

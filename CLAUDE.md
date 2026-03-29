@@ -431,8 +431,8 @@ Use **interpolated values** for edge determination, but flag confidence level:
 
 | Script | Purpose |
 |--------|---------|
-| `cloud.sh` | Hybrid dev: local services + VPS IB Gateway via Tailscale (default workflow) |
-| `local.sh` | Fully local: stop VPS gateway, start local Docker gateway, launch dev |
+| `scripts/cloud.sh` | Hybrid dev: local services + VPS IB Gateway via Tailscale (default workflow) |
+| `scripts/local.sh` | Fully local: stop VPS gateway, start local Docker gateway, launch dev |
 | `scripts/api/server.py` | FastAPI — 21 endpoints, IB pool, auto-restart |
 | `scripts/api/ib_pool.py` | Role-based IB pool (sync=3, orders=4, data=5) |
 | `scripts/api/ib_gateway.py` | IB Gateway health + auto-restart |
@@ -796,7 +796,7 @@ When deployed on the Hetzner VPS via radon-cloud:
 
 ## Startup Checklist
 
-- [ ] `./cloud.sh` (default — local dev services + VPS IB Gateway via Tailscale) — OR `./local.sh` (fully local with Docker gateway)
+- [ ] `scripts/cloud.sh` (default — local dev services + VPS IB Gateway via Tailscale) — OR `scripts/local.sh` (fully local with Docker gateway)
 - [ ] If local mode: approve 2FA on IBKR mobile for cold start
 - [ ] `curl http://localhost:8321/health` — verify `ib_gateway.port_listening: true`
 - [ ] Reconciliation auto-runs → `data/reconciliation.json`

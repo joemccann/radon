@@ -1557,7 +1557,7 @@ Next.js API routes call a local FastAPI server (`scripts/api/server.py` on `loca
 
 **Graceful degradation:** FastAPI down → Next.js serves cached files with `is_stale: true`. No spawn fallback.
 
-**IB Gateway:** Two dev modes managed by `./cloud.sh` (default) and `./local.sh`. **Cloud mode** (`IB_GATEWAY_MODE=cloud`): Gateway stays on Hetzner VPS, local services connect via Tailscale at `ib-gateway:4001`. TCP-only health check, no restart capability. **Docker mode** (`IB_GATEWAY_MODE=docker`): Gateway runs locally via `scripts/docker_ib_gateway.sh`. Autoheal sidecar restarts unhealthy containers. `POST /ib/restart` runs `docker compose restart`. Both scripts switch `.env` automatically.
+**IB Gateway:** Two dev modes managed by `scripts/cloud.sh` (default) and `scripts/local.sh`. **Cloud mode** (`IB_GATEWAY_MODE=cloud`): Gateway stays on Hetzner VPS, local services connect via Tailscale at `ib-gateway:4001`. TCP-only health check, no restart capability. **Docker mode** (`IB_GATEWAY_MODE=docker`): Gateway runs locally via `scripts/docker_ib_gateway.sh`. Autoheal sidecar restarts unhealthy containers. `POST /ib/restart` runs `docker compose restart`. Both scripts switch `.env` automatically.
 
 **Health check:** `curl http://localhost:8321/health` — returns `ib_gateway` (including `upstream_dead` for CLOSE_WAIT detection), `ib_pool`, `uw`, and `test_mode` status.
 

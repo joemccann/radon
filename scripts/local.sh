@@ -16,7 +16,8 @@ log_warn()  { echo -e "${YELLOW}[local]${NC} $*"; }
 log_error() { echo -e "${RED}[local]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-ENV_FILE="$SCRIPT_DIR/.env"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+ENV_FILE="$PROJECT_ROOT/.env"
 
 # -- Step 1: Switch .env to local Docker mode --------------------------------
 
@@ -37,7 +38,7 @@ fi
 # -- Step 3: Start local Docker gateway --------------------------------------
 
 log_info "Starting local Docker IB Gateway..."
-"$SCRIPT_DIR/scripts/docker_ib_gateway.sh" start
+"$SCRIPT_DIR/docker_ib_gateway.sh" start
 
 log_warn "Approve 2FA on IBKR mobile app now."
 log_info "Waiting for container to become healthy..."
@@ -50,7 +51,7 @@ for i in $(seq 1 24); do
   fi
   if [[ $i -eq 24 ]]; then
     log_error "Container did not become healthy after 120s. Check 2FA and logs."
-    "$SCRIPT_DIR/scripts/docker_ib_gateway.sh" status
+    "$SCRIPT_DIR/docker_ib_gateway.sh" status
     exit 1
   fi
   sleep 5
@@ -59,5 +60,5 @@ done
 # -- Step 4: Start dev services -----------------------------------------------
 
 log_info "Starting dev services (Next.js + FastAPI + WS relay)..."
-cd "$SCRIPT_DIR/web"
+cd "$PROJECT_ROOT/web"
 exec npm run dev
