@@ -220,7 +220,7 @@ Visit `http://localhost:3000`.
 
 ### Authentication
 
-Radon uses [Clerk](https://clerk.com) for authentication. All Next.js routes are protected by Clerk middleware (public share routes are exempt). The FastAPI backend validates Clerk JWTs on every request. WebSocket connections use a short-lived ticket flow (30s TTL, single-use) to avoid passing JWTs in URLs. When Clerk is not configured (`CLERK_JWKS_URL` unset), auth is bypassed for local development.
+Radon uses [Clerk](https://clerk.com) for authentication. All Next.js routes are protected by Clerk middleware (public share routes are exempt). The FastAPI backend validates Clerk JWTs on every request. WebSocket connections use a short-lived ticket flow (30s TTL, single-use) to avoid passing JWTs in URLs. For local-only UI development, set `RADON_BYPASS_WEB_AUTH=1` in `web/.env`; the bypass is ignored in production builds.
 
 **Key capabilities**
 

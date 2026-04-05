@@ -206,7 +206,7 @@ All FastAPI routes are protected by Clerk JWT middleware. Next.js routes are pro
 
 **Localhost bypass:** Both the auth middleware and `verify_clerk_jwt` dependency skip validation for requests from `127.0.0.1`/`::1` (server-to-server). The WS relay also skips ticket validation for localhost connections. This enables local dev without Clerk sign-in.
 
-**Graceful fallback:** When `CLERK_JWKS_URL` is not set, auth middleware passes all requests through (local dev without Clerk).
+**Local UI bypass:** Set `RADON_BYPASS_WEB_AUTH=1` in `web/.env` to skip Clerk protection on Next.js routes during local development. The bypass is ignored when `NODE_ENV=production`.
 
 **Public share routes:** `/api/regime/share`, `/api/vcg/share`, `/api/internals/share`, `/api/menthorq/cta/share` are public (no auth).
 

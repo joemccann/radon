@@ -1,4 +1,5 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { isWebAuthBypassEnabled } from "@/lib/webAuthMode";
 
 // API routes are public at the middleware level because server-side page
 // fetches don't carry Clerk session cookies. External API access is still
@@ -10,6 +11,10 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  if (isWebAuthBypassEnabled()) {
+    return;
+  }
+
   if (!isPublicRoute(request)) {
     await auth.protect();
   }
