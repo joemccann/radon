@@ -28,6 +28,7 @@ const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections")
 import ConnectionBanner from "@/components/ConnectionBanner";
 import FlexTokenBanner from "@/components/FlexTokenBanner";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
+import { useIBStatus } from "@/lib/useIBStatus";
 
 type WorkspaceShellProps = {
   section?: WorkspaceSection;
@@ -168,6 +169,10 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     contracts: allContracts,
     indexes: regimeIndexes,
   });
+  const {
+    wsConnected: statusWsConnected,
+    ibConnected: statusIbConnected,
+  } = useIBStatus();
 
   // Debounce ibConnected: disconnections must persist >2s before surfacing to UI.
   // IB farm connectivity checks fire brief disconnected→connected sequences that
@@ -311,10 +316,11 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     : error
       ? `Sync error`
       : "No sync yet";
+  const sidebarIbConnected = statusWsConnected && statusIbConnected;
 
   return (
     <div className="app-shell" suppressHydrationWarning>
-      <Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />
+      <Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={sidebarIbConnected} lastSync={lastSync} />
 
       <main className="main">
         <Header

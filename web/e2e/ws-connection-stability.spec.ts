@@ -52,6 +52,14 @@ const PORTFOLIO_MOCK = {
   violations: [],
 };
 
+const PORTFOLIO_EMPTY = {
+  bankroll: 100_000,
+  positions: [],
+  account_summary: {},
+  exposure: {},
+  violations: [],
+};
+
 const ORDERS_MOCK = {
   last_sync: new Date().toISOString(),
   open_orders: [],
@@ -366,6 +374,25 @@ test.describe("WebSocket connection stability on ticker detail page", () => {
 
     // Verify it never showed OFFLINE at any point —
     // the debounced ibConnected starts truthy from mock, so there should be no flicker
+    const statusText = await statusDot.textContent();
+    expect(statusText).not.toContain("OFFLINE");
+  });
+
+  test("empty orders page still shows CONNECTED when the shared IB status socket is healthy", async ({ page }) => {
+    await page.route("**/api/portfolio", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_EMPTY) }),
+    );
+    await page.route("**/api/orders", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_MOCK) }),
+    );
+
+    await page.goto("http://127.0.0.1:3000/orders");
+
+    const statusDot = page.locator(".sidebar-footer .status-dot-wrap");
+    await expect(statusDot).toBeVisible({ timeout: 10_000 });
+    await page.waitForTimeout(300);
+
+    await expect(statusDot).toContainText("CONNECTED");
     const statusText = await statusDot.textContent();
     expect(statusText).not.toContain("OFFLINE");
   });
