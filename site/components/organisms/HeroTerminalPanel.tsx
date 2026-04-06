@@ -88,7 +88,7 @@ export function HeroTerminalPanel() {
                   >
                     <div>
                       <p className="font-sans text-sm font-medium text-primary">{item.label}</p>
-                      <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.14em] text-secondary">
+                      <p className="mt-1 font-mono text-[11px] uppercase tracking-[0.16em] text-secondary">
                         {item.state}
                       </p>
                     </div>

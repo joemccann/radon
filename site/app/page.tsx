@@ -1,4 +1,5 @@
 import dynamic from "next/dynamic";
+import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { FooterSection } from "@/components/sections/FooterSection";
 import { HeaderShell } from "@/components/sections/HeaderShell";
 import { HeroSection } from "@/components/sections/HeroSection";
@@ -22,6 +23,7 @@ const FinalCTASection = dynamic(() =>
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-canvas text-primary selection:bg-accent selection:text-canvas">
+      <ScrollProgress />
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded focus:bg-accent focus:px-4 focus:py-2 focus:text-canvas focus:outline-none"

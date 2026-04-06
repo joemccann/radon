@@ -43,7 +43,7 @@ export function ExecutionStep({ item, index, step }: ExecutionStepProps) {
       <p className="mt-4 text-sm leading-6 text-secondary">{normalizedItem.summary}</p>
       <div className="mt-6 border-t border-grid pt-4">
         <TelemetryLabel>Audit Trail</TelemetryLabel>
-        <p className="mt-2 font-mono text-[12px] uppercase tracking-[0.14em] text-secondary">
+        <p className="mt-2 font-mono text-[12px] uppercase tracking-[0.16em] text-secondary">
           {normalizedItem.metadata}
         </p>
       </div>

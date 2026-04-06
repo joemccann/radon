@@ -21,13 +21,13 @@ export function HeroSection() {
           <div className="mt-8 flex flex-wrap gap-3">
             <a
               href="#strategies"
-              className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-canvas transition-colors hover:bg-signal-strong"
+              className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.16em] text-canvas transition-colors hover:bg-signal-strong"
             >
               Review Strategies
             </a>
             <a
               href="#execution"
-              className="inline-flex items-center border border-grid bg-panel px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-primary transition-colors hover:bg-panel-raised"
+              className="inline-flex items-center border border-grid bg-panel px-5 py-3 font-mono text-[11px] uppercase tracking-[0.16em] text-primary transition-colors hover:bg-panel-raised"
             >
               Explore Execution
             </a>

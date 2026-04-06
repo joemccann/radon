@@ -25,7 +25,7 @@ export function FinalCTASection() {
           <div className="flex flex-wrap gap-3 xl:justify-end">
             <a
               href="#strategies"
-              className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-canvas transition-colors hover:bg-signal-strong"
+              className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.16em] text-canvas transition-colors hover:bg-signal-strong"
             >
               Review Strategies
             </a>

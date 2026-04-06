@@ -50,7 +50,7 @@ export function MonoMetric({
           <span className="mono-metric-value">{value}</span>
         </div>
         {detail ? (
-          <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.14em] text-secondary">
+          <p className="mt-2 font-mono text-[11px] uppercase tracking-[0.16em] text-secondary">
             {detail}
           </p>
         ) : null}

@@ -17,7 +17,7 @@ export function SourceRail({ items }: SourceRailProps) {
       {items.map((item) => (
         <div key={item.label} className="flex items-center justify-between gap-3">
           <TelemetryLabel>{item.label}</TelemetryLabel>
-          <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.14em] text-secondary">
+          <span className="flex items-center gap-2 font-mono text-[11px] uppercase tracking-[0.16em] text-secondary">
             {item.tone ? <StatusDot tone={item.tone} /> : null}
             {item.value}
           </span>

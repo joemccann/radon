@@ -103,13 +103,13 @@ export function StrategyCard({
         </div>
         <div>
           <dt><TelemetryLabel>Hold</TelemetryLabel></dt>
-          <dd className="mt-2 font-mono text-[13px] uppercase tracking-[0.14em] text-secondary">
+          <dd className="mt-2 font-mono text-[13px] uppercase tracking-[0.16em] text-secondary">
             {normalized.holdPeriod}
           </dd>
         </div>
         <div>
           <dt><TelemetryLabel>Win Rate</TelemetryLabel></dt>
-          <dd className="mt-2 font-mono text-[13px] uppercase tracking-[0.14em] text-secondary">
+          <dd className="mt-2 font-mono text-[13px] uppercase tracking-[0.16em] text-secondary">
             {normalized.winRate}
           </dd>
         </div>

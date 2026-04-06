@@ -36,7 +36,7 @@ export function HeaderShell() {
             <a
               key={item.href}
               href={item.href}
-              className={`font-mono text-[11px] uppercase tracking-[0.18em] text-secondary transition-colors hover:text-primary ${focusRing}`}
+              className={`font-mono text-[11px] uppercase tracking-[0.16em] text-secondary transition-colors hover:text-primary ${focusRing}`}
             >
               {item.label}
             </a>
@@ -54,7 +54,7 @@ export function HeaderShell() {
           </a>
           <a
             href="#strategies"
-            className={`inline-flex items-center border border-accent bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-canvas transition-colors hover:bg-signal-strong ${focusRing}`}
+            className={`inline-flex items-center border border-accent bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-canvas transition-colors hover:bg-signal-strong ${focusRing}`}
           >
             Inspect Strategies
           </a>
@@ -80,7 +80,7 @@ export function HeaderShell() {
                 key={item.href}
                 href={item.href}
                 onClick={() => setMenuOpen(false)}
-                className={`font-mono text-sm uppercase tracking-[0.18em] text-secondary transition-colors hover:text-primary ${focusRing}`}
+                className={`font-mono text-sm uppercase tracking-[0.16em] text-secondary transition-colors hover:text-primary ${focusRing}`}
               >
                 {item.label}
               </a>

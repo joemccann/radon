@@ -32,7 +32,7 @@ export function FooterSection() {
                     href={link.href}
                     target={link.href.startsWith("http") ? "_blank" : undefined}
                     rel={link.href.startsWith("http") ? "noopener noreferrer" : undefined}
-                    className="font-mono text-[12px] uppercase tracking-[0.14em] text-secondary transition-colors hover:text-primary"
+                    className="font-mono text-[12px] uppercase tracking-[0.16em] text-secondary transition-colors hover:text-primary"
                   >
                     {link.label}
                   </a>
