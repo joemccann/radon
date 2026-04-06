@@ -45,7 +45,7 @@ export const headerLinks = [
 export const proofItems: ProofItem[] = [
   {
     label: "Active Strategies",
-    value: "6",
+    value: "7",
     detail: "Defined, undefined, and overlay structures surfaced in one terminal.",
     tone: "core",
   },
@@ -78,14 +78,14 @@ export const proofItems: ProofItem[] = [
 export const heroCommandItems = [
   { label: "Dark Pool Flow", state: "Defined", command: "evaluate AAPL" },
   { label: "LEAP IV Mispricing", state: "Defined", command: "leap-scan NVDA" },
-  { label: "Crash Risk Index", state: "Overlay", command: "cri-scan" },
+  { label: "GEX Levels", state: "Overlay", command: "gex-scan" },
 ];
 
 export const heroMetrics = [
   { label: "COR1M", value: "28.97", detail: "Implied correlation" },
   { label: "VIX", value: "22.77", detail: "Volatility state" },
   { label: "Kelly Cap", value: "7.5%", detail: "Sizing discipline" },
-  { label: "Signal Stack", value: "6", detail: "Deployable modules" },
+  { label: "Signal Stack", value: "7", detail: "Deployable modules" },
 ];
 
 export type ModuleTab = "flow" | "performance" | "structure" | "execution";
@@ -103,7 +103,7 @@ export const moduleContents: Record<ModuleTab, ModuleContent> = {
       { label: "COR1M", value: "28.97", detail: "Implied correlation" },
       { label: "VIX", value: "22.77", detail: "Volatility state" },
       { label: "Kelly Cap", value: "7.5%", detail: "Sizing discipline" },
-      { label: "Signal Stack", value: "6", detail: "Deployable modules" },
+      { label: "Signal Stack", value: "7", detail: "Deployable modules" },
     ],
     commands: [
       { label: "Dark Pool Flow", state: "Defined", command: "evaluate AAPL" },
@@ -138,7 +138,7 @@ export const moduleContents: Record<ModuleTab, ModuleContent> = {
     commands: [
       { label: "Regime Monitor", state: "Continuous", command: "cri-scan" },
       { label: "Vol-Credit Gap", state: "Overlay", command: "vcg" },
-      { label: "GARCH Spreads", state: "Cross-asset", command: "garch-convergence" },
+      { label: "GEX Levels", state: "Dealer Gamma", command: "gex-scan" },
     ],
     commandLabel: "Structure Surface",
     commandPill: "Regime Aware",
@@ -233,6 +233,18 @@ export const strategies: StrategyItem[] = [
     riskType: "Overlay",
     command: "cri-scan",
     tone: "violet",
+  },
+  {
+    name: "Gamma Exposure Levels",
+    description:
+      "Dealer gamma positioning by strike to identify price magnets, accelerators, and the GEX flip where market maker hedging shifts from stabilizing to destabilizing.",
+    edge: "Positive gamma zones attract price as dealers buy dips and sell rallies. Negative gamma zones amplify moves as dealers hedge in the same direction as price.",
+    instruments: "SPX and SPY options. Informs structure selection and entry timing.",
+    holdPeriod: "Intraday to 3 days",
+    winRate: "Overlay",
+    riskType: "Overlay",
+    command: "gex-scan",
+    tone: "core",
   },
 ];
 
