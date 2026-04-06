@@ -48,18 +48,21 @@ export function HeroTerminalPanel() {
       <div className="relative z-20 grid gap-px border-b border-grid bg-grid lg:grid-cols-[160px_minmax(0,1fr)]">
         <nav className="bg-canvas px-4 py-5">
           <TelemetryLabel>Modules</TelemetryLabel>
-          <div className="mt-4 space-y-1">
+          <div className="mt-4 space-y-1" role="tablist" aria-label="Terminal modules">
             {tabs.map((tab) => (
               <TerminalNavItem
                 key={tab.id}
                 label={tab.label}
                 active={activeTab === tab.id}
                 onClick={() => handleTabChange(tab.id)}
+                role="tab"
+                ariaSelected={activeTab === tab.id}
+                id={`tab-${tab.id}`}
               />
             ))}
           </div>
         </nav>
-        <div className="bg-panel px-4 py-5 overflow-hidden">
+        <div className="bg-panel px-4 py-5 overflow-hidden" role="tabpanel" aria-labelledby={`tab-${activeTab}`}>
           <div key={animKey} className="module-content-enter">
             <div className="grid gap-4 sm:grid-cols-2">
               {content.metrics.map((metric, index) => (

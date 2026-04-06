@@ -214,7 +214,7 @@ export const strategies: StrategyItem[] = [
     name: "Volatility-Credit Gap",
     description:
       "Portfolio hedge overlay when volatility reprices faster than cash credit and the gap becomes statistically dislocated.",
-    edge: "VVIX > 110 with stable credit plus a >2 sigma residual exposes artificial calm in HYG and JNK.",
+    edge: "VVIX > 110 with stable credit plus a >2 sigma residual exposes consensus-priced calm in HYG and JNK.",
     instruments: "Short-dated HYG puts or bear put spreads.",
     holdPeriod: "1 to 5 days",
     winRate: "Overlay",

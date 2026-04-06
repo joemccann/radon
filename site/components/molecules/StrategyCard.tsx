@@ -97,21 +97,21 @@ export function StrategyCard({
       <p className="mt-4 text-sm leading-6 text-secondary">{normalized.description}</p>
       <dl className="mt-6 grid gap-4 border-t border-grid pt-5 sm:grid-cols-2">
         <div>
-          <TelemetryLabel>Edge</TelemetryLabel>
+          <dt><TelemetryLabel>Edge</TelemetryLabel></dt>
           <dd className="mt-2 text-sm leading-6 text-primary">{normalized.edge}</dd>
         </div>
         <div>
-          <TelemetryLabel>Instruments</TelemetryLabel>
+          <dt><TelemetryLabel>Instruments</TelemetryLabel></dt>
           <dd className="mt-2 text-sm leading-6 text-primary">{normalized.instruments}</dd>
         </div>
         <div>
-          <TelemetryLabel>Hold</TelemetryLabel>
+          <dt><TelemetryLabel>Hold</TelemetryLabel></dt>
           <dd className="mt-2 font-mono text-[13px] uppercase tracking-[0.14em] text-secondary">
             {normalized.holdPeriod}
           </dd>
         </div>
         <div>
-          <TelemetryLabel>Win Rate</TelemetryLabel>
+          <dt><TelemetryLabel>Win Rate</TelemetryLabel></dt>
           <dd className="mt-2 font-mono text-[13px] uppercase tracking-[0.14em] text-secondary">
             {normalized.winRate}
           </dd>

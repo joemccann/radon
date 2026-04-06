@@ -4,7 +4,7 @@ export const DEFAULT_SITE_THEME: SiteTheme = "dark";
 export const SITE_THEME_STORAGE_KEY = "theme";
 export const siteThemeMetaColor: Record<SiteTheme, string> = {
   dark: "#0a0f14",
-  light: "#edf3ee",
+  light: "#FFFFFF",
 };
 
 export function isSiteTheme(value: unknown): value is SiteTheme {

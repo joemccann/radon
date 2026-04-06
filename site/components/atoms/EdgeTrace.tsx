@@ -14,14 +14,14 @@ type EdgeTraceProps = {
 };
 
 const toneClass: Record<EdgeTone, string> = {
-  core: "from-accent via-signal-strong to-accent",
-  warn: "from-warn via-warn/80 to-warn",
-  violet: "from-dislocation via-extreme to-dislocation",
-  clear: "from-accent via-signal-strong to-accent",
-  strong: "from-signal-strong via-signal-strong/80 to-signal-strong/10",
-  emerging: "from-signal-deep via-signal-deep/80 to-signal-deep/10",
-  dislocated: "from-dislocation via-extreme to-dislocation",
-  muted: "from-secondary/60 via-secondary/40 to-secondary/0",
+  core: "bg-accent",
+  warn: "bg-warn",
+  violet: "bg-dislocation",
+  clear: "bg-accent",
+  strong: "bg-signal-strong",
+  emerging: "bg-signal-deep",
+  dislocated: "bg-dislocation",
+  muted: "bg-secondary/60",
 };
 
 export function EdgeTrace({ tone = "core", className }: EdgeTraceProps) {
@@ -29,7 +29,7 @@ export function EdgeTrace({ tone = "core", className }: EdgeTraceProps) {
     <span
       aria-hidden="true"
       className={[
-        "absolute inset-y-3 left-0 w-px bg-gradient-to-b",
+        "absolute inset-y-3 left-0 w-px",
         toneClass[tone],
         className,
       ]

@@ -3,6 +3,9 @@ type TerminalNavItemProps = {
   active?: boolean;
   description?: string;
   onClick?: () => void;
+  role?: string;
+  ariaSelected?: boolean;
+  id?: string;
 };
 
 export function TerminalNavItem({
@@ -10,12 +13,18 @@ export function TerminalNavItem({
   active = false,
   description,
   onClick,
+  role,
+  ariaSelected,
+  id,
 }: TerminalNavItemProps) {
   return (
     <button
       type="button"
       onClick={onClick}
-      className={`group w-full text-left border-l-2 px-3 py-2 transition-colors duration-200 ${
+      role={role}
+      aria-selected={ariaSelected}
+      id={id}
+      className={`group w-full text-left border-l-2 px-3 py-2 transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 ${
         active
           ? "border-accent bg-panel-raised/60 text-accent"
           : "border-transparent text-muted hover:border-grid hover:text-secondary"

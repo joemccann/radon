@@ -37,7 +37,7 @@ export function SignalPill({
   return (
     <span
       className={[
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.16em]",
+        "inline-flex items-center gap-2 rounded-full border px-3 py-2 sm:py-1 font-mono text-[11px] uppercase tracking-[0.16em]",
         toneClass[tone],
         className,
       ]
