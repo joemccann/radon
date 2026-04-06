@@ -991,6 +991,40 @@ async def vcg_share():
     return result.data
 
 
+# ── GEX (Gamma Exposure Levels) ─────────────────────────────────────
+
+_gex_last_scan: float = 0.0
+_gex_scan_lock: Optional[asyncio.Lock] = None
+GEX_COOLDOWN_S = 60
+
+
+@app.post("/gex/scan")
+async def gex_scan(ticker: str = "SPX"):
+    """Run GEX scan (gex_scan.py --json --ticker X). 60s cooldown between scans."""
+    global _gex_last_scan, _gex_scan_lock
+    import time as _time
+    if _gex_scan_lock is None:
+        _gex_scan_lock = asyncio.Lock()
+    now = _time.monotonic()
+    if now - _gex_last_scan < GEX_COOLDOWN_S:
+        cached = _read_cache(DATA_DIR / "gex.json")
+        if cached:
+            return cached
+    async with _gex_scan_lock:
+        if _time.monotonic() - _gex_last_scan < GEX_COOLDOWN_S:
+            cached = _read_cache(DATA_DIR / "gex.json")
+            if cached:
+                return cached
+        result = await run_script(
+            "gex_scan.py", ["--json", "--ticker", ticker.upper()], timeout=120
+        )
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        _write_cache(DATA_DIR / "gex.json", result.data)
+        _gex_last_scan = _time.monotonic()
+        return result.data
+
+
 @app.post("/regime/share")
 async def regime_share():
     """Generate Regime/CRI X share report (4 cards + preview HTML). Returns output path."""

@@ -84,6 +84,22 @@ Tabbed into `/regime` page. Detects divergence between vol complex (VIX/VVIX) an
 
 **VCG-R thresholds:** RO = VIX > 28 + VCG > 2.5 + sign_ok. EDR = VIX > 25 + VCG 2.0–2.5. BOUNCE = VCG < -3.5. VVIX is severity amplifier (Tier 1/2/3), not a gate.
 
+### GEX (Gamma Exposure Levels) Tab
+
+Tabbed into `/regime` page. Surfaces dealer gamma positioning by strike for SPX/SPY. Identifies price magnets, accelerators, flip points, and expected ranges.
+
+| Component | File |
+|-----------|------|
+| Hook | `web/lib/useGex.ts` (`GexData` type, adaptive polling) |
+| Staleness | `web/lib/gexStaleness.ts` (anchored to `scan_time` age) |
+| API route | `web/app/api/gex/route.ts` (GET cached + SWR) |
+| Panel | `web/components/GexPanel.tsx` |
+| Scanner | `scripts/gex_scan.py` (UW greek-exposure/strike) |
+| FastAPI | `POST /gex/scan` (60s cooldown) |
+| Cache | `data/gex.json` |
+
+**Key levels:** GEX Flip (neg→pos crossing), Max Magnet (highest positive gamma), Max Accelerator (most negative gamma), Put Wall, Call Wall. **Bias heuristic:** BULL/CAUTIOUS_BULL/NEUTRAL/CAUTIOUS_BEAR/BEAR from flip position + net GEX sign + magnet location. **UW fields:** `call_gex` (positive), `put_gex` (negative), `net = call_gex + put_gex` — no negation needed. **Tests:** `test_gex_scan.py` (42), `gex-staleness.test.ts` (9), `gex-panel.test.tsx` (20).
+
 ### RegimePanel Market-Closed Rules
 
 When `market_open === false`:
@@ -266,7 +282,7 @@ When evaluating during market hours, today's partial data is volume-weighted int
 | `blotter` / `blotter-history` | Today's fills / Historical trades |
 | `leap-scan` / `garch-convergence` / `seasonal` | IV mispricing / GARCH divergence / Seasonality |
 | `analyst-ratings [TICKERS]` | Ratings + targets |
-| `vcg-scan` / `cri-scan` | Vol-credit gap / Crash Risk Index |
+| `vcg-scan` / `cri-scan` / `gex-scan` | Vol-credit gap / Crash Risk Index / Gamma Exposure Levels |
 | `menthorq-cta` / `menthorq-dashboard` / `menthorq-screener` / `menthorq-forex` / `menthorq-summary` / `menthorq-quin` | MenthorQ tools |
 
 ## Key Scripts
@@ -287,6 +303,7 @@ When evaluating during market hours, today's partial data is volume-weighted int
 | `scripts/ib_realtime_server.js` | WS relay — batched, 100ms flush, ticket auth |
 | `scripts/utils/atomic_io.py` | Atomic JSON save/load + SHA-256 |
 | `scripts/monitor_daemon/run.py` | Monitor daemon — fills, exit orders, rebalance |
+| `scripts/gex_scan.py` | GEX levels scanner — flip, magnets, accelerators, bias |
 
 ## Critical Data Files
 
@@ -297,6 +314,7 @@ When evaluating during market hours, today's partial data is volume-weighted int
 | `docs/options-structures.json` | 58 structures, guard decisions, bias, risk profile |
 | `data/watchlist.json` | Surveillance tickers |
 | `data/vcg.json` | VCG scan cache |
+| `data/gex.json` | GEX levels cache |
 | `data/price_history_cache/` | Stock + option price histories (auto-pruned at 500) |
 
 ## Seasonality Fallback

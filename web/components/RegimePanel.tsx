@@ -5,6 +5,7 @@ import { AlertTriangle, Check, Shield, X, Zap } from "lucide-react";
 import CriHistoryChart from "./CriHistoryChart";
 import RegimeRelationshipView from "./RegimeRelationshipView";
 import VcgPanel from "./VcgPanel";
+import GexPanel from "./GexPanel";
 import { DayChange, LiveBadge, PointChange, RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import ShareReportModal from "./ShareReportModal";
 import type { ChartSeries, CriHistoryEntry } from "./CriHistoryChart";
@@ -17,7 +18,7 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
-type RegimeTab = "cri" | "vcg";
+type RegimeTab = "cri" | "vcg" | "gex";
 
 type RegimePanelProps = {
   prices: Record<string, PriceData>;
@@ -263,6 +264,7 @@ export default function RegimePanel({
     <div className="ticker-tabs" style={{ marginBottom: "16px" }}>
       <button className={`ticker-tab ${activeTab === "cri" ? "active" : ""}`} onClick={() => setActiveTab("cri")}>CRI</button>
       <button className={`ticker-tab ${activeTab === "vcg" ? "active" : ""}`} onClick={() => setActiveTab("vcg")}>VCG</button>
+      <button className={`ticker-tab ${activeTab === "gex" ? "active" : ""}`} onClick={() => setActiveTab("gex")}>GEX</button>
     </div>
   );
 
@@ -271,6 +273,15 @@ export default function RegimePanel({
       <div className="regime-panel">
         {tabBar}
         <VcgPanel prices={prices} marketState={marketState} />
+      </div>
+    );
+  }
+
+  if (activeTab === "gex") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <GexPanel marketState={marketState} />
       </div>
     );
   }
