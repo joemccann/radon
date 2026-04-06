@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
+import type { ToneType } from "@/lib/tone";
 
-type TelemetryTone = "primary" | "muted" | "core" | "warn";
+type TelemetryTone = ToneType | "primary";
 
 type TelemetryLabelProps = {
   children: ReactNode;
@@ -13,6 +14,13 @@ const toneClass: Record<TelemetryTone, string> = {
   muted: "text-muted",
   core: "text-accent",
   warn: "text-warn",
+  strong: "text-signal-strong",
+  fault: "text-negative",
+  violet: "text-extreme",
+  neutral: "text-secondary",
+  clear: "text-accent",
+  emerging: "text-accent",
+  dislocated: "text-dislocation",
 };
 
 export function TelemetryLabel({

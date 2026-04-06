@@ -23,13 +23,13 @@ export function HeroSection() {
               href="#strategies"
               className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-canvas transition-colors hover:bg-signal-strong"
             >
-              Inspect Strategy Matrix
+              Review Strategies
             </a>
             <a
               href="#execution"
               className="inline-flex items-center border border-grid bg-panel px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-primary transition-colors hover:bg-panel-raised"
             >
-              Review Execution Rail
+              Explore Execution
             </a>
             <a
               href="https://github.com/joemccann/radon"
@@ -40,9 +40,14 @@ export function HeroSection() {
               <CommandChip command="GitHub / Source" />
             </a>
           </div>
-          <div className="mt-10 grid gap-4 md:grid-cols-2">
-            {proofItems.map((item) => (
+          <div className="mt-10 grid grid-cols-3 gap-4">
+            {proofItems.slice(0, 3).map((item) => (
               <ProofMetric key={item.label} item={item} />
+            ))}
+          </div>
+          <div className="mt-3 grid grid-cols-2 gap-4">
+            {proofItems.slice(3).map((item) => (
+              <ProofMetric key={item.label} item={item} compact />
             ))}
           </div>
         </div>

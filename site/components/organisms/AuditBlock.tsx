@@ -6,7 +6,7 @@ export function AuditBlock() {
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
       <div className="relative overflow-hidden border border-grid bg-panel px-6 py-6">
-        <div className="absolute inset-0 projection-lines opacity-25" />
+        <div className="absolute inset-0 projection-lines opacity-[0.08]" />
         <div className="relative z-20">
           <TelemetryLabel tone="core">Auditability Layer</TelemetryLabel>
           <h3 className="mt-4 max-w-[18ch] font-sans text-3xl font-semibold leading-tight text-primary md:text-4xl">

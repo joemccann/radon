@@ -1,6 +1,7 @@
 import { TelemetryLabel } from "@/components/atoms/TelemetryLabel";
+import type { ToneType } from "@/lib/tone";
 
-type MonoTone = "primary" | "core" | "strong";
+type MonoTone = ToneType | "primary";
 type MonoMetricSize = "default" | "compact";
 
 type MonoMetricProps = {
@@ -17,6 +18,14 @@ const toneClass: Record<MonoTone, string> = {
   primary: "text-primary",
   core: "text-accent",
   strong: "text-signal-strong",
+  warn: "text-warn",
+  fault: "text-negative",
+  violet: "text-extreme",
+  neutral: "text-secondary",
+  clear: "text-accent",
+  emerging: "text-accent",
+  dislocated: "text-dislocation",
+  muted: "text-muted",
 };
 
 export function MonoMetric({

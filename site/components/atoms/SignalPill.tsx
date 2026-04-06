@@ -1,23 +1,13 @@
 import type { ReactNode } from "react";
-
-type SignalTone =
-  | "core"
-  | "strong"
-  | "warn"
-  | "violet"
-  | "neutral"
-  | "clear"
-  | "emerging"
-  | "dislocated"
-  | "muted";
+import type { ToneType } from "@/lib/tone";
 
 type SignalPillProps = {
   children: ReactNode;
-  tone?: SignalTone;
+  tone?: ToneType;
   className?: string;
 };
 
-const toneClass: Record<SignalTone, string> = {
+const toneClass: Record<ToneType, string> = {
   core: "border-accent/40 text-accent",
   strong: "border-signal-strong/40 text-signal-strong",
   warn: "border-warn/40 text-warn",

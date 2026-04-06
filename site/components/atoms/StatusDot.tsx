@@ -1,20 +1,12 @@
-type StatusTone =
-  | "core"
-  | "strong"
-  | "warn"
-  | "fault"
-  | "clear"
-  | "emerging"
-  | "dislocated"
-  | "muted";
+import type { ToneType } from "@/lib/tone";
 
 type StatusDotProps = {
-  tone?: StatusTone;
+  tone?: ToneType;
   pulse?: boolean;
   className?: string;
 };
 
-const toneClass: Record<StatusTone, string> = {
+const toneClass: Record<ToneType, string> = {
   core: "bg-accent border-accent/30",
   strong: "bg-signal-strong border-signal-strong/30",
   warn: "bg-warn border-warn/30",
@@ -22,6 +14,8 @@ const toneClass: Record<StatusTone, string> = {
   clear: "bg-accent border-accent/30",
   emerging: "bg-signal-deep border-signal-deep/30",
   dislocated: "bg-dislocation border-dislocation/30",
+  violet: "bg-extreme border-extreme/30",
+  neutral: "bg-secondary border-secondary/30",
   muted: "bg-secondary border-secondary",
 };
 

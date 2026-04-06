@@ -18,6 +18,9 @@ export function FooterSection() {
             Strategies, execution discipline, and state reconstruction for traders who
             want the machine to stay inspectable.
           </p>
+          <p className="mb-8 max-w-xl text-sm leading-6 text-secondary">
+            Source, methodology, and execution rails remain auditable. No black boxes.
+          </p>
         </div>
         {footerColumns.map((column) => (
           <div key={column.title}>

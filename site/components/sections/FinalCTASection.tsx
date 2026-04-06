@@ -27,7 +27,7 @@ export function FinalCTASection() {
               href="#strategies"
               className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-canvas transition-colors hover:bg-signal-strong"
             >
-              Initialize Review
+              Review Strategies
             </a>
             <a
               href="https://github.com/joemccann/radon"
@@ -35,7 +35,7 @@ export function FinalCTASection() {
               rel="noopener noreferrer"
               className="inline-flex"
             >
-              <CommandChip command="Inspect Source" />
+              <CommandChip command="Explore Source" />
             </a>
           </div>
         </div>

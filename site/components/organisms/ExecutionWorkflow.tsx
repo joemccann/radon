@@ -5,15 +5,15 @@ import { executionItems } from "@/lib/landing-content";
 
 export function ExecutionWorkflow() {
   return (
-    <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_320px]">
+    <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.85fr)]">
       <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
         {executionItems.map((item, index) => (
           <ExecutionStep key={item.step} item={item} index={index} />
         ))}
       </div>
-      <aside className="border border-grid bg-panel px-5 py-5">
+      <aside className="border border-grid bg-panel-raised px-6 py-6">
         <TelemetryLabel tone="core">Execution Guarantees</TelemetryLabel>
-        <h3 className="mt-3 font-sans text-2xl font-semibold text-primary">
+        <h3 className="mt-3 font-sans text-xl font-semibold text-primary">
           No hidden handoff between signal and risk.
         </h3>
         <p className="mt-4 text-sm leading-6 text-secondary">

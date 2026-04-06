@@ -94,12 +94,9 @@ export function StrategyCard({
           {normalized.riskType}
         </SignalPill>
       </div>
-      <p className="mt-4 text-sm leading-6 text-secondary">{normalized.description}</p>
+      <p className="mt-3 text-sm font-medium leading-6 text-accent">{normalized.edge}</p>
+      <p className="mt-2 text-sm leading-6 text-secondary">{normalized.description}</p>
       <dl className="mt-6 grid gap-4 border-t border-grid pt-5 sm:grid-cols-2">
-        <div>
-          <dt><TelemetryLabel>Edge</TelemetryLabel></dt>
-          <dd className="mt-2 text-sm leading-6 text-primary">{normalized.edge}</dd>
-        </div>
         <div>
           <dt><TelemetryLabel>Instruments</TelemetryLabel></dt>
           <dd className="mt-2 text-sm leading-6 text-primary">{normalized.instruments}</dd>
