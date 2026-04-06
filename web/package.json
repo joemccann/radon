@@ -1,7 +1,7 @@
 {
   "name": "radon-web",
   "private": true,
-  "version": "0.6.1",
+  "version": "0.7.0",
   "description": "Radon Terminal — market structure reconstruction instrument with real-time IB streaming and AI chat.",
   "type": "module",
   "scripts": {
