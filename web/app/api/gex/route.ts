@@ -40,6 +40,16 @@ const EMPTY_GEX = {
     flip_migration: [],
   },
   history: [],
+  iv: null as null | {
+    iv30d: number | null;
+    iv_rank: number | null;
+    hv30: number | null;
+    mq_iv30d: number | null;
+    mq_iv_rank: string | null;
+    source: "uw" | "mq" | "both" | null;
+  },
+  mq: null as null | Record<string, unknown>,
+  source_delta: null as null | Record<string, unknown>,
 };
 
 function isMarketOpenNow(): boolean {
@@ -84,6 +94,9 @@ function normalizeGexPayload(raw: Record<string, unknown>): Record<string, unkno
       : EMPTY_GEX.bias,
     profile: Array.isArray(raw.profile) ? raw.profile : [],
     history: Array.isArray(raw.history) ? raw.history : [],
+    iv: typeof raw.iv === "object" && raw.iv !== null ? raw.iv : null,
+    mq: typeof raw.mq === "object" && raw.mq !== null ? raw.mq : null,
+    source_delta: typeof raw.source_delta === "object" && raw.source_delta !== null ? raw.source_delta : null,
   };
 }
 

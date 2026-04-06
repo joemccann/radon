@@ -2,8 +2,10 @@
 
 import { useState, useMemo, useRef, useEffect } from "react";
 import { Activity, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight } from "lucide-react";
-import { useGex, type GexData, type GexBucket, type GexLevel, type GexHistoryEntry } from "@/lib/useGex";
+import { useGex, type GexData, type GexBucket, type GexLevel, type GexHistoryEntry, type IvData, type MqLevels, type SourceDelta, type SourceDeltaEntry } from "@/lib/useGex";
 import { MarketState } from "@/lib/useMarketHours";
+import InfoTooltip from "./InfoTooltip";
+import ShareReportModal from "./ShareReportModal";
 
 type GexPanelProps = {
   marketState?: MarketState;
@@ -55,15 +57,39 @@ function levelColor(gamma: number | undefined): string {
 
 /* ─── Metrics Card ────────────────────────────────────── */
 
-function MetricCard({ label, value, sub, color }: {
+function SourceBadge({ source }: { source: "uw" | "mq" | "both" }) {
+  const styles: Record<string, React.CSSProperties> = {
+    uw:   { background: "rgba(15,110,86,0.18)",  color: "var(--signal-core)",  border: "0.5px solid rgba(15,110,86,0.4)" },
+    mq:   { background: "rgba(56,138,221,0.15)", color: "#85b7eb",             border: "0.5px solid rgba(56,138,221,0.35)" },
+    both: { background: "rgba(93,202,165,0.12)", color: "var(--signal-core)",  border: "0.5px solid rgba(93,202,165,0.3)" },
+  };
+  const labels = { uw: "UW", mq: "MQ", both: "UW+MQ" };
+  return (
+    <span style={{
+      ...styles[source],
+      fontSize: 9, fontWeight: 500, padding: "1px 5px",
+      borderRadius: 2, letterSpacing: "0.06em",
+    }}>
+      {labels[source]}
+    </span>
+  );
+}
+
+function MetricCard({ label, value, sub, color, badge, tooltip }: {
   label: string;
   value: string;
   sub?: string;
   color?: string;
+  badge?: React.ReactNode;
+  tooltip?: string;
 }) {
   return (
     <div className="gex-metric-card">
-      <div className="gex-metric-label">{label}</div>
+      <div className="gex-metric-label" style={{ display: "flex", alignItems: "center", gap: 4 }}>
+        {label}
+        {tooltip && <InfoTooltip text={tooltip} />}
+        {badge}
+      </div>
       <div className="gex-metric-value" style={{ color: color || "var(--text-primary)" }}>
         {value}
       </div>
@@ -287,6 +313,129 @@ function sortIndicator(col: GexSortCol, activeCol: GexSortCol | null, dir: SortD
   return dir === "asc" ? " \u2191" : " \u2193";
 }
 
+/* ─── MenthorQ Levels Panel ─────────────────────────── */
+
+function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceDelta | null }) {
+  const [expanded, setExpanded] = useState(false);
+
+  function deltaStyle(d: number | undefined): React.CSSProperties {
+    if (d == null) return {};
+    if (Math.abs(d) <= 2)  return { color: "var(--signal-core)" };
+    if (Math.abs(d) <= 10) return { color: "var(--warning)" };
+    return { color: "var(--fault)" };
+  }
+
+  function fmtDelta(e: SourceDeltaEntry | undefined): React.ReactNode {
+    if (!e) return <span style={{ color: "var(--text-muted)" }}>—</span>;
+    const sign = e.delta > 0 ? "+" : "";
+    return (
+      <span style={deltaStyle(e.delta)}>
+        {sign}{e.delta.toFixed(1)} &nbsp;
+        <span style={{ color: "var(--signal-core)", fontSize: 9 }}>{e.uw.toFixed(0)}</span>
+        <span style={{ color: "var(--text-muted)", fontSize: 9 }}> vs </span>
+        <span style={{ color: "#85b7eb", fontSize: 9 }}>{e.mq.toFixed(0)}</span>
+      </span>
+    );
+  }
+
+  return (
+    <div className="gex-history-section">
+      <button className="gex-mq-toggle" onClick={() => setExpanded(!expanded)}>
+        MenthorQ Key Levels
+        {mq.source_date && (
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginLeft: 8 }}>
+            {mq.source_date}
+          </span>
+        )}
+        <SourceBadge source="mq" />
+        {" "}{expanded ? "▲" : "▼"}
+      </button>
+      {expanded && (
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 10 }}>
+          {/* MQ Level Values */}
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+              Levels
+            </div>
+            {[
+              { label: "HVL (flip)",            val: mq.hvl },
+              { label: "Call Resistance (all)",  val: mq.call_resistance_all },
+              { label: "Call Resistance (0DTE)", val: mq.call_resistance_0dte },
+              { label: "Put Support (all)",      val: mq.put_support_all },
+              { label: "Put Support (0DTE)",     val: mq.put_support_0dte },
+              { label: "Expected High",          val: mq.expected_high },
+              { label: "Expected Low",           val: mq.expected_low },
+            ].map(({ label, val }) => (
+              <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5, fontFamily: "var(--font-mono)" }}>
+                <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>{label}</span>
+                <span style={{ color: "#85b7eb", fontWeight: 500 }}>{val != null ? fmtPrice(val) : "—"}</span>
+              </div>
+            ))}
+            {mq.top_gex_strikes.length > 0 && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>Top GEX Strikes</div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                  {mq.top_gex_strikes.map((s) => (
+                    <span key={s} style={{
+                      background: "rgba(56,138,221,0.12)", color: "#85b7eb",
+                      border: "0.5px solid rgba(56,138,221,0.3)",
+                      fontSize: 10, padding: "1px 6px", borderRadius: 2, fontFamily: "var(--font-mono)",
+                    }}>
+                      {fmtPrice(s)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Source Delta */}
+          <div>
+            <div style={{ fontSize: 10, letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--text-muted)", marginBottom: 8 }}>
+              UW vs MQ Delta &nbsp;
+              <span style={{ color: "var(--text-muted)", fontStyle: "italic", textTransform: "none" }}>(+= UW higher)</span>
+            </div>
+            {sourceDelta ? (
+              [
+                { label: "Flip vs HVL",              entry: sourceDelta.flip_vs_hvl },
+                { label: "Put wall vs support (all)", entry: sourceDelta.put_wall_vs_support_all },
+                { label: "Put wall vs support (0DTE)",entry: sourceDelta.put_wall_vs_support_0dte },
+                { label: "Call wall vs resist (all)", entry: sourceDelta.call_wall_vs_resistance_all },
+                { label: "Call wall vs resist (0DTE)",entry: sourceDelta.call_wall_vs_resistance_0dte },
+              ].map(({ label, entry }) => (
+                <div key={label} style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 5, fontFamily: "var(--font-mono)" }}>
+                  <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>{label}</span>
+                  {fmtDelta(entry)}
+                </div>
+              ))
+            ) : (
+              <div style={{ color: "var(--text-muted)", fontSize: 11 }}>No delta data</div>
+            )}
+            {/* IV comparison */}
+            {(mq.iv30d != null || mq.hv30 != null) && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: 10, color: "var(--text-muted)", marginBottom: 4 }}>Volatility (MQ)</div>
+                {mq.iv30d != null && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, marginBottom: 4, fontFamily: "var(--font-mono)" }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>IV 30D</span>
+                    <span style={{ color: "#85b7eb", fontWeight: 500 }}>{(mq.iv30d * 100).toFixed(2)}%</span>
+                  </div>
+                )}
+                {mq.hv30 != null && (
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, fontFamily: "var(--font-mono)" }}>
+                    <span style={{ color: "var(--text-secondary)", fontSize: 10 }}>HV 30D</span>
+                    <span style={{ color: "var(--text-secondary)", fontWeight: 500 }}>{(mq.hv30 * 100).toFixed(2)}%</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
   const [sortCol, setSortCol] = useState<GexSortCol | null>(null);
   const [sortDir, setSortDir] = useState<SortDir>("desc");
@@ -321,7 +470,7 @@ function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
     { key: "gex_flip", label: "GEX Flip", align: "right" },
     { key: "net_gex", label: "Net GEX", align: "right" },
     { key: "net_dex", label: "Net DEX", align: "right" },
-    { key: "atm_iv", label: "ATM IV", align: "right" },
+    { key: "atm_iv", label: "IV 30D", align: "right" },
     { key: "vol_pc", label: "Vol P/C", align: "right" },
     { key: "bias", label: "Bias", align: "center" },
   ];
@@ -401,6 +550,22 @@ export default function GexPanel({ marketState }: GexPanelProps) {
     );
   }
 
+  if (error && !data) {
+    return (
+      <div className="section">
+        <div className="section-header">
+          <div className="section-title">
+            <Activity size={14} />
+            Gamma Exposure Levels
+          </div>
+        </div>
+        <div className="section-body" style={{ padding: "16px" }}>
+          <div className="alert-item bearish">{error}</div>
+        </div>
+      </div>
+    );
+  }
+
   if (!data || (!data.spot && !data.profile?.length)) {
     return (
       <div className="section">
@@ -412,7 +577,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
         </div>
         <div className="section-body" style={{ padding: "24px", textAlign: "center" }}>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-muted)" }}>
-            {error ? `GEX scan error: ${error}` : "No GEX data available. Run a scan to populate."}
+            No GEX data available — run a scan to populate.
           </span>
         </div>
       </div>
@@ -434,8 +599,13 @@ export default function GexPanel({ marketState }: GexPanelProps) {
         <div className="section-title">
           <Activity size={14} />
           {data.ticker} Gamma Exposure Levels &mdash; {data.data_date}
+          <InfoTooltip
+            text="Gamma Exposure (GEX): net dealer gamma by strike. Positive = dealers long gamma (stabilizing, pins price). Negative = dealers short gamma (destabilizing, amplifies moves). Sources: Unusual Whales + MenthorQ."
+            triggerTestId="gex-section-tooltip-trigger"
+            contentTestId="gex-section-tooltip-content"
+          />
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           {daysCount > 0 && (
             <span
               className="gex-day-badge"
@@ -447,6 +617,13 @@ export default function GexPanel({ marketState }: GexPanelProps) {
               DAY {daysCount} {daysSide} GEX FLIP
             </span>
           )}
+          <ShareReportModal
+            modalTitle="GEX REPORT — SHARE TO X"
+            shareEndpoint="/api/gex/share"
+            buttonTitle="Share GEX report to X"
+            iconSize={11}
+            shareContentTitle="GEX Share Preview"
+          />
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)" }}>
               {new Date(lastSync).toLocaleTimeString()}
@@ -464,34 +641,48 @@ export default function GexPanel({ marketState }: GexPanelProps) {
             sub={data.day_change != null ? `${data.day_change >= 0 ? "+" : ""}${fmtPrice(data.day_change)} (${fmtPct(data.day_change_pct)})` : undefined}
           />
           <MetricCard
-            label="GEX FLIP"
-            value={levels.gex_flip ? fmtPrice(levels.gex_flip.strike) : "---"}
-            sub={levels.gex_flip ? `${fmtPct(levels.gex_flip.distance_pct)} from spot` : undefined}
+            label="GEX FLIP" tooltip="The strike where net GEX crosses from negative (destabilizing) to positive (stabilizing). Spot above flip = dealers long gamma; below = short gamma. MQ HVL shown when UW flip uncomputable."
+            value={levels.gex_flip ? fmtPrice(levels.gex_flip.strike) : (data.mq?.hvl ? fmtPrice(data.mq.hvl as number) : "---")}
+            sub={levels.gex_flip
+              ? `${fmtPct(levels.gex_flip.distance_pct)} from spot`
+              : data.mq?.hvl ? "MQ HVL" : undefined}
             color="var(--warning)"
+            badge={levels.gex_flip ? <SourceBadge source="uw" /> : data.mq?.hvl ? <SourceBadge source="mq" /> : undefined}
           />
           <MetricCard
-            label="NET GEX"
+            label="NET GEX" tooltip="Net dealer gamma exposure in dollars. Negative = dealers short gamma (amplifies moves). Positive = dealers long gamma (stabilizes price)."
             value={fmtGex(data.net_gex)}
             color={netGexColor}
+            badge={<SourceBadge source="uw" />}
           />
           <MetricCard
-            label="NET DEX"
+            label="NET DEX" tooltip="Net dealer delta exposure. Negative = dealers net short delta (will sell on rallies). Large negative DEX signals structural selling pressure."
             value={fmtGex(data.net_dex)}
             color={netDexColor}
+            badge={<SourceBadge source="uw" />}
           />
           <MetricCard
-            label="ATM IV"
-            value={data.atm_iv != null ? `${data.atm_iv.toFixed(1)}%` : "---"}
-            sub={data.expected_range.iv_1d != null ? `\u00B1${data.expected_range.iv_1d.toFixed(2)}% 1d` : undefined}
+            label="IV 30D" tooltip="30-day implied volatility from UW iv_rank endpoint (not 0DTE greeks). Source-tagged: UW = Unusual Whales, MQ = MenthorQ, UW+MQ = both sources agree."
+            value={
+              data.iv?.iv30d != null ? `${data.iv.iv30d.toFixed(1)}%`
+              : data.iv?.mq_iv30d != null ? `${data.iv.mq_iv30d.toFixed(1)}%`
+              : data.atm_iv != null ? `${data.atm_iv.toFixed(1)}%`
+              : "---"
+            }
+            sub={data.iv?.iv_rank != null
+              ? `rank ${data.iv.iv_rank.toFixed(0)}%${data.iv.hv30 != null ? `  HV ${data.iv.hv30.toFixed(1)}%` : ""}`
+              : data.expected_range.iv_1d != null ? `±${data.expected_range.iv_1d.toFixed(2)}% 1d` : undefined}
+            badge={data.iv?.source ? <SourceBadge source={data.iv.source} /> : undefined}
           />
           <MetricCard
             label="VOL P/C"
             value={data.vol_pc != null ? data.vol_pc.toFixed(2) : "---"}
             color={data.vol_pc != null && data.vol_pc > 1.2 ? "var(--warning)" : undefined}
+            badge={<SourceBadge source="uw" />}
           />
         </div>
 
-        {/* ── Key Levels Row ── */}
+        {/* ── Key Levels Row (UW) ── */}
         <div className="gex-levels-row">
           <LevelCard label="GEX FLIP (SUPPORT)" level={levels.gex_flip} labelColor="var(--warning)" />
           <LevelCard label="MAX MAGNET" level={levels.max_magnet} labelColor="var(--signal-core)" />
@@ -499,6 +690,11 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           <LevelCard label="MAX ACCEL (BELOW FLIP)" level={levels.max_accelerator} labelColor="var(--fault)" />
           <LevelCard label="PUT WALL" level={levels.put_wall} labelColor="var(--fault)" />
         </div>
+
+        {/* ── MenthorQ Levels + Delta ── */}
+        {data.mq && (
+          <MqLevelsPanel mq={data.mq as MqLevels} sourceDelta={data.source_delta as SourceDelta | null} />
+        )}
 
         {/* ── GEX Profile Chart ── */}
         <GexProfileChart profile={data.profile} spot={data.spot} />
@@ -523,7 +719,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
             </div>
             {bias.flip_migration.length > 1 && (
               <div className="gex-flip-migration">
-                Flip migration: {bias.flip_migration.map((f) => fmtPrice(f.flip)).join(" \u2192 ")}
+                Flip migration: {bias.flip_migration.map((f) => fmtPrice(f.flip)).join(" → ")}
               </div>
             )}
           </div>

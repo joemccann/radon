@@ -39,6 +39,50 @@ export type GexHistoryEntry = {
   bias: string | null;
 };
 
+/** MenthorQ-sourced key levels (from key_levels dashboard card). */
+export type MqLevels = {
+  source_date: string | null;
+  spot: number | null;
+  hvl: number | null;
+  call_resistance_all: number | null;
+  call_resistance_0dte: number | null;
+  put_support_all: number | null;
+  put_support_0dte: number | null;
+  expected_high: number | null;
+  expected_low: number | null;
+  distance_to_hvl_pct: string | null;
+  iv30d: number | null;
+  hv30: number | null;
+  iv_rank: string | null;
+  top_gex_strikes: number[];
+};
+
+/** Per-level delta between UW and MenthorQ (positive = UW higher). */
+export type SourceDeltaEntry = { uw: number; mq: number; delta: number };
+export type SourceDelta = {
+  flip_vs_hvl?: SourceDeltaEntry;
+  put_wall_vs_support_all?: SourceDeltaEntry;
+  put_wall_vs_support_0dte?: SourceDeltaEntry;
+  call_wall_vs_resistance_all?: SourceDeltaEntry;
+  call_wall_vs_resistance_0dte?: SourceDeltaEntry;
+};
+
+/** Consolidated IV data with explicit source attribution. */
+export type IvData = {
+  /** 30D IV from UW iv_rank endpoint (percentage, e.g. 20.4) */
+  iv30d: number | null;
+  /** 1-year IV rank from UW (0–100) */
+  iv_rank: number | null;
+  /** HV30 from MenthorQ (percentage) */
+  hv30: number | null;
+  /** 30D IV from MenthorQ (percentage) */
+  mq_iv30d: number | null;
+  /** IV rank label from MenthorQ (e.g. "32%") */
+  mq_iv_rank: string | null;
+  /** Which source(s) provided IV data */
+  source: "uw" | "mq" | "both" | null;
+};
+
 export type GexData = {
   scan_time: string;
   market_open: boolean;
@@ -68,6 +112,12 @@ export type GexData = {
   };
   bias: GexBias;
   history: GexHistoryEntry[];
+  /** Structured IV from both sources (replaces the raw atm_iv field for display) */
+  iv: IvData | null;
+  /** MenthorQ key levels (null when MQ unavailable or --no-mq used) */
+  mq: MqLevels | null;
+  /** UW vs MQ level deltas (null when mq is null) */
+  source_delta: SourceDelta | null;
 };
 
 /* ─── Staleness check ────────────────────────────────────────── */

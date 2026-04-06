@@ -998,6 +998,15 @@ _gex_scan_lock: Optional[asyncio.Lock] = None
 GEX_COOLDOWN_S = 60
 
 
+@app.post("/gex/share")
+async def gex_share():
+    """Generate GEX X share report (4 cards + preview HTML). Returns output path."""
+    result = await run_script("generate_gex_share.py", ["--json", "--no-open"], timeout=120)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data
+
+
 @app.post("/gex/scan")
 async def gex_scan(ticker: str = "SPX"):
     """Run GEX scan (gex_scan.py --json --ticker X). 60s cooldown between scans."""

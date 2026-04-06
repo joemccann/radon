@@ -62,6 +62,35 @@ const MOCK_GEX_DATA = {
     { date: "2026-04-04", net_gex: -95000, net_dex: 35000, gex_flip: 5494, spot: 5550, atm_iv: 20.3, vol_pc: 1.2, bias: "CAUTIOUS_BULL" },
     { date: "2026-04-06", net_gex: -104044, net_dex: 37200, gex_flip: 5537, spot: 5582.69, atm_iv: 19.7, vol_pc: 1.42, bias: "CAUTIOUS_BULL" },
   ],
+  iv: {
+    iv30d: 19.7,
+    iv_rank: 29.7,
+    hv30: 16.75,
+    mq_iv30d: 19.5,
+    mq_iv_rank: "30%",
+    source: "both" as const,
+  },
+  mq: {
+    source_date: "2026-04-02",
+    spot: 5575.0,
+    hvl: 5537,
+    call_resistance_all: 5700,
+    call_resistance_0dte: 5600,
+    put_support_all: 5300,
+    put_support_0dte: 5400,
+    expected_high: 5665,
+    expected_low: 5500,
+    distance_to_hvl_pct: "0.09%",
+    iv30d: 0.195,
+    hv30: 0.168,
+    iv_rank: "30%",
+    top_gex_strikes: [5537, 5550, 5500],
+  },
+  source_delta: {
+    flip_vs_hvl: { uw: 5537, mq: 5537, delta: 0 },
+    put_wall_vs_support_all: { uw: 5000, mq: 5300, delta: -300 },
+    call_wall_vs_resistance_0dte: { uw: 5700, mq: 5600, delta: 100 },
+  },
 };
 
 function renderWithData(data = MOCK_GEX_DATA, loading = false, error: string | null = null) {
@@ -89,10 +118,13 @@ describe("GexPanel", () => {
     expect(container.textContent).toContain("No GEX data available");
   });
 
-  it("renders error message", () => {
+  it("renders error message in alert-item bearish card", () => {
     mockUseGex.mockReturnValue({ data: null, loading: false, error: "UW API down", lastSync: null, syncing: false, syncNow: vi.fn() });
     const { container } = render(<GexPanel />);
     expect(container.textContent).toContain("UW API down");
+    const alertEl = container.querySelector(".alert-item.bearish");
+    expect(alertEl).not.toBeNull();
+    expect(alertEl?.textContent).toContain("UW API down");
   });
 
   it("renders ticker and date in header", () => {
@@ -116,7 +148,7 @@ describe("GexPanel", () => {
     expect(container.textContent).toContain("NET GEX");
   });
 
-  it("renders ATM IV", () => {
+  it("renders IV 30D", () => {
     const { container } = renderWithData();
     expect(container.textContent).toContain("19.7%");
   });
@@ -197,4 +229,50 @@ describe("GexPanel", () => {
     const { container } = renderWithData(data);
     expect(container.textContent).toContain("DAY 2 BELOW GEX FLIP");
   });
+
+  it("renders InfoTooltip on section title", () => {
+    const { container } = renderWithData();
+    // The section title tooltip trigger is a span with tabIndex=0 containing '?'
+    const triggers = Array.from(container.querySelectorAll("[data-testid='gex-section-tooltip-trigger']"));
+    expect(triggers.length).toBeGreaterThan(0);
+  });
+
+  it("renders InfoTooltip on NET GEX metric label", () => {
+    const { container } = renderWithData();
+    // Each MetricCard label with a tooltip renders an InfoTooltip child '?' circle
+    const metricLabels = Array.from(container.querySelectorAll(".gex-metric-label"));
+    const netGexLabel = metricLabels.find((el) => el.textContent?.includes("NET GEX"));
+    expect(netGexLabel).toBeTruthy();
+    // Has a tooltip trigger inside
+    expect(netGexLabel?.querySelector("span[tabindex='0']")).toBeTruthy();
+  });
+
+  it("renders InfoTooltip on IV 30D metric label", () => {
+    const { container } = renderWithData();
+    const metricLabels = Array.from(container.querySelectorAll(".gex-metric-label"));
+    const ivLabel = metricLabels.find((el) => el.textContent?.includes("IV 30D"));
+    expect(ivLabel).toBeTruthy();
+    expect(ivLabel?.querySelector("span[tabindex='0']")).toBeTruthy();
+  });
+
+  it("renders ShareReportModal share button in panel header", () => {
+    const { container } = renderWithData();
+    // ShareReportModal renders a button with title containing 'Share GEX report'
+    const shareBtn = container.querySelector("button[title*='Share GEX']") ??
+                     Array.from(container.querySelectorAll("button")).find(
+                       (b) => b.getAttribute("title")?.includes("Share GEX") ||
+                              b.textContent?.toLowerCase().includes("share")
+                     );
+    expect(shareBtn).toBeTruthy();
+  });
+
+  it("ShareReportModal targets /api/gex/share endpoint", async () => {
+    // Verify the component file wires to the correct API endpoint
+    const { readFile } = await import("fs/promises");
+    const { resolve } = await import("path");
+    const componentPath = resolve(__dirname, "../components/GexPanel.tsx");
+    const content = await readFile(componentPath, "utf-8");
+    expect(content).toContain("/api/gex/share");
+  });
+
 });

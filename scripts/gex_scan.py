@@ -7,11 +7,14 @@ a structured JSON signal for the regime dashboard.
 
 Data sources:
   1. Unusual Whales — greek-exposure/strike, greek-exposure (aggregate),
-     greeks (ATM IV), screener/stocks (vol P/C)
+     iv_rank (30D IV + rank), screener/stocks (vol P/C)
+  2. MenthorQ — key levels (HVL, call resistance, put support, top GEX strikes)
+     fetched via Playwright browser automation (optional, graceful fallback)
 
 Usage:
     python3 scripts/gex_scan.py --json --ticker SPX
     python3 scripts/gex_scan.py --json --ticker SPY
+    python3 scripts/gex_scan.py --json --ticker QQQ --no-mq
 """
 from __future__ import annotations
 
@@ -102,20 +105,37 @@ def fetch_aggregate_gex(client, ticker: str) -> List[Dict[str, Any]]:
     return parsed
 
 
-def fetch_atm_iv(client, ticker: str, spot: float) -> Optional[float]:
-    """Fetch ATM IV from UW greeks endpoint using nearest expiry."""
+def fetch_atm_iv(client, ticker: str, spot: float) -> Optional[float]:  # noqa: ARG001
+    """Fetch 30D ATM IV from UW iv_rank endpoint.
+
+    Previous implementation used /greeks (0DTE chain) which produces
+    numerically unstable IV values as T→0.  iv_rank returns the
+    properly-computed 30-day implied volatility.
+    """
     try:
-        data = client.get_greeks(ticker)
+        data = client.get_iv_rank(ticker)
         rows = data.get("data", [])
         if not rows:
             return None
-        nearest = min(rows, key=lambda r: abs(float(r.get("strike", 0)) - spot))
-        call_iv = float(nearest.get("call_volatility", 0))
-        put_iv = float(nearest.get("put_volatility", 0))
-        atm_iv = (call_iv + put_iv) / 2 if call_iv and put_iv else call_iv or put_iv
-        return atm_iv if atm_iv > 0 else None
+        latest = max(rows, key=lambda r: r.get("date", ""))
+        vol = latest.get("volatility")
+        return float(vol) if vol is not None else None
     except Exception as exc:
         print(f"  ATM IV fetch failed: {exc}", file=sys.stderr)
+        return None
+
+
+def fetch_iv_rank(client, ticker: str) -> Optional[float]:
+    """Fetch IV rank (1-year percentile) from UW iv_rank endpoint."""
+    try:
+        data = client.get_iv_rank(ticker)
+        rows = data.get("data", [])
+        if not rows:
+            return None
+        latest = max(rows, key=lambda r: r.get("date", ""))
+        rank = latest.get("iv_rank_1y")
+        return float(rank) if rank is not None else None
+    except Exception:
         return None
 
 
@@ -137,18 +157,199 @@ def fetch_vol_pc(client, ticker: str) -> Optional[float]:
         return None
 
 
+# ══════════════════════════════════════════════════════════════════
+# MenthorQ Integration
+# ══════════════════════════════════════════════════════════════════
+
+# Map UW tickers to MenthorQ dashboard slugs
+_MQ_TICKER_MAP: Dict[str, str] = {
+    "SPX": "spx", "NDX": "ndx", "SPY": "spy", "QQQ": "qqq",
+    "IWM": "iwm", "SMH": "smh", "IBIT": "ibit", "VIX": "vix",
+    "RUT": "rut", "NVDA": "nvda", "GOOGL": "googl", "META": "meta",
+    "TSLA": "tsla", "AMZN": "amzn", "MSFT": "msft", "NFLX": "nflx",
+}
+
+
+def fetch_mq_levels(ticker: str) -> Optional[Dict[str, Any]]:
+    """Fetch MenthorQ key levels (HVL, call resistance, put support, IV).
+
+    Uses Playwright browser automation to intercept the admin-ajax.php
+    JSON responses that carry structured level data.  Returns None on any
+    failure so callers can proceed with UW-only data.
+    """
+    mq_slug = _MQ_TICKER_MAP.get(ticker.upper())
+    if not mq_slug:
+        print(f"  MQ: ticker {ticker} not supported, skipping", file=sys.stderr)
+        return None
+
+    ss_path = _PROJECT_DIR / "data" / "menthorq_cache" / "menthorq_storage_state.json"
+    if not ss_path.exists():
+        print("  MQ: no session state found, skipping", file=sys.stderr)
+        return None
+
+    try:
+        from playwright.sync_api import sync_playwright
+
+        collected: Dict[str, Any] = {}
+
+        def _on_response(resp):
+            if "admin-ajax.php" not in resp.url:
+                return
+            try:
+                body = resp.json()
+                if not body.get("success"):
+                    return
+                resource = body.get("data", {}).get("resource", {})
+                d = resource.get("data", {})
+                if not isinstance(d, dict) or not d:
+                    return
+                # Primary key_levels card: has HVL, call resistance, put support
+                if "High Vol Level" in d or "HVL" in d:
+                    collected.update(d)
+                    collected["_mq_date"] = body.get("data", {}).get("date")
+                # Secondary key_levels card: has Top Net GEX Strikes
+                elif "Top Net GEX Strikes" in d and "Top Net GEX Strikes" not in collected:
+                    collected["Top Net GEX Strikes"] = d["Top Net GEX Strikes"]
+                    if not collected.get("_mq_date"):
+                        collected["_mq_date"] = body.get("data", {}).get("date")
+            except Exception:
+                pass
+
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(headless=True)
+            ctx = browser.new_context(storage_state=str(ss_path))
+            page = ctx.new_page()
+            page.on("response", _on_response)
+
+            url = (
+                f"https://menthorq.com/account/?action=data"
+                f"&type=dashboard&commands=eod&tickers=commons&ticker={mq_slug}"
+            )
+            try:
+                page.goto(url, wait_until="networkidle", timeout=60000)
+            except Exception:
+                # networkidle can time out on slow connections; data may still
+                # have arrived via the intercepted responses
+                pass
+            import time as _t
+            _t.sleep(3)
+            browser.close()
+
+        if not collected:
+            print("  MQ: no key_levels data captured", file=sys.stderr)
+            return None
+
+        def _f(key: str) -> Optional[float]:
+            v = collected.get(key)
+            try:
+                return float(v) if v is not None else None
+            except (TypeError, ValueError):
+                return None
+
+        return {
+            "source_date": collected.get("_mq_date"),
+            "spot": _f("Spot Price"),
+            "hvl": _f("High Vol Level") or _f("HVL"),
+            "call_resistance_all": _f("Call Resistance"),
+            "call_resistance_0dte": _f("Call Resistance 0DTE"),
+            "put_support_all": _f("Put Support"),
+            "put_support_0dte": _f("Put Support 0DTE"),
+            "expected_high": _f("1D Max."),
+            "expected_low": _f("1D Min."),
+            "distance_to_hvl_pct": collected.get("Distance to HVL %"),
+            "iv30d": _f("Implied Vol 30D"),
+            "hv30": _f("Historical Vol 30D"),
+            "iv_rank": collected.get("IV Rank"),
+            "top_gex_strikes": collected.get("Top Net GEX Strikes", []),
+        }
+
+    except Exception as exc:
+        print(f"  MQ levels fetch failed: {exc}", file=sys.stderr)
+        return None
+
+
+def compute_source_delta(
+    levels: Dict[str, Any], mq: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    """Compute per-level deltas between UW and MenthorQ.
+
+    delta > 0 means UW is higher; delta < 0 means MQ is higher.
+    """
+    if not mq:
+        return None
+
+    def _strike(level_dict: Any) -> Optional[float]:
+        if not level_dict:
+            return None
+        return level_dict.get("strike")
+
+    def _diff(uw_val: Optional[float], mq_val: Optional[float]) -> Optional[Dict[str, Any]]:
+        if uw_val is None or mq_val is None:
+            return None
+        return {"uw": uw_val, "mq": mq_val, "delta": round(uw_val - mq_val, 1)}
+
+    uw_flip = _strike(levels.get("gex_flip"))
+    uw_put  = _strike(levels.get("put_wall"))
+    uw_call = _strike(levels.get("call_wall"))
+
+    return {
+        k: v for k, v in {
+            "flip_vs_hvl": _diff(uw_flip, mq.get("hvl")),
+            "put_wall_vs_support_all": _diff(uw_put, mq.get("put_support_all")),
+            "put_wall_vs_support_0dte": _diff(uw_put, mq.get("put_support_0dte")),
+            "call_wall_vs_resistance_all": _diff(uw_call, mq.get("call_resistance_all")),
+            "call_wall_vs_resistance_0dte": _diff(uw_call, mq.get("call_resistance_0dte")),
+        }.items() if v is not None
+    } or None
+
+
 def fetch_spot_price(client, ticker: str) -> Optional[float]:
-    """Get spot price from UW stock info."""
+    """Get spot price: UW stock info → UW iv_rank close → Yahoo Finance.
+
+    Never falls back to strike-midpoint estimation which can be wildly
+    wrong when IB is unavailable (e.g. weekends).
+    """
+    # 1. UW stock info
     try:
         data = client.get_stock_info(ticker)
         info = data.get("data", [{}])
         if isinstance(info, list) and info:
             info = info[0]
         price = info.get("last", info.get("close", info.get("price")))
-        return float(price) if price is not None else None
+        if price is not None:
+            return float(price)
+    except Exception:
+        pass
+
+    # 2. UW iv_rank (has daily close prices)
+    try:
+        data = client.get_iv_rank(ticker)
+        rows = data.get("data", [])
+        if rows:
+            latest = max(rows, key=lambda r: r.get("date", ""))
+            price = latest.get("close")
+            if price is not None:
+                return float(price)
+    except Exception:
+        pass
+
+    # 3. Yahoo Finance fallback (never estimate from strike midpoint)
+    try:
+        import urllib.request as _urlreq
+        yt = "^GSPC" if ticker.upper() == "SPX" else ticker.upper()
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{yt}?interval=1d&range=2d"
+        req = _urlreq.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with _urlreq.urlopen(req, timeout=8) as r:
+            payload = json.loads(r.read())
+        meta = payload["chart"]["result"][0]["meta"]
+        price = meta.get("regularMarketPrice") or meta.get("chartPreviousClose")
+        if price:
+            print(f"  Spot from Yahoo Finance: {price}", file=sys.stderr)
+            return float(price)
     except Exception as exc:
-        print(f"  Spot price fetch failed: {exc}", file=sys.stderr)
-        return None
+        print(f"  Yahoo spot fallback failed: {exc}", file=sys.stderr)
+
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -456,6 +657,8 @@ def build_gex_output(
     vol_pc: Optional[float],
     prior_history: List[Dict[str, Any]],
     market_open: bool,
+    iv_rank: Optional[float] = None,
+    mq: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """Build the full GEX output JSON."""
     bucket_size = _bucket_size_for(ticker, spot)
@@ -537,6 +740,24 @@ def build_gex_output(
     if flip_level is not None:
         all_levels["gex_flip"] = flip_level
 
+    # Source delta (UW vs MenthorQ level comparison)
+    source_delta = compute_source_delta(all_levels, mq)
+
+    # IV data: prefer UW 30D iv (from iv_rank endpoint); supplement with MQ
+    iv_data: Dict[str, Any] = {
+        "iv30d": round(atm_iv * 100, 2) if atm_iv else None,
+        "iv_rank": round(iv_rank, 2) if iv_rank is not None else None,
+        "hv30": round(mq["hv30"] * 100, 2) if mq and mq.get("hv30") else None,
+        "mq_iv30d": round(mq["iv30d"] * 100, 2) if mq and mq.get("iv30d") else None,
+        "mq_iv_rank": mq.get("iv_rank") if mq else None,
+        "source": (
+            "both" if (atm_iv and mq and mq.get("iv30d")) else
+            "uw"   if atm_iv else
+            "mq"   if (mq and mq.get("iv30d")) else
+            None
+        ),
+    }
+
     return {
         "scan_time": datetime.now().isoformat(),
         "market_open": market_open,
@@ -555,6 +776,9 @@ def build_gex_output(
         "expected_range": expected_range,
         "bias": bias,
         "history": history,
+        "iv": iv_data,
+        "mq": mq,
+        "source_delta": source_delta,
     }
 
 
@@ -569,6 +793,7 @@ def main():
     parser.add_argument("--ticker", default="SPX", help="Ticker (default: SPX)")
     parser.add_argument("--json", action="store_true", help="Output JSON to stdout")
     parser.add_argument("--no-cache", action="store_true", help="Skip reading prior cache")
+    parser.add_argument("--no-mq", action="store_true", help="Skip MenthorQ enrichment")
     args = parser.parse_args()
 
     ticker = args.ticker.upper()
@@ -599,23 +824,20 @@ def main():
         agg_history = fetch_aggregate_gex(client, ticker)
         print(f"  Got {len(agg_history)} history days", file=sys.stderr)
 
-        # Spot price: try to derive from strike data midpoint or fetch
         print("  Fetching spot price...", file=sys.stderr)
         spot = fetch_spot_price(client, ticker)
         if spot is None:
-            # Fallback: estimate from strike data
-            strikes = [r["strike"] for r in strike_data]
-            spot = (min(strikes) + max(strikes)) / 2
-            print(f"  Using estimated spot: {spot}", file=sys.stderr)
-        else:
-            print(f"  Spot: {spot}", file=sys.stderr)
+            print("  FATAL: Could not determine spot price (UW + Yahoo both failed)", file=sys.stderr)
+            sys.exit(1)
+        print(f"  Spot: {spot}", file=sys.stderr)
 
         close = spot  # UW doesn't separate last vs close; same when market closed
 
-        print("  Fetching ATM IV...", file=sys.stderr)
+        print("  Fetching 30D IV + IV rank...", file=sys.stderr)
         atm_iv = fetch_atm_iv(client, ticker, spot)
+        iv_rank_val = fetch_iv_rank(client, ticker)
         if atm_iv:
-            print(f"  ATM IV: {atm_iv*100:.1f}%", file=sys.stderr)
+            print(f"  IV 30D: {atm_iv*100:.1f}%  IV Rank: {iv_rank_val:.1f}%" if iv_rank_val else f"  IV 30D: {atm_iv*100:.1f}%", file=sys.stderr)
 
         print("  Fetching Vol P/C...", file=sys.stderr)
         vol_pc = fetch_vol_pc(client, ticker)
@@ -625,6 +847,26 @@ def main():
     finally:
         if hasattr(client, "close"):
             client.close()
+
+    # MenthorQ enrichment (optional, Playwright-based)
+    mq_data: Optional[Dict[str, Any]] = None
+    if not args.no_mq:
+        print("  Fetching MenthorQ key levels...", file=sys.stderr)
+        mq_data = fetch_mq_levels(ticker)
+        if mq_data:
+            hvl = mq_data.get("hvl")
+            cr  = mq_data.get("call_resistance_all")
+            ps  = mq_data.get("put_support_all")
+            mq_iv = mq_data.get("iv30d")
+            print(
+                f"  MQ HVL={hvl}  CallResist={cr}  PutSupport={ps}"
+                + (f"  IV30D={mq_iv:.1f}%" if mq_iv else ""),
+                file=sys.stderr,
+            )
+        else:
+            print("  MQ: unavailable (proceeding with UW only)", file=sys.stderr)
+    else:
+        print("  MQ: skipped (--no-mq)", file=sys.stderr)
 
     # Load prior history from cache
     cache_path = _PROJECT_DIR / "data" / "gex.json"
@@ -643,6 +885,8 @@ def main():
         vol_pc=vol_pc,
         prior_history=prior_history,
         market_open=market_open,
+        iv_rank=iv_rank_val,
+        mq=mq_data,
     )
 
     elapsed = time.time() - t_start
@@ -674,8 +918,13 @@ def _print_summary(result: Dict[str, Any]) -> None:
     print(f"  Spot        : {spot:,.2f}", file=sys.stderr)
     print(f"  Net GEX     : {result['net_gex']:+,.2f}", file=sys.stderr)
     print(f"  Net DEX     : {result['net_dex']:+,.2f}", file=sys.stderr)
-    if result.get("atm_iv"):
-        print(f"  ATM IV      : {result['atm_iv']:.1f}%", file=sys.stderr)
+    iv = result.get("iv", {})
+    if iv.get("iv30d"):
+        rank_str = f"  (rank {iv['iv_rank']:.0f}%)" if iv.get("iv_rank") else ""
+        hv_str = f"  HV30={iv['hv30']:.1f}%" if iv.get("hv30") else ""
+        print(f"  IV 30D (UW) : {iv['iv30d']:.1f}%{rank_str}{hv_str}", file=sys.stderr)
+    if iv.get("mq_iv30d"):
+        print(f"  IV 30D (MQ) : {iv['mq_iv30d']:.1f}%", file=sys.stderr)
     if result.get("vol_pc"):
         print(f"  Vol P/C     : {result['vol_pc']:.2f}", file=sys.stderr)
     if flip_strike:
