@@ -11,9 +11,9 @@ export function SurfacePanelStack({ item }: { item: SurfaceItem }) {
           {item.headline}
         </h3>
       </div>
-      <div className="grid gap-px border-b border-grid bg-grid sm:grid-cols-2">
+      <div className="grid border-b border-grid sm:grid-cols-2">
         {item.metrics.map((metric, index) => (
-          <div key={metric.label} className="min-w-0 bg-panel">
+          <div key={metric.label} className={`min-w-0 bg-panel ${index > 0 ? "border-t border-grid sm:border-t-0 sm:border-l" : ""}`}>
             <MonoMetric
               label={metric.label}
               value={metric.value}

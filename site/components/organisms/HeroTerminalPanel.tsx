@@ -45,8 +45,8 @@ export function HeroTerminalPanel() {
           </div>
         </div>
       </div>
-      <div className="relative z-20 grid gap-px border-b border-grid bg-grid lg:grid-cols-[160px_minmax(0,1fr)]">
-        <nav className="bg-canvas px-4 py-5">
+      <div className="relative z-20 grid border-b border-grid lg:grid-cols-[160px_minmax(0,1fr)]">
+        <nav className="bg-canvas px-4 py-5 lg:border-r lg:border-grid">
           <TelemetryLabel>Modules</TelemetryLabel>
           <div className="mt-4 space-y-1" role="tablist" aria-label="Terminal modules">
             {tabs.map((tab) => (
