@@ -4,7 +4,7 @@ import { StrategyGrid } from "@/components/organisms/StrategyGrid";
 
 export function StrategySection() {
   return (
-    <section id="strategies" className="py-16 md:py-24">
+    <section id="strategies" className="border-t border-grid py-16 md:py-24">
       <div className="flex flex-col gap-6 border-b border-grid pb-8 md:flex-row md:items-end md:justify-between">
         <div className="max-w-3xl">
           <TelemetryLabel tone="core">Strategy Matrix</TelemetryLabel>

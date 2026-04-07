@@ -26,7 +26,7 @@ export function AuditBlock() {
       </div>
       <div className="grid gap-4 sm:grid-cols-2">
         {auditItems.map((item) => (
-          <article key={item.title} className="border border-grid bg-panel px-5 py-5">
+          <article key={item.title} className="border border-grid bg-panel px-5 py-5 transition-colors duration-200 hover:border-accent/40">
             <TelemetryLabel>{item.title}</TelemetryLabel>
             <p className="mt-4 text-sm leading-6 text-primary">{item.detail}</p>
           </article>

@@ -28,7 +28,7 @@ export function ExecutionStep({ item, index, step }: ExecutionStepProps) {
   const normalizedIndex = index ?? Number(step?.id ?? 1) - 1;
 
   return (
-    <article className="relative border border-grid bg-panel px-5 py-5">
+    <article className="relative border border-grid bg-panel px-5 py-5 transition-colors duration-200 hover:border-accent/40">
       <div className="flex items-start justify-between gap-4">
         <div>
           <TelemetryLabel tone="core">Step {normalizedIndex + 1}</TelemetryLabel>

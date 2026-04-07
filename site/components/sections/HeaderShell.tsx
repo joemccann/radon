@@ -56,7 +56,7 @@ export function HeaderShell() {
             href="#strategies"
             className={`inline-flex items-center border border-accent bg-accent px-4 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-canvas transition-colors hover:bg-signal-strong ${focusRing}`}
           >
-            Inspect Strategies
+            Review Strategies
           </a>
           <button
             type="button"

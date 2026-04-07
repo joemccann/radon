@@ -5,7 +5,7 @@ import { footerColumns } from "@/lib/landing-content";
 
 export function FooterSection() {
   return (
-    <footer className="border-t border-grid py-10">
+    <footer className="border-t border-grid bg-panel py-12">
       <div className="grid gap-10 lg:grid-cols-[1.2fr_repeat(2,minmax(0,0.7fr))_auto]">
         <div>
           <div className="flex items-center gap-3">
@@ -14,12 +14,10 @@ export function FooterSection() {
               Radon
             </span>
           </div>
-          <p className="mt-4 max-w-xs text-sm leading-6 text-secondary">
+          <p className="mt-4 max-w-sm text-sm leading-6 text-secondary">
             Strategies, execution discipline, and state reconstruction for traders who
-            want the machine to stay inspectable.
-          </p>
-          <p className="mb-8 max-w-xl text-sm leading-6 text-secondary">
-            Source, methodology, and execution rails remain auditable. No black boxes.
+            want the machine to stay inspectable. Source, methodology, and execution
+            rails remain auditable.
           </p>
         </div>
         {footerColumns.map((column) => (

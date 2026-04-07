@@ -6,11 +6,11 @@ import { proofItems } from "@/lib/landing-content";
 
 export function HeroSection() {
   return (
-    <section id="top" className="relative py-14 md:py-20">
+    <section id="top" className="relative py-20 md:py-28">
       <div className="grid gap-10 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] xl:items-start">
         <div>
           <TelemetryLabel tone="core">Institutional Terminal</TelemetryLabel>
-          <h1 className="mt-5 max-w-[12ch] font-display text-5xl font-semibold leading-[1.02] text-primary md:text-7xl">
+          <h1 className="mt-5 max-w-[14ch] font-display text-5xl font-semibold leading-[1.02] text-primary md:text-7xl">
             Strategies, execution, and state reconstruction in one instrument.
           </h1>
           <p className="mt-6 max-w-2xl text-base leading-8 text-secondary md:text-lg">

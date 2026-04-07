@@ -5,7 +5,9 @@ import { TelemetryLabel } from "@/components/atoms/TelemetryLabel";
 export function FinalCTASection() {
   return (
     <section className="py-16 md:py-24">
-      <div className="border border-grid bg-panel px-6 py-8 md:px-8 md:py-10">
+      <div className="relative overflow-hidden border border-accent/30 bg-panel-raised px-6 py-8 md:px-8 md:py-10">
+        <div className="absolute inset-0 projection-lines opacity-[0.04]" />
+        <div className="relative z-10">
         <TelemetryLabel tone="core">Operator Handoff</TelemetryLabel>
         <div className="mt-5 grid gap-8 xl:grid-cols-[minmax(0,1fr)_auto] xl:items-end">
           <div>
@@ -25,7 +27,7 @@ export function FinalCTASection() {
           <div className="flex flex-wrap gap-3 xl:justify-end">
             <a
               href="#strategies"
-              className="inline-flex items-center border border-accent bg-accent px-5 py-3 font-mono text-[11px] uppercase tracking-[0.16em] text-canvas transition-colors hover:bg-signal-strong"
+              className="inline-flex items-center border border-accent bg-accent px-6 py-3.5 font-mono text-[11px] uppercase tracking-[0.16em] text-canvas transition-colors hover:bg-signal-strong"
             >
               Review Strategies
             </a>
@@ -38,6 +40,7 @@ export function FinalCTASection() {
               <CommandChip command="Explore Source" />
             </a>
           </div>
+        </div>
         </div>
       </div>
     </section>

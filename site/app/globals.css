@@ -53,6 +53,12 @@ html[data-theme="light"] {
 html[data-theme="light"] body {
   background-color: #FFFFFF;
   color: #0f172a;
+  -webkit-font-smoothing: auto;
+}
+
+html[data-theme="light"] header {
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
 }
 
 html[data-theme="light"] .instrument-grid {
@@ -72,15 +78,19 @@ html[data-theme="light"] .scan-line::after {
   background: linear-gradient(
     90deg,
     transparent 0%,
-    rgb(4 138 122 / 0.06) 45%,
-    rgb(4 138 122 / 0.12) 50%,
-    rgb(4 138 122 / 0.06) 55%,
+    rgb(4 138 122 / 0.04) 45%,
+    rgb(4 138 122 / 0.08) 50%,
+    rgb(4 138 122 / 0.04) 55%,
     transparent 100%
   );
 }
 
 html {
   scroll-behavior: smooth;
+}
+
+section[id] {
+  scroll-margin-top: 80px;
 }
 
 body {
@@ -158,6 +168,36 @@ a {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+.section-divider {
+  position: relative;
+}
+
+.section-divider::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(100%, 1200px);
+  height: 1px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--color-grid) 20%,
+    var(--color-grid) 80%,
+    transparent 100%
+  );
+}
+
+.panel-hover {
+  transition: border-color 200ms ease, transform 200ms ease;
+}
+
+.panel-hover:hover {
+  border-color: var(--color-accent);
+  transform: translateY(-2px);
 }
 
 @media (prefers-reduced-motion: reduce) {

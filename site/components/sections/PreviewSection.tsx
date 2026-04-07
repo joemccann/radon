@@ -4,7 +4,7 @@ import { surfaceItems } from "@/lib/landing-content";
 
 export function PreviewSection() {
   return (
-    <section id="surfaces" className="py-16 md:py-24">
+    <section id="surfaces" className="border-t border-grid py-16 md:py-24">
       <div className="max-w-3xl">
         <TelemetryLabel tone="core">Surface Preview</TelemetryLabel>
         <h2 className="mt-4 font-display text-4xl font-semibold text-primary md:text-5xl">

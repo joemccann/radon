@@ -4,7 +4,7 @@ import type { SurfaceItem } from "@/lib/landing-content";
 
 export function SurfacePanelStack({ item }: { item: SurfaceItem }) {
   return (
-    <article className="border border-grid bg-panel">
+    <article className="border border-grid bg-panel transition-colors duration-200 hover:border-accent/40">
       <div className="border-b border-grid px-5 py-4">
         <TelemetryLabel tone="core">{item.name}</TelemetryLabel>
         <h3 className="mt-3 font-sans text-xl font-semibold text-primary">

@@ -3,7 +3,7 @@ import { ExecutionWorkflow } from "@/components/organisms/ExecutionWorkflow";
 
 export function ExecutionSection() {
   return (
-    <section id="execution" className="py-16 md:py-24">
+    <section id="execution" className="border-t border-grid py-16 md:py-24">
       <div className="max-w-3xl">
         <TelemetryLabel tone="core">Execution Rail</TelemetryLabel>
         <h2 className="mt-4 font-display text-4xl font-semibold text-primary md:text-5xl">

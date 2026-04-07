@@ -81,7 +81,7 @@ export function StrategyCard({
   const tone = normalized.tone === "dislocated" ? "violet" : normalized.tone;
 
   return (
-    <article className="relative flex h-full flex-col border border-grid bg-panel px-5 py-5">
+    <article className="relative flex h-full flex-col border border-grid bg-panel px-5 py-5 transition-colors duration-200 hover:border-accent/40">
       <EdgeTrace tone={tone} />
       <div className="flex items-start justify-between gap-4">
         <div>
