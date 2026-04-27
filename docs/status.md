@@ -1,9 +1,24 @@
 # Status & Decision Log
 
 ## Last Updated
-2026-03-25T07:31:12-07:00
+2026-04-23T16:52:00-07:00
 
 ## Recent Evaluations
+
+### AAPL — 2026-04-23 ⛔ NO_TRADE
+- **Decision**: NO_TRADE
+- **Failing Gate**: EDGE (Milestone 4)
+- **📊 Data as of**: 2026-04-23 04:41 PM PT (LIVE)
+- **Reason**: Aggregate flow strength 30.3 below threshold (>50 required). Only 2 sustained accumulation days. Recent strength weak (17.2 today). Signal appears priced in despite bullish news and strong OI changes.
+- **Dark Pool**:
+  - 2026-04-23: 58.6% buy / 17.2 ACCUMULATION
+  - 2026-04-22: 95.0% buy / 90.0 ACCUMULATION
+  - 2026-04-21: 48.4% buy / 0.0 NEUTRAL
+  - 2026-04-20: 74.8% buy / 49.5 ACCUMULATION
+  - 2026-04-17: 67.2% buy / 34.5 ACCUMULATION
+  - AGGREGATE: 65.1% buy / 30.3 ACCUMULATION
+- **OI Changes**: MASSIVE 3, LARGE 3, SIGNIFICANT 22, Total $150,011,386
+- **News**: BULLISH sentiment (score 0.15), 20 headlines (5 bull, 2 bear, 13 neutral), catalysts: AI_CATALYST(3)
 
 ### TSLA — 2026-03-25 ⛔ NO_TRADE
 - **Decision**: NO_TRADE
