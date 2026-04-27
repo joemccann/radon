@@ -5117,6 +5117,7 @@ tr {
   border-top: 1px solid var(--border-dim);
 }
 
+.gex-status-badge,
 .gex-day-badge {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -5124,6 +5125,36 @@ tr {
   padding: 3px 8px;
   border-radius: 999px;
   letter-spacing: 0.5px;
+}
+
+.gex-status-badge {
+  border: 1px solid var(--border-dim);
+  background: var(--bg-raised);
+  color: var(--text-secondary);
+}
+
+.gex-status-badge-live {
+  border-color: color-mix(in srgb, var(--signal-core) 45%, transparent);
+  background: color-mix(in srgb, var(--signal-core) 10%, transparent);
+  color: var(--signal-core);
+}
+
+.gex-status-badge-fresh {
+  border-color: color-mix(in srgb, var(--warning) 38%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+  color: var(--warning);
+}
+
+.gex-status-badge-stale {
+  border-color: color-mix(in srgb, var(--fault) 45%, transparent);
+  background: color-mix(in srgb, var(--fault) 10%, transparent);
+  color: var(--fault);
+}
+
+.gex-status-badge-syncing {
+  border-color: color-mix(in srgb, var(--text-secondary) 45%, transparent);
+  background: color-mix(in srgb, var(--text-secondary) 10%, transparent);
+  color: var(--text-secondary);
 }
 
 .gex-history-section {

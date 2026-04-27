@@ -3,6 +3,7 @@
 import { useState, useMemo, useRef, useEffect } from "react";
 import { Activity, TrendingUp, TrendingDown, ArrowUpRight, ArrowDownRight } from "lucide-react";
 import { useGex, type GexData, type GexBucket, type GexLevel, type GexHistoryEntry, type IvData, type MqLevels, type SourceDelta, type SourceDeltaEntry } from "@/lib/useGex";
+import { isGexDataStale } from "@/lib/gexStaleness";
 import { MarketState } from "@/lib/useMarketHours";
 import InfoTooltip from "./InfoTooltip";
 import ShareReportModal from "./ShareReportModal";
@@ -126,14 +127,19 @@ function LevelCard({ label, level, labelColor }: {
 
 /* ─── GEX Profile Bar Chart ──────────────────────────── */
 
+export function getDisplayProfile(profile: GexBucket[]): GexBucket[] {
+  return [...profile].sort((a, b) => b.strike - a.strike);
+}
+
 function GexProfileChart({ profile, spot }: { profile: GexBucket[]; spot: number }) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
   const chartData = useMemo(() => {
     if (!profile.length) return { buckets: [], maxAbs: 1 };
-    const maxAbs = Math.max(...profile.map((b) => Math.abs(b.net_gex)), 1);
-    return { buckets: profile, maxAbs };
+    const buckets = getDisplayProfile(profile);
+    const maxAbs = Math.max(...buckets.map((b) => Math.abs(b.net_gex)), 1);
+    return { buckets, maxAbs };
   }, [profile]);
 
   const barHeight = 22;
@@ -530,7 +536,7 @@ function GexHistoryTable({ history }: { history: GexHistoryEntry[] }) {
 /* ─── Main component ─────────────────────────────────── */
 
 export default function GexPanel({ marketState }: GexPanelProps) {
-  const { data, loading, error, lastSync } = useGex(marketState ?? null);
+  const { data, loading, error, lastSync, syncing } = useGex(marketState ?? null);
 
   if (loading && !data) {
     return (
@@ -591,6 +597,14 @@ export default function GexPanel({ marketState }: GexPanelProps) {
 
   const netGexColor = data.net_gex >= 0 ? "var(--signal-core)" : "var(--fault)";
   const netDexColor = data.net_dex >= 0 ? "var(--signal-core)" : "var(--fault)";
+  const gexIsStale = isGexDataStale(data);
+  const freshnessBadge = syncing
+    ? { label: "SYNCING", className: "gex-status-badge gex-status-badge-syncing" }
+    : gexIsStale
+      ? { label: "STALE", className: "gex-status-badge gex-status-badge-stale" }
+      : data.market_open
+        ? { label: "LIVE", className: "gex-status-badge gex-status-badge-live" }
+        : { label: "FRESH", className: "gex-status-badge gex-status-badge-fresh" };
 
   return (
     <div className="section gex-panel">
@@ -606,6 +620,9 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <span className={freshnessBadge.className} data-testid="gex-freshness-badge">
+            {freshnessBadge.label}
+          </span>
           {daysCount > 0 && (
             <span
               className="gex-day-badge"

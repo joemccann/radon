@@ -276,6 +276,12 @@ export async function POST(): Promise<Response> {
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "CRI scan failed";
+    const cached = await readLatestCri();
+    if (cached?.data) {
+      const response = NextResponse.json(normalizeCriPayload(cached.data as Record<string, unknown>));
+      response.headers.set("X-Sync-Warning", `CRI sync failed: ${message}`);
+      return response;
+    }
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }

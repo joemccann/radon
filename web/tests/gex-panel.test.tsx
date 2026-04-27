@@ -4,9 +4,9 @@
 
 import React from "react";
 import { render, screen, fireEvent } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 
-import GexPanel from "../components/GexPanel";
+import GexPanel, { getDisplayProfile } from "../components/GexPanel";
 
 const mockUseGex = vi.fn();
 
@@ -106,6 +106,15 @@ function renderWithData(data = MOCK_GEX_DATA, loading = false, error: string | n
 }
 
 describe("GexPanel", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-06T14:00:00-04:00"));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it("renders loading state", () => {
     mockUseGex.mockReturnValue({ data: null, loading: true, error: null, lastSync: null, syncing: false, syncNow: vi.fn() });
     const { container } = render(<GexPanel />);
@@ -131,6 +140,28 @@ describe("GexPanel", () => {
     const { container } = renderWithData();
     expect(container.textContent).toContain("SPX");
     expect(container.textContent).toContain("2026-04-06");
+  });
+
+  it("shows a stale freshness badge when the cached scan is stale", () => {
+    const staleData = {
+      ...MOCK_GEX_DATA,
+      scan_time: "2026-04-05T14:00:00Z",
+      market_open: true,
+    };
+    const { container } = renderWithData(staleData);
+    const badge = container.querySelector('[data-testid="gex-freshness-badge"]');
+    expect(badge?.textContent).toContain("STALE");
+  });
+
+  it("shows a live freshness badge when the scan is fresh during market hours", () => {
+    const freshData = {
+      ...MOCK_GEX_DATA,
+      scan_time: new Date().toISOString(),
+      market_open: true,
+    };
+    const { container } = renderWithData(freshData);
+    const badge = container.querySelector('[data-testid="gex-freshness-badge"]');
+    expect(badge?.textContent).toContain("LIVE");
   });
 
   it("renders day badge", () => {
@@ -170,6 +201,16 @@ describe("GexPanel", () => {
     const { container } = renderWithData();
     expect(container.querySelector("svg")).toBeTruthy();
     expect(container.textContent).toContain("GEX Profile");
+  });
+
+  it("orders GEX profile strikes descending so higher strikes render at the top", () => {
+    expect(getDisplayProfile(MOCK_GEX_DATA.profile).map((bucket) => bucket.strike)).toEqual([
+      5700,
+      5575,
+      5537,
+      5500,
+      5400,
+    ]);
   });
 
   it("renders profile bars with correct colors in SVG", () => {

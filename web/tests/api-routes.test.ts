@@ -73,11 +73,16 @@ vi.mock("@/lib/syncMutex", () => ({
 
 // Mock fs/promises for blotter + journal + portfolio routes
 const mockReadFile = vi.fn();
+const mockReaddir = vi.fn().mockResolvedValue([]);
+const mockMkdir = vi.fn().mockResolvedValue(undefined);
+const mockWriteFile = vi.fn().mockResolvedValue(undefined);
 // Default stat: mtime 5 s ago (fresh) so portfolio GET doesn't trigger background spawn
 const mockStat = vi.fn().mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
 vi.mock("fs/promises", () => ({
   readFile: mockReadFile,
-  writeFile: vi.fn().mockResolvedValue(undefined),
+  readdir: mockReaddir,
+  mkdir: mockMkdir,
+  writeFile: mockWriteFile,
   stat: mockStat,
 }));
 
@@ -679,6 +684,158 @@ describe("POST /api/orders", () => {
 });
 
 // =============================================================================
+// GET/POST /api/gex — success paths
+// =============================================================================
+
+describe("GET /api/gex", () => {
+  let GET: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockReadFile.mockReset();
+    const mod = await import("../app/api/gex/route");
+    GET = mod.GET;
+  });
+
+  it("returns cached GEX payload when file exists", async () => {
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-04-22T14:00:00Z",
+      ticker: "SPX",
+      net_gex: 123,
+      history: [],
+    }));
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ticker).toBe("SPX");
+    expect(body.net_gex).toBe(123);
+  });
+});
+
+describe("POST /api/gex", () => {
+  let POST: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockReadFile.mockReset();
+    mockRadonFetch.mockReset();
+    const mod = await import("../app/api/gex/route");
+    POST = mod.POST;
+  });
+
+  it("returns fresh scan data from FastAPI", async () => {
+    mockRadonFetch.mockResolvedValue({
+      scan_time: "2026-04-22T14:01:00Z",
+      ticker: "SPX",
+      net_gex: 456,
+      history: [],
+    });
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.net_gex).toBe(456);
+  });
+
+  it("falls back to cached data when the fresh scan fails", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("upstream down"));
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-04-22T14:00:00Z",
+      ticker: "SPX",
+      net_gex: 321,
+      history: [],
+    }));
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sync-Warning")).toContain("GEX sync failed");
+    const body = await res.json();
+    expect(body.net_gex).toBe(321);
+  });
+});
+
+// =============================================================================
+// GET/POST /api/regime — success paths
+// =============================================================================
+
+describe("GET /api/regime", () => {
+  let GET: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockReadFile.mockReset();
+    mockStat.mockReset();
+    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+    const mod = await import("../app/api/regime/route");
+    GET = mod.GET;
+  });
+
+  it("returns cached regime payload when file exists", async () => {
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-04-22T14:00:00Z",
+      date: "2026-04-22",
+      market_open: true,
+      cri: { score: 24, level: "ELEVATED", components: { vix: 6, vvix: 6, correlation: 6, momentum: 6 } },
+      history: [],
+      spy_closes: [],
+    }));
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.date).toBe("2026-04-22");
+    expect(body.cri.score).toBe(24);
+  });
+});
+
+describe("POST /api/regime", () => {
+  let POST: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockReadFile.mockReset();
+    mockRadonFetch.mockReset();
+    const mod = await import("../app/api/regime/route");
+    POST = mod.POST;
+  });
+
+  it("returns fresh regime scan data from FastAPI", async () => {
+    mockRadonFetch.mockResolvedValue({
+      scan_time: "2026-04-22T14:01:00Z",
+      date: "2026-04-22",
+      market_open: true,
+      cri: { score: 31, level: "HIGH", components: { vix: 10, vvix: 7, correlation: 7, momentum: 7 } },
+      history: [],
+      spy_closes: [],
+    });
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.cri.score).toBe(31);
+  });
+
+  it("falls back to cached regime data when the fresh scan fails", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("upstream down"));
+    mockReadFile.mockResolvedValue(JSON.stringify({
+      scan_time: "2026-04-22T14:00:00Z",
+      date: "2026-04-22",
+      market_open: true,
+      cri: { score: 18, level: "LOW", components: { vix: 4, vvix: 4, correlation: 5, momentum: 5 } },
+      history: [],
+      spy_closes: [],
+    }));
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sync-Warning")).toContain("CRI sync failed");
+    const body = await res.json();
+    expect(body.cri.score).toBe(18);
+  });
+});
+
+// =============================================================================
 // GET /api/blotter — success paths
 // =============================================================================
 
@@ -747,6 +904,9 @@ describe("GET /api/journal", () => {
   beforeEach(async () => {
     vi.resetModules();
     mockReadFile.mockReset();
+    mockStat.mockReset();
+    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+    mockRadonFetch.mockReset();
     const mod = await import("../app/api/journal/route");
     GET = mod.GET;
   });
@@ -772,7 +932,11 @@ describe("GET /api/journal", () => {
         },
       ],
     };
-    mockReadFile.mockResolvedValue(JSON.stringify(tradeLog));
+    mockReadFile.mockImplementation(async (filePath: string) => {
+      if (String(filePath).includes("trade_log.json")) return JSON.stringify(tradeLog);
+      if (String(filePath).includes("reconciliation.json")) return JSON.stringify({ needs_attention: false, new_trades: [], timestamp: "2026-04-23T12:00:00Z" });
+      throw new Error("unexpected path");
+    });
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -790,5 +954,79 @@ describe("GET /api/journal", () => {
     const body = await res.json();
     expect(body.trades).toEqual([]);
     expect(body.error).toBeDefined();
+  });
+});
+
+describe("POST /api/journal", () => {
+  let POST: () => Promise<Response>;
+
+  beforeEach(async () => {
+    vi.resetModules();
+    mockReadFile.mockReset();
+    mockWriteFile.mockReset();
+    mockWriteFile.mockResolvedValue(undefined);
+    mockRadonFetch.mockReset();
+    const mod = await import("../app/api/journal/route");
+    POST = mod.POST;
+  });
+
+  it("reconciles and returns fresh journal data", async () => {
+    mockRadonFetch.mockResolvedValue({ ok: true });
+    let tradeLog = { trades: [] as Array<Record<string, unknown>> };
+    mockWriteFile.mockImplementation(async (_filePath: string, content: string | Buffer) => {
+      tradeLog = JSON.parse(String(content));
+    });
+    mockReadFile.mockImplementation(async (filePath: string) => {
+      if (String(filePath).includes("reconciliation.json")) {
+        return JSON.stringify({
+          needs_attention: true,
+          timestamp: "2026-04-23T12:00:00Z",
+          new_trades: [
+            {
+              symbol: "PLTR",
+              date: "2026-04-23",
+              action: "BUY_OPTION",
+              net_quantity: 5,
+              avg_price: 2.5,
+              commission: 1.25,
+              realized_pnl: 0,
+              sec_type: "OPT",
+              strike: 115,
+              expiry: "20260517",
+              right: "C",
+            },
+          ],
+        });
+      }
+      if (String(filePath).includes("trade_log.json")) {
+        return JSON.stringify(tradeLog);
+      }
+      throw new Error("unexpected path");
+    });
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.trades).toHaveLength(1);
+    expect(body.trades[0].ticker).toBe("PLTR");
+  });
+
+  it("falls back to cached journal when reconcile fails", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("IB down"));
+    mockReadFile.mockImplementation(async (filePath: string) => {
+      if (String(filePath).includes("trade_log.json")) {
+        return JSON.stringify({ trades: [{ id: 9, date: "2026-04-23", ticker: "GOOG", structure: "Long Call", decision: "EXECUTED" }] });
+      }
+      if (String(filePath).includes("reconciliation.json")) {
+        return JSON.stringify({ needs_attention: false, new_trades: [], timestamp: "2026-04-23T12:00:00Z" });
+      }
+      throw new Error("unexpected path");
+    });
+
+    const res = await POST();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sync-Warning")).toContain("Journal sync failed");
+    const body = await res.json();
+    expect(body.trades[0].ticker).toBe("GOOG");
   });
 });

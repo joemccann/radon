@@ -6,7 +6,8 @@ import type { TradeLogData } from "./types";
 
 const config = {
   endpoint: "/api/journal",
-  hasPost: false, // GET-only polling — sync uses separate endpoint
+  interval: 0,
+  hasPost: true,
   extractTimestamp: (_d: TradeLogData) => new Date().toISOString(),
 };
 
@@ -34,9 +35,7 @@ export function useJournal(active = true): UseJournalReturn {
       if (!res.ok) throw new Error(body.error || "Sync failed");
       setLastSyncResult({ imported: body.imported, skipped: body.skipped });
       // Refresh journal data after successful sync
-      if (body.imported > 0) {
-        result.syncNow();
-      }
+      result.syncNow();
       return { imported: body.imported, skipped: body.skipped };
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Sync failed";

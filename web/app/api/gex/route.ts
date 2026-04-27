@@ -138,3 +138,24 @@ export async function GET(): Promise<Response> {
     tags: ["gex"],
   });
 }
+
+export async function POST(): Promise<Response> {
+  try {
+    const rawData = await radonFetch<Record<string, unknown>>("/gex/scan", { method: "POST", timeout: 130_000 });
+    const data = normalizeGexPayload(rawData);
+    return NextResponse.json(data);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "GEX scan failed";
+    try {
+      const cached = await readCachedGex();
+      if (cached) {
+        const res = NextResponse.json(normalizeGexPayload(cached));
+        res.headers.set("X-Sync-Warning", `GEX sync failed - serving cached data (${message})`);
+        return res;
+      }
+    } catch {
+      // fall through to 502
+    }
+    return NextResponse.json({ error: message }, { status: 502 });
+  }
+}
