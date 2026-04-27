@@ -2,500 +2,500 @@
   "name": "r2k-tier-tail-500",
   "description": "Russell 2000 R2K Tail 500 (500 companies)",
   "tickers": [
-    "XOMA",
-    "FSTR",
-    "LILA",
-    "INR",
-    "ATNI",
-    "PCB",
-    "IBEX",
-    "CATX",
-    "GCO",
-    "RCKY",
-    "SMC",
-    "KELYA",
-    "HNST",
-    "DCTH",
-    "NATH",
-    "KIDS",
-    "ACCO",
-    "SWIM",
-    "MBI",
-    "JOUT",
-    "ONIT",
-    "TARA",
-    "ANGI",
-    "ACRE",
-    "CLPT",
     "XPER",
-    "MGPI",
-    "BOC",
-    "ATLO",
-    "DNUT",
-    "DSGN",
-    "EVH",
-    "RMR",
-    "DSGR",
-    "MNPR",
-    "RXST",
-    "BRBS",
-    "FTK",
-    "LMRI",
-    "EVEX",
-    "ALIT",
-    "BRCB",
-    "JMSB",
-    "NAGE",
-    "BMBL",
-    "MEC",
-    "TOI",
-    "WOOF",
-    "NGNE",
-    "HDSN",
-    "JRVR",
-    "FVCB",
-    "NLOP",
-    "EVGO",
-    "AVXL",
-    "HYLN",
-    "RC",
-    "RLGT",
-    "EOLS",
-    "BKTI",
-    "MITT",
-    "FRPH",
-    "PKOH",
-    "TLS",
-    "KRT",
+    "PLBC",
     "PSFE",
-    "GBFH",
-    "RZLT",
-    "DMAC",
-    "ASPN",
-    "SSP",
-    "EGHT",
-    "BLFY",
-    "EVMN",
-    "CADL",
-    "HLLY",
-    "NKSH",
-    "OSUR",
-    "PINE",
-    "EDIT",
-    "AII",
-    "LRMR",
-    "ASLE",
-    "REFI",
+    "AVXL",
+    "VMD",
+    "TECX",
+    "MVBF",
+    "FRST",
+    "DNUT",
+    "DGICA",
+    "HVT",
+    "RCKY",
+    "FSBW",
+    "CLPT",
+    "NWFL",
+    "ACCO",
+    "NGNE",
+    "PCB",
+    "ALIT",
+    "FSTR",
+    "JOUT",
+    "KELYA",
+    "INV",
+    "IBEX",
+    "ELDN",
+    "ACRE",
+    "EVGO",
+    "SWIM",
+    "CATX",
+    "RC",
+    "GNE",
+    "SITC",
+    "MEC",
     "RPAY",
-    "OVLY",
+    "AMCX",
+    "ATNI",
+    "RXST",
+    "DBI",
+    "OLPX",
+    "GRNT",
+    "MBI",
+    "ALMU",
+    "EOLS",
+    "CDZI",
+    "MGPI",
+    "EVEX",
+    "WSBF",
+    "LILA",
+    "KIDS",
+    "NATH",
+    "RLGT",
+    "ANGI",
+    "BETR",
+    "LAB",
+    "RMR",
+    "NAGE",
+    "ACH",
+    "EGHT",
+    "TARA",
+    "TOI",
+    "GBFH",
+    "BOC",
+    "EVMN",
+    "BKTI",
+    "CNDT",
+    "ATLO",
+    "ABEO",
+    "JMSB",
+    "AVNW",
+    "CIA",
+    "DSGR",
+    "WOOF",
+    "RBBN",
+    "HLLY",
+    "MEI",
+    "PKOH",
+    "SLP",
+    "INR",
+    "MITT",
+    "CHMG",
+    "SMC",
+    "FVCB",
+    "CMTG",
+    "FRPH",
+    "JRVR",
+    "RZLT",
+    "KFS",
+    "HDSN",
+    "FBYD",
+    "HYLN",
+    "FTK",
+    "OPRT",
+    "ASLE",
+    "TLS",
+    "TG",
+    "NEXN",
+    "MNPR",
+    "BNTC",
+    "CTRN",
     "VTEX",
+    "XRX",
+    "PINE",
+    "JACK",
+    "OVLY",
+    "CRCT",
+    "OPFI",
+    "KRT",
+    "NCMI",
+    "PAYS",
+    "ARCT",
+    "FRAF",
+    "NKSH",
     "FDBC",
     "ALCO",
-    "AMCX",
-    "INV",
-    "LMNR",
-    "CLW",
-    "ULCC",
-    "OPFI",
-    "BH",
-    "NCMI",
-    "ELDN",
-    "CIA",
-    "FUNC",
-    "NEXN",
-    "CTRN",
-    "WNEB",
-    "LCNB",
-    "KFS",
-    "POWW",
-    "ABEO",
-    "MYFW",
-    "NRC",
-    "RBBN",
-    "FRAF",
-    "CFFI",
-    "PANL",
-    "FBLA",
-    "CRCT",
-    "SPOK",
-    "MVIS",
     "ARDT",
-    "SIGA",
-    "MEI",
-    "CMTG",
-    "VEL",
-    "TNXP",
-    "CHMG",
-    "TBCH",
-    "CV",
-    "MPTI",
-    "TG",
-    "CNDT",
-    "BNTC",
+    "STRZ",
     "BLZE",
-    "SEVN",
-    "SKYH",
-    "USNA",
-    "USCB",
-    "CTGO",
-    "STRS",
+    "FC",
     "PCYO",
-    "BPRN",
+    "OSUR",
+    "WBTN",
+    "BRCB",
     "QUAD",
-    "OPRT",
-    "VYGR",
-    "SLP",
-    "ALEC",
-    "BSVN",
-    "RICK",
-    "PESI",
-    "ARCT",
-    "NC",
-    "ASUR",
-    "CRDA",
-    "PDYN",
-    "EVC",
-    "ACDC",
-    "PAYS",
-    "BETR",
-    "JACK",
-    "JAKK",
-    "DBI",
-    "OSG",
-    "VABK",
-    "AIRO",
+    "CDXS",
     "CMRC",
-    "KRMD",
-    "OLPX",
-    "PEBK",
-    "WEYS",
-    "XRX",
-    "RSVR",
-    "USAU",
-    "ANIK",
-    "MASS",
-    "CHRS",
-    "IMMR",
-    "LENZ",
-    "MRBK",
-    "KGEI",
-    "BYRN",
-    "ESCA",
-    "ESOA",
-    "KINS",
-    "PACK",
-    "FCCO",
-    "INSE",
+    "WNEB",
+    "BRBS",
+    "AII",
+    "LOVE",
+    "USNA",
+    "VEL",
+    "ASUR",
+    "CLW",
+    "REFI",
+    "EVC",
     "CMT",
-    "ACTG",
+    "DMAC",
+    "MYFW",
+    "PESI",
+    "LRMR",
+    "LCNB",
+    "ASPN",
+    "FUNC",
+    "ULCC",
+    "ALEC",
+    "PANL",
+    "CFFI",
+    "TBRG",
+    "LMRI",
+    "USAU",
+    "FBLA",
+    "CRDA",
+    "SKYH",
+    "NRC",
+    "ACDC",
+    "CD",
     "MG",
-    "ALMU",
-    "NXDT",
-    "ORGO",
-    "GLSI",
-    "VUZI",
-    "SGHT",
-    "WYFI",
-    "EVCM",
-    "SNDA",
-    "QTRX",
+    "BSVN",
+    "SPOK",
+    "JAKK",
+    "POWW",
+    "RICK",
+    "USCB",
+    "KINS",
+    "NLOP",
+    "MVIS",
     "PLTK",
-    "OABI",
-    "FXNC",
-    "EWCZ",
-    "COSO",
-    "ASIC",
-    "GCBC",
+    "CTEV",
+    "BH",
+    "MASS",
+    "VABK",
+    "PDYN",
+    "LMNR",
+    "RSVR",
+    "BZAI",
+    "MPTI",
+    "VYGR",
+    "WYFI",
+    "BPRN",
+    "TBCH",
+    "INSG",
+    "LENZ",
+    "NXDT",
+    "WEST",
+    "ZIP",
+    "ANIK",
+    "ATOM",
+    "STRS",
+    "UIS",
+    "WEYS",
+    "ESOA",
+    "SEVN",
+    "PACK",
+    "PEBK",
     "XPOF",
     "RMNI",
-    "ACH",
-    "WBTN",
-    "IKT",
-    "BBCP",
-    "DSP",
-    "MFIN",
-    "SMHI",
-    "FLXS",
-    "RNA",
-    "ELMD",
-    "INBK",
-    "FHTX",
-    "CDXS",
-    "PAL",
-    "INNV",
-    "III",
-    "LNKB",
-    "NNOX",
-    "BRT",
-    "FENC",
-    "UTMD",
-    "PBFS",
-    "INSG",
-    "CZWI",
-    "OPBK",
-    "LFMD",
-    "CBK",
-    "HPK",
-    "LOVE",
-    "UIS",
-    "CD",
-    "INGN",
-    "RGCO",
-    "LEGH",
+    "MRBK",
+    "OSG",
+    "LPRO",
+    "FCCO",
+    "IMMR",
     "BNED",
-    "FC",
-    "CVRX",
-    "OVBC",
+    "SIGA",
+    "CHRS",
+    "LFMD",
+    "VIA",
+    "INBK",
+    "SNDA",
     "QSI",
-    "PLX",
-    "MDWD",
-    "MPAA",
-    "SEG",
-    "HWBK",
-    "PXED",
-    "FCAP",
-    "SNWV",
-    "STRZ",
-    "CTEV",
+    "MFIN",
+    "IKT",
+    "FNKO",
+    "INSE",
+    "ASIC",
+    "SGHT",
+    "FXNC",
+    "NC",
+    "ESCA",
+    "TNXP",
+    "FLXS",
+    "VUZI",
+    "COSO",
+    "FHTX",
+    "EVCM",
+    "CBK",
+    "KRMD",
+    "BBCP",
+    "KGEI",
+    "AIRO",
+    "UTMD",
+    "III",
+    "INGN",
+    "FENC",
     "LDI",
+    "ACTG",
+    "GCBC",
+    "ELMD",
+    "EWCZ",
+    "ORGO",
+    "RNA",
+    "RELL",
+    "LNKB",
+    "OPBK",
+    "DSP",
+    "CZWI",
+    "LEGH",
+    "OVBC",
+    "GLSI",
+    "BRT",
+    "HRTX",
+    "PBFS",
+    "REPL",
+    "FCAP",
+    "ULH",
+    "PAL",
+    "ALTI",
+    "PRTH",
+    "BCBP",
+    "SEG",
+    "RGCO",
+    "OABI",
+    "SMHI",
     "BKKT",
     "KRO",
-    "ALTI",
-    "VIA",
-    "RELL",
-    "BCBP",
-    "ATOM",
-    "ULH",
-    "WEST",
+    "MPAA",
+    "TTGT",
+    "HWBK",
+    "PLX",
+    "HBB",
+    "FATE",
+    "MDWD",
+    "INNV",
     "CURI",
-    "PRTH",
-    "TBRG",
-    "SKYX",
-    "EGAN",
+    "DOUG",
     "SNFCA",
+    "HPK",
+    "CV",
+    "EFSI",
+    "LFCR",
+    "SNWV",
+    "RXT",
     "BHR",
     "BVFL",
-    "GENC",
-    "DOUG",
-    "LPRO",
-    "FATE",
-    "FNKO",
-    "AGL",
-    "SAMG",
-    "CMDB",
-    "SI",
     "MNSB",
-    "HUMA",
-    "EVI",
-    "HBB",
-    "CFBK",
-    "NFE",
-    "ACU",
-    "EFSI",
-    "HRTX",
-    "FINW",
-    "EBMT",
-    "NREF",
-    "CBFV",
-    "EPM",
-    "LE",
-    "FBYD",
-    "RXT",
-    "DERM",
-    "RGP",
-    "ZIP",
-    "DOMO",
-    "MDV",
-    "NVCT",
-    "OPRX",
-    "RMAX",
-    "BZAI",
-    "ACR",
-    "SKIN",
     "ALTG",
-    "LFCR",
-    "JILL",
-    "SGC",
-    "PDEX",
-    "MLP",
-    "STXS",
-    "JELD",
-    "CRDF",
-    "PNRG",
-    "MED",
-    "TBI",
-    "TTGT",
-    "TCX",
-    "EPSN",
-    "SRBK",
-    "LUCD",
-    "PMTS",
-    "FRD",
-    "AOMR",
-    "KULR",
-    "TLSI",
-    "BALY",
-    "KLTR",
-    "CXDO",
-    "ALDX",
-    "NODK",
-    "BSET",
-    "EML",
-    "LAW",
-    "ONEW",
-    "BOOM",
-    "LWAY",
-    "FNWD",
+    "CMDB",
     "NKTX",
-    "SBFG",
-    "AOUT",
-    "PNBK",
     "LZM",
-    "SPWR",
+    "RCMT",
+    "TBI",
+    "DOMO",
+    "QTRX",
+    "NNOX",
+    "PMTS",
+    "LWAY",
+    "SAMG",
+    "CFBK",
+    "EBMT",
+    "FINW",
+    "EGAN",
+    "RGP",
+    "MDV",
+    "GENC",
+    "ACU",
+    "PXED",
+    "NVCT",
+    "NREF",
+    "EVI",
+    "CBFV",
+    "RMAX",
+    "CVRX",
+    "SGC",
+    "SI",
+    "ADV",
+    "EPM",
+    "MED",
+    "DMRC",
+    "TLSI",
+    "ACR",
+    "FOA",
+    "LUCD",
+    "PDEX",
+    "LAW",
+    "SLQT",
+    "THRY",
+    "NFE",
+    "SRBK",
+    "KULR",
+    "BYRN",
+    "JELD",
+    "AOMR",
+    "FRD",
+    "STXS",
+    "ONEW",
+    "KLC",
+    "EML",
+    "BOOM",
+    "TCX",
+    "MLP",
+    "LE",
+    "HUMA",
+    "OPRX",
+    "CRDF",
     "FF",
+    "PNRG",
+    "CXDO",
+    "HURA",
+    "KLTR",
+    "BALY",
+    "BSET",
+    "NODK",
     "SMID",
+    "SKIN",
+    "SBFG",
+    "EPSN",
     "OFLX",
-    "ELA",
+    "LARK",
     "CRMT",
+    "JILL",
+    "AOUT",
+    "ACNT",
+    "BRCC",
+    "ALDX",
+    "ELA",
     "JYNT",
     "AIRJ",
     "STRW",
-    "LARK",
-    "ACNT",
-    "THRY",
-    "FOA",
-    "SLQT",
-    "SUNS",
-    "RCMT",
-    "WHG",
-    "TRAK",
-    "UBFO",
-    "GYRE",
-    "GAMB",
-    "ARQ",
-    "GWRS",
-    "RVSB",
-    "ADV",
-    "HNVR",
-    "HCAT",
-    "GOSS",
-    "CLAR",
-    "RMBI",
-    "DMRC",
-    "HURA",
+    "SKYX",
     "MNTK",
-    "KRRO",
-    "CARL",
-    "KLC",
-    "XZO",
     "MXCT",
-    "ATYR",
-    "FLWS",
-    "HFFG",
-    "RPT",
-    "CPSS",
-    "FORR",
-    "EEX",
-    "CBNA",
-    "ECBK",
-    "VIRC",
-    "BRCC",
-    "GETY",
-    "NPWR",
-    "ZVIA",
-    "RNAC",
-    "SSTI",
+    "KRRO",
     "TMCI",
-    "OM",
-    "SFBC",
+    "PNBK",
+    "TRAK",
+    "HCAT",
+    "FLWS",
+    "GYRE",
+    "DERM",
+    "FNWD",
+    "WHG",
+    "GETY",
+    "XZO",
     "LAKE",
     "HAIN",
-    "BARK",
-    "AISP",
-    "DCGO",
-    "MAPS",
-    "PROP",
-    "UNB",
-    "TTEC",
-    "SVCO",
-    "FSP",
-    "AVD",
-    "INH",
-    "MPX",
-    "RCEL",
-    "CSPI",
-    "STIM",
-    "CURV",
-    "LNSR",
-    "NRDY",
-    "SMTI",
+    "RMBI",
+    "HNVR",
+    "SUNS",
+    "GWRS",
+    "HFFG",
+    "CPSS",
+    "RVSB",
+    "GAMB",
+    "ECBK",
+    "GOSS",
+    "OM",
+    "RPT",
+    "CLAR",
+    "CARL",
+    "ATYR",
+    "FORR",
+    "SPWR",
     "FFAI",
+    "EEX",
+    "ARQ",
+    "TTEC",
+    "CURV",
+    "AVD",
+    "SVCO",
+    "RNAC",
+    "CBNA",
+    "AARD",
+    "DCGO",
+    "VIRC",
+    "AISP",
+    "ZVIA",
+    "SSTI",
+    "NPWR",
+    "SMTI",
+    "RCEL",
+    "BTMD",
+    "STIM",
+    "CSPI",
+    "UNB",
+    "AEYE",
+    "SFBC",
+    "FSP",
+    "NRDY",
+    "MPX",
+    "INH",
     "TUSK",
     "EXFY",
-    "LUNG",
-    "TCI",
-    "NL",
-    "AEYE",
-    "AKE",
     "PAMT",
-    "SNBR",
-    "AVBH",
-    "OPAL",
-    "LFT",
-    "HQI",
-    "AARD",
-    "LFVN",
-    "RBKB",
-    "WALD",
-    "PPHC",
-    "AIRS",
-    "BTMD",
-    "CLPR",
-    "ARAY",
-    "EP",
-    "GAIA",
-    "MKTW",
-    "VHI",
+    "LNSR",
     "EHTH",
-    "MYPS",
-    "SWKH",
-    "FTLF",
-    "DH",
-    "TZOO",
-    "SBC",
-    "TKNO",
-    "ISPR",
+    "LFVN",
+    "TCI",
+    "BARK",
+    "AKE",
+    "AVBH",
+    "LUNG",
+    "OPAL",
+    "SNBR",
+    "NL",
+    "ARAY",
+    "LFT",
+    "CLPR",
+    "PPHC",
     "LVWR",
-    "AREN",
-    "VALU",
-    "KG",
-    "USGO",
-    "CIX",
+    "HQI",
+    "RBKB",
+    "GAIA",
+    "TZOO",
+    "VHI",
+    "MYPS",
+    "EP",
+    "MKTW",
+    "PROP",
     "SEAT",
+    "AIRS",
+    "DH",
+    "SKIL",
+    "USGO",
+    "TKNO",
+    "WALD",
+    "ISPR",
+    "VALU",
     "TEAD",
+    "SBC",
+    "CIX",
+    "AREN",
+    "KG",
+    "FTLF",
+    "MYO",
+    "COOK",
+    "INMB",
     "SIEB",
     "TVRD",
-    "MYO",
-    "SKIL",
-    "INMB",
-    "BEEP",
-    "ATLN",
-    "ARL",
-    "AFRI",
     "ACTU",
-    "COOK",
     "NEON",
+    "AFRI",
+    "ARL",
+    "BEEP",
     "SLSN",
-    "NXXT",
-    "SLND",
-    "MRDN",
     "VRM",
+    "ATLN",
+    "NXXT",
     "ADRO",
-    "GOCO",
+    "MRDN",
+    "SLND",
     "SAFX",
     "VGAS",
-    "TSEOF",
+    "GOCO",
     "TVGN",
+    "TSEOF",
     "ZSPC",
     "THRD",
     "SBT",
@@ -505,992 +505,992 @@
   ],
   "pairs": [
     [
-      "XOMA",
-      "FSTR"
+      "XPER",
+      "PLBC"
     ],
     [
-      "LILA",
-      "INR"
+      "PSFE",
+      "AVXL"
     ],
     [
-      "ATNI",
-      "PCB"
+      "VMD",
+      "TECX"
     ],
     [
-      "IBEX",
-      "CATX"
+      "MVBF",
+      "FRST"
     ],
     [
-      "GCO",
+      "DNUT",
+      "DGICA"
+    ],
+    [
+      "HVT",
       "RCKY"
     ],
     [
-      "SMC",
-      "KELYA"
+      "FSBW",
+      "CLPT"
     ],
     [
-      "HNST",
-      "DCTH"
-    ],
-    [
-      "NATH",
-      "KIDS"
-    ],
-    [
-      "ACCO",
-      "SWIM"
-    ],
-    [
-      "MBI",
-      "JOUT"
-    ],
-    [
-      "ONIT",
-      "TARA"
-    ],
-    [
-      "ANGI",
-      "ACRE"
-    ],
-    [
-      "CLPT",
-      "XPER"
-    ],
-    [
-      "MGPI",
-      "BOC"
-    ],
-    [
-      "ATLO",
-      "DNUT"
-    ],
-    [
-      "DSGN",
-      "EVH"
-    ],
-    [
-      "RMR",
-      "DSGR"
-    ],
-    [
-      "MNPR",
-      "RXST"
-    ],
-    [
-      "BRBS",
-      "FTK"
-    ],
-    [
-      "LMRI",
-      "EVEX"
-    ],
-    [
-      "ALIT",
-      "BRCB"
-    ],
-    [
-      "JMSB",
-      "NAGE"
-    ],
-    [
-      "BMBL",
-      "MEC"
-    ],
-    [
-      "TOI",
-      "WOOF"
+      "NWFL",
+      "ACCO"
     ],
     [
       "NGNE",
-      "HDSN"
+      "PCB"
     ],
     [
-      "JRVR",
-      "FVCB"
+      "ALIT",
+      "FSTR"
     ],
     [
-      "NLOP",
-      "EVGO"
-    ],
-    [
-      "AVXL",
-      "HYLN"
-    ],
-    [
-      "RC",
-      "RLGT"
-    ],
-    [
-      "EOLS",
-      "BKTI"
-    ],
-    [
-      "MITT",
-      "FRPH"
-    ],
-    [
-      "PKOH",
-      "TLS"
-    ],
-    [
-      "KRT",
-      "PSFE"
-    ],
-    [
-      "GBFH",
-      "RZLT"
-    ],
-    [
-      "DMAC",
-      "ASPN"
-    ],
-    [
-      "SSP",
-      "EGHT"
-    ],
-    [
-      "BLFY",
-      "EVMN"
-    ],
-    [
-      "CADL",
-      "HLLY"
-    ],
-    [
-      "NKSH",
-      "OSUR"
-    ],
-    [
-      "PINE",
-      "EDIT"
-    ],
-    [
-      "AII",
-      "LRMR"
-    ],
-    [
-      "ASLE",
-      "REFI"
-    ],
-    [
-      "RPAY",
-      "OVLY"
-    ],
-    [
-      "VTEX",
-      "FDBC"
-    ],
-    [
-      "ALCO",
-      "AMCX"
+      "JOUT",
+      "KELYA"
     ],
     [
       "INV",
-      "LMNR"
+      "IBEX"
     ],
     [
-      "CLW",
-      "ULCC"
+      "ELDN",
+      "ACRE"
     ],
     [
-      "OPFI",
-      "BH"
+      "EVGO",
+      "SWIM"
     ],
     [
-      "NCMI",
-      "ELDN"
+      "CATX",
+      "RC"
     ],
     [
-      "CIA",
-      "FUNC"
+      "GNE",
+      "SITC"
     ],
     [
-      "NEXN",
-      "CTRN"
+      "MEC",
+      "RPAY"
     ],
     [
-      "WNEB",
-      "LCNB"
+      "AMCX",
+      "ATNI"
     ],
     [
-      "KFS",
-      "POWW"
-    ],
-    [
-      "ABEO",
-      "MYFW"
-    ],
-    [
-      "NRC",
-      "RBBN"
-    ],
-    [
-      "FRAF",
-      "CFFI"
-    ],
-    [
-      "PANL",
-      "FBLA"
-    ],
-    [
-      "CRCT",
-      "SPOK"
-    ],
-    [
-      "MVIS",
-      "ARDT"
-    ],
-    [
-      "SIGA",
-      "MEI"
-    ],
-    [
-      "CMTG",
-      "VEL"
-    ],
-    [
-      "TNXP",
-      "CHMG"
-    ],
-    [
-      "TBCH",
-      "CV"
-    ],
-    [
-      "MPTI",
-      "TG"
-    ],
-    [
-      "CNDT",
-      "BNTC"
-    ],
-    [
-      "BLZE",
-      "SEVN"
-    ],
-    [
-      "SKYH",
-      "USNA"
-    ],
-    [
-      "USCB",
-      "CTGO"
-    ],
-    [
-      "STRS",
-      "PCYO"
-    ],
-    [
-      "BPRN",
-      "QUAD"
-    ],
-    [
-      "OPRT",
-      "VYGR"
-    ],
-    [
-      "SLP",
-      "ALEC"
-    ],
-    [
-      "BSVN",
-      "RICK"
-    ],
-    [
-      "PESI",
-      "ARCT"
-    ],
-    [
-      "NC",
-      "ASUR"
-    ],
-    [
-      "CRDA",
-      "PDYN"
-    ],
-    [
-      "EVC",
-      "ACDC"
-    ],
-    [
-      "PAYS",
-      "BETR"
-    ],
-    [
-      "JACK",
-      "JAKK"
-    ],
-    [
-      "DBI",
-      "OSG"
-    ],
-    [
-      "VABK",
-      "AIRO"
-    ],
-    [
-      "CMRC",
-      "KRMD"
+      "RXST",
+      "DBI"
     ],
     [
       "OLPX",
-      "PEBK"
+      "GRNT"
     ],
     [
-      "WEYS",
-      "XRX"
-    ],
-    [
-      "RSVR",
-      "USAU"
-    ],
-    [
-      "ANIK",
-      "MASS"
-    ],
-    [
-      "CHRS",
-      "IMMR"
-    ],
-    [
-      "LENZ",
-      "MRBK"
-    ],
-    [
-      "KGEI",
-      "BYRN"
-    ],
-    [
-      "ESCA",
-      "ESOA"
-    ],
-    [
-      "KINS",
-      "PACK"
-    ],
-    [
-      "FCCO",
-      "INSE"
-    ],
-    [
-      "CMT",
-      "ACTG"
-    ],
-    [
-      "MG",
+      "MBI",
       "ALMU"
     ],
     [
-      "NXDT",
-      "ORGO"
+      "EOLS",
+      "CDZI"
     ],
     [
-      "GLSI",
-      "VUZI"
+      "MGPI",
+      "EVEX"
     ],
     [
-      "SGHT",
+      "WSBF",
+      "LILA"
+    ],
+    [
+      "KIDS",
+      "NATH"
+    ],
+    [
+      "RLGT",
+      "ANGI"
+    ],
+    [
+      "BETR",
+      "LAB"
+    ],
+    [
+      "RMR",
+      "NAGE"
+    ],
+    [
+      "ACH",
+      "EGHT"
+    ],
+    [
+      "TARA",
+      "TOI"
+    ],
+    [
+      "GBFH",
+      "BOC"
+    ],
+    [
+      "EVMN",
+      "BKTI"
+    ],
+    [
+      "CNDT",
+      "ATLO"
+    ],
+    [
+      "ABEO",
+      "JMSB"
+    ],
+    [
+      "AVNW",
+      "CIA"
+    ],
+    [
+      "DSGR",
+      "WOOF"
+    ],
+    [
+      "RBBN",
+      "HLLY"
+    ],
+    [
+      "MEI",
+      "PKOH"
+    ],
+    [
+      "SLP",
+      "INR"
+    ],
+    [
+      "MITT",
+      "CHMG"
+    ],
+    [
+      "SMC",
+      "FVCB"
+    ],
+    [
+      "CMTG",
+      "FRPH"
+    ],
+    [
+      "JRVR",
+      "RZLT"
+    ],
+    [
+      "KFS",
+      "HDSN"
+    ],
+    [
+      "FBYD",
+      "HYLN"
+    ],
+    [
+      "FTK",
+      "OPRT"
+    ],
+    [
+      "ASLE",
+      "TLS"
+    ],
+    [
+      "TG",
+      "NEXN"
+    ],
+    [
+      "MNPR",
+      "BNTC"
+    ],
+    [
+      "CTRN",
+      "VTEX"
+    ],
+    [
+      "XRX",
+      "PINE"
+    ],
+    [
+      "JACK",
+      "OVLY"
+    ],
+    [
+      "CRCT",
+      "OPFI"
+    ],
+    [
+      "KRT",
+      "NCMI"
+    ],
+    [
+      "PAYS",
+      "ARCT"
+    ],
+    [
+      "FRAF",
+      "NKSH"
+    ],
+    [
+      "FDBC",
+      "ALCO"
+    ],
+    [
+      "ARDT",
+      "STRZ"
+    ],
+    [
+      "BLZE",
+      "FC"
+    ],
+    [
+      "PCYO",
+      "OSUR"
+    ],
+    [
+      "WBTN",
+      "BRCB"
+    ],
+    [
+      "QUAD",
+      "CDXS"
+    ],
+    [
+      "CMRC",
+      "WNEB"
+    ],
+    [
+      "BRBS",
+      "AII"
+    ],
+    [
+      "LOVE",
+      "USNA"
+    ],
+    [
+      "VEL",
+      "ASUR"
+    ],
+    [
+      "CLW",
+      "REFI"
+    ],
+    [
+      "EVC",
+      "CMT"
+    ],
+    [
+      "DMAC",
+      "MYFW"
+    ],
+    [
+      "PESI",
+      "LRMR"
+    ],
+    [
+      "LCNB",
+      "ASPN"
+    ],
+    [
+      "FUNC",
+      "ULCC"
+    ],
+    [
+      "ALEC",
+      "PANL"
+    ],
+    [
+      "CFFI",
+      "TBRG"
+    ],
+    [
+      "LMRI",
+      "USAU"
+    ],
+    [
+      "FBLA",
+      "CRDA"
+    ],
+    [
+      "SKYH",
+      "NRC"
+    ],
+    [
+      "ACDC",
+      "CD"
+    ],
+    [
+      "MG",
+      "BSVN"
+    ],
+    [
+      "SPOK",
+      "JAKK"
+    ],
+    [
+      "POWW",
+      "RICK"
+    ],
+    [
+      "USCB",
+      "KINS"
+    ],
+    [
+      "NLOP",
+      "MVIS"
+    ],
+    [
+      "PLTK",
+      "CTEV"
+    ],
+    [
+      "BH",
+      "MASS"
+    ],
+    [
+      "VABK",
+      "PDYN"
+    ],
+    [
+      "LMNR",
+      "RSVR"
+    ],
+    [
+      "BZAI",
+      "MPTI"
+    ],
+    [
+      "VYGR",
       "WYFI"
     ],
     [
-      "EVCM",
-      "SNDA"
+      "BPRN",
+      "TBCH"
     ],
     [
-      "QTRX",
-      "PLTK"
+      "INSG",
+      "LENZ"
     ],
     [
-      "OABI",
-      "FXNC"
+      "NXDT",
+      "WEST"
     ],
     [
-      "EWCZ",
-      "COSO"
+      "ZIP",
+      "ANIK"
     ],
     [
-      "ASIC",
-      "GCBC"
+      "ATOM",
+      "STRS"
+    ],
+    [
+      "UIS",
+      "WEYS"
+    ],
+    [
+      "ESOA",
+      "SEVN"
+    ],
+    [
+      "PACK",
+      "PEBK"
     ],
     [
       "XPOF",
       "RMNI"
     ],
     [
-      "ACH",
-      "WBTN"
+      "MRBK",
+      "OSG"
     ],
     [
-      "IKT",
-      "BBCP"
+      "LPRO",
+      "FCCO"
     ],
     [
-      "DSP",
-      "MFIN"
+      "IMMR",
+      "BNED"
     ],
     [
-      "SMHI",
-      "FLXS"
+      "SIGA",
+      "CHRS"
     ],
     [
-      "RNA",
-      "ELMD"
+      "LFMD",
+      "VIA"
     ],
     [
       "INBK",
-      "FHTX"
-    ],
-    [
-      "CDXS",
-      "PAL"
-    ],
-    [
-      "INNV",
-      "III"
-    ],
-    [
-      "LNKB",
-      "NNOX"
-    ],
-    [
-      "BRT",
-      "FENC"
-    ],
-    [
-      "UTMD",
-      "PBFS"
-    ],
-    [
-      "INSG",
-      "CZWI"
-    ],
-    [
-      "OPBK",
-      "LFMD"
-    ],
-    [
-      "CBK",
-      "HPK"
-    ],
-    [
-      "LOVE",
-      "UIS"
-    ],
-    [
-      "CD",
-      "INGN"
-    ],
-    [
-      "RGCO",
-      "LEGH"
-    ],
-    [
-      "BNED",
-      "FC"
-    ],
-    [
-      "CVRX",
-      "OVBC"
+      "SNDA"
     ],
     [
       "QSI",
-      "PLX"
+      "MFIN"
     ],
     [
-      "MDWD",
-      "MPAA"
+      "IKT",
+      "FNKO"
+    ],
+    [
+      "INSE",
+      "ASIC"
+    ],
+    [
+      "SGHT",
+      "FXNC"
+    ],
+    [
+      "NC",
+      "ESCA"
+    ],
+    [
+      "TNXP",
+      "FLXS"
+    ],
+    [
+      "VUZI",
+      "COSO"
+    ],
+    [
+      "FHTX",
+      "EVCM"
+    ],
+    [
+      "CBK",
+      "KRMD"
+    ],
+    [
+      "BBCP",
+      "KGEI"
+    ],
+    [
+      "AIRO",
+      "UTMD"
+    ],
+    [
+      "III",
+      "INGN"
+    ],
+    [
+      "FENC",
+      "LDI"
+    ],
+    [
+      "ACTG",
+      "GCBC"
+    ],
+    [
+      "ELMD",
+      "EWCZ"
+    ],
+    [
+      "ORGO",
+      "RNA"
+    ],
+    [
+      "RELL",
+      "LNKB"
+    ],
+    [
+      "OPBK",
+      "DSP"
+    ],
+    [
+      "CZWI",
+      "LEGH"
+    ],
+    [
+      "OVBC",
+      "GLSI"
+    ],
+    [
+      "BRT",
+      "HRTX"
+    ],
+    [
+      "PBFS",
+      "REPL"
+    ],
+    [
+      "FCAP",
+      "ULH"
+    ],
+    [
+      "PAL",
+      "ALTI"
+    ],
+    [
+      "PRTH",
+      "BCBP"
     ],
     [
       "SEG",
-      "HWBK"
+      "RGCO"
     ],
     [
-      "PXED",
-      "FCAP"
-    ],
-    [
-      "SNWV",
-      "STRZ"
-    ],
-    [
-      "CTEV",
-      "LDI"
+      "OABI",
+      "SMHI"
     ],
     [
       "BKKT",
       "KRO"
     ],
     [
-      "ALTI",
-      "VIA"
+      "MPAA",
+      "TTGT"
     ],
     [
-      "RELL",
-      "BCBP"
+      "HWBK",
+      "PLX"
     ],
     [
-      "ATOM",
-      "ULH"
+      "HBB",
+      "FATE"
     ],
     [
-      "WEST",
-      "CURI"
+      "MDWD",
+      "INNV"
     ],
     [
-      "PRTH",
-      "TBRG"
-    ],
-    [
-      "SKYX",
-      "EGAN"
+      "CURI",
+      "DOUG"
     ],
     [
       "SNFCA",
+      "HPK"
+    ],
+    [
+      "CV",
+      "EFSI"
+    ],
+    [
+      "LFCR",
+      "SNWV"
+    ],
+    [
+      "RXT",
       "BHR"
     ],
     [
       "BVFL",
-      "GENC"
-    ],
-    [
-      "DOUG",
-      "LPRO"
-    ],
-    [
-      "FATE",
-      "FNKO"
-    ],
-    [
-      "AGL",
-      "SAMG"
-    ],
-    [
-      "CMDB",
-      "SI"
-    ],
-    [
-      "MNSB",
-      "HUMA"
-    ],
-    [
-      "EVI",
-      "HBB"
-    ],
-    [
-      "CFBK",
-      "NFE"
-    ],
-    [
-      "ACU",
-      "EFSI"
-    ],
-    [
-      "HRTX",
-      "FINW"
-    ],
-    [
-      "EBMT",
-      "NREF"
-    ],
-    [
-      "CBFV",
-      "EPM"
-    ],
-    [
-      "LE",
-      "FBYD"
-    ],
-    [
-      "RXT",
-      "DERM"
-    ],
-    [
-      "RGP",
-      "ZIP"
-    ],
-    [
-      "DOMO",
-      "MDV"
-    ],
-    [
-      "NVCT",
-      "OPRX"
-    ],
-    [
-      "RMAX",
-      "BZAI"
-    ],
-    [
-      "ACR",
-      "SKIN"
+      "MNSB"
     ],
     [
       "ALTG",
-      "LFCR"
-    ],
-    [
-      "JILL",
-      "SGC"
-    ],
-    [
-      "PDEX",
-      "MLP"
-    ],
-    [
-      "STXS",
-      "JELD"
-    ],
-    [
-      "CRDF",
-      "PNRG"
-    ],
-    [
-      "MED",
-      "TBI"
-    ],
-    [
-      "TTGT",
-      "TCX"
-    ],
-    [
-      "EPSN",
-      "SRBK"
-    ],
-    [
-      "LUCD",
-      "PMTS"
-    ],
-    [
-      "FRD",
-      "AOMR"
-    ],
-    [
-      "KULR",
-      "TLSI"
-    ],
-    [
-      "BALY",
-      "KLTR"
-    ],
-    [
-      "CXDO",
-      "ALDX"
-    ],
-    [
-      "NODK",
-      "BSET"
-    ],
-    [
-      "EML",
-      "LAW"
-    ],
-    [
-      "ONEW",
-      "BOOM"
-    ],
-    [
-      "LWAY",
-      "FNWD"
+      "CMDB"
     ],
     [
       "NKTX",
-      "SBFG"
-    ],
-    [
-      "AOUT",
-      "PNBK"
-    ],
-    [
-      "LZM",
-      "SPWR"
-    ],
-    [
-      "FF",
-      "SMID"
-    ],
-    [
-      "OFLX",
-      "ELA"
-    ],
-    [
-      "CRMT",
-      "JYNT"
-    ],
-    [
-      "AIRJ",
-      "STRW"
-    ],
-    [
-      "LARK",
-      "ACNT"
-    ],
-    [
-      "THRY",
-      "FOA"
-    ],
-    [
-      "SLQT",
-      "SUNS"
+      "LZM"
     ],
     [
       "RCMT",
-      "WHG"
+      "TBI"
     ],
     [
-      "TRAK",
-      "UBFO"
+      "DOMO",
+      "QTRX"
     ],
     [
-      "GYRE",
-      "GAMB"
+      "NNOX",
+      "PMTS"
     ],
     [
-      "ARQ",
-      "GWRS"
+      "LWAY",
+      "SAMG"
     ],
     [
-      "RVSB",
+      "CFBK",
+      "EBMT"
+    ],
+    [
+      "FINW",
+      "EGAN"
+    ],
+    [
+      "RGP",
+      "MDV"
+    ],
+    [
+      "GENC",
+      "ACU"
+    ],
+    [
+      "PXED",
+      "NVCT"
+    ],
+    [
+      "NREF",
+      "EVI"
+    ],
+    [
+      "CBFV",
+      "RMAX"
+    ],
+    [
+      "CVRX",
+      "SGC"
+    ],
+    [
+      "SI",
       "ADV"
     ],
     [
-      "HNVR",
-      "HCAT"
+      "EPM",
+      "MED"
     ],
     [
-      "GOSS",
-      "CLAR"
+      "DMRC",
+      "TLSI"
     ],
     [
-      "RMBI",
-      "DMRC"
+      "ACR",
+      "FOA"
     ],
     [
-      "HURA",
-      "MNTK"
+      "LUCD",
+      "PDEX"
     ],
     [
-      "KRRO",
-      "CARL"
+      "LAW",
+      "SLQT"
+    ],
+    [
+      "THRY",
+      "NFE"
+    ],
+    [
+      "SRBK",
+      "KULR"
+    ],
+    [
+      "BYRN",
+      "JELD"
+    ],
+    [
+      "AOMR",
+      "FRD"
+    ],
+    [
+      "STXS",
+      "ONEW"
     ],
     [
       "KLC",
-      "XZO"
+      "EML"
     ],
     [
-      "MXCT",
-      "ATYR"
+      "BOOM",
+      "TCX"
     ],
     [
-      "FLWS",
-      "HFFG"
+      "MLP",
+      "LE"
     ],
     [
-      "RPT",
-      "CPSS"
+      "HUMA",
+      "OPRX"
     ],
     [
-      "FORR",
-      "EEX"
+      "CRDF",
+      "FF"
     ],
     [
-      "CBNA",
-      "ECBK"
+      "PNRG",
+      "CXDO"
     ],
     [
-      "VIRC",
+      "HURA",
+      "KLTR"
+    ],
+    [
+      "BALY",
+      "BSET"
+    ],
+    [
+      "NODK",
+      "SMID"
+    ],
+    [
+      "SKIN",
+      "SBFG"
+    ],
+    [
+      "EPSN",
+      "OFLX"
+    ],
+    [
+      "LARK",
+      "CRMT"
+    ],
+    [
+      "JILL",
+      "AOUT"
+    ],
+    [
+      "ACNT",
       "BRCC"
     ],
     [
-      "GETY",
-      "NPWR"
+      "ALDX",
+      "ELA"
     ],
     [
-      "ZVIA",
-      "RNAC"
+      "JYNT",
+      "AIRJ"
     ],
     [
-      "SSTI",
+      "STRW",
+      "SKYX"
+    ],
+    [
+      "MNTK",
+      "MXCT"
+    ],
+    [
+      "KRRO",
       "TMCI"
     ],
     [
-      "OM",
-      "SFBC"
+      "PNBK",
+      "TRAK"
+    ],
+    [
+      "HCAT",
+      "FLWS"
+    ],
+    [
+      "GYRE",
+      "DERM"
+    ],
+    [
+      "FNWD",
+      "WHG"
+    ],
+    [
+      "GETY",
+      "XZO"
     ],
     [
       "LAKE",
       "HAIN"
     ],
     [
-      "BARK",
-      "AISP"
+      "RMBI",
+      "HNVR"
     ],
     [
-      "DCGO",
-      "MAPS"
+      "SUNS",
+      "GWRS"
     ],
     [
-      "PROP",
-      "UNB"
+      "HFFG",
+      "CPSS"
     ],
     [
-      "TTEC",
-      "SVCO"
+      "RVSB",
+      "GAMB"
     ],
     [
-      "FSP",
-      "AVD"
+      "ECBK",
+      "GOSS"
     ],
     [
-      "INH",
-      "MPX"
+      "OM",
+      "RPT"
     ],
     [
-      "RCEL",
-      "CSPI"
+      "CLAR",
+      "CARL"
     ],
     [
-      "STIM",
-      "CURV"
+      "ATYR",
+      "FORR"
     ],
     [
-      "LNSR",
-      "NRDY"
-    ],
-    [
-      "SMTI",
+      "SPWR",
       "FFAI"
     ],
     [
-      "TUSK",
-      "EXFY"
+      "EEX",
+      "ARQ"
     ],
     [
-      "LUNG",
-      "TCI"
+      "TTEC",
+      "CURV"
     ],
     [
-      "NL",
-      "AEYE"
+      "AVD",
+      "SVCO"
     ],
     [
-      "AKE",
-      "PAMT"
+      "RNAC",
+      "CBNA"
     ],
     [
-      "SNBR",
-      "AVBH"
+      "AARD",
+      "DCGO"
     ],
     [
-      "OPAL",
-      "LFT"
+      "VIRC",
+      "AISP"
     ],
     [
-      "HQI",
-      "AARD"
+      "ZVIA",
+      "SSTI"
     ],
     [
-      "LFVN",
-      "RBKB"
+      "NPWR",
+      "SMTI"
     ],
     [
-      "WALD",
-      "PPHC"
-    ],
-    [
-      "AIRS",
+      "RCEL",
       "BTMD"
     ],
     [
-      "CLPR",
+      "STIM",
+      "CSPI"
+    ],
+    [
+      "UNB",
+      "AEYE"
+    ],
+    [
+      "SFBC",
+      "FSP"
+    ],
+    [
+      "NRDY",
+      "MPX"
+    ],
+    [
+      "INH",
+      "TUSK"
+    ],
+    [
+      "EXFY",
+      "PAMT"
+    ],
+    [
+      "LNSR",
+      "EHTH"
+    ],
+    [
+      "LFVN",
+      "TCI"
+    ],
+    [
+      "BARK",
+      "AKE"
+    ],
+    [
+      "AVBH",
+      "LUNG"
+    ],
+    [
+      "OPAL",
+      "SNBR"
+    ],
+    [
+      "NL",
       "ARAY"
     ],
     [
-      "EP",
-      "GAIA"
+      "LFT",
+      "CLPR"
     ],
     [
-      "MKTW",
-      "VHI"
-    ],
-    [
-      "EHTH",
-      "MYPS"
-    ],
-    [
-      "SWKH",
-      "FTLF"
-    ],
-    [
-      "DH",
-      "TZOO"
-    ],
-    [
-      "SBC",
-      "TKNO"
-    ],
-    [
-      "ISPR",
+      "PPHC",
       "LVWR"
     ],
     [
-      "AREN",
-      "VALU"
+      "HQI",
+      "RBKB"
     ],
     [
-      "KG",
-      "USGO"
+      "GAIA",
+      "TZOO"
     ],
     [
-      "CIX",
+      "VHI",
+      "MYPS"
+    ],
+    [
+      "EP",
+      "MKTW"
+    ],
+    [
+      "PROP",
       "SEAT"
     ],
     [
+      "AIRS",
+      "DH"
+    ],
+    [
+      "SKIL",
+      "USGO"
+    ],
+    [
+      "TKNO",
+      "WALD"
+    ],
+    [
+      "ISPR",
+      "VALU"
+    ],
+    [
       "TEAD",
+      "SBC"
+    ],
+    [
+      "CIX",
+      "AREN"
+    ],
+    [
+      "KG",
+      "FTLF"
+    ],
+    [
+      "MYO",
+      "COOK"
+    ],
+    [
+      "INMB",
       "SIEB"
     ],
     [
       "TVRD",
-      "MYO"
-    ],
-    [
-      "SKIL",
-      "INMB"
-    ],
-    [
-      "BEEP",
-      "ATLN"
-    ],
-    [
-      "ARL",
-      "AFRI"
-    ],
-    [
-      "ACTU",
-      "COOK"
+      "ACTU"
     ],
     [
       "NEON",
-      "SLSN"
+      "AFRI"
     ],
     [
-      "NXXT",
-      "SLND"
+      "ARL",
+      "BEEP"
     ],
     [
-      "MRDN",
+      "SLSN",
       "VRM"
     ],
     [
+      "ATLN",
+      "NXXT"
+    ],
+    [
       "ADRO",
+      "MRDN"
+    ],
+    [
+      "SLND",
+      "SAFX"
+    ],
+    [
+      "VGAS",
       "GOCO"
     ],
     [
-      "SAFX",
-      "VGAS"
-    ],
-    [
-      "TSEOF",
-      "TVGN"
+      "TVGN",
+      "TSEOF"
     ],
     [
       "ZSPC",

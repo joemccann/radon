@@ -1,22 +1,8 @@
 {
   "name": "ndx100-streaming-gaming",
   "description": "NASDAQ 100 Streaming & Gaming",
-  "tickers": [
-    "NFLX",
-    "WBD",
-    "EA",
-    "TTWO"
-  ],
-  "pairs": [
-    [
-      "NFLX",
-      "WBD"
-    ],
-    [
-      "EA",
-      "TTWO"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Communication Services",
   "vol_driver": "Content spending, subscriber growth, gaming cycles",
   "source": "NASDAQ 100 Index"

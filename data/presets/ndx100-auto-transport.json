@@ -1,22 +1,8 @@
 {
   "name": "ndx100-auto-transport",
   "description": "NASDAQ 100 Auto & Transportation",
-  "tickers": [
-    "TSLA",
-    "PCAR",
-    "CSX",
-    "ODFL"
-  ],
-  "pairs": [
-    [
-      "TSLA",
-      "PCAR"
-    ],
-    [
-      "CSX",
-      "ODFL"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Industrials",
   "vol_driver": "Vehicle demand, freight volumes, EV adoption",
   "source": "NASDAQ 100 Index"

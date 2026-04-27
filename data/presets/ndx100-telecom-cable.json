@@ -1,22 +1,8 @@
 {
   "name": "ndx100-telecom-cable",
   "description": "NASDAQ 100 Telecom & Cable",
-  "tickers": [
-    "TMUS",
-    "CMCSA",
-    "CHTR",
-    "CSCO"
-  ],
-  "pairs": [
-    [
-      "TMUS",
-      "CMCSA"
-    ],
-    [
-      "CHTR",
-      "CSCO"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Telecommunications",
   "vol_driver": "Subscriber growth, broadband capex, cord-cutting",
   "source": "NASDAQ 100 Index"

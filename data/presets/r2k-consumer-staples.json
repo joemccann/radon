@@ -5,63 +5,63 @@
     "PSMT",
     "CALM",
     "WDFC",
-    "MZTI",
     "UNFI",
-    "COCO",
+    "MZTI",
     "ANDE",
     "CHEF",
+    "COCO",
     "SPB",
-    "IPAR",
-    "TPB",
-    "CENTA",
     "HLF",
+    "IPAR",
+    "CENTA",
     "FDP",
+    "TPB",
     "IMKTA",
     "UVV",
-    "SMPL",
-    "JJSF",
     "ENR",
+    "JJSF",
+    "SMPL",
     "DOLE",
     "EPC",
     "WMK",
     "FIZZ",
     "TR",
-    "SENEA",
-    "ODC",
-    "STKL",
     "GO",
+    "ODC",
+    "SENEA",
+    "STKL",
     "JBSS",
-    "MAMA",
     "AVO",
     "UTZ",
-    "VITL",
+    "MAMA",
     "CVGW",
+    "BYND",
     "NATR",
+    "VITL",
     "BGS",
     "VLGEA",
-    "CENT",
     "NUS",
+    "CENT",
     "NGVC",
-    "BYND",
     "HNST",
+    "OLPX",
     "MGPI",
     "NAGE",
     "ALCO",
-    "LMNR",
     "USNA",
-    "OLPX",
+    "LMNR",
     "WEST",
-    "SKIN",
-    "MED",
     "LWAY",
-    "HFFG",
+    "MED",
+    "SKIN",
     "BRCC",
-    "ZVIA",
     "HAIN",
+    "HFFG",
+    "ZVIA",
     "LFVN",
     "WALD",
-    "FTLF",
     "ISPR",
+    "FTLF",
     "AFRI"
   ],
   "pairs": [
@@ -71,38 +71,38 @@
     ],
     [
       "WDFC",
-      "MZTI"
+      "UNFI"
     ],
     [
-      "UNFI",
+      "MZTI",
+      "ANDE"
+    ],
+    [
+      "CHEF",
       "COCO"
     ],
     [
-      "ANDE",
-      "CHEF"
-    ],
-    [
       "SPB",
-      "IPAR"
+      "HLF"
     ],
     [
-      "TPB",
+      "IPAR",
       "CENTA"
     ],
     [
-      "HLF",
-      "FDP"
+      "FDP",
+      "TPB"
     ],
     [
       "IMKTA",
       "UVV"
     ],
     [
-      "SMPL",
+      "ENR",
       "JJSF"
     ],
     [
-      "ENR",
+      "SMPL",
       "DOLE"
     ],
     [
@@ -114,76 +114,76 @@
       "TR"
     ],
     [
-      "SENEA",
+      "GO",
       "ODC"
     ],
     [
-      "STKL",
-      "GO"
+      "SENEA",
+      "STKL"
     ],
     [
       "JBSS",
+      "AVO"
+    ],
+    [
+      "UTZ",
       "MAMA"
     ],
     [
-      "AVO",
-      "UTZ"
-    ],
-    [
-      "VITL",
-      "CVGW"
+      "CVGW",
+      "BYND"
     ],
     [
       "NATR",
-      "BGS"
+      "VITL"
     ],
     [
-      "VLGEA",
-      "CENT"
+      "BGS",
+      "VLGEA"
     ],
     [
       "NUS",
-      "NGVC"
+      "CENT"
     ],
     [
-      "BYND",
+      "NGVC",
       "HNST"
     ],
     [
-      "MGPI",
-      "NAGE"
+      "OLPX",
+      "MGPI"
     ],
     [
-      "ALCO",
-      "LMNR"
+      "NAGE",
+      "ALCO"
     ],
     [
       "USNA",
-      "OLPX"
+      "LMNR"
     ],
     [
       "WEST",
-      "SKIN"
-    ],
-    [
-      "MED",
       "LWAY"
     ],
     [
-      "HFFG",
-      "BRCC"
+      "MED",
+      "SKIN"
     ],
     [
-      "ZVIA",
+      "BRCC",
       "HAIN"
+    ],
+    [
+      "HFFG",
+      "ZVIA"
     ],
     [
       "LFVN",
       "WALD"
     ],
     [
-      "FTLF",
-      "ISPR"
+      "ISPR",
+      "FTLF"
     ],
     [
       "AFRI",

@@ -1,22 +1,8 @@
 {
   "name": "ndx100-medtech",
   "description": "NASDAQ 100 Medical Technology",
-  "tickers": [
-    "ISRG",
-    "DXCM",
-    "GEHC",
-    "IDXX"
-  ],
-  "pairs": [
-    [
-      "ISRG",
-      "GEHC"
-    ],
-    [
-      "DXCM",
-      "IDXX"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Health Care",
   "vol_driver": "Medical device demand, hospital capex, procedures",
   "source": "NASDAQ 100 Index"

@@ -8,90 +8,90 @@
     "EPRT",
     "RHP",
     "KRG",
+    "MAC",
     "COMP",
     "SBRA",
-    "MAC",
     "PECO",
     "OUT",
-    "NHI",
     "SKT",
+    "BNL",
     "IRT",
     "CDP",
-    "BNL",
+    "NHI",
+    "SLG",
     "APLE",
     "LXP",
-    "SLG",
-    "UE",
     "AKR",
-    "FCPT",
+    "UE",
     "CURB",
-    "IVT",
+    "FCPT",
     "JOE",
+    "IVT",
     "NMRK",
     "DRH",
+    "CWK",
     "GNL",
     "GTY",
-    "LTC",
     "SHO",
-    "CWK",
-    "SMA",
     "NTST",
+    "LTC",
+    "SMA",
+    "SILA",
+    "PEB",
+    "IIPR",
+    "XHR",
     "DHC",
     "VRE",
-    "PEB",
-    "XHR",
-    "IIPR",
-    "KW",
-    "SILA",
     "DEI",
+    "KW",
     "UMH",
-    "RLJ",
-    "CSR",
     "AAT",
+    "CSR",
+    "RLJ",
+    "PDM",
     "DEA",
     "JBGS",
-    "PDM",
     "SAFE",
-    "PKST",
     "WSR",
-    "ESRT",
     "CBL",
+    "ESRT",
+    "PKST",
     "MMI",
-    "NXRT",
-    "CTO",
+    "SVC",
     "EXPI",
+    "CTO",
     "GOOD",
-    "UHT",
+    "NXRT",
     "ALX",
     "FOR",
+    "UHT",
     "INN",
+    "PSTL",
     "BDN",
     "AHRT",
-    "FPI",
     "CHCT",
-    "PSTL",
+    "FPI",
     "XRN",
-    "OLP",
-    "TRC",
-    "CLDT",
-    "BFS",
-    "LAND",
-    "REAX",
-    "ILPT",
-    "FVR",
     "HPP",
-    "SVC",
+    "OLP",
+    "CLDT",
+    "ILPT",
+    "TRC",
+    "BFS",
+    "REAX",
+    "LAND",
+    "FVR",
     "SITC",
     "RMR",
-    "NLOP",
     "FRPH",
     "PINE",
-    "STRS",
+    "NLOP",
     "NXDT",
+    "STRS",
     "BRT",
     "SEG",
-    "BHR",
     "DOUG",
+    "BHR",
     "MDV",
     "RMAX",
     "MLP",
@@ -115,172 +115,172 @@
       "KRG"
     ],
     [
-      "COMP",
-      "SBRA"
+      "MAC",
+      "COMP"
     ],
     [
-      "MAC",
+      "SBRA",
       "PECO"
     ],
     [
       "OUT",
-      "NHI"
+      "SKT"
     ],
     [
-      "SKT",
+      "BNL",
       "IRT"
     ],
     [
       "CDP",
-      "BNL"
-    ],
-    [
-      "APLE",
-      "LXP"
+      "NHI"
     ],
     [
       "SLG",
-      "UE"
+      "APLE"
     ],
     [
-      "AKR",
-      "FCPT"
+      "LXP",
+      "AKR"
     ],
     [
-      "CURB",
-      "IVT"
+      "UE",
+      "CURB"
     ],
     [
-      "JOE",
+      "FCPT",
+      "JOE"
+    ],
+    [
+      "IVT",
       "NMRK"
     ],
     [
       "DRH",
-      "GNL"
-    ],
-    [
-      "GTY",
-      "LTC"
-    ],
-    [
-      "SHO",
       "CWK"
     ],
     [
-      "SMA",
+      "GNL",
+      "GTY"
+    ],
+    [
+      "SHO",
       "NTST"
+    ],
+    [
+      "LTC",
+      "SMA"
+    ],
+    [
+      "SILA",
+      "PEB"
+    ],
+    [
+      "IIPR",
+      "XHR"
     ],
     [
       "DHC",
       "VRE"
     ],
     [
-      "PEB",
-      "XHR"
-    ],
-    [
-      "IIPR",
+      "DEI",
       "KW"
     ],
     [
-      "SILA",
-      "DEI"
-    ],
-    [
       "UMH",
-      "RLJ"
-    ],
-    [
-      "CSR",
       "AAT"
     ],
     [
-      "DEA",
-      "JBGS"
+      "CSR",
+      "RLJ"
     ],
     [
       "PDM",
+      "DEA"
+    ],
+    [
+      "JBGS",
       "SAFE"
     ],
     [
-      "PKST",
-      "WSR"
-    ],
-    [
-      "ESRT",
+      "WSR",
       "CBL"
     ],
     [
-      "MMI",
-      "NXRT"
+      "ESRT",
+      "PKST"
     ],
     [
-      "CTO",
-      "EXPI"
+      "MMI",
+      "SVC"
+    ],
+    [
+      "EXPI",
+      "CTO"
     ],
     [
       "GOOD",
-      "UHT"
+      "NXRT"
     ],
     [
       "ALX",
       "FOR"
     ],
     [
-      "INN",
+      "UHT",
+      "INN"
+    ],
+    [
+      "PSTL",
       "BDN"
     ],
     [
       "AHRT",
-      "FPI"
+      "CHCT"
     ],
     [
-      "CHCT",
-      "PSTL"
+      "FPI",
+      "XRN"
     ],
     [
-      "XRN",
+      "HPP",
       "OLP"
     ],
     [
-      "TRC",
-      "CLDT"
-    ],
-    [
-      "BFS",
-      "LAND"
-    ],
-    [
-      "REAX",
+      "CLDT",
       "ILPT"
     ],
     [
-      "FVR",
-      "HPP"
+      "TRC",
+      "BFS"
     ],
     [
-      "SVC",
+      "REAX",
+      "LAND"
+    ],
+    [
+      "FVR",
       "SITC"
     ],
     [
       "RMR",
+      "FRPH"
+    ],
+    [
+      "PINE",
       "NLOP"
     ],
     [
-      "FRPH",
-      "PINE"
-    ],
-    [
-      "STRS",
-      "NXDT"
+      "NXDT",
+      "STRS"
     ],
     [
       "BRT",
       "SEG"
     ],
     [
-      "BHR",
-      "DOUG"
+      "DOUG",
+      "BHR"
     ],
     [
       "MDV",

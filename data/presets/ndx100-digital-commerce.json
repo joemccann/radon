@@ -1,28 +1,8 @@
 {
   "name": "ndx100-digital-commerce",
   "description": "NASDAQ 100 Digital Commerce & Delivery",
-  "tickers": [
-    "AMZN",
-    "MELI",
-    "PDD",
-    "DASH",
-    "CPRT",
-    "BKNG"
-  ],
-  "pairs": [
-    [
-      "AMZN",
-      "MELI"
-    ],
-    [
-      "PDD",
-      "DASH"
-    ],
-    [
-      "CPRT",
-      "BKNG"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Consumer Discretionary",
   "vol_driver": "E-commerce, consumer spending, logistics",
   "source": "NASDAQ 100 Index"

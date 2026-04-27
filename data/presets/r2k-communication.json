@@ -12,72 +12,72 @@
     "MSGE",
     "LION",
     "BATRK",
+    "UNIT",
     "MGNI",
     "ZD",
-    "IMAX",
-    "WLY",
     "YELP",
-    "UNIT",
-    "LILAK",
+    "WLY",
+    "IMAX",
     "TRIP",
-    "TDAY",
+    "LILAK",
     "CCOI",
-    "SCHL",
-    "IDT",
-    "SHEN",
-    "QNST",
-    "STGW",
-    "RUM",
+    "TDAY",
     "AMC",
+    "SHEN",
+    "IDT",
+    "SCHL",
+    "STGW",
+    "QNST",
+    "RUM",
+    "BAND",
     "SBGI",
     "CABO",
-    "BAND",
-    "EVER",
-    "ATEX",
     "CARS",
     "GTN",
-    "SSTK",
-    "GRND",
-    "MCS",
-    "BATRA",
-    "OPTU",
-    "GOGO",
     "IHRT",
+    "ATEX",
+    "EVER",
+    "OPTU",
+    "SSTK",
+    "NMAX",
+    "MCS",
+    "GRND",
+    "BATRA",
     "IBTA",
-    "MAX",
     "FUBO",
     "PUBM",
     "NXDR",
-    "NMAX",
-    "LILA",
+    "GOGO",
+    "MAX",
+    "SSP",
+    "BMBL",
+    "AMCX",
     "ATNI",
+    "LILA",
     "ANGI",
     "BOC",
-    "BMBL",
-    "SSP",
-    "AMCX",
-    "NCMI",
     "NEXN",
-    "SPOK",
-    "EVC",
-    "RSVR",
-    "PLTK",
-    "WBTN",
+    "NCMI",
     "STRZ",
-    "CURI",
+    "WBTN",
+    "EVC",
+    "SPOK",
+    "PLTK",
+    "RSVR",
     "ZIP",
     "TTGT",
-    "THRY",
-    "GAMB",
+    "CURI",
     "ADV",
-    "EEX",
+    "THRY",
     "GETY",
+    "GAMB",
+    "EEX",
     "GAIA",
-    "MYPS",
     "TZOO",
-    "AREN",
+    "MYPS",
     "SEAT",
     "TEAD",
+    "AREN",
     "MRDN"
   ],
   "pairs": [
@@ -102,136 +102,136 @@
       "BATRK"
     ],
     [
-      "MGNI",
-      "ZD"
+      "UNIT",
+      "MGNI"
     ],
     [
-      "IMAX",
-      "WLY"
+      "ZD",
+      "YELP"
     ],
     [
-      "YELP",
-      "UNIT"
+      "WLY",
+      "IMAX"
     ],
     [
-      "LILAK",
-      "TRIP"
+      "TRIP",
+      "LILAK"
     ],
     [
-      "TDAY",
-      "CCOI"
-    ],
-    [
-      "SCHL",
-      "IDT"
-    ],
-    [
-      "SHEN",
-      "QNST"
-    ],
-    [
-      "STGW",
-      "RUM"
+      "CCOI",
+      "TDAY"
     ],
     [
       "AMC",
-      "SBGI"
+      "SHEN"
     ],
     [
-      "CABO",
+      "IDT",
+      "SCHL"
+    ],
+    [
+      "STGW",
+      "QNST"
+    ],
+    [
+      "RUM",
       "BAND"
     ],
     [
-      "EVER",
-      "ATEX"
+      "SBGI",
+      "CABO"
     ],
     [
       "CARS",
       "GTN"
     ],
     [
+      "IHRT",
+      "ATEX"
+    ],
+    [
+      "EVER",
+      "OPTU"
+    ],
+    [
       "SSTK",
-      "GRND"
+      "NMAX"
     ],
     [
       "MCS",
-      "BATRA"
+      "GRND"
     ],
     [
-      "OPTU",
-      "GOGO"
-    ],
-    [
-      "IHRT",
+      "BATRA",
       "IBTA"
     ],
     [
+      "FUBO",
+      "PUBM"
+    ],
+    [
+      "NXDR",
+      "GOGO"
+    ],
+    [
       "MAX",
-      "FUBO"
+      "SSP"
     ],
     [
-      "PUBM",
-      "NXDR"
-    ],
-    [
-      "NMAX",
-      "LILA"
-    ],
-    [
-      "ATNI",
-      "ANGI"
-    ],
-    [
-      "BOC",
-      "BMBL"
-    ],
-    [
-      "SSP",
+      "BMBL",
       "AMCX"
     ],
     [
-      "NCMI",
-      "NEXN"
+      "ATNI",
+      "LILA"
     ],
     [
-      "SPOK",
-      "EVC"
+      "ANGI",
+      "BOC"
     ],
     [
-      "RSVR",
-      "PLTK"
+      "NEXN",
+      "NCMI"
     ],
     [
-      "WBTN",
-      "STRZ"
+      "STRZ",
+      "WBTN"
+    ],
+    [
+      "EVC",
+      "SPOK"
+    ],
+    [
+      "PLTK",
+      "RSVR"
+    ],
+    [
+      "ZIP",
+      "TTGT"
     ],
     [
       "CURI",
-      "ZIP"
-    ],
-    [
-      "TTGT",
-      "THRY"
-    ],
-    [
-      "GAMB",
       "ADV"
     ],
     [
-      "EEX",
+      "THRY",
       "GETY"
     ],
     [
+      "GAMB",
+      "EEX"
+    ],
+    [
       "GAIA",
-      "MYPS"
+      "TZOO"
     ],
     [
-      "TZOO",
+      "MYPS",
+      "SEAT"
+    ],
+    [
+      "TEAD",
       "AREN"
-    ],
-    [
-      "SEAT",
-      "TEAD"
     ],
     [
       "MRDN",

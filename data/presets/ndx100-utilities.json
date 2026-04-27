@@ -1,22 +1,8 @@
 {
   "name": "ndx100-utilities",
   "description": "NASDAQ 100 Utilities",
-  "tickers": [
-    "AEP",
-    "CEG",
-    "EXC",
-    "XEL"
-  ],
-  "pairs": [
-    [
-      "AEP",
-      "XEL"
-    ],
-    [
-      "CEG",
-      "EXC"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Utilities",
   "vol_driver": "Interest rates, power demand, regulatory",
   "source": "NASDAQ 100 Index"

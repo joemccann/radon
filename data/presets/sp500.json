@@ -79,6 +79,7 @@
     "CAG",
     "CAH",
     "CARR",
+    "CASY",
     "CAT",
     "CB",
     "CBOE",
@@ -229,7 +230,6 @@
     "HIG",
     "HII",
     "HLT",
-    "HOLX",
     "HON",
     "HOOD",
     "HPE",
@@ -910,10 +910,6 @@
     [
       "BDX",
       "BAX"
-    ],
-    [
-      "GEHC",
-      "HOLX"
     ],
     [
       "IDXX",
@@ -2544,7 +2540,6 @@
         "DXCM",
         "EW",
         "GEHC",
-        "HOLX",
         "IDXX",
         "PODD",
         "ISRG",
@@ -2577,10 +2572,6 @@
           "BAX"
         ],
         [
-          "GEHC",
-          "HOLX"
-        ],
-        [
           "IDXX",
           "RVTY"
         ],
@@ -2590,6 +2581,10 @@
         ],
         [
           "ZBH",
+          "ABT"
+        ],
+        [
+          "GEHC",
           "ABT"
         ]
       ],
@@ -4075,7 +4070,8 @@
         "VZ",
         "WSM",
         "WY",
-        "SATS"
+        "SATS",
+        "CASY"
       ],
       "pairs": [
         [

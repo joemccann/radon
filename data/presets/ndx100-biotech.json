@@ -1,28 +1,8 @@
 {
   "name": "ndx100-biotech",
   "description": "NASDAQ 100 Biotechnology",
-  "tickers": [
-    "AMGN",
-    "GILD",
-    "REGN",
-    "VRTX",
-    "ALNY",
-    "INSM"
-  ],
-  "pairs": [
-    [
-      "AMGN",
-      "GILD"
-    ],
-    [
-      "REGN",
-      "VRTX"
-    ],
-    [
-      "ALNY",
-      "INSM"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Health Care",
   "vol_driver": "Drug approvals, pipeline catalysts, pricing policy",
   "source": "NASDAQ 100 Index"

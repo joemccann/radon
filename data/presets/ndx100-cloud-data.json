@@ -1,27 +1,8 @@
 {
   "name": "ndx100-cloud-data",
   "description": "NASDAQ 100 Cloud & Data Platforms",
-  "tickers": [
-    "DDOG",
-    "PLTR",
-    "TEAM",
-    "SHOP",
-    "CTSH"
-  ],
-  "pairs": [
-    [
-      "DDOG",
-      "PLTR"
-    ],
-    [
-      "TEAM",
-      "SHOP"
-    ],
-    [
-      "CTSH",
-      "TEAM"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Technology",
   "vol_driver": "Cloud adoption, DevOps, data analytics spend",
   "source": "NASDAQ 100 Index"

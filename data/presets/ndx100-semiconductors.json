@@ -1,51 +1,8 @@
 {
   "name": "ndx100-semiconductors",
   "description": "NASDAQ 100 Semiconductors",
-  "tickers": [
-    "NVDA",
-    "AMD",
-    "AVGO",
-    "QCOM",
-    "INTC",
-    "MRVL",
-    "ADI",
-    "MCHP",
-    "MU",
-    "MPWR",
-    "NXPI",
-    "TXN",
-    "ARM"
-  ],
-  "pairs": [
-    [
-      "NVDA",
-      "AMD"
-    ],
-    [
-      "AVGO",
-      "QCOM"
-    ],
-    [
-      "MU",
-      "INTC"
-    ],
-    [
-      "MRVL",
-      "ARM"
-    ],
-    [
-      "TXN",
-      "ADI"
-    ],
-    [
-      "MCHP",
-      "NXPI"
-    ],
-    [
-      "MPWR",
-      "NXPI"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Technology",
   "vol_driver": "AI/cloud capex, semiconductor demand, data center buildout",
   "source": "NASDAQ 100 Index"

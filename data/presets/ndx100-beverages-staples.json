@@ -1,28 +1,8 @@
 {
   "name": "ndx100-beverages-staples",
   "description": "NASDAQ 100 Beverages & Consumer Staples",
-  "tickers": [
-    "PEP",
-    "MNST",
-    "KDP",
-    "CCEP",
-    "KHC",
-    "MDLZ"
-  ],
-  "pairs": [
-    [
-      "PEP",
-      "KDP"
-    ],
-    [
-      "MNST",
-      "CCEP"
-    ],
-    [
-      "KHC",
-      "MDLZ"
-    ]
-  ],
+  "tickers": [],
+  "pairs": [],
   "sector": "Consumer Staples",
   "vol_driver": "Consumer staples demand, input costs, pricing power",
   "source": "NASDAQ 100 Index"

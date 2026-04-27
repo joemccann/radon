@@ -3,29 +3,9 @@
   "description": "NASDAQ 100 Enterprise Software",
   "tickers": [
     "CRM",
-    "ADBE",
-    "INTU",
-    "WDAY",
-    "CDNS",
-    "SNPS",
-    "ADSK",
-    "ROP",
     "PTC"
   ],
-  "pairs": [
-    [
-      "CDNS",
-      "SNPS"
-    ],
-    [
-      "ADBE",
-      "INTU"
-    ],
-    [
-      "WDAY",
-      "ADSK"
-    ]
-  ],
+  "pairs": [],
   "sector": "Technology",
   "vol_driver": "Enterprise IT spending, SaaS adoption",
   "source": "NASDAQ 100 Index"

@@ -9,7 +9,6 @@
     "DXCM",
     "EW",
     "GEHC",
-    "HOLX",
     "IDXX",
     "PODD",
     "ISRG",
@@ -42,10 +41,6 @@
       "BAX"
     ],
     [
-      "GEHC",
-      "HOLX"
-    ],
-    [
       "IDXX",
       "RVTY"
     ],
@@ -55,6 +50,10 @@
     ],
     [
       "ZBH",
+      "ABT"
+    ],
+    [
+      "GEHC",
       "ABT"
     ]
   ],

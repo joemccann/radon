@@ -1,422 +1,71 @@
 {
   "name": "ndx100",
-  "description": "NASDAQ 100 \u2014 101 companies, 21 groups, 53 curated pairs",
+  "description": "NASDAQ 100 \u2014 41 companies, 21 groups, 0 curated pairs",
   "tickers": [
-    "AAPL",
-    "ABNB",
-    "ADBE",
-    "ADI",
-    "ADP",
-    "ADSK",
-    "AEP",
-    "ALNY",
-    "AMAT",
-    "AMD",
-    "AMGN",
-    "AMZN",
-    "APP",
-    "ARM",
-    "ASML",
-    "AVGO",
-    "AXON",
-    "BKNG",
-    "BKR",
-    "CCEP",
-    "CDNS",
-    "CEG",
-    "CHTR",
-    "CMCSA",
-    "COST",
-    "CPRT",
-    "CRWD",
-    "CSCO",
-    "CSGP",
-    "CSX",
-    "CTAS",
-    "CTSH",
-    "DASH",
-    "DDOG",
-    "DXCM",
-    "EA",
-    "EXC",
-    "FANG",
-    "FAST",
-    "FER",
-    "FTNT",
-    "GEHC",
-    "GILD",
-    "GOOG",
-    "GOOGL",
-    "HON",
-    "IDXX",
-    "INSM",
-    "INTC",
-    "INTU",
-    "ISRG",
-    "KDP",
-    "KHC",
-    "KLAC",
-    "LIN",
-    "LRCX",
-    "MAR",
-    "MCHP",
-    "MDLZ",
-    "MELI",
-    "META",
-    "MNST",
-    "MPWR",
-    "MRVL",
-    "MSFT",
-    "MSTR",
-    "MU",
-    "NFLX",
-    "NVDA",
-    "NXPI",
-    "ODFL",
-    "ORLY",
-    "PANW",
-    "PAYX",
-    "PCAR",
-    "PDD",
-    "PEP",
-    "PLTR",
-    "PYPL",
-    "QCOM",
-    "REGN",
-    "ROP",
-    "ROST",
-    "SBUX",
-    "SHOP",
-    "SNPS",
-    "STX",
-    "TEAM",
-    "TMUS",
-    "TRI",
-    "TSLA",
-    "TTWO",
-    "TXN",
-    "VRSK",
-    "VRTX",
-    "WBD",
-    "WDAY",
-    "WDC",
-    "WMT",
-    "XEL",
-    "ZS"
+    "1985",
+    "1986",
+    "1987",
+    "1988",
+    "1989",
+    "1990",
+    "1991",
+    "1992",
+    "1993",
+    "1994",
+    "1995",
+    "1996",
+    "1997",
+    "1998",
+    "1999",
+    "2000",
+    "2001",
+    "2002",
+    "2003",
+    "2004",
+    "2005",
+    "2006",
+    "2007",
+    "2008",
+    "2009",
+    "2010",
+    "2011",
+    "2012",
+    "2013",
+    "2014",
+    "2015",
+    "2016",
+    "2017",
+    "2018",
+    "2019",
+    "2020",
+    "2021",
+    "2022",
+    "2023",
+    "2024",
+    "2025"
   ],
-  "pairs": [
-    [
-      "AAPL",
-      "MSFT"
-    ],
-    [
-      "GOOGL",
-      "META"
-    ],
-    [
-      "AMZN",
-      "NFLX"
-    ],
-    [
-      "NVDA",
-      "AMD"
-    ],
-    [
-      "AVGO",
-      "QCOM"
-    ],
-    [
-      "MU",
-      "INTC"
-    ],
-    [
-      "MRVL",
-      "ARM"
-    ],
-    [
-      "TXN",
-      "ADI"
-    ],
-    [
-      "MCHP",
-      "NXPI"
-    ],
-    [
-      "MPWR",
-      "NXPI"
-    ],
-    [
-      "ASML",
-      "LRCX"
-    ],
-    [
-      "AMAT",
-      "KLAC"
-    ],
-    [
-      "CDNS",
-      "SNPS"
-    ],
-    [
-      "ADBE",
-      "INTU"
-    ],
-    [
-      "WDAY",
-      "ADSK"
-    ],
-    [
-      "CRWD",
-      "PANW"
-    ],
-    [
-      "FTNT",
-      "ZS"
-    ],
-    [
-      "DDOG",
-      "PLTR"
-    ],
-    [
-      "TEAM",
-      "SHOP"
-    ],
-    [
-      "CTSH",
-      "TEAM"
-    ],
-    [
-      "AMZN",
-      "MELI"
-    ],
-    [
-      "PDD",
-      "DASH"
-    ],
-    [
-      "CPRT",
-      "BKNG"
-    ],
-    [
-      "NFLX",
-      "WBD"
-    ],
-    [
-      "EA",
-      "TTWO"
-    ],
-    [
-      "AMGN",
-      "GILD"
-    ],
-    [
-      "REGN",
-      "VRTX"
-    ],
-    [
-      "ALNY",
-      "INSM"
-    ],
-    [
-      "ISRG",
-      "GEHC"
-    ],
-    [
-      "DXCM",
-      "IDXX"
-    ],
-    [
-      "PEP",
-      "KDP"
-    ],
-    [
-      "MNST",
-      "CCEP"
-    ],
-    [
-      "KHC",
-      "MDLZ"
-    ],
-    [
-      "BKNG",
-      "ABNB"
-    ],
-    [
-      "MAR",
-      "SBUX"
-    ],
-    [
-      "ROST",
-      "MAR"
-    ],
-    [
-      "TSLA",
-      "PCAR"
-    ],
-    [
-      "CSX",
-      "ODFL"
-    ],
-    [
-      "HON",
-      "AXON"
-    ],
-    [
-      "CTAS",
-      "FAST"
-    ],
-    [
-      "ADP",
-      "PAYX"
-    ],
-    [
-      "TMUS",
-      "CMCSA"
-    ],
-    [
-      "CHTR",
-      "CSCO"
-    ],
-    [
-      "AEP",
-      "XEL"
-    ],
-    [
-      "CEG",
-      "EXC"
-    ],
-    [
-      "PYPL",
-      "APP"
-    ],
-    [
-      "MSTR",
-      "PYPL"
-    ],
-    [
-      "BKR",
-      "FANG"
-    ],
-    [
-      "COST",
-      "WMT"
-    ],
-    [
-      "ORLY",
-      "COST"
-    ],
-    [
-      "STX",
-      "WDC"
-    ],
-    [
-      "LIN",
-      "FER"
-    ],
-    [
-      "CSGP",
-      "TRI"
-    ]
-  ],
+  "pairs": [],
   "source": "NASDAQ 100 Index (Wikipedia, March 2026)",
   "groups": {
     "mega-cap-tech-platforms": {
       "name": "Mega-Cap Tech Platforms",
       "sector": "Technology",
-      "tickers": [
-        "AAPL",
-        "MSFT",
-        "GOOGL",
-        "META",
-        "AMZN",
-        "NFLX",
-        "GOOG"
-      ],
-      "pairs": [
-        [
-          "AAPL",
-          "MSFT"
-        ],
-        [
-          "GOOGL",
-          "META"
-        ],
-        [
-          "AMZN",
-          "NFLX"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Ad spending, cloud capex, consumer tech demand"
     },
     "semiconductors": {
       "name": "Semiconductors",
       "sector": "Technology",
-      "tickers": [
-        "NVDA",
-        "AMD",
-        "AVGO",
-        "QCOM",
-        "INTC",
-        "MRVL",
-        "ADI",
-        "MCHP",
-        "MU",
-        "MPWR",
-        "NXPI",
-        "TXN",
-        "ARM"
-      ],
-      "pairs": [
-        [
-          "NVDA",
-          "AMD"
-        ],
-        [
-          "AVGO",
-          "QCOM"
-        ],
-        [
-          "MU",
-          "INTC"
-        ],
-        [
-          "MRVL",
-          "ARM"
-        ],
-        [
-          "TXN",
-          "ADI"
-        ],
-        [
-          "MCHP",
-          "NXPI"
-        ],
-        [
-          "MPWR",
-          "NXPI"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "AI/cloud capex, semiconductor demand, data center buildout"
     },
     "semi-equipment": {
       "name": "Semiconductor Equipment",
       "sector": "Technology",
-      "tickers": [
-        "ASML",
-        "AMAT",
-        "KLAC",
-        "LRCX"
-      ],
-      "pairs": [
-        [
-          "ASML",
-          "LRCX"
-        ],
-        [
-          "AMAT",
-          "KLAC"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Wafer fab capex, chip manufacturing capacity"
     },
     "enterprise-software": {
@@ -424,407 +73,170 @@
       "sector": "Technology",
       "tickers": [
         "CRM",
-        "ADBE",
-        "INTU",
-        "WDAY",
-        "CDNS",
-        "SNPS",
-        "ADSK",
-        "ROP",
         "PTC"
       ],
-      "pairs": [
-        [
-          "CDNS",
-          "SNPS"
-        ],
-        [
-          "ADBE",
-          "INTU"
-        ],
-        [
-          "WDAY",
-          "ADSK"
-        ]
-      ],
+      "pairs": [],
       "vol_driver": "Enterprise IT spending, SaaS adoption"
     },
     "cybersecurity": {
       "name": "Cybersecurity",
       "sector": "Technology",
-      "tickers": [
-        "CRWD",
-        "PANW",
-        "FTNT",
-        "ZS"
-      ],
-      "pairs": [
-        [
-          "CRWD",
-          "PANW"
-        ],
-        [
-          "FTNT",
-          "ZS"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Cybersecurity spending, breach events, compliance"
     },
     "cloud-data": {
       "name": "Cloud & Data Platforms",
       "sector": "Technology",
-      "tickers": [
-        "DDOG",
-        "PLTR",
-        "TEAM",
-        "SHOP",
-        "CTSH"
-      ],
-      "pairs": [
-        [
-          "DDOG",
-          "PLTR"
-        ],
-        [
-          "TEAM",
-          "SHOP"
-        ],
-        [
-          "CTSH",
-          "TEAM"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Cloud adoption, DevOps, data analytics spend"
     },
     "digital-commerce": {
       "name": "Digital Commerce & Delivery",
       "sector": "Consumer Discretionary",
-      "tickers": [
-        "AMZN",
-        "MELI",
-        "PDD",
-        "DASH",
-        "CPRT",
-        "BKNG"
-      ],
-      "pairs": [
-        [
-          "AMZN",
-          "MELI"
-        ],
-        [
-          "PDD",
-          "DASH"
-        ],
-        [
-          "CPRT",
-          "BKNG"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "E-commerce, consumer spending, logistics"
     },
     "streaming-gaming": {
       "name": "Streaming & Gaming",
       "sector": "Communication Services",
-      "tickers": [
-        "NFLX",
-        "WBD",
-        "EA",
-        "TTWO"
-      ],
-      "pairs": [
-        [
-          "NFLX",
-          "WBD"
-        ],
-        [
-          "EA",
-          "TTWO"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Content spending, subscriber growth, gaming cycles"
     },
     "biotech": {
       "name": "Biotechnology",
       "sector": "Health Care",
-      "tickers": [
-        "AMGN",
-        "GILD",
-        "REGN",
-        "VRTX",
-        "ALNY",
-        "INSM"
-      ],
-      "pairs": [
-        [
-          "AMGN",
-          "GILD"
-        ],
-        [
-          "REGN",
-          "VRTX"
-        ],
-        [
-          "ALNY",
-          "INSM"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Drug approvals, pipeline catalysts, pricing policy"
     },
     "medtech": {
       "name": "Medical Technology",
       "sector": "Health Care",
-      "tickers": [
-        "ISRG",
-        "DXCM",
-        "GEHC",
-        "IDXX"
-      ],
-      "pairs": [
-        [
-          "ISRG",
-          "GEHC"
-        ],
-        [
-          "DXCM",
-          "IDXX"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Medical device demand, hospital capex, procedures"
     },
     "beverages-staples": {
       "name": "Beverages & Consumer Staples",
       "sector": "Consumer Staples",
-      "tickers": [
-        "PEP",
-        "MNST",
-        "KDP",
-        "CCEP",
-        "KHC",
-        "MDLZ"
-      ],
-      "pairs": [
-        [
-          "PEP",
-          "KDP"
-        ],
-        [
-          "MNST",
-          "CCEP"
-        ],
-        [
-          "KHC",
-          "MDLZ"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Consumer staples demand, input costs, pricing power"
     },
     "travel-leisure": {
       "name": "Travel & Leisure",
       "sector": "Consumer Discretionary",
-      "tickers": [
-        "BKNG",
-        "MAR",
-        "ABNB",
-        "SBUX",
-        "ROST"
-      ],
-      "pairs": [
-        [
-          "BKNG",
-          "ABNB"
-        ],
-        [
-          "MAR",
-          "SBUX"
-        ],
-        [
-          "ROST",
-          "MAR"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Travel demand, consumer discretionary spending"
     },
     "auto-transport": {
       "name": "Auto & Transportation",
       "sector": "Industrials",
-      "tickers": [
-        "TSLA",
-        "PCAR",
-        "CSX",
-        "ODFL"
-      ],
-      "pairs": [
-        [
-          "TSLA",
-          "PCAR"
-        ],
-        [
-          "CSX",
-          "ODFL"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Vehicle demand, freight volumes, EV adoption"
     },
     "industrials-services": {
       "name": "Industrial Services",
       "sector": "Industrials",
-      "tickers": [
-        "HON",
-        "AXON",
-        "CTAS",
-        "FAST",
-        "ADP",
-        "PAYX",
-        "VRSK"
-      ],
-      "pairs": [
-        [
-          "HON",
-          "AXON"
-        ],
-        [
-          "CTAS",
-          "FAST"
-        ],
-        [
-          "ADP",
-          "PAYX"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Industrial activity, employment, B2B services"
     },
     "telecom-cable": {
       "name": "Telecom & Cable",
       "sector": "Telecommunications",
-      "tickers": [
-        "TMUS",
-        "CMCSA",
-        "CHTR",
-        "CSCO"
-      ],
-      "pairs": [
-        [
-          "TMUS",
-          "CMCSA"
-        ],
-        [
-          "CHTR",
-          "CSCO"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Subscriber growth, broadband capex, cord-cutting"
     },
     "utilities": {
       "name": "Utilities",
       "sector": "Utilities",
-      "tickers": [
-        "AEP",
-        "CEG",
-        "EXC",
-        "XEL"
-      ],
-      "pairs": [
-        [
-          "AEP",
-          "XEL"
-        ],
-        [
-          "CEG",
-          "EXC"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Interest rates, power demand, regulatory"
     },
     "payments-fintech": {
       "name": "Payments & Fintech",
       "sector": "Technology",
-      "tickers": [
-        "PYPL",
-        "MSTR",
-        "APP"
-      ],
-      "pairs": [
-        [
-          "PYPL",
-          "APP"
-        ],
-        [
-          "MSTR",
-          "PYPL"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Digital payments, crypto, ad-tech monetization"
     },
     "energy": {
       "name": "Energy",
       "sector": "Energy",
-      "tickers": [
-        "BKR",
-        "FANG"
-      ],
-      "pairs": [
-        [
-          "BKR",
-          "FANG"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Oil/gas prices, drilling activity"
     },
     "retail": {
       "name": "Retail",
       "sector": "Consumer Discretionary",
-      "tickers": [
-        "COST",
-        "WMT",
-        "ORLY"
-      ],
-      "pairs": [
-        [
-          "COST",
-          "WMT"
-        ],
-        [
-          "ORLY",
-          "COST"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "Consumer spending, same-store sales"
     },
     "storage-hardware": {
       "name": "Storage & Hardware",
       "sector": "Technology",
-      "tickers": [
-        "STX",
-        "WDC"
-      ],
-      "pairs": [
-        [
-          "STX",
-          "WDC"
-        ]
-      ],
+      "tickers": [],
+      "pairs": [],
       "vol_driver": "HDD/SSD demand, data storage cycles"
     },
     "misc-singles": {
       "name": "Cross-Industry Singles",
       "sector": "Multi-Sector",
       "tickers": [
-        "LIN",
-        "CSGP",
-        "FER",
-        "TRI"
+        "1989",
+        "2005",
+        "1995",
+        "2001",
+        "2024",
+        "2007",
+        "2004",
+        "2000",
+        "2009",
+        "1990",
+        "2014",
+        "2002",
+        "2016",
+        "2013",
+        "2020",
+        "2011",
+        "2021",
+        "1999",
+        "1985",
+        "2003",
+        "1993",
+        "2006",
+        "2008",
+        "2018",
+        "2023",
+        "2022",
+        "2012",
+        "2019",
+        "1987",
+        "1988",
+        "1997",
+        "1994",
+        "2015",
+        "1998",
+        "1996",
+        "1986",
+        "1991",
+        "2017",
+        "2025",
+        "1992",
+        "2010"
       ],
-      "pairs": [
-        [
-          "LIN",
-          "FER"
-        ],
-        [
-          "CSGP",
-          "TRI"
-        ]
-      ],
+      "pairs": [],
       "vol_driver": "Cross-industry fundamentals"
     }
   }
