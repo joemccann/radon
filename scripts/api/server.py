@@ -37,7 +37,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from api.ib_pool import IBPool
 from api.subprocess import run_script, run_module, ScriptResult
-from api.ib_gateway import check_ib_gateway, ensure_ib_gateway, restart_ib_gateway, is_docker_mode, is_cloud_mode
+from api.ib_gateway import check_ib_gateway, ensure_ib_gateway, restart_ib_gateway, is_docker_mode, is_cloud_mode, is_launchd_mode
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.auth import verify_clerk_jwt, verify_api_key
@@ -108,6 +108,11 @@ async def lifespan(app: FastAPI):
     uw_available = bool(os.environ.get("UW_TOKEN"))
     if not uw_available:
         logger.warning("UW_TOKEN not set — UW-dependent endpoints will fail")
+
+        # Warm journal reconciliation + regime caches on startup so UI views do not render stale state.
+    asyncio.create_task(_warm_journal_reconciliation_on_startup())
+    asyncio.create_task(_warm_cri_cache_on_startup())
+    asyncio.create_task(_warm_gex_cache_on_startup())
 
     yield
 
@@ -190,6 +195,136 @@ def _write_cache(path: Path, data: dict) -> None:
         except OSError:
             pass
         raise
+
+
+def _today_et_str() -> str:
+    try:
+        from zoneinfo import ZoneInfo
+        return datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        return datetime.now().strftime("%Y-%m-%d")
+
+
+def _is_market_open_now_et() -> bool:
+    try:
+        from zoneinfo import ZoneInfo
+        et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        et = datetime.now()
+    if et.weekday() >= 5:
+        return False
+    minutes = et.hour * 60 + et.minute
+    return 9 * 60 + 30 <= minutes <= 16 * 60
+
+
+def _scan_time_to_et_date(scan_time: str) -> Optional[str]:
+    try:
+        ts = datetime.fromisoformat(scan_time.replace("Z", "+00:00"))
+        from zoneinfo import ZoneInfo
+        return ts.astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def _is_gex_cache_stale(data: Optional[dict], *, now_ts: Optional[float] = None, current_market_open: Optional[bool] = None, today_et: Optional[str] = None) -> bool:
+    """Market-aware GEX staleness check mirrored from the Next route logic."""
+    if not data or not isinstance(data, dict):
+        return True
+
+    scan_time = data.get("scan_time")
+    if not isinstance(scan_time, str) or not scan_time:
+        return True
+
+    today_et = today_et or _today_et_str()
+    current_market_open = _is_market_open_now_et() if current_market_open is None else current_market_open
+
+    session_date = _scan_time_to_et_date(scan_time)
+    if not session_date or session_date != today_et:
+        return True
+
+    if not current_market_open:
+        return False
+
+    try:
+        scan_dt = datetime.fromisoformat(scan_time.replace("Z", "+00:00"))
+        current_ts = now_ts if now_ts is not None else time.time()
+        return (current_ts - scan_dt.timestamp()) > 60
+    except Exception:
+        return True
+
+
+def _is_cri_cache_stale(data: Optional[dict], *, mtime_ms: Optional[float] = None, now_ts: Optional[float] = None, current_market_open: Optional[bool] = None, today_et: Optional[str] = None) -> bool:
+    """Market-aware CRI staleness check mirrored from the Next route logic."""
+    if not data or not isinstance(data, dict):
+        return True
+
+    today_et = today_et or _today_et_str()
+    current_market_open = _is_market_open_now_et() if current_market_open is None else current_market_open
+
+    data_date = data.get("date")
+    if not isinstance(data_date, str) or data_date != today_et:
+        return True
+
+    market_open_flag = data.get("market_open")
+    if market_open_flag is False and not current_market_open:
+        return False
+
+    if mtime_ms is None:
+        scan_time = data.get("scan_time")
+        if not isinstance(scan_time, str) or not scan_time:
+            return True
+        try:
+            mtime_ms = datetime.fromisoformat(scan_time.replace("Z", "+00:00")).timestamp() * 1000
+        except Exception:
+            return True
+
+    current_ms = (now_ts if now_ts is not None else time.time()) * 1000
+    return (current_ms - mtime_ms) > 60_000
+
+
+async def _warm_journal_reconciliation_on_startup() -> None:
+    logger.info("Journal startup reconcile triggered")
+    result = await run_script("ib_reconcile.py", [], timeout=120)
+    if result.ok:
+        logger.info("Journal startup reconcile complete")
+    else:
+        logger.warning("Journal startup reconcile failed: %s", result.error)
+
+
+async def _warm_cri_cache_on_startup() -> None:
+    cache_path = DATA_DIR / "cri.json"
+    cached = _read_cache(cache_path)
+    try:
+        mtime_ms = cache_path.stat().st_mtime * 1000
+    except Exception:
+        mtime_ms = None
+
+    if not _is_cri_cache_stale(cached, mtime_ms=mtime_ms):
+        logger.info("CRI startup warm skipped — cache fresh")
+        return
+
+    logger.info("CRI startup warm triggered")
+    result = await run_script("cri_scan.py", ["--json"], timeout=120)
+    if result.ok and result.data:
+        _write_cache(cache_path, result.data)
+        logger.info("CRI startup warm complete")
+    else:
+        logger.warning("CRI startup warm failed: %s", result.error)
+
+
+async def _warm_gex_cache_on_startup() -> None:
+    cached = _read_cache(DATA_DIR / "gex.json")
+    if not _is_gex_cache_stale(cached):
+        logger.info("GEX startup warm skipped — cache fresh")
+        return
+
+    logger.info("GEX startup warm triggered")
+    result = await run_script("gex_scan.py", ["--json", "--ticker", "SPX"], timeout=120)
+    if result.ok and result.data:
+        _write_cache(DATA_DIR / "gex.json", result.data)
+        logger.info("GEX startup warm complete")
+    else:
+        logger.warning("GEX startup warm failed: %s", result.error)
 
 
 def _atomic_save(path: str, data: dict) -> str:
@@ -940,6 +1075,15 @@ async def cta_share():
     return result.data
 
 
+@app.post("/journal/reconcile")
+async def journal_reconcile():
+    """Run IB reconciliation to refresh reconciliation.json for journal auto-import."""
+    result = await run_script("ib_reconcile.py", [], timeout=120)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data or {"ok": True}
+
+
 @app.post("/regime/scan")
 async def regime_scan():
     """Run CRI scan (cri_scan.py --json). 120s timeout."""
@@ -1238,6 +1382,18 @@ def _pool_has_any_connection() -> bool:
     return False
 
 
+def _should_auto_restart_ib_gateway_after_runtime_failure() -> bool:
+    """Runtime subprocess failures should not churn a local launchd/IBC session.
+
+    Startup still uses ensure_ib_gateway(); this only governs mid-session recovery.
+    """
+    if is_cloud_mode() or is_docker_mode():
+        return False
+    if is_launchd_mode():
+        return False
+    return True
+
+
 async def _run_ib_script_with_recovery(
     script: str, args: list, timeout: float = 30
 ) -> ScriptResult:
@@ -1303,19 +1459,33 @@ async def _run_ib_script_with_recovery(
             )
             return result
 
-        if is_cloud_mode() or is_docker_mode():
-            # Cloud/Docker manages Gateway reliability — don't attempt restart.
-            mode = "cloud" if is_cloud_mode() else "Docker"
-            logger.warning(
-                "IB Gateway unreachable in %s mode (port=%s, upstream_dead=%s) — not restarting (%s handles it)",
-                mode, port_ok, upstream_dead, mode,
-            )
-            msg = (
-                f"IB Gateway is not responding ({mode} mode). "
-                + ("Check remote host and Tailscale." if is_cloud_mode()
-                   else "Docker will auto-restart the container. Check IBKR Mobile for 2FA approval.")
-            )
-            result = ScriptResult(ok=False, error=msg)
+        if not _should_auto_restart_ib_gateway_after_runtime_failure():
+            if is_cloud_mode() or is_docker_mode():
+                # Cloud/Docker manages Gateway reliability — don't attempt restart.
+                mode = "cloud" if is_cloud_mode() else "Docker"
+                logger.warning(
+                    "IB Gateway unreachable in %s mode (port=%s, upstream_dead=%s) — not restarting (%s handles it)",
+                    mode, port_ok, upstream_dead, mode,
+                )
+                msg = (
+                    f"IB Gateway is not responding ({mode} mode). "
+                    + ("Check remote host and Tailscale." if is_cloud_mode()
+                       else "Docker will auto-restart the container. Check IBKR Mobile for 2FA approval.")
+                )
+                result = ScriptResult(ok=False, error=msg)
+            else:
+                logger.warning(
+                    "IB Gateway unreachable in local launchd mode (port=%s, upstream_dead=%s) — not auto-restarting to avoid repeated 2FA prompts",
+                    port_ok, upstream_dead,
+                )
+                result = ScriptResult(
+                    ok=False,
+                    error=(
+                        "IB Gateway is not responding (local launchd mode). "
+                        "Manual restart required to avoid repeated 2FA prompts. "
+                        "Use ~/ibc/bin/restart-secure-ibc-service.sh and approve IBKR Mobile 2FA if prompted."
+                    ),
+                )
         else:
             logger.warning(
                 "IB Gateway unreachable (port=%s, upstream_dead=%s), attempting auto-restart...",

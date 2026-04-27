@@ -31,19 +31,17 @@ describe("ib_realtime_server.js stale-data restart modes", () => {
     )?.[0] ?? "";
 
     expect(cloudDockerBlock).toContain('GATEWAY_MODE === "cloud" || GATEWAY_MODE === "docker"');
-    expect(cloudDockerBlock).toContain("ib.disconnect()");
-    expect(cloudDockerBlock).toContain("scheduleReconnect();");
+    expect(cloudDockerBlock).toContain("disconnecting and scheduling reconnect");
     expect(cloudDockerBlock).not.toContain("restart-secure-ibc-service.sh");
   });
 
-  it("uses ESM imports for launchd restarts instead of require()", () => {
-    const launchdBlock = source.match(/else \{\n    \/\/ LaunchD mode — shell out to restart IBC service[\s\S]*?\n  \}/)?.[0] ?? "";
+  it("does not restart local launchd IBC on stale ticks", () => {
+    const launchdBlock = source.match(/else \{\n    \/\/ Local launchd mode[\s\S]*?\n  \}/)?.[0] ?? "";
 
-    expect(source).toContain('import { execSync } from "node:child_process";');
-    expect(source).toContain('import { homedir } from "node:os";');
-    expect(source).not.toContain('require("child_process")');
-    expect(source).not.toContain('require("os")');
-    expect(launchdBlock).toContain("execSync(`");
-    expect(launchdBlock).toContain("homedir()");
+    expect(launchdBlock).toContain("manual IBC restart required");
+    expect(source).toContain("try { ib.disconnect(); } catch { /* ignore */ }");
+    expect(source).toContain("scheduleReconnect();");
+    expect(source).not.toContain("restart-secure-ibc-service.sh");
+    expect(source).not.toContain("execSync(");
   });
 });

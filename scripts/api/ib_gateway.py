@@ -467,6 +467,11 @@ def is_docker_mode() -> bool:
     return GATEWAY_MODE == "docker"
 
 
+def is_launchd_mode() -> bool:
+    """Return True if Gateway is managed by the local launchd/IBC service."""
+    return GATEWAY_MODE == "launchd"
+
+
 async def check_ib_gateway() -> Dict:
     """Check IB Gateway health. Returns status dict for /health endpoint."""
     if is_cloud_mode():

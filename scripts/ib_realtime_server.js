@@ -19,8 +19,6 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import net from "node:net";
-import { execSync } from "node:child_process";
-import { homedir } from "node:os";
 import { WebSocketServer } from "ws";
 import IB from "ib";
 import { classifyIBConnectionError } from "./ib_connection_status.js";
@@ -402,20 +400,14 @@ async function restartIBGateway() {
   if (GATEWAY_MODE === "cloud" || GATEWAY_MODE === "docker") {
     // Cloud/Docker — no local restart capability. Just reconnect the IB socket.
     console.log(`[stale-data] ${GATEWAY_MODE} mode — disconnecting and scheduling reconnect`);
-    try { ib.disconnect(); } catch { /* ignore */ }
-    scheduleReconnect();
   } else {
-    // LaunchD mode — shell out to restart IBC service
-    try {
-      execSync(`${homedir()}/ibc/bin/restart-secure-ibc-service.sh`, {
-        timeout: 60_000,
-        stdio: "pipe",
-      });
-      console.log("[stale-data] IB Gateway restart initiated — waiting for reconnect");
-    } catch (err) {
-      console.error("[stale-data] Failed to restart IB Gateway:", err.message);
-    }
+    // Local launchd mode — do NOT restart IBC from the relay.
+    // Repeated local restarts thrash the auth session and can trigger more 2FA prompts.
+    console.log("[stale-data] launchd mode — reconnecting IB socket only; manual IBC restart required if Gateway stays down");
   }
+
+  try { ib.disconnect(); } catch { /* ignore */ }
+  scheduleReconnect();
 
   // Allow another attempt after 120s cooldown
   setTimeout(() => { ibGatewayRestarting = false; }, 120_000);
