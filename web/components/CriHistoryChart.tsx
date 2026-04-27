@@ -38,7 +38,7 @@ interface CriHistoryChartProps {
   liveValues?: Partial<Record<keyof CriHistoryEntry, number>>;
 }
 
-const MARGIN = { top: 20, right: 56, bottom: 32, left: 48 };
+const MARGIN = { top: 20, right: 56, bottom: 44, left: 48 };
 const HEIGHT = 440;
 const CHART_GRID = "var(--chart-grid, var(--border-dim))";
 const CHART_AXIS = "var(--chart-axis, var(--border-dim))";
@@ -47,6 +47,29 @@ const CHART_SURFACE = "var(--chart-surface, var(--bg-panel))";
 
 function defaultFormat(v: number): string {
   return v.toFixed(2);
+}
+
+export function buildCriHistoryXAxisTickValues(dates: Date[], innerWidth: number): Date[] {
+  if (dates.length <= 1) return dates;
+
+  const maxLabels = Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
+  if (dates.length <= maxLabels) return dates;
+
+  const step = (dates.length - 1) / (maxLabels - 1);
+  const indices = new Set<number>();
+  for (let i = 0; i < maxLabels; i += 1) {
+    indices.add(Math.round(i * step));
+  }
+  indices.add(0);
+  indices.add(dates.length - 1);
+
+  return [...indices]
+    .sort((a, b) => a - b)
+    .map((index) => dates[index]);
+}
+
+export function shouldRotateCriHistoryXAxisLabels(innerWidth: number, tickCount: number): boolean {
+  return tickCount > 5 || innerWidth < 560;
 }
 
 export default function CriHistoryChart({
@@ -239,11 +262,12 @@ export default function CriHistoryChart({
           .attr("font-family", "IBM Plex Mono, monospace");
       });
 
-    // X-axis
-    const tickCount = Math.max(2, Math.min(chartData.length, Math.floor(innerW / 50)));
+    // X-axis — use explicit sparse ticks so labels stay legible on 20-session charts
+    const xTickValues = buildCriHistoryXAxisTickValues(dates, innerW);
+    const rotateXAxisLabels = shouldRotateCriHistoryXAxisLabels(innerW, xTickValues.length);
     const xAxis = d3
       .axisBottom(xScale)
-      .ticks(tickCount)
+      .tickValues(xTickValues)
       .tickFormat((d) => d3.timeFormat("%b %-d")(d as Date));
 
     g.append("g")
@@ -256,7 +280,11 @@ export default function CriHistoryChart({
           .selectAll(".tick text")
           .attr("fill", CHART_AXIS_MUTED)
           .attr("font-size", "10px")
-          .attr("font-family", "IBM Plex Mono, monospace");
+          .attr("font-family", "IBM Plex Mono, monospace")
+          .attr("text-anchor", rotateXAxisLabels ? "end" : "middle")
+          .attr("dx", rotateXAxisLabels ? "-0.4em" : "0")
+          .attr("dy", rotateXAxisLabels ? "0.6em" : "0.9em")
+          .attr("transform", rotateXAxisLabels ? "rotate(-24)" : null);
       });
 
     // Invisible overlay for tooltip

@@ -140,8 +140,8 @@ export default function RegimePanel({
   const marketOpen = data?.market_open ?? true;
 
   const stripState = useMemo(
-    () => resolveRegimeStripLiveState({ prices, data }),
-    [prices, data],
+    () => resolveRegimeStripLiveState({ prices, data, marketOpen }),
+    [prices, data, marketOpen],
   );
   const {
     liveVix,

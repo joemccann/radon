@@ -36,7 +36,7 @@ function formatDateLabel(value: string): string {
   return DATE_FORMATTER.format(date);
 }
 
-function buildTickIndices(length: number, count = 4): number[] {
+export function buildTickIndices(length: number, count = 4): number[] {
   if (length <= count) {
     return Array.from({ length }, (_, index) => index);
   }
@@ -46,7 +46,13 @@ function buildTickIndices(length: number, count = 4): number[] {
   for (let tick = 0; tick < count; tick += 1) {
     indices.add(Math.round(step * tick));
   }
+  indices.add(0);
+  indices.add(length - 1);
   return Array.from(indices).sort((a, b) => a - b);
+}
+
+export function resolveRelationshipTickCount(innerWidth: number): number {
+  return Math.max(4, Math.min(7, Math.floor(innerWidth / 110)));
 }
 
 function spreadStateColor(state: string): string {
@@ -126,7 +132,7 @@ export default function RegimeRelationshipView({
   const innerWidth = CHART_WIDTH - MARGIN.left - MARGIN.right;
   const innerHeight = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
   const xScale = d3.scaleLinear().domain([0, entries.length - 1]).range([0, innerWidth]);
-  const tickIndices = buildTickIndices(entries.length);
+  const tickIndices = buildTickIndices(entries.length, resolveRelationshipTickCount(innerWidth));
 
   const spreadMax = Math.max(
     ...entries.map((entry) => Math.abs(entry.spread)),

@@ -19,6 +19,7 @@ type RegimeStripData = Pick<
 type ResolveRegimeStripLiveStateInput = {
   prices: Record<string, PriceData>;
   data?: Partial<RegimeStripData> | null;
+  marketOpen?: boolean;
 };
 
 export type RegimeStripLiveState = {
@@ -46,11 +47,12 @@ export type RegimeStripLiveState = {
 export function resolveRegimeStripLiveState({
   prices,
   data,
+  marketOpen = true,
 }: ResolveRegimeStripLiveStateInput): RegimeStripLiveState {
-  const liveVix = prices.VIX?.last ?? null;
-  const liveVvix = prices.VVIX?.last ?? null;
-  const liveSpy = prices.SPY?.last ?? null;
-  const liveCor1m = prices.COR1M?.last ?? null;
+  const liveVix = marketOpen ? prices.VIX?.last ?? null : null;
+  const liveVvix = marketOpen ? prices.VVIX?.last ?? null : null;
+  const liveSpy = marketOpen ? prices.SPY?.last ?? null : null;
+  const liveCor1m = marketOpen ? prices.COR1M?.last ?? null : null;
 
   const vixClose = prices.VIX?.close ?? data?.vix ?? null;
   const vvixClose = prices.VVIX?.close ?? data?.vvix ?? null;
