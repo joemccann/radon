@@ -21,6 +21,7 @@ import Header from "@/components/Header";
 import ChatPanel from "@/components/ChatPanel";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
+import DashboardNewsFeed from "@/components/DashboardNewsFeed";
 
 const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections"), {
   loading: () => null,
@@ -349,7 +350,12 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
         <FlexTokenBanner />
 
         <div className="content">
-          {activeSection === "dashboard" ? <ChatPanel activeSection={activeSection} /> : null}
+          {activeSection === "dashboard" ? (
+            <div className="dashboard-grid">
+              <DashboardNewsFeed />
+              <ChatPanel activeSection={activeSection} />
+            </div>
+          ) : null}
 
           {activeSection !== "dashboard" && activeSection !== "ticker-detail" ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
 

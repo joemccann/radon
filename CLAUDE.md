@@ -144,13 +144,16 @@ All three required or overlap bug returns. Tests: `chain-sticky-header.test.ts` 
 
 Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/radonApi.ts`). No `spawn()`.
 
-### Three-Service Dev Stack (`npm run dev`)
+### Four-Service Dev Stack (`npm run dev`)
 
-| Service | Port |
-|---------|------|
+| Service | Port / Cadence |
+|---------|----------------|
 | Next.js | 3000 |
 | IB WS relay | 8765 |
 | FastAPI | 8321 |
+| Newsfeed scraper | every 120s (no port) |
+
+`dev:next` and `dev:prices` stay single-purpose (no scraper).
 
 ### FastAPI Files (`scripts/api/`)
 
@@ -241,6 +244,25 @@ Startup: check port 4001 + CLOSE_WAIT detection, restart if needed, poll 45s. Ru
 
 `scripts/portfolio_performance.py` — Phase A (sequential): IB + cache. Phase B (ThreadPool): UW/Yahoo fallbacks. `PERF_FETCH_WORKERS` env (default 8). Disk cache: `data/price_history_cache/`, TTL 15min/24h. SWR via `POST /performance/background`. Tests: 211 (160 Python + 51 TS).
 
+### Market Ear Newsfeed Scraper
+
+Polls `themarketear.com/newsfeed` every 120s via the chrome-cdp-skill CLI. Module split under `scripts/newsfeed/`:
+
+| File | Responsibility |
+|------|----------------|
+| `paths.js` | `resolveScraperPaths`, `seedPostsFileIfMissing` (env-override aware) |
+| `cdp.js` | `runCdpCommand`, `listTargets`, `selectMarketEarTab` |
+| `extract.js` | `buildExtractionExpression()` IIFE source + `parsePayload()` discriminated union (`source: dom \| parse \| shape`) |
+| `media.js` | `createImageDownloader` + `hydrateLocalImages` (preserves "don't blank thumbs on partial fail" rule) |
+| `store.js` | `loadExistingPosts`, `mergePosts`, `persistPosts` (rollover/truncate at 500 KB → archive + keep `ceil(N×0.2)`) |
+| `scheduler.js` | `runForever` — non-overlapping cycle (await `scrapeOnce`; sleep remainder); pure |
+| `index.js` | Wires modules, owns SIGINT/SIGTERM → AbortController, exports `run` and `scrapeOnce` |
+
+`scripts/newsfeed-scraper.js` is a backwards-compat shim. Output JSON shape (`web/public/data/posts.json`) is locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`: `id, title, content?, timestamp, images?, rawImages?, createdAt?, updatedAt?`).
+
+**Env overrides:** `RADON_NEWSFEED_DATA_DIR`, `_POSTS_FILE`, `_ARCHIVE_DIR`, `_MEDIA_DIR`, `_PUBLIC_ROOT`, `CDP_CLI`.
+**Tests:** `web/tests/newsfeed-scraper.test.ts` — 14 cases / 5 suites (`mergePosts`, `persistPosts` rollover, extractor against jsdom incl. malformed-ld+json fallback, `parsePayload`, `seedPostsFileIfMissing`).
+
 ## Evaluation — 7 Milestones (Stop on Failure)
 
 1. Validate ticker → `scripts/fetch_ticker.py`
@@ -304,6 +326,8 @@ When evaluating during market hours, today's partial data is volume-weighted int
 | `scripts/utils/atomic_io.py` | Atomic JSON save/load + SHA-256 |
 | `scripts/monitor_daemon/run.py` | Monitor daemon — fills, exit orders, rebalance |
 | `scripts/gex_scan.py` | GEX levels scanner — flip, magnets, accelerators, bias |
+| `scripts/newsfeed/index.js` | Market Ear newsfeed scraper — 7-module split, 120s polling, runs as 4th `dev` service |
+| `scripts/newsfeed-scraper.js` | Backwards-compat shim forwarding to `scripts/newsfeed/` |
 
 ## Critical Data Files
 

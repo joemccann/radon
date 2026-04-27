@@ -114,6 +114,10 @@ logs/*
 logs/menthorq_artifacts/
 web/data/
 
+# Newsfeed scraper runtime artifacts (regenerated each cycle)
+web/public/data/
+web/public/media/
+
 # Temp files
 tmp/
 /nanobanana-output/
