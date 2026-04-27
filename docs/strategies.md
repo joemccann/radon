@@ -249,7 +249,7 @@ When fetching any market data, **ALWAYS** use sources in this priority order:
 | **2nd** | Unusual Whales | Dark pool flow, options activity, institutional signals, analyst ratings | API key required |
 | **3rd** | Exa (web search) | Company research, news, data not in IB/UW | API key required |
 | **4th** | agent-browser | Interactive pages, JS-rendered content | Slow, fallback only |
-| **5th** | Cboe official index feeds | COR1M historical fallback before Yahoo | COR1M-specific, delayed historical feed |
+| **5th** | Cboe official index feeds | COR1M historical fallback before Yahoo; official VIX/VVIX daily close verification after market close + 20 minutes ET | COR1M delayed historical feed; VIX_History.csv and VVIX_History.csv official daily close files |
 | **6th ⚠️** | Yahoo Finance | **ABSOLUTE LAST RESORT** — only if ALL above fail | Rate limited, unreliable, delayed |
 
 **For COR1M, use the official Cboe dashboard historical feed before Yahoo Finance.**
@@ -714,6 +714,8 @@ Full mathematical specification: [`cross_asset_volatility_credit_gap_spec_(VCG).
 ### Thesis
 
 Systematic CTA funds (~$400B AUM) use vol-targeting: they maintain 10% portfolio volatility by adjusting equity exposure inversely to realized vol. When realized vol doubles, they must halve exposure — creating predictable, mechanical selling cascades ($200B+ in March 2020). The CRI detects when three crash regime signals converge: VIX rising, the Cboe 1-Month Implied Correlation Index (COR1M) spiking, and SPX breaking below its 100-day moving average.
+
+**VIX/VVIX close verification rule:** when the market has been closed for at least 20 minutes ET and the latest IB/1Y daily bars still end on the prior session, verify the current-session VIX and VVIX close against the official Cboe CSV files (`VIX_History.csv`, `VVIX_History.csv`) before appending the post-close snapshot. This prevents stale frozen IB quotes from leaking into the CRI close-of-day view.
 
 **The edge is predictability, not direction.** CTA selling is mechanical and time-bound (3-5 days). Knowing it's coming allows you to position defensively or profit from the cascade.
 

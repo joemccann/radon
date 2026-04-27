@@ -2,7 +2,7 @@
 
 All tests are pure computation — no network calls.
 """
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 import math
 from types import SimpleNamespace
 
@@ -14,8 +14,14 @@ from cri_scan import (
     _extract_ib_quote_value,
     _connect_ib_with_retry,
     append_post_close_snapshot,
+    build_post_close_snapshot,
     cor1m_level_and_change,
     fetch_all,
+    fetch_cboe_daily_close_from_csv,
+    fetch_cboe_vix_close,
+    fetch_cboe_vvix_close,
+    current_session_date_et,
+    is_post_close_cboe_official_window,
     score_vix_component,
     score_vvix_component,
     score_correlation_component,
@@ -179,6 +185,82 @@ class TestCor1mHistoricalFallbackOrder:
         assert set(aligned.keys()) == {"VIX", "VVIX", "SPY", "COR1M"}
         assert len(common_dates) == 130
         assert [ticker for ticker, _ in yahoo_calls] == ["VIX", "VVIX", "SPY"]
+
+
+class TestCboeOfficialVolatilityCloses:
+    def test_fetch_cboe_daily_close_from_csv_parses_vix_close(self, monkeypatch):
+        csv_payload = "DATE,OPEN,HIGH,LOW,CLOSE\n04/21/2026,20.01,20.50,18.90,19.64\n04/22/2026,19.00,19.15,18.55,18.92\n"
+        monkeypatch.setattr("cri_scan._download_cboe_csv_rows", lambda _url: [
+            {"DATE": "04/21/2026", "OPEN": "20.01", "HIGH": "20.50", "LOW": "18.90", "CLOSE": "19.64"},
+            {"DATE": "04/22/2026", "OPEN": "19.00", "HIGH": "19.15", "LOW": "18.55", "CLOSE": "18.92"},
+        ])
+        assert fetch_cboe_daily_close_from_csv("https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv", "2026-04-22") == pytest.approx(18.92)
+
+    def test_fetch_cboe_vvix_close_uses_vvix_column(self, monkeypatch):
+        monkeypatch.setattr("cri_scan._download_cboe_csv_rows", lambda _url: [
+            {"DATE": "04/21/2026", "VVIX": "99.50"},
+            {"DATE": "04/22/2026", "VVIX": "97.13"},
+        ])
+        assert fetch_cboe_vvix_close("2026-04-22") == pytest.approx(97.13)
+
+    def test_fetch_cboe_vix_close_uses_official_url(self, monkeypatch):
+        seen = {}
+
+        def fake_fetch(url: str, session_date: str, value_column: str = "CLOSE"):
+            seen["url"] = url
+            seen["session_date"] = session_date
+            seen["value_column"] = value_column
+            return 18.92
+
+        monkeypatch.setattr("cri_scan.fetch_cboe_daily_close_from_csv", fake_fetch)
+        assert fetch_cboe_vix_close("2026-04-22") == pytest.approx(18.92)
+        assert seen == {
+            "url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv",
+            "session_date": "2026-04-22",
+            "value_column": "CLOSE",
+        }
+
+    def test_fetch_cboe_vvix_close_uses_official_url(self, monkeypatch):
+        seen = {}
+
+        def fake_fetch(url: str, session_date: str, value_column: str = "CLOSE"):
+            seen["url"] = url
+            seen["session_date"] = session_date
+            seen["value_column"] = value_column
+            return 97.13
+
+        monkeypatch.setattr("cri_scan.fetch_cboe_daily_close_from_csv", fake_fetch)
+        assert fetch_cboe_vvix_close("2026-04-22") == pytest.approx(97.13)
+        assert seen == {
+            "url": "https://cdn.cboe.com/api/global/us_indices/daily_prices/VVIX_History.csv",
+            "session_date": "2026-04-22",
+            "value_column": "VVIX",
+        }
+
+    def test_post_close_cboe_window_starts_after_420pm_et(self):
+        assert is_post_close_cboe_official_window(datetime(2026, 4, 22, 16, 19)) is False
+        assert is_post_close_cboe_official_window(datetime(2026, 4, 22, 16, 20)) is True
+
+    def test_build_post_close_snapshot_prefers_official_cboe_for_vix_and_vvix(self, monkeypatch):
+        monkeypatch.setattr("cri_scan.fetch_cboe_vix_close", lambda session_date: 18.92)
+        monkeypatch.setattr("cri_scan.fetch_cboe_vvix_close", lambda session_date: 97.13)
+        monkeypatch.setattr("cri_scan.fetch_preferred_current_quote", lambda ticker: {"SPY": 711.21}.get(ticker))
+        monkeypatch.setattr("cri_scan.fetch_cor1m_current_quote", lambda: 11.53)
+
+        snapshot = build_post_close_snapshot("2026-04-22", use_official_cboe_close=True)
+
+        assert snapshot == {
+            "VIX": pytest.approx(18.92),
+            "VVIX": pytest.approx(97.13),
+            "SPY": pytest.approx(711.21),
+            "COR1M": pytest.approx(11.53),
+        }
+
+    def test_current_session_date_uses_prior_session_before_open(self):
+        assert current_session_date_et(datetime(2026, 4, 23, 7, 35)) == "2026-04-22"
+
+    def test_current_session_date_uses_prior_friday_on_weekend(self):
+        assert current_session_date_et(datetime(2026, 4, 25, 10, 0)) == "2026-04-24"
 
 
 class TestCor1mHistoricalFallback:

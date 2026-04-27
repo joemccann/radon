@@ -87,5 +87,6 @@ An evaluation is complete when:
 1. **Interactive Brokers** — Real-time quotes, positions, executions
 2. **Unusual Whales** — Dark pool flow, options activity, alerts, analyst ratings
 3. **Exa (web search)** — Company research, code/docs lookup
-4. **agent-browser** — Interactive pages, JS-rendered content
-5. **Yahoo Finance** — **ABSOLUTE LAST RESORT** — only if ALL above sources fail (rate limited, unreliable)
+4. **Cboe official index feeds** — Official VIX/VVIX daily close verification after market close + 20 minutes ET; COR1M historical fallback
+5. **agent-browser** — Interactive pages, JS-rendered content
+6. **Yahoo Finance** — **ABSOLUTE LAST RESORT** — only if ALL above sources fail (rate limited, unreliable)

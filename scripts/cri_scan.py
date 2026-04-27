@@ -13,8 +13,9 @@ Data sources (priority order):
   1. Interactive Brokers — Index('VIX','CBOE'), Index('VVIX','CBOE'),
      Index('COR1M','CBOE'), Stock('SPY','SMART','USD')
   2. Unusual Whales — OHLC for SPY only. Does NOT support VIX/VVIX/COR1M.
-  3. Cboe COR1M dashboard historical feed — COR1M only, via the official
-     dashboard endpoint used by the site's download workflow.
+  3. Cboe official feeds — COR1M dashboard historical feed plus official
+     VIX_History.csv / VVIX_History.csv daily close verification after market
+     close + 20 minutes ET.
   4. Yahoo Finance — ABSOLUTE LAST RESORT. Only for remaining gaps after
      higher-priority sources fail; COR1M reaches Yahoo only if IB + Cboe fail.
 
@@ -26,6 +27,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import csv
 import json
 import math
 import sys
@@ -66,6 +68,9 @@ YAHOO_TICKERS = {
     "COR1M": "^COR1M",
 }
 CBOE_COR1M_HISTORICAL_URL = "https://cdn.cboe.com/api/global/delayed_quotes/charts/historical/_COR1M.json"
+CBOE_VIX_HISTORY_CSV_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX_History.csv"
+CBOE_VVIX_HISTORY_CSV_URL = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VVIX_History.csv"
+CBOE_POST_CLOSE_VERIFICATION_MINUTES = 20
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -228,6 +233,23 @@ def _fetch_yahoo_chart_result(ticker: str, days: int = 400) -> Optional[Dict[str
 
 
 @lru_cache(maxsize=1)
+def _download_cboe_csv_rows(url: str) -> List[Dict[str, str]]:
+    """Download and parse a Cboe CSV file into a list of row dictionaries."""
+    from urllib.request import Request, urlopen
+
+    req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+    try:
+        with urlopen(req, timeout=10) as resp:
+            payload = resp.read().decode("utf-8", "ignore")
+    except Exception as exc:
+        print(f"  CBOE CSV download failed ({url}) — {exc}", file=sys.stderr)
+        return []
+
+    rows = list(csv.DictReader(payload.splitlines()))
+    return [row for row in rows if isinstance(row, dict)]
+
+
+@lru_cache(maxsize=1)
 def _fetch_cboe_cor1m_payload() -> Optional[Dict[str, Any]]:
     """Fetch the official COR1M history payload used by the Cboe dashboard."""
     from urllib.request import Request, urlopen
@@ -278,6 +300,39 @@ def _fetch_cboe_cor1m_current_quote() -> Optional[float]:
     if not bars:
         return None
     return bars[-1][1]
+
+
+def _parse_cboe_csv_date(raw_date: str) -> Optional[str]:
+    try:
+        return datetime.strptime(raw_date, "%m/%d/%Y").strftime("%Y-%m-%d")
+    except Exception:
+        return None
+
+
+def fetch_cboe_daily_close_from_csv(url: str, session_date: str, value_column: str = "CLOSE") -> Optional[float]:
+    """Return the official Cboe daily close for a given ET session date from CSV."""
+    rows = _download_cboe_csv_rows(url)
+    for row in reversed(rows):
+        row_date = _parse_cboe_csv_date(str(row.get("DATE", "")))
+        if row_date != session_date:
+            continue
+        raw_value = row.get(value_column)
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError):
+            return None
+        if math.isnan(value) or math.isinf(value):
+            return None
+        return value
+    return None
+
+
+def fetch_cboe_vix_close(session_date: str) -> Optional[float]:
+    return fetch_cboe_daily_close_from_csv(CBOE_VIX_HISTORY_CSV_URL, session_date, value_column="CLOSE")
+
+
+def fetch_cboe_vvix_close(session_date: str) -> Optional[float]:
+    return fetch_cboe_daily_close_from_csv(CBOE_VVIX_HISTORY_CSV_URL, session_date, value_column="VVIX")
 
 
 def _fetch_yahoo(ticker: str, days: int = 400) -> List[Tuple[str, float]]:
@@ -434,15 +489,38 @@ def fetch_cor1m_current_quote() -> Optional[float]:
     return selected
 
 
-def current_session_date_et() -> str:
-    """Return today's session date in Eastern Time as YYYY-MM-DD."""
-    try:
-        import zoneinfo
+def current_session_date_et(now: Optional[datetime] = None) -> str:
+    """Return the active ET market session date as YYYY-MM-DD.
 
-        return datetime.now(zoneinfo.ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
-    except Exception:
-        now_et = datetime.now(timezone.utc) + timedelta(hours=-5)
-        return now_et.strftime("%Y-%m-%d")
+    Before the cash open, use the prior trading session. After the open,
+    use the current calendar day. Weekends resolve to the prior Friday.
+    """
+    now_et = _now_et(now)
+
+    def previous_trading_day(dt: datetime) -> datetime:
+        candidate = dt - timedelta(days=1)
+        while candidate.weekday() >= 5:
+            candidate -= timedelta(days=1)
+        return candidate
+
+    if now_et.weekday() >= 5:
+        return previous_trading_day(now_et).strftime("%Y-%m-%d")
+
+    minutes = now_et.hour * 60 + now_et.minute
+    if minutes < 9 * 60 + 30:
+        return previous_trading_day(now_et).strftime("%Y-%m-%d")
+
+    return now_et.strftime("%Y-%m-%d")
+
+
+def build_post_close_snapshot(session_date: str, use_official_cboe_close: bool) -> Dict[str, Optional[float]]:
+    """Build the end-of-day snapshot used when daily bars lag the current ET session."""
+    return {
+        "VIX": fetch_cboe_vix_close(session_date) if use_official_cboe_close else fetch_preferred_current_quote("VIX"),
+        "VVIX": fetch_cboe_vvix_close(session_date) if use_official_cboe_close else fetch_preferred_current_quote("VVIX"),
+        "SPY": fetch_preferred_current_quote("SPY"),
+        "COR1M": fetch_cor1m_current_quote(),
+    }
 
 
 def append_post_close_snapshot(
@@ -1378,22 +1456,36 @@ def generate_html_report(
 # Market Hours Check
 # ══════════════════════════════════════════════════════════════════
 
-def is_market_open() -> bool:
-    """Check if US equity markets are currently open."""
+def _now_et(now: Optional[datetime] = None) -> datetime:
     import zoneinfo
     try:
         et = zoneinfo.ZoneInfo("America/New_York")
+        if now is not None:
+            return now.astimezone(et) if now.tzinfo else now
+        return datetime.now(et)
     except Exception:
+        if now is not None:
+            return now
         now_utc = datetime.now(timezone.utc)
-        et_offset = timedelta(hours=-5)
-        now_et = now_utc + et_offset
-        return now_et.weekday() < 5 and 9 * 60 + 30 <= now_et.hour * 60 + now_et.minute <= 16 * 60
+        return now_utc + timedelta(hours=-5)
 
-    now_et = datetime.now(et)
+
+def is_market_open(now: Optional[datetime] = None) -> bool:
+    """Check if US equity markets are currently open."""
+    now_et = _now_et(now)
     if now_et.weekday() >= 5:
         return False
     minutes = now_et.hour * 60 + now_et.minute
     return 9 * 60 + 30 <= minutes <= 16 * 60
+
+
+def is_post_close_cboe_official_window(now: Optional[datetime] = None) -> bool:
+    """True once the official Cboe daily close should be available after 4:20pm ET."""
+    now_et = _now_et(now)
+    if now_et.weekday() >= 5:
+        return False
+    minutes = now_et.hour * 60 + now_et.minute
+    return minutes >= (16 * 60 + CBOE_POST_CLOSE_VERIFICATION_MINUTES)
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -1450,12 +1542,16 @@ Examples:
                 f"  Post-close daily bars still end on {common_dates[-1]} — attempting today's closing snapshot",
                 file=sys.stderr,
             )
-            closing_snapshot = {
-                "VIX": fetch_preferred_current_quote("VIX"),
-                "VVIX": fetch_preferred_current_quote("VVIX"),
-                "SPY": fetch_preferred_current_quote("SPY"),
-                "COR1M": fetch_cor1m_current_quote(),
-            }
+            use_official_cboe_close = is_post_close_cboe_official_window()
+            if use_official_cboe_close:
+                print(
+                    f"  Using official Cboe daily close verification for VIX/VVIX after {CBOE_POST_CLOSE_VERIFICATION_MINUTES} minutes post-close",
+                    file=sys.stderr,
+                )
+            closing_snapshot = build_post_close_snapshot(
+                session_date=session_date,
+                use_official_cboe_close=use_official_cboe_close,
+            )
             aligned, common_dates, appended = append_post_close_snapshot(
                 aligned,
                 common_dates,
