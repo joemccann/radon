@@ -24,5 +24,9 @@ export default defineConfig({
     url: `http://localhost:${PORT}`,
     reuseExistingServer: true,
     timeout: 60_000,
+    env: {
+      ...process.env,
+      RADON_AUTHLESS_TEST: "1",
+    },
   },
 });
