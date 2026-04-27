@@ -62,9 +62,19 @@ class TestRatioDetection:
             {'secType': 'OPT', 'right': 'C', 'position': 50, 'strike': 115.0},
         ]
         desc = format_structure_description("Ratio Risk Reversal", legs)
-        assert "1x2" in desc
+        assert "50x25" in desc
         assert "P$85.0" in desc
         assert "C$115.0" in desc
+
+    def test_ratio_risk_reversal_description_uses_actual_leg_counts_in_long_short_order(self):
+        """Risk reversal labels should follow the displayed long/short leg order, not strike sort or reduced GCD form."""
+        legs = [
+            {'secType': 'OPT', 'right': 'P', 'position': -10, 'strike': 400.0},
+            {'secType': 'OPT', 'right': 'C', 'position': 75, 'strike': 410.0},
+        ]
+        desc = format_structure_description("Ratio Risk Reversal", legs)
+        assert "75x10" in desc
+        assert "2x15" not in desc
 
     def test_plain_risk_reversal_description_no_ratio(self):
         """Standard risk reversal description has no ratio prefix."""

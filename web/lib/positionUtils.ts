@@ -80,8 +80,12 @@ export function resolveMarketValue(pos: PortfolioPosition): number | null {
   return single?.market_value ?? null;
 }
 
+function getLegMultiplier(leg: { type: string }): number {
+  return leg.type === "Stock" ? 1 : 100;
+}
+
 export function getMultiplier(pos: PortfolioPosition): number {
-  return pos.structure_type === "Stock" ? 1 : 100;
+  return pos.structure_type === "Stock" || pos.legs.some((leg) => leg.type === "Stock") ? 1 : 100;
 }
 
 export function resolveEntryCost(pos: PortfolioPosition): number {
@@ -238,7 +242,7 @@ function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>)
     const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
     if (current == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
-    rtMv += sign * current * leg.contracts * 100;
+    rtMv += sign * current * leg.contracts * getLegMultiplier(leg);
   }
   return rtMv;
 }
@@ -272,8 +276,9 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
     if (current == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
     if (lp?.close != null && lp.close > 0) {
-      wsDailyPnl += sign * (current - lp.close) * leg.contracts * 100;
-      closeValue += sign * lp.close * leg.contracts * 100;
+      const multiplier = getLegMultiplier(leg);
+      wsDailyPnl += sign * (current - lp.close) * leg.contracts * multiplier;
+      closeValue += sign * lp.close * leg.contracts * multiplier;
       hasClose = true;
     }
   }
@@ -315,7 +320,7 @@ export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<strin
     const close = lp?.close;
     if (close != null && close > 0) {
       const sign = leg.direction === "LONG" ? 1 : -1;
-      pnl += sign * (last - close) * leg.contracts * 100;
+      pnl += sign * (last - close) * leg.contracts * getLegMultiplier(leg);
       hasClose = true;
     }
   }

@@ -116,6 +116,10 @@ function getDailyChange(realtimePrice?: PriceData | null): number | null {
   return ((last - close) / close) * 100;
 }
 
+function getLegMultiplier(leg: { type: string }): number {
+  return leg.type === "Stock" ? 1 : 100;
+}
+
 function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock") return null;
   let rtMv = 0;
@@ -125,7 +129,7 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
     const current = resolveRealtimePrice(lp, leg.market_price, Boolean(leg.market_price_is_calculated)).price;
     if (current == null) return null;
     const sign = leg.direction === "LONG" ? 1 : -1;
-    rtMv += sign * current * leg.contracts * 100;
+    rtMv += sign * current * leg.contracts * getLegMultiplier(leg);
   }
   return rtMv;
 }
@@ -250,11 +254,12 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
       if (current == null) return null;
       priceIsCalculated = priceIsCalculated || resolved.isCalculated;
       const sign = leg.direction === "LONG" ? 1 : -1;
-      rtMv += sign * current * leg.contracts * 100;
+      const multiplier = getLegMultiplier(leg);
+      rtMv += sign * current * leg.contracts * multiplier;
       const close = lp?.close;
       if (close != null && close > 0) {
-        rtDailyPnl += sign * (current - close) * leg.contracts * 100;
-        rtCloseValue += sign * close * leg.contracts * 100;
+        rtDailyPnl += sign * (current - close) * leg.contracts * multiplier;
+        rtCloseValue += sign * close * leg.contracts * multiplier;
         hasCloseData = true;
       }
     }

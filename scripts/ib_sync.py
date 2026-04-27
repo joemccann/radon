@@ -234,8 +234,19 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
     return f"Combo ({len(legs)} legs)", "complex"
 
 
+def _raw_ratio_label(legs: list) -> str:
+    """Compute raw NxM contract counts for two legs, e.g. '75x10'."""
+    if len(legs) != 2:
+        return ""
+    a = int(abs(legs[0].get('position', legs[0].get('contracts', 0))))
+    b = int(abs(legs[1].get('position', legs[1].get('contracts', 0))))
+    if a == b or a == 0 or b == 0:
+        return ""
+    return f"{a}x{b}"
+
+
 def _ratio_label(legs: list) -> str:
-    """Compute NxM ratio label from leg contract counts, e.g. '1x2'.
+    """Compute normalized NxM ratio label from leg contract counts, e.g. '1x2'.
 
     Returns empty string if legs have equal counts (not a ratio).
     Reduces to smallest integer ratio via GCD.
@@ -250,6 +261,25 @@ def _ratio_label(legs: list) -> str:
     return f"{a // g}x{b // g}"
 
 
+def _display_ratio_label(structure_type: str, opt_legs: list, all_legs: list) -> str:
+    """Return the display ratio label for a structure.
+
+    Risk reversals/synthetics should show actual contract counts in displayed
+    long-short leg order so the label matches the expanded leg rows and top-row
+    quantity. Other ratio structures keep the normalized NxM form.
+    """
+    if "Ratio" not in structure_type:
+        return ""
+
+    if "Risk Reversal" in structure_type or "Synthetic" in structure_type:
+        long_legs = [l for l in all_legs if l.get('secType') == 'OPT' and l.get('position', 0) > 0]
+        short_legs = [l for l in all_legs if l.get('secType') == 'OPT' and l.get('position', 0) < 0]
+        if len(long_legs) == 1 and len(short_legs) == 1:
+            return _raw_ratio_label([long_legs[0], short_legs[0]])
+
+    return _ratio_label(opt_legs)
+
+
 def format_structure_description(structure_type: str, legs: list) -> str:
     """Create human-readable structure description with strikes"""
     if structure_type == "Stock":
@@ -261,7 +291,7 @@ def format_structure_description(structure_type: str, legs: list) -> str:
     if not opt_legs:
         return structure_type
 
-    ratio = _ratio_label(opt_legs) if "Ratio" in structure_type else ""
+    ratio = _display_ratio_label(structure_type, opt_legs, legs)
     ratio_suffix = f" {ratio}" if ratio else ""
 
     if "Spread" in structure_type:
