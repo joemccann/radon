@@ -136,6 +136,13 @@ web/verify-regime-internals.mjs
 /.claude/worktrees/
 /.claude/hooks/dead-code.manifest
 
+# Local skill / agent installations (per-developer, not checked in)
+/.agents/
+/.claude/skills/
+/.pi/skills/
+/skills-lock.json
+/radon-dark-full.png
+
 # =============================================================================
 # Vendor (downloaded binaries, not checked in)
 # =============================================================================
