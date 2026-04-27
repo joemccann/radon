@@ -584,7 +584,10 @@ function groupExecutedOrders(
 
 function blotterShareData(t: BlotterTrade): SharePnlData {
   const lastExec = t.executions.length > 0 ? t.executions[t.executions.length - 1] : null;
-  const pnlPct = t.cost_basis !== 0 ? (t.realized_pnl / Math.abs(t.cost_basis)) * 100 : null;
+  const realizedPnl = t.realized_pnl ?? 0;
+  const realizedBasisRaw = t.realized_cost_basis ?? t.cost_basis;
+  const realizedBasis = realizedBasisRaw != null ? Math.abs(realizedBasisRaw) : 0;
+  const pnlPct = realizedBasis > 0 ? (realizedPnl / realizedBasis) * 100 : null;
   // Derive per-unit entry/exit from execution prices (weighted average)
   let entryPrice: number | null = null;
   let exitPrice: number | null = null;
@@ -630,7 +633,7 @@ function blotterShareData(t: BlotterTrade): SharePnlData {
 
   return {
     description: t.contract_desc || t.symbol,
-    pnl: t.realized_pnl,
+    pnl: realizedPnl,
     pnlPct,
     commission: t.total_commission,
     fillPrice: lastExec?.price ?? null,
@@ -2160,34 +2163,44 @@ export function HistoricalTradesSection() {
                 </tr>
               </thead>
               <tbody>
-                {pageRows.map((t, i) => (
-                  <tr key={`${t.symbol}-${t.contract_desc}-${i}`}>
-                    <td>{getTradeDate(t) ? new Date(getTradeDate(t)).toLocaleDateString() : "—"}</td>
-                    <td><TickerLink ticker={t.symbol} /></td>
-                    <td>{t.contract_desc}</td>
-                    <td>{t.sec_type}</td>
-                    <td>
-                      <span className={`pill ${t.is_closed ? "neutral" : "defined"}`}>
-                        {t.is_closed ? "Closed" : "Open"}
-                      </span>
-                    </td>
-                    <td className="right">{t.total_quantity ?? t.net_quantity}</td>
-                    <td className="right">{t.total_commission != null ? fmtPrice(t.total_commission) : "---"}</td>
-                    <td className={`right ${(t.realized_pnl ?? 0) >= 0 ? "positive" : "negative"}`}>
-                      {t.realized_pnl != null ? (
-                        <>
-                          {t.realized_pnl >= 0 ? "+" : ""}{fmtPrice(t.realized_pnl)}
-                          {t.cost_basis != null && Math.abs(t.cost_basis) > 0 ? ` (${((t.realized_pnl / Math.abs(t.cost_basis)) * 100) >= 0 ? "+" : ""}${((t.realized_pnl / Math.abs(t.cost_basis)) * 100).toFixed(1)}%)` : ""}
-                        </>
-                      ) : "---"}
-                    </td>
-                    <td className="right">{t.cost_basis != null ? fmtPrice(t.cost_basis) : "---"}</td>
-                    <td className="right">{t.proceeds != null ? fmtPrice(t.proceeds) : "---"}</td>
-                    <td>
-                      {t.is_closed && <SharePnlButton data={blotterShareData(t)} />}
-                    </td>
-                  </tr>
-                ))}
+                {pageRows.map((t, i) => {
+                  const realizedBasis = t.realized_cost_basis != null ? Math.abs(t.realized_cost_basis) : (t.cost_basis != null ? Math.abs(t.cost_basis) : 0);
+                  const realizedPct = t.realized_pnl != null && realizedBasis > 0 ? (t.realized_pnl / realizedBasis) * 100 : null;
+                  const partiallyRealized = !t.is_closed && (t.realized_quantity ?? 0) > 0;
+                  const realizedLabel = partiallyRealized
+                    ? `${t.realized_quantity} ${t.net_quantity >= 0 ? "sold" : "covered"}`
+                    : null;
+
+                  return (
+                    <tr key={`${t.symbol}-${t.contract_desc}-${i}`}>
+                      <td>{getTradeDate(t) ? new Date(getTradeDate(t)).toLocaleDateString() : "—"}</td>
+                      <td><TickerLink ticker={t.symbol} /></td>
+                      <td>{t.contract_desc}</td>
+                      <td>{t.sec_type}</td>
+                      <td>
+                        <span className={`pill ${t.is_closed ? "neutral" : "defined"}`}>
+                          {t.is_closed ? "Closed" : "Open"}
+                        </span>
+                      </td>
+                      <td className="right">{t.total_quantity ?? t.net_quantity}</td>
+                      <td className="right">{t.total_commission != null ? fmtPrice(t.total_commission) : "---"}</td>
+                      <td className={`right ${(t.realized_pnl ?? 0) >= 0 ? "positive" : "negative"}`}>
+                        {t.realized_pnl != null ? (
+                          <>
+                            {t.realized_pnl >= 0 ? "+" : ""}{fmtPrice(t.realized_pnl)}
+                            {realizedPct != null ? ` (${realizedPct >= 0 ? "+" : ""}${realizedPct.toFixed(1)}%)` : ""}
+                            {realizedLabel ? ` · ${realizedLabel}` : ""}
+                          </>
+                        ) : "---"}
+                      </td>
+                      <td className="right">{t.cost_basis != null ? fmtPrice(t.cost_basis) : "---"}</td>
+                      <td className="right">{t.proceeds != null ? fmtPrice(t.proceeds) : "---"}</td>
+                      <td>
+                        {t.is_closed && <SharePnlButton data={blotterShareData(t)} />}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
             {totalPages > 1 && (

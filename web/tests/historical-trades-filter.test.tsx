@@ -85,6 +85,8 @@ const BASE_BLOTTER: BlotterData = {
       net_quantity: 2,
       total_commission: 2.7,
       realized_pnl: 0,
+      realized_quantity: 0,
+      realized_cost_basis: null,
       cost_basis: 0,
       proceeds: 0,
       total_cash_flow: 0,
@@ -152,5 +154,64 @@ describe("HistoricalTradesSection", () => {
     expect(screen.getByText("MSFT")).toBeTruthy();
     expect(screen.getByText("TSLA")).toBeTruthy();
     expect(screen.queryByText("1/3")).toBeNull();
+  });
+
+  it("shows realized pnl and sold quantity for partially closed open trades", () => {
+    const partialBlotter: BlotterData = {
+      ...BASE_BLOTTER,
+      open_trades: [
+        {
+          symbol: "ALAB",
+          contract_desc: "ALAB 20270115 120C",
+          sec_type: "OPT",
+          is_closed: false,
+          net_quantity: 2,
+          total_quantity: 5,
+          total_commission: 4.93,
+          realized_pnl: 17275.97,
+          realized_quantity: 3,
+          realized_cost_basis: 11071.34,
+          cost_basis: 7380.90,
+          proceeds: 28347.31,
+          total_cash_flow: 9883.07,
+          executions: [
+            {
+              exec_id: "alab-open",
+              time: "2026-04-15T14:30:00.000Z",
+              side: "BOT",
+              quantity: 5,
+              price: 36.90,
+              commission: 4.93,
+              notional_value: 18447.31,
+              net_cash_flow: -18452.24,
+            },
+            {
+              exec_id: "alab-close-partial",
+              time: "2026-04-21T19:00:00.000Z",
+              side: "SLD",
+              quantity: 3,
+              price: 94.51,
+              commission: 0,
+              notional_value: 28347.31,
+              net_cash_flow: 28347.31,
+            },
+          ],
+        },
+      ],
+    };
+
+    useBlotterMock.mockReturnValue({
+      data: partialBlotter,
+      loading: false,
+      syncing: false,
+      error: null,
+      syncNow: vi.fn(),
+    });
+
+    render(React.createElement(HistoricalTradesSection));
+
+    expect(screen.getByText(/\+\$17,275\.97 \(\+156\.0%\) · 3 sold/)).toBeTruthy();
+    expect(screen.getByText("5")).toBeTruthy();
+    expect(screen.getByText("$7,380.90")).toBeTruthy();
   });
 });

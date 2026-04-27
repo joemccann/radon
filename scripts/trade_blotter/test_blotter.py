@@ -305,7 +305,7 @@ class TestTrade:
         assert trade.unrealized_pnl(Decimal("7.50")) == Decimal("2493.50")
     
     def test_partial_close(self):
-        """Partially closed position."""
+        """Partially closed position shows realized P&L on closed quantity and remaining basis on open quantity."""
         trade = Trade(
             symbol="TSLA",
             contract_desc="TSLA (STK)",
@@ -333,11 +333,14 @@ class TestTrade:
                 ),
             ]
         )
-        
+
         assert trade.is_closed == False
         assert trade.net_quantity == Decimal("50")
-        assert trade.realized_pnl is None
-        
+        assert trade.realized_quantity == Decimal("50")
+        assert trade.realized_cost_basis == Decimal("12500.50")
+        assert trade.realized_pnl == Decimal("498.50")
+        assert trade.cost_basis == Decimal("12500.50")
+
         # At current price 270:
         # Cash flow so far = -25001 (buy) + 12999 (sell) = -12002
         # Market value = 50 * 270 = 13500
@@ -465,7 +468,7 @@ class TestTradeBlotter:
     """Tests for TradeBlotter aggregation."""
     
     def test_total_realized_pnl(self):
-        """Sum of all closed trade P&Ls."""
+        """Sum realized P&L across closed and partially closed trades."""
         blotter = TradeBlotter(trades=[
             Trade(
                 symbol="AAPL",
@@ -489,12 +492,24 @@ class TestTradeBlotter:
                               Side.SELL, Decimal("50"), Decimal("390"), Decimal("1")),
                 ]
             ),
+            Trade(
+                symbol="TSLA",
+                contract_desc="TSLA (STK)",
+                sec_type=SecurityType.STOCK,
+                executions=[
+                    Execution("005", datetime.now(), "TSLA", SecurityType.STOCK,
+                              Side.BUY, Decimal("100"), Decimal("250"), Decimal("1")),
+                    Execution("006", datetime.now(), "TSLA", SecurityType.STOCK,
+                              Side.SELL, Decimal("50"), Decimal("260"), Decimal("1")),
+                ]
+            ),
         ])
-        
+
         # AAPL: (16000 - 1) - (15000 + 1) = 998
         # MSFT: (19500 - 1) - (20000 + 1) = -502
-        # Total: 998 - 502 = 496
-        assert blotter.total_realized_pnl == Decimal("496.00")
+        # TSLA partial: 50 * (260 - 250.01) - 1 pro-rata already included = 498.50
+        # Total: 998 - 502 + 498.50 = 994.50
+        assert blotter.total_realized_pnl == Decimal("994.50")
     
     def test_total_commissions(self):
         """Sum of all commissions across all trades."""

@@ -6,6 +6,16 @@ from enum import Enum
 from typing import Optional, List, Dict, Any
 
 
+@dataclass
+class InventorySummary:
+    """Rolling average-cost summary for a trade's executions."""
+    remaining_qty: Decimal
+    remaining_basis: Decimal
+    realized_qty: Decimal
+    realized_basis: Decimal
+    realized_pnl: Decimal
+
+
 class Side(Enum):
     BUY = "BOT"
     SELL = "SLD"
@@ -93,6 +103,72 @@ class Trade:
         sells = sum((e.quantity for e in self.executions if e.side == Side.SELL), Decimal(0))
         return max(buys, sells)
 
+    def _inventory_summary(self) -> InventorySummary:
+        """Compute remaining basis and realized P&L with rolling average cost.
+
+        Uses average-cost accounting so partial closes realize P&L against the
+        average basis/proceeds of the full opening position rather than FIFO.
+        """
+        position_qty = Decimal(0)  # signed: long positive, short negative
+        avg_basis_per_unit = Decimal(0)
+        realized_qty = Decimal(0)
+        realized_basis = Decimal(0)
+        realized_pnl = Decimal(0)
+
+        for e in sorted(self.executions, key=lambda ex: ex.time):
+            qty = e.quantity
+            if qty <= 0:
+                continue
+
+            signed_qty = qty if e.side == Side.BUY else -qty
+            same_direction = position_qty == 0 or (position_qty > 0 and signed_qty > 0) or (position_qty < 0 and signed_qty < 0)
+
+            if same_direction:
+                if e.side == Side.BUY:
+                    opening_total = e.notional_value + e.commission
+                else:
+                    opening_total = e.notional_value - e.commission
+                current_basis = avg_basis_per_unit * abs(position_qty)
+                position_qty += signed_qty
+                avg_basis_per_unit = (current_basis + opening_total) / abs(position_qty) if position_qty != 0 else Decimal(0)
+                continue
+
+            close_qty = min(abs(position_qty), qty)
+            if close_qty > 0:
+                basis_closed = avg_basis_per_unit * close_qty
+                realized_qty += close_qty
+                realized_basis += basis_closed
+
+                if position_qty > 0 and e.side == Side.SELL:
+                    close_value_per_unit = (e.notional_value - e.commission) / qty
+                    realized_pnl += close_value_per_unit * close_qty - basis_closed
+                elif position_qty < 0 and e.side == Side.BUY:
+                    cover_cost_per_unit = (e.notional_value + e.commission) / qty
+                    realized_pnl += basis_closed - cover_cost_per_unit * close_qty
+
+                remaining_qty = abs(position_qty) - close_qty
+                position_qty = (Decimal(1) if position_qty > 0 else Decimal(-1)) * remaining_qty if remaining_qty > 0 else Decimal(0)
+                if position_qty == 0:
+                    avg_basis_per_unit = Decimal(0)
+
+            residual_qty = qty - close_qty
+            if residual_qty > 0:
+                if e.side == Side.BUY:
+                    position_qty = residual_qty
+                    avg_basis_per_unit = (e.notional_value + e.commission) / qty
+                else:
+                    position_qty = -residual_qty
+                    avg_basis_per_unit = (e.notional_value - e.commission) / qty
+
+        remaining_basis = avg_basis_per_unit * abs(position_qty)
+        return InventorySummary(
+            remaining_qty=abs(position_qty),
+            remaining_basis=remaining_basis,
+            realized_qty=realized_qty,
+            realized_basis=realized_basis,
+            realized_pnl=realized_pnl,
+        )
+
     @property
     def is_closed(self) -> bool:
         """True if position is fully closed."""
@@ -112,21 +188,40 @@ class Trade:
         return sum(e.net_cash_flow for e in self.executions)
     
     @property
+    def realized_quantity(self) -> Decimal:
+        """Quantity already closed/realized within this trade."""
+        return self._inventory_summary().realized_qty
+
+    @property
+    def realized_cost_basis(self) -> Optional[Decimal]:
+        """Average-cost basis allocated to the realized/closed quantity."""
+        summary = self._inventory_summary()
+        if summary.realized_qty <= 0:
+            return None
+        return summary.realized_basis
+
+    @property
     def realized_pnl(self) -> Optional[Decimal]:
         """
-        Realized P&L for closed positions.
-        Returns None if position is still open.
+        Realized P&L for both fully and partially closed positions.
+        Returns None only when no quantity has been closed yet.
         """
-        if not self.is_closed:
+        summary = self._inventory_summary()
+        if summary.realized_qty <= 0:
             return None
-        return self.total_cash_flow
+        return summary.realized_pnl
     
     @property
     def cost_basis(self) -> Decimal:
         """
-        Total cost basis (for open positions).
-        Sum of all buy executions including commissions.
+        Cost basis.
+
+        - Closed trades: historical buy-side basis (legacy display behavior)
+        - Open trades: remaining open basis after any partial closes
         """
+        if not self.is_closed:
+            return self._inventory_summary().remaining_basis
+
         total = Decimal(0)
         for e in self.executions:
             if e.side == Side.BUY:
@@ -226,7 +321,8 @@ class TradeBlotter:
     
     @property
     def total_realized_pnl(self) -> Decimal:
-        return sum(t.realized_pnl or Decimal(0) for t in self.closed_trades)
+        """Sum realized P&L across fully and partially closed trades."""
+        return sum(t.realized_pnl or Decimal(0) for t in self.trades)
     
     @property
     def total_commissions(self) -> Decimal:

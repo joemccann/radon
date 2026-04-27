@@ -371,7 +371,9 @@ export type BlotterTrade = {
   net_quantity: number;
   total_quantity?: number;
   total_commission: number;
-  realized_pnl: number;
+  realized_pnl: number | null;
+  realized_quantity?: number;
+  realized_cost_basis?: number | null;
   cost_basis: number;
   proceeds: number;
   total_cash_flow: number;

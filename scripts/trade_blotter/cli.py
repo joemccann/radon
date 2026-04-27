@@ -160,6 +160,8 @@ def blotter_to_dict(blotter: TradeBlotter) -> dict:
             "total_quantity": trade.total_quantity,
             "total_commission": trade.total_commission,
             "realized_pnl": trade.realized_pnl,
+            "realized_quantity": trade.realized_quantity,
+            "realized_cost_basis": trade.realized_cost_basis,
             "cost_basis": trade.cost_basis,
             "proceeds": trade.proceeds,
             "total_cash_flow": trade.total_cash_flow,
