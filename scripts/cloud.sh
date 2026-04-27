@@ -22,7 +22,19 @@ ENV_FILE="$PROJECT_ROOT/.env"
 # -- Step 1: Verify Tailscale connectivity -----------------------------------
 
 log_info "Checking Tailscale connectivity to ib-gateway..."
-if ! ping -c 1 -W 3 ib-gateway >/dev/null 2>&1; then
+tcp_probe() {
+  python3 -c "
+import socket, sys
+s = socket.socket()
+s.settimeout(3)
+try:
+    s.connect((sys.argv[1], int(sys.argv[2])))
+    s.close()
+except Exception:
+    sys.exit(1)
+" "$1" "$2" 2>/dev/null
+}
+if ! tcp_probe ib-gateway 22 && ! tcp_probe ib-gateway 4001; then
   log_error "Cannot reach ib-gateway via Tailscale. Is Tailscale running?"
   exit 1
 fi
@@ -58,7 +70,7 @@ log_info ".env → IB_GATEWAY_HOST=ib-gateway, IB_GATEWAY_MODE=cloud"
 # -- Step 5: Verify port 4001 reachable on VPS ------------------------------
 
 log_info "Verifying IB Gateway port 4001..."
-if bash -c "echo > /dev/tcp/ib-gateway/4001" 2>/dev/null; then
+if tcp_probe ib-gateway 4001; then
   log_info "Port 4001 is open."
 else
   log_warn "Port 4001 not responding yet. Gateway may still be starting (2FA pending)."
