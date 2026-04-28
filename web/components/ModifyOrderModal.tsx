@@ -9,6 +9,7 @@ import Modal from "./Modal";
 import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
 import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
+import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { ModifyOrderQuoteTelemetry } from "./QuoteTelemetry";
 import { OrderPriceStrip, OrderLegPills, type OrderLeg as UnifiedOrderLeg } from "@/lib/order";
 
@@ -287,6 +288,51 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
   const hasPriceData = priceData?.bid != null && priceData?.ask != null;
 
   const { bid, mid, ask } = getQuoteMetrics(priceData);
+
+  // Black-Scholes implied per-share value at current spot.
+  // - Single OPT: from contract.
+  // - BAG combo: signed sum across editableLegs at current spot/IV per leg.
+  // - STK: not applicable.
+  const impliedReference: number | null = (() => {
+    if (!order || !prices) return null;
+    if (isComboOrder) {
+      let net = 0;
+      for (const leg of editableLegs) {
+        const strikeNum = Number.parseFloat(leg.strike);
+        if (!Number.isFinite(strikeNum) || strikeNum <= 0) return null;
+        const result = computeLegImpliedValue(
+          {
+            ticker: order.contract.symbol,
+            expiry: leg.expiry,
+            strike: strikeNum,
+            type: leg.right === "C" ? "Call" : "Put",
+            direction: leg.action === "BUY" ? "LONG" : "SHORT",
+            contracts: 1,
+          },
+          prices,
+        );
+        if (result.perContract == null) return null;
+        net += (leg.action === "BUY" ? 1 : -1) * result.perContract;
+      }
+      return Math.round(net * 100) / 100;
+    }
+    const c = order.contract;
+    if (c.secType !== "OPT" || c.strike == null || !c.right || !c.expiry) return null;
+    const type: "Call" | "Put" | null =
+      c.right === "C" || c.right === "CALL" ? "Call" : c.right === "P" || c.right === "PUT" ? "Put" : null;
+    if (!type) return null;
+    return computeLegImpliedValue(
+      {
+        ticker: c.symbol,
+        expiry: c.expiry,
+        strike: c.strike,
+        type,
+        direction: order.action === "BUY" ? "LONG" : "SHORT",
+        contracts: 1,
+      },
+      prices,
+    ).perContract;
+  })();
   const handleLegChange = (index: number, patch: Partial<EditableComboLeg>) => {
     setEditableLegs((prev) => prev.map((leg, legIndex) => (legIndex === index ? { ...leg, ...patch } : leg)));
   };
@@ -418,6 +464,16 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
                     onClick={() => ask != null && setNewPrice(ask.toFixed(2))}
                   >
                     ASK{ask != null ? ` ${ask.toFixed(2)}` : ""}
+                  </button>
+                  <button
+                    className="btn-quick"
+                    disabled={impliedReference == null}
+                    title="Black-Scholes implied value at current spot"
+                    onClick={() =>
+                      impliedReference != null && setNewPrice(Math.abs(impliedReference).toFixed(2))
+                    }
+                  >
+                    IMPLIED{impliedReference != null ? ` ${Math.abs(impliedReference).toFixed(2)}` : ""}
                   </button>
                 </div>
               </div>
