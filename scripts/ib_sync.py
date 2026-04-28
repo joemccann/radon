@@ -1009,15 +1009,25 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
                 if fd:
                     fill_contract_date = min(fill_contract_date, fd) if fill_contract_date else fd
 
-        # Fallback chain: blotter (per-contract) → trade_log → blotter (ticker) →
-        # IB fills → prev portfolio → "unknown"
+        # Fallback chain — ORDERED FROM MOST → LEAST SPECIFIC. Anything weaker
+        # than per-contract risks attributing a brand-new contract to an
+        # unrelated older trade on the same ticker (regression: AMD Risk
+        # Reversal P$320/C$330 was assigned 2026-04-22 because an unrelated
+        # AMD 295P existed in the blotter — see test_combo_entry_date.py).
+        #
+        #   1. blotter (per-contract: ticker|expiry|right|strike)
+        #   2. trade_log (ticker|structure)
+        #   3. IB fills (per-contract, same-session)
+        #   4. prev portfolio (ticker|structure|expiry, excluding today)
+        #   5. today  ← brand-new positions default here so the frontend's
+        #              same-day P&L branch fires correctly. We deliberately
+        #              do NOT use a per-ticker blotter fallback or "unknown".
         pos['entry_date'] = (
             blotter_contract_date
             or trade_log_dates.get(f"{ticker}|{structure}")
-            or blotter_dates.get(ticker)
             or fill_contract_date
             or prev_dates.get(key)
-            or "unknown"
+            or today
         )
 
     result = {

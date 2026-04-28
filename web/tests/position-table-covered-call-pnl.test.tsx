@@ -3,7 +3,7 @@
  */
 
 import React from "react";
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
 import PositionTable from "../components/PositionTable";
 import type { PortfolioPosition } from "../lib/types";
@@ -111,6 +111,20 @@ const PRICES: Record<string, PriceData> = {
 };
 
 describe("PositionTable covered call P&L", () => {
+  beforeEach(() => {
+    // Enable all toggleable columns so this test can assert against
+    // Entry Cost / Market Value / Avg Entry — which are not all visible
+    // under the default column-visibility set.
+    window.localStorage.setItem(
+      "radon:columns:positions",
+      JSON.stringify({
+        qty: true, avg_entry: true, last_price: true, implied: true,
+        implied_market_value: true, daily_chg: true, today_pnl: true,
+        entry_cost: true, market_value: true,
+      }),
+    );
+  });
+
   it("uses stock share math instead of option contract math for covered calls", () => {
     render(<PositionTable positions={POSITIONS} prices={PRICES} showUnderlying />);
 
