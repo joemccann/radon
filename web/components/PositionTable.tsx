@@ -23,6 +23,7 @@ import {
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
 import { computeLegImpliedValue, computePositionImpliedValue } from "@/lib/impliedValue";
+import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 
 /* ─── Sortable header cell ─────────────────────────────── */
 
@@ -139,7 +140,7 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
 
 export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
-function makePositionExtract(prices?: Record<string, PriceData>) {
+function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 0) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
     const isStock = pos.structure_type === "Stock";
     const _stockLast = prices?.[pos.ticker]?.last;
@@ -160,7 +161,7 @@ function makePositionExtract(prices?: Record<string, PriceData>) {
       }
       case "implied": {
         if (isStock || !prices) return null;
-        return computePositionImpliedValue(pos, prices).netPerContract;
+        return computePositionImpliedValue(pos, prices, { riskFreeRate }).netPerContract;
       }
       case "daily_chg": return isStock ? getDailyChange(prices?.[pos.ticker]) : getOptionDailyChg(pos, prices);
       case "today_pnl": return getTodayPnlDollars(pos, prices);
@@ -240,7 +241,7 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimePrice, prices, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
+function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimePrice, prices, riskFreeRate = 0, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -309,8 +310,8 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
   // or when any leg lacks IV / spot.
   const impliedNet = useMemo(() => {
     if (isStock || !prices) return null;
-    return computePositionImpliedValue(pos, prices).netPerContract;
-  }, [isStock, pos, prices]);
+    return computePositionImpliedValue(pos, prices, { riskFreeRate }).netPerContract;
+  }, [isStock, pos, prices, riskFreeRate]);
 
   // Today's P&L in dollars
   const todayPnl = isStock
@@ -397,6 +398,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
                   contracts: leg.contracts,
                 },
                 prices,
+                { riskFreeRate },
               ).perContract;
         return (
           <LegRow
@@ -417,7 +419,8 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
 /* ─── Position table ───────────────────────────────────── */
 
 export default function PositionTable({ positions, showExpiry = true, showUnderlying = false, prices }: { positions: PortfolioPosition[]; showExpiry?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData> }) {
-  const positionExtract = useMemo(() => makePositionExtract(prices), [prices]);
+  const riskFreeRate = useRiskFreeRate();
+  const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
 
   // Instrument detail modal state
@@ -450,7 +453,7 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
         </thead>
         <tbody>
           {sorted.map((pos) => (
-            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} onLegClick={handleLegClick} />
+            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
           ))}
         </tbody>
       </table>

@@ -8,6 +8,7 @@ import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
+import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
@@ -94,6 +95,7 @@ function ExistingOrderRow({
 
   const priceData = resolveOrderPriceData(order, prices);
   const canModify = order.orderType === "LMT" || order.orderType === "STP LMT";
+  const riskFreeRate = useRiskFreeRate();
 
   // Black-Scholes implied per-share value at current spot. Single OPT only;
   // STK and BAG are skipped (BAG implied is shown in the consolidated combo row).
@@ -113,8 +115,9 @@ function ExistingOrderRow({
         contracts: Math.abs(order.totalQuantity),
       },
       prices,
+      { riskFreeRate },
     ).perContract;
-  }, [order, prices]);
+  }, [order, prices, riskFreeRate]);
 
   const handleCancel = useCallback(async () => {
     setActionLoading(true);

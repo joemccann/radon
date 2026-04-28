@@ -39,6 +39,7 @@ import {
   resolveOpenOrderComboPrice,
 } from "@/lib/openOrderCombos";
 import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedValue";
+import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable from "./PositionTable";
 import { TableSkeleton } from "@/components/ui/Skeleton";
@@ -1513,6 +1514,7 @@ function resolveOrderLastPrice(
 function makeOpenOrderExtract(
   prices?: Record<string, PriceData>,
   portfolio?: PortfolioData | null,
+  riskFreeRate = 0,
 ) {
   return (item: OpenOrderDisplayRow, key: OpenOrderKey): string | number | null => {
     switch (key) {
@@ -1530,8 +1532,8 @@ function makeOpenOrderExtract(
       case "implied":
         if (!prices) return null;
         return item.kind === "combo"
-          ? computeOrderImpliedValue(item.orders, prices).netPerContract
-          : resolveOrderImpliedValue(item.order, prices);
+          ? computeOrderImpliedValue(item.orders, prices, { riskFreeRate }).netPerContract
+          : resolveOrderImpliedValue(item.order, prices, riskFreeRate);
       case "status": return item.kind === "combo" ? item.status : item.order.status;
       case "tif": return item.kind === "combo" ? item.tif : item.order.tif;
       case "actions": return null;
@@ -1558,6 +1560,7 @@ function OrderPriceCell({ price }: { price: number | null }) {
 function resolveOrderImpliedValue(
   order: OpenOrder,
   prices: Record<string, PriceData>,
+  riskFreeRate = 0,
 ): number | null {
   const c = order.contract;
   if (c.secType !== "OPT") return null;
@@ -1575,6 +1578,7 @@ function resolveOrderImpliedValue(
       contracts: Math.abs(order.totalQuantity),
     },
     prices,
+    { riskFreeRate },
   ).perContract;
 }
 
@@ -1611,7 +1615,8 @@ function OrdersSections({
   portfolio?: PortfolioData | null;
 }) {
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
-  const openOrderExtract = useMemo(() => makeOpenOrderExtract(prices, portfolio), [prices, portfolio]);
+  const riskFreeRate = useRiskFreeRate();
+  const openOrderExtract = useMemo(() => makeOpenOrderExtract(prices, portfolio, riskFreeRate), [prices, portfolio, riskFreeRate]);
   const openOrderRows = useMemo(() => {
     if (!orders) return [];
     return buildOpenOrderDisplayRows(orders.open_orders, portfolio?.positions);
@@ -1826,7 +1831,7 @@ function OrdersSections({
                         </td>
                         <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
                         <OrderImpliedCell
-                          price={prices ? computeOrderImpliedValue(o.orders, prices).netPerContract : null}
+                          price={prices ? computeOrderImpliedValue(o.orders, prices, { riskFreeRate }).netPerContract : null}
                         />
                         <td>
                           {isPendingCancel ? (
@@ -1912,7 +1917,7 @@ function OrdersSections({
                       </td>
                       <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
                       <OrderImpliedCell
-                        price={prices ? resolveOrderImpliedValue(o.order, prices) : null}
+                        price={prices ? resolveOrderImpliedValue(o.order, prices, riskFreeRate) : null}
                       />
                       <td>
                         {isPendingCancel ? (

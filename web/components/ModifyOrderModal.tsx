@@ -10,6 +10,7 @@ import { getQuoteMetrics } from "@/lib/quoteTelemetry";
 import { applyRestingLimitToQuote } from "@/lib/modifyOrderQuote";
 import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
+import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { ModifyOrderQuoteTelemetry } from "./QuoteTelemetry";
 import { OrderPriceStrip, OrderLegPills, type OrderLeg as UnifiedOrderLeg } from "@/lib/order";
 
@@ -263,6 +264,8 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
     [marketPriceData, order?.action, order?.limitPrice],
   );
 
+  const riskFreeRate = useRiskFreeRate();
+
   if (!order) return null;
 
   const currentPrice = order.limitPrice ?? 0;
@@ -310,6 +313,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
             contracts: 1,
           },
           prices,
+          { riskFreeRate },
         );
         if (result.perContract == null) return null;
         net += (leg.action === "BUY" ? 1 : -1) * result.perContract;
@@ -331,6 +335,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
         contracts: 1,
       },
       prices,
+      { riskFreeRate },
     ).perContract;
   })();
   const handleLegChange = (index: number, patch: Partial<EditableComboLeg>) => {

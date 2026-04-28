@@ -357,3 +357,83 @@ describe("computeOrderImpliedValue", () => {
     expect(r.netPerContract).toBeNull();
   });
 });
+
+/* ─── σ back-solve fallback (market closed: no streaming impliedVol) ── */
+
+describe("computeLegImpliedValue — σ back-solver fallback", () => {
+  it("back-solves σ from yesterday's option close + underlying close when impliedVol is missing", () => {
+    const T_today = yearsToExpiry(AMD_EXPIRY, NOW)!;
+    const T_yest = T_today + 1 / 365;
+    const sigmaTrue = 0.35;
+    const S_yest = 285;
+    const K = 295;
+    const optionClose = bsPut(S_yest, K, T_yest, 0, sigmaTrue);
+
+    const result = computeLegImpliedValue(
+      leg({ strike: K, type: "Put" }),
+      {
+        AMD: pd({ last: 280, close: S_yest }),
+        AMD_20260501_295_P: pd({ close: optionClose }),
+      },
+      { now: NOW },
+    );
+
+    expect(result.perContract).not.toBeNull();
+    expect(result.inputs?.sigmaSource).toBe("backsolve");
+    const expected = bsPut(280, K, T_today, 0, sigmaTrue);
+    expect(result.perContract!).toBeCloseTo(expected, 1);
+  });
+
+  it("prefers streaming impliedVol when both stream and close-based fallback are available", () => {
+    const sigmaStream = 0.5;
+    const T_today = yearsToExpiry(AMD_EXPIRY, NOW)!;
+    const optionClose = bsPut(285, 295, T_today + 1 / 365, 0, 0.4);
+
+    const result = computeLegImpliedValue(
+      leg(),
+      {
+        AMD: pd({ last: 280, close: 285 }),
+        AMD_20260501_295_P: pd({ impliedVol: sigmaStream, close: optionClose }),
+      },
+      { now: NOW },
+    );
+
+    expect(result.inputs?.sigmaSource).toBe("stream");
+    expect(result.inputs?.sigma).toBe(sigmaStream);
+  });
+
+  it("returns null when neither stream nor close-based fallback inputs are present", () => {
+    const result = computeLegImpliedValue(
+      leg(),
+      {
+        AMD: pd({ last: 280 }),
+        AMD_20260501_295_P: pd({}),
+      },
+      { now: NOW },
+    );
+    expect(result.perContract).toBeNull();
+  });
+
+  it("propagates user-supplied riskFreeRate into the back-solve", () => {
+    const r = 0.05;
+    const T_today = yearsToExpiry(AMD_EXPIRY, NOW)!;
+    const T_yest = T_today + 1 / 365;
+    const sigmaTrue = 0.4;
+    const optionClose = bsPut(285, 295, T_yest, r, sigmaTrue);
+
+    const result = computeLegImpliedValue(
+      leg(),
+      {
+        AMD: pd({ last: 280, close: 285 }),
+        AMD_20260501_295_P: pd({ close: optionClose }),
+      },
+      { now: NOW, riskFreeRate: r },
+    );
+
+    expect(result.inputs?.r).toBe(r);
+    expect(result.inputs?.sigmaSource).toBe("backsolve");
+    expect(result.perContract).not.toBeNull();
+    const expected = bsPut(280, 295, T_today, r, sigmaTrue);
+    expect(result.perContract!).toBeCloseTo(expected, 1);
+  });
+});

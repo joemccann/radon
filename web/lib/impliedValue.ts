@@ -9,7 +9,7 @@
  * scripts/scenario_analysis.py).
  */
 
-import { bsPrice, RISK_FREE_RATE_DEFAULT } from "./blackScholes";
+import { bsImpliedVol, bsPrice, RISK_FREE_RATE_DEFAULT } from "./blackScholes";
 import { optionKey, type PriceData } from "./pricesProtocol";
 import type { OpenOrder, PortfolioLeg, PortfolioPosition } from "./types";
 
@@ -37,6 +37,9 @@ export type ImpliedValueInputs = {
   sigma: number;
   r: number;
   spotSource: "last" | "undPrice" | "mid";
+  /** Where σ came from. "stream" = IB tickOptionComputation,
+   *  "backsolve" = bisection on yesterday's option close + underlying close. */
+  sigmaSource: "stream" | "backsolve";
 };
 
 export type ImpliedValueResult = {
@@ -94,6 +97,47 @@ function resolveSpot(
   return null;
 }
 
+/* ─── sigma resolution ───────────────────────────────── */
+
+type SigmaResolution = { sigma: number; source: "stream" | "backsolve" } | null;
+
+/**
+ * Resolve σ for a leg.
+ *
+ * Priority:
+ *   1. Streaming `optionPd.impliedVol` (IB tickOptionComputation, RTH).
+ *   2. Bisection back-solve from yesterday's option close + yesterday's
+ *      underlying close. Uses the same BS pricer; sigma carries forward
+ *      to today's spot. Required when market is closed and IB stops sending
+ *      Greek ticks.
+ *
+ * Returns null if neither source yields a usable sigma.
+ */
+function resolveSigma(
+  optionPd: PriceData | null | undefined,
+  tickerPd: PriceData | null | undefined,
+  K: number,
+  type: "Call" | "Put",
+  T: number,
+  r: number,
+): SigmaResolution {
+  if (isPositive(optionPd?.impliedVol)) {
+    return { sigma: optionPd!.impliedVol!, source: "stream" };
+  }
+
+  const optionClose = optionPd?.close;
+  const underlyingClose = tickerPd?.close;
+  if (!isPositive(optionClose) || !isPositive(underlyingClose) || T <= 0) return null;
+
+  // Yesterday's T ≈ today's T + 1 day (calendar approximation).
+  // The bias on σ is small for short-DTE positions and acceptable for an
+  // overnight / weekend display.
+  const T_y = T + 1 / DAYS_PER_YEAR;
+  const sigma = bsImpliedVol(optionClose, underlyingClose, K, T_y, r, type);
+  if (sigma == null || !isPositive(sigma)) return null;
+  return { sigma, source: "backsolve" };
+}
+
 /* ─── leg-level ──────────────────────────────────────── */
 
 const NULL_RESULT: ImpliedValueResult = { perContract: null, notional: null, inputs: null };
@@ -118,7 +162,7 @@ export function computeLegImpliedValue(
   const oKey = legOptionKey(input);
   if (!oKey) return NULL_RESULT;
   const optionPd = prices[oKey];
-  if (!optionPd || !isPositive(optionPd.impliedVol)) return NULL_RESULT;
+  const tickerPd = prices[input.ticker.toUpperCase()];
 
   const spot = resolveSpot(input.ticker, optionPd, prices);
   if (!spot) return NULL_RESULT;
@@ -128,12 +172,16 @@ export function computeLegImpliedValue(
   if (T == null) return NULL_RESULT;
 
   const r = opts.riskFreeRate ?? RISK_FREE_RATE_DEFAULT;
+
+  const sig = resolveSigma(optionPd, tickerPd, input.strike, input.type, T, r);
+  if (!sig) return NULL_RESULT;
+
   const perContract = bsPrice({
     S: spot.S,
     K: input.strike,
     T,
     r,
-    sigma: optionPd.impliedVol!,
+    sigma: sig.sigma,
     type: input.type,
   });
 
@@ -142,7 +190,15 @@ export function computeLegImpliedValue(
   return {
     perContract,
     notional: perContract * Math.max(0, input.contracts) * 100,
-    inputs: { S: spot.S, K: input.strike, T, sigma: optionPd.impliedVol!, r, spotSource: spot.source },
+    inputs: {
+      S: spot.S,
+      K: input.strike,
+      T,
+      sigma: sig.sigma,
+      r,
+      spotSource: spot.source,
+      sigmaSource: sig.source,
+    },
   };
 }
 

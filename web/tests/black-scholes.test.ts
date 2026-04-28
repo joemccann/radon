@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bsCall, bsPrice, bsPut, normCdf } from "../lib/blackScholes";
+import { bsCall, bsImpliedVol, bsPrice, bsPut, normCdf } from "../lib/blackScholes";
 
 /**
  * Reference values produced by scripts/scenario_analysis.py:
@@ -108,5 +108,38 @@ describe("Put-call parity", () => {
       sigma = 0.25;
     const lhs = bsCall(S, K, T, r, sigma) - bsPut(S, K, T, r, sigma);
     expect(lhs).toBeCloseTo(S - K * Math.exp(-r * T), 4);
+  });
+});
+
+describe("bsImpliedVol — round-trip", () => {
+  it.each([
+    { S: 100, K: 100, T: 0.5, r: 0.05, sigma: 0.25, type: "Call" as const },
+    { S: 100, K: 110, T: 0.25, r: 0.04, sigma: 0.4, type: "Call" as const },
+    { S: 295, K: 295, T: 3 / 365, r: 0.0364, sigma: 0.45, type: "Put" as const },
+    { S: 50, K: 60, T: 1.0, r: 0, sigma: 0.3, type: "Put" as const },
+  ])("recovers σ from price for $type S=$S K=$K σ=$sigma", ({ S, K, T, r, sigma, type }) => {
+    const price = bsPrice({ S, K, T, r, sigma, type });
+    const recovered = bsImpliedVol(price, S, K, T, r, type);
+    expect(recovered).not.toBeNull();
+    expect(recovered!).toBeCloseTo(sigma, 4);
+  });
+
+  it("returns null when observed price is at/below intrinsic", () => {
+    const intrinsicCall = Math.max(110 - 100 * Math.exp(-0.05 * 0.5), 0);
+    expect(bsImpliedVol(intrinsicCall, 110, 100, 0.5, 0.05, "Call")).toBeNull();
+    expect(bsImpliedVol(intrinsicCall - 0.5, 110, 100, 0.5, 0.05, "Call")).toBeNull();
+  });
+
+  it("returns null on garbage inputs", () => {
+    expect(bsImpliedVol(0, 100, 100, 0.5, 0, "Call")).toBeNull();
+    expect(bsImpliedVol(5, 0, 100, 0.5, 0, "Call")).toBeNull();
+    expect(bsImpliedVol(5, 100, 0, 0.5, 0, "Call")).toBeNull();
+    expect(bsImpliedVol(5, 100, 100, 0, 0, "Call")).toBeNull();
+    expect(bsImpliedVol(NaN, 100, 100, 0.5, 0, "Call")).toBeNull();
+  });
+
+  it("returns null when price exceeds upper arbitrage bound", () => {
+    expect(bsImpliedVol(150, 100, 100, 0.5, 0, "Call")).toBeNull();
+    expect(bsImpliedVol(150, 100, 100, 0.5, 0, "Put")).toBeNull();
   });
 });
