@@ -4,6 +4,8 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
 import { Link as LinkIcon, RefreshCw, Radio } from "lucide-react";
 
+import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime";
+
 const POSTS_ENDPOINT = "/data/posts.json";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const MAX_VISIBLE_POSTS = 18;
@@ -29,46 +31,6 @@ type NormalisedPost = MarketEarPost & {
   timestampMs: number;
   href: string;
 };
-
-function formatAbsolute(timestamp: string) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return timestamp;
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
-
-function formatRelative(timestamp: string) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
-  const diff = Date.now() - date.getTime();
-  const minute = 60 * 1000;
-  const hour = 60 * minute;
-  const day = 24 * hour;
-  if (diff < minute) return "moments ago";
-  if (diff < hour) {
-    const mins = Math.max(1, Math.round(diff / minute));
-    return `${mins} minute${mins === 1 ? "" : "s"} ago`;
-  }
-  if (diff < day) {
-    const hours = Math.max(1, Math.round(diff / hour));
-    return `${hours} hour${hours === 1 ? "" : "s"} ago`;
-  }
-  const days = Math.max(1, Math.round(diff / day));
-  return `${days} day${days === 1 ? "" : "s"} ago`;
-}
-
-function formatTime(timestamp: string) {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) return "";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function buildPostHref(id: string) {
   if (!id) return "https://themarketear.com/newsfeed";
