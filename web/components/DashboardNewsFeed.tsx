@@ -128,7 +128,7 @@ export default function DashboardNewsFeed() {
       <div className="section-header">
         <div className="section-title">
           <Radio size={14} />
-          Market Ear Live Feed
+          Live Market Analysis
         </div>
         <div className="news-feed-actions">
           <span className="report-meta">{freshnessLabel}</span>
