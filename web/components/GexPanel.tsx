@@ -284,26 +284,54 @@ function ExpectedRangeBar({ data }: { data: GexData }) {
   const range = maxVal - minVal || 1;
   const pct = (v: number) => ((v - minVal) / range) * 100;
 
+  // Anchor every level at its pct on the bar. Each anchor renders as a
+  // value+label stack centered on its position. To avoid horizontal
+  // collisions when two levels sit close together, anchors are assigned to
+  // alternating rows (top/bottom) — pre-sorted by pct, then placed greedy.
+  type Anchor = { pct: number; value: number; label: string; color?: string };
+  const anchors: Anchor[] = [];
+  anchors.push({ pct: pct(low), value: low, label: "RANGE LOW" });
+  if (accel) anchors.push({ pct: pct(accel), value: accel, label: "MAX ACCEL", color: "var(--accelerator, var(--fault))" });
+  if (flip) anchors.push({ pct: pct(flip), value: flip, label: "GEX FLIP", color: "var(--warning)" });
+  anchors.push({ pct: pct(spot), value: spot, label: "CLOSE", color: "var(--signal-strong)" });
+  if (magnet) anchors.push({ pct: pct(magnet), value: magnet, label: "MAX MAGNET", color: "var(--signal-core)" });
+  anchors.push({ pct: pct(high), value: high, label: "RANGE HIGH" });
+  anchors.sort((a, b) => a.pct - b.pct);
+
+  // Greedy two-row collision: each anchor takes the highest row whose
+  // last-occupied pct is ≥ COLLISION_PCT away. Anchors render value above
+  // label (~36 px tall block); the label width at the smallest font is
+  // ~64 px, which is ~6.5 % of a typical 1000 px bar — round up to 8 %.
+  const COLLISION_PCT = 8;
+  const lastPctByRow: number[] = [-Infinity, -Infinity];
+  const placed = anchors.map((a) => {
+    const row = lastPctByRow.findIndex((p) => a.pct - p >= COLLISION_PCT);
+    const finalRow = row === -1 ? lastPctByRow.length - 1 : row; // overflow → bottom row
+    lastPctByRow[finalRow] = a.pct;
+    return { ...a, row: finalRow };
+  });
+
   return (
     <div className="gex-range-container">
       <div className="gex-range-title">EXPECTED RANGE &mdash; {data.data_date}</div>
       <div className="gex-range-bar">
         <div className="gex-range-fill" style={{ left: `${pct(low)}%`, width: `${pct(high) - pct(low)}%` }} />
-        {/* Markers */}
+        {accel && <div className="gex-range-marker" style={{ left: `${pct(accel)}%`, borderColor: "var(--accelerator, var(--fault))" }} title={`MAX ACCEL: ${fmtPrice(accel)}`} />}
         {flip && <div className="gex-range-marker" style={{ left: `${pct(flip)}%`, borderColor: "var(--warning)" }} title={`GEX FLIP: ${fmtPrice(flip)}`} />}
-        <div className="gex-range-marker" style={{ left: `${pct(spot)}%`, borderColor: "var(--signal-strong)" }} title={`SPOT: ${fmtPrice(spot)}`} />
-        {magnet && <div className="gex-range-marker" style={{ left: `${pct(magnet)}%`, borderColor: "var(--signal-core)" }} title={`MAGNET: ${fmtPrice(magnet)}`} />}
+        <div className="gex-range-marker" style={{ left: `${pct(spot)}%`, borderColor: "var(--signal-strong)" }} title={`CLOSE: ${fmtPrice(spot)}`} />
+        {magnet && <div className="gex-range-marker" style={{ left: `${pct(magnet)}%`, borderColor: "var(--signal-core)" }} title={`MAX MAGNET: ${fmtPrice(magnet)}`} />}
       </div>
-      <div className="gex-range-labels">
-        <span>{fmtPrice(low)}</span>
-        {flip && <span style={{ left: `${pct(flip)}%`, color: "var(--warning)" }}>{fmtPrice(flip)}</span>}
-        <span style={{ marginLeft: "auto" }}>{fmtPrice(high)}</span>
-      </div>
-      <div className="gex-range-sublabels">
-        {accel && <span>MAX ACCEL</span>}
-        {flip && <span>GEX FLIP</span>}
-        <span>CLOSE</span>
-        {magnet && <span>MAX MAGNET</span>}
+      <div className="gex-range-anchors">
+        {placed.map((a) => (
+          <div
+            key={a.label}
+            className={`gex-range-anchor gex-range-anchor-row-${a.row}`}
+            style={{ left: `${a.pct}%` }}
+          >
+            <div className="gex-range-anchor-value" style={a.color ? { color: a.color } : undefined}>{fmtPrice(a.value)}</div>
+            <div className="gex-range-anchor-label">{a.label}</div>
+          </div>
+        ))}
       </div>
     </div>
   );

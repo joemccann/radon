@@ -5328,23 +5328,40 @@ tr {
   transform: translateX(-50%);
 }
 
-.gex-range-labels {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  margin-top: 4px;
+/* Anchored level labels under the bar. Each anchor is absolutely placed
+   at its pct, value above label. Two staggered rows prevent collision. */
+.gex-range-anchors {
+  position: relative;
+  margin-top: 6px;
+  height: 64px; /* enough for two stacked rows of value+label */
 }
-
-.gex-range-sublabels {
-  display: flex;
-  justify-content: space-between;
+.gex-range-anchor {
+  position: absolute;
+  transform: translateX(-50%);
   font-family: var(--font-mono);
+  text-align: center;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.gex-range-anchor-row-0 { top: 0; }
+.gex-range-anchor-row-1 { top: 32px; }
+.gex-range-anchor-value {
+  font-size: 10px;
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  line-height: 14px;
+}
+.gex-range-anchor-label {
   font-size: 9px;
   color: var(--text-muted);
   text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 12px;
 }
+/* Pin the leftmost / rightmost anchors flush so the label doesn't get
+   half-clipped by the panel edge. */
+.gex-range-anchor[style*="left: 0%"] { transform: none; text-align: left; }
+.gex-range-anchor[style*="left: 100%"] { transform: translateX(-100%); text-align: right; }
 
 .gex-bias-card {
   background: var(--bg-panel-raised);
