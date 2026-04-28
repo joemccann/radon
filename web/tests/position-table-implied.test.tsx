@@ -6,10 +6,24 @@
  */
 
 import React from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 
 afterEach(cleanup);
+
+// Each test starts with no persisted column state — defaults apply
+// (Implied ON, Implied MV OFF). Tests that need MV visible enable it
+// explicitly via localStorage before render.
+beforeEach(() => {
+  window.localStorage.clear();
+});
+
+function enableAllImpliedColumns() {
+  window.localStorage.setItem(
+    "radon:columns:positions",
+    JSON.stringify({ implied: true, implied_market_value: true }),
+  );
+}
 import PositionTable from "../components/PositionTable";
 import { bsPut } from "../lib/blackScholes";
 import { yearsToExpiry } from "../lib/impliedValue";
@@ -78,9 +92,20 @@ describe("PositionTable — Implied column", () => {
     expect(screen.getByText("Implied")).toBeTruthy();
   });
 
-  it("renders 'Implied MV' header when at least one option position is present", () => {
+  it("renders 'Implied MV' header when at least one option position is present (column enabled)", () => {
+    enableAllImpliedColumns();
     render(<PositionTable positions={[AMD_LONG_PUT]} prices={{}} />);
-    expect(screen.getByText("Implied MV")).toBeTruthy();
+    // The label appears in two places: the column header AND the toggle menu entry.
+    // Both present means the column is rendered.
+    expect(screen.getAllByText("Implied MV").length).toBeGreaterThan(0);
+  });
+
+  it("hides 'Implied MV' header by default (matches POSITION_COLUMN_DEFAULTS)", () => {
+    render(<PositionTable positions={[AMD_LONG_PUT]} prices={{}} />);
+    // With defaults, "Implied MV" appears only as a checkbox label inside the
+    // Columns toggle menu — never as a <th> column header.
+    const ths = Array.from(document.querySelectorAll("thead th")).map((t) => t.textContent ?? "");
+    expect(ths.some((t) => t.includes("Implied MV"))).toBe(false);
   });
 
   it("hides Implied + Implied MV headers when the table contains only stock positions", () => {
@@ -107,7 +132,8 @@ describe("PositionTable — Implied column", () => {
     expect(screen.queryByText("Implied MV")).toBeNull();
   });
 
-  it("renders BS-derived implied MV for an option position with streamed IV", () => {
+  it("renders BS-derived implied MV for an option position with streamed IV (column enabled)", () => {
+    enableAllImpliedColumns();
     const sigma = 0.45;
     const spot = 280;
     const prices: Record<string, PriceData> = {
@@ -118,8 +144,7 @@ describe("PositionTable — Implied column", () => {
 
     const row = screen.getByText("AMD").closest("tr")!;
     const T = yearsToExpiry(expiry, new Date())!;
-    const notional = bsPut(spot, 295, T, 0, sigma) * 75 * 100; // long put, 75 contracts, +sign
-    // Match fmtUsd output: "$X,YYY" with no decimals, signed +
+    const notional = bsPut(spot, 295, T, 0, sigma) * 75 * 100;
     const expectedAbs = `$${Math.round(notional).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
     expect(row.textContent).toContain(`+${expectedAbs}`);
   });

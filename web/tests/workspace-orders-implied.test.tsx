@@ -84,13 +84,20 @@ function pd(over: Partial<PriceData>): PriceData {
 }
 
 beforeEach(() => {
-  // nothing yet
+  window.localStorage.clear();
 });
 
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
 });
+
+function enableAllImpliedOrderColumns() {
+  window.localStorage.setItem(
+    "radon:columns:orders-open",
+    JSON.stringify({ implied: true, implied_mv: true }),
+  );
+}
 
 describe("WorkspaceSections orders — Implied column", () => {
   it("hides Implied + Implied MV headers when the orders table contains only STK rows", () => {
@@ -137,7 +144,8 @@ describe("WorkspaceSections orders — Implied column", () => {
     expect(screen.queryByText("Implied MV")).toBeNull();
   });
 
-  it("renders 'Implied MV' header in the orders table", () => {
+  it("renders 'Implied MV' header in the orders table when toggled on", () => {
+    enableAllImpliedOrderColumns();
     const orders: OrdersData = {
       last_sync: NOW.toISOString(),
       open_count: 1,
@@ -177,7 +185,8 @@ describe("WorkspaceSections orders — Implied column", () => {
         portfolio: null,
       }),
     );
-    expect(screen.getByText("Implied MV")).toBeTruthy();
+    // "Implied MV" appears as both <th> and as a checkbox label in the toggle menu.
+    expect(screen.getAllByText("Implied MV").length).toBeGreaterThan(0);
   });
 
   it("renders 'Implied' header and BS-derived value for a single OPT order", () => {

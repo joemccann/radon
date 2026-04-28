@@ -24,6 +24,8 @@ import {
 } from "@/lib/positionUtils";
 import { computeLegImpliedValue, computePositionImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
+import { useColumnVisibility } from "@/lib/useColumnVisibility";
+import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 
 /* ─── Sortable header cell ─────────────────────────────── */
 
@@ -140,6 +142,49 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
 
 export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "implied_market_value" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
+/** User-toggleable columns. `ticker`/`structure`/`direction`/`pnl` are
+ *  always-on identity/outcome columns; `underlying`/`expiry` are caller-
+ *  controlled via showUnderlying/showExpiry props. */
+type ToggleableColumnKey =
+  | "qty"
+  | "avg_entry"
+  | "last_price"
+  | "implied"
+  | "implied_market_value"
+  | "daily_chg"
+  | "today_pnl"
+  | "entry_cost"
+  | "market_value";
+
+const POSITION_COLUMNS: readonly ColumnsToggleEntry<ToggleableColumnKey>[] = [
+  { key: "qty", label: "Qty" },
+  { key: "avg_entry", label: "Avg Entry" },
+  { key: "last_price", label: "Last Price" },
+  { key: "implied", label: "Implied" },
+  { key: "implied_market_value", label: "Implied MV" },
+  { key: "daily_chg", label: "Day Chg" },
+  { key: "today_pnl", label: "Today P&L" },
+  { key: "entry_cost", label: "Entry Cost" },
+  { key: "market_value", label: "Market Value" },
+];
+
+/** Default visibility — chosen so a fresh-install user fits the table on a
+ *  ~1280px viewport. Less-essential columns (Implied MV, Entry Cost) start
+ *  hidden and can be toggled on. */
+const POSITION_COLUMN_DEFAULTS: Record<ToggleableColumnKey, boolean> = {
+  qty: true,
+  avg_entry: true,
+  last_price: true,
+  implied: true,
+  implied_market_value: false,
+  daily_chg: true,
+  today_pnl: true,
+  entry_cost: false,
+  market_value: true,
+};
+
+type PositionColumnVisibility = Record<ToggleableColumnKey, boolean>;
+
 function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 0) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
     const isStock = pos.structure_type === "Stock";
@@ -185,6 +230,7 @@ function LegRow({
   showExpiry,
   showUnderlying,
   showImplied,
+  columns,
   realtimeLegPrice,
   legImpliedPerContract,
   legImpliedMv,
@@ -194,6 +240,7 @@ function LegRow({
   showExpiry: boolean;
   showUnderlying?: boolean;
   showImplied?: boolean;
+  columns: PositionColumnVisibility;
   realtimeLegPrice?: PriceData | null;
   legImpliedPerContract?: number | null;
   legImpliedMv?: number | null;
@@ -215,42 +262,54 @@ function LegRow({
   const sign = leg.direction === "LONG" ? 1 : -1;
   const legPnl = legMv != null ? sign * (legMv - legEc) : null;
 
+  // The leg-description cell spans across the always-on identity columns
+  // (Structure, Direction) plus the optional Qty column.
+  const descColSpan = 1 + (columns.qty ? 1 : 0) + 1;
+
   return (
     <tr className={flashDirection ? `last-price-${flashDirection}` : undefined}>
       <td></td>
       <td
-        colSpan={3}
+        colSpan={descColSpan}
         className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
         onClick={onLegClick ? () => onLegClick(leg) : undefined}
       >
         {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
       </td>
       {showUnderlying && <td></td>}
-      <td className="right cell-muted">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
-      <td className="right last-price-cell">
-        {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
-        {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
-        {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
-      </td>
-      {showImplied && (
-        <>
-          <td className="right cell-muted" title="Black-Scholes implied value at current spot">
-            {legImpliedPerContract != null ? fmtPrice(legImpliedPerContract) : "—"}
-          </td>
-          <td
-            className={`right cell-muted ${legImpliedMv != null ? (legImpliedMv >= 0 ? "positive" : "negative") : ""}`}
-            title="Implied market value: BS price × contracts × 100, signed"
-          >
-            {legImpliedMv != null
-              ? `${legImpliedMv >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legImpliedMv))}`
-              : "—"}
-          </td>
-        </>
+      {columns.avg_entry && (
+        <td className="right cell-muted">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
       )}
-      <td></td>
-      <td></td>
-      <td className="right cell-muted">{fmtPrice(legEc)}</td>
-      <td className="right cell-muted">{legMv != null ? fmtUsd(legMv) : "—"}</td>
+      {columns.last_price && (
+        <td className="right last-price-cell">
+          {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
+          {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
+          {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
+        </td>
+      )}
+      {showImplied && columns.implied && (
+        <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+          {legImpliedPerContract != null ? fmtPrice(legImpliedPerContract) : "—"}
+        </td>
+      )}
+      {showImplied && columns.implied_market_value && (
+        <td
+          className={`right cell-muted ${legImpliedMv != null ? (legImpliedMv >= 0 ? "positive" : "negative") : ""}`}
+          title="Implied market value: BS price × contracts × 100, signed"
+        >
+          {legImpliedMv != null
+            ? `${legImpliedMv >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legImpliedMv))}`
+            : "—"}
+        </td>
+      )}
+      {columns.daily_chg && <td></td>}
+      {columns.today_pnl && <td></td>}
+      {columns.entry_cost && (
+        <td className="right cell-muted">{fmtPrice(legEc)}</td>
+      )}
+      {columns.market_value && (
+        <td className="right cell-muted">{legMv != null ? fmtUsd(legMv) : "—"}</td>
+      )}
       <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
         {legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}
       </td>
@@ -261,7 +320,7 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, realtimePrice, prices, riskFreeRate = 0, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
+function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, columns, realtimePrice, prices, riskFreeRate = 0, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; columns: PositionColumnVisibility; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -375,7 +434,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           )}
         </td>
         <td>{structureDisplay}</td>
-        <td className="right">{pos.contracts}</td>
+        {columns.qty && <td className="right">{pos.contracts}</td>}
         <td>
           <span className={`pill ${pos.risk_profile === "defined" ? "defined" : pos.risk_profile === "equity" ? "neutral" : "undefined"}`}>
             {pos.direction}
@@ -388,35 +447,41 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             {underlyingDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="underlying down" />}
           </td>
         )}
-        <td className="right">{fmtPrice(avgEntry)}</td>
-        <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
-          {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
-          {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
-          {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
-        </td>
-        {showImplied && (
-          <>
-            <td className="right cell-muted" title="Black-Scholes implied value at current spot">
-              {impliedNet != null ? fmtPrice(impliedNet) : "—"}
-            </td>
-            <td
-              className={`right ${impliedNotional != null ? (impliedNotional >= 0 ? "positive" : "negative") : ""}`}
-              title="Implied market value: BS price × contracts × multiplier, signed"
-            >
-              {impliedNotional != null
-                ? `${impliedNotional >= 0 ? "+" : "-"}${fmtUsd(Math.abs(impliedNotional))}`
-                : "—"}
-            </td>
-          </>
+        {columns.avg_entry && <td className="right">{fmtPrice(avgEntry)}</td>}
+        {columns.last_price && (
+          <td className={`right last-price-cell ${flashDirection ? `last-price-${flashDirection}` : ""}`}>
+            {lastPrice != null ? fmtPriceOrCalculated(lastPrice, lastPriceIsCalculated) : "—"}
+            {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
+            {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
+          </td>
         )}
-        <td className={`right ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
-          {dailyChg != null ? `${dailyChg >= 0 ? "+" : ""}${dailyChg.toFixed(2)}%` : "—"}
-        </td>
-        <td className={`right ${todayPnl != null ? (todayPnl >= 0 ? "positive" : "negative") : ""}`}>
-          {todayPnl != null ? `${todayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(todayPnl))}` : "—"}
-        </td>
-        <td className="right">{fmtUsd(entryCost)}</td>
-        <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>
+        {showImplied && columns.implied && (
+          <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+            {impliedNet != null ? fmtPrice(impliedNet) : "—"}
+          </td>
+        )}
+        {showImplied && columns.implied_market_value && (
+          <td
+            className={`right ${impliedNotional != null ? (impliedNotional >= 0 ? "positive" : "negative") : ""}`}
+            title="Implied market value: BS price × contracts × multiplier, signed"
+          >
+            {impliedNotional != null
+              ? `${impliedNotional >= 0 ? "+" : "-"}${fmtUsd(Math.abs(impliedNotional))}`
+              : "—"}
+          </td>
+        )}
+        {columns.daily_chg && (
+          <td className={`right ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
+            {dailyChg != null ? `${dailyChg >= 0 ? "+" : ""}${dailyChg.toFixed(2)}%` : "—"}
+          </td>
+        )}
+        {columns.today_pnl && (
+          <td className={`right ${todayPnl != null ? (todayPnl >= 0 ? "positive" : "negative") : ""}`}>
+            {todayPnl != null ? `${todayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(todayPnl))}` : "—"}
+          </td>
+        )}
+        {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
+        {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
         <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
           {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "—"}
         </td>
@@ -449,6 +514,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             showExpiry={showExpiry}
             showUnderlying={showUnderlying}
             showImplied={showImplied}
+            columns={columns}
             realtimeLegPrice={key && prices ? prices[key] : null}
             legImpliedPerContract={legImplied}
             legImpliedMv={legImpliedMv}
@@ -462,7 +528,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
 
 /* ─── Position table ───────────────────────────────────── */
 
-export default function PositionTable({ positions, showExpiry = true, showUnderlying = false, prices }: { positions: PortfolioPosition[]; showExpiry?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData> }) {
+export default function PositionTable({ positions, showExpiry = true, showUnderlying = false, prices, tableId = "positions" }: { positions: PortfolioPosition[]; showExpiry?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData>; tableId?: string }) {
   const riskFreeRate = useRiskFreeRate();
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
@@ -471,6 +537,17 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
   const showImplied = useMemo(
     () => positions.some((p) => p.structure_type !== "Stock"),
     [positions],
+  );
+  // User-driven column visibility (persisted to localStorage by `tableId`).
+  const { visible: columns, toggle: toggleColumn, reset: resetColumns } =
+    useColumnVisibility<ToggleableColumnKey>(tableId, POSITION_COLUMN_DEFAULTS);
+  // Hide Implied / Implied MV from the toggle menu when no option rows exist.
+  const visibleColumnEntries = useMemo<readonly ColumnsToggleEntry<ToggleableColumnKey>[]>(
+    () =>
+      showImplied
+        ? POSITION_COLUMNS
+        : POSITION_COLUMNS.filter((c) => c.key !== "implied" && c.key !== "implied_market_value"),
+    [showImplied],
   );
 
   // Instrument detail modal state
@@ -482,36 +559,42 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
 
   return (
     <>
+      <div className="position-table-toolbar">
+        <ColumnsToggle<ToggleableColumnKey>
+          columns={visibleColumnEntries}
+          visible={columns}
+          onToggle={toggleColumn}
+          onReset={resetColumns}
+        />
+      </div>
+      <div className="table-wrap">
       <table>
         <thead>
           <tr>
             <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {columns.qty && <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            {showImplied && (
-              <>
-                <SortTh<PositionSortKey> label="Implied" sortKey="implied" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                <SortTh<PositionSortKey> label="Implied MV" sortKey="implied_market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-              </>
-            )}
-            <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {columns.avg_entry && <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.last_price && <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {showImplied && columns.implied && <SortTh<PositionSortKey> label="Implied" sortKey="implied" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {showImplied && columns.implied_market_value && <SortTh<PositionSortKey> label="Implied MV" sortKey="implied_market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.daily_chg && <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.today_pnl && <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.entry_cost && <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.market_value && <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             {showExpiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
           </tr>
         </thead>
         <tbody>
           {sorted.map((pos) => (
-            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} showImplied={showImplied} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
+            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} showImplied={showImplied} columns={columns} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
           ))}
         </tbody>
       </table>
+      </div>
 
       {activeInstrument && prices && (
         <InstrumentDetailModal

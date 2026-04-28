@@ -40,6 +40,8 @@ import {
 } from "@/lib/openOrderCombos";
 import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
+import { useColumnVisibility } from "@/lib/useColumnVisibility";
+import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable from "./PositionTable";
 import { TableSkeleton } from "@/components/ui/Skeleton";
@@ -971,7 +973,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} />
+            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-defined" />
           </div>
         </div>
       )}
@@ -996,7 +998,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} />
+            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-undefined" />
           </div>
         </div>
       )}
@@ -1021,7 +1023,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} />
+            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} tableId="positions-equity" />
           </div>
         </div>
       )}
@@ -1455,6 +1457,37 @@ function JournalSections() {
 
 type OpenOrderKey = "symbol" | "action" | "orderType" | "totalQuantity" | "limitPrice" | "lastPrice" | "implied" | "implied_mv" | "status" | "tif" | "actions";
 
+type OrderToggleableKey =
+  | "orderType"
+  | "totalQuantity"
+  | "limitPrice"
+  | "lastPrice"
+  | "implied"
+  | "implied_mv"
+  | "tif";
+
+const ORDER_COLUMNS: readonly ColumnsToggleEntry<OrderToggleableKey>[] = [
+  { key: "orderType", label: "Type" },
+  { key: "totalQuantity", label: "Quantity" },
+  { key: "limitPrice", label: "Limit Price" },
+  { key: "lastPrice", label: "Last Price" },
+  { key: "implied", label: "Implied" },
+  { key: "implied_mv", label: "Implied MV" },
+  { key: "tif", label: "TIF" },
+];
+
+const ORDER_COLUMN_DEFAULTS: Record<OrderToggleableKey, boolean> = {
+  orderType: true,
+  totalQuantity: true,
+  limitPrice: true,
+  lastPrice: true,
+  implied: true,
+  implied_mv: false,
+  tif: true,
+};
+
+type OrderColumnVisibility = Record<OrderToggleableKey, boolean>;
+
 /** Build the prices-map key for an order's contract (option key for options, symbol for stocks). */
 function orderPriceKey(contract: OpenOrder["contract"]): string | null {
   if (contract.secType === "BAG") return null;
@@ -1672,6 +1705,15 @@ function OrdersSections({
       ),
     [orders],
   );
+  const { visible: orderColumns, toggle: toggleOrderColumn, reset: resetOrderColumns } =
+    useColumnVisibility<OrderToggleableKey>("orders-open", ORDER_COLUMN_DEFAULTS);
+  const visibleOrderColumnEntries = useMemo<readonly ColumnsToggleEntry<OrderToggleableKey>[]>(
+    () =>
+      showImplied
+        ? ORDER_COLUMNS
+        : ORDER_COLUMNS.filter((c) => c.key !== "implied" && c.key !== "implied_mv"),
+    [showImplied],
+  );
   const openOrderRows = useMemo(() => {
     if (!orders) return [];
     return buildOpenOrderDisplayRows(orders.open_orders, portfolio?.positions);
@@ -1820,6 +1862,12 @@ function OrdersSections({
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <TableSearch query={openFilter.query} setQuery={openFilter.setQuery} placeholder="Filter orders..." resultCount={openFilter.filtered.length} totalCount={openSort.sorted.length} />
+            <ColumnsToggle<OrderToggleableKey>
+              columns={visibleOrderColumnEntries}
+              visible={orderColumns}
+              onToggle={toggleOrderColumn}
+              onReset={resetOrderColumns}
+            />
             <span className="pill defined">{orders.open_count} ORDERS</span>
           </div>
         </div>
@@ -1827,23 +1875,20 @@ function OrdersSections({
           {openOrderRows.length === 0 ? (
             <div className="alert-item">No open orders</div>
           ) : (
+            <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <SortTh<OpenOrderKey> label="Symbol" sortKey="symbol" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Action" sortKey="action" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Type" sortKey="orderType" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  {showImplied && (
-                    <>
-                      <SortTh<OpenOrderKey> label="Implied" sortKey="implied" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                      <SortTh<OpenOrderKey> label="Implied MV" sortKey="implied_mv" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                    </>
-                  )}
+                  {orderColumns.orderType && <SortTh<OpenOrderKey> label="Type" sortKey="orderType" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
+                  {orderColumns.totalQuantity && <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
+                  {orderColumns.limitPrice && <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
+                  {orderColumns.lastPrice && <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
+                  {showImplied && orderColumns.implied && <SortTh<OpenOrderKey> label="Implied" sortKey="implied" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
+                  {showImplied && orderColumns.implied_mv && <SortTh<OpenOrderKey> label="Implied MV" sortKey="implied_mv" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   <SortTh<OpenOrderKey> label="Status" sortKey="status" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="TIF" sortKey="tif" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                  {orderColumns.tif && <SortTh<OpenOrderKey> label="TIF" sortKey="tif" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   <th className="actions-th">Actions</th>
                 </tr>
               </thead>
@@ -1882,23 +1927,27 @@ function OrdersSections({
                         <td>
                           <span className="pill neutral">COMBO</span>
                         </td>
-                        <td>{o.structure}</td>
-                        <td className="right">{o.totalQuantity}</td>
-                        <td className="right">
-                          <span className={isPendingModify ? "status-modifying" : ""}>
-                            {isPendingModify ? "—" : o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"}
-                          </span>
-                        </td>
-                        <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
-                        {showImplied && (
-                          <>
-                            <OrderImpliedCell
-                              price={prices ? computeOrderImpliedValue(o.orders, prices, { riskFreeRate }).netPerContract : null}
-                            />
-                            <OrderImpliedMvCell
-                              value={prices ? resolveComboImpliedMv(o.orders, prices, riskFreeRate) : null}
-                            />
-                          </>
+                        {orderColumns.orderType && <td>{o.structure}</td>}
+                        {orderColumns.totalQuantity && <td className="right">{o.totalQuantity}</td>}
+                        {orderColumns.limitPrice && (
+                          <td className="right">
+                            <span className={isPendingModify ? "status-modifying" : ""}>
+                              {isPendingModify ? "—" : o.limitPrice != null ? fmtPrice(o.limitPrice) : "—"}
+                            </span>
+                          </td>
+                        )}
+                        {orderColumns.lastPrice && (
+                          <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
+                        )}
+                        {showImplied && orderColumns.implied && (
+                          <OrderImpliedCell
+                            price={prices ? computeOrderImpliedValue(o.orders, prices, { riskFreeRate }).netPerContract : null}
+                          />
+                        )}
+                        {showImplied && orderColumns.implied_mv && (
+                          <OrderImpliedMvCell
+                            value={prices ? resolveComboImpliedMv(o.orders, prices, riskFreeRate) : null}
+                          />
                         )}
                         <td>
                           {isPendingCancel ? (
@@ -1909,7 +1958,7 @@ function OrdersSections({
                             o.status
                           )}
                         </td>
-                        <td>{o.tif}</td>
+                        {orderColumns.tif && <td>{o.tif}</td>}
                         <td className="actions-cell">
                           {isPending ? (
                             <span className="cancel-pending-label">PENDING</span>
@@ -1973,25 +2022,29 @@ function OrdersSections({
                           {o.order.action}
                         </span>
                       </td>
-                      <td>{o.order.orderType}</td>
-                      <td className="right">{o.order.totalQuantity}</td>
-                      <td className="right">
-                        {isPendingModify && o.order.orderType === "STP LMT" ? (
-                          <span className="status-modifying">Modifying...</span>
-                        ) : (
-                          o.order.limitPrice != null ? fmtPrice(o.order.limitPrice) : "—"
-                        )}
-                      </td>
-                      <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
-                      {showImplied && (
-                        <>
-                          <OrderImpliedCell
-                            price={prices ? resolveOrderImpliedValue(o.order, prices, riskFreeRate) : null}
-                          />
-                          <OrderImpliedMvCell
-                            value={prices ? resolveSingleOrderImpliedMv(o.order, prices, riskFreeRate) : null}
-                          />
-                        </>
+                      {orderColumns.orderType && <td>{o.order.orderType}</td>}
+                      {orderColumns.totalQuantity && <td className="right">{o.order.totalQuantity}</td>}
+                      {orderColumns.limitPrice && (
+                        <td className="right">
+                          {isPendingModify && o.order.orderType === "STP LMT" ? (
+                            <span className="status-modifying">Modifying...</span>
+                          ) : (
+                            o.order.limitPrice != null ? fmtPrice(o.order.limitPrice) : "—"
+                          )}
+                        </td>
+                      )}
+                      {orderColumns.lastPrice && (
+                        <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
+                      )}
+                      {showImplied && orderColumns.implied && (
+                        <OrderImpliedCell
+                          price={prices ? resolveOrderImpliedValue(o.order, prices, riskFreeRate) : null}
+                        />
+                      )}
+                      {showImplied && orderColumns.implied_mv && (
+                        <OrderImpliedMvCell
+                          value={prices ? resolveSingleOrderImpliedMv(o.order, prices, riskFreeRate) : null}
+                        />
                       )}
                       <td>
                         {isPendingCancel ? (
@@ -2002,7 +2055,7 @@ function OrdersSections({
                           o.order.status
                         )}
                       </td>
-                      <td>{o.order.tif}</td>
+                      {orderColumns.tif && <td>{o.order.tif}</td>}
                       <td className="actions-cell">
                         {isPending ? (
                           <span className="cancel-pending-label">PENDING</span>
@@ -2033,6 +2086,7 @@ function OrdersSections({
                 })}
               </tbody>
             </table>
+            </div>
           )}
         </div>
       </div>

@@ -3095,6 +3095,98 @@ tr.leg-row td {
 /* ── Table wrap for horizontal scroll ── */
 .table-wrap { overflow-x: auto; }
 
+/* ── PositionTable toolbar ── */
+.position-table-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  padding: 0 0 6px;
+}
+
+/* ── Columns visibility toggle ── */
+.columns-toggle {
+  position: relative;
+  display: inline-block;
+}
+.columns-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: border-color 0.12s ease, color 0.12s ease;
+}
+.columns-toggle-btn:hover { border-color: var(--signal-core); color: var(--signal-core); }
+.columns-toggle-label { font-weight: 500; }
+.columns-toggle-count {
+  color: var(--text-secondary);
+  opacity: 0.7;
+  font-variant-numeric: tabular-nums;
+}
+.columns-toggle-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 20;
+  min-width: 200px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.32);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.columns-toggle-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  border-radius: 2px;
+  user-select: none;
+}
+.columns-toggle-item:hover { background: var(--bg-hover); color: inherit; }
+.columns-toggle-item input[type="checkbox"] {
+  accent-color: var(--signal-core);
+  cursor: pointer;
+  margin: 0;
+}
+.columns-toggle-item-locked { opacity: 0.7; cursor: not-allowed; }
+.columns-toggle-item-locked input { cursor: not-allowed; }
+.columns-toggle-item-label { flex: 1; }
+.columns-toggle-item-locked-hint {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  opacity: 0.6;
+}
+.columns-toggle-reset {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--border-dim);
+  color: var(--text-secondary);
+  font-size: 11px;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0 0 2px 2px;
+}
+.columns-toggle-reset:hover { color: var(--signal-core); }
+
 /* ── Table Search / Filter ── */
 .table-search {
   display: inline-flex;
