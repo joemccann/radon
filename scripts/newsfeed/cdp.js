@@ -6,7 +6,7 @@ const PAGES_CACHE = "/tmp/cdp-pages.json";
 
 export const DEFAULT_CDP_PATH = path.join(
   process.env.HOME || "",
-  ".pi/agent/git/github.com/pasky/chrome-cdp-skill/skills/chrome-cdp/scripts/cdp.mjs",
+  ".claude/skills/chrome-cdp/scripts/cdp.mjs",
 );
 
 export function resolveCdpPath() {
