@@ -20,6 +20,16 @@ export function buildExtractionExpression() {
       }
     };
 
+    // JSON-LD parses preserve HTML entities (&#39;, &amp;, &quot;…); textContent
+    // does not. Round-trip through a <textarea>.innerHTML to decode safely
+    // without executing any markup the headline might contain.
+    const decodeEntities = (s) => {
+      if (typeof s !== 'string' || !s) return s;
+      const el = document.createElement('textarea');
+      el.innerHTML = s;
+      return el.value;
+    };
+
     const build = () => {
       const articles = Array.from(document.querySelectorAll('article.post'));
       const items = articles.map((article) => {
@@ -34,7 +44,7 @@ export function buildExtractionExpression() {
         }
 
         const id = (article.id || schema?.mainEntityOfPage?.['@id'] || schema?.url || '').split('/').filter(Boolean).pop() || '';
-        const title = (schema?.headline || article.querySelector('.title')?.textContent || '').trim();
+        const title = decodeEntities((schema?.headline || article.querySelector('.title')?.textContent || '').trim());
         const contentNodes = Array.from(article.querySelectorAll('.body .content'));
         const contentText = contentNodes.map((node) => (node.textContent || '').trim()).filter(Boolean).join('\\n');
         const timestamp = schema?.datePublished || schema?.dateModified || article.querySelector('time')?.getAttribute('datetime') || '';
@@ -53,7 +63,7 @@ export function buildExtractionExpression() {
         });
         const images = Array.from(new Set(imageCandidates.map(toAbsolute).filter(Boolean)));
 
-        return { id, title, content: contentText || schema?.description || '', timestamp, images };
+        return { id, title, content: contentText || decodeEntities(schema?.description || ''), timestamp, images };
       }).filter((entry) => entry.id && entry.title && entry.timestamp);
 
       return items;

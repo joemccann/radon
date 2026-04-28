@@ -295,6 +295,42 @@ describe("buildExtractionExpression (DOM)", () => {
     expect(fallback.images).toContain("https://themarketear.com/uploads/aapl.jpg");
   });
 
+  it("decodes HTML entities in JSON-LD headline and description", async () => {
+    const { buildExtractionExpression, parsePayload } = await import(
+      "../../scripts/newsfeed/extract.js"
+    );
+
+    const ld = JSON.stringify({
+      "@type": "Article",
+      headline: "European Utilities&#39; re-rating",
+      description: "AT&amp;T &amp; peers &mdash; &quot;quality&quot; growth",
+      datePublished: "2026-04-28T07:00:00Z",
+    });
+
+    const fixture = `
+      <article class="post" id="entity-1">
+        <script type="application/ld+json">${ld}</script>
+        <time datetime="2026-04-28T07:00:00Z">today</time>
+      </article>
+    `;
+
+    const dom = new JSDOM(`<!DOCTYPE html><html><body>${fixture}</body></html>`);
+    const ctx: Record<string, unknown> = {
+      document: dom.window.document,
+      URL: globalThis.URL,
+    };
+    vm.createContext(ctx);
+    const raw = vm.runInContext(buildExtractionExpression(), ctx) as string;
+    const parsed = parsePayload(raw);
+
+    expect(parsed.ok).toBe(true);
+    if (!parsed.ok) throw new Error("expected ok payload");
+    const item = parsed.items.find((it: any) => it.id === "entity-1");
+    expect(item).toBeDefined();
+    expect(item.title).toBe("European Utilities' re-rating");
+    expect(item.content).toBe('AT&T & peers — "quality" growth');
+  });
+
   it("filters out articles missing id/title/timestamp", async () => {
     const { buildExtractionExpression, parsePayload } = await import(
       "../../scripts/newsfeed/extract.js"
