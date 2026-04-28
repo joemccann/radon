@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+# scripts/dev — Radon dev-stack launcher with optional --only <service> filter.
+#
+# Always starts all four services (next, ib, api, scraper). With --only NAME,
+# concurrently hides the output of every service except NAME — the hidden
+# services keep running, only their log lines are suppressed.
+#
+# Usage:
+#   npm run dev                       # all four streams (default)
+#   npm run dev -- --only api         # show only [api] lines
+#   npm run dev -- --only ib          # show only [ib] lines
+#   npm run dev -- --only next        # show only [next] lines
+#   npm run dev -- --only scraper     # show only [scraper] lines
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+ALL_NAMES=(next ib api scraper)
+ONLY=""
+
+usage() {
+  cat <<EOF
+Usage: npm run dev [-- --only <next|ib|api|scraper>]
+
+  npm run dev                       Run all four services with full logs.
+  npm run dev -- --only <name>      Show only that service's logs.
+                                    Other three keep running silently.
+EOF
+}
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --only)
+      ONLY="${2:-}"
+      shift 2 || true
+      ;;
+    --only=*)
+      ONLY="${1#--only=}"
+      shift
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "[dev] unknown arg: $1" >&2
+      usage >&2
+      exit 2
+      ;;
+  esac
+done
+
+HIDE_ARGS=()
+if [[ -n "$ONLY" ]]; then
+  valid=0
+  for n in "${ALL_NAMES[@]}"; do
+    [[ "$n" == "$ONLY" ]] && valid=1
+  done
+  if [[ $valid -eq 0 ]]; then
+    echo "[dev] --only must be one of: ${ALL_NAMES[*]} (got: '$ONLY')" >&2
+    exit 2
+  fi
+  hidden=()
+  for n in "${ALL_NAMES[@]}"; do
+    [[ "$n" == "$ONLY" ]] || hidden+=("$n")
+  done
+  IFS=, HIDE_ARGS=(--hide "${hidden[*]}")
+  unset IFS
+  echo "[dev] showing only [$ONLY] — other services still running"
+fi
+
+cd "$PROJECT_ROOT/web"
+
+exec npx concurrently "${HIDE_ARGS[@]}" \
+  -n next,ib,api,scraper \
+  -c cyan,yellow,green,magenta \
+  "next dev" \
+  "node ../scripts/ib_realtime_server.js" \
+  "python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .." \
+  "node ../scripts/newsfeed/index.js"

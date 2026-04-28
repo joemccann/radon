@@ -156,6 +156,14 @@ Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/rado
 
 `dev:next` and `dev:prices` stay single-purpose (no scraper).
 
+**Filter logs to one service** — `npm run dev` delegates to `scripts/dev` which accepts `--only <next|ib|api|scraper>`:
+
+```bash
+npm run dev                    # all four streams
+npm run dev -- --only api      # only [api] lines (others still running)
+npm run dev -- --only ib       # only [ib] lines
+```
+
 ### FastAPI Files (`scripts/api/`)
 
 | File | Purpose |
