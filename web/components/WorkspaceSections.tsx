@@ -38,6 +38,7 @@ import {
   buildExecutedGroupDescription,
   resolveOpenOrderComboPrice,
 } from "@/lib/openOrderCombos";
+import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedValue";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable from "./PositionTable";
 import { TableSkeleton } from "@/components/ui/Skeleton";
@@ -1451,7 +1452,7 @@ function JournalSections() {
 
 /* ─── Orders tables ────────────────────────────────────── */
 
-type OpenOrderKey = "symbol" | "action" | "orderType" | "totalQuantity" | "limitPrice" | "lastPrice" | "status" | "tif" | "actions";
+type OpenOrderKey = "symbol" | "action" | "orderType" | "totalQuantity" | "limitPrice" | "lastPrice" | "implied" | "status" | "tif" | "actions";
 
 /** Build the prices-map key for an order's contract (option key for options, symbol for stocks). */
 function orderPriceKey(contract: OpenOrder["contract"]): string | null {
@@ -1526,6 +1527,11 @@ function makeOpenOrderExtract(
         return item.kind === "combo"
           ? resolveOpenOrderComboPrice(item.orders, prices)
           : resolveOrderLastPrice(item.order, prices, portfolio);
+      case "implied":
+        if (!prices) return null;
+        return item.kind === "combo"
+          ? computeOrderImpliedValue(item.orders, prices).netPerContract
+          : resolveOrderImpliedValue(item.order, prices);
       case "status": return item.kind === "combo" ? item.status : item.order.status;
       case "tif": return item.kind === "combo" ? item.tif : item.order.tif;
       case "actions": return null;
@@ -1542,6 +1548,40 @@ function OrderPriceCell({ price }: { price: number | null }) {
       {price != null ? fmtPrice(price) : "—"}
       {direction === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
       {direction === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
+    </td>
+  );
+}
+
+/** Black-Scholes implied per-share value of an order's contract. Single OPT only;
+ *  STK and BAG return null (BAG aggregation is handled at the combo row level
+ *  via `computeOrderImpliedValue`). */
+function resolveOrderImpliedValue(
+  order: OpenOrder,
+  prices: Record<string, PriceData>,
+): number | null {
+  const c = order.contract;
+  if (c.secType !== "OPT") return null;
+  if (c.strike == null || !c.right || !c.expiry) return null;
+  const type: "Call" | "Put" | null =
+    c.right === "C" || c.right === "CALL" ? "Call" : c.right === "P" || c.right === "PUT" ? "Put" : null;
+  if (!type) return null;
+  return computeLegImpliedValue(
+    {
+      ticker: c.symbol,
+      expiry: c.expiry,
+      strike: c.strike,
+      type,
+      direction: order.action === "BUY" ? "LONG" : "SHORT",
+      contracts: Math.abs(order.totalQuantity),
+    },
+    prices,
+  ).perContract;
+}
+
+function OrderImpliedCell({ price }: { price: number | null }) {
+  return (
+    <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+      {price != null ? fmtPrice(price) : "—"}
     </td>
   );
 }
@@ -1736,6 +1776,7 @@ function OrdersSections({
                   <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                  <SortTh<OpenOrderKey> label="Implied" sortKey="implied" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Status" sortKey="status" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="TIF" sortKey="tif" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <th className="actions-th">Actions</th>
@@ -1784,6 +1825,9 @@ function OrdersSections({
                           </span>
                         </td>
                         <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
+                        <OrderImpliedCell
+                          price={prices ? computeOrderImpliedValue(o.orders, prices).netPerContract : null}
+                        />
                         <td>
                           {isPendingCancel ? (
                             <span className="status-cancelling">Cancelling...</span>
@@ -1867,6 +1911,9 @@ function OrdersSections({
                         )}
                       </td>
                       <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
+                      <OrderImpliedCell
+                        price={prices ? resolveOrderImpliedValue(o.order, prices) : null}
+                      />
                       <td>
                         {isPendingCancel ? (
                           <span className="status-cancelling">Cancelling...</span>

@@ -22,6 +22,7 @@ import {
   getTodayPnlDollars,
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
+import { computeLegImpliedValue, computePositionImpliedValue } from "@/lib/impliedValue";
 
 /* ─── Sortable header cell ─────────────────────────────── */
 
@@ -136,7 +137,7 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
 
 /* ─── Sort extract factory ─────────────────────────────── */
 
-export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
+export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
 function makePositionExtract(prices?: Record<string, PriceData>) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
@@ -157,6 +158,10 @@ function makePositionExtract(prices?: Record<string, PriceData>) {
         if (optRtMv != null) return optRtMv / (pos.contracts * getMultiplier(pos));
         return getLastPrice(pos);
       }
+      case "implied": {
+        if (isStock || !prices) return null;
+        return computePositionImpliedValue(pos, prices).netPerContract;
+      }
       case "daily_chg": return isStock ? getDailyChange(prices?.[pos.ticker]) : getOptionDailyChg(pos, prices);
       case "today_pnl": return getTodayPnlDollars(pos, prices);
       case "entry_cost": return resolveEntryCost(pos);
@@ -175,12 +180,14 @@ function LegRow({
   showExpiry,
   showUnderlying,
   realtimeLegPrice,
+  legImpliedPerContract,
   onLegClick,
 }: {
   leg: PortfolioPosition["legs"][number];
   showExpiry: boolean;
   showUnderlying?: boolean;
   realtimeLegPrice?: PriceData | null;
+  legImpliedPerContract?: number | null;
   onLegClick?: (leg: PortfolioLeg) => void;
 }) {
   const resolvedPrice = resolveRealtimePrice(
@@ -215,6 +222,9 @@ function LegRow({
         {marketPrice != null ? fmtPriceOrCalculated(marketPrice, isCalculated) : "—"}
         {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
         {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
+      </td>
+      <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+        {legImpliedPerContract != null ? fmtPrice(legImpliedPerContract) : "—"}
       </td>
       <td></td>
       <td></td>
@@ -295,6 +305,13 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
     ? getDailyChange(realtimePrice)
     : getOptionDailyChg(pos, prices);
 
+  // Black-Scholes implied per-share, signed-summed across legs. null for stocks
+  // or when any leg lacks IV / spot.
+  const impliedNet = useMemo(() => {
+    if (isStock || !prices) return null;
+    return computePositionImpliedValue(pos, prices).netPerContract;
+  }, [isStock, pos, prices]);
+
   // Today's P&L in dollars
   const todayPnl = isStock
     ? (realtimePrice?.last != null && realtimePrice.last > 0 && realtimePrice?.close != null && realtimePrice.close > 0
@@ -349,6 +366,9 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
           {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
           {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
         </td>
+        <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+          {impliedNet != null ? fmtPrice(impliedNet) : "—"}
+        </td>
         <td className={`right ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
           {dailyChg != null ? `${dailyChg >= 0 ? "+" : ""}${dailyChg.toFixed(2)}%` : "—"}
         </td>
@@ -364,6 +384,20 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
       </tr>
       {hasMultipleLegs && legsExpanded && pos.legs.map((leg, i) => {
         const key = legPriceKey(pos.ticker, pos.expiry, leg);
+        const legImplied =
+          leg.type === "Stock" || leg.strike == null || leg.strike === 0 || !prices
+            ? null
+            : computeLegImpliedValue(
+                {
+                  ticker: pos.ticker,
+                  expiry: pos.expiry,
+                  strike: leg.strike,
+                  type: leg.type,
+                  direction: leg.direction,
+                  contracts: leg.contracts,
+                },
+                prices,
+              ).perContract;
         return (
           <LegRow
             key={`${pos.id}-leg-${i}`}
@@ -371,6 +405,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
             showExpiry={showExpiry}
             showUnderlying={showUnderlying}
             realtimeLegPrice={key && prices ? prices[key] : null}
+            legImpliedPerContract={legImplied}
             onLegClick={onLegClick ? (l) => onLegClick(l, pos) : undefined}
           />
         );
@@ -404,6 +439,7 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
             {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<PositionSortKey> label="Implied" sortKey="implied" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />

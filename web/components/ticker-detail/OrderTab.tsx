@@ -7,6 +7,7 @@ import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
+import { computeLegImpliedValue } from "@/lib/impliedValue";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
@@ -94,6 +95,27 @@ function ExistingOrderRow({
   const priceData = resolveOrderPriceData(order, prices);
   const canModify = order.orderType === "LMT" || order.orderType === "STP LMT";
 
+  // Black-Scholes implied per-share value at current spot. Single OPT only;
+  // STK and BAG are skipped (BAG implied is shown in the consolidated combo row).
+  const impliedPrice = useMemo(() => {
+    const c = order.contract;
+    if (c.secType !== "OPT" || c.strike == null || !c.right || !c.expiry) return null;
+    const type: "Call" | "Put" | null =
+      c.right === "C" || c.right === "CALL" ? "Call" : c.right === "P" || c.right === "PUT" ? "Put" : null;
+    if (!type) return null;
+    return computeLegImpliedValue(
+      {
+        ticker: c.symbol,
+        expiry: c.expiry,
+        strike: c.strike,
+        type,
+        direction: order.action === "BUY" ? "LONG" : "SHORT",
+        contracts: Math.abs(order.totalQuantity),
+      },
+      prices,
+    ).perContract;
+  }, [order, prices]);
+
   const handleCancel = useCallback(async () => {
     setActionLoading(true);
     await requestCancel(order);
@@ -140,6 +162,10 @@ function ExistingOrderRow({
         <div className="existing-order-detail">
           <span className="pos-stat-label">LAST</span>
           <span className="pos-stat-value">{priceData?.last != null ? fmtPrice(priceData.last) : "---"}</span>
+        </div>
+        <div className="existing-order-detail" title="Black-Scholes implied value at current spot">
+          <span className="pos-stat-label">IMPLIED</span>
+          <span className="pos-stat-value">{impliedPrice != null ? fmtPrice(impliedPrice) : "---"}</span>
         </div>
       </div>
 
