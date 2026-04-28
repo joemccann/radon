@@ -43,7 +43,11 @@ import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
-import PositionTable from "./PositionTable";
+import PositionTable, {
+  POSITION_COLUMNS,
+  POSITION_COLUMN_DEFAULTS,
+  type PositionToggleableColumnKey,
+} from "./PositionTable";
 import { TableSkeleton } from "@/components/ui/Skeleton";
 import CancelOrderDialog from "./CancelOrderDialog";
 import ModifyOrderModal from "./ModifyOrderModal";
@@ -933,6 +937,34 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
   const undefinedFilter = useTableFilter(undefinedPositions, extractPositionSearchText);
   const equityFilter = useTableFilter(equityPositions, extractPositionSearchText);
 
+  // Column visibility per section. Each section gets its own localStorage
+  // bucket so toggling one doesn't affect the others. The toggle UI is
+  // rendered inside each section-header (left of TableSearch).
+  const definedCols = useColumnVisibility<PositionToggleableColumnKey>("positions-defined", POSITION_COLUMN_DEFAULTS);
+  const undefinedCols = useColumnVisibility<PositionToggleableColumnKey>("positions-undefined", POSITION_COLUMN_DEFAULTS);
+  const equityCols = useColumnVisibility<PositionToggleableColumnKey>("positions-equity", POSITION_COLUMN_DEFAULTS);
+
+  const definedHasOptions = useMemo(
+    () => definedFilter.filtered.some((p) => p.structure_type !== "Stock"),
+    [definedFilter.filtered],
+  );
+  const undefinedHasOptions = useMemo(
+    () => undefinedFilter.filtered.some((p) => p.structure_type !== "Stock"),
+    [undefinedFilter.filtered],
+  );
+  const equityHasOptions = useMemo(
+    () => equityFilter.filtered.some((p) => p.structure_type !== "Stock"),
+    [equityFilter.filtered],
+  );
+
+  const filterImpliedEntries = (hasOptions: boolean) =>
+    hasOptions
+      ? POSITION_COLUMNS
+      : POSITION_COLUMNS.filter((c) => c.key !== "implied" && c.key !== "implied_market_value");
+  const definedColEntries = useMemo(() => filterImpliedEntries(definedHasOptions), [definedHasOptions]);
+  const undefinedColEntries = useMemo(() => filterImpliedEntries(undefinedHasOptions), [undefinedHasOptions]);
+  const equityColEntries = useMemo(() => filterImpliedEntries(equityHasOptions), [equityHasOptions]);
+
   if (!portfolio) {
     return (
       <div className="section">
@@ -962,6 +994,12 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
               <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <ColumnsToggle<PositionToggleableColumnKey>
+                columns={definedColEntries}
+                visible={definedCols.visible}
+                onToggle={definedCols.toggle}
+                onReset={definedCols.reset}
+              />
               <TableSearch
                 query={definedFilter.query}
                 setQuery={definedFilter.setQuery}
@@ -973,7 +1011,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-defined" />
+            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-defined" columnVisibility={definedCols.visible} />
           </div>
         </div>
       )}
@@ -987,6 +1025,12 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
               <InfoTooltip text={SECTION_TOOLTIPS["Undefined Risk Positions"]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <ColumnsToggle<PositionToggleableColumnKey>
+                columns={undefinedColEntries}
+                visible={undefinedCols.visible}
+                onToggle={undefinedCols.toggle}
+                onReset={undefinedCols.reset}
+              />
               <TableSearch
                 query={undefinedFilter.query}
                 setQuery={undefinedFilter.setQuery}
@@ -998,7 +1042,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-undefined" />
+            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-undefined" columnVisibility={undefinedCols.visible} />
           </div>
         </div>
       )}
@@ -1012,6 +1056,12 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
               <InfoTooltip text={SECTION_TOOLTIPS["Equity Positions"]} />
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <ColumnsToggle<PositionToggleableColumnKey>
+                columns={equityColEntries}
+                visible={equityCols.visible}
+                onToggle={equityCols.toggle}
+                onReset={equityCols.reset}
+              />
               <TableSearch
                 query={equityFilter.query}
                 setQuery={equityFilter.setQuery}
@@ -1023,7 +1073,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} tableId="positions-equity" />
+            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} tableId="positions-equity" columnVisibility={equityCols.visible} />
           </div>
         </div>
       )}
@@ -1861,13 +1911,13 @@ function OrdersSections({
             <InfoTooltip text={SECTION_TOOLTIPS["Open Orders"]} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <TableSearch query={openFilter.query} setQuery={openFilter.setQuery} placeholder="Filter orders..." resultCount={openFilter.filtered.length} totalCount={openSort.sorted.length} />
             <ColumnsToggle<OrderToggleableKey>
               columns={visibleOrderColumnEntries}
               visible={orderColumns}
               onToggle={toggleOrderColumn}
               onReset={resetOrderColumns}
             />
+            <TableSearch query={openFilter.query} setQuery={openFilter.setQuery} placeholder="Filter orders..." resultCount={openFilter.filtered.length} totalCount={openSort.sorted.length} />
             <span className="pill defined">{orders.open_count} ORDERS</span>
           </div>
         </div>

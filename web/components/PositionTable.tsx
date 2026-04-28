@@ -145,7 +145,7 @@ export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "un
 /** User-toggleable columns. `ticker`/`structure`/`direction`/`pnl` are
  *  always-on identity/outcome columns; `underlying`/`expiry` are caller-
  *  controlled via showUnderlying/showExpiry props. */
-type ToggleableColumnKey =
+export type PositionToggleableColumnKey =
   | "qty"
   | "avg_entry"
   | "last_price"
@@ -156,7 +156,10 @@ type ToggleableColumnKey =
   | "entry_cost"
   | "market_value";
 
-const POSITION_COLUMNS: readonly ColumnsToggleEntry<ToggleableColumnKey>[] = [
+// Internal alias retained so the existing JSX/cell gating reads the same.
+type ToggleableColumnKey = PositionToggleableColumnKey;
+
+export const POSITION_COLUMNS: readonly ColumnsToggleEntry<PositionToggleableColumnKey>[] = [
   { key: "qty", label: "Qty" },
   { key: "avg_entry", label: "Avg Entry" },
   { key: "last_price", label: "Last Price" },
@@ -171,7 +174,7 @@ const POSITION_COLUMNS: readonly ColumnsToggleEntry<ToggleableColumnKey>[] = [
 /** Default visibility — chosen so a fresh-install user fits the table on a
  *  ~1280px viewport. Less-essential columns (Implied MV, Entry Cost) start
  *  hidden and can be toggled on. */
-const POSITION_COLUMN_DEFAULTS: Record<ToggleableColumnKey, boolean> = {
+export const POSITION_COLUMN_DEFAULTS: Record<PositionToggleableColumnKey, boolean> = {
   qty: true,
   avg_entry: true,
   last_price: true,
@@ -183,7 +186,7 @@ const POSITION_COLUMN_DEFAULTS: Record<ToggleableColumnKey, boolean> = {
   market_value: true,
 };
 
-type PositionColumnVisibility = Record<ToggleableColumnKey, boolean>;
+export type PositionColumnVisibility = Record<PositionToggleableColumnKey, boolean>;
 
 function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 0) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
@@ -528,7 +531,25 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
 
 /* ─── Position table ───────────────────────────────────── */
 
-export default function PositionTable({ positions, showExpiry = true, showUnderlying = false, prices, tableId = "positions" }: { positions: PortfolioPosition[]; showExpiry?: boolean; showUnderlying?: boolean; prices?: Record<string, PriceData>; tableId?: string }) {
+export default function PositionTable({
+  positions,
+  showExpiry = true,
+  showUnderlying = false,
+  prices,
+  tableId = "positions",
+  columnVisibility: controlledVisibility,
+}: {
+  positions: PortfolioPosition[];
+  showExpiry?: boolean;
+  showUnderlying?: boolean;
+  prices?: Record<string, PriceData>;
+  tableId?: string;
+  /** When provided, the table is "controlled" — the parent owns the column
+   *  visibility state and renders the toggle widget itself (e.g. inside a
+   *  shared section header). When omitted, the table falls back to its own
+   *  internal hook + toolbar above the table. */
+  columnVisibility?: PositionColumnVisibility;
+}) {
   const riskFreeRate = useRiskFreeRate();
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
@@ -538,9 +559,11 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
     () => positions.some((p) => p.structure_type !== "Stock"),
     [positions],
   );
-  // User-driven column visibility (persisted to localStorage by `tableId`).
-  const { visible: columns, toggle: toggleColumn, reset: resetColumns } =
-    useColumnVisibility<ToggleableColumnKey>(tableId, POSITION_COLUMN_DEFAULTS);
+  // Internal fallback hook — only renders the toolbar when the parent didn't
+  // provide a controlled `columnVisibility` map.
+  const internal = useColumnVisibility<ToggleableColumnKey>(tableId, POSITION_COLUMN_DEFAULTS);
+  const isControlled = controlledVisibility != null;
+  const columns: PositionColumnVisibility = isControlled ? controlledVisibility! : internal.visible;
   // Hide Implied / Implied MV from the toggle menu when no option rows exist.
   const visibleColumnEntries = useMemo<readonly ColumnsToggleEntry<ToggleableColumnKey>[]>(
     () =>
@@ -559,14 +582,16 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
 
   return (
     <>
-      <div className="position-table-toolbar">
-        <ColumnsToggle<ToggleableColumnKey>
-          columns={visibleColumnEntries}
-          visible={columns}
-          onToggle={toggleColumn}
-          onReset={resetColumns}
-        />
-      </div>
+      {!isControlled && (
+        <div className="position-table-toolbar">
+          <ColumnsToggle<ToggleableColumnKey>
+            columns={visibleColumnEntries}
+            visible={columns}
+            onToggle={internal.toggle}
+            onReset={internal.reset}
+          />
+        </div>
+      )}
       <div className="table-wrap">
       <table>
         <thead>
