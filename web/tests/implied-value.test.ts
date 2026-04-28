@@ -271,6 +271,54 @@ describe("computePositionImpliedValue", () => {
     );
     expect(r.netNotional).toBeCloseTo(r.netPerContract! * 75 * 100, 6);
   });
+
+  it("netNotional for long put is positive: +bsPut × 300 × 100", () => {
+    const sigma = 0.45;
+    const spot = 280;
+    const r = computePositionImpliedValue(
+      makePosition({ contracts: 300, legs: [
+        { direction: "LONG", contracts: 300, type: "Put", strike: 295, entry_cost: 90000, avg_cost: 3.0, market_price: 3.0, market_value: 90000 },
+      ] }),
+      { AMD: pd({ last: spot }), AMD_20260501_295_P: pd({ impliedVol: sigma }) },
+      { now: NOW },
+    );
+    const T = yearsToExpiry(AMD_EXPIRY, NOW)!;
+    const expected = bsPut(spot, 295, T, 0, sigma) * 300 * 100;
+    expect(r.netNotional).not.toBeNull();
+    expect(r.netNotional!).toBeGreaterThan(0);
+    expect(r.netNotional!).toBeCloseTo(expected, 4);
+  });
+
+  it("netNotional for bull call spread (long lower + short higher) is positive (debit)", () => {
+    const sigma = 0.3;
+    const expiry = "2026-06-19";
+    const contracts = 5;
+    const position = makePosition({
+      structure: "Bull Call Spread",
+      structure_type: "Bull Call Spread",
+      expiry,
+      contracts,
+      legs: [
+        { direction: "LONG", contracts, type: "Call", strike: 100, entry_cost: 1500, avg_cost: 3, market_price: 3, market_value: 1500 },
+        { direction: "SHORT", contracts, type: "Call", strike: 110, entry_cost: -500, avg_cost: -1, market_price: 1, market_value: -500 },
+      ],
+    });
+    const r = computePositionImpliedValue(
+      position,
+      {
+        AMD: pd({ last: 105 }),
+        AMD_20260619_100_C: pd({ impliedVol: sigma }),
+        AMD_20260619_110_C: pd({ impliedVol: sigma }),
+      },
+      { now: NOW },
+    );
+    const T = yearsToExpiry(expiry, NOW)!;
+    const expected =
+      (bsCall(105, 100, T, 0, sigma) - bsCall(105, 110, T, 0, sigma)) * contracts * 100;
+    expect(r.netNotional).not.toBeNull();
+    expect(r.netNotional!).toBeGreaterThan(0);
+    expect(r.netNotional!).toBeCloseTo(expected, 4);
+  });
 });
 
 /* ─── order aggregation ──────────────────────────────── */

@@ -1453,7 +1453,7 @@ function JournalSections() {
 
 /* ─── Orders tables ────────────────────────────────────── */
 
-type OpenOrderKey = "symbol" | "action" | "orderType" | "totalQuantity" | "limitPrice" | "lastPrice" | "implied" | "status" | "tif" | "actions";
+type OpenOrderKey = "symbol" | "action" | "orderType" | "totalQuantity" | "limitPrice" | "lastPrice" | "implied" | "implied_mv" | "status" | "tif" | "actions";
 
 /** Build the prices-map key for an order's contract (option key for options, symbol for stocks). */
 function orderPriceKey(contract: OpenOrder["contract"]): string | null {
@@ -1534,6 +1534,11 @@ function makeOpenOrderExtract(
         return item.kind === "combo"
           ? computeOrderImpliedValue(item.orders, prices, { riskFreeRate }).netPerContract
           : resolveOrderImpliedValue(item.order, prices, riskFreeRate);
+      case "implied_mv":
+        if (!prices) return null;
+        return item.kind === "combo"
+          ? resolveComboImpliedMv(item.orders, prices, riskFreeRate)
+          : resolveSingleOrderImpliedMv(item.order, prices, riskFreeRate);
       case "status": return item.kind === "combo" ? item.status : item.order.status;
       case "tif": return item.kind === "combo" ? item.tif : item.order.tif;
       case "actions": return null;
@@ -1590,6 +1595,48 @@ function OrderImpliedCell({ price }: { price: number | null }) {
   );
 }
 
+/** Implied dollar notional for a combo order: net per-share × baseQuantity × 100,
+ *  using the same baseQuantity convention as resolveOpenOrderComboPrice (Math.min
+ *  across leg sizes). Sign reflects net debit (positive) vs credit (negative). */
+function resolveComboImpliedMv(
+  orders: OpenOrder[],
+  prices: Record<string, PriceData>,
+  riskFreeRate = 0,
+): number | null {
+  const r = computeOrderImpliedValue(orders, prices, { riskFreeRate });
+  if (r.netPerContract == null) return null;
+  const sizes = orders.map((o) => Math.abs(o.totalQuantity)).filter((q) => q > 0);
+  if (sizes.length === 0) return null;
+  const base = Math.min(...sizes);
+  return r.netPerContract * base * 100;
+}
+
+/** Implied dollar notional for a single OPT order: per-share × |qty| × 100,
+ *  signed by BUY/SELL action. STK/BAG/null on missing inputs. */
+function resolveSingleOrderImpliedMv(
+  order: OpenOrder,
+  prices: Record<string, PriceData>,
+  riskFreeRate = 0,
+): number | null {
+  const perShare = resolveOrderImpliedValue(order, prices, riskFreeRate);
+  if (perShare == null) return null;
+  const sign = order.action === "BUY" ? 1 : -1;
+  return sign * perShare * Math.abs(order.totalQuantity) * 100;
+}
+
+function OrderImpliedMvCell({ value }: { value: number | null }) {
+  return (
+    <td
+      className={`right ${value != null ? (value >= 0 ? "positive" : "negative") : "cell-muted"}`}
+      title="Implied market value: BS price × contracts × 100, signed"
+    >
+      {value != null
+        ? `${value >= 0 ? "+" : "-"}${fmtUsd(Math.abs(value))}`
+        : "—"}
+    </td>
+  );
+}
+
 type ExecOrderKey = "symbol" | "side" | "quantity" | "avgPrice" | "commission" | "realizedPNL" | "time";
 
 const execOrderExtract = (item: ExecutedOrder, key: ExecOrderKey): string | number | null => {
@@ -1617,6 +1664,14 @@ function OrdersSections({
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
   const riskFreeRate = useRiskFreeRate();
   const openOrderExtract = useMemo(() => makeOpenOrderExtract(prices, portfolio, riskFreeRate), [prices, portfolio, riskFreeRate]);
+  // Implied columns only meaningful when at least one open order is an option.
+  const showImplied = useMemo(
+    () =>
+      (orders?.open_orders ?? []).some(
+        (o) => o.contract.secType === "OPT" || o.contract.secType === "BAG",
+      ),
+    [orders],
+  );
   const openOrderRows = useMemo(() => {
     if (!orders) return [];
     return buildOpenOrderDisplayRows(orders.open_orders, portfolio?.positions);
@@ -1781,7 +1836,12 @@ function OrdersSections({
                   <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
-                  <SortTh<OpenOrderKey> label="Implied" sortKey="implied" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                  {showImplied && (
+                    <>
+                      <SortTh<OpenOrderKey> label="Implied" sortKey="implied" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                      <SortTh<OpenOrderKey> label="Implied MV" sortKey="implied_mv" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
+                    </>
+                  )}
                   <SortTh<OpenOrderKey> label="Status" sortKey="status" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="TIF" sortKey="tif" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <th className="actions-th">Actions</th>
@@ -1830,9 +1890,16 @@ function OrdersSections({
                           </span>
                         </td>
                         <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
-                        <OrderImpliedCell
-                          price={prices ? computeOrderImpliedValue(o.orders, prices, { riskFreeRate }).netPerContract : null}
-                        />
+                        {showImplied && (
+                          <>
+                            <OrderImpliedCell
+                              price={prices ? computeOrderImpliedValue(o.orders, prices, { riskFreeRate }).netPerContract : null}
+                            />
+                            <OrderImpliedMvCell
+                              value={prices ? resolveComboImpliedMv(o.orders, prices, riskFreeRate) : null}
+                            />
+                          </>
+                        )}
                         <td>
                           {isPendingCancel ? (
                             <span className="status-cancelling">Cancelling...</span>
@@ -1916,9 +1983,16 @@ function OrdersSections({
                         )}
                       </td>
                       <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
-                      <OrderImpliedCell
-                        price={prices ? resolveOrderImpliedValue(o.order, prices, riskFreeRate) : null}
-                      />
+                      {showImplied && (
+                        <>
+                          <OrderImpliedCell
+                            price={prices ? resolveOrderImpliedValue(o.order, prices, riskFreeRate) : null}
+                          />
+                          <OrderImpliedMvCell
+                            value={prices ? resolveSingleOrderImpliedMv(o.order, prices, riskFreeRate) : null}
+                          />
+                        </>
+                      )}
                       <td>
                         {isPendingCancel ? (
                           <span className="status-cancelling">Cancelling...</span>

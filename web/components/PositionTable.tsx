@@ -138,7 +138,7 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
 
 /* ─── Sort extract factory ─────────────────────────────── */
 
-export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
+export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "implied_market_value" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
 function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 0) {
   return (pos: PortfolioPosition, key: PositionSortKey): string | number | null => {
@@ -163,6 +163,10 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
         if (isStock || !prices) return null;
         return computePositionImpliedValue(pos, prices, { riskFreeRate }).netPerContract;
       }
+      case "implied_market_value": {
+        if (isStock || !prices) return null;
+        return computePositionImpliedValue(pos, prices, { riskFreeRate }).netNotional;
+      }
       case "daily_chg": return isStock ? getDailyChange(prices?.[pos.ticker]) : getOptionDailyChg(pos, prices);
       case "today_pnl": return getTodayPnlDollars(pos, prices);
       case "entry_cost": return resolveEntryCost(pos);
@@ -180,15 +184,19 @@ function LegRow({
   leg,
   showExpiry,
   showUnderlying,
+  showImplied,
   realtimeLegPrice,
   legImpliedPerContract,
+  legImpliedMv,
   onLegClick,
 }: {
   leg: PortfolioPosition["legs"][number];
   showExpiry: boolean;
   showUnderlying?: boolean;
+  showImplied?: boolean;
   realtimeLegPrice?: PriceData | null;
   legImpliedPerContract?: number | null;
+  legImpliedMv?: number | null;
   onLegClick?: (leg: PortfolioLeg) => void;
 }) {
   const resolvedPrice = resolveRealtimePrice(
@@ -224,9 +232,21 @@ function LegRow({
         {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
         {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
       </td>
-      <td className="right cell-muted" title="Black-Scholes implied value at current spot">
-        {legImpliedPerContract != null ? fmtPrice(legImpliedPerContract) : "—"}
-      </td>
+      {showImplied && (
+        <>
+          <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+            {legImpliedPerContract != null ? fmtPrice(legImpliedPerContract) : "—"}
+          </td>
+          <td
+            className={`right cell-muted ${legImpliedMv != null ? (legImpliedMv >= 0 ? "positive" : "negative") : ""}`}
+            title="Implied market value: BS price × contracts × 100, signed"
+          >
+            {legImpliedMv != null
+              ? `${legImpliedMv >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legImpliedMv))}`
+              : "—"}
+          </td>
+        </>
+      )}
       <td></td>
       <td></td>
       <td className="right cell-muted">{fmtPrice(legEc)}</td>
@@ -241,7 +261,7 @@ function LegRow({
 
 /* ─── Position row ─────────────────────────────────────── */
 
-function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimePrice, prices, riskFreeRate = 0, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
+function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImplied = false, realtimePrice, prices, riskFreeRate = 0, onLegClick }: { pos: PortfolioPosition; showExpiry?: boolean; showUnderlying?: boolean; showImplied?: boolean; realtimePrice?: PriceData | null; prices?: Record<string, PriceData>; riskFreeRate?: number; onLegClick?: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [legsExpanded, setLegsExpanded] = useState(false);
   const hasMultipleLegs = pos.legs.length > 1;
 
@@ -313,6 +333,13 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
     return computePositionImpliedValue(pos, prices, { riskFreeRate }).netPerContract;
   }, [isStock, pos, prices, riskFreeRate]);
 
+  // Black-Scholes implied dollar notional (= netNotional). Signed: long debit
+  // positions positive, short/credit positions negative.
+  const impliedNotional = useMemo(() => {
+    if (isStock || !prices) return null;
+    return computePositionImpliedValue(pos, prices, { riskFreeRate }).netNotional;
+  }, [isStock, pos, prices, riskFreeRate]);
+
   // Today's P&L in dollars
   const todayPnl = isStock
     ? (realtimePrice?.last != null && realtimePrice.last > 0 && realtimePrice?.close != null && realtimePrice.close > 0
@@ -367,9 +394,21 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
           {priceDirection === "up" && <ArrowUp size={11} className="price-trend-icon price-trend-up" aria-label="price up" />}
           {priceDirection === "down" && <ArrowDown size={11} className="price-trend-icon price-trend-down" aria-label="price down" />}
         </td>
-        <td className="right cell-muted" title="Black-Scholes implied value at current spot">
-          {impliedNet != null ? fmtPrice(impliedNet) : "—"}
-        </td>
+        {showImplied && (
+          <>
+            <td className="right cell-muted" title="Black-Scholes implied value at current spot">
+              {impliedNet != null ? fmtPrice(impliedNet) : "—"}
+            </td>
+            <td
+              className={`right ${impliedNotional != null ? (impliedNotional >= 0 ? "positive" : "negative") : ""}`}
+              title="Implied market value: BS price × contracts × multiplier, signed"
+            >
+              {impliedNotional != null
+                ? `${impliedNotional >= 0 ? "+" : "-"}${fmtUsd(Math.abs(impliedNotional))}`
+                : "—"}
+            </td>
+          </>
+        )}
         <td className={`right ${dailyChg != null ? (dailyChg >= 0 ? "positive" : "negative") : ""}`}>
           {dailyChg != null ? `${dailyChg >= 0 ? "+" : ""}${dailyChg.toFixed(2)}%` : "—"}
         </td>
@@ -385,7 +424,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
       </tr>
       {hasMultipleLegs && legsExpanded && pos.legs.map((leg, i) => {
         const key = legPriceKey(pos.ticker, pos.expiry, leg);
-        const legImplied =
+        const legResult =
           leg.type === "Stock" || leg.strike == null || leg.strike === 0 || !prices
             ? null
             : computeLegImpliedValue(
@@ -399,15 +438,20 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, realtimeP
                 },
                 prices,
                 { riskFreeRate },
-              ).perContract;
+              );
+        const legImplied = legResult?.perContract ?? null;
+        const legSign = leg.direction === "LONG" ? 1 : -1;
+        const legImpliedMv = legResult?.notional != null ? legSign * legResult.notional : null;
         return (
           <LegRow
             key={`${pos.id}-leg-${i}`}
             leg={leg}
             showExpiry={showExpiry}
             showUnderlying={showUnderlying}
+            showImplied={showImplied}
             realtimeLegPrice={key && prices ? prices[key] : null}
             legImpliedPerContract={legImplied}
+            legImpliedMv={legImpliedMv}
             onLegClick={onLegClick ? (l) => onLegClick(l, pos) : undefined}
           />
         );
@@ -422,6 +466,12 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
   const riskFreeRate = useRiskFreeRate();
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
+  // Implied columns are only meaningful for option positions. Hide them entirely
+  // when this table renders an all-stock list (e.g. the Equity Positions section).
+  const showImplied = useMemo(
+    () => positions.some((p) => p.structure_type !== "Stock"),
+    [positions],
+  );
 
   // Instrument detail modal state
   const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
@@ -442,7 +492,12 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
             {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Implied" sortKey="implied" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {showImplied && (
+              <>
+                <SortTh<PositionSortKey> label="Implied" sortKey="implied" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                <SortTh<PositionSortKey> label="Implied MV" sortKey="implied_market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              </>
+            )}
             <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
@@ -453,7 +508,7 @@ export default function PositionTable({ positions, showExpiry = true, showUnderl
         </thead>
         <tbody>
           {sorted.map((pos) => (
-            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
+            <PositionRow key={pos.id} pos={pos} showExpiry={showExpiry} showUnderlying={showUnderlying} showImplied={showImplied} realtimePrice={prices?.[pos.ticker]} prices={prices} riskFreeRate={riskFreeRate} onLegClick={handleLegClick} />
           ))}
         </tbody>
       </table>

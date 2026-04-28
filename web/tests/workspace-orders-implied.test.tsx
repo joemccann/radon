@@ -93,6 +93,93 @@ afterEach(() => {
 });
 
 describe("WorkspaceSections orders — Implied column", () => {
+  it("hides Implied + Implied MV headers when the orders table contains only STK rows", () => {
+    const orders: OrdersData = {
+      last_sync: NOW.toISOString(),
+      open_count: 1,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [
+        {
+          orderId: 9,
+          permId: 9,
+          symbol: "TSLA",
+          contract: {
+            conId: 1,
+            symbol: "TSLA",
+            secType: "STK",
+            strike: null,
+            right: null,
+            expiry: null,
+          },
+          action: "BUY",
+          orderType: "LMT",
+          totalQuantity: 100,
+          limitPrice: 250,
+          auxPrice: null,
+          status: "Submitted",
+          filled: 0,
+          remaining: 100,
+          avgFillPrice: null,
+          tif: "DAY",
+        },
+      ],
+    };
+    render(
+      React.createElement(WorkspaceSections, {
+        section: "orders",
+        orders,
+        prices: {},
+        portfolio: null,
+      }),
+    );
+    expect(screen.queryByText("Implied")).toBeNull();
+    expect(screen.queryByText("Implied MV")).toBeNull();
+  });
+
+  it("renders 'Implied MV' header in the orders table", () => {
+    const orders: OrdersData = {
+      last_sync: NOW.toISOString(),
+      open_count: 1,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [
+        {
+          orderId: 1,
+          permId: 1,
+          symbol: "AMD",
+          contract: {
+            conId: 1,
+            symbol: "AMD",
+            secType: "OPT",
+            strike: 295,
+            right: "P",
+            expiry: expiry.replace(/-/g, ""),
+          },
+          action: "BUY",
+          orderType: "LMT",
+          totalQuantity: 1,
+          limitPrice: 3.0,
+          auxPrice: null,
+          status: "Submitted",
+          filled: 0,
+          remaining: 1,
+          avgFillPrice: null,
+          tif: "DAY",
+        },
+      ],
+    };
+    render(
+      React.createElement(WorkspaceSections, {
+        section: "orders",
+        orders,
+        prices: {},
+        portfolio: null,
+      }),
+    );
+    expect(screen.getByText("Implied MV")).toBeTruthy();
+  });
+
   it("renders 'Implied' header and BS-derived value for a single OPT order", () => {
     const sigma = 0.45;
     const spot = 280;

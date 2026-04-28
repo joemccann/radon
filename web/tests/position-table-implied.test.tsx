@@ -73,9 +73,55 @@ const AMD_LONG_PUT: PortfolioPosition = {
 };
 
 describe("PositionTable — Implied column", () => {
-  it("renders 'Implied' header", () => {
-    render(<PositionTable positions={[]} prices={{}} />);
+  it("renders 'Implied' header when at least one option position is present", () => {
+    render(<PositionTable positions={[AMD_LONG_PUT]} prices={{}} />);
     expect(screen.getByText("Implied")).toBeTruthy();
+  });
+
+  it("renders 'Implied MV' header when at least one option position is present", () => {
+    render(<PositionTable positions={[AMD_LONG_PUT]} prices={{}} />);
+    expect(screen.getByText("Implied MV")).toBeTruthy();
+  });
+
+  it("hides Implied + Implied MV headers when the table contains only stock positions", () => {
+    const stockOnly: PortfolioPosition = {
+      ...AMD_LONG_PUT,
+      ticker: "TSLA",
+      structure_type: "Stock",
+      contracts: 100,
+      legs: [
+        {
+          direction: "LONG",
+          contracts: 100,
+          type: "Stock",
+          strike: null,
+          entry_cost: 25000,
+          avg_cost: 250,
+          market_price: 260,
+          market_value: 26000,
+        },
+      ],
+    };
+    render(<PositionTable positions={[stockOnly]} prices={{}} />);
+    expect(screen.queryByText("Implied")).toBeNull();
+    expect(screen.queryByText("Implied MV")).toBeNull();
+  });
+
+  it("renders BS-derived implied MV for an option position with streamed IV", () => {
+    const sigma = 0.45;
+    const spot = 280;
+    const prices: Record<string, PriceData> = {
+      AMD: pd({ last: spot }),
+      [`AMD_${expiry.replace(/-/g, "")}_295_P`]: pd({ impliedVol: sigma }),
+    };
+    render(<PositionTable positions={[AMD_LONG_PUT]} prices={prices} />);
+
+    const row = screen.getByText("AMD").closest("tr")!;
+    const T = yearsToExpiry(expiry, new Date())!;
+    const notional = bsPut(spot, 295, T, 0, sigma) * 75 * 100; // long put, 75 contracts, +sign
+    // Match fmtUsd output: "$X,YYY" with no decimals, signed +
+    const expectedAbs = `$${Math.round(notional).toLocaleString("en-US", { maximumFractionDigits: 0 })}`;
+    expect(row.textContent).toContain(`+${expectedAbs}`);
   });
 
   it("renders BS-derived implied price for an option position with streamed IV", () => {
