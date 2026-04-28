@@ -392,6 +392,20 @@ Day Chg % = Daily P&L / |Yesterday's Close Value| × 100   (NEVER entry cost)
 
 Per-leg: `sign × (last - close) × contracts × 100`. Impl: `getOptionDailyChg()` in `WorkspaceSections.tsx`.
 
+**Same-day exception:** when `entry_date == today (ET)`, yesterday's close is meaningless. Day Chg and Today P&L use entry-cost as baseline → Today P&L = Total P&L = `MV − EC`. Branch in `getOptionDailyChg()` / `getTodayPnlDollars()` (`positionUtils.ts`). **`ib_daily_pnl` is ignored for same-day positions** — IB sometimes reports stale numbers for fresh fills.
+
+### Entry-Date Resolution (`ib_sync.py`)
+
+Strict ordered fallback chain, MOST → LEAST specific:
+
+1. blotter (per-contract: `ticker|expiry|right|strike`)
+2. trade_log (`ticker|structure`)
+3. IB fills (per-contract, same-session)
+4. prev portfolio (`ticker|structure|expiry`, excluding today)
+5. **today** ← brand-new positions land here so the same-day P&L branch fires
+
+**Never use a per-ticker blotter fallback** — different contracts on the same ticker have different open dates. Regression: AMD Risk Reversal P$320/C$330 was assigned an unrelated AMD 295P date and surfaced wildly wrong Today P&L (test: `test_combo_entry_date.py`).
+
 ### Combo Natural Market Bid/Ask
 
 **CRITICAL:** Use cross-fields for natural market.
@@ -434,6 +448,28 @@ SELL combo: receive BID on BUY legs, pay ASK on SELL legs
 ### Data Normalization
 
 JSON files: `"ticker"`. IB contracts: `"symbol"`. Read defensively: `t.get("ticker") or t.get("symbol")`.
+
+### Implied (Black-Scholes) Value
+
+Per-share theoretical price computed from streaming spot + per-leg σ. Math is a TS port of `scripts/scenario_analysis.py:192-226` and is verified to 4-decimal Python parity (`web/tests/black-scholes.test.ts`).
+
+| Input | Source order | Failure |
+|-------|--------------|---------|
+| **S** | `prices[ticker].last` → `prices[optionKey].undPrice` → `(prices[ticker].bid+ask)/2` | `null` |
+| **σ** | `prices[optionKey].impliedVol` (IB tickOptionComputation) → bisection on `prices[optionKey].close` + `prices[ticker].close` (T_yest = T+1/365) | `null` |
+| **K** | `leg.strike` | `null` if 0 |
+| **T** | `(expiry@16:00 ET − now) / 365 days` | clamps to 0 |
+| **r** | `useRiskFreeRate()` → FRED DFF (effective Fed Funds), 24h cached. Fallback 0.0 | n/a |
+
+**Combo aggregation:** signed sum across legs — long `+bsPrice`, short `−bsPrice`. `netNotional = perContract × contracts × 100`, signed.
+
+**Files:** `web/lib/blackScholes.ts` (math), `web/lib/impliedValue.ts` (resolver), `web/app/api/risk-free-rate/route.ts` + `web/lib/useRiskFreeRate.ts`.
+
+### Column Visibility
+
+PositionTable + Open Orders table support per-section column toggling via `useColumnVisibility(tableId, defaults)` (`web/lib/useColumnVisibility.ts`). State persists to localStorage keyed `radon:columns:<tableId>`. Each portfolio section gets its own bucket — `positions-defined`, `positions-undefined`, `positions-equity`, `orders-open`. The `<ColumnsToggle />` widget renders **inside the section header, left of the filter input**.
+
+Implied / Implied MV columns are additionally gated on `positions.some(p => p.structure_type !== "Stock")` — stock-only sections hide them entirely.
 
 ## UW API Quick Reference
 

@@ -172,3 +172,4 @@ docker/ib-gateway/secrets/*.txt
 
 # Firecrawl
 .firecrawl/
+.worktrees/
