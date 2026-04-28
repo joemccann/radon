@@ -47,6 +47,7 @@ GATE 4 — NO NAKED SHORTS: Never naked short stock, calls, futures, or bonds. E
 | File | Loader | Contains |
 |------|--------|----------|
 | `.env` (root) | `python-dotenv` | `MENTHORQ_USER`, `MENTHORQ_PASS`, `CLERK_JWKS_URL`, `CLERK_ISSUER`, `ALLOWED_USER_IDS` |
+| `.env.ib-mode` (root, gitignored) | overlayed after `.env` (Python + Node) | `IB_GATEWAY_MODE`, `IB_GATEWAY_HOST` — managed by `scripts/ib mode local\|cloud` |
 | `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY` |
 
 ## Market Hours
@@ -445,7 +446,19 @@ Key endpoints: `/api/darkpool/{ticker}`, `/api/option-trades/flow-alerts`, `/api
 
 ## IB Gateway
 
-Three modes via `IB_GATEWAY_MODE` env (default: `docker`):
+Three modes via `IB_GATEWAY_MODE` env (default: `docker`).
+
+### Switching modes — `scripts/ib`
+
+Mode is persisted to `.env.ib-mode` at project root (gitignored). Single toggle is read by **every** Radon entry point — Python services, Node WS relay, ad-hoc scripts — via a dotenv overlay (`.env` loaded first, `.env.ib-mode` overlayed with `override=True`). No editing `.env`, no per-shell `export`.
+
+```bash
+scripts/ib mode               # print current mode + host
+scripts/ib mode local         # docker, 127.0.0.1
+scripts/ib mode cloud         # cloud, ib-gateway (Tailscale)
+```
+
+Switching while services are running does NOT auto-reconnect — restart the dev stack to pick up the new gateway. `scripts/cloud.sh` and `scripts/local.sh` call `scripts/ib mode <X>` for you and additionally orchestrate Docker / VPS lifecycle.
 
 ### Docker Mode (Primary)
 
@@ -453,7 +466,7 @@ Image: `ghcr.io/gnzsnz/ib-gateway`. Config: `docker/ib-gateway/`. Commands: `scr
 
 ### Cloud Mode (Tailscale) — Default for Dev
 
-Gateway on Hetzner VM at `ib-gateway:4001` via Tailscale MagicDNS. Set `IB_GATEWAY_HOST=ib-gateway`, `IB_GATEWAY_MODE=cloud` in root `.env`. All scripts import `DEFAULT_HOST` from `ib_client`.
+Gateway on Hetzner VM at `ib-gateway:4001` via Tailscale MagicDNS. Run `scripts/ib mode cloud` once; the overlay file persists across shell sessions. All scripts import `DEFAULT_HOST` from `ib_client`.
 
 **VPS:** Port `0.0.0.0:4001 → container:4003` (socat). "Allow connections from localhost only" must be **unchecked** in VNC settings.
 **Cloud behavior:** TCP probe only. No local restart/CLOSE_WAIT. `POST /ib/restart` returns 503.

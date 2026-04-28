@@ -17,7 +17,6 @@ log_error() { echo -e "${RED}[cloud]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$PROJECT_ROOT/.env"
 
 # -- Step 1: Verify Tailscale connectivity -----------------------------------
 
@@ -60,12 +59,9 @@ if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "ib-gateway"; then
   "$SCRIPT_DIR/docker_ib_gateway.sh" stop
 fi
 
-# -- Step 4: Switch .env to cloud mode --------------------------------------
+# -- Step 4: Persist cloud mode in .env.ib-mode -----------------------------
 
-log_info "Switching .env to cloud mode..."
-sed -i '' 's/^IB_GATEWAY_HOST=.*/IB_GATEWAY_HOST=ib-gateway/' "$ENV_FILE"
-sed -i '' 's/^IB_GATEWAY_MODE=.*/IB_GATEWAY_MODE=cloud/' "$ENV_FILE"
-log_info ".env → IB_GATEWAY_HOST=ib-gateway, IB_GATEWAY_MODE=cloud"
+"$SCRIPT_DIR/ib" mode cloud
 
 # -- Step 5: Verify port 4001 reachable on VPS ------------------------------
 

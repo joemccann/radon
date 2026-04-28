@@ -13,6 +13,9 @@ import { dirname, resolve } from "node:path";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 dotenv.config({ path: resolve(__dirname, "../.env") });
+// .env.ib-mode (managed by scripts/ib mode) overlays after .env so its
+// IB_GATEWAY_MODE/HOST values win — single switch, no .env rewriting.
+dotenv.config({ path: resolve(__dirname, "../.env.ib-mode"), override: true });
 
 import process from "node:process";
 import fs from "node:fs";

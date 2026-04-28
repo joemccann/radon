@@ -114,6 +114,9 @@ logs/*
 logs/menthorq_artifacts/
 web/data/
 
+# IB Gateway mode toggle (per-developer state, written by scripts/ib)
+.env.ib-mode
+
 # Newsfeed scraper runtime artifacts (regenerated each cycle)
 web/public/data/
 web/public/media/

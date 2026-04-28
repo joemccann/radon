@@ -17,14 +17,10 @@ log_error() { echo -e "${RED}[local]${NC} $*"; }
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
-ENV_FILE="$PROJECT_ROOT/.env"
 
-# -- Step 1: Switch .env to local Docker mode --------------------------------
+# -- Step 1: Persist local Docker mode in .env.ib-mode -----------------------
 
-log_info "Switching .env to local Docker mode..."
-sed -i '' 's/^IB_GATEWAY_HOST=.*/IB_GATEWAY_HOST=127.0.0.1/' "$ENV_FILE"
-sed -i '' 's/^IB_GATEWAY_MODE=.*/IB_GATEWAY_MODE=docker/' "$ENV_FILE"
-log_info ".env → IB_GATEWAY_HOST=127.0.0.1, IB_GATEWAY_MODE=docker"
+"$SCRIPT_DIR/ib" mode local
 
 # -- Step 2: Stop VPS gateway ------------------------------------------------
 

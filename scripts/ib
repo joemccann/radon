@@ -1,0 +1,107 @@
+#!/bin/bash
+# scripts/ib — IB Gateway mode toggle.
+#
+# Persists the active IB Gateway mode to .env.ib-mode at the project root.
+# Every Radon entry point (Python services, Node WS relay, ad-hoc scripts)
+# overlays this file on top of .env at startup, so a single toggle here is
+# picked up everywhere on next launch — no rewriting .env, no hand-editing.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+MODE_FILE="$PROJECT_ROOT/.env.ib-mode"
+
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m'
+
+log_info()  { echo -e "${GREEN}[ib]${NC} $*"; }
+log_warn()  { echo -e "${YELLOW}[ib]${NC} $*"; }
+log_error() { echo -e "${RED}[ib]${NC} $*"; }
+
+usage() {
+  cat <<'EOF'
+Usage: scripts/ib mode [local|cloud]
+
+  scripts/ib mode             Print the current IB Gateway mode.
+  scripts/ib mode local       Use local Docker IB Gateway (127.0.0.1:4001).
+  scripts/ib mode cloud       Use Hetzner gateway via Tailscale (ib-gateway:4001).
+
+The chosen mode persists to .env.ib-mode and is read by every Radon entry
+point at startup (overlayed on top of .env). Switch once per session — no
+need to restart already-running services unless you also want them to
+reconnect to the new gateway.
+EOF
+}
+
+read_field() {
+  # Print value for IB_GATEWAY_MODE / IB_GATEWAY_HOST from .env.ib-mode, or "unset".
+  local key="$1"
+  if [[ ! -f "$MODE_FILE" ]]; then
+    echo "unset"
+    return
+  fi
+  local value
+  value="$(grep -E "^${key}=" "$MODE_FILE" | tail -n1 | cut -d= -f2- || true)"
+  echo "${value:-unset}"
+}
+
+write_mode() {
+  local mode="$1" host="$2"
+  local tmp="${MODE_FILE}.tmp.$$"
+  cat > "$tmp" <<EOF
+# Managed by scripts/ib — do not edit by hand.
+# Run \`scripts/ib mode local\` or \`scripts/ib mode cloud\` to change mode.
+IB_GATEWAY_MODE=${mode}
+IB_GATEWAY_HOST=${host}
+EOF
+  mv "$tmp" "$MODE_FILE"
+  log_info "mode=${mode} host=${host} (persisted to .env.ib-mode)"
+  log_info "running services keep their current connection — restart dev to apply."
+}
+
+print_current() {
+  local mode host
+  mode="$(read_field IB_GATEWAY_MODE)"
+  host="$(read_field IB_GATEWAY_HOST)"
+  if [[ "$mode" == "unset" ]]; then
+    log_warn ".env.ib-mode not present — falling back to .env defaults"
+    log_info "set one with: scripts/ib mode local | scripts/ib mode cloud"
+    return
+  fi
+  log_info "mode: ${mode}"
+  log_info "host: ${host}"
+}
+
+cmd="${1:-help}"
+case "$cmd" in
+  mode)
+    sub="${2:-}"
+    case "$sub" in
+      "")
+        print_current
+        ;;
+      local|docker)
+        write_mode docker 127.0.0.1
+        ;;
+      cloud)
+        write_mode cloud ib-gateway
+        ;;
+      *)
+        log_error "unknown mode '$sub'"
+        usage >&2
+        exit 2
+        ;;
+    esac
+    ;;
+  -h|--help|help)
+    usage
+    ;;
+  *)
+    log_error "unknown command '$cmd'"
+    usage >&2
+    exit 2
+    ;;
+esac

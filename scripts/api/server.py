@@ -44,11 +44,14 @@ from api.auth import verify_clerk_jwt, verify_api_key
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 
-# Load .env from project root for Python scripts
+# Load .env from project root for Python scripts.
+# .env.ib-mode (managed by scripts/ib mode) overlays after .env so its
+# IB_GATEWAY_MODE/HOST values win — single switch, no .env rewriting.
 try:
     from dotenv import load_dotenv
     load_dotenv(PROJECT_ROOT / ".env")
     load_dotenv(PROJECT_ROOT / "web" / ".env")
+    load_dotenv(PROJECT_ROOT / ".env.ib-mode", override=True)
 except ImportError:
     pass
 

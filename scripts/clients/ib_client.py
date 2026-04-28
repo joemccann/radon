@@ -31,9 +31,12 @@ from typing import Any, Dict, List, Optional, Sequence, Set, Union
 from dotenv import load_dotenv
 from ib_insync import IB, FlexReport, Option
 
-# Load root .env so IB_GATEWAY_HOST/PORT are available before defaults are computed
+# Load root .env so IB_GATEWAY_HOST/PORT are available before defaults are computed.
+# .env.ib-mode (managed by scripts/ib mode) overlays it so a single toggle there
+# wins over any host/mode set in .env — no rewriting .env per session.
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 load_dotenv(_PROJECT_ROOT / ".env")
+load_dotenv(_PROJECT_ROOT / ".env.ib-mode", override=True)
 
 # ---------------------------------------------------------------------------
 # Exception hierarchy
