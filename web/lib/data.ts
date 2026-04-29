@@ -33,7 +33,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Scanner", route: "scanner", href: "/scanner", icon: Sparkles },
   { label: "Discover", route: "discover", href: "/discover", icon: Search },
   { label: "Journal", route: "journal", href: "/journal", icon: Wrench },
-  { label: "Regime", route: "regime", href: "/regime", icon: Shield },
+  { label: "Regime", route: "regime", href: "/regime/cri", icon: Shield },
   { label: "CTA", route: "cta", href: "/cta", icon: Activity },
   // { label: "Internals", route: "internals", href: "/internals", icon: Activity },
 ];

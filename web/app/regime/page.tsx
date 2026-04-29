@@ -1,5 +1,5 @@
-import WorkspaceShell from "@/components/WorkspaceShell";
+import { redirect } from "next/navigation";
 
 export default function RegimePage() {
-  return <WorkspaceShell section="regime" />;
+  redirect("/regime/cri");
 }

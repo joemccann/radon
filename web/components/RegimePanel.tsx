@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, Check, Shield, X, Zap } from "lucide-react";
 import CriHistoryChart from "./CriHistoryChart";
 import RegimeRelationshipView from "./RegimeRelationshipView";
@@ -19,6 +20,18 @@ import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
 type RegimeTab = "cri" | "vcg" | "gex";
+
+const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex"] as const;
+
+/** Extract the tab segment from /regime/<tab>; defaults to "cri". */
+function tabFromPathname(pathname: string | null): RegimeTab {
+  if (!pathname) return "cri";
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex)(?:\/|$)/);
+  if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
+    return match[1] as RegimeTab;
+  }
+  return "cri";
+}
 
 type RegimePanelProps = {
   prices: Record<string, PriceData>;
@@ -112,7 +125,10 @@ export default function RegimePanel({
   shareContentTitle = "Regime Share Preview",
   marketState,
 }: RegimePanelProps) {
-  const [activeTab, setActiveTab] = useState<RegimeTab>("cri");
+  const router = useRouter();
+  const pathname = usePathname();
+  const activeTab = tabFromPathname(pathname);
+  const goToTab = (tab: RegimeTab) => router.push(`/regime/${tab}`);
   const { data, syncing, lastSync } = useRegime(marketState, { endpoint: dataEndpoint });
   const shareModal = shareEndpoint ? (
     <ShareReportModal
@@ -262,9 +278,9 @@ export default function RegimePanel({
 
   const tabBar = (
     <div className="ticker-tabs" style={{ marginBottom: "16px" }}>
-      <button className={`ticker-tab ${activeTab === "cri" ? "active" : ""}`} onClick={() => setActiveTab("cri")}>CRI</button>
-      <button className={`ticker-tab ${activeTab === "vcg" ? "active" : ""}`} onClick={() => setActiveTab("vcg")}>VCG</button>
-      <button className={`ticker-tab ${activeTab === "gex" ? "active" : ""}`} onClick={() => setActiveTab("gex")}>GEX</button>
+      <button className={`ticker-tab ${activeTab === "cri" ? "active" : ""}`} onClick={() => goToTab("cri")}>CRI</button>
+      <button className={`ticker-tab ${activeTab === "vcg" ? "active" : ""}`} onClick={() => goToTab("vcg")}>VCG</button>
+      <button className={`ticker-tab ${activeTab === "gex" ? "active" : ""}`} onClick={() => goToTab("gex")}>GEX</button>
     </div>
   );
 
