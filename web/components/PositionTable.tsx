@@ -142,11 +142,14 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
 
 export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "implied_market_value" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
-/** User-toggleable columns. `ticker`/`structure`/`direction`/`pnl` are
- *  always-on identity/outcome columns; `underlying`/`expiry` are caller-
- *  controlled via showUnderlying/showExpiry props. */
+/** User-toggleable columns. `ticker` is the only always-on identity column —
+ *  rows are keyed off it. `structure`/`direction`/`pnl`/`expiry` default ON
+ *  but are user-toggleable; `underlying` is caller-controlled via the
+ *  showUnderlying prop. */
 export type PositionToggleableColumnKey =
+  | "structure"
   | "qty"
+  | "direction"
   | "avg_entry"
   | "last_price"
   | "implied"
@@ -154,13 +157,17 @@ export type PositionToggleableColumnKey =
   | "daily_chg"
   | "today_pnl"
   | "entry_cost"
-  | "market_value";
+  | "market_value"
+  | "pnl"
+  | "expiry";
 
 // Internal alias retained so the existing JSX/cell gating reads the same.
 type ToggleableColumnKey = PositionToggleableColumnKey;
 
 export const POSITION_COLUMNS: readonly ColumnsToggleEntry<PositionToggleableColumnKey>[] = [
+  { key: "structure", label: "Structure" },
   { key: "qty", label: "Qty" },
+  { key: "direction", label: "Direction" },
   { key: "avg_entry", label: "Avg Entry" },
   { key: "last_price", label: "Last Price" },
   { key: "implied", label: "Implied" },
@@ -169,13 +176,17 @@ export const POSITION_COLUMNS: readonly ColumnsToggleEntry<PositionToggleableCol
   { key: "today_pnl", label: "Today P&L" },
   { key: "entry_cost", label: "Entry Cost" },
   { key: "market_value", label: "Market Value" },
+  { key: "pnl", label: "P&L" },
+  { key: "expiry", label: "Expiry" },
 ];
 
 /** Default visibility — chosen so a fresh-install user fits the table on a
  *  ~1280px viewport. Less-essential columns (Implied MV, Entry Cost) start
  *  hidden and can be toggled on. */
 export const POSITION_COLUMN_DEFAULTS: Record<PositionToggleableColumnKey, boolean> = {
+  structure: true,
   qty: true,
+  direction: true,
   avg_entry: true,
   last_price: true,
   implied: true,
@@ -184,6 +195,8 @@ export const POSITION_COLUMN_DEFAULTS: Record<PositionToggleableColumnKey, boole
   today_pnl: true,
   entry_cost: false,
   market_value: true,
+  pnl: true,
+  expiry: true,
 };
 
 export type PositionColumnVisibility = Record<PositionToggleableColumnKey, boolean>;
@@ -265,20 +278,23 @@ function LegRow({
   const sign = leg.direction === "LONG" ? 1 : -1;
   const legPnl = legMv != null ? sign * (legMv - legEc) : null;
 
-  // The leg-description cell spans across the always-on identity columns
-  // (Structure, Direction) plus the optional Qty column.
-  const descColSpan = 1 + (columns.qty ? 1 : 0) + 1;
+  // The leg-description cell spans across the columns to the right of Ticker
+  // up through Direction: Structure, optional Qty, Direction (each gated).
+  const descColSpan =
+    (columns.structure ? 1 : 0) + (columns.qty ? 1 : 0) + (columns.direction ? 1 : 0);
 
   return (
     <tr className={flashDirection ? `last-price-${flashDirection}` : undefined}>
       <td></td>
-      <td
-        colSpan={descColSpan}
-        className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
-        onClick={onLegClick ? () => onLegClick(leg) : undefined}
-      >
-        {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
-      </td>
+      {descColSpan > 0 && (
+        <td
+          colSpan={descColSpan}
+          className={`cell-indent cell-muted ${onLegClick ? "leg-clickable" : ""}`}
+          onClick={onLegClick ? () => onLegClick(leg) : undefined}
+        >
+          {leg.direction} {leg.contracts}x {leg.type}{leg.strike ? ` $${leg.strike}` : ""}
+        </td>
+      )}
       {showUnderlying && <td></td>}
       {columns.avg_entry && (
         <td className="right cell-muted">{fmtPrice(Math.abs(leg.avg_cost) / (leg.type === "Stock" ? 1 : 100))}</td>
@@ -313,10 +329,12 @@ function LegRow({
       {columns.market_value && (
         <td className="right cell-muted">{legMv != null ? fmtUsd(legMv) : "—"}</td>
       )}
-      <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
-        {legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}
-      </td>
-      {showExpiry && <td></td>}
+      {columns.pnl && (
+        <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
+          {legPnl != null ? `${legPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(legPnl))}` : "—"}
+        </td>
+      )}
+      {showExpiry && columns.expiry && <td></td>}
     </tr>
   );
 }
@@ -436,13 +454,15 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             <TickerLink ticker={pos.ticker} positionId={pos.id} />
           )}
         </td>
-        <td>{structureDisplay}</td>
+        {columns.structure && <td>{structureDisplay}</td>}
         {columns.qty && <td className="right">{pos.contracts}</td>}
-        <td>
-          <span className={`pill ${pos.risk_profile === "defined" ? "defined" : pos.risk_profile === "equity" ? "neutral" : "undefined"}`}>
-            {pos.direction}
-          </span>
-        </td>
+        {columns.direction && (
+          <td>
+            <span className={`pill ${pos.risk_profile === "defined" ? "defined" : pos.risk_profile === "equity" ? "neutral" : "undefined"}`}>
+              {pos.direction}
+            </span>
+          </td>
+        )}
         {showUnderlying && (
           <td className={`right last-price-cell ${underlyingFlash ? `last-price-${underlyingFlash}` : ""}`}>
             {underlyingPrice != null ? fmtPrice(underlyingPrice) : "—"}
@@ -485,10 +505,12 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         )}
         {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
-        <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
-          {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "—"}
-        </td>
-        {showExpiry && <td>{pos.expiry !== "N/A" ? pos.expiry : "—"}</td>}
+        {columns.pnl && (
+          <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
+            {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "—"}
+          </td>
+        )}
+        {showExpiry && columns.expiry && <td>{pos.expiry !== "N/A" ? pos.expiry : "—"}</td>}
       </tr>
       {hasMultipleLegs && legsExpanded && pos.legs.map((leg, i) => {
         const key = legPriceKey(pos.ticker, pos.expiry, leg);
@@ -597,9 +619,9 @@ export default function PositionTable({
         <thead>
           <tr>
             <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {columns.structure && <SortTh<PositionSortKey> label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.qty && <SortTh<PositionSortKey> label="Qty" sortKey="qty" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            {columns.direction && <SortTh<PositionSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {showUnderlying && <SortTh<PositionSortKey> label="Underlying" sortKey="underlying" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.avg_entry && <SortTh<PositionSortKey> label="Avg Entry" sortKey="avg_entry" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.last_price && <SortTh<PositionSortKey> label="Last Price" sortKey="last_price" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
@@ -609,8 +631,8 @@ export default function PositionTable({
             {columns.today_pnl && <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.entry_cost && <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.market_value && <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-            {showExpiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.pnl && <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {showExpiry && columns.expiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
           </tr>
         </thead>
         <tbody>

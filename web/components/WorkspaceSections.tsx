@@ -957,13 +957,20 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
     [equityFilter.filtered],
   );
 
-  const filterImpliedEntries = (hasOptions: boolean) =>
-    hasOptions
-      ? POSITION_COLUMNS
-      : POSITION_COLUMNS.filter((c) => c.key !== "implied" && c.key !== "implied_market_value");
-  const definedColEntries = useMemo(() => filterImpliedEntries(definedHasOptions), [definedHasOptions]);
-  const undefinedColEntries = useMemo(() => filterImpliedEntries(undefinedHasOptions), [undefinedHasOptions]);
-  const equityColEntries = useMemo(() => filterImpliedEntries(equityHasOptions), [equityHasOptions]);
+  const filterEntries = (hasOptions: boolean, hasExpiry: boolean) => {
+    let cols = POSITION_COLUMNS as readonly ColumnsToggleEntry<PositionToggleableColumnKey>[];
+    if (!hasOptions) {
+      cols = cols.filter((c) => c.key !== "implied" && c.key !== "implied_market_value");
+    }
+    if (!hasExpiry) {
+      cols = cols.filter((c) => c.key !== "expiry");
+    }
+    return cols;
+  };
+  const definedColEntries = useMemo(() => filterEntries(definedHasOptions, true), [definedHasOptions]);
+  const undefinedColEntries = useMemo(() => filterEntries(undefinedHasOptions, true), [undefinedHasOptions]);
+  // Equity Positions section: stocks have no expiry, so omit the toggle entry.
+  const equityColEntries = useMemo(() => filterEntries(equityHasOptions, false), [equityHasOptions]);
 
   if (!portfolio) {
     return (
