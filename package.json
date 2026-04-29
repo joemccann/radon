@@ -3,7 +3,9 @@
   "type": "module",
   "dependencies": {
     "@sinclair/typebox": "0.34.48",
+    "axios": "^1.15.2",
     "dotenv": "^17.3.1",
+    "fs-extra": "^11.3.4",
     "ib": "^0.2.9",
     "ws": "^8.19.0"
   },
