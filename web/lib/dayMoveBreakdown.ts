@@ -11,18 +11,34 @@ import type { PnlBreakdownRow } from "@/components/PnlBreakdownModal";
 /**
  * Resolve the "current price" for a position's price data.
  *
+ * Day-Move-specific: NEVER falls back to close. A close-based "current"
+ * would yield (close − close) = 0 and pollute the breakdown with zero rows
+ * for stale subscriptions. The panel is only meaningful when a live tick or
+ * mid is available.
+ *
  * Priority:
  *   1. `last` if it exists and is > 0
  *   2. `(bid + ask) / 2` if both bid and ask are defined and > 0
  *   3. null — position should be excluded from the Day Move calculation
  */
 export function resolveLastOrMid(p: PriceData): number | null {
-  return resolveRealtimePrice(p).price;
+  const r = resolveRealtimePrice(p);
+  if (r.price == null) return null;
+  // The portfolio chain falls back to close as a final tier (marked
+  // isCalculated=true). For day-move we treat that case as "no live data".
+  if (r.isCalculated && p.close != null && p.close > 0 && r.price === p.close) {
+    return null;
+  }
+  return r.price;
 }
 
 /** Returns true when the resolved price came from the mid (bid/ask), not last. */
 function isMid(p: PriceData): boolean {
-  return resolveRealtimePrice(p).isCalculated;
+  const r = resolveRealtimePrice(p);
+  if (r.price == null || !r.isCalculated) return false;
+  // Exclude the close fallback case — only a real bid/ask mid counts as MID.
+  if (p.close != null && p.close > 0 && r.price === p.close) return false;
+  return true;
 }
 
 export function computeDayMoveBreakdown(

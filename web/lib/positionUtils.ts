@@ -60,6 +60,15 @@ export function resolveRealtimePrice(
     return { price: fallbackPrice, isCalculated: fallbackIsCalculated };
   }
 
+  // Final fallback: previous-session close. WS broadcasts close on every tick
+  // (with disk-cache backfill in scripts/ib_realtime_server.js), so even on a
+  // dead market or a sync that fetched no live quote we still surface the most
+  // recent known price instead of "—".
+  const close = isPositiveNumber(priceData?.close) ? priceData.close : null;
+  if (close != null) {
+    return { price: close, isCalculated: true };
+  }
+
   return { price: null, isCalculated: false };
 }
 

@@ -81,3 +81,62 @@ describe("resolveRealtimePrice — stale option last trade", () => {
     expect(result.price).toBe(244.00);
   });
 });
+
+describe("resolveRealtimePrice — close fallback", () => {
+  // Scenario: morning sync at 9:50 ET fetched no marketPrice/bid/ask/close for
+  // less-liquid options, so leg.market_price is null. WS later streams the
+  // previous-session close (or backfills from the disk cache). The row should
+  // surface that close so MV / P&L stop rendering "—".
+  it("uses close when last/bid/ask and fallbackPrice are all unusable", () => {
+    const pd = makePriceData({
+      symbol: "AAOI_20260515_105_C",
+      last: null, bid: null, ask: null, close: 35.50,
+    });
+    const result = resolveRealtimePrice(pd, null, false);
+    expect(result.price).toBe(35.50);
+    expect(result.isCalculated).toBe(true);
+  });
+
+  it("uses close when fallbackPrice is undefined", () => {
+    const pd = makePriceData({
+      symbol: "IGV_20260515_90_C",
+      last: null, bid: null, ask: null, close: 1.10,
+    });
+    const result = resolveRealtimePrice(pd);
+    expect(result.price).toBe(1.10);
+    expect(result.isCalculated).toBe(true);
+  });
+
+  it("prefers fallbackPrice over close when both available", () => {
+    // sync's leg.market_price wins — it may be a same-session mid that the
+    // WS close-cache hasn't refreshed yet.
+    const pd = makePriceData({
+      symbol: "AAOI_20260515_105_C",
+      last: null, bid: null, ask: null, close: 35.50,
+    });
+    const result = resolveRealtimePrice(pd, 36.10, true);
+    expect(result.price).toBe(36.10);
+    expect(result.isCalculated).toBe(true);
+  });
+
+  it("ignores zero or negative close values", () => {
+    const pd = makePriceData({
+      symbol: "AAOI_20260515_105_C",
+      last: null, bid: null, ask: null, close: 0,
+    });
+    expect(resolveRealtimePrice(pd, null, false).price).toBe(null);
+
+    const pd2 = makePriceData({ symbol: "X_20260101_1_C", close: -1 });
+    expect(resolveRealtimePrice(pd2, null, false).price).toBe(null);
+  });
+
+  it("still prefers a live last over close", () => {
+    const pd = makePriceData({
+      symbol: "AAPL_20260529_290_C",
+      last: 2.13, bid: 2.10, ask: 2.16, close: 2.50,
+    });
+    const result = resolveRealtimePrice(pd);
+    expect(result.price).toBe(2.13);
+    expect(result.isCalculated).toBe(false);
+  });
+});
