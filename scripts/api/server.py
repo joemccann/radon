@@ -1087,6 +1087,22 @@ async def journal_reconcile():
     return result.data or {"ok": True}
 
 
+@app.post("/journal/rehydrate")
+async def journal_rehydrate(days: int = 365):
+    """Backfill trade_log.json from IB Flex Query (up to 365 days).
+
+    Idempotent: each row carries an ib_exec_id and existing rows are
+    skipped on re-run. Use this after multi-day reconcile gaps where
+    in-session fills (24h window) are no longer reachable.
+    """
+    result = await run_script("journal_rehydrate.py", ["--days", str(days)], timeout=300)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    if result.data and result.data.get("ok") is False:
+        raise HTTPException(status_code=502, detail=result.data.get("error", "Rehydrate failed"))
+    return result.data or {"ok": True, "imported": 0, "skipped": 0}
+
+
 @app.post("/regime/scan")
 async def regime_scan():
     """Run CRI scan (cri_scan.py --json). 120s timeout."""

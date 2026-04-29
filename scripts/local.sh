@@ -56,5 +56,8 @@ done
 # -- Step 4: Start dev services -----------------------------------------------
 
 log_info "Starting dev services (Next.js + FastAPI + WS relay)..."
+log_info "Backgrounding journal rehydrate (logs/journal-rehydrate.log)..."
+( "$SCRIPT_DIR/_post_start_journal.sh" & )
+
 cd "$PROJECT_ROOT/web"
 exec npm run dev

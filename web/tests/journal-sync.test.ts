@@ -231,4 +231,64 @@ describe("syncNewTrades", () => {
     expect(r2.skipped).toBe(1);
     expect(r2.trades[0].ticker).toBe("SPXU");
   });
+
+  describe("ib_exec_id dedupe", () => {
+    const WITH_EXEC_ID: ReconciliationTrade = {
+      ...BUY_STOCK,
+      ib_exec_id: "EXEC-URTY-001",
+    };
+
+    it("imports a trade with ib_exec_id and persists the field", () => {
+      const result = syncNewTrades([], [WITH_EXEC_ID]);
+      expect(result.imported).toBe(1);
+      expect(result.trades[0].ib_exec_id).toBe("EXEC-URTY-001");
+    });
+
+    it("dedupes via ib_exec_id even when other fields drift", () => {
+      const r1 = syncNewTrades([], [WITH_EXEC_ID]);
+      const reimported: ReconciliationTrade = {
+        ...WITH_EXEC_ID,
+        avg_price: 999, // drift the legacy fingerprint signals
+      };
+      const r2 = syncNewTrades(r1.trades, [reimported]);
+      expect(r2.imported).toBe(0);
+      expect(r2.skipped).toBe(1);
+    });
+
+    it("matches composite exec_id parts ('A+B' covers 'A' and 'B')", () => {
+      const composite: ReconciliationTrade = {
+        ...BUY_STOCK,
+        ib_exec_id: "FILL-A+FILL-B",
+      };
+      const r1 = syncNewTrades([], [composite]);
+      expect(r1.imported).toBe(1);
+
+      const partial: ReconciliationTrade = {
+        ...BUY_STOCK,
+        ib_exec_id: "FILL-A",
+      };
+      const r2 = syncNewTrades(r1.trades, [partial]);
+      expect(r2.imported).toBe(0);
+      expect(r2.skipped).toBe(1);
+    });
+
+    it("falls back to legacy fingerprint when neither side has exec_id", () => {
+      // Neither existing nor new trade has ib_exec_id
+      const r1 = syncNewTrades([], [BUY_STOCK]);
+      const r2 = syncNewTrades(r1.trades, [BUY_STOCK]);
+      expect(r2.imported).toBe(0);
+      expect(r2.skipped).toBe(1);
+    });
+
+    it("does NOT skip a new exec_id even if legacy fingerprint matches", () => {
+      // Same fingerprint, different exec_id — should still import.
+      const fillA: ReconciliationTrade = { ...BUY_STOCK, ib_exec_id: "EX-A" };
+      const fillB: ReconciliationTrade = { ...BUY_STOCK, ib_exec_id: "EX-B" };
+
+      const r1 = syncNewTrades([], [fillA]);
+      const r2 = syncNewTrades(r1.trades, [fillB]);
+      expect(r2.imported).toBe(1);
+      expect(r2.trades[0].ib_exec_id).toBe("EX-B");
+    });
+  });
 });

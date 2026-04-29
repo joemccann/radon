@@ -7,9 +7,9 @@
   "scripts": {
     "dev": "bash ../scripts/dev",
     "dev:next": "next dev",
-    "dev:verbose": "concurrently -n next,ib,api,scraper -c cyan,yellow,green,magenta \"NEXT_DEBUG_LOGGING=1 next dev\" \"node ../scripts/ib_realtime_server.js --verbose\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir ..\" \"node ../scripts/newsfeed/index.js\"",
-    "dev:verbose:next": "concurrently -n next,ib,api,scraper -c cyan,yellow,green,magenta \"NEXT_DEBUG_LOGGING=1 next dev\" \"node ../scripts/ib_realtime_server.js\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir ..\" \"node ../scripts/newsfeed/index.js\"",
-    "dev:verbose:ib": "concurrently -n next,ib,api,scraper -c cyan,yellow,green,magenta \"next dev\" \"node ../scripts/ib_realtime_server.js --verbose\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir ..\" \"node ../scripts/newsfeed/index.js\"",
+    "dev:verbose": "concurrently -n next,ib,api,scraper -c cyan,yellow,green,magenta \"NEXT_DEBUG_LOGGING=1 next dev\" \"node ../scripts/ib_realtime_server.js --verbose\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts\" \"node ../scripts/newsfeed/index.js\"",
+    "dev:verbose:next": "concurrently -n next,ib,api,scraper -c cyan,yellow,green,magenta \"NEXT_DEBUG_LOGGING=1 next dev\" \"node ../scripts/ib_realtime_server.js\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts\" \"node ../scripts/newsfeed/index.js\"",
+    "dev:verbose:ib": "concurrently -n next,ib,api,scraper -c cyan,yellow,green,magenta \"next dev\" \"node ../scripts/ib_realtime_server.js --verbose\" \"python3.13 -m uvicorn scripts.api.server:app --host 127.0.0.1 --port 8321 --reload --app-dir .. --reload-dir ../scripts\" \"node ../scripts/newsfeed/index.js\"",
     "dev:prices": "node ../scripts/ib_realtime_server.js",
     "build": "next build",
     "start": "next start",

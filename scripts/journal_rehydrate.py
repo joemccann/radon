@@ -1,0 +1,445 @@
+#!/usr/bin/env python3
+"""
+Journal Rehydrate — Backfill data/trade_log.json from the IB Flex Query.
+
+Why this exists:
+    ``ib_reconcile.py`` calls ``client.get_fills()`` which only returns the
+    *current* socket session's executions (and a ~24h server-side window).
+    If the daily reconcile cron skips a day, the gap silently grows until
+    we drop trades on the floor. Flex Query is the durable source of truth
+    (up to 365 days), so we use it to refill ``trade_log.json`` whenever the
+    journal looks stale.
+
+Behavior:
+    - Pulls executions via :class:`scripts.trade_blotter.flex_query.FlexQueryFetcher`.
+    - Groups executions by contract (per-symbol for stock, per
+      symbol/strike/expiry/right for options).
+    - Each appended trade carries a stable ``ib_exec_id`` that we dedupe
+      against on the next run — append-only, idempotent.
+    - Writes via :func:`scripts.utils.atomic_io.atomic_save` so the file is
+      always crash-safe.
+    - Emits a single JSON object on stdout — the FastAPI route forwards it
+      back to the caller.
+
+Failure mode:
+    On Flex error / timeout, we abort BEFORE touching ``trade_log.json``
+    and surface the error message in the JSON payload. Better a loud
+    failure than a silent stale journal.
+
+Usage:
+    python3 journal_rehydrate.py [--days 365]
+
+Output (stdout):
+    {"imported": N, "skipped": M, "latest_date": "YYYY-MM-DD", "ok": true}
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from collections import defaultdict
+from datetime import datetime
+from decimal import Decimal
+from pathlib import Path
+from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# Make imports work whether invoked directly or via FastAPI's run_script().
+SCRIPT_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = SCRIPT_DIR.parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+if str(SCRIPT_DIR / "trade_blotter") not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR / "trade_blotter"))
+
+# Load .env so IB_FLEX_TOKEN / IB_FLEX_QUERY_ID resolve when run standalone.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+    load_dotenv(PROJECT_ROOT / "web" / ".env")
+except ImportError:
+    pass
+
+from utils.atomic_io import atomic_save, verified_load  # noqa: E402
+
+DEFAULT_TRADE_LOG = PROJECT_ROOT / "data" / "trade_log.json"
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _decimal_to_float(value: Optional[Decimal]) -> float:
+    """Cast a ``Decimal`` (or None) to a JSON-friendly float."""
+    if value is None:
+        return 0.0
+    return float(value)
+
+
+def _structure_label(side: str, sec_type: str, strike: Optional[float], right: Optional[str], expiry_iso: Optional[str]) -> str:
+    """Mirror web/lib/journalSync.ts:resolveStructure() so labels match."""
+    type_label = {
+        "STK": "Stock",
+        "OPT": "Option",
+        "BAG": "Spread",
+    }.get(sec_type, sec_type)
+    side_label = "Long" if side == "BUY" else "Closed"
+
+    if sec_type in ("OPT", "BAG") and strike and right:
+        right_label = "Call" if right == "C" else "Put" if right == "P" else right
+        suffix = f" {expiry_iso}" if expiry_iso else ""
+        return f"{side_label} {right_label} ${int(strike) if float(strike).is_integer() else strike}{suffix}"
+
+    return f"{side_label} {type_label} ({sec_type})"
+
+
+def _expiry_to_iso(expiry: Optional[str]) -> Optional[str]:
+    """Convert IB's compact ``YYYYMMDD`` expiry to ``YYYY-MM-DD``."""
+    if not expiry:
+        return None
+    if len(expiry) == 8 and expiry.isdigit():
+        return f"{expiry[0:4]}-{expiry[4:6]}-{expiry[6:8]}"
+    return expiry
+
+
+# ---------------------------------------------------------------------------
+# Grouping
+# ---------------------------------------------------------------------------
+
+
+def _group_key(exec_obj: Any) -> str:
+    """Build the dedupe / grouping key for an Execution.
+
+    Stock fills group by symbol; option fills group by full contract.
+    """
+    sec_type = exec_obj.sec_type.value
+    if sec_type == "STK":
+        return f"{exec_obj.symbol}|{sec_type}"
+    return f"{exec_obj.symbol}|{sec_type}|{exec_obj.strike}|{exec_obj.expiry}|{exec_obj.right}"
+
+
+def _group_executions(executions: List[Any]) -> Dict[str, Dict[str, Any]]:
+    """Aggregate Execution objects into per-contract groups.
+
+    Mirrors the bookkeeping ib_reconcile.py does, but built from Flex
+    Query Execution objects rather than ib_insync Fill objects.
+    """
+    grouped: Dict[str, Dict[str, Any]] = {}
+
+    for exec_obj in sorted(executions, key=lambda e: e.time):
+        key = _group_key(exec_obj)
+        bucket = grouped.setdefault(
+            key,
+            {
+                "symbol": exec_obj.symbol,
+                "sec_type": exec_obj.sec_type.value,
+                "strike": float(exec_obj.strike) if exec_obj.strike else None,
+                "expiry": exec_obj.expiry,
+                "right": exec_obj.right,
+                "executions": [],
+                "exec_ids": [],
+                "first_time": exec_obj.time,
+                "buy_qty": Decimal(0),
+                "sell_qty": Decimal(0),
+                "buy_value": Decimal(0),
+                "sell_value": Decimal(0),
+                "total_commission": Decimal(0),
+            },
+        )
+
+        bucket["executions"].append(exec_obj)
+        bucket["exec_ids"].append(str(exec_obj.exec_id))
+
+        if exec_obj.side.value == "BOT":
+            bucket["buy_qty"] += exec_obj.quantity
+            bucket["buy_value"] += exec_obj.quantity * exec_obj.price
+        else:
+            bucket["sell_qty"] += exec_obj.quantity
+            bucket["sell_value"] += exec_obj.quantity * exec_obj.price
+
+        bucket["total_commission"] += exec_obj.commission
+
+    return grouped
+
+
+def _resolve_action(bucket: Dict[str, Any]) -> Optional[str]:
+    """Map net qty + sec_type to the same action labels journalSync.ts emits."""
+    sec_type = bucket["sec_type"]
+    net = bucket["buy_qty"] - bucket["sell_qty"]
+
+    if net > 0:
+        return "BUY" if sec_type == "STK" else "BUY_OPTION"
+    if net < 0:
+        return "SELL" if sec_type == "STK" else "SELL_TO_OPEN"
+    # Net flat — buy and sell sides match. Treat as a closed round-trip
+    # (we don't have realized P&L from Flex without lot matching).
+    if bucket["buy_qty"] > 0:
+        return "CLOSED"
+    return None
+
+
+def _composite_exec_id(exec_ids: List[str]) -> str:
+    """Stable ``ib_exec_id`` for a contract group.
+
+    Multi-leg combos and multi-fill orders need an identifier that
+    persists across re-runs. We sort the underlying Flex execIds and
+    join — order-independent + collision-free.
+    """
+    if len(exec_ids) == 1:
+        return exec_ids[0]
+    return "+".join(sorted(set(exec_ids)))
+
+
+def _bucket_to_entry(bucket: Dict[str, Any], next_id: int) -> Dict[str, Any]:
+    """Build the trade_log.json row for one grouped contract."""
+    sec_type = bucket["sec_type"]
+    net_qty = bucket["buy_qty"] - bucket["sell_qty"]
+    abs_qty = abs(int(net_qty)) if net_qty != 0 else int(bucket["buy_qty"])
+
+    total_qty = bucket["buy_qty"] + bucket["sell_qty"]
+    avg_price = (
+        float((bucket["buy_value"] + bucket["sell_value"]) / total_qty)
+        if total_qty > 0
+        else 0.0
+    )
+
+    multiplier = 100 if sec_type in ("OPT", "BAG") else 1
+    total_cost = abs_qty * avg_price * multiplier + _decimal_to_float(bucket["total_commission"])
+    expiry_iso = _expiry_to_iso(bucket["expiry"])
+
+    action = _resolve_action(bucket)
+    if action is None:
+        return {}
+
+    side = "BUY" if action in ("BUY", "BUY_OPTION") else "SELL"
+    structure = _structure_label(side, sec_type, bucket["strike"], bucket["right"], expiry_iso)
+
+    entry: Dict[str, Any] = {
+        "id": next_id,
+        "date": bucket["first_time"].strftime("%Y-%m-%d"),
+        "ticker": bucket["symbol"],
+        "structure": structure,
+        "decision": "IB_AUTO_IMPORT",
+        "action": action,
+        "fill_price": round(avg_price, 4),
+        "total_cost": round(total_cost, 4),
+        "commission": round(_decimal_to_float(bucket["total_commission"]), 4),
+        "ib_exec_id": _composite_exec_id(bucket["exec_ids"]),
+        "notes": f"Rehydrated from IB Flex Query on {datetime.now().strftime('%Y-%m-%d')}",
+    }
+
+    if sec_type in ("OPT", "BAG"):
+        entry["contracts"] = abs_qty
+        if bucket["strike"]:
+            entry["strike"] = bucket["strike"]
+        if bucket["right"]:
+            entry["right"] = bucket["right"]
+        if bucket["expiry"]:
+            entry["expiry"] = bucket["expiry"]
+    else:
+        entry["shares"] = abs_qty
+
+    return entry
+
+
+# ---------------------------------------------------------------------------
+# Existing-trade index
+# ---------------------------------------------------------------------------
+
+
+def _existing_exec_ids(trades: List[Dict[str, Any]]) -> set[str]:
+    """Collect every ib_exec_id (and split-composite parts) we already have."""
+    ids: set[str] = set()
+    for trade in trades:
+        exec_id = trade.get("ib_exec_id")
+        if not exec_id:
+            continue
+        ids.add(str(exec_id))
+        for part in str(exec_id).split("+"):
+            if part:
+                ids.add(part)
+    return ids
+
+
+def _existing_legacy_keys(trades: List[Dict[str, Any]]) -> set[Tuple[str, str, str]]:
+    """Fallback fingerprint for rows imported before ib_exec_id existed.
+
+    Tuple: (ticker, date, structure). Coarser than the Flex execId, but
+    enough to keep the pre-rehydrate corpus from being re-appended.
+    """
+    keys: set[Tuple[str, str, str]] = set()
+    for trade in trades:
+        ticker = trade.get("ticker")
+        date = trade.get("date") or trade.get("close_date")
+        structure = trade.get("structure", "")
+        if ticker and date:
+            keys.add((str(ticker), str(date), str(structure)))
+    return keys
+
+
+def _is_duplicate(
+    entry: Dict[str, Any],
+    existing_exec_ids: set[str],
+    legacy_keys: set[Tuple[str, str, str]],
+) -> bool:
+    """Prefer execId match, else fall back to (ticker, date, structure)."""
+    exec_id = entry.get("ib_exec_id")
+    if exec_id and str(exec_id) in existing_exec_ids:
+        return True
+    if exec_id:
+        for part in str(exec_id).split("+"):
+            if part and part in existing_exec_ids:
+                return True
+
+    legacy_key = (entry["ticker"], entry["date"], entry.get("structure", ""))
+    return legacy_key in legacy_keys
+
+
+# ---------------------------------------------------------------------------
+# Public entry points
+# ---------------------------------------------------------------------------
+
+
+def rehydrate_from_executions(
+    executions: List[Any],
+    existing: Dict[str, Any],
+) -> Tuple[Dict[str, Any], int, int, Optional[str]]:
+    """Pure function: merge Flex executions into the existing trade log.
+
+    Args:
+        executions: List of ``Execution`` objects from Flex Query.
+        existing: Loaded ``trade_log.json`` payload (``{"trades": [...]}``).
+
+    Returns:
+        (updated payload, imported count, skipped count, latest date)
+    """
+    trades = list(existing.get("trades", []))
+    exec_ids = _existing_exec_ids(trades)
+    legacy_keys = _existing_legacy_keys(trades)
+    next_id = max((t.get("id", 0) for t in trades), default=0) + 1
+
+    grouped = _group_executions(executions)
+    candidate_entries: List[Dict[str, Any]] = []
+    for bucket in grouped.values():
+        entry = _bucket_to_entry(bucket, next_id)
+        if not entry:
+            continue
+        candidate_entries.append(entry)
+
+    candidate_entries.sort(key=lambda e: (e["date"], e["ticker"]))
+
+    imported = 0
+    skipped = 0
+    for entry in candidate_entries:
+        if _is_duplicate(entry, exec_ids, legacy_keys):
+            skipped += 1
+            continue
+        entry["id"] = next_id
+        next_id += 1
+        trades.append(entry)
+        exec_ids.add(str(entry["ib_exec_id"]))
+        legacy_keys.add((entry["ticker"], entry["date"], entry.get("structure", "")))
+        imported += 1
+
+    latest_date = max((t.get("date") for t in trades if t.get("date")), default=None)
+
+    return {"trades": trades}, imported, skipped, latest_date
+
+
+def rehydrate(
+    days: int = 365,
+    trade_log_path: Path = DEFAULT_TRADE_LOG,
+    fetcher: Optional[Any] = None,
+) -> Dict[str, Any]:
+    """Run the full rehydrate cycle and persist the result atomically.
+
+    Args:
+        days: Lookback window for the Flex Query.
+        trade_log_path: Override path (used by tests).
+        fetcher: Optional pre-built FlexQueryFetcher for tests/mocking.
+    """
+    if fetcher is None:
+        token = os.environ.get("IB_FLEX_TOKEN")
+        query_id = os.environ.get("IB_FLEX_QUERY_ID")
+        if not token or not query_id:
+            return {
+                "ok": False,
+                "imported": 0,
+                "skipped": 0,
+                "error": "IB_FLEX_TOKEN / IB_FLEX_QUERY_ID not configured",
+            }
+        from trade_blotter.flex_query import FlexQueryFetcher  # local import keeps test-time mocking simple
+
+        fetcher = FlexQueryFetcher(token=token, query_id=query_id)
+
+    try:
+        executions = fetcher.fetch_executions(days_back=days)
+    except Exception as exc:  # noqa: BLE001 — surface every failure
+        return {
+            "ok": False,
+            "imported": 0,
+            "skipped": 0,
+            "error": f"Flex Query failed: {exc}",
+        }
+
+    try:
+        existing = verified_load(str(trade_log_path))
+    except FileNotFoundError:
+        existing = {"trades": []}
+    except (ValueError, json.JSONDecodeError) as exc:
+        # Fall back to non-verified read so a missing _checksum doesn't
+        # block rehydrate. Atomic save below will add one.
+        try:
+            with open(trade_log_path, "r") as fh:
+                existing = json.load(fh)
+        except Exception:
+            return {
+                "ok": False,
+                "imported": 0,
+                "skipped": 0,
+                "error": f"Failed to read trade_log.json: {exc}",
+            }
+
+    if "trades" not in existing or not isinstance(existing["trades"], list):
+        existing = {"trades": []}
+
+    updated, imported, skipped, latest_date = rehydrate_from_executions(executions, existing)
+
+    if imported > 0:
+        atomic_save(str(trade_log_path), updated)
+
+    return {
+        "ok": True,
+        "imported": imported,
+        "skipped": skipped,
+        "latest_date": latest_date,
+        "executions_seen": len(executions),
+    }
+
+
+# ---------------------------------------------------------------------------
+# CLI
+# ---------------------------------------------------------------------------
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--days", type=int, default=365, help="Flex Query lookback window")
+    parser.add_argument(
+        "--trade-log",
+        type=Path,
+        default=DEFAULT_TRADE_LOG,
+        help="Override trade_log.json path (testing)",
+    )
+    args = parser.parse_args()
+
+    result = rehydrate(days=args.days, trade_log_path=args.trade_log)
+    print(json.dumps(result))
+    return 0 if result.get("ok") else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

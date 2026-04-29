@@ -68,16 +68,30 @@ def get_trade_log_trades(trade_log: dict) -> set:
         trades.add((ticker, date, structure))
     return trades
 
+
+def get_trade_log_exec_ids(trade_log: dict) -> set:
+    """Collect every ib_exec_id in the trade log, including composite parts."""
+    ids = set()
+    for trade in trade_log.get("trades", []):
+        exec_id = trade.get("ib_exec_id")
+        if not exec_id:
+            continue
+        ids.add(str(exec_id))
+        for part in str(exec_id).split("+"):
+            if part:
+                ids.add(part)
+    return ids
+
 def fetch_ib_executions(client: IBClient, lookback_days: int = 7) -> list:
     """Fetch executions from IB for the last N days."""
     executions = []
     fills = client.get_fills()
-    
+
     for fill in fills:
         e = fill.execution
         c = fill.contract
         cr = fill.commissionReport
-        
+
         executions.append({
             "time": e.time,
             "symbol": c.symbol,
@@ -91,8 +105,9 @@ def fetch_ib_executions(client: IBClient, lookback_days: int = 7) -> list:
             "strike": c.strike if c.secType == "OPT" else None,
             "expiry": c.lastTradeDateOrContractMonth if c.secType == "OPT" else None,
             "right": c.right if c.secType == "OPT" else None,
+            "exec_id": getattr(e, "execId", None),
         })
-    
+
     return executions
 
 def fetch_ib_positions(client: IBClient) -> list:
@@ -131,6 +146,7 @@ def group_executions_by_symbol(executions: list) -> dict:
                 "expiry": e.get("expiry"),
                 "right": e.get("right"),
                 "executions": [],
+                "exec_ids": [],
                 "net_quantity": 0,
                 "total_value": 0,
                 "total_commission": 0,
@@ -139,6 +155,8 @@ def group_executions_by_symbol(executions: list) -> dict:
 
         g = grouped[key]
         g["executions"].append(e)
+        if e.get("exec_id"):
+            g["exec_ids"].append(str(e["exec_id"]))
 
         qty = e["shares"] if e["side"] == "BOT" else -e["shares"]
         g["net_quantity"] += qty
@@ -166,41 +184,57 @@ def group_executions_by_symbol(executions: list) -> dict:
     return grouped
 
 def find_new_trades(executions: list, trade_log: dict) -> list:
-    """Find executions that aren't in the trade log."""
-    existing = get_trade_log_trades(trade_log)
+    """Find executions that aren't in the trade log.
+
+    Dedupe priority: ib_exec_id (preferred) → (ticker, date, structure)
+    fingerprint (legacy fallback for rows imported before exec_id existed).
+    """
+    existing_legacy = get_trade_log_trades(trade_log)
+    existing_exec_ids = get_trade_log_exec_ids(trade_log)
     grouped = group_executions_by_symbol(executions)
 
     new_trades = []
     for key, g in grouped.items():
         symbol = g["symbol"]
-        # Get the date from first execution
-        if g["executions"]:
-            trade_date = g["executions"][0]["time"].strftime("%Y-%m-%d")
+        if not g["executions"]:
+            continue
 
-            # Check if this trade exists in log
-            found = False
-            for ticker, date, structure in existing:
-                if ticker == symbol and date == trade_date:
-                    found = True
+        trade_date = g["executions"][0]["time"].strftime("%Y-%m-%d")
+        composite_exec_id = "+".join(sorted(set(g.get("exec_ids", [])))) if g.get("exec_ids") else None
+
+        already_logged = False
+        if composite_exec_id:
+            for part in composite_exec_id.split("+"):
+                if part and part in existing_exec_ids:
+                    already_logged = True
                     break
 
-            if not found and g["action"] not in ["NEUTRAL"]:
-                entry = {
-                    "symbol": symbol,
-                    "date": trade_date,
-                    "action": g["action"],
-                    "net_quantity": g["net_quantity"],
-                    "avg_price": g["total_value"] / sum(e["shares"] for e in g["executions"]) if g["executions"] else 0,
-                    "commission": g["total_commission"],
-                    "realized_pnl": g["total_realized_pnl"],
-                    "sec_type": g["sec_type"],
-                }
-                # Include contract details for options
-                if g["sec_type"] in ("OPT", "BAG") and g.get("strike"):
-                    entry["strike"] = g["strike"]
-                    entry["expiry"] = g.get("expiry")
-                    entry["right"] = g.get("right")
-                new_trades.append(entry)
+        if not already_logged:
+            for ticker, date, _structure in existing_legacy:
+                if ticker == symbol and date == trade_date:
+                    already_logged = True
+                    break
+
+        if already_logged or g["action"] in ["NEUTRAL"]:
+            continue
+
+        entry = {
+            "symbol": symbol,
+            "date": trade_date,
+            "action": g["action"],
+            "net_quantity": g["net_quantity"],
+            "avg_price": g["total_value"] / sum(e["shares"] for e in g["executions"]) if g["executions"] else 0,
+            "commission": g["total_commission"],
+            "realized_pnl": g["total_realized_pnl"],
+            "sec_type": g["sec_type"],
+        }
+        if composite_exec_id:
+            entry["ib_exec_id"] = composite_exec_id
+        if g["sec_type"] in ("OPT", "BAG") and g.get("strike"):
+            entry["strike"] = g["strike"]
+            entry["expiry"] = g.get("expiry")
+            entry["right"] = g.get("right")
+        new_trades.append(entry)
 
     return new_trades
 
