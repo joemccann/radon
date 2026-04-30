@@ -56,6 +56,11 @@ LOGIN_URL = "https://menthorq.com/login/"
 DEFAULT_ARTIFACT_ROOT = Path(__file__).resolve().parent.parent.parent / "logs" / "menthorq_artifacts"
 DEFAULT_STORAGE_STATE_PATH = Path(__file__).resolve().parent.parent.parent / "data" / "menthorq_cache" / "menthorq_storage_state.json"
 
+# Login-flow navigation timeout. WordPress sites pipe continuous analytics /
+# heartbeat traffic so "networkidle" waits are fragile by design — bump the
+# floor and lean on "domcontentloaded" / "load" instead. Override via env.
+MENTHORQ_NAV_TIMEOUT_MS = int(os.environ.get("MENTHORQ_NAV_TIMEOUT_MS", "90000"))
+
 # CTA card slugs (data-command-slug attributes)
 CTA_SLUGS = {
     "main": "cta_table",
@@ -290,7 +295,7 @@ class MenthorQClient:
             return False
 
         try:
-            self._page.goto(BASE_URL, wait_until="domcontentloaded", timeout=30000)
+            self._page.goto(BASE_URL, wait_until="domcontentloaded", timeout=MENTHORQ_NAV_TIMEOUT_MS)
             time.sleep(2)
         except Exception as exc:
             logger.warning(f"MenthorQ storage-state restore failed during navigation: {exc}")
@@ -328,7 +333,7 @@ class MenthorQClient:
     def _login(self) -> None:
         """Authenticate to MenthorQ via WordPress login form."""
         logger.info("Navigating to MenthorQ login...")
-        self._page.goto(LOGIN_URL, wait_until="networkidle", timeout=30000)
+        self._page.goto(LOGIN_URL, wait_until="domcontentloaded", timeout=MENTHORQ_NAV_TIMEOUT_MS)
         time.sleep(2)
 
         # WordPress login form — try multiple selector patterns
@@ -391,7 +396,7 @@ class MenthorQClient:
                 f"context={self._login_failure_context()}"
             )
 
-        self._page.wait_for_load_state("networkidle", timeout=30000)
+        self._page.wait_for_load_state("load", timeout=MENTHORQ_NAV_TIMEOUT_MS)
         time.sleep(3)
 
         # Verify login succeeded
