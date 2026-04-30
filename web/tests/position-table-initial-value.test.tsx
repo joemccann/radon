@@ -170,6 +170,27 @@ describe("PositionTable — POSITION_COLUMNS exposes initial_value", () => {
   it("defaults to ON for a fresh install", () => {
     expect(POSITION_COLUMN_DEFAULTS.initial_value).toBe(true);
   });
+
+  it("market_value appears before initial_value (swap with Initial Value)", () => {
+    const keys = POSITION_COLUMNS.map((c) => c.key);
+    const mvIdx = keys.indexOf("market_value");
+    const ivIdx = keys.indexOf("initial_value");
+    expect(mvIdx).toBeGreaterThan(-1);
+    expect(ivIdx).toBeGreaterThan(-1);
+    expect(mvIdx).toBeLessThan(ivIdx);
+  });
+});
+
+describe("PositionTable — rendered header order swaps Market Value before Initial Value", () => {
+  it("Market Value <th> precedes Initial Value <th> in the rendered table", () => {
+    render(<PositionTable positions={[AAPL_STOCK]} prices={{}} />);
+    const ths = getThTexts();
+    const mvIdx = ths.findIndex((t) => t === "Market Value");
+    const ivIdx = ths.findIndex((t) => t === "Initial Value");
+    expect(mvIdx).toBeGreaterThan(-1);
+    expect(ivIdx).toBeGreaterThan(-1);
+    expect(mvIdx).toBeLessThan(ivIdx);
+  });
 });
 
 describe("PositionTable — Initial Value renders by default", () => {

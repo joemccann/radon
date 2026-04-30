@@ -175,9 +175,9 @@ export const POSITION_COLUMNS: readonly ColumnsToggleEntry<PositionToggleableCol
   { key: "implied_market_value", label: "Implied MV" },
   { key: "daily_chg", label: "Day Chg" },
   { key: "today_pnl", label: "Today P&L" },
-  { key: "initial_value", label: "Initial Value" },
-  { key: "entry_cost", label: "Entry Cost" },
   { key: "market_value", label: "Market Value" },
+  { key: "entry_cost", label: "Entry Cost" },
+  { key: "initial_value", label: "Initial Value" },
   { key: "pnl", label: "P&L" },
   { key: "expiry", label: "Expiry" },
 ];
@@ -327,14 +327,14 @@ function LegRow({
       )}
       {columns.daily_chg && <td></td>}
       {columns.today_pnl && <td></td>}
-      {columns.initial_value && (
-        <td className="right cell-muted">{fmtUsd(legEc)}</td>
+      {columns.market_value && (
+        <td className="right cell-muted">{legMv != null ? fmtUsd(legMv) : "—"}</td>
       )}
       {columns.entry_cost && (
         <td className="right cell-muted">{fmtPrice(legEc)}</td>
       )}
-      {columns.market_value && (
-        <td className="right cell-muted">{legMv != null ? fmtUsd(legMv) : "—"}</td>
+      {columns.initial_value && (
+        <td className="right cell-muted">{fmtUsd(legEc)}</td>
       )}
       {columns.pnl && (
         <td className={`right cell-muted ${legPnl != null ? (legPnl >= 0 ? "positive" : "negative") : ""}`}>
@@ -510,9 +510,9 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             {todayPnl != null ? `${todayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(todayPnl))}` : "—"}
           </td>
         )}
-        {columns.initial_value && <td className="right">{fmtUsd(Math.abs(entryCost))}</td>}
-        {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
+        {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
+        {columns.initial_value && <td className="right">{fmtUsd(Math.abs(entryCost))}</td>}
         {columns.pnl && (
           <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
             {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "—"}
@@ -637,9 +637,9 @@ export default function PositionTable({
             {showImplied && columns.implied_market_value && <SortTh<PositionSortKey> label="Implied MV" sortKey="implied_market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.daily_chg && <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.today_pnl && <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            {columns.initial_value && <SortTh<PositionSortKey> label="Initial Value" sortKey="initial_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            {columns.entry_cost && <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.market_value && <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.entry_cost && <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.initial_value && <SortTh<PositionSortKey> label="Initial Value" sortKey="initial_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.pnl && <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {showExpiry && columns.expiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
           </tr>
