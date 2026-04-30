@@ -140,7 +140,7 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
 
 /* ─── Sort extract factory ─────────────────────────────── */
 
-export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "implied_market_value" | "daily_chg" | "today_pnl" | "entry_cost" | "market_value" | "pnl" | "expiry";
+export type PositionSortKey = "ticker" | "structure" | "qty" | "direction" | "underlying" | "avg_entry" | "last_price" | "implied" | "implied_market_value" | "daily_chg" | "today_pnl" | "initial_value" | "entry_cost" | "market_value" | "pnl" | "expiry";
 
 /** User-toggleable columns. `ticker` is the only always-on identity column —
  *  rows are keyed off it. `structure`/`direction`/`pnl`/`expiry` default ON
@@ -156,6 +156,7 @@ export type PositionToggleableColumnKey =
   | "implied_market_value"
   | "daily_chg"
   | "today_pnl"
+  | "initial_value"
   | "entry_cost"
   | "market_value"
   | "pnl"
@@ -174,6 +175,7 @@ export const POSITION_COLUMNS: readonly ColumnsToggleEntry<PositionToggleableCol
   { key: "implied_market_value", label: "Implied MV" },
   { key: "daily_chg", label: "Day Chg" },
   { key: "today_pnl", label: "Today P&L" },
+  { key: "initial_value", label: "Initial Value" },
   { key: "entry_cost", label: "Entry Cost" },
   { key: "market_value", label: "Market Value" },
   { key: "pnl", label: "P&L" },
@@ -193,6 +195,7 @@ export const POSITION_COLUMN_DEFAULTS: Record<PositionToggleableColumnKey, boole
   implied_market_value: false,
   daily_chg: true,
   today_pnl: true,
+  initial_value: true,
   entry_cost: false,
   market_value: true,
   pnl: true,
@@ -230,6 +233,7 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
       }
       case "daily_chg": return isStock ? getDailyChange(prices?.[pos.ticker]) : getOptionDailyChg(pos, prices);
       case "today_pnl": return getTodayPnlDollars(pos, prices);
+      case "initial_value": return Math.abs(resolveEntryCost(pos));
       case "entry_cost": return resolveEntryCost(pos);
       case "market_value": return mv;
       case "pnl": return mv != null ? mv - resolveEntryCost(pos) : null;
@@ -323,6 +327,9 @@ function LegRow({
       )}
       {columns.daily_chg && <td></td>}
       {columns.today_pnl && <td></td>}
+      {columns.initial_value && (
+        <td className="right cell-muted">{fmtUsd(legEc)}</td>
+      )}
       {columns.entry_cost && (
         <td className="right cell-muted">{fmtPrice(legEc)}</td>
       )}
@@ -503,6 +510,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             {todayPnl != null ? `${todayPnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(todayPnl))}` : "—"}
           </td>
         )}
+        {columns.initial_value && <td className="right">{fmtUsd(Math.abs(entryCost))}</td>}
         {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
         {columns.pnl && (
@@ -629,6 +637,7 @@ export default function PositionTable({
             {showImplied && columns.implied_market_value && <SortTh<PositionSortKey> label="Implied MV" sortKey="implied_market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.daily_chg && <SortTh<PositionSortKey> label="Day Chg" sortKey="daily_chg" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.today_pnl && <SortTh<PositionSortKey> label="Today P&L" sortKey="today_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.initial_value && <SortTh<PositionSortKey> label="Initial Value" sortKey="initial_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.entry_cost && <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.market_value && <SortTh<PositionSortKey> label="Market Value" sortKey="market_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.pnl && <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
