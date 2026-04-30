@@ -698,6 +698,7 @@ export default function OptionsChainTab({
   const [strikesPerSide, setStrikesPerSide] = useState(15);
   const [sideFilter, setSideFilter] = useState<"both" | "calls" | "puts">("both");
   const atmRef = useRef<HTMLTableRowElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const initialFocusAppliedRef = useRef(false);
 
   const focusedExpiry = useMemo(
@@ -872,11 +873,20 @@ export default function OptionsChainTab({
     return () => setChainContracts([]);
   }, [ticker, selectedExpiry, visibleStrikes, setChainContracts]);
 
-  // Scroll to ATM on load
+  // Center the ATM row inside the chain wrapper only — scrollIntoView would
+  // also scroll page-level ancestors, dragging the Order Builder with it.
   useEffect(() => {
-    if (atmRef.current) {
-      atmRef.current.scrollIntoView({ block: "center", behavior: "smooth" });
-    }
+    const atmEl = atmRef.current;
+    const wrapper = wrapperRef.current;
+    if (!atmEl || !wrapper) return;
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const atmRect = atmEl.getBoundingClientRect();
+    const target =
+      wrapper.scrollTop +
+      (atmRect.top - wrapperRect.top) +
+      atmRect.height / 2 -
+      wrapper.clientHeight / 2;
+    wrapper.scrollTo({ top: Math.max(0, target), behavior: "smooth" });
   }, [visibleStrikes]);
 
   // Add leg from chain click
@@ -1038,7 +1048,7 @@ export default function OptionsChainTab({
           </span>
         </div>
       ) : (
-        <div className="chain-grid-wrapper">
+        <div className="chain-grid-wrapper" ref={wrapperRef}>
           <table className="chain-grid">
             <thead>
               <tr>
