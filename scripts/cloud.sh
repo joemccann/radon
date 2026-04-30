@@ -77,6 +77,8 @@ fi
 log_info "Starting dev services (Next.js + FastAPI + WS relay)..."
 log_info "Backgrounding journal rehydrate (logs/journal-rehydrate.log)..."
 ( "$SCRIPT_DIR/_post_start_journal.sh" & )
+log_info "Backgrounding CTA cache refresh (logs/cta-startup-sync.log)..."
+( "$SCRIPT_DIR/_post_start_cta.sh" & )
 
 cd "$PROJECT_ROOT/web"
 exec npm run dev

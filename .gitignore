@@ -129,6 +129,7 @@ tmp/
 
 # Runtime caches
 data/cache/
+data/locks/
 data/nav_history.jsonl
 
 # Verification screenshots (generated during UI work)
