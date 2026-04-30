@@ -26,7 +26,7 @@
 GATE 1 — CONVEXITY      : Potential gain ≥ 2× potential loss. Defined-risk only.
 GATE 2 — EDGE           : Specific, data-backed dark pool/OTC signal that hasn't moved price yet.
 GATE 3 — RISK MGMT      : Fractional Kelly sizing. Hard cap: 2.5% of bankroll per position.
-GATE 4 — NO NAKED SHORTS: Never naked short stock, calls, futures, or bonds. Every short call fully covered. Violation = immediate cancel.
+GATE 4 — NO NAKED SHORTS: ⚠️ ENFORCEMENT DISABLED (2026-04-30). Originally: never naked short stock, calls, futures, or bonds. Discipline is now operator-side; see "Naked Short Protection (Gate 4)" section for re-enable steps.
 ```
 
 **Any gate fails → stop. No rationalization.**
@@ -210,7 +210,11 @@ Startup: check port 4001 + CLOSE_WAIT detection, restart if needed, poll 45s. Ru
 
 ## Naked Short Protection (Gate 4)
 
-**Hard rule — no exceptions.**
+> ⚠️ **STATUS: DISABLED (2026-04-30) by operator request.**
+> All three enforcement layers short-circuit to allow. Detection logic is preserved in private `_*Impl` functions and can be re-armed without rewriting.
+> While disabled, naked-short discipline is operator-side. The original rules are retained below as the canonical specification for the day this is re-enabled.
+
+### Original rules (specification — currently NOT enforced)
 
 | Scenario | Action |
 |----------|--------|
@@ -226,9 +230,39 @@ Startup: check port 4001 + CLOSE_WAIT detection, restart if needed, poll 45s. Ru
 | Combo closing (action=SELL) | ALLOW |
 | BUY anything | ALLOW |
 
-**Enforcement:** UI (`checkNakedShortRisk()` in `OrderTab.tsx`) → API (403 in `orders/place/route.ts`) → Post-sync audit (`naked_short_audit.py`).
+**Original enforcement path:** UI (`checkNakedShortRisk()` in `OrderTab.tsx`) → API (403 in `orders/place/route.ts`) → Post-sync audit (`naked_short_audit.py`).
 **Combo check:** BAG orders use `action=BUY` envelope. Guard inspects leg-level `right`/`action`. `sellCallRatio - buyCallRatio` = uncovered shorts.
 **Impl:** `web/lib/nakedShortGuard.ts`, `scripts/naked_short_audit.py`. Tests: `naked-short-guard.test.ts` (21), `test_naked_short_audit.py`.
+
+### How to re-enable
+
+The disable is intentionally a thin shim — three early returns and three `.skip` markers. Reverse all six to restore identical pre-disable behavior.
+
+1. **`web/lib/nakedShortGuard.ts`**
+   - In `checkNakedShortRisk(...)`: delete the `// GUARD DISABLED — always allow.` line and the `return { allowed: true };` immediately below it. Then remove the `_checkNakedShortRiskImpl` wrapper function declaration (its body is the original implementation — keep the body, drop the wrapper).
+   - In `auditOpenOrders(...)`: delete `// GUARD DISABLED` line and `return [];` below it. Remove the `_auditOpenOrdersImpl` wrapper, keep its body.
+   - Restore parameter names: `_order` → `order`, `_portfolio` → `portfolio`, `_orders` → `orders`.
+   - Update the file-top comment block back to the original "Naked short guard — prevents orders…" docstring.
+
+2. **`scripts/naked_short_audit.py`**
+   - In `find_naked_short_violations(orders, positions)`: delete the `return []` and the "GUARD DISABLED" docstring; merge `_find_naked_short_violations_impl` body back into `find_naked_short_violations`. Drop the `_impl` shim.
+
+3. **Re-arm test suites**
+   - `web/tests/naked-short-guard.test.ts`: change `describe.skip(...)` → `describe(...)` for both `checkNakedShortRisk` and `auditOpenOrders` blocks; remove the "Guard is disabled at the export boundary; suite skipped." comment.
+   - `scripts/tests/test_naked_short_audit.py`: remove the `@pytest.mark.skip(reason="naked short guard disabled at module entry point")` decorators on `TestFindNakedShortViolations` and `TestDryRun`.
+
+4. **Restore this section's status**
+   - Replace the `⚠️ STATUS: DISABLED` block above with the original `**Hard rule — no exceptions.**` line.
+   - Restore the "Four Gates" line at top of CLAUDE.md (Gate 4) to its pre-disable wording: `Never naked short stock, calls, futures, or bonds. Every short call fully covered. Violation = immediate cancel.`
+
+5. **Verify**
+   ```bash
+   # All three should pass / re-arm
+   npx vitest run tests/naked-short-guard.test.ts                 # expect 21 passing
+   pytest scripts/tests/test_naked_short_audit.py -v              # expect TestFindNakedShortViolations + TestDryRun unsipped, all green
+   npx tsc --noEmit                                                # no new errors in nakedShortGuard.ts
+   ```
+   Then place a deliberately-naked combo (e.g. SELL call with no covering long) in the UI and confirm it is blocked end-to-end (UI banner → 403 from `/api/orders/place` → `naked_short_audit.py --dry-run` reports the violation).
 
 ---
 

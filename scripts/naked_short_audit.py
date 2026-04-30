@@ -2,6 +2,11 @@
 """
 Naked Short Audit — scan open orders and cancel naked short violations.
 
+⚠️ DISABLED 2026-04-30: ``find_naked_short_violations`` short-circuits to
+``[]``. The detection logic is preserved in ``_find_naked_short_violations_impl``
+for re-enable. See "Naked Short Protection (Gate 4)" in ``CLAUDE.md`` for the
+6-step re-enable procedure.
+
 Detects orders that would create naked short positions (stock or call options)
 and optionally cancels them via IB Gateway.
 
@@ -54,13 +59,14 @@ def _get_short_call_contracts(positions: list, ticker: str) -> int:
 def find_naked_short_violations(orders: list, positions: list) -> list:
     """Pure function: detect naked short violations in open orders.
 
-    Args:
-        orders: list of order dicts (from orders.json open_orders)
-        positions: list of position dicts (from portfolio.json positions)
-
-    Returns:
-        List of violation dicts: [{"order_id", "perm_id", "reason", "symbol"}]
+    GUARD DISABLED — always returns []. Re-enable by removing the early
+    return below.
     """
+    return []
+
+
+def _find_naked_short_violations_impl(orders: list, positions: list) -> list:
+    """Original detection logic, retained for reference."""
     violations = []
 
     for order in orders:

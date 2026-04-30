@@ -91,6 +91,7 @@ def make_spread_position(ticker, contracts, long_strike, short_strike):
 # Test: find_naked_short_violations
 # ===========================================================================
 
+@pytest.mark.skip(reason="naked short guard disabled at module entry point")
 class TestFindNakedShortViolations:
     def test_no_orders_no_violations(self):
         assert find_naked_short_violations([], []) == []
@@ -233,6 +234,7 @@ class TestCancelViolations:
 # Test: dry-run mode (main)
 # ===========================================================================
 
+@pytest.mark.skip(reason="naked short guard disabled at module entry point")
 class TestDryRun:
     def test_dry_run_does_not_cancel(self, tmp_path):
         """Dry-run prints violations but does not connect to IB or cancel."""
