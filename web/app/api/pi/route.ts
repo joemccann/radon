@@ -333,11 +333,34 @@ const executeJournal = (args: string[], paths: Paths): Promise<ScriptResult> => 
   }));
 };
 
+const normalizeScanArgs = (args: string[]): string[] => {
+  const tokens = args.slice();
+  if (!tokens.length) return tokens;
+
+  // Accept "scan 20" → "scan --top 20"
+  if (tokens.length === 1 && isPositiveInt(tokens[0])) {
+    return ["--top", tokens[0]];
+  }
+
+  // Accept "scan top 20" / "scan min-score 12" → "scan --top 20" / "scan --min-score 12"
+  if (tokens.length === 2 && /^(top|min-score)$/i.test(tokens[0]) && isPositiveInt(tokens[1])) {
+    return [`--${tokens[0].toLowerCase()}`, tokens[1]];
+  }
+
+  return tokens;
+};
+
 const executeScan = async (args: string[], paths: Paths): Promise<ScriptResult> => {
-  const parsed = parseGenericIntFlags(args, {
+  const parsed = parseGenericIntFlags(normalizeScanArgs(args), {
     "--top": (value) => parseFlagInt(value, "top"),
     "--min-score": (value) => parseFlagInt(value, "min-score"),
   });
+
+  if (parsed.positional.length) {
+    throw new Error(
+      `scan only accepts --top N or --min-score N (got: ${parsed.positional.join(" ")})`,
+    );
+  }
 
   const commandArgs = [path.join("scripts", "scanner.py")];
   if (parsed.parsed["top"]) {
@@ -345,10 +368,6 @@ const executeScan = async (args: string[], paths: Paths): Promise<ScriptResult> 
   }
   if (parsed.parsed["min-score"]) {
     commandArgs.push("--min-score", parsed.parsed["min-score"]);
-  }
-
-  if (parsed.positional.length) {
-    throw new Error("scanner command does not accept positional arguments");
   }
 
   return runPythonScript(commandArgs[0], commandArgs.slice(1), paths.cwd);
@@ -525,6 +544,7 @@ const resolvePiInput = (body: PiRoutePayload): string => {
 };
 
 export const __resolvePiInput = resolvePiInput;
+export const __normalizeScanArgs = normalizeScanArgs;
 
 export async function POST(request: NextRequest): Promise<Response> {
   let body: PiRoutePayload;

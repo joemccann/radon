@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NextRequest } from "next/server";
-import { buildEvaluateCommand, __resolvePiInput } from "../app/api/pi/route";
+import { buildEvaluateCommand, __resolvePiInput, __normalizeScanArgs } from "../app/api/pi/route";
 
 type CommandResult = {
   status: number;
@@ -46,6 +46,28 @@ test("__resolvePiInput combines command and separate text payloads", () => {
   expect(__resolvePiInput({ command: "/evaluate", input: "KWEB" })).toBe("/evaluate KWEB");
   expect(__resolvePiInput({ input: "/evaluate KWEB" })).toBe("/evaluate KWEB");
   expect(__resolvePiInput({ text: "/evaluate KWEB" })).toBe("/evaluate KWEB");
+});
+
+test("__normalizeScanArgs accepts natural shorthand and passes through canonical flags", () => {
+  expect(__normalizeScanArgs([])).toEqual([]);
+  expect(__normalizeScanArgs(["--top", "12"])).toEqual(["--top", "12"]);
+  expect(__normalizeScanArgs(["--min-score", "8"])).toEqual(["--min-score", "8"]);
+  expect(__normalizeScanArgs(["12"])).toEqual(["--top", "12"]);
+  expect(__normalizeScanArgs(["top", "12"])).toEqual(["--top", "12"]);
+  expect(__normalizeScanArgs(["TOP", "12"])).toEqual(["--top", "12"]);
+  expect(__normalizeScanArgs(["min-score", "8"])).toEqual(["--min-score", "8"]);
+  expect(__normalizeScanArgs(["AAPL"])).toEqual(["AAPL"]);
+  expect(__normalizeScanArgs(["top", "12", "extra"])).toEqual(["top", "12", "extra"]);
+});
+
+test("pi API rejects unknown scan positional with a clear message", async () => {
+  const { response, body } = await runPiRequest("/scan AAPL");
+
+  expect(response.status).toBe(400);
+  expect(body.command).toBe("scan");
+  expect(body.status).toBe("error");
+  expect(body.output).toContain("scan only accepts");
+  expect(body.output).toContain("AAPL");
 });
 
 test("buildEvaluateCommand builds single evaluate command with default and explicit --days", () => {
