@@ -167,10 +167,12 @@ describe("OrderTab combo sign handling", () => {
       }),
     );
 
+    // The strip shows the structural fair value of the spread, sign-preserved
+    // and matching the InstrumentDetail header. For this Risk Reversal:
+    //   netBid = LONG call.bid - SHORT put.bid = 3.40 - 3.80 = -0.40
+    //   netAsk = LONG call.ask - SHORT put.ask = 3.46 - 3.86 = -0.40
     const strip = container.querySelector(".spread-price-strip");
-    expect(strip?.textContent).toContain("-$0.46");
     expect(strip?.textContent).toContain("-$0.40");
-    expect(strip?.textContent).toContain("-$0.34");
 
     fireEvent.click(getByRole("button", { name: /MID -0.40/i }));
 

@@ -510,15 +510,14 @@ function ComboOrderForm({
     });
   }, [position]);
 
-  // Compute net BID / ASK / MID for the combo using natural market prices.
-  // IB reverses leg actions when Order.action = SELL, so the EFFECTIVE
-  // execution direction depends on the combo action:
-  //   BUY combo: LONG leg → BUY (pay ask), SHORT leg → SELL (receive bid)
-  //   SELL combo: LONG leg → SELL (receive bid), SHORT leg → BUY (pay ask)
+  // Compute net BID / ASK / MID for the combo as a structural fair value.
   //
-  // Natural market calculation:
-  //   netBid = what we receive if we SELL at market (best case)
-  //   netAsk = what we pay if we BUY at market (worst case)
+  // The strip describes the SPREAD itself, not a side of execution, so it
+  // must be invariant to the BUY/SELL action toggle and must agree on sign
+  // with the InstrumentDetail header (which uses `resolveSpreadPriceData`).
+  // Convention: each leg contributes `direction * leg.{bid|ask}` to the net,
+  // long adds, short subtracts. Credit spreads are negative, debit spreads
+  // are positive. Same math as `resolveSpreadPriceData`.
   const netPrices = useMemo(() => {
     let netBid = 0;
     let netAsk = 0;
@@ -530,18 +529,9 @@ function ComboOrderForm({
       const lp = prices[key];
       if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
 
-      // Effective execution after IB's reversal:
-      const effectivelySelling = (action === "SELL") === (leg.direction === "LONG");
-      
-      if (effectivelySelling) {
-        // We're selling this leg → receive BID
-        netBid += lp.bid;
-        netAsk += lp.ask;
-      } else {
-        // We're buying this leg → pay ASK
-        netBid -= lp.ask;
-        netAsk -= lp.bid;
-      }
+      const sign = leg.direction === "LONG" ? 1 : -1;
+      netBid += sign * lp.bid;
+      netAsk += sign * lp.ask;
     }
 
     if (!allAvailable) return { bid: null, ask: null, mid: null };
@@ -549,7 +539,7 @@ function ComboOrderForm({
     const ask = Math.max(netBid, netAsk);
     const mid = (bid + ask) / 2;
     return { bid, ask, mid };
-  }, [position, prices, ticker, action]);
+  }, [position, prices, ticker]);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
