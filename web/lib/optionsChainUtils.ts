@@ -243,12 +243,28 @@ export function findAtmStrike(strikes: number[], currentPrice: number): number |
 
 /* ─── Visible strikes around ATM ─── */
 
+/** Sentinel value for strikesPerSide meaning "show every strike in the chain".
+ * Pass to getVisibleStrikes to bypass the ATM-centered window entirely.
+ * The WS subscription is still capped at ±50 around ATM even in this mode
+ * (see OptionsChainTab) to avoid flooding the relay with hundreds of ticks. */
+export const ALL_STRIKES = -1;
+
+/**
+ * Return the slice of strikes to display in the options chain grid.
+ *
+ * @param strikes - Full sorted strike array from the chain API.
+ * @param atmStrike - Nearest-ATM strike to centre the window on. Falls back
+ *   to the array midpoint when null.
+ * @param strikesPerSide - Number of strikes to show on each side of ATM.
+ *   Pass ALL_STRIKES (-1) to return the entire array.
+ */
 export function getVisibleStrikes(
   strikes: number[],
   atmStrike: number | null,
   strikesPerSide: number,
 ): number[] {
   if (strikes.length === 0) return [];
+  if (strikesPerSide === ALL_STRIKES) return strikes;
   const atmIdx = atmStrike != null ? strikes.indexOf(atmStrike) : Math.floor(strikes.length / 2);
   const startIdx = Math.max(0, atmIdx - strikesPerSide);
   const endIdx = Math.min(strikes.length, atmIdx + strikesPerSide + 1);

@@ -8,6 +8,7 @@ import {
   computeNetOptionQuote,
   findAtmStrike,
   getVisibleStrikes,
+  ALL_STRIKES,
 } from "../lib/optionsChainUtils";
 import type { PriceData } from "../lib/pricesProtocol";
 
@@ -402,5 +403,16 @@ describe("getVisibleStrikes", () => {
     const visible = getVisibleStrikes(strikes, null, 2);
     // Middle index = 5 → strikes[3..7] = [195, 200, 205, 210, 215]
     expect(visible).toEqual([195, 200, 205, 210, 215]);
+  });
+
+  it("returns all strikes when strikesPerSide is ALL_STRIKES", () => {
+    const visible = getVisibleStrikes(strikes, 200, ALL_STRIKES);
+    expect(visible).toEqual(strikes);
+  });
+
+  it("returns all strikes with ALL_STRIKES regardless of ATM position", () => {
+    expect(getVisibleStrikes(strikes, 180, ALL_STRIKES)).toEqual(strikes);
+    expect(getVisibleStrikes(strikes, 230, ALL_STRIKES)).toEqual(strikes);
+    expect(getVisibleStrikes(strikes, null, ALL_STRIKES)).toEqual(strikes);
   });
 });

@@ -22,6 +22,7 @@ import {
   normalizeComboOrder,
   findAtmStrike,
   getVisibleStrikes,
+  ALL_STRIKES,
 } from "@/lib/optionsChainUtils";
 import { OrderPriceStrip, OrderLegPills, OrderConfirmSummary, type OrderLeg as UnifiedOrderLeg, type OrderSummary } from "@/lib/order";
 
@@ -907,14 +908,23 @@ export default function OptionsChainTab({
       setChainContracts([]);
       return;
     }
+    // When showing all strikes, cap WS subscriptions to ±50 around ATM to
+    // avoid overwhelming the relay with hundreds of simultaneous ticks.
+    const WS_CAP = 50;
+    const strikesToStream =
+      strikesPerSide === ALL_STRIKES
+        ? getVisibleStrikes(strikes, focusedStrike ?? atmStrike, WS_CAP)
+        : visibleStrikes.map((r) => r.strike);
+    const streamSet = new Set(strikesToStream);
     const contracts: OptionContract[] = [];
     for (const row of visibleStrikes) {
+      if (!streamSet.has(row.strike)) continue;
       contracts.push({ symbol: ticker, expiry: selectedExpiry, strike: row.strike, right: "C" });
       contracts.push({ symbol: ticker, expiry: selectedExpiry, strike: row.strike, right: "P" });
     }
     setChainContracts(contracts);
     return () => setChainContracts([]);
-  }, [ticker, selectedExpiry, visibleStrikes, setChainContracts]);
+  }, [ticker, selectedExpiry, visibleStrikes, strikesPerSide, strikes, focusedStrike, atmStrike, setChainContracts]);
 
   // Center the ATM row inside the chain wrapper only — scrollIntoView would
   // also scroll page-level ancestors, dragging the Order Builder with it.
@@ -1079,6 +1089,8 @@ export default function OptionsChainTab({
             <option value={15}>±15</option>
             <option value={25}>±25</option>
             <option value={50}>±50</option>
+            <option value={100}>±100</option>
+            <option value={ALL_STRIKES}>All</option>
           </select>
         </div>
       </div>

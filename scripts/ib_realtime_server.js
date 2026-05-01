@@ -730,6 +730,27 @@ async function handleSnapshotRequest(client, symbols) {
   }
 }
 
+/** Maximum age (ms) for cached bid/ask before we consider it stale.
+ * Option quotes older than 8 hours come from a prior session and should
+ * not be broadcast to new subscribers — they will be replaced once the
+ * fresh reqMktData ticks arrive from IB. */
+const QUOTE_STALE_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+/**
+ * Return a copy of PriceData safe to send as an initial snapshot.
+ * If the cached bid/ask timestamps are older than QUOTE_STALE_MS
+ * (i.e. from a prior trading session), null them out so the UI shows
+ * "---" instead of stale prices until fresh ticks arrive.
+ */
+function safeInitialState(data) {
+  if (!data.timestamp) return data;
+  const age = Date.now() - new Date(data.timestamp).getTime();
+  if (age > QUOTE_STALE_MS) {
+    return { ...data, bid: null, ask: null, bidSize: null, askSize: null, lastIsCalculated: false };
+  }
+  return data;
+}
+
 function hydrateAndBroadcast(symbol) {
   const state = symbolStates.get(symbol);
   if (!state) return;
@@ -905,7 +926,7 @@ async function handleClientMessage(client, data) {
             sendMessage(client, {
               type: "price",
               symbol,
-              data: state.data,
+              data: safeInitialState(state.data),
             });
           }
           // Send cached fundamentals if available
@@ -933,7 +954,7 @@ async function handleClientMessage(client, data) {
             sendMessage(client, {
               type: "price",
               symbol: key,
-              data: state.data,
+              data: safeInitialState(state.data),
             });
           }
           subscribed.push(key);
@@ -952,7 +973,7 @@ async function handleClientMessage(client, data) {
             sendMessage(client, {
               type: "price",
               symbol: key,
-              data: state.data,
+              data: safeInitialState(state.data),
             });
           }
           subscribed.push(key);

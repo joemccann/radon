@@ -154,6 +154,8 @@ Index subscriptions use the same websocket action with an `indexes` array:
 
 The realtime server preserves the typed IB contract for stock, option, and index subscriptions as soon as the websocket subscription arrives, so reconnect and cold-restore flows resubscribe `/regime` indexes as CBOE indices instead of rebuilding them as stocks.
 
+**Stale quote guard (`safeInitialState`):** When a new client subscribes to an option contract, the relay immediately sends back the most recently cached `PriceData` snapshot. If that snapshot is from a prior trading session (timestamp older than 8 hours), `bid`/`ask`/`bidSize`/`askSize` are nulled before the initial push so the chain displays `---` instead of stale prices from yesterday's session. Fresh frozen-data ticks from the new `reqMktData` call repopulate the quote within seconds.
+
 **Snapshot (one-time):**
 ```bash
 curl -X POST http://localhost:3000/api/prices \
@@ -281,9 +283,9 @@ npx playwright test
 ASSISTANT_MOCK=1 npm test
 ```
 
-**Unit tests** (`web/tests/`): Route logic, price utilities, naked short guard, WebSocket state machine, regime/CRI staleness, CTA freshness, share cards, P&L calculations, day change, exposure breakdown.
+**Unit tests** (`web/tests/`): Route logic, price utilities, naked short guard, WebSocket state machine, regime/CRI staleness, CTA freshness, share cards, P&L calculations, day change, exposure breakdown, stale option quote guard (`stale-option-quote-guard.test.ts`).
 
-**E2E tests** (`web/e2e/`): Regime live index streaming, CTA stale banners, share P&L rendering, options chain sticky headers, market-closed EOD values.
+**E2E tests** (`web/e2e/`): Regime live index streaming, CTA stale banners, share P&L rendering, options chain sticky headers, market-closed EOD values, chain strikes-per-side selector including ±100 and All modes (`chain-strikes-selector.spec.ts`).
 
 ### IB Connectivity Tests
 
