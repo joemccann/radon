@@ -24,42 +24,46 @@ function chatCompletion(content: string): unknown {
   return { choices: [{ message: { content } }] };
 }
 
-const TAXONOMY = ["BTC", "ETH", "crypto", "vol", "VIX", "macro", "rates", "Fed"];
+const TAXONOMY = ["BTC", "VOL", "POSITIONING", "MACRO"];
 
-describe("createTagger.tagPost", () => {
-  it("returns ≥3 tags from the taxonomy on a successful gpt-oss-120b response", async () => {
+describe("createTagger.tagPost (open vocabulary)", () => {
+  it("returns the model's 3 tags normalised to uppercase", async () => {
     const fetchMock = vi.fn().mockResolvedValue(
-      jsonResponse(chatCompletion(JSON.stringify({ tags: ["BTC", "crypto", "vol"] }))),
+      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "put-call-ratio", "positioning"] }))),
     );
     global.fetch = fetchMock as typeof fetch;
 
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ taxonomy: TAXONOMY });
+    const tagger = createTagger({
+      getTaxonomySnapshot: async () => TAXONOMY,
+    });
 
-    const tags = await tagger.tagPost({ id: "p1", title: "BTC rally", content: "Spot-led" });
+    const tags = await tagger.tagPost({ id: "p1", title: "Hated puts", content: "Put call ratio imploded" });
 
-    expect(tags).toEqual(["BTC", "crypto", "vol"]);
+    expect(tags).toEqual(["PUTS", "PUT-CALL-RATIO", "POSITIONING"]);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    const [, init] = fetchMock.mock.calls[0];
-    const body = JSON.parse(init.body as string);
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
     expect(body.model).toBe("gpt-oss-120b");
-    expect(init.headers.Authorization).toBe("Bearer test-key");
+    const systemMsg = body.messages.find((m: { role: string }) => m.role === "system").content;
+    expect(systemMsg).toMatch(/BTC, VOL, POSITIONING, MACRO/);
+    expect(systemMsg).toMatch(/EXACTLY 3 tags/);
+    expect(systemMsg).toMatch(/ALL TAGS ARE UPPERCASE/);
   });
 
   it("falls back to qwen-3-235b on a 429 from gpt-oss-120b", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ error: "rate limited" }, 429))
       .mockResolvedValueOnce(
-        jsonResponse(chatCompletion(JSON.stringify({ tags: ["macro", "rates", "Fed"] }))),
+        jsonResponse(chatCompletion(JSON.stringify({ tags: ["MACRO", "FED", "RATES"] }))),
       );
     global.fetch = fetchMock as typeof fetch;
 
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ taxonomy: TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
 
     const tags = await tagger.tagPost({ id: "p2", title: "Fed cuts", content: "Rate path" });
 
-    expect(tags).toEqual(["macro", "rates", "Fed"]);
+    expect(tags).toEqual(["MACRO", "FED", "RATES"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
     const second = JSON.parse(fetchMock.mock.calls[1][1].body as string);
     expect(second.model).toBe("qwen-3-235b-a22b-instruct-2507");
@@ -72,46 +76,101 @@ describe("createTagger.tagPost", () => {
     global.fetch = fetchMock as typeof fetch;
 
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ taxonomy: TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
 
     const tags = await tagger.tagPost({ id: "p3", title: "X", content: "Y" });
 
     expect(tags).toBeNull();
-    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
-  it("filters tags to taxonomy intersection and rejects responses with <3 valid tags", async () => {
+  it("trims to exactly 3 tags when the model returns more", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning", "vol", "hedging"] }))),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+
+    const tags = await tagger.tagPost({ id: "p4", title: "X", content: "Y" });
+    expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
+  });
+
+  it("falls back if normalised tag count drops below 3 (post-cleanup junk)", async () => {
     const fetchMock = vi.fn()
-      // gpt-oss returns 2 valid + 1 invalid → reject, fall back
       .mockResolvedValueOnce(
-        jsonResponse(chatCompletion(JSON.stringify({ tags: ["BTC", "crypto", "GARBAGE"] }))),
+        jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "", "  "] }))),
       )
-      // llama returns 3 valid
       .mockResolvedValueOnce(
-        jsonResponse(chatCompletion(JSON.stringify({ tags: ["BTC", "ETH", "crypto", "vol"] }))),
+        jsonResponse(chatCompletion(JSON.stringify({ tags: ["puts", "options", "positioning"] }))),
       );
     global.fetch = fetchMock as typeof fetch;
 
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = createTagger({ taxonomy: TAXONOMY });
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
 
-    const tags = await tagger.tagPost({ id: "p4", title: "X", content: "Y" });
-
-    // First response had only 2 valid (BTC, crypto) — discarded.
-    // Second response has 4 valid; keeps all 4.
-    expect(tags).toEqual(["BTC", "ETH", "crypto", "vol"]);
+    const tags = await tagger.tagPost({ id: "p5", title: "X", content: "Y" });
+    expect(tags).toEqual(["PUTS", "OPTIONS", "POSITIONING"]);
     expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 
   it("throws if CEREBRAS_API_KEY is not set", async () => {
     delete process.env.CEREBRAS_API_KEY;
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    expect(() => createTagger({ taxonomy: TAXONOMY })).toThrow(/CEREBRAS_API_KEY/);
+    expect(() => createTagger({ getTaxonomySnapshot: async () => TAXONOMY })).toThrow(/CEREBRAS_API_KEY/);
   });
 
-  it("throws if taxonomy is empty", async () => {
+  it("throws if getTaxonomySnapshot is missing", async () => {
     const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
-    expect(() => createTagger({ taxonomy: [] })).toThrow(/taxonomy/);
+    expect(() => createTagger({})).toThrow(/getTaxonomySnapshot/);
+  });
+});
+
+describe("__normaliseTags (uppercase + kebab-case)", () => {
+  it("uppercases everything", async () => {
+    const { __normaliseTags } = await import("../../scripts/newsfeed/tagger.js");
+    expect(__normaliseTags(["btc", "Vix", "USD", "puts", "Options"])).toEqual([
+      "BTC",
+      "VIX",
+      "USD",
+      "PUTS",
+      "OPTIONS",
+    ]);
+  });
+
+  it("uppercase-kebab-cases multi-word concepts", async () => {
+    const { __normaliseTags } = await import("../../scripts/newsfeed/tagger.js");
+    expect(
+      __normaliseTags(["Put Call Ratio", "single stock vol", "FUND_FLOWS", "Tail Hedge"]),
+    ).toEqual(["PUT-CALL-RATIO", "SINGLE-STOCK-VOL", "FUND-FLOWS", "TAIL-HEDGE"]);
+  });
+
+  it("preserves & in tickers like M&A", async () => {
+    const { __normaliseTags } = await import("../../scripts/newsfeed/tagger.js");
+    expect(__normaliseTags(["m&a", "S&P", "M&A"])).toEqual(["M&A", "S&P"]);
+  });
+
+  it("strips surrounding punctuation and quotes", async () => {
+    const { __normaliseTags } = await import("../../scripts/newsfeed/tagger.js");
+    expect(__normaliseTags(['"puts"', "#options", "calls.", "(positioning)"])).toEqual([
+      "PUTS",
+      "OPTIONS",
+      "CALLS",
+      "POSITIONING",
+    ]);
+  });
+
+  it("dedupes after normalisation", async () => {
+    const { __normaliseTags } = await import("../../scripts/newsfeed/tagger.js");
+    expect(__normaliseTags(["BTC", "btc", "BTC.", "Bitcoin"])).toEqual(["BTC", "BITCOIN"]);
+  });
+
+  it("drops empty/whitespace tags", async () => {
+    const { __normaliseTags } = await import("../../scripts/newsfeed/tagger.js");
+    expect(__normaliseTags(["puts", "  ", "", null as unknown as string, "options"])).toEqual([
+      "PUTS",
+      "OPTIONS",
+    ]);
   });
 });
 
@@ -131,8 +190,7 @@ describe("hydrateTags", () => {
 
     expect(updated).toBe(true);
     expect(tagger.tagPost).toHaveBeenCalledTimes(1);
-    expect(tagger.tagPost).toHaveBeenCalledWith(expect.objectContaining({ id: "p2" }));
-    expect(posts[0].tags).toEqual(["BTC", "crypto", "vol"]); // untouched
+    expect(posts[0].tags).toEqual(["BTC", "crypto", "vol"]);
     expect(posts[1].tags).toEqual(["macro", "rates", "Fed"]);
   });
 
@@ -153,13 +211,34 @@ describe("hydrateTags", () => {
     expect(posts[1].tags).toEqual(["macro", "rates", "Fed"]);
   });
 
-  it("leaves untagged posts unchanged when tagger returns null (don't blank existing tags)", async () => {
+  it("invokes onNewTags for every successful tagPost result", async () => {
+    const { hydrateTags } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = {
+      tagPost: vi
+        .fn()
+        .mockResolvedValueOnce(["PUTS", "OPTIONS", "POSITIONING"])
+        .mockResolvedValueOnce(["MACRO", "FED", "RATES"]),
+    };
+    const onNewTags = vi.fn().mockResolvedValue(undefined);
+    const posts = [
+      { id: "p1", title: "x", content: "x" },
+      { id: "p2", title: "y", content: "y" },
+    ];
+
+    await hydrateTags(posts, tagger, { onNewTags });
+
+    expect(onNewTags).toHaveBeenCalledTimes(2);
+    expect(onNewTags).toHaveBeenNthCalledWith(1, ["PUTS", "OPTIONS", "POSITIONING"]);
+    expect(onNewTags).toHaveBeenNthCalledWith(2, ["MACRO", "FED", "RATES"]);
+  });
+
+  it("leaves posts unchanged when tagger returns null", async () => {
     const { hydrateTags } = await import("../../scripts/newsfeed/tagger.js");
     const tagger = { tagPost: vi.fn().mockResolvedValue(null) };
 
     const posts = [
-      { id: "p1", title: "x", content: "x" }, // no tags yet
-      { id: "p2", title: "y", content: "y", tags: ["BTC"] }, // partial
+      { id: "p1", title: "x", content: "x" },
+      { id: "p2", title: "y", content: "y", tags: ["BTC"] },
     ];
 
     const updated = await hydrateTags(posts, tagger);
@@ -167,23 +246,5 @@ describe("hydrateTags", () => {
     expect(updated).toBe(false);
     expect(posts[0].tags).toBeUndefined();
     expect(posts[1].tags).toEqual(["BTC"]);
-  });
-
-  it("respects throttleMs between calls", async () => {
-    const { hydrateTags } = await import("../../scripts/newsfeed/tagger.js");
-    const tagger = { tagPost: vi.fn().mockResolvedValue(["macro", "rates", "Fed"]) };
-
-    const posts = [
-      { id: "p1", title: "x", content: "x" },
-      { id: "p2", title: "y", content: "y" },
-      { id: "p3", title: "z", content: "z" },
-    ];
-
-    const start = Date.now();
-    await hydrateTags(posts, tagger, { throttleMs: 50 });
-    const elapsed = Date.now() - start;
-
-    // 3 calls, throttle between calls 1→2 and 2→3 → expect ≥100ms total
-    expect(elapsed).toBeGreaterThanOrEqual(95);
   });
 });

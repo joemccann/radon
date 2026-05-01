@@ -1,5 +1,4 @@
 #!/usr/bin/env node
-import path from "path";
 import { pathToFileURL } from "url";
 import fs from "fs-extra";
 import { resolveScraperPaths, seedPostsFileIfMissing } from "./paths.js";
@@ -9,31 +8,16 @@ import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
 import { runForever } from "./scheduler.js";
 import { createTagger, hydrateTags } from "./tagger.js";
+import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
 
 const INTERVAL_MS = 2 * 60 * 1000;
 const COOKIE_URLS = ["https://themarketear.com"];
 
-async function loadTaxonomy(projectRoot) {
-  const taxonomyFile = path.join(projectRoot, "data", "tag_taxonomy.json");
+function buildTaggerOrNull({ projectRoot }) {
   try {
-    const raw = await fs.readFile(taxonomyFile, "utf8");
-    const parsed = JSON.parse(raw);
-    const tags = Array.isArray(parsed?.tags) ? parsed.tags : null;
-    if (!tags || tags.length === 0) {
-      console.warn(`[newsfeed] taxonomy at ${taxonomyFile} is empty — skipping tag hydration`);
-      return null;
-    }
-    return tags;
-  } catch (err) {
-    console.warn(`[newsfeed] taxonomy unavailable (${err.message}) — skipping tag hydration`);
-    return null;
-  }
-}
-
-function buildTaggerOrNull(taxonomy) {
-  if (!taxonomy) return null;
-  try {
-    return createTagger({ taxonomy });
+    return createTagger({
+      getTaxonomySnapshot: async () => (await loadTaxonomy(projectRoot)).tags,
+    });
   } catch (err) {
     console.warn(`[newsfeed] tagger disabled: ${err.message}`);
     return null;
@@ -81,11 +65,19 @@ export function createScraper(overrides = {}) {
     const imagesUpdated = await hydrateLocalImages(merged, downloader);
 
     let tagsUpdated = false;
-    const taxonomy = await loadTaxonomy(paths.projectRoot);
-    const tagger = buildTaggerOrNull(taxonomy);
+    let newTagsAdded = 0;
+    const tagger = buildTaggerOrNull({ projectRoot: paths.projectRoot });
     if (tagger) {
       try {
-        tagsUpdated = await hydrateTags(merged, tagger);
+        tagsUpdated = await hydrateTags(merged, tagger, {
+          onNewTags: async (tags) => {
+            const additions = await appendTagsToTaxonomy(paths.projectRoot, tags);
+            newTagsAdded += additions.length;
+            if (additions.length > 0) {
+              console.info(`[newsfeed] taxonomy +${additions.length}: ${additions.join(", ")}`);
+            }
+          },
+        });
       } catch (err) {
         console.warn(`[newsfeed] tag hydration failed: ${err.message}`);
       }
@@ -104,7 +96,7 @@ export function createScraper(overrides = {}) {
     });
 
     console.info(
-      `[newsfeed] cycle ok N=${merged.length} changed=${changed} imagesUpdated=${imagesUpdated} tagsUpdated=${tagsUpdated} ms=${Date.now() - cycleStart}`,
+      `[newsfeed] cycle ok N=${merged.length} changed=${changed} imagesUpdated=${imagesUpdated} tagsUpdated=${tagsUpdated} newTags=${newTagsAdded} ms=${Date.now() - cycleStart}`,
     );
     return { changed: true, count: merged.length };
   }
