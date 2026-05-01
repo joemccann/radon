@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 const TAGS_PARAM = "tags";
@@ -48,42 +48,42 @@ export function useNewsfeedTagFilter(): NewsfeedTagFilter {
     setSelectedTags((prev) => (setsEqual(prev, fromUrl) ? prev : fromUrl));
   }, [tagsParamRaw]);
 
-  const writeUrl = useCallback(
-    (next: Set<string>) => {
-      const params = new URLSearchParams(searchParams?.toString() ?? "");
-      if (next.size === 0) {
-        params.delete(TAGS_PARAM);
-      } else {
-        params.set(TAGS_PARAM, serializeTags(next));
-      }
-      const query = params.toString();
-      const url = query ? `${pathname}?${query}` : pathname ?? "/dashboard";
-      router.replace(url, { scroll: false });
-    },
-    [router, pathname, searchParams],
-  );
+  // Sync local state → URL after commit. Calling router.replace inside a
+  // setState updater (or anywhere during render) trips React's
+  // "Cannot update a component while rendering a different component"
+  // because router.replace dispatches into the Router component.
+  // Effect runs post-commit, so it's safe.
+  const lastWrittenRef = useRef<string | null>(null);
+  useEffect(() => {
+    const desired = serializeTags(selectedTags);
+    const current = tagsParamRaw;
+    if (desired === current) {
+      lastWrittenRef.current = desired;
+      return;
+    }
+    if (lastWrittenRef.current === desired) return; // already wrote this, waiting for URL to settle
+    lastWrittenRef.current = desired;
 
-  const toggleTag = useCallback(
-    (tag: string) => {
-      setSelectedTags((prev) => {
-        const next = new Set(prev);
-        if (next.has(tag)) next.delete(tag);
-        else next.add(tag);
-        writeUrl(next);
-        return next;
-      });
-    },
-    [writeUrl],
-  );
+    const params = new URLSearchParams(searchParams?.toString() ?? "");
+    if (desired.length === 0) params.delete(TAGS_PARAM);
+    else params.set(TAGS_PARAM, desired);
+    const query = params.toString();
+    const url = query ? `${pathname}?${query}` : pathname ?? "/dashboard";
+    router.replace(url, { scroll: false });
+  }, [selectedTags, tagsParamRaw, searchParams, pathname, router]);
 
-  const clearTags = useCallback(() => {
+  const toggleTag = useCallback((tag: string) => {
     setSelectedTags((prev) => {
-      if (prev.size === 0) return prev;
-      const next = new Set<string>();
-      writeUrl(next);
+      const next = new Set(prev);
+      if (next.has(tag)) next.delete(tag);
+      else next.add(tag);
       return next;
     });
-  }, [writeUrl]);
+  }, []);
+
+  const clearTags = useCallback(() => {
+    setSelectedTags((prev) => (prev.size === 0 ? prev : new Set()));
+  }, []);
 
   return { selectedTags, toggleTag, clearTags };
 }
