@@ -1371,6 +1371,68 @@ td.last-price-cell {
   color: var(--negative);
 }
 
+.news-feed-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border-dim);
+  background: var(--bg-panel-raised);
+}
+
+.news-feed-list + .news-feed-pagination {
+  border-bottom: none;
+  border-top: 1px solid var(--border-dim);
+}
+
+.news-feed-page-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.news-feed-page-button:hover:not(:disabled) {
+  color: var(--signal-core);
+  border-color: var(--signal-core);
+  background: var(--bg-hover);
+}
+
+.news-feed-page-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.news-feed-page-meta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.news-feed-page-indicator {
+  color: var(--text-secondary);
+}
+
+.news-feed-page-range {
+  color: var(--text-muted);
+}
+
 .chat-messages {
   flex: 1;
   min-height: 220px;

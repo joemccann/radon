@@ -2,13 +2,13 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Image from "next/image";
-import { Link as LinkIcon, RefreshCw, Radio } from "lucide-react";
+import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw, Radio } from "lucide-react";
 
 import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime";
 
 const POSTS_ENDPOINT = "/data/posts.json";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
-const MAX_VISIBLE_POSTS = 18;
+const PAGE_SIZE = 18;
 
 export type MarketEarPost = {
   id: string;
@@ -37,12 +37,66 @@ function buildPostHref(id: string) {
   return `https://themarketear.com/posts/${encodeURIComponent(id)}`;
 }
 
+type PaginationBarProps = {
+  currentPage: number;
+  totalPages: number;
+  rangeStart: number;
+  rangeEnd: number;
+  totalItems: number;
+  onPrev: () => void;
+  onNext: () => void;
+};
+
+function PaginationBar({
+  currentPage,
+  totalPages,
+  rangeStart,
+  rangeEnd,
+  totalItems,
+  onPrev,
+  onNext,
+}: PaginationBarProps) {
+  return (
+    <nav className="news-feed-pagination" aria-label="Newsfeed pagination">
+      <button
+        type="button"
+        className="news-feed-page-button"
+        onClick={onPrev}
+        disabled={currentPage <= 1}
+        aria-label="Previous page"
+      >
+        <ChevronLeft size={12} />
+        <span>Prev</span>
+      </button>
+      <div className="news-feed-page-meta">
+        <span className="news-feed-page-indicator">
+          Page {currentPage} of {totalPages}
+        </span>
+        <span className="news-feed-page-range">
+          Showing {rangeStart}–{rangeEnd} of {totalItems}
+        </span>
+      </div>
+      <button
+        type="button"
+        className="news-feed-page-button"
+        onClick={onNext}
+        disabled={currentPage >= totalPages}
+        aria-label="Next page"
+      >
+        <span>Next</span>
+        <ChevronRight size={12} />
+      </button>
+    </nav>
+  );
+}
+
 export default function DashboardNewsFeed() {
   const [posts, setPosts] = useState<NormalisedPost[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
+  const [currentPage, setCurrentPage] = useState(1);
 
   const loadPosts = useCallback(async ({ signal, mode = "silent" }: FetchOptions = {}) => {
     if (mode === "initial") {
@@ -120,8 +174,43 @@ export default function DashboardNewsFeed() {
     await loadPosts({ mode: "refresh" });
   }, [loadPosts]);
 
-  const items = useMemo(() => posts.slice(0, MAX_VISIBLE_POSTS), [posts]);
+  const totalPages = Math.max(1, Math.ceil(posts.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(1);
+    }
+  }, [currentPage, totalPages]);
+
+  const safePage = Math.min(currentPage, totalPages);
+  const items = useMemo(
+    () => posts.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [posts, safePage],
+  );
+  const showPagination = posts.length > PAGE_SIZE;
+  const rangeStart = posts.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(safePage * PAGE_SIZE, posts.length);
+
+  const goPrev = useCallback(() => {
+    setCurrentPage((page) => Math.max(1, page - 1));
+  }, []);
+  const goNext = useCallback(() => {
+    setCurrentPage((page) => Math.min(totalPages, page + 1));
+  }, [totalPages]);
+
   const freshnessLabel = lastUpdated ? `Updated ${formatAbsolute(lastUpdated)}` : "Awaiting first capture";
+
+  const paginationBar = showPagination ? (
+    <PaginationBar
+      currentPage={safePage}
+      totalPages={totalPages}
+      rangeStart={rangeStart}
+      rangeEnd={rangeEnd}
+      totalItems={posts.length}
+      onPrev={goPrev}
+      onNext={goNext}
+    />
+  ) : null;
 
   return (
     <div className="section dashboard-news">
@@ -151,7 +240,9 @@ export default function DashboardNewsFeed() {
         ) : items.length === 0 ? (
           <div className="news-feed-empty">No Market Ear posts captured yet. Ensure the scraper is running.</div>
         ) : (
-          <ul className="news-feed-list">
+          <>
+            {paginationBar}
+            <ul className="news-feed-list">
             {items.map((post) => {
               const firstImage = post.images?.[0] ?? null;
               const relative = formatRelative(post.isoTimestamp);
@@ -195,7 +286,9 @@ export default function DashboardNewsFeed() {
                 </li>
               );
             })}
-          </ul>
+            </ul>
+            {paginationBar}
+          </>
         )}
       </div>
     </div>
