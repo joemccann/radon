@@ -297,14 +297,20 @@ Polls `themarketear.com/newsfeed` every 120s via the chrome-cdp-skill CLI. Modul
 | `cdp.js` | `runCdpCommand`, `listTargets`, `selectMarketEarTab`, `fetchCookieHeader` (pulls `themarketear.com` cookies via `Network.getCookies` for the image downloader) |
 | `extract.js` | `buildExtractionExpression()` IIFE source + `parsePayload()` discriminated union (`source: dom \| parse \| shape`) |
 | `media.js` | `createImageDownloader` + `hydrateLocalImages` (preserves "don't blank thumbs on partial fail" rule). Default axios client forces IPv4 (`https.Agent { family: 4 }`) — themarketear.com's CDN advertises AAAA records that EHOSTUNREACH on residential IPv6. Accepts `getCookieHeader` callback so cookie-gated `/images/<hash>.png` URLs follow their 301 to `*.cdn.digitaloceanspaces.com`; without cookies the upstream returns 404. |
-| `store.js` | `loadExistingPosts`, `mergePosts`, `persistPosts` (rollover/truncate at 500 KB → archive + keep `ceil(N×0.2)`) |
+| `store.js` | `loadExistingPosts`, `mergePosts`, `persistPosts` (rollover/truncate at 500 KB → archive + keep `ceil(N×0.2)`). `mergePosts` preserves `tags` across update cycles. |
+| `tagger.js` | Cerebras-backed AI tagger. Primary `gpt-oss-120b` (reasoning model — needs `max_tokens: 800` headroom for chain-of-thought before final JSON), fallback `qwen-3-235b-a22b-instruct-2507`. Both on Cerebras free tier (30 req/min, 1M tok/day). Sets undici global dispatcher `connect: { family: 4 }` since `api.cerebras.ai`'s AAAA route is unreachable from residential IPv6. `createTagger({ taxonomy })` + `hydrateTags(posts, tagger, { force, throttleMs })` — only re-tags posts with `tags.length < 3` unless `force=true`. |
 | `scheduler.js` | `runForever` — non-overlapping cycle (await `scrapeOnce`; sleep remainder); pure |
-| `index.js` | Wires modules, owns SIGINT/SIGTERM → AbortController, exports `run` and `scrapeOnce` |
+| `index.js` | Wires modules, owns SIGINT/SIGTERM → AbortController, exports `run` and `scrapeOnce`. Lazy-loads `data/tag_taxonomy.json` per cycle and runs `hydrateTags` between `hydrateLocalImages` and `persistPosts` (fail-soft). |
+| `backfill_tags.js` | One-shot CLI for retroactive tagging. Default mode tags posts with `tags.length < 3`; `--retag` re-tags every post (use after expanding the taxonomy). Throttles to ~24 req/min under the 30 rpm cap. |
 
-`scripts/newsfeed-scraper.js` is a backwards-compat shim. Output JSON shape (`web/public/data/posts.json`) is locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`: `id, title, content?, timestamp, images?, rawImages?, createdAt?, updatedAt?`).
+`scripts/newsfeed-scraper.js` is a backwards-compat shim. Output JSON shape (`web/public/data/posts.json`) is locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`: `id, title, content?, timestamp, images?, rawImages?, tags?, createdAt?, updatedAt?`).
 
-**Env overrides:** `RADON_NEWSFEED_DATA_DIR`, `_POSTS_FILE`, `_ARCHIVE_DIR`, `_MEDIA_DIR`, `_PUBLIC_ROOT`, `CDP_CLI`.
-**Tests:** `web/tests/newsfeed-scraper.test.ts` — 20 cases / 7 suites (`mergePosts`, `persistPosts` rollover, extractor against jsdom incl. malformed-ld+json fallback, `parsePayload`, `seedPostsFileIfMissing`, `formatCookieHeader`, `createImageDownloader` cookie-gated upstream).
+**Tag taxonomy:** `data/tag_taxonomy.json` — editable curated list of allowed tags. Adding a tag = append one line; new tags only apply to new scrape cycles unless you run `node scripts/newsfeed/backfill_tags.js --retag`. The dashboard's filter chip pool auto-derives from the union of `tags` actually present across posts.json.
+
+**Filter UI:** Per-post tag chips on every card; AND-semantics filter when ≥2 chips selected. Active filters render as a top-of-feed bar with × removal + "Clear all". State deep-links via `/dashboard?tags=BTC,vol` (`useSearchParams` + `router.replace`, no scroll-jump). `useNewsfeedTagFilter` hook holds local state mirror so optimistic toggles render before URL round-trip.
+
+**Env overrides:** `RADON_NEWSFEED_DATA_DIR`, `_POSTS_FILE`, `_ARCHIVE_DIR`, `_MEDIA_DIR`, `_PUBLIC_ROOT`, `CDP_CLI`. **Cerebras key:** `CEREBRAS_API_KEY` in `web/.env`.
+**Tests:** `web/tests/newsfeed-scraper.test.ts` (21), `web/tests/newsfeed-tagger.test.ts` (10), `web/tests/dashboard-newsfeed-pagination.test.tsx` (6), `web/tests/dashboard-newsfeed-tag-filter.test.tsx` (8) — 45 newsfeed cases total.
 
 ## Evaluation — 7 Milestones (Stop on Failure)
 
@@ -498,6 +504,8 @@ Per-share theoretical price computed from streaming spot + per-leg σ. Math is a
 **Combo aggregation:** signed sum across legs — long `+bsPrice`, short `−bsPrice`. `netNotional = perContract × contracts × 100`, signed.
 
 **Files:** `web/lib/blackScholes.ts` (math), `web/lib/impliedValue.ts` (resolver), `web/app/api/risk-free-rate/route.ts` + `web/lib/useRiskFreeRate.ts`.
+
+**Options-chain coverage.** `OptionsChainTab` (`web/components/ticker-detail/OptionsChainTab.tsx`) renders an `Implied` column on both call and put sides via the same resolver — `computeLegImpliedValue` + `useRiskFreeRate`. Tests: `web/tests/options-chain-implied.test.tsx` (4).
 
 ### Column Visibility
 

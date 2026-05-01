@@ -8,6 +8,8 @@ import { fmtPrice } from "@/lib/positionUtils";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { useChainPrefetch } from "@/lib/useChainPrefetch";
+import { computeLegImpliedValue } from "@/lib/impliedValue";
+import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import {
   type OrderLeg,
   formatExpiry,
@@ -42,6 +44,8 @@ type ChainStrike = {
 /* ─── Chain Strike Row ─── */
 
 function StrikeRow({
+  ticker,
+  expiry,
   strike,
   callKey,
   putKey,
@@ -51,7 +55,10 @@ function StrikeRow({
   onClickPut,
   atmRef,
   sideFilter,
+  riskFreeRate,
 }: {
+  ticker: string;
+  expiry: string;
   strike: number;
   callKey: string;
   putKey: string;
@@ -61,6 +68,7 @@ function StrikeRow({
   onClickPut: (strike: number, action: "BUY" | "SELL") => void;
   atmRef?: React.Ref<HTMLTableRowElement>;
   sideFilter: "both" | "calls" | "puts";
+  riskFreeRate: number;
 }) {
   const callData = prices[callKey] ?? null;
   const putData = prices[putKey] ?? null;
@@ -82,6 +90,28 @@ function StrikeRow({
   const putIV = putData?.impliedVol;
   const putDelta = putData?.delta;
 
+  // Black-Scholes implied (theoretical) per-share price. Reuses the same
+  // resolver the dashboard PositionTable uses — same S, σ, K, T, r precedence.
+  // contracts is set to 1 because we display per-share, not notional.
+  const callImplied = useMemo(
+    () =>
+      computeLegImpliedValue(
+        { ticker, expiry, strike, type: "Call", direction: "LONG", contracts: 1 },
+        prices,
+        { riskFreeRate },
+      ).perContract,
+    [ticker, expiry, strike, prices, riskFreeRate],
+  );
+  const putImplied = useMemo(
+    () =>
+      computeLegImpliedValue(
+        { ticker, expiry, strike, type: "Put", direction: "LONG", contracts: 1 },
+        prices,
+        { riskFreeRate },
+      ).perContract,
+    [ticker, expiry, strike, prices, riskFreeRate],
+  );
+
   const rowClass = `chain-row ${isAtm ? "chain-row-atm" : ""}`;
   const showCalls = sideFilter !== "puts";
   const showPuts = sideFilter !== "calls";
@@ -93,6 +123,12 @@ function StrikeRow({
         <>
           <td className="chain-cell chain-greek">{callDelta != null ? callDelta.toFixed(2) : ""}</td>
           <td className="chain-cell chain-iv">{callIV != null ? (callIV * 100).toFixed(1) : ""}</td>
+          <td
+            className="chain-cell chain-implied"
+            title="Black-Scholes implied (theoretical) per-share price"
+          >
+            {callImplied != null ? fmtPrice(callImplied) : ""}
+          </td>
           <td className="chain-cell chain-vol">{callVol != null ? callVol.toLocaleString() : ""}</td>
           <td
             className="chain-cell chain-bid chain-clickable"
@@ -150,6 +186,12 @@ function StrikeRow({
             {putAsk != null ? fmtPrice(putAsk) : "---"}
           </td>
           <td className="chain-cell chain-vol">{putVol != null ? putVol.toLocaleString() : ""}</td>
+          <td
+            className="chain-cell chain-implied"
+            title="Black-Scholes implied (theoretical) per-share price"
+          >
+            {putImplied != null ? fmtPrice(putImplied) : ""}
+          </td>
           <td className="chain-cell chain-iv">{putIV != null ? (putIV * 100).toFixed(1) : ""}</td>
           <td className="chain-cell chain-greek">{putDelta != null ? putDelta.toFixed(2) : ""}</td>
         </>
@@ -697,6 +739,7 @@ export default function OptionsChainTab({
   const [orderLegs, setOrderLegs] = useState<OrderLeg[]>([]);
   const [strikesPerSide, setStrikesPerSide] = useState(15);
   const [sideFilter, setSideFilter] = useState<"both" | "calls" | "puts">("both");
+  const riskFreeRate = useRiskFreeRate();
   const atmRef = useRef<HTMLTableRowElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const initialFocusAppliedRef = useRef(false);
@@ -1056,6 +1099,9 @@ export default function OptionsChainTab({
                   <>
                     <th className="chain-header">Δ</th>
                     <th className="chain-header">IV</th>
+                    <th className="chain-header" title="Black-Scholes implied (theoretical) per-share price">
+                      Implied
+                    </th>
                     <th className="chain-header">Vol</th>
                     <th className="chain-header">Bid</th>
                     <th className="chain-header chain-header-mid">Mid</th>
@@ -1071,15 +1117,18 @@ export default function OptionsChainTab({
                     <th className="chain-header chain-header-mid">Mid</th>
                     <th className="chain-header">Ask</th>
                     <th className="chain-header">Vol</th>
+                    <th className="chain-header" title="Black-Scholes implied (theoretical) per-share price">
+                      Implied
+                    </th>
                     <th className="chain-header">IV</th>
                     <th className="chain-header">Δ</th>
                   </>
                 )}
               </tr>
               <tr>
-                {sideFilter !== "puts" && <th className="chain-side-label" colSpan={7}>CALLS</th>}
+                {sideFilter !== "puts" && <th className="chain-side-label" colSpan={8}>CALLS</th>}
                 <th className="chain-side-label" />
-                {sideFilter !== "calls" && <th className="chain-side-label" colSpan={7}>PUTS</th>}
+                {sideFilter !== "calls" && <th className="chain-side-label" colSpan={8}>PUTS</th>}
               </tr>
             </thead>
             <tbody>
@@ -1088,6 +1137,8 @@ export default function OptionsChainTab({
                 return (
                   <StrikeRow
                     key={row.strike}
+                    ticker={ticker}
+                    expiry={selectedExpiry!}
                     strike={row.strike}
                     callKey={row.callKey}
                     putKey={row.putKey}
@@ -1097,6 +1148,7 @@ export default function OptionsChainTab({
                     onClickPut={handlePutClick}
                     atmRef={isAtm ? atmRef : undefined}
                     sideFilter={sideFilter}
+                    riskFreeRate={riskFreeRate}
                   />
                 );
               })}

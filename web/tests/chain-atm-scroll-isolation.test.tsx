@@ -108,6 +108,15 @@ describe("Options chain ATM auto-centering", () => {
           ),
         );
       }
+      // useRiskFreeRate (called from OptionsChainTab to drive Implied col)
+      if (url.includes("/api/risk-free-rate")) {
+        return Promise.resolve(
+          new Response(JSON.stringify({ rate: 0 }), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+        );
+      }
       throw new Error(`Unexpected fetch: ${url}`);
     });
   });
