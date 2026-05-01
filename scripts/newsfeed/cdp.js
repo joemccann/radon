@@ -51,3 +51,23 @@ export function selectMarketEarTab(pages) {
   }
   return candidates.find((page) => page.url.includes("/newsfeed")) || candidates[0];
 }
+
+export function formatCookieHeader(cookies) {
+  if (!Array.isArray(cookies)) return "";
+  return cookies
+    .filter((c) => c && typeof c.name === "string" && typeof c.value === "string")
+    .map((c) => `${c.name}=${c.value}`)
+    .join("; ");
+}
+
+export async function fetchCookieHeader(targetId, urls) {
+  const params = JSON.stringify({ urls });
+  const raw = await runCdpCommand("evalraw", targetId, "Network.getCookies", params);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return "";
+  }
+  return formatCookieHeader(parsed?.cookies);
+}

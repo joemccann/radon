@@ -242,6 +242,122 @@ describe("persistPosts rollover", () => {
   });
 });
 
+describe("formatCookieHeader", () => {
+  it("joins valid cookies into a header string", async () => {
+    const { formatCookieHeader } = await import("../../scripts/newsfeed/cdp.js");
+    expect(
+      formatCookieHeader([
+        { name: "P", value: "abc" },
+        { name: "U", value: "xyz" },
+      ]),
+    ).toBe("P=abc; U=xyz");
+  });
+
+  it("filters out malformed cookie records and returns empty string for non-arrays", async () => {
+    const { formatCookieHeader } = await import("../../scripts/newsfeed/cdp.js");
+    expect(formatCookieHeader([{ name: "ok", value: "1" }, { value: "no name" }, null])).toBe("ok=1");
+    expect(formatCookieHeader(undefined)).toBe("");
+    expect(formatCookieHeader(null)).toBe("");
+  });
+});
+
+describe("createImageDownloader (auth-gated upstream)", () => {
+  it("sends Cookie header from getCookieHeader so cookie-gated images succeed", async () => {
+    const root = await createTempRoot();
+    const mediaDir = path.join(root, "media");
+    await mkdir(mediaDir, { recursive: true });
+
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+
+    const requests: Array<{ url: string; cookie: string | undefined }> = [];
+    const fakeClient = {
+      get: async (url: string, options: { headers?: Record<string, string> } = {}) => {
+        const cookie = options.headers?.Cookie;
+        requests.push({ url, cookie });
+        if (!cookie) {
+          const err = new Error("Request failed with status code 404") as Error & { response?: unknown };
+          err.response = { status: 404 };
+          throw err;
+        }
+        return { status: 200, data: Buffer.from("PNG-bytes") };
+      },
+    };
+
+    const getCookieHeader = async () => "P=session-token; U=user-token";
+
+    const downloader = createImageDownloader({
+      mediaDir,
+      client: fakeClient,
+      getCookieHeader,
+    });
+
+    const result = await downloader.download("cMjrK4n79D", [
+      "https://themarketear.com/images/caee42fb8ae49ff83ccb1ad3500fdee5.png",
+    ]);
+
+    expect(result).toEqual(["/media/cmjrk4n79d-01.png"]);
+    expect(requests).toHaveLength(1);
+    expect(requests[0].cookie).toBe("P=session-token; U=user-token");
+
+    const onDisk = await readFile(path.join(mediaDir, "cmjrk4n79d-01.png"));
+    expect(onDisk.toString()).toBe("PNG-bytes");
+  });
+
+  it("falls back to no-cookie request when getCookieHeader is omitted (legacy behavior)", async () => {
+    const root = await createTempRoot();
+    const mediaDir = path.join(root, "media");
+    await mkdir(mediaDir, { recursive: true });
+
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+
+    const requests: Array<{ url: string; cookie: string | undefined }> = [];
+    const fakeClient = {
+      get: async (url: string, options: { headers?: Record<string, string> } = {}) => {
+        requests.push({ url, cookie: options.headers?.Cookie });
+        return { status: 200, data: Buffer.from("ok") };
+      },
+    };
+
+    const downloader = createImageDownloader({ mediaDir, client: fakeClient });
+
+    const result = await downloader.download("p1", ["https://themarketear.com/images/x.png"]);
+
+    expect(result).toEqual(["/media/p1-01.png"]);
+    expect(requests[0].cookie).toBeUndefined();
+  });
+
+  it("refreshes cookies once per download call so a stale jar can be replaced mid-cycle", async () => {
+    const root = await createTempRoot();
+    const mediaDir = path.join(root, "media");
+    await mkdir(mediaDir, { recursive: true });
+
+    const { createImageDownloader } = await import("../../scripts/newsfeed/media.js");
+
+    const cookieValues = ["first", "second"];
+    let cookieCalls = 0;
+    const getCookieHeader = async () => {
+      cookieCalls += 1;
+      return cookieValues[Math.min(cookieCalls - 1, cookieValues.length - 1)];
+    };
+
+    const seenCookies: string[] = [];
+    const fakeClient = {
+      get: async (_url: string, options: { headers?: Record<string, string> } = {}) => {
+        seenCookies.push(options.headers?.Cookie ?? "");
+        return { status: 200, data: Buffer.from("ok") };
+      },
+    };
+
+    const downloader = createImageDownloader({ mediaDir, client: fakeClient, getCookieHeader });
+
+    await downloader.download("a", ["https://themarketear.com/images/a.png"]);
+    await downloader.download("b", ["https://themarketear.com/images/b.png"]);
+
+    expect(cookieCalls).toBe(2);
+    expect(seenCookies).toEqual(["first", "second"]);
+  });
+});
+
 describe("buildExtractionExpression (DOM)", () => {
   it("extracts well-formed ld+json article AND falls back to DOM when ld+json is malformed", async () => {
     const { buildExtractionExpression, parsePayload } = await import(

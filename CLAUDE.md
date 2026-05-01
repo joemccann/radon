@@ -294,9 +294,9 @@ Polls `themarketear.com/newsfeed` every 120s via the chrome-cdp-skill CLI. Modul
 | File | Responsibility |
 |------|----------------|
 | `paths.js` | `resolveScraperPaths`, `seedPostsFileIfMissing` (env-override aware) |
-| `cdp.js` | `runCdpCommand`, `listTargets`, `selectMarketEarTab` |
+| `cdp.js` | `runCdpCommand`, `listTargets`, `selectMarketEarTab`, `fetchCookieHeader` (pulls `themarketear.com` cookies via `Network.getCookies` for the image downloader) |
 | `extract.js` | `buildExtractionExpression()` IIFE source + `parsePayload()` discriminated union (`source: dom \| parse \| shape`) |
-| `media.js` | `createImageDownloader` + `hydrateLocalImages` (preserves "don't blank thumbs on partial fail" rule) |
+| `media.js` | `createImageDownloader` + `hydrateLocalImages` (preserves "don't blank thumbs on partial fail" rule). Default axios client forces IPv4 (`https.Agent { family: 4 }`) — themarketear.com's CDN advertises AAAA records that EHOSTUNREACH on residential IPv6. Accepts `getCookieHeader` callback so cookie-gated `/images/<hash>.png` URLs follow their 301 to `*.cdn.digitaloceanspaces.com`; without cookies the upstream returns 404. |
 | `store.js` | `loadExistingPosts`, `mergePosts`, `persistPosts` (rollover/truncate at 500 KB → archive + keep `ceil(N×0.2)`) |
 | `scheduler.js` | `runForever` — non-overlapping cycle (await `scrapeOnce`; sleep remainder); pure |
 | `index.js` | Wires modules, owns SIGINT/SIGTERM → AbortController, exports `run` and `scrapeOnce` |
@@ -304,7 +304,7 @@ Polls `themarketear.com/newsfeed` every 120s via the chrome-cdp-skill CLI. Modul
 `scripts/newsfeed-scraper.js` is a backwards-compat shim. Output JSON shape (`web/public/data/posts.json`) is locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`: `id, title, content?, timestamp, images?, rawImages?, createdAt?, updatedAt?`).
 
 **Env overrides:** `RADON_NEWSFEED_DATA_DIR`, `_POSTS_FILE`, `_ARCHIVE_DIR`, `_MEDIA_DIR`, `_PUBLIC_ROOT`, `CDP_CLI`.
-**Tests:** `web/tests/newsfeed-scraper.test.ts` — 14 cases / 5 suites (`mergePosts`, `persistPosts` rollover, extractor against jsdom incl. malformed-ld+json fallback, `parsePayload`, `seedPostsFileIfMissing`).
+**Tests:** `web/tests/newsfeed-scraper.test.ts` — 20 cases / 7 suites (`mergePosts`, `persistPosts` rollover, extractor against jsdom incl. malformed-ld+json fallback, `parsePayload`, `seedPostsFileIfMissing`, `formatCookieHeader`, `createImageDownloader` cookie-gated upstream).
 
 ## Evaluation — 7 Milestones (Stop on Failure)
 

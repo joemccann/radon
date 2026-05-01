@@ -1,13 +1,20 @@
 import path from "path";
 import fs from "fs-extra";
+import https from "node:https";
 import axios from "axios";
 
 const BASE_URL = new URL("https://themarketear.com");
 
+// Force IPv4 — themarketear.com's CDN advertises AAAA but those routes are
+// frequently unreachable from residential IPv6, causing EHOSTUNREACH timeouts
+// while curl-style IPv4 succeeds.
+const ipv4Agent = new https.Agent({ family: 4, keepAlive: true });
+
 const defaultClient = axios.create({
   timeout: 20000,
   responseType: "arraybuffer",
-  maxRedirects: 3,
+  maxRedirects: 5,
+  httpsAgent: ipv4Agent,
 });
 
 function slugify(value) {
@@ -21,12 +28,26 @@ function slugify(value) {
   );
 }
 
-export function createImageDownloader({ mediaDir, client = defaultClient } = {}) {
+export function createImageDownloader({ mediaDir, client = defaultClient, getCookieHeader } = {}) {
   if (!mediaDir) throw new Error("createImageDownloader requires mediaDir");
   const cache = new Map();
 
+  async function resolveCookieHeader() {
+    if (typeof getCookieHeader !== "function") return null;
+    try {
+      const value = await getCookieHeader();
+      return typeof value === "string" && value.length > 0 ? value : null;
+    } catch (err) {
+      console.warn(`[newsfeed] cookie lookup failed: ${err.message}`);
+      return null;
+    }
+  }
+
   async function download(postId, urls) {
     if (!Array.isArray(urls) || urls.length === 0) return [];
+
+    const cookieHeader = await resolveCookieHeader();
+    const requestOptions = cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined;
 
     const tasks = urls.map(async (remoteUrl, index) => {
       const absoluteUrl = new URL(remoteUrl, BASE_URL).toString();
@@ -42,7 +63,7 @@ export function createImageDownloader({ mediaDir, client = defaultClient } = {})
 
       if (!(await fs.pathExists(destPath))) {
         try {
-          const response = await client.get(absoluteUrl);
+          const response = await client.get(absoluteUrl, requestOptions);
           await fs.writeFile(destPath, response.data);
         } catch (err) {
           console.warn(`[newsfeed] image download failed ${absoluteUrl}: ${err.message}`);

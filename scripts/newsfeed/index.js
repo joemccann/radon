@@ -2,23 +2,37 @@
 import { pathToFileURL } from "url";
 import fs from "fs-extra";
 import { resolveScraperPaths, seedPostsFileIfMissing } from "./paths.js";
-import { listTargets, runCdpCommand, selectMarketEarTab } from "./cdp.js";
+import { fetchCookieHeader, listTargets, runCdpCommand, selectMarketEarTab } from "./cdp.js";
 import { buildExtractionExpression, parsePayload } from "./extract.js";
 import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
 import { runForever } from "./scheduler.js";
 
 const INTERVAL_MS = 2 * 60 * 1000;
+const COOKIE_URLS = ["https://themarketear.com"];
 
 export function createScraper(overrides = {}) {
   const paths = resolveScraperPaths(overrides);
-  const downloader = createImageDownloader({ mediaDir: paths.mediaDir });
+
+  let activeTargetId = null;
+  const getCookieHeader = async () => {
+    if (!activeTargetId) return "";
+    try {
+      return await fetchCookieHeader(activeTargetId, COOKIE_URLS);
+    } catch (err) {
+      console.warn(`[newsfeed] cookie lookup failed: ${err.message}`);
+      return "";
+    }
+  };
+
+  const downloader = createImageDownloader({ mediaDir: paths.mediaDir, getCookieHeader });
 
   async function scrapeOnce() {
     const cycleStart = Date.now();
 
     const pages = await listTargets();
     const target = selectMarketEarTab(pages);
+    activeTargetId = target.targetId;
     const expression = buildExtractionExpression();
     const raw = await runCdpCommand("eval", target.targetId, expression);
 
