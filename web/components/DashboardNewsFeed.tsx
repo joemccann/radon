@@ -273,7 +273,6 @@ export default function DashboardNewsFeed() {
           </div>
         ) : (
           <>
-            {paginationBar}
             <ul className="news-feed-list">
             {items.map((post) => {
               const firstImage = post.images?.[0] ?? null;

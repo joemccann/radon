@@ -183,9 +183,9 @@ describe("DashboardNewsFeed tag chips", () => {
     await waitFor(() => expect(screen.queryAllByRole("listitem").length).toBeGreaterThan(0));
 
     // Move to page 2
-    const navTop = screen.getAllByRole("navigation", { name: /pagination/i })[0];
-    fireEvent.click(within(navTop).getByRole("button", { name: /next/i }));
-    expect(within(navTop).getByText(/page 2 of 2/i)).toBeTruthy();
+    const nav = screen.getByRole("navigation", { name: /pagination/i });
+    fireEvent.click(within(nav).getByRole("button", { name: /next/i }));
+    expect(within(screen.getByRole("navigation", { name: /pagination/i })).getByText(/page 2 of 2/i)).toBeTruthy();
 
     // Apply a filter — should reset to page 1
     const visibleItems = screen.getAllByRole("listitem");

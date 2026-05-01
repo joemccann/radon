@@ -65,7 +65,7 @@ async function renderFeed(posts: unknown[]) {
 }
 
 describe("DashboardNewsFeed pagination", () => {
-  it("paginates 50 posts at 18 per page and renders top + bottom controls", async () => {
+  it("paginates 50 posts at 18 per page and renders only a bottom-of-list control", async () => {
     await renderFeed(makePosts(50));
 
     // Page 1: posts p50 down through p33 (newest 18)
@@ -74,87 +74,53 @@ describe("DashboardNewsFeed pagination", () => {
     expect(within(items[0]).getByText("Headline 50")).toBeTruthy();
     expect(within(items[17]).getByText("Headline 33")).toBeTruthy();
 
-    // Both pagination bars present (top + bottom)
+    // Exactly one pagination bar — bottom only
     const nav = screen.getAllByRole("navigation", { name: /pagination/i });
-    expect(nav).toHaveLength(2);
+    expect(nav).toHaveLength(1);
 
-    // Indicator text appears in both
-    for (const bar of nav) {
-      expect(within(bar).getByText(/page 1 of 3/i)).toBeTruthy();
-      expect(within(bar).getByText(/showing\s*1\s*[–-]\s*18\s*of\s*50/i)).toBeTruthy();
-    }
+    expect(within(nav[0]).getByText(/page 1 of 3/i)).toBeTruthy();
+    expect(within(nav[0]).getByText(/showing\s*1\s*[–-]\s*18\s*of\s*50/i)).toBeTruthy();
   });
 
-  it("advances to the next page when the top Next button is clicked", async () => {
+  it("advances to the next page when Next is clicked", async () => {
     await renderFeed(makePosts(50));
 
-    const [topBar] = screen.getAllByRole("navigation", { name: /pagination/i });
-    fireEvent.click(within(topBar).getByRole("button", { name: /next/i }));
+    const bar = screen.getByRole("navigation", { name: /pagination/i });
+    fireEvent.click(within(bar).getByRole("button", { name: /next/i }));
 
     const items = screen.getAllByRole("listitem");
     expect(items).toHaveLength(18);
     // Page 2 starts at p32 (post #19 newest-first)
     expect(within(items[0]).getByText("Headline 32")).toBeTruthy();
-
-    for (const bar of screen.getAllByRole("navigation", { name: /pagination/i })) {
-      expect(within(bar).getByText(/page 2 of 3/i)).toBeTruthy();
-    }
+    expect(within(screen.getByRole("navigation", { name: /pagination/i })).getByText(/page 2 of 3/i)).toBeTruthy();
   });
 
-  it("advances when the bottom Next button is clicked and goes back via the bottom Prev button", async () => {
+  it("Prev returns to the previous page", async () => {
     await renderFeed(makePosts(50));
 
-    const navsBefore = screen.getAllByRole("navigation", { name: /pagination/i });
-    const bottomBar = navsBefore[navsBefore.length - 1];
-    fireEvent.click(within(bottomBar).getByRole("button", { name: /next/i }));
+    const bar = screen.getByRole("navigation", { name: /pagination/i });
+    fireEvent.click(within(bar).getByRole("button", { name: /next/i }));
+    expect(within(screen.getByRole("navigation", { name: /pagination/i })).getByText(/page 2 of 3/i)).toBeTruthy();
 
-    expect(
-      within(screen.getAllByRole("navigation", { name: /pagination/i })[0]).getByText(/page 2 of 3/i),
-    ).toBeTruthy();
-
-    const bottomBar2 =
-      screen.getAllByRole("navigation", { name: /pagination/i }).slice(-1)[0];
-    fireEvent.click(within(bottomBar2).getByRole("button", { name: /prev/i }));
-
-    expect(
-      within(screen.getAllByRole("navigation", { name: /pagination/i })[0]).getByText(/page 1 of 3/i),
-    ).toBeTruthy();
+    fireEvent.click(within(screen.getByRole("navigation", { name: /pagination/i })).getByRole("button", { name: /prev/i }));
+    expect(within(screen.getByRole("navigation", { name: /pagination/i })).getByText(/page 1 of 3/i)).toBeTruthy();
   });
 
   it("disables Prev on the first page and Next on the last page", async () => {
     await renderFeed(makePosts(50));
 
-    for (const bar of screen.getAllByRole("navigation", { name: /pagination/i })) {
-      expect(within(bar).getByRole("button", { name: /prev/i })).toHaveProperty(
-        "disabled",
-        true,
-      );
-      expect(within(bar).getByRole("button", { name: /next/i })).toHaveProperty(
-        "disabled",
-        false,
-      );
-    }
+    let bar = screen.getByRole("navigation", { name: /pagination/i });
+    expect(within(bar).getByRole("button", { name: /prev/i })).toHaveProperty("disabled", true);
+    expect(within(bar).getByRole("button", { name: /next/i })).toHaveProperty("disabled", false);
 
     // Click forward to last page (page 3)
-    const top = screen.getAllByRole("navigation", { name: /pagination/i })[0];
-    fireEvent.click(within(top).getByRole("button", { name: /next/i }));
-    fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: /pagination/i })[0]).getByRole(
-        "button",
-        { name: /next/i },
-      ),
-    );
+    fireEvent.click(within(bar).getByRole("button", { name: /next/i }));
+    bar = screen.getByRole("navigation", { name: /pagination/i });
+    fireEvent.click(within(bar).getByRole("button", { name: /next/i }));
 
-    for (const bar of screen.getAllByRole("navigation", { name: /pagination/i })) {
-      expect(within(bar).getByRole("button", { name: /prev/i })).toHaveProperty(
-        "disabled",
-        false,
-      );
-      expect(within(bar).getByRole("button", { name: /next/i })).toHaveProperty(
-        "disabled",
-        true,
-      );
-    }
+    bar = screen.getByRole("navigation", { name: /pagination/i });
+    expect(within(bar).getByRole("button", { name: /prev/i })).toHaveProperty("disabled", false);
+    expect(within(bar).getByRole("button", { name: /next/i })).toHaveProperty("disabled", true);
 
     // Last page renders the remaining posts (50 - 36 = 14)
     expect(screen.getAllByRole("listitem")).toHaveLength(14);
@@ -180,17 +146,11 @@ describe("DashboardNewsFeed pagination", () => {
     });
 
     // Move to page 3
-    const top = screen.getAllByRole("navigation", { name: /pagination/i })[0];
-    fireEvent.click(within(top).getByRole("button", { name: /next/i }));
-    fireEvent.click(
-      within(screen.getAllByRole("navigation", { name: /pagination/i })[0]).getByRole(
-        "button",
-        { name: /next/i },
-      ),
-    );
-    expect(
-      within(screen.getAllByRole("navigation", { name: /pagination/i })[0]).getByText(/page 3 of 3/i),
-    ).toBeTruthy();
+    let bar = screen.getByRole("navigation", { name: /pagination/i });
+    fireEvent.click(within(bar).getByRole("button", { name: /next/i }));
+    bar = screen.getByRole("navigation", { name: /pagination/i });
+    fireEvent.click(within(bar).getByRole("button", { name: /next/i }));
+    expect(within(screen.getByRole("navigation", { name: /pagination/i })).getByText(/page 3 of 3/i)).toBeTruthy();
 
     // Refresh: only 10 posts now → 1 page; current page 3 should clamp to 1
     fetchMock.mockResolvedValueOnce({
