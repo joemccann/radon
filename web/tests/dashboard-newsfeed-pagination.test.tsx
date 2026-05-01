@@ -13,6 +13,12 @@ vi.mock("next/image", () => ({
     React.createElement("img", { src, alt }),
 }));
 
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: vi.fn(), push: vi.fn(), refresh: vi.fn() }),
+  usePathname: () => "/dashboard",
+  useSearchParams: () => new URLSearchParams(""),
+}));
+
 function makePosts(count: number) {
   // Newest first when sorted by timestamp desc
   return Array.from({ length: count }, (_, i) => {

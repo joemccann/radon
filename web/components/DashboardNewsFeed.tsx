@@ -5,6 +5,8 @@ import Image from "next/image";
 import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw, Radio } from "lucide-react";
 
 import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime";
+import { useNewsfeedTagFilter } from "../lib/useNewsfeedTagFilter";
+import NewsfeedTagBar from "./NewsfeedTagBar";
 
 const POSTS_ENDPOINT = "/data/posts.json";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
@@ -17,6 +19,7 @@ export type MarketEarPost = {
   timestamp: string;
   images?: string[];
   rawImages?: string[];
+  tags?: string[];
   createdAt?: string;
   updatedAt?: string;
 };
@@ -174,7 +177,24 @@ export default function DashboardNewsFeed() {
     await loadPosts({ mode: "refresh" });
   }, [loadPosts]);
 
-  const totalPages = Math.max(1, Math.ceil(posts.length / PAGE_SIZE));
+  const { selectedTags, toggleTag, clearTags } = useNewsfeedTagFilter();
+
+  const filteredPosts = useMemo(() => {
+    if (selectedTags.size === 0) return posts;
+    const required = Array.from(selectedTags);
+    return posts.filter((post) => {
+      const postTags = Array.isArray(post.tags) ? post.tags : [];
+      return required.every((t) => postTags.includes(t));
+    });
+  }, [posts, selectedTags]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredPosts.length / PAGE_SIZE));
+
+  // Reset to page 1 whenever the filter changes (selectedTags identity changes).
+  // Also clamp if current page exceeds the new totalPages after data refresh.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [selectedTags]);
 
   useEffect(() => {
     if (currentPage > totalPages) {
@@ -184,12 +204,12 @@ export default function DashboardNewsFeed() {
 
   const safePage = Math.min(currentPage, totalPages);
   const items = useMemo(
-    () => posts.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
-    [posts, safePage],
+    () => filteredPosts.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filteredPosts, safePage],
   );
-  const showPagination = posts.length > PAGE_SIZE;
-  const rangeStart = posts.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
-  const rangeEnd = Math.min(safePage * PAGE_SIZE, posts.length);
+  const showPagination = filteredPosts.length > PAGE_SIZE;
+  const rangeStart = filteredPosts.length === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
+  const rangeEnd = Math.min(safePage * PAGE_SIZE, filteredPosts.length);
 
   const goPrev = useCallback(() => {
     setCurrentPage((page) => Math.max(1, page - 1));
@@ -233,12 +253,24 @@ export default function DashboardNewsFeed() {
         </div>
       </div>
       <div className="section-body">
+        <NewsfeedTagBar
+          selectedTags={selectedTags}
+          onRemove={toggleTag}
+          onClearAll={clearTags}
+        />
         {loading ? (
           <div className="news-feed-empty">Collecting Market Ear posts…</div>
         ) : error ? (
           <div className="news-feed-error">{error}</div>
-        ) : items.length === 0 ? (
+        ) : posts.length === 0 ? (
           <div className="news-feed-empty">No Market Ear posts captured yet. Ensure the scraper is running.</div>
+        ) : items.length === 0 ? (
+          <div className="news-feed-empty news-feed-empty-filtered">
+            <span>No posts match the selected filter.</span>
+            <button type="button" className="news-feed-page-button" onClick={clearTags}>
+              Clear filter
+            </button>
+          </div>
         ) : (
           <>
             {paginationBar}
@@ -248,6 +280,7 @@ export default function DashboardNewsFeed() {
               const relative = formatRelative(post.isoTimestamp);
               const time = formatTime(post.isoTimestamp);
               const absolute = formatAbsolute(post.isoTimestamp);
+              const postTags = Array.isArray(post.tags) ? post.tags : [];
 
               return (
                 <li key={post.id} className="news-feed-item">
@@ -266,6 +299,24 @@ export default function DashboardNewsFeed() {
                         className="news-feed-image"
                         priority={false}
                       />
+                    </div>
+                  ) : null}
+                  {postTags.length > 0 ? (
+                    <div className="news-feed-tags">
+                      {postTags.map((tag) => {
+                        const isActive = selectedTags.has(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            className={`news-feed-tag-chip${isActive ? " is-active" : ""}`}
+                            onClick={() => toggleTag(tag)}
+                            aria-pressed={isActive}
+                          >
+                            {tag}
+                          </button>
+                        );
+                      })}
                     </div>
                   ) : null}
                   <div className="news-feed-footer">

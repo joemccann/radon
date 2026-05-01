@@ -1433,6 +1433,110 @@ td.last-price-cell {
   color: var(--text-muted);
 }
 
+.news-feed-tag-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 24px;
+  border-bottom: 1px solid var(--border-dim);
+  background: var(--bg-panel-raised);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.news-feed-tag-bar-label {
+  color: var(--text-muted);
+}
+
+.news-feed-tag-bar-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.news-feed-tag-bar-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  border: 1px solid var(--signal-core);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--signal-core);
+  font: inherit;
+  cursor: pointer;
+  transition: background 150ms ease;
+}
+
+.news-feed-tag-bar-chip:hover {
+  background: var(--bg-hover);
+}
+
+.news-feed-tag-bar-clear {
+  margin-left: auto;
+  padding: 4px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.news-feed-tag-bar-clear:hover {
+  color: var(--signal-core);
+  border-color: var(--signal-core);
+}
+
+.news-feed-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.news-feed-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.news-feed-tag-chip:hover {
+  color: var(--signal-core);
+  border-color: var(--signal-core);
+  background: var(--bg-hover);
+}
+
+.news-feed-tag-chip.is-active {
+  color: var(--signal-core);
+  border-color: var(--signal-core);
+  background: var(--bg-hover);
+}
+
+.news-feed-empty-filtered {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
 .chat-messages {
   flex: 1;
   min-height: 220px;
@@ -5182,6 +5286,7 @@ tr {
 .chain-iv { color: var(--text-secondary); font-size: 10px; }
 .chain-vol { color: var(--text-secondary); font-size: 10px; }
 .chain-last { color: var(--text-muted); }
+.chain-implied { color: var(--text-secondary); font-family: var(--font-mono); font-size: 10px; }
 
 /* Side filter toggle */
 .chain-side-toggle { display: flex; gap: 0; border: 1px solid var(--line-grid); border-radius: 4px; overflow: hidden; }

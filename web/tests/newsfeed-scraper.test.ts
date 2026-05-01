@@ -135,6 +135,61 @@ describe("mergePosts", () => {
     expect(withChange.merged[0].updatedAt).toBe("2025-05-01T00:00:00.000Z");
   });
 
+  it("preserves existing post.tags through merge cycles (no diff and content-changed)", async () => {
+    const { mergePosts } = await import("../../scripts/newsfeed/store.js");
+
+    const existing = [
+      {
+        id: "p1",
+        title: "Old title",
+        content: "body",
+        timestamp: "2025-04-01T11:50:00.000Z",
+        timestampMs: new Date("2025-04-01T11:50:00.000Z").getTime(),
+        rawImages: ["https://x/y.jpg"],
+        images: ["/media/p1.jpg"],
+        tags: ["BTC", "crypto", "macro"],
+        createdAt: "2025-03-30T00:00:00.000Z",
+        updatedAt: "2025-03-30T00:00:00.000Z",
+      },
+    ];
+
+    // Cycle A — no content diff, scraper has no concept of tags
+    const noDiff = mergePosts(
+      existing,
+      [
+        {
+          id: "p1",
+          title: "Old title",
+          content: "body",
+          timestamp: "2025-04-01T11:50:00.000Z",
+          images: ["https://x/y.jpg"],
+        },
+      ],
+      { now: () => new Date("2025-05-01T00:00:00Z") },
+    );
+    expect(noDiff.merged[0].tags).toEqual(["BTC", "crypto", "macro"]);
+
+    // Cycle B — title changes (forces the update branch), tags must still survive
+    const updated = mergePosts(
+      existing,
+      [
+        {
+          id: "p1",
+          title: "New title",
+          content: "body",
+          timestamp: "2025-04-01T11:50:00.000Z",
+          images: ["https://x/y.jpg"],
+        },
+      ],
+      { now: () => new Date("2025-05-01T00:00:00Z") },
+    );
+    expect(updated.changed).toBe(true);
+    expect(updated.merged[0].title).toBe("New title");
+    expect(updated.merged[0].tags).toEqual(["BTC", "crypto", "macro"]);
+    expect(updated.merged[0].createdAt).toBe("2025-03-30T00:00:00.000Z");
+    expect(updated.merged[0].updatedAt).toBe("2025-05-01T00:00:00.000Z");
+  });
+
   it("sorts merged posts by timestamp descending", async () => {
     const { mergePosts } = await import("../../scripts/newsfeed/store.js");
 
