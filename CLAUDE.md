@@ -298,19 +298,31 @@ Polls `themarketear.com/newsfeed` every 120s via the chrome-cdp-skill CLI. Modul
 | `extract.js` | `buildExtractionExpression()` IIFE source + `parsePayload()` discriminated union (`source: dom \| parse \| shape`) |
 | `media.js` | `createImageDownloader` + `hydrateLocalImages` (preserves "don't blank thumbs on partial fail" rule). Default axios client forces IPv4 (`https.Agent { family: 4 }`) — themarketear.com's CDN advertises AAAA records that EHOSTUNREACH on residential IPv6. Accepts `getCookieHeader` callback so cookie-gated `/images/<hash>.png` URLs follow their 301 to `*.cdn.digitaloceanspaces.com`; without cookies the upstream returns 404. |
 | `store.js` | `loadExistingPosts`, `mergePosts`, `persistPosts` (rollover/truncate at 500 KB → archive + keep `ceil(N×0.2)`). `mergePosts` preserves `tags` across update cycles. |
-| `tagger.js` | Cerebras-backed AI tagger. Primary `gpt-oss-120b` (reasoning model — needs `max_tokens: 800` headroom for chain-of-thought before final JSON), fallback `qwen-3-235b-a22b-instruct-2507`. Both on Cerebras free tier (30 req/min, 1M tok/day). Sets undici global dispatcher `connect: { family: 4 }` since `api.cerebras.ai`'s AAAA route is unreachable from residential IPv6. `createTagger({ taxonomy })` + `hydrateTags(posts, tagger, { force, throttleMs })` — only re-tags posts with `tags.length < 3` unless `force=true`. |
+| `tagger.js` | Cerebras-backed **open-vocabulary** tagger. Primary `gpt-oss-120b` (reasoning model — needs `max_tokens: 800` headroom for chain-of-thought before final JSON), fallback `qwen-3-235b-a22b-instruct-2507`. Both on Cerebras free tier (30 req/min, 1M tok/day). Sets undici global dispatcher `connect: { family: 4 }` since `api.cerebras.ai`'s AAAA route is unreachable from residential IPv6. Picks **EXACTLY 3 tags per post**, free-form. Existing taxonomy is shown to the model as context (encourages reuse) but the model coins new tags when nothing fits. `createTagger({ getTaxonomySnapshot })` returns `{ tagPost }`; `hydrateTags(posts, tagger, { force, throttleMs, onNewTags })` skips posts with `tags.length >= 3` unless `force=true`. |
+| `taxonomy.js` | Atomic, append-only writer for `data/tag_taxonomy.json`. `loadTaxonomy(projectRoot)` reads and tolerates missing/empty file. `appendTagsToTaxonomy(projectRoot, candidates)` returns the genuinely-new additions and writes only when something changed. **Case-insensitive dedup** — `BTC` and `btc` collapse to the canonical existing form. In-process concurrent writers are serialised via a promise chain; cross-process is rare and the docs advise pausing the scraper before running backfill. |
 | `scheduler.js` | `runForever` — non-overlapping cycle (await `scrapeOnce`; sleep remainder); pure |
-| `index.js` | Wires modules, owns SIGINT/SIGTERM → AbortController, exports `run` and `scrapeOnce`. Lazy-loads `data/tag_taxonomy.json` per cycle and runs `hydrateTags` between `hydrateLocalImages` and `persistPosts` (fail-soft). |
-| `backfill_tags.js` | One-shot CLI for retroactive tagging. Default mode tags posts with `tags.length < 3`; `--retag` re-tags every post (use after expanding the taxonomy). Throttles to ~24 req/min under the 30 rpm cap. |
+| `index.js` | Wires modules, owns SIGINT/SIGTERM → AbortController, exports `run` and `scrapeOnce`. Per cycle: builds tagger via `getTaxonomySnapshot: () => loadTaxonomy(projectRoot).tags`; runs `hydrateTags` between `hydrateLocalImages` and `persistPosts`; novel tags returned by the model are appended to taxonomy via `onNewTags → appendTagsToTaxonomy`. Logged as `taxonomy +<n>: <tags>` per cycle. Fail-soft if tagger errors. |
+| `backfill_tags.js` | One-shot CLI for retroactive tagging. Default mode tags posts with `tags.length < 3`; `--retag` re-tags every post (use after the prompt or naming rules change). Throttles to ~24 req/min under the 30 rpm cap. Reports starting → final taxonomy size and per-post additions. |
 
 `scripts/newsfeed-scraper.js` is a backwards-compat shim. Output JSON shape (`web/public/data/posts.json`) is locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`: `id, title, content?, timestamp, images?, rawImages?, tags?, createdAt?, updatedAt?`).
 
-**Tag taxonomy:** `data/tag_taxonomy.json` — editable curated list of allowed tags. Adding a tag = append one line; new tags only apply to new scrape cycles unless you run `node scripts/newsfeed/backfill_tags.js --retag`. The dashboard's filter chip pool auto-derives from the union of `tags` actually present across posts.json.
+**Tag taxonomy:** `data/tag_taxonomy.json` — auto-grows as the model encounters new themes. **Naming rules** (enforced by `__normaliseTags` in `tagger.js`):
+- ALL UPPERCASE — no proper-noun mixed case, no lowercase. `Fed` → `FED`, `oil` → `OIL`.
+- Multi-word concepts use UPPERCASE-KEBAB-CASE: `PUT-CALL-RATIO`, `FUND-FLOWS`, `MARKET-STRUCTURE`, `RISK-APPETITE`.
+- Allowed characters: `A-Z`, `0-9`, `-`, `&`. Punctuation, quotes, leading `#`, etc. are stripped.
+- Case-insensitive dedup at the taxonomy layer prevents `BTC` / `btc` / `Btc` from creating three entries.
 
-**Filter UI:** Per-post tag chips on every card; AND-semantics filter when ≥2 chips selected. Active filters render as a top-of-feed bar with × removal + "Clear all". State deep-links via `/dashboard?tags=BTC,vol` (`useSearchParams` + `router.replace`, no scroll-jump). `useNewsfeedTagFilter` hook holds local state mirror so optimistic toggles render before URL round-trip.
+The dashboard's filter chip pool auto-derives from the union of `tags` actually present across posts.json — retired tags drop off and newly-coined ones appear once they're applied to ≥1 post.
+
+**Tagger prompt design** (in `buildSystemPrompt` of `tagger.js`):
+1. Priority order: INSTRUMENT named in the post (puts, calls, options, BTC, oil) → SECTOR / asset class (semis, energy, credit, crypto) → THEME (positioning, hedging, macro, Fed).
+2. Tag glossary disambiguates overlapping concepts: VOL vs VIX (VIX only when index named or charted), PUTS vs VOL (specific instrument beats generic vol), HEDGING (action) vs PUTS/CALLS/OPTIONS (instruments), SKEW (options skew specifically), GAMMA (dealer-gamma / GEX), POSITIONING (long/short exposure).
+3. Output spec: strict JSON `{"tags":["...","...","..."]}`, exactly 3.
+
+**Filter UI:** Per-post tag chips on every card; AND-semantics filter when ≥2 chips selected. Active filters render as a top-of-feed bar with × removal + "Clear all". State deep-links via `/dashboard?tags=BTC,vol` (`useSearchParams` + `router.replace`, no scroll-jump). `useNewsfeedTagFilter` hook holds local state mirror so optimistic toggles render before URL round-trip; URL writes happen in a post-commit `useEffect` to avoid React's "Cannot update a component while rendering a different component" warning.
 
 **Env overrides:** `RADON_NEWSFEED_DATA_DIR`, `_POSTS_FILE`, `_ARCHIVE_DIR`, `_MEDIA_DIR`, `_PUBLIC_ROOT`, `CDP_CLI`. **Cerebras key:** `CEREBRAS_API_KEY` in `web/.env`.
-**Tests:** `web/tests/newsfeed-scraper.test.ts` (21), `web/tests/newsfeed-tagger.test.ts` (10), `web/tests/dashboard-newsfeed-pagination.test.tsx` (6), `web/tests/dashboard-newsfeed-tag-filter.test.tsx` (8) — 45 newsfeed cases total.
+**Tests:** `web/tests/newsfeed-scraper.test.ts` (21), `web/tests/newsfeed-tagger.test.ts` (17), `web/tests/newsfeed-taxonomy.test.ts` (5), `web/tests/newsfeed-time.test.ts` (6), `web/tests/dashboard-newsfeed-pagination.test.tsx` (6), `web/tests/dashboard-newsfeed-tag-filter.test.tsx` (8) — **63 newsfeed cases total**.
 
 ## Evaluation — 7 Milestones (Stop on Failure)
 
@@ -375,7 +387,10 @@ When evaluating during market hours, today's partial data is volume-weighted int
 | `scripts/utils/atomic_io.py` | Atomic JSON save/load + SHA-256 |
 | `scripts/monitor_daemon/run.py` | Monitor daemon — fills, exit orders, rebalance |
 | `scripts/gex_scan.py` | GEX levels scanner — flip, magnets, accelerators, bias |
-| `scripts/newsfeed/index.js` | Market Ear newsfeed scraper — 7-module split, 120s polling, runs as 4th `dev` service |
+| `scripts/newsfeed/index.js` | Market Ear newsfeed scraper — 8-module split, 120s polling, runs as 4th `dev` service. Per cycle: extract → merge → image hydrate → AI tag → persist. Auto-grows `data/tag_taxonomy.json`. |
+| `scripts/newsfeed/tagger.js` | Open-vocab Cerebras tagger (gpt-oss-120b → qwen-3-235b). Picks exactly 3 UPPERCASE tags per post. |
+| `scripts/newsfeed/taxonomy.js` | Atomic, append-only writer for `data/tag_taxonomy.json`. Case-insensitive dedup. |
+| `scripts/newsfeed/backfill_tags.js` | Retroactive tagger CLI. `--retag` re-tags every post (use after the prompt or naming rules change). |
 | `scripts/newsfeed-scraper.js` | Backwards-compat shim forwarding to `scripts/newsfeed/` |
 
 ## Critical Data Files
@@ -388,6 +403,7 @@ When evaluating during market hours, today's partial data is volume-weighted int
 | `data/watchlist.json` | Surveillance tickers |
 | `data/vcg.json` | VCG scan cache |
 | `data/gex.json` | GEX levels cache |
+| `data/tag_taxonomy.json` | Auto-growing UPPERCASE tag list for Market Ear posts. Force-tracked despite `data/*.json` gitignore. |
 | `data/price_history_cache/` | Stock + option price histories (auto-pruned at 500) |
 
 ## Seasonality Fallback
