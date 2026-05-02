@@ -4,6 +4,13 @@ import { readdir, readFile, stat } from "fs/promises";
 import { join } from "path";
 
 export const runtime = "nodejs";
+// Disable Next.js's default static caching for route handlers. The route reads
+// from disk via readdir/readFile/stat — Next.js can't see those as dynamic
+// data sources, so without this the first response is frozen and subsequent
+// requests serve stale CTA cache state until the dev server restarts. See
+// commit history: prior incidents fixed Apr 30 (post-startup hook), but the
+// underlying response-caching window remained.
+export const dynamic = "force-dynamic";
 
 const PROJECT_ROOT = join(process.cwd(), "..");
 const CACHE_DIR = join(PROJECT_ROOT, "data", "menthorq_cache");

@@ -68,7 +68,7 @@ export function useMenthorqCta(): { data: CtaCache | null; loading: boolean; err
   useEffect(() => {
     let active = true;
 
-    fetch("/api/menthorq/cta")
+    fetch("/api/menthorq/cta", { cache: "no-store" })
       .then(async (res) => {
         const json = (await res.json()) as CtaCache;
         if (!active) return;
