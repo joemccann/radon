@@ -7,12 +7,12 @@
     "SWX",
     "TXNM",
     "POR",
-    "NJR",
     "BKH",
-    "SR",
+    "NJR",
     "OGS",
-    "BIPC",
+    "SR",
     "NWE",
+    "BIPC",
     "OTTR",
     "AVA",
     "AWR",
@@ -45,18 +45,18 @@
     ],
     [
       "POR",
-      "NJR"
+      "BKH"
     ],
     [
-      "BKH",
-      "SR"
+      "NJR",
+      "OGS"
     ],
     [
-      "OGS",
-      "BIPC"
+      "SR",
+      "NWE"
     ],
     [
-      "NWE",
+      "BIPC",
       "OTTR"
     ],
     [

@@ -19,48 +19,48 @@
     "WLY",
     "IMAX",
     "TRIP",
-    "LILAK",
     "CCOI",
+    "LILAK",
     "TDAY",
+    "SCHL",
+    "IDT",
     "AMC",
     "SHEN",
-    "IDT",
-    "SCHL",
     "STGW",
     "QNST",
     "RUM",
     "BAND",
-    "SBGI",
-    "CABO",
-    "CARS",
-    "GTN",
     "IHRT",
+    "SBGI",
+    "CARS",
     "ATEX",
+    "GTN",
+    "CABO",
     "EVER",
-    "OPTU",
-    "SSTK",
-    "NMAX",
     "MCS",
     "GRND",
-    "BATRA",
+    "SSTK",
+    "OPTU",
     "IBTA",
-    "FUBO",
+    "BATRA",
     "PUBM",
     "NXDR",
-    "GOGO",
+    "FUBO",
     "MAX",
-    "SSP",
+    "GOGO",
     "BMBL",
-    "AMCX",
+    "SSP",
+    "NMAX",
     "ATNI",
-    "LILA",
-    "ANGI",
+    "AMCX",
     "BOC",
-    "NEXN",
+    "ANGI",
+    "LILA",
     "NCMI",
-    "STRZ",
+    "NEXN",
     "WBTN",
     "EVC",
+    "STRZ",
     "SPOK",
     "PLTK",
     "RSVR",
@@ -69,14 +69,14 @@
     "CURI",
     "ADV",
     "THRY",
-    "GETY",
     "GAMB",
     "EEX",
-    "GAIA",
+    "GETY",
     "TZOO",
+    "GAIA",
     "MYPS",
-    "SEAT",
     "TEAD",
+    "SEAT",
     "AREN",
     "MRDN"
   ],
@@ -115,19 +115,19 @@
     ],
     [
       "TRIP",
-      "LILAK"
+      "CCOI"
     ],
     [
-      "CCOI",
+      "LILAK",
       "TDAY"
+    ],
+    [
+      "SCHL",
+      "IDT"
     ],
     [
       "AMC",
       "SHEN"
-    ],
-    [
-      "IDT",
-      "SCHL"
     ],
     [
       "STGW",
@@ -138,67 +138,67 @@
       "BAND"
     ],
     [
-      "SBGI",
-      "CABO"
+      "IHRT",
+      "SBGI"
     ],
     [
       "CARS",
-      "GTN"
-    ],
-    [
-      "IHRT",
       "ATEX"
     ],
     [
+      "GTN",
+      "CABO"
+    ],
+    [
       "EVER",
-      "OPTU"
+      "MCS"
     ],
     [
-      "SSTK",
-      "NMAX"
+      "GRND",
+      "SSTK"
     ],
     [
-      "MCS",
-      "GRND"
-    ],
-    [
-      "BATRA",
+      "OPTU",
       "IBTA"
     ],
     [
-      "FUBO",
+      "BATRA",
       "PUBM"
     ],
     [
       "NXDR",
-      "GOGO"
+      "FUBO"
     ],
     [
       "MAX",
-      "SSP"
+      "GOGO"
     ],
     [
       "BMBL",
-      "AMCX"
+      "SSP"
     ],
     [
-      "ATNI",
-      "LILA"
+      "NMAX",
+      "ATNI"
     ],
     [
-      "ANGI",
+      "AMCX",
       "BOC"
     ],
     [
-      "NEXN",
-      "NCMI"
+      "ANGI",
+      "LILA"
+    ],
+    [
+      "NCMI",
+      "NEXN"
+    ],
+    [
+      "WBTN",
+      "EVC"
     ],
     [
       "STRZ",
-      "WBTN"
-    ],
-    [
-      "EVC",
       "SPOK"
     ],
     [
@@ -215,22 +215,22 @@
     ],
     [
       "THRY",
+      "GAMB"
+    ],
+    [
+      "EEX",
       "GETY"
     ],
     [
-      "GAMB",
-      "EEX"
-    ],
-    [
-      "GAIA",
-      "TZOO"
+      "TZOO",
+      "GAIA"
     ],
     [
       "MYPS",
-      "SEAT"
+      "TEAD"
     ],
     [
-      "TEAD",
+      "SEAT",
       "AREN"
     ],
     [

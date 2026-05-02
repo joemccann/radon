@@ -4,23 +4,23 @@
   "tickers": [
     "PSMT",
     "CALM",
-    "WDFC",
+    "COCO",
     "UNFI",
+    "WDFC",
+    "CHEF",
     "MZTI",
     "ANDE",
-    "CHEF",
-    "COCO",
     "SPB",
-    "HLF",
     "IPAR",
+    "HLF",
     "CENTA",
-    "FDP",
     "TPB",
+    "FDP",
+    "JJSF",
     "IMKTA",
     "UVV",
-    "ENR",
-    "JJSF",
     "SMPL",
+    "ENR",
     "DOLE",
     "EPC",
     "WMK",
@@ -35,14 +35,14 @@
     "UTZ",
     "MAMA",
     "CVGW",
-    "BYND",
     "NATR",
-    "VITL",
     "BGS",
+    "VITL",
     "VLGEA",
-    "NUS",
     "CENT",
     "NGVC",
+    "NUS",
+    "BYND",
     "HNST",
     "OLPX",
     "MGPI",
@@ -53,15 +53,15 @@
     "WEST",
     "LWAY",
     "MED",
-    "SKIN",
     "BRCC",
-    "HAIN",
+    "SKIN",
     "HFFG",
     "ZVIA",
+    "HAIN",
     "LFVN",
     "WALD",
-    "ISPR",
     "FTLF",
+    "ISPR",
     "AFRI"
   ],
   "pairs": [
@@ -70,39 +70,39 @@
       "CALM"
     ],
     [
-      "WDFC",
+      "COCO",
       "UNFI"
+    ],
+    [
+      "WDFC",
+      "CHEF"
     ],
     [
       "MZTI",
       "ANDE"
     ],
     [
-      "CHEF",
-      "COCO"
-    ],
-    [
       "SPB",
-      "HLF"
+      "IPAR"
     ],
     [
-      "IPAR",
+      "HLF",
       "CENTA"
     ],
     [
-      "FDP",
-      "TPB"
+      "TPB",
+      "FDP"
     ],
     [
-      "IMKTA",
-      "UVV"
+      "JJSF",
+      "IMKTA"
+    ],
+    [
+      "UVV",
+      "SMPL"
     ],
     [
       "ENR",
-      "JJSF"
-    ],
-    [
-      "SMPL",
       "DOLE"
     ],
     [
@@ -131,22 +131,22 @@
     ],
     [
       "CVGW",
-      "BYND"
-    ],
-    [
-      "NATR",
-      "VITL"
+      "NATR"
     ],
     [
       "BGS",
-      "VLGEA"
+      "VITL"
     ],
     [
-      "NUS",
+      "VLGEA",
       "CENT"
     ],
     [
       "NGVC",
+      "NUS"
+    ],
+    [
+      "BYND",
       "HNST"
     ],
     [
@@ -167,23 +167,23 @@
     ],
     [
       "MED",
-      "SKIN"
+      "BRCC"
     ],
     [
-      "BRCC",
+      "SKIN",
+      "HFFG"
+    ],
+    [
+      "ZVIA",
       "HAIN"
-    ],
-    [
-      "HFFG",
-      "ZVIA"
     ],
     [
       "LFVN",
       "WALD"
     ],
     [
-      "ISPR",
-      "FTLF"
+      "FTLF",
+      "ISPR"
     ],
     [
       "AFRI",

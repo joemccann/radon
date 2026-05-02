@@ -5,21 +5,21 @@
     "AHR",
     "CTRE",
     "TRNO",
-    "EPRT",
     "RHP",
+    "EPRT",
     "KRG",
     "MAC",
-    "COMP",
     "SBRA",
     "PECO",
+    "COMP",
     "OUT",
     "SKT",
-    "BNL",
     "IRT",
-    "CDP",
+    "BNL",
     "NHI",
-    "SLG",
+    "CDP",
     "APLE",
+    "SLG",
     "LXP",
     "AKR",
     "UE",
@@ -31,60 +31,61 @@
     "DRH",
     "CWK",
     "GNL",
-    "GTY",
     "SHO",
-    "NTST",
     "LTC",
+    "GTY",
+    "NTST",
     "SMA",
     "SILA",
-    "PEB",
-    "IIPR",
-    "XHR",
     "DHC",
+    "PEB",
+    "XHR",
     "VRE",
+    "IIPR",
     "DEI",
     "KW",
     "UMH",
-    "AAT",
     "CSR",
+    "AAT",
     "RLJ",
     "PDM",
     "DEA",
-    "JBGS",
     "SAFE",
+    "JBGS",
     "WSR",
     "CBL",
     "ESRT",
     "PKST",
-    "MMI",
     "SVC",
-    "EXPI",
+    "MMI",
+    "NXRT",
     "CTO",
     "GOOD",
-    "NXRT",
+    "EXPI",
+    "INN",
     "ALX",
     "FOR",
     "UHT",
-    "INN",
     "PSTL",
     "BDN",
+    "HPP",
     "AHRT",
     "CHCT",
     "FPI",
     "XRN",
-    "HPP",
-    "OLP",
-    "CLDT",
     "ILPT",
+    "CLDT",
     "TRC",
+    "OLP",
     "BFS",
-    "REAX",
-    "LAND",
     "FVR",
+    "LAND",
+    "REAX",
     "SITC",
     "RMR",
     "FRPH",
     "PINE",
+    "RMAX",
     "NLOP",
     "NXDT",
     "STRS",
@@ -93,7 +94,6 @@
     "DOUG",
     "BHR",
     "MDV",
-    "RMAX",
     "MLP",
     "STRW",
     "FSP",
@@ -108,35 +108,35 @@
     ],
     [
       "TRNO",
-      "EPRT"
+      "RHP"
     ],
     [
-      "RHP",
+      "EPRT",
       "KRG"
     ],
     [
       "MAC",
-      "COMP"
+      "SBRA"
     ],
     [
-      "SBRA",
-      "PECO"
+      "PECO",
+      "COMP"
     ],
     [
       "OUT",
       "SKT"
     ],
     [
-      "BNL",
-      "IRT"
+      "IRT",
+      "BNL"
     ],
     [
-      "CDP",
-      "NHI"
+      "NHI",
+      "CDP"
     ],
     [
-      "SLG",
-      "APLE"
+      "APLE",
+      "SLG"
     ],
     [
       "LXP",
@@ -160,27 +160,27 @@
     ],
     [
       "GNL",
-      "GTY"
-    ],
-    [
-      "SHO",
-      "NTST"
+      "SHO"
     ],
     [
       "LTC",
+      "GTY"
+    ],
+    [
+      "NTST",
       "SMA"
     ],
     [
       "SILA",
-      "PEB"
+      "DHC"
     ],
     [
-      "IIPR",
+      "PEB",
       "XHR"
     ],
     [
-      "DHC",
-      "VRE"
+      "VRE",
+      "IIPR"
     ],
     [
       "DEI",
@@ -188,10 +188,10 @@
     ],
     [
       "UMH",
-      "AAT"
+      "CSR"
     ],
     [
-      "CSR",
+      "AAT",
       "RLJ"
     ],
     [
@@ -199,8 +199,8 @@
       "DEA"
     ],
     [
-      "JBGS",
-      "SAFE"
+      "SAFE",
+      "JBGS"
     ],
     [
       "WSR",
@@ -211,55 +211,55 @@
       "PKST"
     ],
     [
-      "MMI",
-      "SVC"
+      "SVC",
+      "MMI"
     ],
     [
-      "EXPI",
+      "NXRT",
       "CTO"
     ],
     [
       "GOOD",
-      "NXRT"
+      "EXPI"
     ],
     [
-      "ALX",
-      "FOR"
+      "INN",
+      "ALX"
     ],
     [
-      "UHT",
-      "INN"
+      "FOR",
+      "UHT"
     ],
     [
       "PSTL",
       "BDN"
     ],
     [
-      "AHRT",
-      "CHCT"
-    ],
-    [
-      "FPI",
-      "XRN"
-    ],
-    [
       "HPP",
-      "OLP"
+      "AHRT"
     ],
     [
-      "CLDT",
+      "CHCT",
+      "FPI"
+    ],
+    [
+      "XRN",
       "ILPT"
     ],
     [
-      "TRC",
+      "CLDT",
+      "TRC"
+    ],
+    [
+      "OLP",
       "BFS"
     ],
     [
-      "REAX",
+      "FVR",
       "LAND"
     ],
     [
-      "FVR",
+      "REAX",
       "SITC"
     ],
     [
@@ -268,23 +268,23 @@
     ],
     [
       "PINE",
-      "NLOP"
-    ],
-    [
-      "NXDT",
-      "STRS"
-    ],
-    [
-      "BRT",
-      "SEG"
-    ],
-    [
-      "DOUG",
-      "BHR"
-    ],
-    [
-      "MDV",
       "RMAX"
+    ],
+    [
+      "NLOP",
+      "NXDT"
+    ],
+    [
+      "STRS",
+      "BRT"
+    ],
+    [
+      "SEG",
+      "DOUG"
+    ],
+    [
+      "BHR",
+      "MDV"
     ],
     [
       "MLP",
