@@ -1,7 +1,11 @@
 {
   "version": "0.7.0",
   "type": "module",
+  "scripts": {
+    "db:migrate": "bun run scripts/db/migrate.ts"
+  },
   "dependencies": {
+    "@libsql/client": "^0.17.3",
     "@sinclair/typebox": "0.34.48",
     "axios": "^1.15.2",
     "dotenv": "^17.3.1",

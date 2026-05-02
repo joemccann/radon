@@ -24,3 +24,9 @@ pytz>=2024.1
 
 # Browser automation (MenthorQ CTA scraping)
 playwright>=1.48.0
+
+
+# libSQL client for the Turso-backed two-mode architecture (plan §0).
+# `libsql-experimental` is the supported SDK with embedded-replica
+# support; the older `libsql-client` package does not have it.
+libsql-experimental>=0.0.55

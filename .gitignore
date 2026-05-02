@@ -175,3 +175,12 @@ docker/ib-gateway/secrets/*.txt
 .firecrawl/
 .worktrees/
 web/.claude/
+
+# Turso libSQL embedded replica files
+data/replica.db
+data/replica.db-shm
+data/replica.db-wal
+web/data/replica.db
+web/data/replica.db-shm
+web/data/replica.db-wal
+data/replica.db-info
