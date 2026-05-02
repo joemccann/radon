@@ -20,6 +20,8 @@ export type MarketEarPost = {
   images?: string[];
   rawImages?: string[];
   tags?: string[];
+  tags_text?: string[];
+  tags_vision?: string[];
   createdAt?: string;
   updatedAt?: string;
 };

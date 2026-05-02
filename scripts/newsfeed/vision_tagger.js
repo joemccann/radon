@@ -13,6 +13,7 @@ import path from "node:path";
 import { Agent, setGlobalDispatcher } from "undici";
 
 import { __buildSystemPrompt as buildSystemPrompt, __normaliseTags as normaliseTags } from "./tagger.js";
+import { enrichWithParentTags } from "./tag_hierarchy.js";
 
 let dispatcherConfigured = false;
 function ensureIpv4Dispatcher() {
@@ -99,18 +100,68 @@ async function callOnce({ model, systemPrompt, userPrompt, imageB64, mediaType, 
   const text = json?.content?.find((c) => c.type === "text")?.text;
   if (typeof text !== "string") throw new Error("vision-tagger empty content");
 
-  // Claude usually returns clean JSON; tolerate prose wrapping by extracting
-  // the first {...} block.
-  let parsed;
-  try {
-    parsed = JSON.parse(text);
-  } catch {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("vision-tagger non-JSON response");
-    parsed = JSON.parse(m[0]);
-  }
-  if (!parsed || !Array.isArray(parsed.tags)) throw new Error("vision-tagger missing tags array");
+  const parsed = parseTagsFromText(text);
+  if (!parsed) throw new Error("vision-tagger non-JSON response");
+  if (!Array.isArray(parsed.tags)) throw new Error("vision-tagger missing tags array");
   return parsed.tags;
+}
+
+// Walks the text and returns the first balanced {...} block. Tracks string
+// literals so braces inside JSON strings don't confuse the depth counter.
+// Used because Claude occasionally appends a second JSON object or trailing
+// prose after the answer — a greedy /\{[\s\S]*\}/ would glue them together.
+function extractFirstJsonObject(text) {
+  let depth = 0;
+  let start = -1;
+  let inString = false;
+  let escape = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (ch === "\\") escape = true;
+      else if (ch === '"') inString = false;
+      continue;
+    }
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+    if (ch === "{") {
+      if (depth === 0) start = i;
+      depth++;
+    } else if (ch === "}") {
+      depth--;
+      if (depth === 0 && start !== -1) return text.slice(start, i + 1);
+      if (depth < 0) return null;
+    }
+  }
+  return null;
+}
+
+function parseTagsFromText(text) {
+  // Fast path: response is already pure JSON.
+  try {
+    return JSON.parse(text);
+  } catch {
+    /* fall through to extraction */
+  }
+  // Extract balanced blocks one at a time and return the first one with a
+  // tags array — handles "JSON + prose", "JSON + JSON", and code-fence wrapping.
+  let cursor = 0;
+  while (cursor < text.length) {
+    const slice = text.slice(cursor);
+    const block = extractFirstJsonObject(slice);
+    if (!block) return null;
+    try {
+      const obj = JSON.parse(block);
+      if (obj && Array.isArray(obj.tags)) return obj;
+    } catch {
+      /* try next block */
+    }
+    cursor += slice.indexOf(block) + block.length;
+  }
+  return null;
 }
 
 export function createVisionTagger({
@@ -162,24 +213,84 @@ export function createVisionTagger({
   return { tagPost };
 }
 
-// Composes a vision-first tagger that falls back to a text tagger.
-//   - If the post has a local image, try vision; on null, fall through.
-//   - Otherwise (or on vision failure), use the text tagger.
-// Returned object satisfies the same { tagPost } interface that hydrateTags expects.
-export function createTaggerRouter({ visionTagger, textTagger }) {
-  async function tagPost(post) {
-    const hasImage = Array.isArray(post.images) && post.images.length > 0;
-    if (hasImage && visionTagger) {
-      const tags = await visionTagger.tagPost(post);
-      if (tags) return tags;
-    }
-    if (textTagger) return textTagger.tagPost(post);
-    return null;
+function unionTags(textTags, visionTags) {
+  const seen = new Set();
+  const merged = [];
+  for (const t of [...(textTags || []), ...(visionTags || [])]) {
+    if (typeof t !== "string" || t.length === 0) continue;
+    if (seen.has(t)) continue;
+    seen.add(t);
+    merged.push(t);
   }
-  return { tagPost };
+  return merged;
+}
+
+// Runs BOTH taggers per post (text + vision), in parallel, and stamps three
+// fields on each post:
+//   - tags_text   : exactly 3 from the Cerebras text tagger
+//   - tags_vision : exactly 3 from the Anthropic vision tagger (only when a local image exists)
+//   - tags        : union of the two, deduped, preserving order (text first)
+//
+// Cursor semantics:
+//   - default mode: skip a post once both classifications are complete (or vision is N/A).
+//   - force=true : always re-run both classifiers.
+//
+// Throttle is applied between posts (not within a post). Within-post text and
+// vision calls run in parallel since they hit different providers.
+export async function hydrateTagsDual(
+  posts,
+  { textTagger, visionTagger, force = false, throttleMs = 0, onNewTags } = {},
+) {
+  let updated = false;
+  let firstApiCall = true;
+
+  for (const post of posts) {
+    const hasImage = Array.isArray(post.images) && post.images.length > 0;
+    const textComplete = Array.isArray(post.tags_text) && post.tags_text.length === 3;
+    const visionComplete =
+      !hasImage || (Array.isArray(post.tags_vision) && post.tags_vision.length === 3);
+
+    const needsText = !!textTagger && (force || !textComplete);
+    const needsVision = hasImage && !!visionTagger && (force || !visionComplete);
+
+    if (!needsText && !needsVision) continue;
+
+    if (!firstApiCall && throttleMs > 0) {
+      await new Promise((r) => setTimeout(r, throttleMs));
+    }
+    firstApiCall = false;
+
+    const [textResult, visionResult] = await Promise.all([
+      needsText ? textTagger.tagPost(post) : Promise.resolve(null),
+      needsVision ? visionTagger.tagPost(post) : Promise.resolve(null),
+    ]);
+
+    let postUpdated = false;
+
+    if (textResult && textResult.length === 3) {
+      post.tags_text = textResult;
+      postUpdated = true;
+      if (typeof onNewTags === "function") await onNewTags(textResult);
+    }
+    if (visionResult && visionResult.length === 3) {
+      post.tags_vision = visionResult;
+      postUpdated = true;
+      if (typeof onNewTags === "function") await onNewTags(visionResult);
+    }
+
+    if (postUpdated) {
+      post.tags = enrichWithParentTags(unionTags(post.tags_text, post.tags_vision));
+      updated = true;
+    }
+  }
+
+  return updated;
 }
 
 // Test seam.
 export const __resolveImageAbsolutePath = resolveImageAbsolutePath;
 export const __detectMediaType = detectMediaType;
 export const __buildUserPrompt = buildUserPrompt;
+export const __extractFirstJsonObject = extractFirstJsonObject;
+export const __parseTagsFromText = parseTagsFromText;
+export const __unionTags = unionTags;

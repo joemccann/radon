@@ -18,8 +18,8 @@ dotenv.config({ path: path.resolve(__dirname, "../../web/.env") });
 
 import { resolveScraperPaths } from "./paths.js";
 import { loadExistingPosts, persistPosts } from "./store.js";
-import { createTagger, hydrateTags } from "./tagger.js";
-import { createTaggerRouter, createVisionTagger } from "./vision_tagger.js";
+import { createTagger } from "./tagger.js";
+import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
 
 const FREE_TIER_PER_MIN = 30;
@@ -39,18 +39,20 @@ function printHelp() {
     [
       "Usage: node scripts/newsfeed/backfill_tags.js [--retag]",
       "",
-      "Tags posts in web/public/data/posts.json using Cerebras (gpt-oss-120b →",
-      "qwen-3-235b fallback). Open-vocabulary: novel tags returned by the model",
-      "are auto-appended to data/tag_taxonomy.json.",
+      "Dual-classifies every post in web/public/data/posts.json:",
+      "  - tags_text   : Cerebras text tagger (gpt-oss-120b → qwen-3-235b fallback)",
+      "  - tags_vision : Anthropic Claude vision tagger (claude-haiku-4-5)",
+      "  - tags        : union of the two (deduped, dashboard-facing)",
       "",
-      "Default mode skips posts already carrying ≥3 tags. --retag forces every",
-      "post to be re-tagged (use after the prompt or naming rules change).",
+      "Cursor: a post is skipped only when both classifications are present",
+      "(vision is N/A for posts with no local image). --retag re-runs both",
+      "classifiers on every post regardless of state.",
       "",
       "Flags:",
-      "  --retag   Re-tag every post.",
+      "  --retag   Re-tag every post (vision + text).",
       "  --help    Show this help.",
       "",
-      `Throttle: ${THROTTLE_MS}ms between requests (~${Math.floor(60_000 / THROTTLE_MS)} req/min, well under free-tier 30 rpm).`,
+      `Throttle: ${THROTTLE_MS}ms between posts (~${Math.floor(60_000 / THROTTLE_MS)} posts/min). Per-post text+vision run in parallel.`,
     ].join("\n"),
   );
 }
@@ -64,7 +66,9 @@ async function main() {
 
   const paths = resolveScraperPaths();
   console.log(`[backfill] posts file: ${paths.postsFile}`);
-  console.log(`[backfill] mode: ${force ? "RETAG (every post)" : "default (only posts with <3 tags)"}`);
+  console.log(
+    `[backfill] mode: ${force ? "RETAG (every post, both classifiers)" : "default (skip posts with both classifications complete)"}`,
+  );
 
   const initialTaxonomy = await loadTaxonomy(paths.projectRoot);
   console.log(`[backfill] starting taxonomy size: ${initialTaxonomy.tags.length}`);
@@ -92,22 +96,28 @@ async function main() {
     throw new Error("no taggers available — set CEREBRAS_API_KEY and/or ANTHROPIC_API_KEY");
   }
 
-  console.log(`[backfill] taggers: vision=${visionTagger ? "ON" : "off"} text=${textTagger ? "ON" : "off"}`);
-
-  const tagger = createTaggerRouter({ visionTagger, textTagger });
+  console.log(`[backfill] taggers: text=${textTagger ? "ON" : "off"} vision=${visionTagger ? "ON" : "off"}`);
 
   const posts = await loadExistingPosts(paths.postsFile);
   console.log(`[backfill] loaded ${posts.length} posts`);
 
+  const needsWork = (p) => {
+    const hasImage = Array.isArray(p.images) && p.images.length > 0;
+    const textComplete = Array.isArray(p.tags_text) && p.tags_text.length === 3;
+    const visionComplete =
+      !hasImage || (Array.isArray(p.tags_vision) && p.tags_vision.length === 3);
+    return !(textComplete && visionComplete);
+  };
+
   const start = Date.now();
-  const target = force
-    ? posts.length
-    : posts.filter((p) => !Array.isArray(p.tags) || p.tags.length < 3).length;
-  console.log(`[backfill] will tag ${target} post(s); throttling ${THROTTLE_MS}ms between requests`);
+  const target = force ? posts.length : posts.filter(needsWork).length;
+  console.log(`[backfill] will tag ${target} post(s); throttling ${THROTTLE_MS}ms between posts`);
 
   let totalNewTags = 0;
 
-  const updated = await hydrateTags(posts, tagger, {
+  const updated = await hydrateTagsDual(posts, {
+    textTagger,
+    visionTagger,
     force,
     throttleMs: THROTTLE_MS,
     onNewTags: async (tags) => {
@@ -120,7 +130,7 @@ async function main() {
   });
 
   if (!updated) {
-    console.log("[backfill] nothing to update — all posts already meet the tag threshold");
+    console.log("[backfill] nothing to update — every post already has both classifications");
     return;
   }
 
@@ -131,11 +141,11 @@ async function main() {
     postsFile: paths.postsFile,
   });
 
-  const remaining = posts.filter((p) => !Array.isArray(p.tags) || p.tags.length < 3).length;
+  const remaining = posts.filter(needsWork).length;
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);
   const finalTaxonomy = await loadTaxonomy(paths.projectRoot);
   console.log(
-    `[backfill] done in ${elapsed}s — ${remaining} post(s) still under-tagged; taxonomy ${initialTaxonomy.tags.length} → ${finalTaxonomy.tags.length} (+${totalNewTags})`,
+    `[backfill] done in ${elapsed}s — ${remaining} post(s) still incomplete; taxonomy ${initialTaxonomy.tags.length} → ${finalTaxonomy.tags.length} (+${totalNewTags})`,
   );
 }
 

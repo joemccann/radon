@@ -9,8 +9,8 @@ import { buildExtractionExpression, parsePayload } from "./extract.js";
 import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
 import { runForever } from "./scheduler.js";
-import { createTagger, hydrateTags } from "./tagger.js";
-import { createTaggerRouter, createVisionTagger } from "./vision_tagger.js";
+import { createTagger } from "./tagger.js";
+import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
 
 // Concurrently spawns this process without env inheritance from `next dev`,
@@ -45,13 +45,6 @@ function buildVisionTaggerOrNull({ projectRoot, publicRoot }) {
     console.warn(`[newsfeed] vision tagger disabled: ${err.message}`);
     return null;
   }
-}
-
-function buildTaggerOrNull({ projectRoot, publicRoot }) {
-  const textTagger = buildTextTaggerOrNull({ projectRoot });
-  const visionTagger = buildVisionTaggerOrNull({ projectRoot, publicRoot });
-  if (!textTagger && !visionTagger) return null;
-  return createTaggerRouter({ visionTagger, textTagger });
 }
 
 export function createScraper(overrides = {}) {
@@ -96,10 +89,16 @@ export function createScraper(overrides = {}) {
 
     let tagsUpdated = false;
     let newTagsAdded = 0;
-    const tagger = buildTaggerOrNull({ projectRoot: paths.projectRoot, publicRoot: paths.publicRoot });
-    if (tagger) {
+    const textTagger = buildTextTaggerOrNull({ projectRoot: paths.projectRoot });
+    const visionTagger = buildVisionTaggerOrNull({
+      projectRoot: paths.projectRoot,
+      publicRoot: paths.publicRoot,
+    });
+    if (textTagger || visionTagger) {
       try {
-        tagsUpdated = await hydrateTags(merged, tagger, {
+        tagsUpdated = await hydrateTagsDual(merged, {
+          textTagger,
+          visionTagger,
           onNewTags: async (tags) => {
             const additions = await appendTagsToTaxonomy(paths.projectRoot, tags);
             newTagsAdded += additions.length;
