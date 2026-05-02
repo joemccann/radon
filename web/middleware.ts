@@ -1,8 +1,29 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
+
+function isLocalHost(url: URL): boolean {
+  return LOCAL_HOSTS.has(url.hostname);
+}
+
+// Explicit test-flag override (used by Playwright via RADON_AUTHLESS_TEST=1).
+// Kept for parity with FastAPI's own bypass and to allow CI-driven authless runs.
 export function isLocalAuthlessTestBypassEnabled(url: URL, flag = process.env.RADON_AUTHLESS_TEST): boolean {
   if (flag !== "1") return false;
-  return url.hostname === "localhost" || url.hostname === "127.0.0.1";
+  return isLocalHost(url);
+}
+
+// Local-dev auto-bypass: any time `next dev` runs against localhost we skip
+// Clerk so the developer never sees the sign-in wall. Production builds set
+// NODE_ENV=production so this is a no-op there even if someone reverse-proxies
+// localhost. The FastAPI side already auto-skips for 127.0.0.1/::1 callers
+// (see scripts/api/auth.py).
+export function isLocalDevAuthBypassEnabled(
+  url: URL,
+  nodeEnv = process.env.NODE_ENV,
+): boolean {
+  if (nodeEnv === "production") return false;
+  return isLocalHost(url);
 }
 
 // API routes are public at the middleware level because server-side page
@@ -15,7 +36,10 @@ const isPublicRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
-  if (isLocalAuthlessTestBypassEnabled(request.nextUrl)) {
+  if (
+    isLocalDevAuthBypassEnabled(request.nextUrl) ||
+    isLocalAuthlessTestBypassEnabled(request.nextUrl)
+  ) {
     return;
   }
 

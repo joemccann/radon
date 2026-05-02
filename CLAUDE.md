@@ -191,9 +191,10 @@ All FastAPI routes protected by Clerk JWT middleware. Next.js by Clerk middlewar
 Key files: `scripts/api/auth.py` (FastAPI), `web/middleware.ts` (Next.js), `web/lib/wsTicket.ts` (browser), `web/lib/radonApi.ts` (Bearer token attachment).
 
 **Auth-exempt:** `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`.
-**Localhost bypass:** Auth skipped for `127.0.0.1`/`::1` (local dev).
+**Localhost bypass (FastAPI):** auth skipped when the request `client.host` is `127.0.0.1` or `::1` — covers all server-to-server Next.js → FastAPI calls. Implemented in `scripts/api/auth.py:51-54`.
+**Localhost bypass (Next.js / Clerk):** Clerk middleware auto-bypasses on `localhost` / `127.0.0.1` / `::1` whenever `NODE_ENV !== "production"`, so `npm run dev` never hits the sign-in wall on this machine. `next build && next start` (production builds) still enforce Clerk even when served on localhost. Helper functions: `isLocalDevAuthBypassEnabled` (auto, dev-only) and `isLocalAuthlessTestBypassEnabled` (explicit `RADON_AUTHLESS_TEST=1` flag, used by Playwright via `web/playwright.config.ts`). Both live in `web/middleware.ts`.
 **Public share routes:** `/api/regime/share`, `/api/vcg/share`, `/api/internals/share`, `/api/menthorq/cta/share`.
-**Tests:** `test_auth.py`, `auth-integration.test.ts`, `ws-ticket-local.test.ts`.
+**Tests:** `test_auth.py`, `auth-integration.test.ts`, `ws-ticket-local.test.ts`, `middleware-authless.test.ts` (8 cases covering both bypass paths).
 
 ### IB Gateway Auto-Recovery
 
@@ -610,7 +611,7 @@ Python: `RotatingFileHandler` (10MB, 2 backups). System: `newsyslog` via `/etc/n
 ## Cloud Deployment Notes
 
 - **FastAPI auth**: Clerk JWT on external requests. Localhost bypass for Next.js → FastAPI.
-- **Clerk middleware**: API routes excluded from `protect()`. Auth handled by FastAPI.
+- **Clerk middleware**: API routes excluded from `protect()`. Auth handled by FastAPI. **Auto-bypass on localhost in non-production** (`isLocalDevAuthBypassEnabled` in `web/middleware.ts`) — never affects production deploys because `NODE_ENV=production` is set on built images.
 - **`NEXT_PUBLIC_*`**: Baked at build time. Rebuild after `.env` changes.
 - **Root `node_modules`**: Has `@sinclair/typebox` (pinned `0.34.48`) used by `lib/tools/`.
 - **CI/CD**: Push to `main` → GitHub Actions → SSH → `deploy.sh` on VPS. Auto-rollback on health failure. Secrets: `VPS_HOST`, `VPS_SSH_KEY`.
