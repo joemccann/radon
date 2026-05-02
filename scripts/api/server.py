@@ -113,10 +113,14 @@ async def lifespan(app: FastAPI):
     if not uw_available:
         logger.warning("UW_TOKEN not set — UW-dependent endpoints will fail")
 
-        # Warm journal reconciliation + regime caches on startup so UI views do not render stale state.
+    # Phase 6: lifespan warming hooks for CRI / GEX have been removed.
+    # The Turso embedded replica keeps both reads sub-millisecond, and the
+    # systemd timers in radon-services (Hetzner) or laptop launchd plists
+    # (local mode) refresh the underlying snapshots on cadence — so the
+    # FastAPI server no longer needs to bootstrap those caches at boot.
+    # Journal reconciliation still runs once at startup because trade-fill
+    # rehydration is lifecycle-bound, not periodic.
     asyncio.create_task(_warm_journal_reconciliation_on_startup())
-    asyncio.create_task(_warm_cri_cache_on_startup())
-    asyncio.create_task(_warm_gex_cache_on_startup())
 
     yield
 
@@ -341,40 +345,11 @@ async def _warm_journal_reconciliation_on_startup() -> None:
         logger.warning("Journal startup reconcile failed: %s", result.error)
 
 
-async def _warm_cri_cache_on_startup() -> None:
-    cache_path = DATA_DIR / "cri.json"
-    cached = _read_cache(cache_path)
-    try:
-        mtime_ms = cache_path.stat().st_mtime * 1000
-    except Exception:
-        mtime_ms = None
-
-    if not _is_cri_cache_stale(cached, mtime_ms=mtime_ms):
-        logger.info("CRI startup warm skipped — cache fresh")
-        return
-
-    logger.info("CRI startup warm triggered")
-    result = await run_script("cri_scan.py", ["--json"], timeout=120)
-    if result.ok and result.data:
-        _write_cache(cache_path, result.data)
-        logger.info("CRI startup warm complete")
-    else:
-        logger.warning("CRI startup warm failed: %s", result.error)
-
-
-async def _warm_gex_cache_on_startup() -> None:
-    cached = _read_cache(DATA_DIR / "gex.json")
-    if not _is_gex_cache_stale(cached):
-        logger.info("GEX startup warm skipped — cache fresh")
-        return
-
-    logger.info("GEX startup warm triggered")
-    result = await run_script("gex_scan.py", ["--json", "--ticker", "SPX"], timeout=120)
-    if result.ok and result.data:
-        _write_cache(DATA_DIR / "gex.json", result.data)
-        logger.info("GEX startup warm complete")
-    else:
-        logger.warning("GEX startup warm failed: %s", result.error)
+# Phase 6: _warm_cri_cache_on_startup and _warm_gex_cache_on_startup were
+# deleted alongside their lifespan-task call sites. The Turso embedded
+# replica keeps both caches current without any FastAPI-side bootstrap;
+# scheduled refreshes are owned by the radon-services container (Hetzner
+# mode) or the laptop launchd plists (local mode).
 
 
 def _atomic_save(path: str, data: dict) -> str:

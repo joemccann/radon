@@ -1,0 +1,17 @@
+[Unit]
+Description=Radon MenthorQ CTA sync (Playwright)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/app
+EnvironmentFile=-/app/.env
+EnvironmentFile=-/app/web/.env
+Environment=RADON_CTA_SYNC_SOURCE=systemd-timer
+ExecStart=/usr/local/bin/python3.13 scripts/cta_sync_service.py
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

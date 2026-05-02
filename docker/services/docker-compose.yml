@@ -1,0 +1,70 @@
+# Hetzner-side docker-compose extension. Sits alongside the existing
+# docker/ib-gateway/docker-compose.yml on the VPS:
+#
+#   /home/radon/radon-cloud/
+#     ├─ ib-gateway/        (existing, unchanged)
+#     ├─ caddy/             (existing, persists Caddyfile)
+#     ├─ media/             (Phase 0.5: served by Caddy at media.radon.run)
+#     └─ services/          (this file — radon-services container)
+#
+# Bring up with:
+#   cd /home/radon/radon-cloud/services
+#   docker compose up -d
+#
+# The image is built from /app source bind-mounted off the laptop (during
+# development) or built from the source tarball pushed by CI (production).
+# We don't deploy from this repo — Phase 4 ships the *config*; the deploy
+# is operator-triggered.
+
+services:
+  radon-services:
+    build:
+      context: ../..
+      dockerfile: docker/services/Dockerfile
+    image: radon-services:latest
+    restart: unless-stopped
+    # systemd-as-PID-1 needs cgroup access + a writable /run.
+    cap_add:
+      - SYS_ADMIN
+    security_opt:
+      - seccomp:unconfined
+    tmpfs:
+      - /run
+      - /run/lock
+    volumes:
+      # Shared replica file. Put it on a named volume so the laptop's
+      # local replica.db file (gitignored) is never copied in.
+      - radon-data:/app/data
+      # Source code bind for hot-reload during dev. In production the
+      # image already carries /app/scripts and /app/web baked in.
+      # Comment this line out for production deploys.
+      # - ../../:/app:cached
+      - /var/log/journal:/var/log/journal
+    environment:
+      TURSO_DB_URL: ${TURSO_DB_URL}
+      TURSO_AUTH_TOKEN: ${TURSO_AUTH_TOKEN}
+      RADON_MODE: hetzner
+      IB_GATEWAY_HOST: ib-gateway
+      IB_GATEWAY_PORT: 4001
+      RADON_DATA_DIR: /app/data
+    depends_on:
+      - ib-gateway
+    networks:
+      - radon-net
+    labels:
+      - "autoheal=true"
+    healthcheck:
+      # systemd-running test: the bus is up means timers can fire
+      test: ["CMD-SHELL", "systemctl is-system-running --quiet || systemctl is-system-running | grep -q running"]
+      interval: 60s
+      timeout: 10s
+      retries: 3
+      start_period: 90s
+
+volumes:
+  radon-data:
+
+networks:
+  radon-net:
+    external: true
+    name: radon-cloud_default

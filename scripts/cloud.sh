@@ -63,6 +63,22 @@ fi
 
 "$SCRIPT_DIR/ib" mode cloud
 
+# -- Step 4b: Persist RADON_MODE=hetzner so DB writes pick the right path ---
+#
+# Phase 5: in Hetzner mode the laptop runs only the newsfeed scraper +
+# Next.js. All other schedulers run inside the radon-services container
+# on the VPS. We unload the laptop's launchd plists so they don't race.
+if command -v launchctl >/dev/null 2>&1; then
+  for plist in com.radon.cri-scan com.radon.cta-sync com.radon.data-refresh \
+               com.radon.exit-order-service com.radon.monitor-daemon; do
+    if launchctl list | grep -q "$plist"; then
+      log_info "Unloading $plist (Hetzner mode)..."
+      launchctl unload "$HOME/Library/LaunchAgents/$plist.plist" 2>/dev/null || true
+    fi
+  done
+fi
+"$SCRIPT_DIR/_set_radon_mode.sh" hetzner
+
 # -- Step 5: Verify port 4001 reachable on VPS ------------------------------
 
 log_info "Verifying IB Gateway port 4001..."
@@ -73,12 +89,12 @@ else
 fi
 
 # -- Step 6: Start dev services ----------------------------------------------
+#
+# Phase 6: the legacy `_post_start_*.sh` warmers (journal rehydrate, CTA
+# cache refresh) are no longer invoked here. In Hetzner mode the
+# radon-services container's systemd timers do the periodic refresh;
+# warming on every laptop boot is redundant.
 
 log_info "Starting dev services (Next.js + FastAPI + WS relay)..."
-log_info "Backgrounding journal rehydrate (logs/journal-rehydrate.log)..."
-( "$SCRIPT_DIR/_post_start_journal.sh" & )
-log_info "Backgrounding CTA cache refresh (logs/cta-startup-sync.log)..."
-( "$SCRIPT_DIR/_post_start_cta.sh" & )
-
 cd "$PROJECT_ROOT/web"
 exec npm run dev

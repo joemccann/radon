@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon monitor daemon — every 60 seconds
+Requires=radon-monitor.service
+
+[Timer]
+OnBootSec=60s
+OnUnitActiveSec=60s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

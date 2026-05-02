@@ -646,6 +646,18 @@ Python: `RotatingFileHandler` (10MB, 2 backups). System: `newsyslog` via `/etc/n
 - [ ] Reconciliation, exit orders, CRI scan auto-running
 - [ ] Check market hours
 
+## Two-Mode Architecture (cloud-services migration)
+
+`scripts/cloud.sh` puts the laptop in **Hetzner mode** (`RADON_MODE=hetzner`). All schedulers run inside the `radon-services` container on the VPS; the laptop runs only Next.js + the chrome-cdp newsfeed scraper. `app.radon.run` keeps showing fresh data when the laptop is closed.
+
+`scripts/local.sh` puts the laptop in **Local mode** (`RADON_MODE=local`). Laptop launchd plists own all schedulers; no Hetzner dependency.
+
+Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`). Every Next.js + FastAPI + scheduler process holds an embedded replica at `data/replica.db` (gitignored) for sub-millisecond local reads. JSON files in `data/` are written alongside DB rows as a fallback / debug-export.
+
+**Image host**: `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Both Next.js peers reference absolute URLs in `posts.images`.
+
+Operator runbook: `docs/cloud-services.md`.
+
 ## ⛔ Brand Identity — Mandatory for UI Work
 
 Full spec: `docs/brand-identity.md` + `brand/radon-brand-system.md`. Tokens: `brand/radon-design-tokens.json`. Tailwind: `brand/radon-tailwind-theme.ts`. Kit: `/kit` route.

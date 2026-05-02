@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon MenthorQ CTA sync — 13:15 + 14:00 ET on trading days
+Requires=radon-cta-sync.service
+
+[Timer]
+# Mirrors com.radon.cta-sync launchd plist:
+# 13:15 ET + 14:00 ET, Mon–Fri only.
+# UTC equivalent: 18:15 + 19:00 (winter), 17:15 + 18:00 (summer).
+OnCalendar=Mon..Fri *-*-* 18:15
+OnCalendar=Mon..Fri *-*-* 19:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

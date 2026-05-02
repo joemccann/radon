@@ -1,0 +1,10 @@
+[Unit]
+Description=Radon analyst ratings — once daily at 13:00 ET
+Requires=radon-analyst-ratings.service
+
+[Timer]
+OnCalendar=Mon..Fri *-*-* 18:00
+Persistent=true
+
+[Install]
+WantedBy=timers.target

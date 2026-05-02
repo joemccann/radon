@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon data refresh — every 15 minutes 06:30–13:15 ET
+Requires=radon-data-refresh.service
+
+[Timer]
+# Mirrors com.radon.data-refresh: every 15 minutes during ET morning
+# trading hours (06:30–13:15 ET). UTC equivalent: 11:30–18:15 winter.
+OnCalendar=Mon..Fri *-*-* 11..18:00,15,30,45
+Persistent=true
+
+[Install]
+WantedBy=timers.target

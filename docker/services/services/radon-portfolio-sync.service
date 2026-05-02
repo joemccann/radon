@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon IB portfolio sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/app
+EnvironmentFile=-/app/.env
+EnvironmentFile=-/app/web/.env
+ExecStart=/usr/local/bin/python3.13 scripts/ib_sync.py --sync
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

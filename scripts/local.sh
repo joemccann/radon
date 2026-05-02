@@ -22,6 +22,23 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 "$SCRIPT_DIR/ib" mode local
 
+# -- Step 1b: Restore laptop schedulers and set RADON_MODE=local ------------
+#
+# Phase 5: local mode loads the launchd plists so the laptop becomes
+# self-sufficient (no Hetzner dependency). Idempotent — load is a no-op
+# if the plist is already loaded.
+if command -v launchctl >/dev/null 2>&1; then
+  for plist in com.radon.cri-scan com.radon.cta-sync com.radon.data-refresh \
+               com.radon.exit-order-service com.radon.monitor-daemon; do
+    f="$HOME/Library/LaunchAgents/$plist.plist"
+    if [[ -f "$f" ]]; then
+      launchctl load "$f" 2>/dev/null || true
+      log_info "Loaded $plist (local mode)"
+    fi
+  done
+fi
+"$SCRIPT_DIR/_set_radon_mode.sh" local
+
 # -- Step 2: Stop VPS gateway ------------------------------------------------
 
 log_info "Stopping IB Gateway on Hetzner..."
@@ -54,12 +71,12 @@ for i in $(seq 1 24); do
 done
 
 # -- Step 4: Start dev services -----------------------------------------------
+#
+# Phase 6: legacy `_post_start_*.sh` warmers retired. Local-mode laptop
+# loads its launchd plists in Step 1b above; those plists own all
+# scheduled refreshes (CRI scan, CTA sync, etc.) on the same cadence
+# that the Hetzner systemd timers use in cloud mode.
 
 log_info "Starting dev services (Next.js + FastAPI + WS relay)..."
-log_info "Backgrounding journal rehydrate (logs/journal-rehydrate.log)..."
-( "$SCRIPT_DIR/_post_start_journal.sh" & )
-log_info "Backgrounding CTA cache refresh (logs/cta-startup-sync.log)..."
-( "$SCRIPT_DIR/_post_start_cta.sh" & )
-
 cd "$PROJECT_ROOT/web"
 exec npm run dev

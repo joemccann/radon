@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon CRI scan — every 30 minutes during ET trading hours
+Requires=radon-cri-scan.service
+
+[Timer]
+# Mirrors com.radon.cri-scan launchd plist on the laptop:
+# 01:05–17:00 ET, every 30 minutes, Mon–Fri only.
+# In UTC that's 06:05–22:00 (winter) / 05:05–21:00 (summer).
+# Using OnCalendar=Mon..Fri *-*-* 05,06..22:05,35 keeps it simple
+# even though it runs an extra ~hour during DST shoulder weeks.
+OnCalendar=Mon..Fri *-*-* 05..22:05,35
+Persistent=true
+
+[Install]
+WantedBy=timers.target
