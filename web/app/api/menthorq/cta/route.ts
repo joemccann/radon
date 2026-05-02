@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import { readdir, readFile, stat } from "fs/promises";
 import { join } from "path";
+import { getDb } from "@/lib/db";
 
 export const runtime = "nodejs";
 // Disable Next.js's default static caching for route handlers. The route reads
@@ -198,7 +199,37 @@ async function readSyncHealth(targetDate: string): Promise<CtaSyncHealth | null>
   return null;
 }
 
-async function readLatestCta(): Promise<{
+async function readLatestCtaFromDb(): Promise<{
+  data: { date: string | null; fetched_at: string | null; tables: CtaTables };
+  latestFile: string | null;
+  mtimeMs: number | null;
+} | null> {
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT date, payload, fetched_at FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
+      args: [],
+    });
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as unknown as { date: string; payload: string; fetched_at: string };
+    const raw = JSON.parse(row.payload) as Record<string, unknown>;
+    const mtimeMs = Date.parse(row.fetched_at);
+    return {
+      data: {
+        date: typeof raw.date === "string" ? raw.date : row.date,
+        fetched_at:
+          typeof raw.fetched_at === "string" ? raw.fetched_at : row.fetched_at,
+        tables: (raw.tables as CtaTables) ?? null,
+      },
+      latestFile: `db:menthorq_cta/${row.date}`,
+      mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function readLatestCtaFromDisk(): Promise<{
   data: { date: string | null; fetched_at: string | null; tables: CtaTables };
   latestFile: string | null;
   mtimeMs: number | null;
@@ -237,6 +268,18 @@ async function readLatestCta(): Promise<{
       mtimeMs: null,
     };
   }
+}
+
+async function readLatestCta(): Promise<{
+  data: { date: string | null; fetched_at: string | null; tables: CtaTables };
+  latestFile: string | null;
+  mtimeMs: number | null;
+}> {
+  // Phase 2: prefer DB; fall back to disk for resilience while the
+  // dual-write path is still warming.
+  const fromDb = await readLatestCtaFromDb();
+  if (fromDb && fromDb.data.tables) return fromDb;
+  return readLatestCtaFromDisk();
 }
 
 function buildCacheMeta(

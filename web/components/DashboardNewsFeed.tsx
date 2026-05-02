@@ -8,7 +8,8 @@ import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime"
 import { useNewsfeedTagFilter } from "../lib/useNewsfeedTagFilter";
 import NewsfeedTagBar from "./NewsfeedTagBar";
 
-const POSTS_ENDPOINT = "/data/posts.json";
+const POSTS_ENDPOINT = "/api/newsfeed/posts";
+const POSTS_FALLBACK_ENDPOINT = "/data/posts.json";
 const REFRESH_INTERVAL_MS = 2 * 60 * 1000;
 const PAGE_SIZE = 18;
 
@@ -113,18 +114,27 @@ export default function DashboardNewsFeed() {
     }
 
     try {
-      const response = await fetch(POSTS_ENDPOINT, {
+      let response = await fetch(POSTS_ENDPOINT, {
         cache: "no-store",
         signal,
       });
 
       if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+        // Phase 1 dual-write: if the DB-backed route is unavailable
+        // (cold replica, transient sync failure) fall back to the
+        // static JSON file the scraper still writes.
+        response = await fetch(POSTS_FALLBACK_ENDPOINT, {
+          cache: "no-store",
+          signal,
+        });
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}`);
+        }
       }
 
       const data: unknown = await response.json();
       if (!Array.isArray(data)) {
-        throw new Error("Unexpected payload shape from posts.json");
+        throw new Error("Unexpected payload shape from posts endpoint");
       }
 
       const normalised = data

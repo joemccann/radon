@@ -21,6 +21,7 @@ import { loadExistingPosts, persistPosts } from "./store.js";
 import { createTagger } from "./tagger.js";
 import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
+import { appendTaxonomy, upsertPosts } from "../db/writer.js";
 
 const FREE_TIER_PER_MIN = 30;
 const SAFETY_MARGIN = 5;
@@ -125,6 +126,11 @@ async function main() {
       if (additions.length > 0) {
         totalNewTags += additions.length;
         console.log(`[backfill] taxonomy +${additions.length}: ${additions.join(", ")}`);
+        try {
+          await appendTaxonomy(additions);
+        } catch (err) {
+          console.warn(`[backfill] db taxonomy append non-fatal: ${err.message}`);
+        }
       }
     },
   });
@@ -140,6 +146,13 @@ async function main() {
     mediaDir: paths.mediaDir,
     postsFile: paths.postsFile,
   });
+
+  try {
+    await upsertPosts(posts);
+    console.log(`[backfill] db dual-write: ${posts.length} posts upserted`);
+  } catch (err) {
+    console.warn(`[backfill] db dual-write non-fatal: ${err.message}`);
+  }
 
   const remaining = posts.filter(needsWork).length;
   const elapsed = ((Date.now() - start) / 1000).toFixed(1);

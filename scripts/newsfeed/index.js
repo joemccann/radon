@@ -10,6 +10,7 @@ import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
 import { pushMedia } from "./push_media.js";
 import { runForever } from "./scheduler.js";
+import { appendTaxonomy, recordServiceHealth, upsertPosts } from "../db/writer.js";
 import { createTagger } from "./tagger.js";
 import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
@@ -66,6 +67,7 @@ export function createScraper(overrides = {}) {
 
   async function scrapeOnce() {
     const cycleStart = Date.now();
+    const cycleStartIso = new Date(cycleStart).toISOString();
 
     const pages = await listTargets();
     const target = selectMarketEarTab(pages);
@@ -105,6 +107,11 @@ export function createScraper(overrides = {}) {
             newTagsAdded += additions.length;
             if (additions.length > 0) {
               console.info(`[newsfeed] taxonomy +${additions.length}: ${additions.join(", ")}`);
+              try {
+                await appendTaxonomy(additions);
+              } catch (err) {
+                console.warn(`[newsfeed] db taxonomy append non-fatal: ${err.message}`);
+              }
             }
           },
         });
@@ -135,8 +142,29 @@ export function createScraper(overrides = {}) {
       }
     }
 
+    let dbWritten = 0;
+    try {
+      await upsertPosts(merged);
+      dbWritten = merged.length;
+      await recordServiceHealth("newsfeed-scraper", "ok", {
+        startedAt: cycleStartIso,
+        finishedAt: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.warn(`[newsfeed] db dual-write non-fatal: ${err.message}`);
+      try {
+        await recordServiceHealth("newsfeed-scraper", "error", {
+          startedAt: cycleStartIso,
+          finishedAt: new Date().toISOString(),
+          error: { message: err.message },
+        });
+      } catch (_inner) {
+        /* ignore — health write is best-effort */
+      }
+    }
+
     console.info(
-      `[newsfeed] cycle ok N=${merged.length} changed=${changed} imagesUpdated=${imagesUpdated} pushedToHetzner=${pushedToHetzner} tagsUpdated=${tagsUpdated} newTags=${newTagsAdded} ms=${Date.now() - cycleStart}`,
+      `[newsfeed] cycle ok N=${merged.length} changed=${changed} imagesUpdated=${imagesUpdated} pushedToHetzner=${pushedToHetzner} tagsUpdated=${tagsUpdated} newTags=${newTagsAdded} dbWritten=${dbWritten} ms=${Date.now() - cycleStart}`,
     );
     return { changed: true, count: merged.length };
   }

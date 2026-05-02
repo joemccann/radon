@@ -69,3 +69,9 @@ export async function syncDb(): Promise<void> {
 export function __resetDbForTests(): void {
   cached = null;
 }
+
+// Test seam — inject a libSQL client (typically in-memory) so route
+// handlers can be tested hermetically.
+export function __setDbForTests(client: Client): void {
+  cached = client;
+}
