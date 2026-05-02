@@ -68,15 +68,21 @@ function buildSystemPrompt(taxonomy) {
     "Pick EXACTLY 3 tags that best capture the post's core themes.",
     "",
     "Priority order — apply each step and stop only when you have 3 tags:",
-    "  1. INSTRUMENT or PRODUCT named in the post (puts, calls, options, BTC, oil, gold, futures, swaps, ETFs, bonds).",
-    "  2. SECTOR or asset class focus (semis, energy, banks, credit, crypto, equities).",
-    "  3. THEME or narrative (positioning, hedging, macro, Fed, inflation, earnings, geopolitics).",
+    "  1. TECHNICAL SIGNAL named explicitly — when the post calls out a candlestick pattern, indicator, chart pattern, or price-action concept, tag the SPECIFIC name. These are high-information signals; do not skip them.",
+    "       Candlestick patterns: SHOOTING-STAR, HAMMER, INVERSE-HAMMER, HANGING-MAN, DOJI, ENGULFING, MORNING-STAR, EVENING-STAR, HARAMI, MARUBOZU, PIERCING-LINE, DARK-CLOUD-COVER, THREE-WHITE-SOLDIERS, THREE-BLACK-CROWS.",
+    "       Chart patterns: HEAD-SHOULDERS, INVERSE-HEAD-SHOULDERS, DOUBLE-TOP, DOUBLE-BOTTOM, TRIPLE-TOP, TRIPLE-BOTTOM, TRIANGLE, ASCENDING-TRIANGLE, DESCENDING-TRIANGLE, FLAG, PENNANT, WEDGE, CUP-AND-HANDLE, BREAKOUT, BREAKDOWN, GAP, ISLAND-REVERSAL.",
+    "       Indicators: RSI, MACD, MOVING-AVERAGE, GOLDEN-CROSS, DEATH-CROSS, BOLLINGER-BANDS, STOCHASTIC, ADX, ICHIMOKU, FIBONACCI, VWAP, OBV, ATR, PARABOLIC-SAR, KELTNER-CHANNEL.",
+    "       Price-action: SUPPORT, RESISTANCE, TREND, TRENDLINE, MOMENTUM, OVERSOLD, OVERBOUGHT, DIVERGENCE, ELLIOTT-WAVE, PIVOT, RANGE.",
+    "       Use the umbrella TECHNICAL-ANALYSIS only when the post discusses TA generically without naming a specific pattern/indicator.",
+    "  2. INSTRUMENT or PRODUCT named in the post (puts, calls, options, BTC, oil, gold, futures, swaps, ETFs, bonds, SPX, SPY).",
+    "  3. SECTOR or asset class focus (semis, energy, banks, credit, crypto, equities).",
+    "  4. THEME or narrative (positioning, hedging, macro, Fed, inflation, earnings, geopolitics).",
     "",
     "Reuse an existing tag when one fits; coin a NEW tag only when nothing in the existing set captures the concept. Do not split a single concept across multiple near-synonyms.",
     "",
     "Naming rules — apply STRICTLY so tags merge cleanly across posts:",
-    "  - ALL TAGS ARE UPPERCASE. No exceptions. Examples: BTC, OIL, VOL, PUTS, OPTIONS, POSITIONING, FED.",
-    "  - Multi-word concepts use UPPERCASE kebab-case: PUT-CALL-RATIO, FUND-FLOWS, SINGLE-STOCK-VOL, DEALER-GAMMA, TAIL-HEDGE.",
+    "  - ALL TAGS ARE UPPERCASE. No exceptions. Examples: BTC, OIL, VOL, PUTS, OPTIONS, POSITIONING, FED, RSI.",
+    "  - Multi-word concepts use UPPERCASE kebab-case: PUT-CALL-RATIO, FUND-FLOWS, SINGLE-STOCK-VOL, DEALER-GAMMA, TAIL-HEDGE, SHOOTING-STAR, HEAD-SHOULDERS.",
     "  - Allowed characters: A-Z, 0-9, hyphen, ampersand. No spaces, no lowercase, no underscores.",
     "",
     "Disambiguation:",
@@ -86,6 +92,8 @@ function buildSystemPrompt(taxonomy) {
     "  - SKEW is options skew specifically.",
     "  - GAMMA is dealer-gamma / GEX.",
     "  - POSITIONING is who is long/short and how exposed.",
+    "  - TECHNICAL SIGNALS: prefer the specific named pattern/indicator (SHOOTING-STAR, RSI, HEAD-SHOULDERS) over generic TECHNICAL-ANALYSIS. A post that names two TA concepts (e.g. shooting star AND inverse hammer) should tag both when slot count allows.",
+    "  - CANDLESTICK is the umbrella; only use it when the post discusses candlestick analysis without naming a specific pattern.",
     "",
     "Output FORMAT: STRICT JSON. {\"tags\": [\"...\",\"...\",\"...\"]}. Exactly 3. No prose.",
     "",
@@ -183,9 +191,10 @@ export function createTagger({
   return { tagPost };
 }
 
-// Test seam.
+// Test seam + shared with vision_tagger.js (uses identical prompt + normalisation).
 export const __normaliseTags = normaliseTags;
 export const __normaliseSingleTag = normaliseSingleTag;
+export const __buildSystemPrompt = buildSystemPrompt;
 
 export async function hydrateTags(posts, tagger, { force = false, throttleMs = 0, onNewTags } = {}) {
   let updated = false;

@@ -25,12 +25,17 @@ npm run dev
 # 4. Open http://localhost:3000
 ```
 
-The `npm run dev` command starts three services:
+The `npm run dev` command starts four services:
 - Next.js dev server (port 3000)
 - IB real-time price server (port 8765)
 - FastAPI server (port 8321) — Python script execution, IB Gateway auto-restart
+- Market Ear newsfeed scraper (no port; polls `themarketear.com/newsfeed` every 120s via chrome-cdp)
+
+**Authentication on localhost.** Clerk auth auto-bypasses on `localhost` / `127.0.0.1` / `::1` whenever `NODE_ENV !== "production"`, so `npm run dev` never hits the sign-in wall. `next build && next start` (production builds) still enforce Clerk. See [Authentication](#authentication) for details.
 
 **Note:** Frontend data polling automatically respects market hours. During CLOSED market (weekends, holidays, overnight), all polls stop. During regular hours (9:30 AM - 4:00 PM ET) polling is most frequent. See [Market-Hours Polling](#market-hours-polling) for details.
+
+**Disk-backed routes.** All Next.js GET handlers that read live disk state (`portfolio`, `journal`, `discover`, `flow-analysis`, `blotter`, `vcg`, `internals`, `performance`, `scanner`, `regime`, `gex`, `menthorq/cta`) export `dynamic = "force-dynamic"`; their corresponding hooks fetch with `cache: "no-store"`. Without those markers Next.js 16 statically prerenders the first GET and freezes it for the dev-server lifetime — the failure mode that surfaced "CTA CACHE STALE" while fresh data already existed on disk. The contract is enforced by `web/tests/api-routes-no-cache-contract.test.ts` (18 assertions).
 
 ## Architecture
 
@@ -121,8 +126,27 @@ cp .env.example .env
 **Optional:**
 - `ANTHROPIC_MODEL` - Model override
 - `ANTHROPIC_API_URL` - API endpoint override
+- `CEREBRAS_API_KEY` - Cerebras free-tier key for the Market Ear **text** tagger (`gpt-oss-120b` primary, `qwen-3-235b` fallback). Used for posts without images.
+- `ANTHROPIC_API_KEY` - Anthropic key for the Market Ear **vision** tagger (`claude-haiku-4-5`, ~$0.003/post). Used for posts with images (chart-heavy Market Ear posts where the image carries more signal than the caption). Either key alone is sufficient — the scraper routes per-post and falls back to whichever tagger is configured. Without both, tag hydration is skipped (scraping continues; posts just stay untagged).
 - `IB_REALTIME_WS_URL` - Server-side websocket URL used by `/api/prices` for one-time snapshots (default: `ws://localhost:8765`)
 - `NEXT_PUBLIC_IB_REALTIME_WS_URL` - Browser websocket URL for direct realtime subscriptions (default: `ws://localhost:8765`)
+
+## Authentication
+
+The trading terminal uses Clerk for production auth, but **on localhost in development the sign-in wall is automatically bypassed** so `npm run dev` Just Works without ever touching Clerk.
+
+| Path | When auth is enforced | When auth is skipped |
+|------|------------------------|----------------------|
+| Next.js middleware (`web/middleware.ts`) | `NODE_ENV === "production"` OR a non-localhost hostname | `localhost` / `127.0.0.1` / `::1` AND `NODE_ENV !== "production"` (auto), OR `RADON_AUTHLESS_TEST=1` (explicit, used by Playwright) |
+| FastAPI (`scripts/api/auth.py`) | External requests with valid Clerk JWT in `Authorization: Bearer …` | `request.client.host` ∈ `{127.0.0.1, ::1}` (auto, covers Next.js → FastAPI server-to-server) |
+| WebSocket (`scripts/api/ws_ticket.py`) | Single-use 30-second tickets minted from a Clerk session | n/a — ticket flow is required |
+
+**Production safety.** `next build && next start` sets `NODE_ENV=production`, so the auto-bypass cannot fire even if the host happens to resolve as localhost. The two helper functions live in `web/middleware.ts`:
+
+- `isLocalDevAuthBypassEnabled(url, nodeEnv?)` — auto, dev-only.
+- `isLocalAuthlessTestBypassEnabled(url, flag?)` — explicit, used by Playwright via `RADON_AUTHLESS_TEST=1` in `web/playwright.config.ts`.
+
+Both are exercised by `web/tests/middleware-authless.test.ts` (8 cases — IPv6 `[::1]` form, production blocks bypass, `"test"` env treated as non-production, etc.).
 
 ## Real-Time Pricing
 

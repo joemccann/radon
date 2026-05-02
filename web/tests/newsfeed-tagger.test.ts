@@ -50,6 +50,35 @@ describe("createTagger.tagPost (open vocabulary)", () => {
     expect(systemMsg).toMatch(/ALL TAGS ARE UPPERCASE/);
   });
 
+  it("primes the model with technical-analysis vocabulary (candlesticks, indicators, chart patterns)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(chatCompletion(JSON.stringify({ tags: ["SHOOTING-STAR", "SPX", "EQUITIES"] }))),
+    );
+    global.fetch = fetchMock as typeof fetch;
+
+    const { createTagger } = await import("../../scripts/newsfeed/tagger.js");
+    const tagger = createTagger({ getTaxonomySnapshot: async () => TAXONOMY });
+
+    const tags = await tagger.tagPost({
+      id: "p-ta",
+      title: "Shooting star",
+      content: "SPX printed a large shooting star candle today, one of the more important signals to watch after a strong move.",
+    });
+
+    expect(tags).toEqual(["SHOOTING-STAR", "SPX", "EQUITIES"]);
+
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    const systemMsg = body.messages.find((m: { role: string }) => m.role === "system").content;
+    expect(systemMsg).toMatch(/TECHNICAL SIGNAL/);
+    expect(systemMsg).toMatch(/SHOOTING-STAR/);
+    expect(systemMsg).toMatch(/HAMMER/);
+    expect(systemMsg).toMatch(/RSI/);
+    expect(systemMsg).toMatch(/MACD/);
+    expect(systemMsg).toMatch(/HEAD-SHOULDERS/);
+    expect(systemMsg).toMatch(/SUPPORT/);
+    expect(systemMsg).toMatch(/RESISTANCE/);
+  });
+
   it("falls back to qwen-3-235b on a 429 from gpt-oss-120b", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ error: "rate limited" }, 429))

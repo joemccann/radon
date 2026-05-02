@@ -2,10 +2,24 @@
 // Retroactively tag posts in posts.json. Default mode tags posts with <3 tags.
 // --retag re-tags every post (use after refining the prompt or naming rules).
 // Novel tags returned by the model are auto-appended to data/tag_taxonomy.json.
+//
+// Routing: posts with a local image use the Anthropic vision tagger
+// (claude-haiku-4-5); text-only posts use the Cerebras text tagger. Throttle
+// targets the more conservative Cerebras 30 rpm limit.
+
+import path from "path";
+import { fileURLToPath } from "url";
+import dotenv from "dotenv";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../web/.env") });
 
 import { resolveScraperPaths } from "./paths.js";
 import { loadExistingPosts, persistPosts } from "./store.js";
 import { createTagger, hydrateTags } from "./tagger.js";
+import { createTaggerRouter, createVisionTagger } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
 
 const FREE_TIER_PER_MIN = 30;
@@ -55,9 +69,32 @@ async function main() {
   const initialTaxonomy = await loadTaxonomy(paths.projectRoot);
   console.log(`[backfill] starting taxonomy size: ${initialTaxonomy.tags.length}`);
 
-  const tagger = createTagger({
-    getTaxonomySnapshot: async () => (await loadTaxonomy(paths.projectRoot)).tags,
-  });
+  const taxonomyFn = async () => (await loadTaxonomy(paths.projectRoot)).tags;
+
+  let textTagger = null;
+  try {
+    textTagger = createTagger({ getTaxonomySnapshot: taxonomyFn });
+  } catch (err) {
+    console.warn(`[backfill] text tagger disabled: ${err.message}`);
+  }
+
+  let visionTagger = null;
+  try {
+    visionTagger = createVisionTagger({
+      publicRoot: paths.publicRoot,
+      getTaxonomySnapshot: taxonomyFn,
+    });
+  } catch (err) {
+    console.warn(`[backfill] vision tagger disabled: ${err.message}`);
+  }
+
+  if (!textTagger && !visionTagger) {
+    throw new Error("no taggers available — set CEREBRAS_API_KEY and/or ANTHROPIC_API_KEY");
+  }
+
+  console.log(`[backfill] taggers: vision=${visionTagger ? "ON" : "off"} text=${textTagger ? "ON" : "off"}`);
+
+  const tagger = createTaggerRouter({ visionTagger, textTagger });
 
   const posts = await loadExistingPosts(paths.postsFile);
   console.log(`[backfill] loaded ${posts.length} posts`);

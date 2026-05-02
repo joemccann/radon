@@ -1,6 +1,8 @@
 #!/usr/bin/env node
-import { pathToFileURL } from "url";
+import path from "path";
+import { fileURLToPath, pathToFileURL } from "url";
 import fs from "fs-extra";
+import dotenv from "dotenv";
 import { resolveScraperPaths, seedPostsFileIfMissing } from "./paths.js";
 import { fetchCookieHeader, listTargets, runCdpCommand, selectMarketEarTab } from "./cdp.js";
 import { buildExtractionExpression, parsePayload } from "./extract.js";
@@ -8,20 +10,48 @@ import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
 import { runForever } from "./scheduler.js";
 import { createTagger, hydrateTags } from "./tagger.js";
+import { createTaggerRouter, createVisionTagger } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
+
+// Concurrently spawns this process without env inheritance from `next dev`,
+// so neither CEREBRAS_API_KEY nor ANTHROPIC_API_KEY are present. Load web/.env
+// (and root .env for completeness) up-front so both taggers can construct.
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+dotenv.config({ path: path.resolve(__dirname, "../../.env") });
+dotenv.config({ path: path.resolve(__dirname, "../../web/.env") });
 
 const INTERVAL_MS = 2 * 60 * 1000;
 const COOKIE_URLS = ["https://themarketear.com"];
 
-function buildTaggerOrNull({ projectRoot }) {
+function buildTextTaggerOrNull({ projectRoot }) {
   try {
     return createTagger({
       getTaxonomySnapshot: async () => (await loadTaxonomy(projectRoot)).tags,
     });
   } catch (err) {
-    console.warn(`[newsfeed] tagger disabled: ${err.message}`);
+    console.warn(`[newsfeed] text tagger disabled: ${err.message}`);
     return null;
   }
+}
+
+function buildVisionTaggerOrNull({ projectRoot, publicRoot }) {
+  try {
+    return createVisionTagger({
+      publicRoot,
+      getTaxonomySnapshot: async () => (await loadTaxonomy(projectRoot)).tags,
+    });
+  } catch (err) {
+    console.warn(`[newsfeed] vision tagger disabled: ${err.message}`);
+    return null;
+  }
+}
+
+function buildTaggerOrNull({ projectRoot, publicRoot }) {
+  const textTagger = buildTextTaggerOrNull({ projectRoot });
+  const visionTagger = buildVisionTaggerOrNull({ projectRoot, publicRoot });
+  if (!textTagger && !visionTagger) return null;
+  return createTaggerRouter({ visionTagger, textTagger });
 }
 
 export function createScraper(overrides = {}) {
@@ -66,7 +96,7 @@ export function createScraper(overrides = {}) {
 
     let tagsUpdated = false;
     let newTagsAdded = 0;
-    const tagger = buildTaggerOrNull({ projectRoot: paths.projectRoot });
+    const tagger = buildTaggerOrNull({ projectRoot: paths.projectRoot, publicRoot: paths.publicRoot });
     if (tagger) {
       try {
         tagsUpdated = await hydrateTags(merged, tagger, {

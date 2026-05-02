@@ -222,6 +222,8 @@ Visit `http://localhost:3000`.
 
 Radon uses [Clerk](https://clerk.com) for authentication. All Next.js routes are protected by Clerk middleware (public share routes are exempt). The FastAPI backend validates Clerk JWTs on every request. WebSocket connections use a short-lived ticket flow (30s TTL, single-use) to avoid passing JWTs in URLs. When Clerk is not configured (`CLERK_JWKS_URL` unset), auth is bypassed for local development.
 
+**Local dev convenience.** Clerk middleware **auto-bypasses on `localhost` / `127.0.0.1` / `::1` whenever `NODE_ENV !== "production"`**, so `npm run dev` never hits the sign-in wall on the developer's machine even when Clerk is fully configured. Production builds (`next build && next start`) set `NODE_ENV=production` and continue to enforce Clerk on every protected route. FastAPI applies the same localhost bypass to incoming requests with `client.host ∈ {127.0.0.1, ::1}`, which covers all server-to-server Next.js → FastAPI traffic. Tests cover both bypass paths in `web/tests/middleware-authless.test.ts`.
+
 **Key capabilities**
 
 - Real-time price streaming with live greeks
@@ -421,6 +423,7 @@ CTA freshness is now an explicit contract:
 - `data/menthorq_cache/health/cta-sync-latest.json` is the primary machine-readable health record, and `data/menthorq_cache/health/history/cta-sync-*.json` preserves run history. For older tooling, the latest record is also mirrored to `data/service_health/cta-sync.json`.
 - `scripts/run_cta_sync.sh` is the launchd-safe wrapper. It resolves the repo Python runtime, parses the root `.env` literally without shell expansion, and delegates to `scripts/cta_sync_service.py`.
 - `/api/menthorq/cta` compares the latest cache date against the latest closed trading day, triggers one background CTA sync when stale, and returns explicit `cache_meta` plus `sync_health` metadata (with a `sync_status` compatibility alias) so `/cta` can show stale/degraded state instead of silently presenting old data as current.
+- The route exports `dynamic = "force-dynamic"` and the `useMenthorqCta` hook fetches with `cache: "no-store"`, so Next.js never freezes the first response and the browser never serves a cached snapshot. The same contract applies to every other disk-backed route (`portfolio`, `journal`, `discover`, `flow-analysis`, `blotter`, `vcg`, `internals`, `performance`, `scanner`, `regime`, `gex`); enforcement lives in `web/tests/api-routes-no-cache-contract.test.ts`.
 
 For the `/regime` RVOL/COR1M chart, the CRI cache now preserves enough trailing SPY closes to rebuild the full prior 20 sessions of realized volatility. COR1M history now falls back to the official Cboe dashboard feed before Yahoo, and the API prefers the richer CRI cache candidate when scheduled snapshots lag and backfills missing `history[].realized_vol` values from cached closes before rendering the chart.
 
