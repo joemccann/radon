@@ -43,6 +43,13 @@
     "WEALTH-INEQUALITY",
     "REAL-ESTATE",
     "DEMOGRAPHICS",
-    "GAMMA"
+    "GAMMA",
+    "FACTOR",
+    "CHINA",
+    "EM-EXPORTS",
+    "PROPERTY",
+    "FINTECH",
+    "VALUATIONS",
+    "INFRASTRUCTURE"
   ]
 }
