@@ -14,6 +14,7 @@ import hashlib
 import json
 import logging
 import os
+import sys
 from datetime import datetime, timezone
 import sys
 import time
@@ -184,7 +185,13 @@ def _read_cache(path: Path) -> Optional[dict]:
 
 
 def _write_cache(path: Path, data: dict) -> None:
-    """Write JSON to cache file atomically via temp file + os.replace()."""
+    """Write JSON to cache file atomically via temp file + os.replace().
+
+    Phase 3 dual-write: also persists supported caches (vcg, gex, cri) to
+    Turso so app.radon.run reads see the same payload without depending on
+    the laptop's filesystem. Failures are silently logged and never break
+    the file write.
+    """
     import tempfile
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_path = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp", prefix=".cache_")
@@ -198,6 +205,46 @@ def _write_cache(path: Path, data: dict) -> None:
         except OSError:
             pass
         raise
+
+    _maybe_dual_write_to_db(path, data)
+
+
+def _maybe_dual_write_to_db(path: Path, data: dict) -> None:
+    """Best-effort DB mirror for known JSON caches."""
+    name = path.name
+    try:
+        # Defer import so server boot still works if libsql isn't installed.
+        from db.writer import (
+            record_service_health,
+            upsert_cri_snapshot,
+            upsert_discover_snapshot,
+            upsert_gex_snapshot,
+            upsert_oi_changes,
+            upsert_vcg_snapshot,
+        )
+    except ImportError:
+        return
+    try:
+        scan_iso = data.get("scan_time") if isinstance(data, dict) else None
+        if name == "vcg.json":
+            upsert_vcg_snapshot(scan_iso or _today_et_str(), data)
+            record_service_health("vcg-scan", "ok", finished_at=scan_iso)
+        elif name == "gex.json":
+            ticker = data.get("ticker", "SPX") if isinstance(data, dict) else "SPX"
+            upsert_gex_snapshot(ticker, scan_iso or _today_et_str(), data)
+            record_service_health("gex-scan", "ok", finished_at=scan_iso)
+        elif name == "cri.json":
+            session_date = (data.get("date") if isinstance(data, dict) else None) or _today_et_str()
+            upsert_cri_snapshot(session_date, scan_iso or _today_et_str(), data)
+            record_service_health("cri-scan", "ok", finished_at=scan_iso)
+        elif name == "discover.json":
+            upsert_discover_snapshot(scan_iso or _today_et_str(), data)
+            record_service_health("discover", "ok", finished_at=scan_iso)
+        elif name == "oi_changes.json":
+            upsert_oi_changes(scan_iso or _today_et_str(), data)
+            record_service_health("oi-changes", "ok", finished_at=scan_iso)
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        print(f"[server] db dual-write non-fatal for {name}: {exc}", file=sys.stderr)
 
 
 def _today_et_str() -> str:

@@ -896,6 +896,18 @@ def main():
             cache["ratings"][ticker] = data
     save_json(RATINGS_CACHE_FILE, cache)
 
+    # Phase 3 dual-write — best-effort.
+    try:
+        sys.path.insert(0, str(Path(__file__).parent))
+        from db.writer import record_service_health, upsert_analyst_ratings
+        fetched_at = cache["last_updated"]
+        for ticker, data in ratings_dict.items():
+            if not data.get("error"):
+                upsert_analyst_ratings(ticker, fetched_at, data)
+        record_service_health("analyst-ratings", "ok", finished_at=fetched_at)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Warning: analyst_ratings db dual-write failed: {exc}", file=sys.stderr)
+
 
 if __name__ == "__main__":
     main()

@@ -1579,6 +1579,16 @@ Examples:
             "market_open": market_open,
             **result,
         }
+        # Phase 3 dual-write — best-effort, never breaks the JSON pipeline.
+        try:
+            sys.path.insert(0, str(_PROJECT_DIR / "scripts"))
+            from db.writer import record_service_health, upsert_cri_snapshot
+            scan_iso = output["scan_time"]
+            session_date_iso = output.get("date") or scan_iso.split("T", 1)[0]
+            upsert_cri_snapshot(session_date_iso, scan_iso, output)
+            record_service_health("cri-scan", "ok", finished_at=scan_iso)
+        except Exception as exc:  # noqa: BLE001
+            print(f"[cri-scan] db dual-write non-fatal: {exc}", file=sys.stderr)
         print(json.dumps(output, indent=2))
     else:
         print_summary(result, market_open)

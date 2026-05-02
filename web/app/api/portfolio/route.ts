@@ -9,6 +9,7 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
+import { getDb } from "@/lib/db";
 
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -21,6 +22,22 @@ const PORTFOLIO_PATH = join(process.cwd(), "..", "data", "portfolio.json");
 const CACHE_TTL_MS = 60_000; // 1 minute
 
 const TRADE_LOG_PATH = join(process.cwd(), "..", "data", "trade_log.json");
+
+/** Read the latest portfolio snapshot from Turso, falling back to disk. */
+async function readPortfolioFromDb(): Promise<Record<string, unknown> | null> {
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
+      args: [],
+    });
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as unknown as { payload: string };
+    return JSON.parse(row.payload) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
 
 /** Load ticker → earliest trade date from trade_log.json */
 async function loadTradeLogDates(): Promise<Record<string, string>> {
@@ -85,6 +102,15 @@ export async function GET(): Promise<Response> {
   }
 
   try {
+    // Phase 3: prefer the Turso snapshot. Fall back to the JSON file
+    // when the DB is empty (cold replica) or unreachable.
+    const fromDb = await readPortfolioFromDb();
+    if (fromDb) {
+      const tradeLogDates = await loadTradeLogDates();
+      const response = NextResponse.json({ ...fromDb, trade_log_dates: tradeLogDates });
+      return setNoStoreResponseHeaders(response, requestId);
+    }
+
     const result = await readDataFile("data/portfolio.json", PortfolioData);
     if (!result.ok) {
       return setNoStoreResponseHeaders(

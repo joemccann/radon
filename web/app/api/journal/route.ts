@@ -3,6 +3,7 @@ import { readFile, stat } from "fs/promises";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { runJournalSync } from "@/lib/journalSync";
+import { getDb } from "@/lib/db";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -28,7 +29,26 @@ type ReconciliationPayload = {
   new_trades?: unknown[];
 };
 
+async function readJournalFromDb(): Promise<JournalPayload | null> {
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT payload FROM journal ORDER BY filled_at DESC, written_at DESC LIMIT 5000`,
+      args: [],
+    });
+    if (result.rows.length === 0) return null;
+    const trades = result.rows.map((r) =>
+      JSON.parse((r as unknown as { payload: string }).payload),
+    );
+    return { trades };
+  } catch {
+    return null;
+  }
+}
+
 async function readJournal(): Promise<JournalPayload> {
+  const fromDb = await readJournalFromDb();
+  if (fromDb) return fromDb;
   const raw = await readFile(TRADE_LOG_PATH, "utf-8");
   return JSON.parse(raw) as JournalPayload;
 }

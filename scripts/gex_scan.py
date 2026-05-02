@@ -904,6 +904,17 @@ def main():
     atomic_save(str(cache_path), result)
     print(f"  Cache written: {cache_path}", file=sys.stderr)
 
+    # Phase 3 dual-write — best-effort, never breaks the JSON pipeline.
+    try:
+        sys.path.insert(0, str(_PROJECT_DIR / "scripts"))
+        from db.writer import record_service_health, upsert_gex_snapshot
+        ticker = result.get("ticker", args.ticker if hasattr(args, "ticker") else "UNKNOWN")
+        scan_iso = result.get("scan_time") or datetime.now().isoformat()
+        upsert_gex_snapshot(ticker, scan_iso, result)
+        record_service_health("gex-scan", "ok", finished_at=scan_iso)
+    except Exception as exc:  # noqa: BLE001
+        print(f"[gex-scan] db dual-write non-fatal: {exc}", file=sys.stderr)
+
 
 def _print_summary(result: Dict[str, Any]) -> None:
     """Print human-readable GEX summary."""

@@ -4,6 +4,7 @@ import { join } from "path";
 import { isGexDataStale } from "@/lib/gexStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getDb } from "@/lib/db";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -69,7 +70,22 @@ function todayET(): string {
   return new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
 }
 
-async function readCachedGex(): Promise<Record<string, unknown> | null> {
+async function readCachedGexFromDb(): Promise<Record<string, unknown> | null> {
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT payload FROM gex_snapshots WHERE ticker = 'SPX' ORDER BY scan_time DESC LIMIT 1`,
+      args: [],
+    });
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as unknown as { payload: string };
+    return JSON.parse(row.payload) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+async function readCachedGexFromDisk(): Promise<Record<string, unknown> | null> {
   try {
     const raw = await readFile(CACHE_PATH, "utf-8");
     const jsonStart = raw.indexOf("{");
@@ -78,6 +94,10 @@ async function readCachedGex(): Promise<Record<string, unknown> | null> {
   } catch {
     return null;
   }
+}
+
+async function readCachedGex(): Promise<Record<string, unknown> | null> {
+  return (await readCachedGexFromDb()) ?? (await readCachedGexFromDisk());
 }
 
 function normalizeGexPayload(raw: Record<string, unknown>): Record<string, unknown> {

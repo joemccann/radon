@@ -1100,6 +1100,18 @@ def save_portfolio(portfolio: dict):
     checksum = atomic_save(str(PORTFOLIO_PATH), portfolio)
     print(f"✓ Saved portfolio to {PORTFOLIO_PATH} (checksum: {checksum[:12]}…)")
 
+    # Phase 3 dual-write — best-effort, non-fatal.
+    try:
+        import sys as _sys
+        from datetime import datetime as _datetime, timezone as _tz
+        _sys.path.insert(0, str(Path(__file__).parent))
+        from db.writer import record_service_health, upsert_portfolio_snapshot
+        taken_at = _datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
+        upsert_portfolio_snapshot(taken_at, portfolio)
+        record_service_health("portfolio-sync", "ok", finished_at=taken_at)
+    except Exception as exc:  # noqa: BLE001
+        print(f"  Warning: portfolio db dual-write failed: {exc}")
+
     # Track daily NAV for performance history
     acct = portfolio.get("account_summary", {})
     net_liq = acct.get("net_liquidation") or portfolio.get("bankroll")

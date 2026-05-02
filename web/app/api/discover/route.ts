@@ -3,6 +3,7 @@ import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
+import { getDb } from "@/lib/db";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -40,7 +41,42 @@ function buildCacheMeta(filePath: string): CacheMeta {
   }
 }
 
+async function readDiscoverFromDb(): Promise<{
+  data: Record<string, unknown>;
+  fetchedAtMs: number;
+} | null> {
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT scan_time, payload FROM discover_snapshots ORDER BY scan_time DESC LIMIT 1`,
+      args: [],
+    });
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+    return {
+      data: JSON.parse(row.payload) as Record<string, unknown>,
+      fetchedAtMs: Date.parse(row.scan_time) || Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildCacheMetaFromMs(ms: number): CacheMeta {
+  const ageSeconds = (Date.now() - ms) / 1000;
+  return {
+    last_refresh: new Date(ms).toISOString(),
+    age_seconds: Math.round(ageSeconds),
+    is_stale: ageSeconds > STALE_THRESHOLD_SECONDS,
+    stale_threshold_seconds: STALE_THRESHOLD_SECONDS,
+  };
+}
+
 export async function GET(): Promise<Response> {
+  const fromDb = await readDiscoverFromDb();
+  if (fromDb) {
+    return NextResponse.json({ ...fromDb.data, cache_meta: buildCacheMetaFromMs(fromDb.fetchedAtMs) });
+  }
   try {
     const raw = await readFile(DISCOVER_CACHE_PATH, "utf-8");
     const data = JSON.parse(raw);

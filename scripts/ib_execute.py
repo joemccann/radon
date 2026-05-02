@@ -344,7 +344,17 @@ class OrderExecutor:
         # Save
         with open(TRADE_LOG_PATH, 'w') as f:
             json.dump(trade_log, f, indent=2)
-        
+
+        # Phase 3 dual-write — best-effort.
+        try:
+            import sys as _sys
+            _sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
+            from db.writer import upsert_journal_entry
+            trade_id = f"{trade_entry['date']}T{trade_entry['time']}#{next_id}"
+            upsert_journal_entry(trade_id, trade_entry, filled_at=trade_entry.get("date"))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Warning: journal db dual-write failed: {exc}")
+
         print(f"\n📝 Logged to trade_log.json (ID: {next_id})")
         return True
 
