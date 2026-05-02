@@ -31,6 +31,11 @@ const config = {
     config.resolve.alias["@tools"] = resolve(__dirname, "..", "lib", "tools");
     return config;
   },
+  images: {
+    remotePatterns: [
+      { protocol: "https", hostname: "media.radon.run" },
+    ],
+  },
   async headers() {
     return [
       {

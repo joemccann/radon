@@ -8,6 +8,7 @@ import { fetchCookieHeader, listTargets, runCdpCommand, selectMarketEarTab } fro
 import { buildExtractionExpression, parsePayload } from "./extract.js";
 import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
+import { pushMedia } from "./push_media.js";
 import { runForever } from "./scheduler.js";
 import { createTagger } from "./tagger.js";
 import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
@@ -124,8 +125,18 @@ export function createScraper(overrides = {}) {
       postsFile: paths.postsFile,
     });
 
+    let pushedToHetzner = 0;
+    if (imagesUpdated) {
+      const pushResult = await pushMedia({ local: `${paths.mediaDir}/` });
+      if (pushResult.ok) {
+        pushedToHetzner = pushResult.transferred ?? 0;
+      } else {
+        console.warn(`[newsfeed] media push non-fatal: ${pushResult.reason}`);
+      }
+    }
+
     console.info(
-      `[newsfeed] cycle ok N=${merged.length} changed=${changed} imagesUpdated=${imagesUpdated} tagsUpdated=${tagsUpdated} newTags=${newTagsAdded} ms=${Date.now() - cycleStart}`,
+      `[newsfeed] cycle ok N=${merged.length} changed=${changed} imagesUpdated=${imagesUpdated} pushedToHetzner=${pushedToHetzner} tagsUpdated=${tagsUpdated} newTags=${newTagsAdded} ms=${Date.now() - cycleStart}`,
     );
     return { changed: true, count: merged.length };
   }

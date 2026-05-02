@@ -1,0 +1,61 @@
+{$DOMAIN:app.radon.run} {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/radon.log
+        format json
+    }
+
+    handle /ws* {
+        reverse_proxy localhost:8765
+    }
+
+    handle_path /api/ib/* {
+        reverse_proxy localhost:8321
+    }
+
+    handle {
+        reverse_proxy localhost:3000
+    }
+}
+
+# media.radon.run — static image host for newsfeed thumbnails.
+# Fed by laptop newsfeed scraper via rsync over Tailscale; both
+# localhost:3000 (laptop dev) and app.radon.run (Hetzner prod) read
+# from this host. Caddy auto-issues Let's Encrypt TLS on first request.
+media.radon.run {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        Access-Control-Allow-Origin "*"
+        # Image filenames are content-derived (slug+index) → immutable.
+        Cache-Control "public, max-age=31536000, immutable"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/media.log
+        format json
+    }
+
+    @health path /healthz
+    handle @health {
+        respond "ok" 200
+    }
+
+    handle {
+        root * /home/radon/radon-cloud/media
+        file_server {
+            precompressed gzip
+        }
+    }
+}
