@@ -4,6 +4,10 @@ import { join } from "path";
 import { isPerformanceBehindPortfolioSync, isPortfolioBehindCurrentEtSession } from "@/lib/performanceFreshness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+// Disable Next.js static caching: this handler reads live disk state
+// (data/*.json, cache files). Without this, the framework freezes the
+// first response and serves stale data until the dev server restarts.
+export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 

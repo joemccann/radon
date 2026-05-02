@@ -31,7 +31,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
 
   const fetchPortfolio = useCallback(async () => {
     try {
-      const res = await fetch("/api/portfolio");
+      const res = await fetch("/api/portfolio", { cache: "no-store" });
       if (!res.ok) throw new Error("Failed to fetch portfolio");
       const json = (await res.json()) as PortfolioData;
       setData(json);
@@ -58,7 +58,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
     syncingRef.current = true;
     setSyncing(true);
     try {
-      const res = await fetch("/api/portfolio", { method: "POST" });
+      const res = await fetch("/api/portfolio", { method: "POST", cache: "no-store" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");

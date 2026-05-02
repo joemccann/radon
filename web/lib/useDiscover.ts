@@ -26,7 +26,7 @@ export function useDiscover(active: boolean): UseDiscoverReturn {
   const triggerSync = useCallback(async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/discover", { method: "POST" });
+      const res = await fetch("/api/discover", { method: "POST", cache: "no-store" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Discover sync failed");
@@ -52,7 +52,7 @@ export function useDiscover(active: boolean): UseDiscoverReturn {
 
     const init = async () => {
       try {
-        const res = await fetch("/api/discover");
+        const res = await fetch("/api/discover", { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to fetch discover data");
         const json = (await res.json()) as DiscoverData;
         setData(json);

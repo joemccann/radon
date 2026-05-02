@@ -30,7 +30,7 @@ export function useJournal(active = true): UseJournalReturn {
   const syncWithIB = useCallback(async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/journal/sync", { method: "POST" });
+      const res = await fetch("/api/journal/sync", { method: "POST", cache: "no-store" });
       const body = await res.json();
       if (!res.ok) throw new Error(body.error || "Sync failed");
       setLastSyncResult({ imported: body.imported, skipped: body.skipped });

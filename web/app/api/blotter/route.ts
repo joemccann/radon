@@ -2,6 +2,10 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
+// Disable Next.js static caching: this handler reads live disk state
+// (data/*.json, cache files). Without this, the framework freezes the
+// first response and serves stale data until the dev server restarts.
+export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 

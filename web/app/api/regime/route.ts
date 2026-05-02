@@ -6,6 +6,10 @@ import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCa
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+// Disable Next.js static caching: this handler reads live disk state
+// (data/*.json, cache files). Without this, the framework freezes the
+// first response and serves stale data until the dev server restarts.
+export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 

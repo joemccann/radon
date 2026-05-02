@@ -61,7 +61,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
       setSyncing(true);
     }
     try {
-      const res = await fetch(endpoint, { method });
+      const res = await fetch(endpoint, { method, cache: "no-store" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? `Sync failed (${res.status})`);
@@ -108,7 +108,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
 
     const init = async () => {
       try {
-        const res = await fetch(endpoint, { method: "GET" });
+        const res = await fetch(endpoint, { method: "GET", cache: "no-store" });
         if (!res.ok) throw new Error("Failed to fetch cached data");
         const json = (await res.json()) as T;
         setData(json);

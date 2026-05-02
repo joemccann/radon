@@ -27,7 +27,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   const triggerSync = useCallback(async () => {
     setSyncing(true);
     try {
-      const res = await fetch("/api/orders", { method: "POST" });
+      const res = await fetch("/api/orders", { method: "POST", cache: "no-store" });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");
@@ -52,7 +52,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   useEffect(() => {
     const init = async () => {
       try {
-        const res = await fetch("/api/orders");
+        const res = await fetch("/api/orders", { cache: "no-store" });
         if (!res.ok) throw new Error("Failed to fetch orders");
         const json = (await res.json()) as OrdersData;
         setData(json);
