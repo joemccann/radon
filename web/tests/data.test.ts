@@ -149,6 +149,29 @@ describe("navItems", () => {
     const hrefs = navItems.map((n) => n.href);
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
+
+  it("orders Flow Analysis directly below Discover", () => {
+    const routes = navItems.map((n) => n.route);
+    const discoverIdx = routes.indexOf("discover");
+    const flowIdx = routes.indexOf("flow-analysis");
+    expect(discoverIdx).toBeGreaterThanOrEqual(0);
+    expect(flowIdx).toBe(discoverIdx + 1);
+  });
+
+  it("locks the full visible-nav order", () => {
+    expect(navItems.map((n) => n.route)).toEqual([
+      "dashboard",
+      "portfolio",
+      "performance", // hidden: true, but still part of the canonical order
+      "orders",
+      "scanner",
+      "discover",
+      "flow-analysis",
+      "journal",
+      "regime",
+      "cta",
+    ]);
+  });
 });
 
 // =============================================================================

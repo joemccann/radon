@@ -26,12 +26,12 @@ export const PI_COMMAND_ALIASES: Record<string, string> = {
 
 export const navItems: WorkspaceNavItem[] = [
   { label: "Dashboard", route: "dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: LineChart },
   { label: "Portfolio", route: "portfolio", href: "/portfolio", icon: Circle },
   { label: "Performance", route: "performance", href: "/performance", icon: BarChart3, hidden: true },
   { label: "Orders", route: "orders", href: "/orders", icon: ClipboardList },
   { label: "Scanner", route: "scanner", href: "/scanner", icon: Sparkles },
   { label: "Discover", route: "discover", href: "/discover", icon: Search },
+  { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: LineChart },
   { label: "Journal", route: "journal", href: "/journal", icon: Wrench },
   { label: "Regime", route: "regime", href: "/regime/cri", icon: Shield },
   { label: "CTA", route: "cta", href: "/cta", icon: Activity },
