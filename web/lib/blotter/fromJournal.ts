@@ -539,13 +539,91 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
   return out;
 }
 
+/* ─── Legacy blotter.json integration ──────────────────────────────────── */
+
+/**
+ * Match an exec_id against a legacy blotter index. Journal-side ids may be
+ * composite (`"a+b+c"` from journal_rehydrate's multi-fill collapse), so we
+ * try the composite first and then each constituent id.
+ */
+function lookupLegacyTrade(
+  execId: string,
+  legacyByExecId: Map<string, BlotterTradeShape>,
+): BlotterTradeShape | undefined {
+  if (!execId) return undefined;
+  const direct = legacyByExecId.get(execId);
+  if (direct) return direct;
+  if (!execId.includes("+")) return undefined;
+  for (const part of execId.split("+")) {
+    const hit = legacyByExecId.get(part);
+    if (hit) return hit;
+  }
+  return undefined;
+}
+
+/**
+ * Index every legacy trade by every exec_id its executions reference, so we
+ * can resolve composite journal ids regardless of which leg appears first.
+ */
+function indexLegacyByExecId(
+  legacy: BlotterPayload | null | undefined,
+): Map<string, BlotterTradeShape> {
+  const out = new Map<string, BlotterTradeShape>();
+  if (!legacy) return out;
+  const all: BlotterTradeShape[] = [
+    ...(legacy.closed_trades ?? []),
+    ...(legacy.open_trades ?? []),
+  ];
+  for (const trade of all) {
+    for (const exec of trade.executions ?? []) {
+      if (exec?.exec_id) out.set(exec.exec_id, trade);
+    }
+  }
+  return out;
+}
+
+/**
+ * Collect the set of legacy exec_ids that the journal has already matched
+ * against, so we know which legacy-only trades to splice into the union.
+ */
+function collectClaimedLegacyExecIds(
+  journalRows: JournalRow[],
+  legacyByExecId: Map<string, BlotterTradeShape>,
+): Set<string> {
+  const claimed = new Set<string>();
+  for (const row of journalRows) {
+    const execId = (row?.payload?.ib_exec_id ?? "").toString();
+    if (!execId) continue;
+    const hit = lookupLegacyTrade(execId, legacyByExecId);
+    if (!hit) continue;
+    for (const e of hit.executions ?? []) {
+      if (e?.exec_id) claimed.add(e.exec_id);
+    }
+  }
+  return claimed;
+}
+
 /**
  * Project a list of journal rows into the BlotterPayload shape the
  * /orders historical-trades panel expects.
  *
+ * When `legacyBlotter` is supplied (data/blotter.json), the deriver
+ * performs a UNION + PREFERENCE FALLBACK:
+ *   1. Journal rows lacking explicit cost_basis / proceeds / realized_pnl
+ *      adopt those numbers from the matching legacy trade (matched by
+ *      exec_id, including composite "a+b+c" matching).
+ *   2. Journal rows carrying explicit P&L (post-bbc776e rehydrate) ignore
+ *      the legacy values — the journal is fresher.
+ *   3. Legacy trades whose exec_id never appears in the journal are spliced
+ *      into the union output (so the historical record from before the
+ *      journal table existed isn't lost).
+ *
  * Pure function — no I/O, no side effects.
  */
-export function journalRowsToBlotter(rows: JournalRow[]): BlotterPayload {
+export function journalRowsToBlotter(
+  rows: JournalRow[],
+  legacyBlotter?: BlotterPayload | null,
+): BlotterPayload {
   const closed: BlotterTradeShape[] = [];
   const open: BlotterTradeShape[] = [];
   let totalCommissions = 0;
@@ -555,24 +633,70 @@ export function journalRowsToBlotter(rows: JournalRow[]): BlotterPayload {
   // rows that lack them. Rows that already carry the explicit fields are
   // skipped (rowToBlotterTrade reads them directly).
   const synthFields = buildLotMatchedFields(rows);
+  const legacyByExecId = indexLegacyByExecId(legacyBlotter);
 
   rows.forEach((row, idx) => {
     if (!row?.payload || typeof row.payload !== "object") return;
+
+    const payload = row.payload;
+    const journalHasExplicitPnl =
+      typeof payload.cost_basis === "number"
+      || typeof payload.proceeds === "number"
+      || typeof payload.realized_pnl === "number";
+
+    // Legacy fallback: when the journal row lacks explicit P&L AND there's
+    // a matching exec_id in legacy blotter.json, prefer the legacy values
+    // for cost_basis / proceeds / realized_pnl. Everything else (symbol,
+    // qty, dates, contract metadata) keeps using the journal — it's the
+    // fresher source.
+    let legacyHit: BlotterTradeShape | undefined;
+    if (!journalHasExplicitPnl && legacyByExecId.size > 0) {
+      const execId = (payload.ib_exec_id ?? "").toString();
+      legacyHit = lookupLegacyTrade(execId, legacyByExecId);
+    }
+
+    if (legacyHit) {
+      const merged: JournalTradePayload = {
+        ...payload,
+        cost_basis: legacyHit.cost_basis,
+        proceeds: legacyHit.proceeds,
+        realized_pnl:
+          legacyHit.realized_pnl != null ? legacyHit.realized_pnl : payload.realized_pnl,
+      };
+      if (typeof legacyHit.realized_quantity === "number") {
+        merged.realized_quantity = legacyHit.realized_quantity;
+      }
+      if (typeof legacyHit.total_quantity === "number") {
+        merged.total_round_trip_quantity = legacyHit.total_quantity;
+      }
+      const trade = rowToBlotterTrade({ ...row, payload: merged });
+      // Honour the legacy is_closed verdict — legacy already lot-matched.
+      trade.is_closed = legacyHit.is_closed;
+      totalCommissions += trade.total_commission || 0;
+      if (trade.is_closed) {
+        realizedPnl += trade.realized_pnl ?? 0;
+        closed.push(trade);
+      } else {
+        open.push(trade);
+      }
+      return;
+    }
+
     const synth = synthFields.get(idx);
     if (synth) {
       // Inject synthesized fields into the payload so rowToBlotterTrade
       // reads them as if they were persisted. realized_pnl is left
       // unset (null synth value) when the contract is still fully open.
       const merged: JournalTradePayload = {
-        ...row.payload,
-        cost_basis: row.payload.cost_basis ?? synth.cost_basis,
-        proceeds: row.payload.proceeds ?? synth.proceeds,
-        realized_quantity: row.payload.realized_quantity ?? synth.realized_quantity,
+        ...payload,
+        cost_basis: payload.cost_basis ?? synth.cost_basis,
+        proceeds: payload.proceeds ?? synth.proceeds,
+        realized_quantity: payload.realized_quantity ?? synth.realized_quantity,
         total_round_trip_quantity:
-          row.payload.total_round_trip_quantity ?? synth.total_round_trip_quantity,
+          payload.total_round_trip_quantity ?? synth.total_round_trip_quantity,
       };
       if (synth.realized_pnl !== null) {
-        merged.realized_pnl = row.payload.realized_pnl ?? synth.realized_pnl;
+        merged.realized_pnl = payload.realized_pnl ?? synth.realized_pnl;
       }
       const trade = rowToBlotterTrade({ ...row, payload: merged });
       // Honour the lot-matched is_closed verdict (rowToBlotterTrade's
@@ -599,8 +723,34 @@ export function journalRowsToBlotter(rows: JournalRow[]): BlotterPayload {
     }
   });
 
+  // Splice in legacy trades that the journal never matched. These are the
+  // pre-journal historical records (before the Turso table existed).
+  if (legacyBlotter && legacyByExecId.size > 0) {
+    const claimed = collectClaimedLegacyExecIds(rows, legacyByExecId);
+    const splice = (trade: BlotterTradeShape) => {
+      const anyClaimed = (trade.executions ?? []).some(
+        (e) => e?.exec_id && claimed.has(e.exec_id),
+      );
+      if (anyClaimed) return;
+      totalCommissions += trade.total_commission || 0;
+      if (trade.is_closed) {
+        realizedPnl += trade.realized_pnl ?? 0;
+        closed.push(trade);
+      } else {
+        open.push(trade);
+      }
+    };
+    (legacyBlotter.closed_trades ?? []).forEach(splice);
+    (legacyBlotter.open_trades ?? []).forEach(splice);
+  }
+
+  // as_of = max(journal max(filled_at), legacy as_of).
+  const journalAsOf = maxFilledAt(rows);
+  const legacyAsOf = legacyBlotter?.as_of ?? "";
+  const asOf = journalAsOf > legacyAsOf ? journalAsOf : legacyAsOf;
+
   return {
-    as_of: maxFilledAt(rows),
+    as_of: asOf,
     summary: {
       closed_trades: closed.length,
       open_trades: open.length,

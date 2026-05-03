@@ -3,7 +3,11 @@ import { readFile } from "fs/promises";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
-import { journalRowsToBlotter, type JournalRow } from "@/lib/blotter/fromJournal";
+import {
+  journalRowsToBlotter,
+  type BlotterPayload,
+  type JournalRow,
+} from "@/lib/blotter/fromJournal";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -13,11 +17,7 @@ export const runtime = "nodejs";
 
 const BLOTTER_CACHE_PATH = join(process.cwd(), "..", "data", "blotter.json");
 
-async function readBlotterFromJournal(): Promise<unknown | null> {
-  // Single source of truth: the Turso `journal` table. Same data the
-  // /journal page reads, projected into the historical-trades shape.
-  // When the table is empty we fall through to the legacy
-  // blotter.json mirror so deploys with an unbootstrapped DB still work.
+async function readJournalRows(): Promise<JournalRow[] | null> {
   try {
     const db = getDb();
     const result = await db.execute({
@@ -25,34 +25,43 @@ async function readBlotterFromJournal(): Promise<unknown | null> {
       args: [],
     });
     if (result.rows.length === 0) return null;
-    const rows: JournalRow[] = result.rows.map((r) => {
+    return result.rows.map((r) => {
       const row = r as unknown as { payload: string; filled_at: string | null };
       return {
         payload: JSON.parse(row.payload),
         filled_at: row.filled_at,
       };
     });
-    return journalRowsToBlotter(rows);
   } catch {
     return null;
   }
 }
 
-async function readBlotterFromDisk(): Promise<unknown | null> {
+async function readBlotterFromDisk(): Promise<BlotterPayload | null> {
   try {
     const raw = await readFile(BLOTTER_CACHE_PATH, "utf-8");
-    return JSON.parse(raw);
+    return JSON.parse(raw) as BlotterPayload;
   } catch {
     return null;
   }
+}
+
+async function buildUnion(): Promise<BlotterPayload | null> {
+  // Read both sources unconditionally so the deriver can perform its
+  // union + preference fallback. Order doesn't matter — both are awaited
+  // in parallel.
+  const [rows, legacy] = await Promise.all([
+    readJournalRows(),
+    readBlotterFromDisk(),
+  ]);
+  if (rows && rows.length > 0) return journalRowsToBlotter(rows, legacy);
+  if (legacy) return legacy;
+  return null;
 }
 
 export async function GET(): Promise<Response> {
-  const fromJournal = await readBlotterFromJournal();
-  if (fromJournal) return NextResponse.json(fromJournal);
-
-  const fromDisk = await readBlotterFromDisk();
-  if (fromDisk) return NextResponse.json(fromDisk);
+  const union = await buildUnion();
+  if (union) return NextResponse.json(union);
 
   return NextResponse.json({
     as_of: "",
@@ -71,16 +80,13 @@ export async function POST(): Promise<Response> {
     return NextResponse.json(data);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Blotter sync failed";
-    const fromJournal = await readBlotterFromJournal();
-    if (fromJournal) {
-      const res = NextResponse.json(fromJournal);
-      res.headers.set("X-Sync-Warning", `Blotter sync failed - serving journal-derived data (${message})`);
-      return res;
-    }
-    const fromDisk = await readBlotterFromDisk();
-    if (fromDisk) {
-      const res = NextResponse.json(fromDisk);
-      res.headers.set("X-Sync-Warning", `Blotter sync failed - serving cached data (${message})`);
+    const union = await buildUnion();
+    if (union) {
+      const res = NextResponse.json(union);
+      res.headers.set(
+        "X-Sync-Warning",
+        `Blotter sync failed - serving union of journal + cached data (${message})`,
+      );
       return res;
     }
     return NextResponse.json({ error: message }, { status: 502 });

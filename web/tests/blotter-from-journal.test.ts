@@ -6,8 +6,44 @@
 import { describe, it, expect } from "vitest";
 import {
   journalRowsToBlotter,
+  type BlotterPayload,
+  type BlotterTradeShape,
   type JournalRow,
 } from "../lib/blotter/fromJournal";
+
+function legacyTrade(overrides: Partial<BlotterTradeShape>): BlotterTradeShape {
+  return {
+    symbol: "?",
+    contract_desc: "",
+    sec_type: "OPT",
+    is_closed: true,
+    net_quantity: 0,
+    total_quantity: 0,
+    total_commission: 0,
+    realized_pnl: null,
+    cost_basis: 0,
+    proceeds: 0,
+    total_cash_flow: 0,
+    executions: [],
+    ...overrides,
+  };
+}
+
+function legacyPayload(trades: BlotterTradeShape[], asOf = "2026-03-26T00:00:00Z"): BlotterPayload {
+  const closed = trades.filter((t) => t.is_closed);
+  const open = trades.filter((t) => !t.is_closed);
+  return {
+    as_of: asOf,
+    summary: {
+      closed_trades: closed.length,
+      open_trades: open.length,
+      total_commissions: trades.reduce((a, t) => a + (t.total_commission || 0), 0),
+      realized_pnl: closed.reduce((a, t) => a + (t.realized_pnl ?? 0), 0),
+    },
+    closed_trades: closed,
+    open_trades: open,
+  };
+}
 
 function row(payload: Record<string, unknown>, filled_at?: string): JournalRow {
   return { payload: payload as JournalRow["payload"], filled_at: filled_at ?? null };
@@ -396,5 +432,293 @@ describe("journalRowsToBlotter", () => {
     expect(body.closed_trades[0].realized_pnl).toBeCloseTo(305, 4);
     // Sanity: as_of is the journal MAX(filled_at), not 1970/null.
     expect(body.as_of).toBe("2026-05-02T18:00:00Z");
+  });
+
+  /* ─── Union + preference fallback ──────────────────────────────────── */
+
+  describe("legacy blotter union + preference fallback", () => {
+    it("journal row lacks P&L → uses legacy P&L when exec_id matches", () => {
+      // Pre-bbc776e journal row: aggregated buy+sell into one volume-
+      // weighted record. cost_basis / proceeds / realized_pnl are absent.
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "AAPL",
+            structure: "Closed Call $190 2026-04-30",
+            action: "CLOSED",
+            fill_price: 5.0,
+            total_cost: 25000,
+            contracts: 50,
+            commission: 5,
+            ib_exec_id: "legacy-exec-1",
+          },
+          "2026-04-30",
+        ),
+      ];
+      const legacy = legacyPayload([
+        legacyTrade({
+          symbol: "AAPL",
+          contract_desc: "AAPL Closed Call $190",
+          sec_type: "OPT",
+          is_closed: true,
+          total_quantity: 50,
+          total_commission: 5,
+          realized_pnl: 1234.56,
+          cost_basis: 22000,
+          proceeds: 23234.56,
+          total_cash_flow: 1234.56,
+          executions: [
+            {
+              exec_id: "legacy-exec-1",
+              time: "2026-04-30T09:30:00",
+              side: "BOT",
+              quantity: 50,
+              price: 4.4,
+              commission: 2.5,
+              notional_value: 22000,
+              net_cash_flow: -22002.5,
+            },
+          ],
+        }),
+      ]);
+
+      const out = journalRowsToBlotter(rows, legacy);
+      expect(out.summary.closed_trades).toBe(1);
+      const trade = out.closed_trades[0];
+      expect(trade.symbol).toBe("AAPL"); // journal-fresh metadata
+      expect(trade.realized_pnl).toBeCloseTo(1234.56, 4);
+      expect(trade.cost_basis).toBeCloseTo(22000, 2);
+      expect(trade.proceeds).toBeCloseTo(23234.56, 2);
+      expect(trade.is_closed).toBe(true);
+    });
+
+    it("journal row has explicit P&L (post-bbc776e) → ignores legacy", () => {
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 2,
+            ticker: "MSFT",
+            structure: "Closed Put $400 2026-04-30",
+            action: "SELL_OPTION",
+            fill_price: 3.0,
+            total_cost: 15000,
+            contracts: 50,
+            commission: 2.5,
+            ib_exec_id: "msft-exec-1",
+            // Explicit fields — journal_rehydrate ran w/ bbc776e in effect.
+            realized_pnl: 999.99,
+            cost_basis: 14000,
+            proceeds: 14999.99,
+          },
+          "2026-04-30",
+        ),
+      ];
+      const legacy = legacyPayload([
+        legacyTrade({
+          symbol: "MSFT",
+          is_closed: true,
+          total_commission: 2.5,
+          // Different (stale) numbers — journal must win.
+          realized_pnl: 111.11,
+          cost_basis: 1,
+          proceeds: 2,
+          executions: [
+            {
+              exec_id: "msft-exec-1",
+              time: "2026-04-30T09:30:00",
+              side: "SLD",
+              quantity: 50,
+              price: 3.0,
+              commission: 2.5,
+              notional_value: 15000,
+              net_cash_flow: 14997.5,
+            },
+          ],
+        }),
+      ]);
+
+      const out = journalRowsToBlotter(rows, legacy);
+      const trade = out.closed_trades[0];
+      expect(trade.realized_pnl).toBeCloseTo(999.99, 4);
+      expect(trade.cost_basis).toBeCloseTo(14000, 2);
+      expect(trade.proceeds).toBeCloseTo(14999.99, 2);
+    });
+
+    it("trade only in legacy → spliced into union output", () => {
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "NVDA",
+            structure: "Closed Call",
+            action: "SELL_OPTION",
+            fill_price: 1,
+            total_cost: 100,
+            contracts: 1,
+            commission: 0.5,
+            ib_exec_id: "in-journal",
+            realized_pnl: 50,
+            cost_basis: 50,
+            proceeds: 100,
+          },
+          "2026-04-15",
+        ),
+      ];
+      const legacy = legacyPayload([
+        legacyTrade({
+          symbol: "GOOG",
+          contract_desc: "GOOG Closed Spread",
+          is_closed: true,
+          total_commission: 1.0,
+          realized_pnl: 250,
+          cost_basis: 1000,
+          proceeds: 1250,
+          executions: [
+            {
+              exec_id: "legacy-only-1",
+              time: "2026-02-01",
+              side: "SLD",
+              quantity: 10,
+              price: 125,
+              commission: 1.0,
+              notional_value: 1250,
+              net_cash_flow: 1249,
+            },
+          ],
+        }),
+      ]);
+
+      const out = journalRowsToBlotter(rows, legacy);
+      // Both should be present.
+      expect(out.summary.closed_trades).toBe(2);
+      const symbols = out.closed_trades.map((t) => t.symbol).sort();
+      expect(symbols).toEqual(["GOOG", "NVDA"]);
+      const goog = out.closed_trades.find((t) => t.symbol === "GOOG")!;
+      expect(goog.realized_pnl).toBeCloseTo(250, 4);
+    });
+
+    it("trade only in journal (new fill) → passes through unchanged", () => {
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "SPY",
+            structure: "Long Call $470 2026-05-30",
+            action: "BUY_OPTION",
+            fill_price: 4.10,
+            total_cost: 1640,
+            contracts: 4,
+            commission: 1.6,
+            ib_exec_id: "post-326-fill",
+            right: "C",
+            strike: 470,
+            expiry: "20260530",
+          },
+          "2026-04-15T15:30:00Z",
+        ),
+      ];
+      const legacy = legacyPayload([
+        legacyTrade({
+          symbol: "OTHER",
+          is_closed: true,
+          realized_pnl: 99,
+          cost_basis: 1,
+          proceeds: 100,
+          executions: [
+            {
+              exec_id: "unrelated",
+              time: "2026-01-01",
+              side: "BOT",
+              quantity: 1,
+              price: 1,
+              commission: 0,
+              notional_value: 1,
+              net_cash_flow: -1,
+            },
+          ],
+        }),
+      ]);
+
+      const out = journalRowsToBlotter(rows, legacy);
+      // Journal row → open, legacy unrelated → spliced into closed.
+      expect(out.summary.open_trades).toBe(1);
+      expect(out.summary.closed_trades).toBe(1);
+      const spy = out.open_trades[0];
+      expect(spy.symbol).toBe("SPY");
+      expect(spy.is_closed).toBe(false);
+      // Journal row had no explicit P&L AND no legacy match — falls back
+      // to the row-level heuristic.
+      expect(spy.cost_basis).toBe(1640);
+      expect(spy.proceeds).toBe(0);
+    });
+
+    it("composite exec_id 'a+b' matches legacy exec_id 'a'", () => {
+      // journal_rehydrate.py joins multi-fill exec ids with '+'. Legacy
+      // blotter.json stores each fill separately; the deriver must match
+      // on any constituent.
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "AMD",
+            structure: "Closed Call $200",
+            action: "CLOSED",
+            fill_price: 2.0,
+            total_cost: 4000,
+            contracts: 20,
+            commission: 1.5,
+            ib_exec_id: "fill-a+fill-b+fill-c",
+          },
+          "2026-04-20",
+        ),
+      ];
+      const legacy = legacyPayload([
+        legacyTrade({
+          symbol: "AMD",
+          is_closed: true,
+          total_commission: 1.5,
+          realized_pnl: 567.89,
+          cost_basis: 3500,
+          proceeds: 4067.89,
+          executions: [
+            // The legacy trade keys on the second leg only — we must still
+            // resolve via the composite-split fallback.
+            {
+              exec_id: "fill-b",
+              time: "2026-04-20T10:00:00",
+              side: "SLD",
+              quantity: 20,
+              price: 2.0,
+              commission: 1.5,
+              notional_value: 4000,
+              net_cash_flow: 3998.5,
+            },
+          ],
+        }),
+      ]);
+
+      const out = journalRowsToBlotter(rows, legacy);
+      expect(out.summary.closed_trades).toBe(1);
+      const trade = out.closed_trades[0];
+      expect(trade.symbol).toBe("AMD");
+      expect(trade.realized_pnl).toBeCloseTo(567.89, 4);
+      expect(trade.cost_basis).toBeCloseTo(3500, 2);
+      expect(trade.proceeds).toBeCloseTo(4067.89, 2);
+    });
+
+    it("as_of = MAX(journal max filled_at, legacy as_of)", () => {
+      const rows: JournalRow[] = [
+        row(
+          { ticker: "X", action: "BUY_OPTION", contracts: 1, fill_price: 1, total_cost: 100 },
+          "2026-05-01T00:00:00Z",
+        ),
+      ];
+      const olderLegacy = legacyPayload([], "2026-03-26T00:00:00Z");
+      expect(journalRowsToBlotter(rows, olderLegacy).as_of).toBe("2026-05-01T00:00:00Z");
+
+      const newerLegacy = legacyPayload([], "2027-01-01T00:00:00Z");
+      expect(journalRowsToBlotter(rows, newerLegacy).as_of).toBe("2027-01-01T00:00:00Z");
+    });
   });
 });
