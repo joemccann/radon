@@ -648,13 +648,25 @@ Python: `RotatingFileHandler` (10MB, 2 backups). System: `newsyslog` via `/etc/n
 
 ## Two-Mode Architecture (cloud-services migration)
 
-`scripts/cloud.sh` puts the laptop in **Hetzner mode** (`RADON_MODE=hetzner`). All schedulers run inside the `radon-services` container on the VPS; the laptop runs only Next.js + the chrome-cdp newsfeed scraper. `app.radon.run` keeps showing fresh data when the laptop is closed.
+`scripts/cloud.sh` puts the laptop in **Hetzner mode** (`RADON_MODE=hetzner`). Schedulers run as host systemd services on the Hetzner VPS (`radon-api`, `radon-monitor`, `radon-relay`, `radon-refresh`, `radon-nextjs`); the laptop runs only Next.js + the chrome-cdp newsfeed scraper. `app.radon.run` keeps showing fresh data when the laptop is closed.
 
 `scripts/local.sh` puts the laptop in **Local mode** (`RADON_MODE=local`). Laptop launchd plists own all schedulers; no Hetzner dependency.
 
 Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-west-2.turso.io`). Every Next.js + FastAPI + scheduler process holds an embedded replica at `data/replica.db` (gitignored) for sub-millisecond local reads. JSON files in `data/` are written alongside DB rows as a fallback / debug-export.
 
+**Schema + writers:** `scripts/db/migrations/0001_init.sql` (12 hot-data tables). Node writes via `scripts/db/writer.js` + `web/lib/db.ts`; Python writes via `scripts/db/writer.py` + `scripts/db/client.py`. Routes prefer DB and fall back to disk.
+
 **Image host**: `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Both Next.js peers reference absolute URLs in `posts.images`.
+
+**Production build constraint**: Next.js 16 prerender crashes on `/_global-error` + `/_not-found` (root ClerkProvider context isn't materialised in isolated workers). `web/package.json` build script uses `next build --experimental-build-mode=compile` to skip prerender. `app/error.tsx`, `app/[ticker]/not-found.tsx`, and `app/global-error.tsx` use plain `<a>` and pure JSX (no `next/link`, no `useEffect`, no `globals.css`) so they don't trigger the same useContext invariant.
+
+**Newsfeed dependency**: `themarketear.com` requires the laptop running. The scraper is the 4th `npm run dev` child and:
+1. Polls `themarketear.com/newsfeed` via chrome-cdp every 120s (Chrome Debug.app must be running and logged in).
+2. Dual-writes posts to `posts` table + `web/public/data/posts.json`.
+3. Auto-grows `tag_taxonomy` table via Cerebras + Anthropic taggers.
+4. Rsyncs new images over Tailscale to `media.radon.run`.
+
+If the laptop is closed, no NEW posts arrive — but the dashboard keeps showing the last-known feed because `posts` rows persist in Turso.
 
 Operator runbook: `docs/cloud-services.md`.
 

@@ -11,18 +11,30 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
                 ┌─────────────────┴─────────────────┐
                 │   embedded replica.db sync ~60s   │
                 ▼                                   ▼
-         LAPTOP dev process                 HETZNER production
-         localhost:3000 (Next.js)           app.radon.run (Caddy → Next.js)
-         FastAPI 8321                       FastAPI 8321 (private)
-         IB realtime relay 8765             radon-services systemd timers
+         LAPTOP dev process                 HETZNER production (5.78.148.38)
+         localhost:3000 (Next.js)           app.radon.run (Caddy → radon-nextjs)
+         FastAPI 8321                       FastAPI 8321 (radon-api, private)
+         IB realtime relay 8765             radon-relay, radon-monitor (host systemd)
          newsfeed scraper (chrome-cdp)      ib-gateway docker (4001)
                                             media.radon.run (Caddy static)
 ```
 
 - **Database**: Turso (libSQL) — every Next.js / FastAPI / scheduler process holds a SQLite-fast embedded replica, writes go to cloud and stream back.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner systemd timers (cloud mode) — same scripts, different host.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd services (cloud mode). The `docker/services/` directory in this repo is a containerized alternative we designed but did not deploy — production currently uses host-installed services at `/home/radon/radon-cloud/services/*.service`.
 - **Browser-bound**: themarketear.com newsfeed scraper always runs on the laptop (magic-link login can't be automated). Everything else can run anywhere.
+
+## Newsfeed (`themarketear.com`) — Always-on dependency
+
+The newsfeed is the **only** part of Radon that fundamentally requires the laptop. Every other service runs on Hetzner. Operating procedure:
+
+1. Keep `Chrome Debug.app` running with port 9222 + an authenticated `themarketear.com` tab. (`scripts/cdp.mjs list` should show the tab.)
+2. Keep `Tailscale` connected on the laptop so `push_media.js` can rsync new images to `radon@ib-gateway:/home/radon/radon-cloud/media/`.
+3. Keep `npm run dev` (or `scripts/cloud.sh` / `scripts/local.sh`) running — the newsfeed scraper is the 4th child and polls every 120s.
+4. **If you want the newsfeed to keep updating without the full dev stack**, run *only* the scraper: `node scripts/newsfeed/index.js`. It needs `web/.env` (CEREBRAS_API_KEY + ANTHROPIC_API_KEY) and the root `.env` (TURSO_DB_URL + TURSO_AUTH_TOKEN). Both peers (`localhost:3000` + `app.radon.run`) read newly-arrived posts immediately.
+5. Closing the laptop does NOT break `app.radon.run` — the dashboard keeps rendering the last-known posts.json from the DB, just no new arrivals until the laptop is back online.
+
+If the themarketear cookie ever rotates, log in fresh in the Chrome Debug.app tab; the scraper picks up the new session on the next cycle (`fetchCookieHeader` reads cookies via `Network.getCookies`).
 
 ## Mode switch
 
@@ -36,27 +48,42 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 ## Deployment
 
-### Initial Hetzner bring-up (one-time)
+### Production layout on Hetzner
 
-```bash
-# On Hetzner VPS, as radon
-mkdir -p /home/radon/radon-cloud/services
-cd /home/radon/radon-cloud/services
-# Copy docker/services/docker-compose.yml + Dockerfile from this repo,
-# plus .env (TURSO_DB_URL, TURSO_AUTH_TOKEN, TWS_USERID, etc.)
-
-docker compose build
-docker compose up -d
-docker compose ps    # verify radon-services healthy
 ```
+/home/radon/
+├─ radon/                    (git checkout — main branch, fast-forwarded by CI)
+│  ├─ web/.next              (Next.js compile-mode build, regenerated each deploy)
+│  ├─ scripts/               (Python schedulers, dual-write to Turso)
+│  └─ data/replica.db        (libSQL embedded replica)
+└─ radon-cloud/
+   ├─ .env                   (TURSO_DB_URL, TURSO_AUTH_TOKEN, RADON_MODE=hetzner, …)
+   ├─ caddy/Caddyfile        (app.radon.run + media.radon.run)
+   ├─ media/                 (rsync target for newsfeed images)
+   ├─ scripts/deploy.sh      (health-gated CI deploy)
+   ├─ services/*.service     (radon-{nextjs,api,relay,monitor,refresh,ib-gateway})
+   └─ docker-compose.yml     (ib-gateway container)
+```
+
+Every `radon-*.service` uses `EnvironmentFile=/home/radon/radon-cloud/.env` so a single edit propagates to all schedulers. Restart with `sudo systemctl restart radon-{nextjs,api,relay,monitor}`.
 
 ### Day-to-day deploys
 
-The radon-services image is rebuilt and rolled by CI on push to `main`:
+`.github/workflows/deploy.yml` runs `bash scripts/deploy.sh` on every push to `main`:
 
-```
-.github/workflows/deploy.yml → ssh radon@ib-gateway → docker compose pull && up -d
-```
+1. `git fetch origin main && git reset --hard origin/main` → applies repo changes.
+2. `pip install -r requirements.txt` → picks up new Python deps (e.g. `libsql-experimental`).
+3. `npm install && npm run build` → compile-mode build (no prerender, all routes dynamic).
+4. `sudo systemctl restart radon-nextjs radon-api radon-relay radon-monitor` → reload services.
+5. Health check `curl http://localhost:8321/health` with retries → rolls back to previous commit on failure.
+
+### Build constraint
+
+`web/package.json` runs `next build --experimental-build-mode=compile` because Next.js 16's standard build crashes during prerender of `/_global-error` and `/_not-found` (the root ClerkProvider context isn't materialised in isolated workers — `useContext` returns null). Compile mode skips prerender entirely; every page is `force-dynamic` already so the runtime behavior is unchanged. If a future Next.js patch fixes the underlying issue, drop the flag and the build returns to the standard pipeline.
+
+### Containerized scheduler alternative (not currently deployed)
+
+The repo also includes `docker/services/Dockerfile` + `docker/services/docker-compose.yml` describing a single Python+Node+Playwright container with systemd timers. This is the design from Phase 4 of the migration plan — kept as committed config in case the host-systemd setup is ever replaced with a containerized one. Production today uses host systemd.
 
 **Do not deploy from this branch.** The plan document explicitly forbids automatic prod deploys until rollback paths are exercised.
 

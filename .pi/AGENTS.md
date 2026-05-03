@@ -349,13 +349,35 @@ Output: `reports/garch-convergence-{preset}-{date}.html`. Strategy spec: `docs/s
 
 Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/radonApi.ts`).
 
-**Three-Service Dev Stack** (`npm run dev`): Next.js :3000, IB WS relay :8765, FastAPI :8321.
+**Four-Service Dev Stack** (`npm run dev`): Next.js :3000, IB WS relay :8765, FastAPI :8321, Market Ear newsfeed scraper (chrome-cdp, every 120s).
 
 **Auth (Clerk):** JWT middleware on all FastAPI routes (`scripts/api/auth.py`). WS uses ticket-based auth (30s TTL, single-use via `scripts/api/ws_ticket.py`). Localhost bypass for dev. Auth-exempt: `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`. Public share routes exempt.
 
 **Degradation:** FastAPI down -> cached with `is_stale: true`. No spawn fallback.
 
 **IB Gateway:** Cloud mode (default dev) = Hetzner VPS via Tailscale `ib-gateway:4001`, TCP probe only. Docker mode = local `scripts/docker_ib_gateway.sh`, autoheal sidecar.
+
+## Cloud-Services Architecture (Phase 0–6 Migration)
+
+`app.radon.run` is a peer Next.js running on Hetzner. Both peers (laptop `localhost:3000` + `app.radon.run`) read identical state from a **Turso libSQL** DB with embedded replicas at `data/replica.db`. Reads hit local SQLite (sub-millisecond); writes stream to cloud and back to every replica.
+
+**Two modes** — toggle via `scripts/cloud.sh` ↔ `scripts/local.sh`. Persists to `.env.ib-mode` (`RADON_MODE=hetzner|local`).
+
+| Concern | Local mode | Hetzner mode |
+|---|---|---|
+| Schedulers (CRI/GEX/VCG/portfolio/journal/discover/ratings/oi) | laptop launchd plists | Hetzner systemd (host-installed) |
+| MenthorQ Playwright | laptop | Hetzner |
+| **themarketear newsfeed** | **laptop** (always — magic-link login can't be automated) | **laptop** (same) |
+| IB Gateway | local Docker | Hetzner Docker via Tailscale MagicDNS |
+| Public Next.js (`app.radon.run`) | n/a | Hetzner systemd `radon-nextjs` |
+
+**Schemas + DB writers**: `scripts/db/migrations/0001_init.sql` (12 tables), `web/lib/db.ts` (Node), `scripts/db/client.py` + `scripts/db/writer.py` (Python). All hot-data scripts dual-write JSON file + DB row; route handlers prefer DB and fall back to disk.
+
+**Media host**: `https://media.radon.run` (Caddy on Hetzner). Newsfeed scraper rsyncs new images over Tailscale (`scripts/newsfeed/push_media.js`). DB stores absolute URLs so both peers resolve identically.
+
+**Production build workaround**: Next.js 16 has a prerender invariant that crashes on `/_global-error` and `/_not-found` because the root ClerkProvider's context isn't materialised in isolated workers. `web/package.json` build script uses `--experimental-build-mode=compile` to skip prerender; every page is `force-dynamic` already so no functional loss. `app/error.tsx` and `app/[ticker]/not-found.tsx` use plain `<a>` (not `next/link`) for the same reason.
+
+**Operator runbook**: `docs/cloud-services.md`.
 
 | FastAPI File | Purpose |
 |------|---------|
