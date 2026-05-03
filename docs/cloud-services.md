@@ -55,14 +55,18 @@ THEMARKETEAR_PASSWORD=<…>
    ```
    Without these, the headless Chromium binary fails with `error while loading shared libraries: libnspr4.so`.
 3. `THEMARKETEAR_EMAIL` + `THEMARKETEAR_PASSWORD` are appended to `/home/radon/radon-cloud/.env`.
-4. Committed systemd unit at `docker/services/services/radon-newsfeed.service`. To enable on Hetzner:
+4. **Hetzner runs it as `radon-newsfeed.service`** (enabled 2026-05-03 cutover). `Restart=on-failure`, `RestartSec=30`, `EnvironmentFile=/home/radon/radon-cloud/.env`. Steady-state cycle ~4s; first cold cycle does the FirebaseUI auth (~16s) then caches storage state. Tail logs:
+   ```bash
+   ssh root@ib-gateway "journalctl -u radon-newsfeed -f"
+   ```
+   To re-install on a fresh VPS or after `radon-newsfeed.service` was removed:
    ```bash
    sudo cp /home/radon/radon/docker/services/services/radon-newsfeed.service /etc/systemd/system/
    sudo systemctl daemon-reload
    sudo systemctl enable --now radon-newsfeed.service
-   journalctl -u radon-newsfeed.service -f
    ```
-5. Closing the laptop after the cutover does NOT break `app.radon.run` — Hetzner is now self-sufficient for the newsfeed too.
+5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/home/radon/radon-cloud/media/` (no `host:` prefix, no SSH). rsync does a local copy directly to the volume Caddy serves. The Tailscale and public-IP variants are laptop-only fallbacks (see below).
+6. **Closing the laptop after the cutover does not break `app.radon.run`** — the newsfeed now runs entirely on Hetzner. No chrome-cdp, no Chrome Debug.app, no Tailscale dependency for new posts.
 
 ### Tailscale-free media push
 
