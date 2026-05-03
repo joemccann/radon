@@ -1,0 +1,18 @@
+[Unit]
+Description=Radon newsfeed scraper (themarketear.com headless Playwright loop)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+ExecStart=/usr/bin/node /home/radon/radon/scripts/newsfeed/index.js
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

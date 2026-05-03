@@ -15,26 +15,54 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
          localhost:3000 (Next.js)           app.radon.run (Caddy → radon-nextjs)
          FastAPI 8321                       FastAPI 8321 (radon-api, private)
          IB realtime relay 8765             radon-relay, radon-monitor (host systemd)
-         newsfeed scraper (chrome-cdp)      ib-gateway docker (4001)
+         newsfeed scraper (Playwright)      newsfeed scraper (Playwright, optional)
+                                            ib-gateway docker (4001)
                                             media.radon.run (Caddy static)
 ```
 
 - **Database**: Turso (libSQL) — every Next.js / FastAPI / scheduler process holds a SQLite-fast embedded replica, writes go to cloud and stream back.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
 - **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd services (cloud mode). The `docker/services/` directory in this repo is a containerized alternative we designed but did not deploy — production currently uses host-installed services at `/home/radon/radon-cloud/services/*.service`.
-- **Browser-bound**: themarketear.com newsfeed scraper always runs on the laptop (magic-link login can't be automated). Everything else can run anywhere.
+- **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
-## Newsfeed (`themarketear.com`) — Always-on dependency
+## Newsfeed (`themarketear.com`) — Self-contained headless flow
 
-The newsfeed is the **only** part of Radon that fundamentally requires the laptop. Every other service runs on Hetzner. Operating procedure:
+The newsfeed used to be the only part of Radon that fundamentally required the laptop. As of `feature/newsfeed-headless`, the scraper drives Playwright's bundled Chromium, logs in with email + password, and persists the FirebaseUI session to `data/newsfeed-storage.json` (gitignored). It can run anywhere Chromium can launch.
 
-1. Keep `Chrome Debug.app` running with port 9222 + an authenticated `themarketear.com` tab. (`scripts/cdp.mjs list` should show the tab.)
-2. Keep `Tailscale` connected on the laptop so `push_media.js` can rsync new images to `radon@ib-gateway:/home/radon/radon-cloud/media/`.
-3. Keep `npm run dev` (or `scripts/cloud.sh` / `scripts/local.sh`) running — the newsfeed scraper is the 4th child and polls every 120s.
-4. **If you want the newsfeed to keep updating without the full dev stack**, run *only* the scraper: `node scripts/newsfeed/index.js`. It needs `web/.env` (CEREBRAS_API_KEY + ANTHROPIC_API_KEY) and the root `.env` (TURSO_DB_URL + TURSO_AUTH_TOKEN). Both peers (`localhost:3000` + `app.radon.run`) read newly-arrived posts immediately.
-5. Closing the laptop does NOT break `app.radon.run` — the dashboard keeps rendering the last-known posts.json from the DB, just no new arrivals until the laptop is back online.
+**Required env (root `.env` — do NOT commit):**
 
-If the themarketear cookie ever rotates, log in fresh in the Chrome Debug.app tab; the scraper picks up the new session on the next cycle (`fetchCookieHeader` reads cookies via `Network.getCookies`).
+```
+THEMARKETEAR_EMAIL=joe@cryptdex.trade
+THEMARKETEAR_PASSWORD=<…>
+# Optional: RADON_NEWSFEED_HEADLESS=0   # to launch a visible browser for debugging
+```
+
+**Operating procedure:**
+
+1. **Laptop dev stack** — `npm run dev` keeps including the scraper as the 4th child and polls every 120s. No more "must keep Chrome Debug.app open" requirement.
+2. **Standalone (laptop or Hetzner)** — `node scripts/newsfeed/index.js` runs forever; `node scripts/newsfeed/index.js --once` runs a single cycle (use for smoke tests).
+3. **Storage state** — first launch authenticates with email + password (full FirebaseUI flow), then saves cookies + localStorage to `data/newsfeed-storage.json`. Subsequent runs reuse the session; the scraper still re-authenticates every ~6h to refresh cookies before they expire.
+4. **Failure capture** — any login-flow failure dumps a screenshot to `data/newsfeed-debug-<ts>.png` (gitignored) for postmortem.
+5. **Cookie rotation** — themarketear can rotate FirebaseUI cookies on its own; just delete `data/newsfeed-storage.json` and the next cycle will re-authenticate from scratch.
+
+**Hetzner first-time setup:**
+
+1. `scripts/deploy.sh` already runs `npx playwright install chromium` after the npm install (idempotent).
+2. System libs (libnspr4, libnss3, libcups2, libxkbcommon0, libgbm1, …) require **one-time** sudo install:
+   ```bash
+   sudo apt-get update
+   sudo npx playwright install-deps chromium    # installs all required apt packages
+   ```
+   Without these, the headless Chromium binary fails with `error while loading shared libraries: libnspr4.so`.
+3. `THEMARKETEAR_EMAIL` + `THEMARKETEAR_PASSWORD` are appended to `/home/radon/radon-cloud/.env`.
+4. Committed systemd unit at `docker/services/services/radon-newsfeed.service`. To enable on Hetzner:
+   ```bash
+   sudo cp /home/radon/radon/docker/services/services/radon-newsfeed.service /etc/systemd/system/
+   sudo systemctl daemon-reload
+   sudo systemctl enable --now radon-newsfeed.service
+   journalctl -u radon-newsfeed.service -f
+   ```
+5. Closing the laptop after the cutover does NOT break `app.radon.run` — Hetzner is now self-sufficient for the newsfeed too.
 
 ### Tailscale-free media push
 

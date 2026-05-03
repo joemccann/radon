@@ -4,7 +4,13 @@ import { fileURLToPath, pathToFileURL } from "url";
 import fs from "fs-extra";
 import dotenv from "dotenv";
 import { resolveScraperPaths, seedPostsFileIfMissing } from "./paths.js";
-import { fetchCookieHeader, listTargets, runCdpCommand, selectMarketEarTab } from "./cdp.js";
+import {
+  fetchCookieHeader,
+  listTargets,
+  runCdpCommand,
+  selectMarketEarTab,
+  setActivePage,
+} from "./cdp.js";
 import { buildExtractionExpression, parsePayload } from "./extract.js";
 import { createImageDownloader, hydrateLocalImages } from "./media.js";
 import { loadExistingPosts, mergePosts, persistPosts } from "./store.js";
@@ -14,6 +20,8 @@ import { appendTaxonomy, recordServiceHealth, upsertPosts } from "../db/writer.j
 import { createTagger } from "./tagger.js";
 import { createVisionTagger, hydrateTagsDual } from "./vision_tagger.js";
 import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
+import { createBrowser, NEWSFEED_DEFAULT_STORAGE_PATH } from "./browser.js";
+import { ensureAuthenticated } from "./auth.js";
 
 // Concurrently spawns this process without env inheritance from `next dev`,
 // so neither CEREBRAS_API_KEY nor ANTHROPIC_API_KEY are present. Load web/.env
@@ -24,6 +32,7 @@ dotenv.config({ path: path.resolve(__dirname, "../../.env") });
 dotenv.config({ path: path.resolve(__dirname, "../../web/.env") });
 
 const INTERVAL_MS = 2 * 60 * 1000;
+const REAUTH_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6h — refresh storage state before cookies expire
 const COOKIE_URLS = ["https://themarketear.com"];
 
 function buildTextTaggerOrNull({ projectRoot }) {
@@ -51,12 +60,49 @@ function buildVisionTaggerOrNull({ projectRoot, publicRoot }) {
 
 export function createScraper(overrides = {}) {
   const paths = resolveScraperPaths(overrides);
+  const storageStatePath = overrides.storageStatePath || NEWSFEED_DEFAULT_STORAGE_PATH;
 
-  let activeTargetId = null;
+  let browserHandle = null;
+  let lastAuthAt = 0;
+
+  async function getBrowser() {
+    if (!browserHandle) {
+      browserHandle = await createBrowser({ storageStatePath });
+      setActivePage(browserHandle.page, browserHandle.context);
+    }
+    return browserHandle;
+  }
+
+  async function closeBrowser() {
+    if (browserHandle) {
+      try {
+        await browserHandle.close();
+      } catch {
+        /* ignore */
+      }
+      browserHandle = null;
+      setActivePage(null, null);
+    }
+  }
+
+  async function authenticateIfNeeded({ force = false } = {}) {
+    const handle = await getBrowser();
+    const elapsed = Date.now() - lastAuthAt;
+    if (!force && lastAuthAt > 0 && elapsed < REAUTH_INTERVAL_MS) {
+      return;
+    }
+    await ensureAuthenticated({
+      context: handle.context,
+      page: handle.page,
+      persistStorageState: handle.persistStorageState,
+    });
+    lastAuthAt = Date.now();
+  }
+
   const getCookieHeader = async () => {
-    if (!activeTargetId) return "";
+    if (!browserHandle) return "";
     try {
-      return await fetchCookieHeader(activeTargetId, COOKIE_URLS);
+      return await fetchCookieHeader(null, COOKIE_URLS);
     } catch (err) {
       console.warn(`[newsfeed] cookie lookup failed: ${err.message}`);
       return "";
@@ -69,9 +115,23 @@ export function createScraper(overrides = {}) {
     const cycleStart = Date.now();
     const cycleStartIso = new Date(cycleStart).toISOString();
 
+    await authenticateIfNeeded();
+    const handle = await getBrowser();
+
+    // Re-navigate every cycle so we always have fresh DOM (prior cycle could
+    // have left the page in any state).
+    await handle.page.goto("https://themarketear.com/newsfeed", {
+      waitUntil: "domcontentloaded",
+      timeout: 30_000,
+    });
+    if (typeof handle.page.waitForLoadState === "function") {
+      await handle.page
+        .waitForLoadState("networkidle", { timeout: 15_000 })
+        .catch(() => {});
+    }
+
     const pages = await listTargets();
     const target = selectMarketEarTab(pages);
-    activeTargetId = target.targetId;
     const expression = buildExtractionExpression();
     const raw = await runCdpCommand("eval", target.targetId, expression);
 
@@ -169,11 +229,11 @@ export function createScraper(overrides = {}) {
     return { changed: true, count: merged.length };
   }
 
-  return { paths, scrapeOnce };
+  return { paths, scrapeOnce, closeBrowser, authenticateIfNeeded };
 }
 
 export async function run({ intervalMs = INTERVAL_MS, signal, ...overrides } = {}) {
-  const { paths, scrapeOnce } = createScraper(overrides);
+  const { paths, scrapeOnce, closeBrowser } = createScraper(overrides);
 
   await fs.ensureDir(paths.dataDir);
   await fs.ensureDir(paths.archiveDir);
@@ -182,19 +242,27 @@ export async function run({ intervalMs = INTERVAL_MS, signal, ...overrides } = {
 
   console.info(`[newsfeed] starting — polling every ${Math.round(intervalMs / 1000)}s`);
 
-  await runForever({
-    intervalMs,
-    scrapeOnce,
-    signal,
-    onCycleError: (err) => console.error(`[newsfeed] cycle failed: ${err.message}`),
-  });
+  try {
+    await runForever({
+      intervalMs,
+      scrapeOnce,
+      signal,
+      onCycleError: (err) => console.error(`[newsfeed] cycle failed: ${err.message}`),
+    });
+  } finally {
+    await closeBrowser();
+  }
 
   console.info("[newsfeed] stopped");
 }
 
 export async function scrapeOnce(overrides = {}) {
-  const { scrapeOnce: runOnce } = createScraper(overrides);
-  return runOnce();
+  const { scrapeOnce: runOnce, closeBrowser } = createScraper(overrides);
+  try {
+    return await runOnce();
+  } finally {
+    await closeBrowser();
+  }
 }
 
 function isDirectExecution() {
@@ -207,16 +275,31 @@ function isDirectExecution() {
 }
 
 if (isDirectExecution()) {
-  const controller = new AbortController();
-  const shutdown = (signal) => {
-    console.info(`[newsfeed] received ${signal} — shutting down`);
-    controller.abort();
-  };
-  process.on("SIGINT", () => shutdown("SIGINT"));
-  process.on("SIGTERM", () => shutdown("SIGTERM"));
+  const argv = process.argv.slice(2);
+  const onceMode = argv.includes("--once");
 
-  run({ signal: controller.signal }).catch((err) => {
-    console.error(`[newsfeed] fatal: ${err.message}`);
-    process.exit(1);
-  });
+  if (onceMode) {
+    scrapeOnce()
+      .then((result) => {
+        console.info(`[newsfeed] --once complete: changed=${result.changed} count=${result.count}`);
+        process.exit(0);
+      })
+      .catch((err) => {
+        console.error(`[newsfeed] fatal: ${err.message}`);
+        process.exit(1);
+      });
+  } else {
+    const controller = new AbortController();
+    const shutdown = (signal) => {
+      console.info(`[newsfeed] received ${signal} — shutting down`);
+      controller.abort();
+    };
+    process.on("SIGINT", () => shutdown("SIGINT"));
+    process.on("SIGTERM", () => shutdown("SIGTERM"));
+
+    run({ signal: controller.signal }).catch((err) => {
+      console.error(`[newsfeed] fatal: ${err.message}`);
+      process.exit(1);
+    });
+  }
 }

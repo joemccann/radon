@@ -1,55 +1,80 @@
-import { spawn } from "child_process";
-import path from "path";
-import fs from "fs-extra";
+/*
+  Backwards-compat shim — historical chrome-cdp surface is preserved so the
+  rest of the newsfeed module graph doesn't move. Real work happens against a
+  Playwright Page provided by `setActivePage()` from index.js.
+*/
+const PLAYWRIGHT_TARGET_ID = "playwright-page";
 
-const PAGES_CACHE = "/tmp/cdp-pages.json";
+let activePage = null;
+let activeContext = null;
 
-export const DEFAULT_CDP_PATH = path.join(
-  process.env.HOME || "",
-  ".claude/skills/chrome-cdp/scripts/cdp.mjs",
-);
-
-export function resolveCdpPath() {
-  return process.env.CDP_CLI || DEFAULT_CDP_PATH;
+export function setActivePage(page, context) {
+  activePage = page || null;
+  activeContext = context || null;
 }
 
-export async function runCdpCommand(command, ...args) {
-  const cdpPath = resolveCdpPath();
-  return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [cdpPath, command, ...args], {
-      env: process.env,
-    });
-    let stdout = "";
-    let stderr = "";
-
-    child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
-    child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve(stdout.trim());
-      } else {
-        reject(new Error(`cdp ${command} failed (${code}): ${stderr || stdout}`));
-      }
-    });
-  });
+export function getActivePage() {
+  return activePage;
 }
 
 export async function listTargets() {
-  await runCdpCommand("list");
-  if (!(await fs.pathExists(PAGES_CACHE))) {
-    throw new Error("Chrome CDP cache missing after list command.");
+  if (!activePage) {
+    throw new Error("No active Playwright page — call setActivePage(page) before listTargets().");
   }
-  const raw = await fs.readFile(PAGES_CACHE, "utf8");
-  return JSON.parse(raw);
+  return [
+    {
+      targetId: PLAYWRIGHT_TARGET_ID,
+      url: typeof activePage.url === "function" ? activePage.url() : "",
+      type: "page",
+    },
+  ];
 }
 
 export function selectMarketEarTab(pages) {
-  const candidates = pages.filter((page) => page.url.includes("themarketear.com"));
-  if (candidates.length === 0) {
-    throw new Error("No Chrome tab with themarketear.com is currently open.");
+  if (!Array.isArray(pages) || pages.length === 0) {
+    throw new Error("selectMarketEarTab: no pages provided.");
   }
-  return candidates.find((page) => page.url.includes("/newsfeed")) || candidates[0];
+  return pages[0];
+}
+
+function expressionToEvaluator(expression) {
+  if (typeof expression !== "string") {
+    throw new Error("runCdpCommand eval expects a string expression.");
+  }
+  // The expression is an IIFE that returns a JSON string. Wrap as a function
+  // body so page.evaluate() can run it inside the document context.
+  return new Function(`return (${expression});`);
+}
+
+export async function runCdpCommand(command, _targetId, ...rest) {
+  if (!activePage) {
+    throw new Error("No active Playwright page — call setActivePage(page) first.");
+  }
+
+  if (command === "eval") {
+    const expression = rest[0];
+    const evaluator = expressionToEvaluator(expression);
+    return await activePage.evaluate(evaluator);
+  }
+
+  if (command === "evalraw") {
+    const [domainMethod, paramsJson] = rest;
+    const params = paramsJson ? JSON.parse(paramsJson) : {};
+    if (domainMethod === "Network.getCookies" && Array.isArray(params.urls)) {
+      if (!activeContext || typeof activeContext.cookies !== "function") {
+        throw new Error("Active Playwright context required for cookie lookup.");
+      }
+      const cookies = await activeContext.cookies(params.urls);
+      return JSON.stringify({ cookies });
+    }
+    throw new Error(`runCdpCommand evalraw: unsupported method ${domainMethod}`);
+  }
+
+  if (command === "list") {
+    return JSON.stringify(await listTargets());
+  }
+
+  throw new Error(`runCdpCommand: unsupported command "${command}"`);
 }
 
 export function formatCookieHeader(cookies) {
@@ -60,14 +85,17 @@ export function formatCookieHeader(cookies) {
     .join("; ");
 }
 
-export async function fetchCookieHeader(targetId, urls) {
-  const params = JSON.stringify({ urls });
-  const raw = await runCdpCommand("evalraw", targetId, "Network.getCookies", params);
-  let parsed;
+export async function fetchCookieHeader(_targetId, urls) {
+  if (!activeContext || typeof activeContext.cookies !== "function") return "";
   try {
-    parsed = JSON.parse(raw);
+    const cookies = await activeContext.cookies(urls);
+    return formatCookieHeader(cookies);
   } catch {
     return "";
   }
-  return formatCookieHeader(parsed?.cookies);
+}
+
+export const DEFAULT_CDP_PATH = null;
+export function resolveCdpPath() {
+  return null;
 }

@@ -100,7 +100,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 
 **Image host:** `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Posts use absolute URLs. Public-IP fallback: `RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/`.
 
-**Newsfeed depends on the laptop.** chrome-cdp polls `themarketear.com` every 120s (Chrome Debug.app must be running and logged in). If laptop closed, no new posts — but feed keeps rendering from Turso.
+**Newsfeed runs headless on either host.** `scripts/newsfeed/browser.js` + `auth.js` drive Playwright; auth via `THEMARKETEAR_EMAIL` / `THEMARKETEAR_PASSWORD` env. Session persisted to `data/newsfeed-storage.json` (gitignored, ~30d), full re-auth every ~6h. Polls every 120s. Hetzner deploy installs the browser via `npx playwright install chromium` in `deploy.sh`; one-time system libs via `npx playwright install-deps chromium` (sudo). Committed systemd unit lives at `docker/services/services/radon-newsfeed.service` — disabled by default; operator enables after laptop cutover.
 
 **Trades canonical store (shipped 2026-05-03, `6c6f90f`):** Turso `journal` table. Both `/journal` and `/orders` derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` with a **union+preference fallback to `data/blotter.json`** for legacy aggregate-only rows that lack explicit `realized_pnl` / `cost_basis` / `proceeds` (the persistence path commit `bbc776e` added to `journal_rehydrate.py` only applies to *new* rehydrate runs; existing rows pre-date it). When IB Flex Query 1442520 cooldown clears and a fresh rehydrate runs, journal rows gain explicit P&L fields and the deriver auto-prefers them; `data/blotter.json` decays to a redundant fallback with no code change. See `docs/cloud-services.md` § "Trades — single source of truth".
 
@@ -226,11 +226,12 @@ Each tab follows the same pattern: hook + staleness lib + API route + panel + sc
 
 ## Newsfeed Scraper
 
-Module split under `scripts/newsfeed/` (`paths`, `cdp`, `extract`, `media`, `store`, `tagger`, `vision_tagger`, `taxonomy`, `scheduler`, `index`). `scripts/newsfeed-scraper.js` is a back-compat shim. Output shape locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`).
+Module split under `scripts/newsfeed/` (`paths`, `browser`, `auth`, `cdp`, `extract`, `media`, `store`, `tagger`, `vision_tagger`, `taxonomy`, `scheduler`, `index`). `scripts/newsfeed-scraper.js` is a back-compat shim. Output shape locked by `web/components/DashboardNewsFeed.tsx` (`MarketEarPost`).
 
 **Key behaviors:**
+- **Headless Playwright** (`browser.js` + `auth.js`) replaces the old chrome-cdp dependency. Required env: `THEMARKETEAR_EMAIL`, `THEMARKETEAR_PASSWORD`. Storage state at `data/newsfeed-storage.json` reuses the session across cycles; full re-auth every ~6h. `cdp.js` is a thin Playwright shim for backwards compatibility (`runCdpCommand`, `fetchCookieHeader`, `listTargets`, `selectMarketEarTab` still exported).
 - **IPv4 forced** for `themarketear.com` CDN (`https.Agent { family: 4 }`) and `api.cerebras.ai` (undici dispatcher) — both AAAA-unreachable from residential IPv6.
-- **Cookie-gated images:** `media.js` accepts `getCookieHeader` callback; `themarketear.com` cookies pulled via CDP `Network.getCookies` to follow `/images/<hash>.png` 301 → `*.cdn.digitaloceanspaces.com`.
+- **Cookie-gated images:** `media.js` accepts `getCookieHeader` callback; `themarketear.com` cookies pulled via Playwright `context.cookies()` to follow `/images/<hash>.png` 301 → `*.cdn.digitaloceanspaces.com`.
 - **Rollover** at 500 KB → archive + keep ⌈N×0.2⌉. `mergePosts` preserves `tags` across cycles.
 
 **Tagging:**

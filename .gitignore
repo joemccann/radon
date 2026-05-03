@@ -121,6 +121,10 @@ web/data/
 web/public/data/
 web/public/media/
 
+# Newsfeed Playwright storage state (cookies + localStorage; re-derived per machine)
+data/newsfeed-storage*.json
+data/newsfeed-debug-*.png
+
 # Temp files
 tmp/
 /nanobanana-output/
