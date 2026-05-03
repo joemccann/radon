@@ -2,6 +2,17 @@
 """
 Flex Query - Fetch historical executions from Interactive Brokers.
 
+⚠️ DEPRECATED — superseded by journal-table source of truth (2026-05-03).
+
+The /orders (blotter) page now reads from the Turso ``journal`` table via
+``web/lib/blotter/fromJournal.ts``. The standalone Flex Query 1422766 path
+this module backs is broken IB-side ("1001 — Statement could not be
+generated") and remains only as a fallback when the DB is empty. New
+trades land in the journal via journal_rehydrate.py (Flex Query 1442520,
+working) and the live monitor_daemon.handlers.journal_sync handler.
+
+Do not extend this module. New work belongs against the journal payload.
+
 Flex Queries allow fetching up to 365 days of trade history.
 
 Setup (one-time):

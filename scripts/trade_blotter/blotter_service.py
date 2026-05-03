@@ -1,6 +1,14 @@
 """
 Trade Blotter / Reconciliation Service.
 
+⚠️ DEPRECATED — superseded by journal-table source of truth (2026-05-03).
+
+The /orders page now derives its view from the Turso ``journal`` table
+(see ``web/lib/blotter/fromJournal.ts`` and ``web/app/api/blotter/route.ts``).
+This service still backs the legacy ``data/blotter.json`` mirror and the
+``POST /api/blotter`` refresh path, both of which are fallbacks. New work
+belongs against the journal payload.
+
 Fetches execution data from Interactive Brokers and calculates P&L.
 Supports both real-time fills and historical Flex Query data.
 """
