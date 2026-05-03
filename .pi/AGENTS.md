@@ -373,6 +373,8 @@ Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/rado
 
 **Schemas + DB writers**: `scripts/db/migrations/0001_init.sql` (12 tables), `web/lib/db.ts` (Node), `scripts/db/client.py` + `scripts/db/writer.py` (Python). All hot-data scripts dual-write JSON file + DB row; route handlers prefer DB and fall back to disk.
 
+**Trades — single source of truth (in flight)**: the `journal` table is canonical. `scripts/journal_rehydrate.py` (commit `bbc776e`) persists `realized_pnl` / `cost_basis` / `proceeds` / `realized_quantity` for round-trips (stocks + options). `monitor_daemon/handlers/journal_sync` dual-writes live fills every 5 min in market hours. The `/orders` page flip to journal-derived (`web/lib/blotter/fromJournal.ts`) is held on `feature/blotter-from-journal` until prod journal is re-rehydrated against IB Flex Query 1442520 (currently blocked on IB cooldown).
+
 **Media host**: `https://media.radon.run` (Caddy on Hetzner). Newsfeed scraper rsyncs new images over Tailscale (`scripts/newsfeed/push_media.js`). DB stores absolute URLs so both peers resolve identically. Tailscale-free fallback: set `RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/` to route rsync over the Hetzner public IP.
 
 **Production build workaround**: Next.js 16 has a prerender invariant that crashes on `/_global-error` and `/_not-found` because the root ClerkProvider's context isn't materialised in isolated workers. `web/package.json` build script uses `--experimental-build-mode=compile` to skip prerender; every page is `force-dynamic` already so no functional loss. `app/error.tsx` and `app/[ticker]/not-found.tsx` use plain `<a>` (not `next/link`) for the same reason.

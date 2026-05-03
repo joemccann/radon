@@ -99,6 +99,50 @@ The repo also includes `docker/services/Dockerfile` + `docker/services/docker-co
 
 **Do not deploy from this branch.** The plan document explicitly forbids automatic prod deploys until rollback paths are exercised.
 
+## Trades — single source of truth
+
+The Turso `journal` table is the canonical store for executed trades.
+Both the `/journal` and `/orders` pages will derive their view from the
+same rows, eliminating the historical split between
+`data/trade_log.json` (journal page) and `data/blotter.json` (orders
+page).
+
+**Shipped today (commit `bbc776e`)** — `scripts/journal_rehydrate.py`
+now persists `realized_pnl`, `cost_basis`, `proceeds`, `realized_quantity`,
+and `total_round_trip_quantity` for every round-trip (stocks AND options).
+Idempotent on re-run via `ib_exec_id` dedupe. 19 tests in
+`scripts/tests/test_journal_rehydrate.py` cover profit / loss / multi-fill /
+partial-close / short-cover / re-run / option parity. Live fills landing
+during a trading session are captured by `monitor_daemon/handlers/journal_sync`
+(every 5 min during market hours, dual-writes to `data/trade_log.json` +
+`journal` table).
+
+**In flight (`feature/blotter-from-journal` branch, held)** — the actual
+`/orders` flip:
+- `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` projects journal
+  rows into the historical-trades shape `WorkspaceSections.HistoricalTradesSection`
+  consumes.
+- `web/app/api/blotter/route.ts` reads `journal` first, falls through to
+  `data/blotter.json` only on empty.
+- `scripts/trade_blotter/flex_query.py` + `blotter_service.py` carry
+  deprecation banners.
+
+**Why held**: a side-by-side diff against the currently-served `/api/blotter`
+showed 109/116 trades with mismatched `realized_pnl` / `cost_basis` /
+`proceeds` because the existing 205 journal rows were written by the
+**old** rehydrate code and lack those fields. Production data needs to
+be re-rehydrated against IB Flex Query 1442520 (the working query;
+1422766 returns `1001 — Statement could not be generated` and is
+blocked on operator action in IB Account Management). At the time of
+this writing, Flex 1442520 is also temporarily returning `1001` —
+likely an IB-side cooldown / weekend backlog. A scheduled retry is
+in flight; once it succeeds, the diff harness should report zero
+divergence and `feature/blotter-from-journal` fast-forwards onto main.
+
+**Once shipped**, the standalone Flex Query 1422766 path remains as the
+`POST /api/blotter` refresh hook for backwards compatibility but is no
+longer the source of truth for any rendered surface. Don't extend it.
+
 ## Bootstrap & disaster recovery
 
 | Scenario | Recovery |
