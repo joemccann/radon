@@ -31,6 +31,13 @@ from .base import BaseHandler
 from clients.ib_client import IBClient, DEFAULT_HOST
 from utils.atomic_io import atomic_save, verified_load
 
+try:
+    # Phase-3 dual-write: each new row also lands in Turso so app.radon.run
+    # reads see fresh fills via the DB path, not just disk.
+    from db.writer import upsert_journal_entry  # type: ignore
+except ImportError:  # pragma: no cover — DB layer optional in unit tests
+    upsert_journal_entry = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 DEFAULT_TRADE_LOG = Path(__file__).parent.parent.parent.parent / "data" / "trade_log.json"
@@ -102,8 +109,28 @@ class JournalSyncHandler(BaseHandler):
         if candidates:
             existing["trades"].extend(candidates)
             atomic_save(str(self.trade_log_path), existing)
+            self._dual_write(candidates)
 
         return result
+
+    def _dual_write(self, candidates: List[Dict[str, Any]]) -> None:
+        """Mirror new rows to the Turso ``journal`` table.
+
+        Failures are logged and swallowed — the canonical source remains
+        ``trade_log.json``; DB drift is repaired by the next bootstrap or
+        rehydrate run.
+        """
+        if upsert_journal_entry is None:
+            return
+        for entry in candidates:
+            try:
+                upsert_journal_entry(
+                    str(entry.get("ib_exec_id")),
+                    entry,
+                    filled_at=entry.get("filled_at") or entry.get("date"),
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("journal_sync: DB upsert failed: %s", exc)
 
     # -- internals ---------------------------------------------------------
 

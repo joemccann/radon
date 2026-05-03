@@ -46,11 +46,44 @@ async function readJournalFromDb(): Promise<JournalPayload | null> {
   }
 }
 
+async function readJournalFromDisk(): Promise<JournalPayload | null> {
+  try {
+    const raw = await readFile(TRADE_LOG_PATH, "utf-8");
+    return JSON.parse(raw) as JournalPayload;
+  } catch {
+    return null;
+  }
+}
+
+function latestFilledAt(payload: JournalPayload | null): string {
+  if (!payload?.trades?.length) return "";
+  let max = "";
+  for (const t of payload.trades as Array<Record<string, unknown>>) {
+    const candidate =
+      (t.filled_at as string | undefined) ??
+      (t.date as string | undefined) ??
+      (t.close_date as string | undefined) ??
+      "";
+    if (candidate > max) max = candidate;
+  }
+  return max;
+}
+
 async function readJournal(): Promise<JournalPayload> {
-  const fromDb = await readJournalFromDb();
-  if (fromDb) return fromDb;
-  const raw = await readFile(TRADE_LOG_PATH, "utf-8");
-  return JSON.parse(raw) as JournalPayload;
+  // Prefer whichever source has the most-recent filled_at. This protects
+  // against silent staleness when one source drifts: a half-empty DB
+  // shouldn't mask a fresher disk file (or vice versa). When both are
+  // current, the DB wins on the tie (cheaper read on the embedded replica).
+  const [fromDb, fromDisk] = await Promise.all([
+    readJournalFromDb(),
+    readJournalFromDisk(),
+  ]);
+  if (!fromDb && !fromDisk) {
+    throw new Error("Journal unavailable: both DB and disk reads failed");
+  }
+  if (!fromDb) return fromDisk!;
+  if (!fromDisk) return fromDb;
+  return latestFilledAt(fromDisk) > latestFilledAt(fromDb) ? fromDisk : fromDb;
 }
 
 async function readReconciliation(): Promise<ReconciliationPayload | null> {
