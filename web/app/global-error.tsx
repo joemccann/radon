@@ -1,67 +1,22 @@
 "use client";
 
-import "./globals.css";
-import { useEffect } from "react";
+// Minimal global-error: pure server-style render, no hooks, no client
+// imports beyond inline styles. Next.js 16 prerender of /_global-error
+// crashes if any client context is needed (useContext returns null in
+// the static-generation worker). Strip to bare HTML.
 
 type AppError = Error & { digest?: string };
 
-/**
- * Root-level error UI when the root layout fails. Must define html/body (replaces root layout).
- */
-export default function GlobalError({ error, reset }: { error: AppError; reset: () => void }) {
-  useEffect(() => {
-    console.error("[radon] global error boundary:", error);
-  }, [error]);
-
+export default function GlobalError({ error }: { error: AppError; reset: () => void }) {
   return (
-    <html lang="en" data-theme="dark">
-      <body className="app-root">
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            justifyContent: "center",
-            minHeight: "100vh",
-            fontFamily: "var(--font-mono)",
-            color: "var(--text-secondary)",
-            gap: "16px",
-            padding: "24px",
-            background: "var(--bg-base)",
-          }}
-        >
-          <span
-            style={{
-              fontSize: "11px",
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: "var(--fault, #E85D6C)",
-            }}
-          >
+    <html lang="en">
+      <body style={{ background: "#0a0f14", color: "#94a3b8", fontFamily: "monospace", margin: 0 }}>
+        <div style={{ padding: "48px 24px", textAlign: "center" }}>
+          <p style={{ color: "#E85D6C", fontSize: 12, letterSpacing: "0.1em", textTransform: "uppercase" }}>
             Application Error
-          </span>
-          <span style={{ fontSize: "12px", textAlign: "center", maxWidth: "420px" }}>
-            Radon Terminal could not render. Reload the page or return after a moment.
-          </span>
-          {error.digest ? (
-            <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>Digest: {error.digest}</span>
-          ) : null}
-          <button
-            type="button"
-            onClick={() => reset()}
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "11px",
-              padding: "8px 14px",
-              borderRadius: "4px",
-              border: "1px solid var(--border-dim, #1e293b)",
-              background: "var(--bg-panel-raised, #151c22)",
-              color: "var(--text-primary)",
-              cursor: "pointer",
-            }}
-          >
-            Retry
-          </button>
+          </p>
+          <p style={{ fontSize: 12 }}>Radon Terminal could not render. Reload the page.</p>
+          {error?.digest ? <p style={{ fontSize: 10 }}>Digest: {error.digest}</p> : null}
         </div>
       </body>
     </html>
