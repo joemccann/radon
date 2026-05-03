@@ -174,11 +174,114 @@ def _resolve_action(bucket: Dict[str, Any]) -> Optional[str]:
         return "BUY" if sec_type == "STK" else "BUY_OPTION"
     if net < 0:
         return "SELL" if sec_type == "STK" else "SELL_TO_OPEN"
-    # Net flat — buy and sell sides match. Treat as a closed round-trip
-    # (we don't have realized P&L from Flex without lot matching).
+    # Net flat — buy and sell sides match. Treat as a closed round-trip;
+    # _compute_pnl_summary() does the lot matching that gives us the
+    # realized P&L.
     if bucket["buy_qty"] > 0:
         return "CLOSED"
     return None
+
+
+def _compute_pnl_summary(bucket: Dict[str, Any]) -> Dict[str, Decimal]:
+    """Lot-match a bucket's executions to derive realized P&L + cost basis.
+
+    Mirrors :class:`scripts.trade_blotter.models.Trade._inventory_summary`
+    so a closed round-trip rehydrated from Flex carries the same
+    ``realized_pnl`` / ``cost_basis`` / ``proceeds`` numbers the legacy
+    Flex 1422766 blotter pipeline produced. Average-cost basis,
+    direction-aware (handles both long and short round-trips),
+    commission-aware on both sides.
+
+    Returns a dict with Decimal entries keyed:
+        ``realized_pnl``    — signed P&L from closed quantity (0 if no closes)
+        ``realized_qty``    — total contracts/shares closed
+        ``cost_basis``      — sum of buy.notional + buy.commission
+        ``proceeds``        — sum of sell.notional - sell.commission
+        ``open_basis``      — basis allocated to the still-open residual
+
+    Applies uniformly to STK / OPT / BAG; multiplier is the only thing
+    that differs and that lives on the Execution itself.
+    """
+    sec_type = bucket["sec_type"]
+    multiplier = Decimal(100) if sec_type in ("OPT", "BAG") else Decimal(1)
+
+    position_qty = Decimal(0)            # signed: long positive, short negative
+    avg_basis_per_unit = Decimal(0)      # already includes opening commissions
+    realized_qty = Decimal(0)
+    realized_pnl = Decimal(0)
+    cost_basis = Decimal(0)
+    proceeds = Decimal(0)
+
+    for exec_obj in sorted(bucket["executions"], key=lambda e: e.time):
+        qty = exec_obj.quantity
+        if qty <= 0:
+            continue
+        notional = qty * exec_obj.price * multiplier
+        commission = exec_obj.commission
+        is_buy = exec_obj.side.value == "BOT"
+
+        if is_buy:
+            cost_basis += notional + commission
+            opening_total = notional + commission
+        else:
+            proceeds += notional - commission
+            opening_total = notional - commission
+
+        signed_qty = qty if is_buy else -qty
+        same_direction = (
+            position_qty == 0
+            or (position_qty > 0 and signed_qty > 0)
+            or (position_qty < 0 and signed_qty < 0)
+        )
+
+        if same_direction:
+            current_basis = avg_basis_per_unit * abs(position_qty)
+            position_qty += signed_qty
+            avg_basis_per_unit = (
+                (current_basis + opening_total) / abs(position_qty)
+                if position_qty != 0
+                else Decimal(0)
+            )
+            continue
+
+        close_qty = min(abs(position_qty), qty)
+        if close_qty > 0:
+            basis_closed = avg_basis_per_unit * close_qty
+            realized_qty += close_qty
+
+            if position_qty > 0 and not is_buy:
+                close_value_per_unit = (notional - commission) / qty
+                realized_pnl += close_value_per_unit * close_qty - basis_closed
+            elif position_qty < 0 and is_buy:
+                cover_cost_per_unit = (notional + commission) / qty
+                realized_pnl += basis_closed - cover_cost_per_unit * close_qty
+
+            remaining_qty = abs(position_qty) - close_qty
+            position_qty = (
+                (Decimal(1) if position_qty > 0 else Decimal(-1)) * remaining_qty
+                if remaining_qty > 0
+                else Decimal(0)
+            )
+            if position_qty == 0:
+                avg_basis_per_unit = Decimal(0)
+
+        residual = qty - close_qty
+        if residual > 0:
+            if is_buy:
+                position_qty = residual
+                avg_basis_per_unit = (notional + commission) / qty
+            else:
+                position_qty = -residual
+                avg_basis_per_unit = (notional - commission) / qty
+
+    open_basis = avg_basis_per_unit * abs(position_qty)
+    return {
+        "realized_pnl": realized_pnl,
+        "realized_qty": realized_qty,
+        "cost_basis": cost_basis,
+        "proceeds": proceeds,
+        "open_basis": open_basis,
+    }
 
 
 def _composite_exec_id(exec_ids: List[str]) -> str:
@@ -217,6 +320,9 @@ def _bucket_to_entry(bucket: Dict[str, Any], next_id: int) -> Dict[str, Any]:
     side = "BUY" if action in ("BUY", "BUY_OPTION") else "SELL"
     structure = _structure_label(side, sec_type, bucket["strike"], bucket["right"], expiry_iso)
 
+    pnl = _compute_pnl_summary(bucket)
+    round_trip_quantity = int(max(bucket["buy_qty"], bucket["sell_qty"]))
+
     entry: Dict[str, Any] = {
         "id": next_id,
         "date": bucket["first_time"].strftime("%Y-%m-%d"),
@@ -229,6 +335,16 @@ def _bucket_to_entry(bucket: Dict[str, Any], next_id: int) -> Dict[str, Any]:
         "commission": round(_decimal_to_float(bucket["total_commission"]), 4),
         "ib_exec_id": _composite_exec_id(bucket["exec_ids"]),
         "notes": f"Rehydrated from IB Flex Query on {datetime.now().strftime('%Y-%m-%d')}",
+        # Lot-matched P&L breakdown (equivalent to scripts/trade_blotter
+        # /models.py:Trade._inventory_summary). Persisted on every row,
+        # closed or open, so the journal-derived blotter (web/lib
+        # /blotter/fromJournal.ts) doesn't have to reconstruct lots from
+        # row-level totals it doesn't have access to.
+        "cost_basis": round(_decimal_to_float(pnl["cost_basis"]), 4),
+        "proceeds": round(_decimal_to_float(pnl["proceeds"]), 4),
+        "realized_pnl": round(_decimal_to_float(pnl["realized_pnl"]), 4),
+        "realized_quantity": int(pnl["realized_qty"]),
+        "total_round_trip_quantity": round_trip_quantity,
     }
 
     if sec_type in ("OPT", "BAG"):
