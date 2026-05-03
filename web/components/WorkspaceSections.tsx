@@ -2284,12 +2284,22 @@ function OrdersSections({
 /* ─── Historical Trades (Flex Query) ───────────────────── */
 
 const BLOTTER_PAGE_SIZE = 15;
+const BLOTTER_STALE_THRESHOLD_DAYS = 1;
 
 type BlotterSortKey = "date" | "symbol" | "contract_desc" | "sec_type" | "status" | "net_quantity" | "total_commission" | "realized_pnl" | "cost_basis" | "proceeds";
 
 function getTradeDate(item: BlotterTrade): string {
   if (item.executions.length === 0) return "";
   return item.executions[item.executions.length - 1].time;
+}
+
+function blotterStalenessAgeDays(asOf: string | undefined | null): number | null {
+  if (!asOf) return null;
+  const asOfTime = Date.parse(asOf);
+  if (Number.isNaN(asOfTime)) return null;
+  const diffMs = Date.now() - asOfTime;
+  if (diffMs <= 0) return 0;
+  return Math.floor(diffMs / (24 * 60 * 60 * 1000));
 }
 
 const blotterExtract = (item: BlotterTrade, key: BlotterSortKey): string | number | null => {
@@ -2341,6 +2351,8 @@ export function HistoricalTradesSection() {
 
   const totalCount = allTrades.length;
   const hasData = data && (data.as_of || totalCount > 0);
+  const stalenessAgeDays = blotterStalenessAgeDays(data?.as_of);
+  const isStale = stalenessAgeDays !== null && stalenessAgeDays > BLOTTER_STALE_THRESHOLD_DAYS;
 
   return (
     <div className="section">
@@ -2354,6 +2366,14 @@ export function HistoricalTradesSection() {
           {data?.as_of && (
             <span className="report-meta" style={{ margin: 0, padding: 0, border: "none" }}>
               {new Date(data.as_of).toLocaleDateString()}
+            </span>
+          )}
+          {isStale && stalenessAgeDays !== null && (
+            <span
+              className="pill bearish"
+              title="Blotter has not been refreshed from IB Flex for more than a day. Click Refresh to pull the latest trades."
+            >
+              STALE · {stalenessAgeDays}d
             </span>
           )}
           {allTrades.length > 0 ? (

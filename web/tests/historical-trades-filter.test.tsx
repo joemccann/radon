@@ -214,4 +214,43 @@ describe("HistoricalTradesSection", () => {
     expect(screen.getByText("5")).toBeTruthy();
     expect(screen.getByText("$7,380.90")).toBeTruthy();
   });
+
+  it("shows a STALE pill when as_of is older than the threshold", () => {
+    const staleBlotter: BlotterData = {
+      ...BASE_BLOTTER,
+      as_of: new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString(),
+    };
+
+    useBlotterMock.mockReturnValue({
+      data: staleBlotter,
+      loading: false,
+      syncing: false,
+      error: null,
+      syncNow: vi.fn(),
+    });
+
+    render(React.createElement(HistoricalTradesSection));
+
+    expect(screen.getByText(/STALE/)).toBeTruthy();
+    expect(screen.getByText(/STALE · 5d/)).toBeTruthy();
+  });
+
+  it("does not show a STALE pill when as_of is recent", () => {
+    const freshBlotter: BlotterData = {
+      ...BASE_BLOTTER,
+      as_of: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
+    };
+
+    useBlotterMock.mockReturnValue({
+      data: freshBlotter,
+      loading: false,
+      syncing: false,
+      error: null,
+      syncNow: vi.fn(),
+    });
+
+    render(React.createElement(HistoricalTradesSection));
+
+    expect(screen.queryByText(/STALE/)).toBeNull();
+  });
 });
