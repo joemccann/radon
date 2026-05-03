@@ -36,6 +36,18 @@ The newsfeed is the **only** part of Radon that fundamentally requires the lapto
 
 If the themarketear cookie ever rotates, log in fresh in the Chrome Debug.app tab; the scraper picks up the new session on the next cycle (`fetchCookieHeader` reads cookies via `Network.getCookies`).
 
+### Tailscale-free media push
+
+The default rsync target (`radon@ib-gateway:/home/radon/radon-cloud/media/`) only resolves when Tailscale is up on the laptop. If the operator has shut Tailscale off (battery, conference WiFi, MagicDNS flake) the newsfeed cycle keeps scraping but logs `[push-media] non-fatal: rsync exit …` until the next cycle.
+
+To bypass Tailscale and push over the Hetzner public IP, export the env override before running the scraper / dev stack:
+
+```bash
+export RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/
+```
+
+The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys` on the VPS is shared between the Tailscale and public-IP entry points, so no key swap is needed. Tailscale remains the secure default; only flip the env when you actively want the public path. If the public route ever needs different SSH options (custom port, identity file, `StrictHostKeyChecking`), surface them via `RADON_MEDIA_RSYNC_SSH_OPTS` (not yet wired — add when you actually need it).
+
 ## Mode switch
 
 | Action | Command |

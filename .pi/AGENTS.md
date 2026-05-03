@@ -373,7 +373,7 @@ Next.js routes call FastAPI (`localhost:8321`) via `radonFetch()` (`web/lib/rado
 
 **Schemas + DB writers**: `scripts/db/migrations/0001_init.sql` (12 tables), `web/lib/db.ts` (Node), `scripts/db/client.py` + `scripts/db/writer.py` (Python). All hot-data scripts dual-write JSON file + DB row; route handlers prefer DB and fall back to disk.
 
-**Media host**: `https://media.radon.run` (Caddy on Hetzner). Newsfeed scraper rsyncs new images over Tailscale (`scripts/newsfeed/push_media.js`). DB stores absolute URLs so both peers resolve identically.
+**Media host**: `https://media.radon.run` (Caddy on Hetzner). Newsfeed scraper rsyncs new images over Tailscale (`scripts/newsfeed/push_media.js`). DB stores absolute URLs so both peers resolve identically. Tailscale-free fallback: set `RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/` to route rsync over the Hetzner public IP.
 
 **Production build workaround**: Next.js 16 has a prerender invariant that crashes on `/_global-error` and `/_not-found` because the root ClerkProvider's context isn't materialised in isolated workers. `web/package.json` build script uses `--experimental-build-mode=compile` to skip prerender; every page is `force-dynamic` already so no functional loss. `app/error.tsx` and `app/[ticker]/not-found.tsx` use plain `<a>` (not `next/link`) for the same reason.
 

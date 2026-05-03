@@ -656,7 +656,7 @@ Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-we
 
 **Schema + writers:** `scripts/db/migrations/0001_init.sql` (12 hot-data tables). Node writes via `scripts/db/writer.js` + `web/lib/db.ts`; Python writes via `scripts/db/writer.py` + `scripts/db/client.py`. Routes prefer DB and fall back to disk.
 
-**Image host**: `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Both Next.js peers reference absolute URLs in `posts.images`.
+**Image host**: `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Both Next.js peers reference absolute URLs in `posts.images`. Tailscale-free fallback: `RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/` routes the rsync over the Hetzner public IP (same SSH key works on both paths).
 
 **Production build constraint**: Next.js 16 prerender crashes on `/_global-error` + `/_not-found` (root ClerkProvider context isn't materialised in isolated workers). `web/package.json` build script uses `next build --experimental-build-mode=compile` to skip prerender. `app/error.tsx`, `app/[ticker]/not-found.tsx`, and `app/global-error.tsx` use plain `<a>` and pure JSX (no `next/link`, no `useEffect`, no `globals.css`) so they don't trigger the same useContext invariant.
 
