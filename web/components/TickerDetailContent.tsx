@@ -167,8 +167,12 @@ export default function TickerDetailContent({
             ticker={ticker}
             prices={prices}
             tickerPriceData={prices[ticker] ?? null}
-            focusPosition={positionId != null ? position : null}
-            focusPositionRequested={positionId != null}
+            // Auto-focus on any existing position for this ticker — not just
+            // when the URL carries an explicit positionId. Otherwise the chain
+            // defaults to the next ≥7-day Friday expiry instead of the user's
+            // actual position expiry, leading to mismatched-expiry orders.
+            focusPosition={position ?? null}
+            focusPositionRequested={position != null}
           />
         )}
         {resolvedTab === "position" && position && (

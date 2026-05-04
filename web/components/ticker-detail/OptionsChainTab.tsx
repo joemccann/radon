@@ -260,9 +260,15 @@ function OrderBuilder({
 
   const signedNetPrice = useCallback((value: number | null) => {
     if (value == null) return null;
+    // Single-leg orders carry a positive premium (the price you pay/receive
+    // for that one option). Sign-flipping is a combo-only concept for
+    // expressing net debit/credit. Forcing positive here keeps BID/MID/ASK
+    // quote buttons positive, the auto-populated limit positive, and the
+    // `isValidPrice` (parsedPrice > 0) check satisfied.
+    if (!isCombo) return Math.abs(value);
     if (isDebit === null) return value;
     return isDebit ? Math.abs(value) : -Math.abs(value);
-  }, [isDebit]);
+  }, [isCombo, isDebit]);
 
   const signedNetPrices = useMemo(() => {
     return {
