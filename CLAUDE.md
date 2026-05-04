@@ -205,6 +205,26 @@ Stock→equity. Long Call / Put→defined. Short Call / Put→undefined. Spreads
 ### Data Normalization
 JSON: `"ticker"`. IB contracts: `"symbol"`. Read defensively: `t.get("ticker") or t.get("symbol")`.
 
+### Margin Warning Thresholds (`web/lib/marginWarning.ts`)
+
+Persistent toast fires on transition into a worse level. Thresholds match IBKR's published guidance.
+
+```
+critical:  excess_liquidity ≤ 0                              (active margin call)
+critical:  cushion < 0.01  (< 1%)                            (imminent)
+warning:   cushion < 0.05  (< 5%)                            (approaching)
+warning:   equity_with_loan_value ≤ maint_margin_req × 1.10  (IBKR's own published rule)
+none:      otherwise
+
+cushion = excess_liquidity / net_liquidation
+```
+
+`assessMargin()` is a pure function — derive on the client from `portfolio.account_summary`. Toast UX in `WorkspaceShell.tsx` near the existing `prevIbConnectedRef` block; `prevMarginLevelRef` ensures we only fire on transition to a higher rank (`none < warning < critical`). User dismisses via the existing `×` close button. **Never auto-dismiss** (`addToast(..., 0)`).
+
+This is **Stage 1 (threshold-derived)** of the margin-alerting plan. **Stage 2** swaps the data source to authoritative IBKR Web API `/fyi/notifications` once OAuth Self-Service is activated for the account; the toast UI does not change. Plan: `~/.claude/plans/identify-all-issues-with-reactive-kernighan.md`.
+
+Tests: `web/tests/margin-warning.test.ts` (12 unit cases), `web/e2e/margin-warning-toast.spec.ts` (6 Playwright scenarios).
+
 ---
 
 ## Component Cheat Sheet
@@ -221,6 +241,7 @@ Each tab follows the same pattern: hook + staleness lib + API route + panel + sc
 | **Regime history** | `CriHistoryChart.tsx` | 20 sessions, 440px. Left: VIX `#05AD98` + VVIX `#8B5CF6`. Right: RVOL `#F5A623` + COR1M `#D946A8`. |
 | **Options Chain sticky header** | `OptionsChainTab.tsx` | Three required CSS rules — all three or overlap returns: (1) `background: var(--bg-panel-raised)` on `.chain-header` + `.chain-side-label`; (2) `position: sticky; top: 0` / `top: 24px`; (3) `.chain-grid thead { position: relative; z-index: 10 }`. |
 | **Column visibility** | `useColumnVisibility(tableId, defaults)` | Persists to `localStorage` keyed `radon:columns:<tableId>`. Buckets: `positions-{defined,undefined,equity}`, `orders-open`. `<ColumnsToggle />` left of filter input in section header. |
+| **Margin Warning Toast** | `web/lib/marginWarning.ts`, `web/components/WorkspaceShell.tsx` (`prevMarginLevelRef` block), `web/tests/margin-warning.test.ts`, `web/e2e/margin-warning-toast.spec.ts` | Stage 1 — threshold-derived from `portfolio.account_summary`. Persistent toast (`addToast(..., 0)`), fires only on transition to a worse rank. See "Margin Warning Thresholds" in Calculations. Stage 2 will swap source to IBKR `/fyi/notifications` once OAuth Self-Service activates. |
 
 ---
 
