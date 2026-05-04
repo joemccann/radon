@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from monitor_daemon.daemon import MonitorDaemon
 from monitor_daemon.handlers import FillMonitorHandler, ExitOrdersHandler, PresetRebalanceHandler, JournalSyncHandler
 from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
+from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
 
 # Paths
 PROJECT_DIR = Path(__file__).parent.parent.parent
@@ -94,7 +95,9 @@ def create_daemon() -> MonitorDaemon:
         ib_port=4001,
         client_id=72
     ))
-    
+
+    daemon.register(CashFlowSyncHandler())
+
     # Load previous state
     daemon.load_state()
     

@@ -28,6 +28,7 @@ import { useDiscover } from "@/lib/useDiscover";
 import { useFlowAnalysis } from "@/lib/useFlowAnalysis";
 import { useScanner } from "@/lib/useScanner";
 import { useBlotter } from "@/lib/useBlotter";
+import CashFlowsSection from "@/components/CashFlowsSection";
 import { useSort, type SortDirection } from "@/lib/useSort";
 import { useTableFilter } from "@/lib/useTableFilter";
 import TableSearch from "./TableSearch";
@@ -2275,6 +2276,8 @@ function OrdersSections({
           </div>
         </div>
       )}
+
+      <CashFlowsSection />
 
       <HistoricalTradesSection />
     </>

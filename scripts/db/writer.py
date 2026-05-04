@@ -92,6 +92,40 @@ def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
     db.commit()
 
 
+def upsert_cash_flow(
+    txn_id: str,
+    date_str: str,
+    txn_type: str,
+    amount: float,
+    currency: str = "USD",
+    description: Optional[str] = None,
+    raw_type: Optional[str] = None,
+) -> None:
+    """Persist one cash transaction (deposit / withdrawal / dividend / etc).
+
+    `amount` is signed (positive = inflow into account, negative = outflow).
+    Idempotent on `txn_id` (IB transactionID), so re-running the Flex pull
+    after a partial-day refresh is a no-op for already-seen rows.
+    """
+    db = get_db()
+    db.execute(
+        """
+        INSERT INTO cash_flows (id, date, type, amount, currency, description, raw_type, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+          date        = excluded.date,
+          type        = excluded.type,
+          amount      = excluded.amount,
+          currency    = excluded.currency,
+          description = excluded.description,
+          raw_type    = excluded.raw_type,
+          synced_at   = excluded.synced_at
+        """,
+        (txn_id, date_str, txn_type, float(amount), currency, description, raw_type, _now_iso()),
+    )
+    db.commit()
+
+
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
     db = get_db()
     db.execute(

@@ -15,7 +15,7 @@ import json
 import logging
 import os
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import sys
 import time
 from contextlib import asynccontextmanager
@@ -1550,6 +1550,83 @@ async def _run_ib_script_with_recovery(
                 )
 
     return result
+
+
+# ---------------------------------------------------------------------------
+# Cash flows (deposits, withdrawals, dividends, interest, fees)
+# ---------------------------------------------------------------------------
+
+@app.get("/cash-flows")
+async def cash_flows(
+    days: int = 90,
+    types: str = "",
+):
+    """Return cash transactions from the `cash_flows` Turso table.
+
+    Reads-only — populated by `scripts/cash_flow_sync.py` which runs daily
+    via the monitor_daemon `cash_flow_sync` handler. Falls back to
+    `data/cash_flows.json` if the DB read fails.
+
+    Query params:
+      days  - lookback window in days, default 90
+      types - comma-separated filter (e.g. "Deposit,Withdrawal"); empty = all
+    """
+    type_filter = {t.strip() for t in types.split(",") if t.strip()} or None
+    cutoff_iso = (datetime.now(timezone.utc).date() - timedelta(days=max(1, days))).isoformat()
+
+    rows: list[dict[str, Any]] = []
+    db_error: Optional[str] = None
+
+    try:
+        from db.client import get_db
+        db = get_db()
+        cursor = db.execute(
+            """
+            SELECT id, date, type, amount, currency, description, raw_type, synced_at
+            FROM cash_flows
+            WHERE date >= ?
+            ORDER BY date DESC, id DESC
+            """,
+            (cutoff_iso,),
+        )
+        for row in cursor.fetchall():
+            rows.append({
+                "id": row[0],
+                "date": row[1],
+                "type": row[2],
+                "amount": row[3],
+                "currency": row[4],
+                "description": row[5],
+                "raw_type": row[6],
+                "synced_at": row[7],
+            })
+    except Exception as exc:
+        db_error = str(exc)
+        # Fall back to JSON file
+        try:
+            from utils.atomic_io import verified_load
+            snapshot = verified_load(str(DATA_DIR / "cash_flows.json"))
+            rows = [r for r in snapshot.get("rows", []) if r.get("date", "") >= cutoff_iso]
+        except Exception:
+            pass
+
+    if type_filter:
+        rows = [r for r in rows if r.get("type") in type_filter]
+
+    summary = {
+        "deposits": sum(r["amount"] for r in rows if r["type"] == "Deposit"),
+        "withdrawals": sum(r["amount"] for r in rows if r["type"] == "Withdrawal"),
+        "dividends": sum(r["amount"] for r in rows if r["type"] == "Dividend"),
+        "net": sum(r["amount"] for r in rows),
+    }
+
+    return {
+        "rows": rows,
+        "count": len(rows),
+        "from_date": cutoff_iso,
+        "summary": summary,
+        "db_error": db_error,  # null on success; non-null when DB read failed and we fell back
+    }
 
 
 # ---------------------------------------------------------------------------
