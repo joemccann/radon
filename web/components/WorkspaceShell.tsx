@@ -29,6 +29,7 @@ const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections")
 import ConnectionBanner from "@/components/ConnectionBanner";
 import FlexTokenBanner from "@/components/FlexTokenBanner";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
+import { assessMargin, rankOf, type MarginLevel } from "@/lib/marginWarning";
 
 type WorkspaceShellProps = {
   section?: WorkspaceSection;
@@ -227,6 +228,17 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     }
     prevIbConnectedRef.current = ibConnected;
   }, [ibConnected, ibIssue, ibStatusMessage, addToast]);
+
+  // Margin-warning persistent toast (Stage 1: threshold-derived).
+  // Fires only on transition into a worse level. duration:0 = manual dismiss only.
+  const prevMarginLevelRef = useRef<MarginLevel>("none");
+  useEffect(() => {
+    const { level, message } = assessMargin(portfolio?.account_summary);
+    if (rankOf(level) > rankOf(prevMarginLevelRef.current)) {
+      addToast(level === "critical" ? "error" : "warning", message, 0);
+    }
+    prevMarginLevelRef.current = level;
+  }, [portfolio?.account_summary, addToast]);
   const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
   const error = isOrdersPage ? ordersError : portfolioError;
   const lastSync = isOrdersPage ? ordersLastSync : portfolioLastSync;
