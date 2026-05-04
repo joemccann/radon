@@ -21,6 +21,13 @@ numpy>=1.26.0
 # Environment and utilities
 python-dotenv>=1.0.0
 pytz>=2024.1
+# Python tzdata fallback — Ubuntu 24's system tzdata excludes legacy zone
+# aliases like "US/Eastern" (which IBKR's TWS API sends in execution
+# timestamps). Without this, ib_insync's parse_execution() raises
+# LookupError on every fill and the fill is silently dropped before
+# reaching journal_sync. See incident 2026-05-04 (AMD risk reversal
+# closes on 5/4 didn't surface to /orders until tzdata was installed).
+tzdata>=2024.1
 
 # Browser automation (MenthorQ CTA scraping)
 playwright>=1.48.0
