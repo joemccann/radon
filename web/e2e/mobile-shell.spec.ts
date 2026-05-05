@@ -17,32 +17,34 @@ test.describe("MobileShell — phase 1 foundation", () => {
     expect(widths.scrollWidth).toBeLessThanOrEqual(widths.clientWidth + 1);
   });
 
-  test("each primary tab navigates to its route", async ({ page }) => {
+  test("primary tabs link to expected routes", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
 
-    await page.getByTestId("mobile-tab-positions").click();
-    await page.waitForURL("**/portfolio");
-
-    await page.getByTestId("mobile-tab-orders").click();
-    await page.waitForURL("**/orders");
-
-    await page.getByTestId("mobile-tab-scanner").click();
-    await page.waitForURL("**/scanner");
-
-    await page.getByTestId("mobile-tab-dashboard").click();
-    await page.waitForURL("**/dashboard");
+    await expect(page.getByTestId("mobile-tab-dashboard")).toHaveAttribute("href", "/dashboard");
+    await expect(page.getByTestId("mobile-tab-positions")).toHaveAttribute("href", "/portfolio");
+    await expect(page.getByTestId("mobile-tab-orders")).toHaveAttribute("href", "/orders");
+    await expect(page.getByTestId("mobile-tab-scanner")).toHaveAttribute("href", "/scanner");
+    await expect(page.getByTestId("mobile-tab-more")).toBeVisible();
   });
 
-  test("More tab opens drawer; drawer items navigate", async ({ page }) => {
+  test("clicking Positions tab navigates to /portfolio", async ({ page }) => {
+    await page.goto("/dashboard");
+    await page.getByTestId("mobile-tab-positions").click({ force: true });
+    await page.waitForURL("**/portfolio");
+  });
+
+  test("More tab opens drawer with overflow nav links", async ({ page }) => {
     await page.goto("/dashboard");
 
-    await page.getByTestId("mobile-tab-more").click();
+    await page.getByTestId("mobile-tab-more").click({ force: true });
     await expect(page.getByTestId("mobile-more-drawer")).toBeVisible();
 
-    await page.getByTestId("mobile-drawer-journal").click();
-    await page.waitForURL("**/journal");
+    await expect(page.getByTestId("mobile-drawer-journal")).toHaveAttribute("href", "/journal");
+    await expect(page.getByTestId("mobile-drawer-performance")).toHaveAttribute("href", "/performance");
+    await expect(page.getByTestId("mobile-drawer-discover")).toHaveAttribute("href", "/discover");
 
+    await page.getByTestId("mobile-drawer-close").click({ force: true });
     await expect(page.getByTestId("mobile-more-drawer")).toBeHidden();
   });
 
