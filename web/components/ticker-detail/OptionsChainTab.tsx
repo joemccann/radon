@@ -25,6 +25,8 @@ import {
   ALL_STRIKES,
 } from "@/lib/optionsChainUtils";
 import { OrderPriceStrip, OrderLegPills, OrderConfirmSummary, type OrderLeg as UnifiedOrderLeg, type OrderSummary } from "@/lib/order";
+import { useViewport } from "@/lib/useViewport";
+import MobileChainLadder from "@/components/mobile/MobileChainLadder";
 
 /* ─── Types ─── */
 
@@ -746,6 +748,8 @@ export default function OptionsChainTab({
   const [orderLegs, setOrderLegs] = useState<OrderLeg[]>([]);
   const [strikesPerSide, setStrikesPerSide] = useState(15);
   const [sideFilter, setSideFilter] = useState<"both" | "calls" | "puts">("both");
+  const { isMobile, hasMounted } = useViewport();
+  const showMobileChain = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();
   const atmRef = useRef<HTMLTableRowElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
@@ -1033,6 +1037,25 @@ export default function OptionsChainTab({
           {error}
         </span>
       </div>
+    );
+  }
+
+  if (showMobileChain) {
+    return (
+      <MobileChainLadder
+        ticker={ticker}
+        expirations={expirations}
+        selectedExpiry={selectedExpiry}
+        onSelectExpiry={(expiry) => {
+          setSelectedExpiry(expiry);
+          setOrderLegs([]);
+        }}
+        visibleStrikes={visibleStrikes}
+        atmStrike={atmStrike}
+        prices={prices}
+        currentPrice={currentPrice}
+        loading={loadingStrikes}
+      />
     );
   }
 

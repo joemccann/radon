@@ -6302,6 +6302,229 @@ body[data-mobile="true"] .toast-container {
   border-color: var(--accent-bg);
 }
 
+/* ── Mobile Options Chain ladder ── */
+
+.mobile-chain {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--mobile-app-bar-height) - var(--mobile-tab-bar-height) - var(--safe-top) - var(--safe-bottom) - 80px);
+  min-height: 480px;
+}
+
+.mobile-chain__header {
+  position: sticky;
+  top: 0;
+  background: var(--bg-base);
+  z-index: 5;
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 8px;
+}
+
+.mobile-chain__brand {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 4px 8px;
+  font-family: var(--font-mono);
+}
+
+.mobile-chain__ticker {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+}
+
+.mobile-chain__price {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.mobile-chain__expiry-bar {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding: 4px;
+  scrollbar-width: none;
+}
+
+.mobile-chain__expiry-bar::-webkit-scrollbar {
+  display: none;
+}
+
+.mobile-chain__expiry-chip {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 8px 12px;
+  min-height: 44px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mobile-chain__expiry-chip--active {
+  color: var(--accent-bg);
+  border-color: var(--accent-bg);
+}
+
+.mobile-chain__expiry-date {
+  font-weight: 600;
+}
+
+.mobile-chain__expiry-dte {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+
+.mobile-chain__ladder-head {
+  display: grid;
+  grid-template-columns: 1fr 64px 1fr;
+  align-items: center;
+  padding: 6px 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-dim);
+  background: var(--bg-panel-raised);
+}
+
+.mobile-chain__side-label {
+  text-align: center;
+}
+
+.mobile-chain__strike-label {
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.mobile-chain__ladder {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.mobile-chain__row {
+  display: grid;
+  grid-template-columns: 1fr 64px 1fr;
+  align-items: stretch;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.mobile-chain__row--atm {
+  background: rgba(5, 173, 152, 0.06);
+}
+
+.mobile-chain__row--atm .mobile-chain__strike {
+  color: var(--accent-bg);
+  font-weight: 700;
+}
+
+.mobile-chain__cell {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 10px;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  min-height: 44px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-chain__cell:active {
+  background: var(--bg-hover);
+}
+
+.mobile-chain__cell--call {
+  border-right: 1px solid var(--border-dim);
+}
+
+.mobile-chain__cell--put {
+  border-left: 1px solid var(--border-dim);
+  text-align: right;
+  align-items: flex-end;
+}
+
+.mobile-chain__last {
+  font-size: 13px;
+}
+
+.mobile-chain__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 6px;
+  font-size: 9px;
+  color: var(--text-secondary);
+  letter-spacing: 0.04em;
+}
+
+.mobile-chain__cell--put .mobile-chain__meta {
+  flex-direction: row-reverse;
+}
+
+.mobile-chain__strike {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+}
+
+.mobile-chain__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.mobile-chain__detail-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border-dim);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.mobile-chain__detail-row:last-child {
+  border-bottom: none;
+}
+
+.mobile-chain__detail-label {
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 10px;
+}
+
+.mobile-chain__detail-value {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {
