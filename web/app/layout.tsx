@@ -1,12 +1,27 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
 import { dark } from "@clerk/themes";
 import Providers from "@/components/Providers";
+import PwaRegister from "@/components/PwaRegister";
 import "./globals.css";
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  viewportFit: "cover",
+  themeColor: "#0a0f14",
+};
 
 export const metadata: Metadata = {
   title: "Radon Terminal",
   description: "Market structure reconstruction instrument. Surfaces convex opportunities from institutional flow, volatility surfaces, and cross-asset positioning.",
+  manifest: "/manifest.webmanifest",
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "Radon",
+  },
   icons: {
     icon: [
       { url: "/icons/favicon-16x16.png", sizes: "16x16", type: "image/png" },
@@ -41,6 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <html lang="en" data-theme="dark">
         <body className="app-root">
           <Providers>{children}</Providers>
+          <PwaRegister />
         </body>
       </html>
     </ClerkProvider>

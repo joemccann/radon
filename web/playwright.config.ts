@@ -17,6 +17,14 @@ export default defineConfig({
       name: "chromium",
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      name: "mobile",
+      testMatch: /mobile-.*\.spec\.ts$/,
+      use: {
+        ...devices["iPhone 15"],
+        viewport: { width: 393, height: 852 },
+      },
+    },
   ],
   // Start Next.js dev server before tests
   webServer: {

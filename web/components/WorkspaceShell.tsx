@@ -22,6 +22,8 @@ import ChatPanel from "@/components/ChatPanel";
 import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
 import DashboardNewsFeed from "@/components/DashboardNewsFeed";
+import MobileShell from "@/components/mobile/MobileShell";
+import { useViewport } from "@/lib/useViewport";
 
 const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections"), {
   loading: () => null,
@@ -40,6 +42,8 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const [theme, setTheme] = useState<"dark" | "light" | null>(null);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const pathname = usePathname();
+  const { isMobile, hasMounted } = useViewport();
+  const showMobileChrome = isMobile && hasMounted;
   const activeSection: WorkspaceSection = section ?? resolveSectionFromPath(pathname, "dashboard");
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
@@ -327,6 +331,9 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
 
   return (
     <div className="app-shell" suppressHydrationWarning>
+      {showMobileChrome ? (
+        <MobileShell title={activeLabel} ibConnected={ibConnected} lastSync={lastSync} />
+      ) : null}
       <Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />
 
       <main className="main">
