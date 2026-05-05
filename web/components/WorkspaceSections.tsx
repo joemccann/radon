@@ -42,7 +42,9 @@ import {
 import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
+import { useViewport } from "@/lib/useViewport";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
+import MobileOrderList from "./mobile/MobileOrderList";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable, {
   POSITION_COLUMNS,
@@ -1753,6 +1755,8 @@ function OrdersSections({
   portfolio?: PortfolioData | null;
 }) {
   const { pendingCancels, pendingModifies, cancelledOrders, requestCancel, requestModify } = useOrderActions();
+  const { isMobile, hasMounted } = useViewport();
+  const showMobileOrders = isMobile && hasMounted;
   const riskFreeRate = useRiskFreeRate();
   const openOrderExtract = useMemo(() => makeOpenOrderExtract(prices, portfolio, riskFreeRate), [prices, portfolio, riskFreeRate]);
   // Implied columns only meaningful when at least one open order is an option.
@@ -1932,6 +1936,34 @@ function OrdersSections({
         <div className="section-body">
           {openOrderRows.length === 0 ? (
             <div className="alert-item">No open orders</div>
+          ) : showMobileOrders ? (
+            <MobileOrderList
+              rows={openFilter.filtered}
+              pendingCancelPermIds={pendingCancels}
+              pendingModifyPermIds={pendingModifies}
+              canModify={canModify}
+              onRequestCancel={(single, combo) => {
+                if (single) setCancelTarget(single);
+                else if (combo) handleCancelCombo(combo);
+              }}
+              onRequestModify={(single, combo) => {
+                if (single) {
+                  setModifyTarget({ modalOrder: single, requestOrder: single });
+                } else if (combo && combo.length > 0) {
+                  const comboRow = openFilter.filtered.find(
+                    (row) => row.kind === "combo" && row.orders === combo,
+                  );
+                  if (comboRow && comboRow.kind === "combo") {
+                    const target = buildGroupedComboModifyTarget(comboRow);
+                    setModifyTarget({
+                      modalOrder: target.modalOrder,
+                      requestOrder: combo[0],
+                      cancelOrders: target.cancelOrders,
+                    });
+                  }
+                }
+              }}
+            />
           ) : (
             <div className="table-wrap">
             <table>

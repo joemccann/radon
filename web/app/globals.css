@@ -6263,6 +6263,45 @@ body[data-mobile="true"] .toast-container {
   border-radius: 4px;
 }
 
+.mobile-action-sheet {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-action-sheet__item {
+  min-height: 56px;
+  padding: 0 16px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  text-align: left;
+  cursor: pointer;
+}
+
+.mobile-action-sheet__item:active {
+  background: var(--bg-hover);
+}
+
+.mobile-action-sheet__item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mobile-action-sheet__item--cancel {
+  color: var(--negative);
+  border-color: var(--negative);
+}
+
+.mobile-action-sheet__item--modify {
+  color: var(--accent-bg);
+  border-color: var(--accent-bg);
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {
