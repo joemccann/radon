@@ -18,6 +18,37 @@ log_error() { echo -e "${RED}[cloud]${NC} $*"; }
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
+# -- Step 0: Refuse to run when a third-party VPN is hijacking traffic -------
+#
+# NordVPN / ProtonVPN / TunnelBear install routes that capture traffic before
+# Tailscale's data plane can use it. Tailscale's *control* plane stays green
+# (peers list, `tailscale ping` via DERP), so the symptom looks like an ACL
+# or firewall problem when it isn't. Catch the conflict here with a clear
+# error rather than letting the TCP probe time out.
+detect_blocking_vpn() {
+  # Match on the foreground app's exact basename (case-insensitive). On
+  # macOS, quitting the app disconnects the tunnel, so the app's presence
+  # is a reliable proxy for "VPN is active". Avoid substring matches —
+  # they false-positive on installed-but-idle system extensions like
+  # com.tunnelbear.mac.TunnelBear.vpn-extension.
+  local matches=()
+  pgrep -qix NordVPN    && matches+=("NordVPN")
+  pgrep -qix ProtonVPN  && matches+=("ProtonVPN")
+  pgrep -qix TunnelBear && matches+=("TunnelBear")
+  if (( ${#matches[@]} > 0 )); then
+    printf '%s\n' "${matches[@]}" | paste -sd ', ' -
+  fi
+}
+
+blocking_vpn="$(detect_blocking_vpn)"
+if [[ -n "$blocking_vpn" ]]; then
+  log_error "Detected active VPN: ${blocking_vpn}."
+  log_error "These clients hijack routing and break Tailscale's data plane,"
+  log_error "so the laptop can't reach ib-gateway:4001 even though the tailnet"
+  log_error "shows it as online. Disconnect the VPN and retry."
+  exit 1
+fi
+
 # -- Step 1: Verify Tailscale connectivity -----------------------------------
 
 log_info "Checking Tailscale connectivity to ib-gateway..."
