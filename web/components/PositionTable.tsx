@@ -25,7 +25,9 @@ import {
 import { computeLegImpliedValue, computePositionImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
+import { useViewport } from "@/lib/useViewport";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
+import MobilePositionList from "./mobile/MobilePositionList";
 
 /* ─── Sortable header cell ─────────────────────────────── */
 
@@ -580,6 +582,7 @@ export default function PositionTable({
    *  internal hook + toolbar above the table. */
   columnVisibility?: PositionColumnVisibility;
 }) {
+  const { isMobile, hasMounted } = useViewport();
   const riskFreeRate = useRiskFreeRate();
   const positionExtract = useMemo(() => makePositionExtract(prices, riskFreeRate), [prices, riskFreeRate]);
   const { sorted, sort, toggle } = useSort(positions, positionExtract);
@@ -609,6 +612,10 @@ export default function PositionTable({
   const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
     setActiveInstrument({ leg, ticker: pos.ticker, expiry: pos.expiry });
   }, []);
+
+  if (isMobile && hasMounted) {
+    return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} />;
+  }
 
   return (
     <>

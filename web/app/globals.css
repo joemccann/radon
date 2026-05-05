@@ -6185,6 +6185,84 @@ body[data-mobile="true"] .toast-container {
   gap: 6px;
 }
 
+.mobile-card__title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.mobile-card__pnl {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-card__pnl-value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.mobile-card__pnl-pct {
+  font-size: 10px;
+  letter-spacing: 0.04em;
+}
+
+.mobile-card__chevron-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mobile-card__chevron {
+  display: inline-flex;
+  align-items: center;
+  color: var(--text-muted);
+}
+
+.mobile-card__leg-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+}
+
+.mobile-card__leg-desc {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.mobile-card__leg-metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+
+.mobile-card__leg-meta {
+  color: var(--text-muted);
+}
+
+.mobile-empty-state {
+  padding: 24px 16px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  border: 1px dashed var(--border-dim);
+  border-radius: 4px;
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {
