@@ -6058,3 +6058,234 @@ body[data-mobile="true"] .toast-container {
   cursor: pointer;
 }
 
+/* ── Mobile Card primitive ── */
+
+.mobile-card {
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.mobile-card--interactive {
+  cursor: pointer;
+}
+
+.mobile-card--interactive:active {
+  background: var(--bg-hover);
+}
+
+.mobile-card--interactive:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 1px;
+}
+
+.mobile-card--positive { border-left: 3px solid var(--positive); }
+.mobile-card--negative { border-left: 3px solid var(--negative); }
+.mobile-card--warning { border-left: 3px solid var(--warning); }
+
+.mobile-card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mobile-card-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font-family: var(--font-mono);
+}
+
+.mobile-card-row--default { font-size: 13px; }
+.mobile-card-row--compact { font-size: 11px; }
+
+.mobile-card-row__label {
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 10px;
+}
+
+.mobile-card-row__value {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.mobile-card-row__value--positive { color: var(--positive); }
+.mobile-card-row__value--negative { color: var(--negative); }
+.mobile-card-row__value--warning { color: var(--warning); }
+.mobile-card-row__value--muted { color: var(--text-muted); }
+
+.mobile-card__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
+
+.mobile-card__subtitle {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.mobile-card__metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.mobile-card__metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mobile-card__metric-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+
+.mobile-card__metric-value {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-card__metric-value--positive { color: var(--positive); }
+.mobile-card__metric-value--negative { color: var(--negative); }
+
+.mobile-card__detail {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+/* ── Mobile BottomSheet ── */
+
+.mobile-sheet-root {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.mobile-sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.6);
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.mobile-sheet {
+  position: relative;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--border-dim);
+  border-top-left-radius: 4px;
+  border-top-right-radius: 4px;
+  padding-bottom: var(--safe-bottom);
+  max-height: 90dvh;
+  display: flex;
+  flex-direction: column;
+  animation: mobile-sheet-in 240ms var(--ease-out);
+  will-change: transform;
+}
+
+@keyframes mobile-sheet-in {
+  from { transform: translateY(100%); }
+  to { transform: translateY(0); }
+}
+
+.mobile-sheet__handle-bar {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  cursor: grab;
+  touch-action: none;
+}
+
+.mobile-sheet__handle {
+  width: 40px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--text-muted);
+  opacity: 0.6;
+}
+
+.mobile-sheet__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 16px 12px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.mobile-sheet__title {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.mobile-sheet__close {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.mobile-sheet__body {
+  padding: 12px 16px;
+  overflow-y: auto;
+  flex: 1;
+}
+
+.mobile-sheet__footer {
+  padding: 12px 16px calc(12px + var(--safe-bottom));
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
