@@ -11,6 +11,7 @@ const toneClass: Record<ToneType, string> = {
   core: "border-accent/40 text-accent",
   strong: "border-signal-strong/40 text-signal-strong",
   warn: "border-warn/40 text-warn",
+  fault: "border-negative/40 text-negative",
   violet: "border-extreme/40 text-extreme",
   neutral: "border-grid text-secondary",
   clear: "border-accent/40 text-accent",
