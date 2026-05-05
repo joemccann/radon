@@ -4,12 +4,12 @@ import { useEffect, useState } from "react";
 import MobileAppBar from "./MobileAppBar";
 import MobileTabBar from "./MobileTabBar";
 import MobileMoreDrawer from "./MobileMoreDrawer";
+import MobileTickerSearch from "./MobileTickerSearch";
 
 type MobileShellProps = {
   title: string;
   ibConnected?: boolean;
   lastSync?: string | null;
-  onOpenSearch?: () => void;
 };
 
 /**
@@ -19,8 +19,9 @@ type MobileShellProps = {
  *
  * Render alongside the existing desktop layout in `WorkspaceShell` — does not wrap children.
  */
-export default function MobileShell({ title, ibConnected, lastSync, onOpenSearch }: MobileShellProps) {
+export default function MobileShell({ title, ibConnected, lastSync }: MobileShellProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
 
   useEffect(() => {
     if (typeof document === "undefined") return;
@@ -32,13 +33,21 @@ export default function MobileShell({ title, ibConnected, lastSync, onOpenSearch
 
   return (
     <>
-      <MobileAppBar title={title} ibConnected={ibConnected} onOpenSearch={onOpenSearch} />
+      <MobileAppBar
+        title={title}
+        ibConnected={ibConnected}
+        onOpenSearch={() => setSearchOpen(true)}
+      />
       <MobileTabBar onOpenMore={() => setDrawerOpen(true)} />
       <MobileMoreDrawer
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         ibConnected={ibConnected}
         lastSync={lastSync}
+      />
+      <MobileTickerSearch
+        open={searchOpen}
+        onClose={() => setSearchOpen(false)}
       />
     </>
   );

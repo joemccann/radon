@@ -6525,6 +6525,99 @@ body[data-mobile="true"] .toast-container {
   font-variant-numeric: tabular-nums;
 }
 
+/* ── Mobile: hide elements that don't apply at small widths ── */
+
+body[data-mobile="true"] .columns-toggle {
+  display: none;
+}
+
+body[data-mobile="true"] .table-search,
+body[data-mobile="true"] .table-search-wrap {
+  /* TableSearch loses prominence on mobile; show only when needed */
+  max-width: 100%;
+}
+
+/* ── Mobile Ticker Search overlay ── */
+
+.mobile-search-root {
+  position: fixed;
+  inset: 0;
+  z-index: 95;
+  background: var(--bg-base);
+  display: flex;
+  flex-direction: column;
+  padding-top: var(--safe-top);
+  padding-bottom: var(--safe-bottom);
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+.mobile-search-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 8px;
+  border-bottom: 1px solid var(--border-dim);
+}
+
+.mobile-search-input {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Override desktop input sizing inside the mobile overlay so iOS
+ * doesn't auto-zoom on focus (anything <16px triggers zoom). */
+.mobile-search-input input {
+  font-size: 16px !important;
+  padding: 12px 14px !important;
+  min-height: 44px;
+}
+
+.mobile-search-close {
+  width: 44px;
+  height: 44px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+/* When the dropdown sits inside the overlay, let it span the body. */
+.mobile-search-input #ticker-search-listbox {
+  position: static !important;
+  max-height: none !important;
+  border: none !important;
+  margin-top: 8px;
+}
+
+/* ── Mobile Share PnL popover → bottom sheet ── */
+
+body[data-mobile="true"] .share-pnl-popover {
+  position: fixed;
+  inset: auto 0 0 0;
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  padding: 16px 16px calc(16px + var(--safe-bottom)) !important;
+  border-radius: 4px 4px 0 0 !important;
+  border-bottom: none !important;
+  z-index: 100;
+}
+
+body[data-mobile="true"] .share-pnl-popover-actions {
+  flex-direction: column !important;
+}
+
+body[data-mobile="true"] .share-pnl-action {
+  min-height: 44px;
+  width: 100%;
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {
