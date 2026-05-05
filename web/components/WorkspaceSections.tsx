@@ -45,6 +45,7 @@ import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobileOrderList from "./mobile/MobileOrderList";
+import MobileBlotterList from "./mobile/MobileBlotterList";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable, {
   POSITION_COLUMNS,
@@ -2356,6 +2357,8 @@ const blotterExtract = (item: BlotterTrade, key: BlotterSortKey): string | numbe
 export function HistoricalTradesSection() {
   const { data, loading, syncing, error, syncNow } = useBlotter(true);
   const [page, setPage] = useState(0);
+  const { isMobile, hasMounted } = useViewport();
+  const showMobileBlotter = isMobile && hasMounted;
 
   const allTrades = useMemo(() => {
     if (!data) return [];
@@ -2436,7 +2439,33 @@ export function HistoricalTradesSection() {
         {!loading && !hasData && !error && (
           <div className="alert-item section-message">No historical trades. Click REFRESH to fetch from IB.</div>
         )}
-        {!loading && pageRows.length > 0 && (
+        {!loading && pageRows.length > 0 && showMobileBlotter && (
+          <>
+            <MobileBlotterList trades={pageRows} />
+            {totalPages > 1 && (
+              <div className="pagination" style={{ marginTop: 8 }}>
+                <button
+                  className="page-button"
+                  disabled={safePage === 0}
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                >
+                  Prev
+                </button>
+                <span className="page-meta">
+                  Page {safePage + 1} of {totalPages}
+                </span>
+                <button
+                  className="page-button"
+                  disabled={safePage >= totalPages - 1}
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                >
+                  Next
+                </button>
+              </div>
+            )}
+          </>
+        )}
+        {!loading && pageRows.length > 0 && !showMobileBlotter && (
           <>
             <table>
               <thead>
