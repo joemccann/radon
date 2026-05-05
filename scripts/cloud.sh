@@ -20,32 +20,48 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 
 # -- Step 0: Refuse to run when a third-party VPN is hijacking traffic -------
 #
-# NordVPN / ProtonVPN / TunnelBear install routes that capture traffic before
-# Tailscale's data plane can use it. Tailscale's *control* plane stays green
-# (peers list, `tailscale ping` via DERP), so the symptom looks like an ACL
-# or firewall problem when it isn't. Catch the conflict here with a clear
-# error rather than letting the TCP probe time out.
-detect_blocking_vpn() {
-  # Match on the foreground app's exact basename (case-insensitive). On
-  # macOS, quitting the app disconnects the tunnel, so the app's presence
-  # is a reliable proxy for "VPN is active". Avoid substring matches —
-  # they false-positive on installed-but-idle system extensions like
-  # com.tunnelbear.mac.TunnelBear.vpn-extension.
-  local matches=()
-  pgrep -qix NordVPN    && matches+=("NordVPN")
-  pgrep -qix ProtonVPN  && matches+=("ProtonVPN")
-  pgrep -qix TunnelBear && matches+=("TunnelBear")
-  if (( ${#matches[@]} > 0 )); then
-    printf '%s\n' "${matches[@]}" | paste -sd ', ' -
-  fi
+# Detect the conflict at the routing-table level rather than by app name —
+# any third-party VPN (NordVPN, ProtonVPN, WireGuard, Cisco AnyConnect,
+# Cloudflare WARP, OpenVPN, IKEv2, …) breaks Tailscale's data plane the
+# same way: by installing a default (or split-default) route over its own
+# tunnel interface. The control plane stays green so peers look online;
+# only TCP to the peer's IP times out.
+#
+# Algorithm: find Tailscale's tunnel interface via its 100.64/10 IP, then
+# look for `default` / `0/1` / `128.0/1` routes owned by any *other*
+# tunnel-class interface (utun, ipsec, ppp, tun). Tailscale itself can
+# install a default route via its own interface (e.g. with --exit-node);
+# excluding ts_iface keeps that case from firing.
+tailscale_tun_iface() {
+  ifconfig 2>/dev/null | awk '
+    /^[a-z]/ { iface=$1; sub(/:$/,"",iface) }
+    /^[[:space:]]+inet 100\./ {
+      split($2, octets, ".")
+      second = octets[2] + 0
+      if (second >= 64 && second <= 127) { print iface; exit }
+    }
+  '
 }
 
-blocking_vpn="$(detect_blocking_vpn)"
-if [[ -n "$blocking_vpn" ]]; then
-  log_error "Detected active VPN: ${blocking_vpn}."
-  log_error "These clients hijack routing and break Tailscale's data plane,"
-  log_error "so the laptop can't reach ib-gateway:4001 even though the tailnet"
-  log_error "shows it as online. Disconnect the VPN and retry."
+detect_hijacking_interfaces() {
+  local ts_iface
+  ts_iface="$(tailscale_tun_iface)"
+  netstat -nr -f inet 2>/dev/null | awk -v ts="$ts_iface" '
+    ($1 == "default" || $1 == "0/1" || $1 == "128.0/1") &&
+    $NF ~ /^(utun|ipsec|ppp|tun)/ &&
+    $NF != ts {
+      print $NF
+    }
+  ' | sort -u | paste -sd ',' -
+}
+
+hijacker="$(detect_hijacking_interfaces)"
+if [[ -n "$hijacker" ]]; then
+  log_error "VPN tunnel ${hijacker} owns the default route — traffic to"
+  log_error "ib-gateway:4001 will be routed through it instead of Tailscale,"
+  log_error "and the TCP probe will time out even though the tailnet shows"
+  log_error "ib-gateway online. Disconnect the active VPN (NordVPN, ProtonVPN,"
+  log_error "WireGuard, Cisco AnyConnect, Cloudflare WARP, etc.) and retry."
   exit 1
 fi
 
