@@ -43,6 +43,16 @@ Never skip to Yahoo / web without trying IB → UW first. Clients live in `scrip
 | `.env.ib-mode` (root, gitignored) | overlayed after `.env` | `IB_GATEWAY_MODE`, `IB_GATEWAY_HOST` — toggled by `scripts/ib mode local\|cloud` |
 | `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY`, Clerk keys |
 
+**IB Flex Web Service env (Hetzner `/home/radon/radon-cloud/.env`):**
+
+| Var | Points to | Used by |
+|---|---|---|
+| `IB_FLEX_TOKEN` | Flex Web Service token | All Flex pulls |
+| `IB_FLEX_QUERY_ID` | `1422766` (blotter) | `scripts/trade_blotter/flex_query.py` |
+| `IB_FLEX_NAV_QUERY_ID` | `1497709` (Cash Transactions, created 2026-05-05) | `scripts/cash_flow_sync.py`, `scripts/portfolio_performance.py` |
+
+The `1442520` (journal/Trade History) query is referenced indirectly via `scripts/journal_rehydrate.py` reading `IB_FLEX_QUERY_ID` at runtime — but on Hetzner the env points at `1422766`. Journal rehydrate has its own configuration. **Don't repurpose `IB_FLEX_NAV_QUERY_ID` for trade pulls** — it's tuned for `CashTransaction` only.
+
 ---
 
 ## Architecture
@@ -71,7 +81,16 @@ All FastAPI routes JWT-protected; Next.js by `web/middleware.ts`; WebSocket via 
 `IB_GATEWAY_MODE` env, persisted to `.env.ib-mode`. Toggle via `scripts/ib mode {local|cloud}`. Switching does NOT auto-reconnect — restart the dev stack.
 
 - **`docker`** (default for local): `ghcr.io/gnzsnz/ib-gateway`, `restart: unless-stopped`. `npm run ib:start`.
-- **`cloud`** (default for dev): Hetzner VM at `ib-gateway:4001` via Tailscale. TCP probe only — `POST /ib/restart` returns 503. VPS commands: `ibstart/stop/restart/status/logs/health`.
+- **`cloud`** (default for dev): Hetzner VM at `ib-gateway:4001` via Tailscale. TCP probe only — `POST /ib/restart` returns 503. Laptop aliases (SSH-wrapped, defined in `~/.zshrc`): `ibstart/stop/restart/status/logs/health` for IB Gateway only. **Whole-stack control on the VPS** uses `/usr/local/bin/radon` (also reachable from laptop via `ssh root@ib-gateway radon <cmd>`):
+
+  | Command | Effect |
+  |---|---|
+  | `radon stop` | `systemctl stop` IB + all `radon-*` units |
+  | `radon start` | start them all (IB Gateway first) |
+  | `radon restart` | stop then start |
+  | `radon status` (or bare `radon`) | `systemctl list-units "radon-*"` |
+
+  Covers `radon-{ib-gateway,api,relay,monitor,newsfeed,nextjs}` + `radon-refresh.timer`. Installed manually 2026-05-04 — **not yet wired into `radon-cloud/scripts/setup-vps.sh`, so a `wipe-vps.sh` rebuild drops it.**
 - **`launchd`** (legacy): `~/ibc/bin/`, Mon-Fri auto-lifecycle.
 
 Auto-recovery (docker mode): port + CLOSE_WAIT detection at startup (poll 45s); subprocess errors trigger health check first — only restart if port not listening or CLOSE_WAIT. Client ID collisions, VOL errors, transient timeouts do NOT trigger restart.
@@ -242,6 +261,7 @@ Each tab follows the same pattern: hook + staleness lib + API route + panel + sc
 | **Options Chain sticky header** | `OptionsChainTab.tsx` | Three required CSS rules — all three or overlap returns: (1) `background: var(--bg-panel-raised)` on `.chain-header` + `.chain-side-label`; (2) `position: sticky; top: 0` / `top: 24px`; (3) `.chain-grid thead { position: relative; z-index: 10 }`. |
 | **Column visibility** | `useColumnVisibility(tableId, defaults)` | Persists to `localStorage` keyed `radon:columns:<tableId>`. Buckets: `positions-{defined,undefined,equity}`, `orders-open`. `<ColumnsToggle />` left of filter input in section header. |
 | **Margin Warning Toast** | `web/lib/marginWarning.ts`, `web/components/WorkspaceShell.tsx` (`prevMarginLevelRef` block), `web/tests/margin-warning.test.ts`, `web/e2e/margin-warning-toast.spec.ts` | Stage 1 — threshold-derived from `portfolio.account_summary`. Persistent toast (`addToast(..., 0)`), fires only on transition to a worse rank. See "Margin Warning Thresholds" in Calculations. Stage 2 will swap source to IBKR `/fyi/notifications` once OAuth Self-Service activates. |
+| **Cash Flows panel** (on `/orders`) | `scripts/cash_flow_sync.py` (Flex pull + classifier), `scripts/db/migrations/0002_cash_flows.sql`, `scripts/db/writer.py:upsert_cash_flow`, FastAPI `GET /cash-flows`, `web/app/api/cash-flows/route.ts`, `web/lib/useCashFlows.ts`, `web/components/CashFlowsSection.tsx`, daemon handler `scripts/monitor_daemon/handlers/cash_flow_sync.py` (86400s daily) | Surfaces IBKR `CashTransaction` rows (deposits / withdrawals / dividends / interest / fees / withholding tax) on `/orders`. Reads `IB_FLEX_NAV_QUERY_ID` (1497709, *Cash Transactions* query). Idempotent on `transactionID`. Type classifier in `_classify()` — combined "Deposits/Withdrawals" rows disambiguate by amount sign. UI: positive = green, negative = red, persistent toast not used. Tests: 15 pytest + 5 Playwright. |
 
 ---
 
