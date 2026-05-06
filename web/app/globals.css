@@ -6618,6 +6618,37 @@ body[data-mobile="true"] .share-pnl-action {
   width: 100%;
 }
 
+/* ── Mobile chart sizing ── */
+
+body[data-mobile="true"] .cri-history-chart-surface {
+  min-height: min(440px, 60vh);
+}
+
+body[data-mobile="true"] .cri-history-chart-svg,
+body[data-mobile="true"] .cri-history-chart-empty {
+  height: min(440px, 60vh);
+}
+
+body[data-mobile="true"] .skew-chart-surface {
+  min-height: min(408px, 55vh);
+}
+
+body[data-mobile="true"] .skew-chart-empty {
+  height: min(408px, 55vh);
+}
+
+/* GEX profile chart — keep horizontal scroll, but constrain card height on mobile */
+body[data-mobile="true"] .gex-profile-chart {
+  max-height: 60vh;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Allow the chart tooltip to stay within viewport bounds on mobile */
+body[data-mobile="true"] .chart-tooltip {
+  max-width: calc(100vw - var(--safe-left) - var(--safe-right) - 24px);
+  pointer-events: none;
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {

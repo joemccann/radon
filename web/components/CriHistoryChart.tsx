@@ -287,31 +287,46 @@ export default function CriHistoryChart({
           .attr("transform", rotateXAxisLabels ? "rotate(-24)" : null);
       });
 
-    // Invisible overlay for tooltip
+    // Invisible overlay for tooltip — supports both mouse hover and touch drag.
+    const updateTooltip = (clientX: number, clientY: number, mx: number) => {
+      const hoveredDate = xScale.invert(mx);
+      const bisect = d3.bisector((d: CriHistoryEntry) => new Date(d.date)).left;
+      let idx = bisect(chartData, hoveredDate);
+      idx = Math.max(0, Math.min(chartData.length - 1, idx));
+      if (idx > 0) {
+        const before = chartData[idx - 1];
+        const after = chartData[idx];
+        const tBefore = Math.abs(new Date(before.date).getTime() - hoveredDate.getTime());
+        const tAfter = Math.abs(new Date(after.date).getTime() - hoveredDate.getTime());
+        if (tBefore < tAfter) idx = idx - 1;
+      }
+      const entry = chartData[idx];
+      const svgRect = svgRef.current?.getBoundingClientRect();
+      const ex = clientX - (svgRect?.left ?? 0);
+      const ey = clientY - (svgRect?.top ?? 0);
+      setTooltip({ visible: true, x: ex, y: ey, d: entry });
+    };
+
     g.append("rect")
       .attr("width", innerW)
       .attr("height", innerH)
       .attr("fill", "transparent")
+      .style("touch-action", "pan-y")
       .on("mousemove", function (event: MouseEvent) {
         const [mx] = d3.pointer(event, this);
-        const hoveredDate = xScale.invert(mx);
-        const bisect = d3.bisector((d: CriHistoryEntry) => new Date(d.date)).left;
-        let idx = bisect(chartData, hoveredDate);
-        idx = Math.max(0, Math.min(chartData.length - 1, idx));
-        if (idx > 0) {
-          const before = chartData[idx - 1];
-          const after = chartData[idx];
-          const tBefore = Math.abs(new Date(before.date).getTime() - hoveredDate.getTime());
-          const tAfter = Math.abs(new Date(after.date).getTime() - hoveredDate.getTime());
-          if (tBefore < tAfter) idx = idx - 1;
-        }
-        const entry = chartData[idx];
-        const svgRect = svgRef.current?.getBoundingClientRect();
-        const ex = event.clientX - (svgRect?.left ?? 0);
-        const ey = event.clientY - (svgRect?.top ?? 0);
-        setTooltip({ visible: true, x: ex, y: ey, d: entry });
+        updateTooltip(event.clientX, event.clientY, mx);
       })
       .on("mouseleave", function () {
+        setTooltip({ visible: false, x: 0, y: 0, d: null });
+      })
+      .on("touchstart touchmove", function (event: TouchEvent) {
+        if (event.touches.length === 0) return;
+        event.preventDefault();
+        const [mx] = d3.pointer(event.touches[0], this);
+        const t = event.touches[0];
+        updateTooltip(t.clientX, t.clientY, mx);
+      })
+      .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
   }, [chartData, width, series, liveValues, leftSeries, rightSeries]);
