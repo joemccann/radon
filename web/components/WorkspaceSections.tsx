@@ -46,6 +46,8 @@ import { useViewport } from "@/lib/useViewport";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobileOrderList from "./mobile/MobileOrderList";
 import MobileBlotterList from "./mobile/MobileBlotterList";
+import MobileExecutedList from "./mobile/MobileExecutedList";
+import MobileJournalList from "./mobile/MobileJournalList";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable, {
   POSITION_COLUMNS,
@@ -1340,6 +1342,8 @@ function JournalSections() {
   const { data, loading, error, syncWithIB, syncing, lastSyncResult } = useJournal();
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const { isMobile, hasMounted } = useViewport();
+  const showMobileJournal = isMobile && hasMounted;
   const trades = useMemo(() => {
     if (!data?.trades) return [];
     return [...data.trades].sort((a, b) => b.id - a.id);
@@ -1432,7 +1436,12 @@ function JournalSections() {
         {!loading && trades.length === 0 && !error && (
           <div className="section-body"><div className="alert-item">No trades in journal.</div></div>
         )}
-        {trades.length > 0 && (
+        {trades.length > 0 && showMobileJournal && (
+          <div className="section-body">
+            <MobileJournalList trades={sortedTrades} />
+          </div>
+        )}
+        {trades.length > 0 && !showMobileJournal && (
           <div className="section-body table-wrap">
             <table>
               <thead>
@@ -2197,6 +2206,8 @@ function OrdersSections({
         <div className="section-body">
           {positionGroups.length === 0 ? (
             <div className="alert-item">No fills this session</div>
+          ) : showMobileOrders ? (
+            <MobileExecutedList groups={execFilter.filtered} />
           ) : (
             <table>
               <thead>
