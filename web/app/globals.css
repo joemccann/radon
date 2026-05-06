@@ -6918,6 +6918,41 @@ body[data-mobile="true"] .chart-tooltip {
   font-size: 11px;
 }
 
+/* ── Phase 3 polish ── */
+
+/* Floor every visible input under data-mobile to 16px so iOS Safari
+ * never auto-zooms on focus. Specific inputs (price ladder, ticker
+ * search overlay) already set 16px+ above; this is the global net
+ * for everything else (modify modal, table search, etc.). */
+body[data-mobile="true"] input[type="text"],
+body[data-mobile="true"] input[type="number"],
+body[data-mobile="true"] input[type="search"],
+body[data-mobile="true"] input[type="email"],
+body[data-mobile="true"] input[type="password"],
+body[data-mobile="true"] input[type="tel"],
+body[data-mobile="true"] input[type="url"],
+body[data-mobile="true"] textarea,
+body[data-mobile="true"] select {
+  font-size: max(16px, 1em);
+}
+
+/* Body text floor — desktop drops to 11px in some panels; mobile
+ * keeps a 14px minimum for primary content. Doesn't override
+ * font-size on .mobile-* / .pill / .columns-* widgets that intentionally
+ * use smaller mono for labels. */
+body[data-mobile="true"] {
+  font-size: 14px;
+}
+
+/* Tabular numerics floor on shared price/qty cells when not already
+ * inside a mobile-* card (which has its own typography). */
+body[data-mobile="true"] .right,
+body[data-mobile="true"] .tabular,
+body[data-mobile="true"] td.right {
+  font-size: max(12px, 1em);
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {
