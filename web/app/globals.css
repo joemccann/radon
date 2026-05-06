@@ -6649,6 +6649,275 @@ body[data-mobile="true"] .chart-tooltip {
   pointer-events: none;
 }
 
+/* ── Mobile chain detail-sheet trade actions ── */
+
+.mobile-chain__detail-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.mobile-chain__detail-buy,
+.mobile-chain__detail-sell {
+  min-height: 56px;
+  padding: 0 16px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.mobile-chain__detail-buy {
+  color: var(--positive);
+  border-color: var(--positive);
+}
+
+.mobile-chain__detail-sell {
+  color: var(--negative);
+  border-color: var(--negative);
+}
+
+/* ── Mobile chain pending-legs strip ── */
+
+.mobile-chain__pending-strip {
+  position: fixed;
+  left: var(--safe-left);
+  right: var(--safe-right);
+  bottom: calc(var(--mobile-tab-bar-height) + var(--safe-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  background: var(--bg-panel-raised);
+  border-top: 1px solid var(--border-dim);
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-primary);
+  cursor: pointer;
+  z-index: 50;
+}
+
+.mobile-chain__pending-count {
+  color: var(--text-secondary);
+}
+
+.mobile-chain__pending-action {
+  color: var(--accent-bg);
+  font-weight: 600;
+}
+
+/* ── Mobile order ticket ── */
+
+.mobile-ticket {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.mobile-ticket__legs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.mobile-ticket__leg {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+}
+
+.mobile-ticket__leg-desc {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  flex: 1;
+  min-width: 0;
+}
+
+.mobile-ticket__leg-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.mobile-ticket__qty-btn {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.mobile-ticket__qty-value {
+  min-width: 32px;
+  text-align: center;
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 13px;
+}
+
+.mobile-ticket__leg-remove {
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: 1px solid var(--negative);
+  border-radius: 4px;
+  color: var(--negative);
+  cursor: pointer;
+}
+
+.mobile-ticket__quote {
+  display: grid;
+  grid-template-columns: auto 1fr auto 1fr auto 1fr;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+}
+
+.mobile-ticket__quote-label {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.mobile-ticket__quote-value {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  text-align: right;
+}
+
+.mobile-ticket__price-row {
+  display: grid;
+  grid-template-columns: auto 56px 1fr 56px;
+  align-items: center;
+  gap: 8px;
+}
+
+.mobile-ticket__price-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+}
+
+.mobile-ticket__price-btn {
+  height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+}
+
+.mobile-ticket__price-input {
+  height: 56px;
+  width: 100%;
+  text-align: center;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+  outline: none;
+}
+
+.mobile-ticket__price-input:focus {
+  border-color: var(--border-focus);
+}
+
+.mobile-ticket__tif {
+  display: flex;
+  gap: 8px;
+}
+
+.mobile-ticket__tif-chip {
+  flex: 1;
+  min-height: 44px;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.mobile-ticket__tif-chip--active {
+  color: var(--accent-bg);
+  border-color: var(--accent-bg);
+}
+
+.mobile-ticket__submit {
+  width: 100%;
+  min-height: 56px;
+  background: var(--accent-bg);
+  color: var(--accent-text);
+  border: none;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  cursor: pointer;
+}
+
+.mobile-ticket__submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.mobile-ticket__error {
+  padding: 8px 12px;
+  border: 1px solid var(--negative);
+  border-radius: 4px;
+  color: var(--negative);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.mobile-ticket__success {
+  padding: 8px 12px;
+  border: 1px solid var(--positive);
+  border-radius: 4px;
+  color: var(--positive);
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
 /* ── Mobile BottomSheet ── */
 
 .mobile-sheet-root {

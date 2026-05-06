@@ -1055,6 +1055,11 @@ export default function OptionsChainTab({
         prices={prices}
         currentPrice={currentPrice}
         loading={loadingStrikes}
+        orderLegs={orderLegs}
+        onAddLeg={handleAddLeg}
+        onRemoveLeg={handleRemoveLeg}
+        onUpdateLeg={handleUpdateLeg}
+        onClearLegs={handleClearLegs}
       />
     );
   }

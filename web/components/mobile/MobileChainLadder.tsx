@@ -3,8 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { fmtPrice } from "@/lib/positionUtils";
-import { formatExpiry, daysToExpiry } from "@/lib/optionsChainUtils";
+import { formatExpiry, daysToExpiry, type OrderLeg } from "@/lib/optionsChainUtils";
 import BottomSheet from "./BottomSheet";
+import MobileOrderTicket from "./MobileOrderTicket";
 
 type Strike = {
   strike: number;
@@ -22,6 +23,11 @@ type MobileChainLadderProps = {
   prices: Record<string, PriceData>;
   currentPrice: number | null;
   loading?: boolean;
+  orderLegs?: OrderLeg[];
+  onAddLeg?: (strike: number, right: "C" | "P", action: "BUY" | "SELL") => void;
+  onRemoveLeg?: (id: string) => void;
+  onUpdateLeg?: (id: string, updates: Partial<OrderLeg>) => void;
+  onClearLegs?: () => void;
 };
 
 type SelectedCell = {
@@ -62,8 +68,14 @@ export default function MobileChainLadder({
   prices,
   currentPrice,
   loading,
+  orderLegs = [],
+  onAddLeg,
+  onRemoveLeg,
+  onUpdateLeg,
+  onClearLegs,
 }: MobileChainLadderProps) {
   const [selected, setSelected] = useState<SelectedCell | null>(null);
+  const [ticketOpen, setTicketOpen] = useState(false);
   const ladderRef = useRef<HTMLDivElement>(null);
   const atmRowRef = useRef<HTMLDivElement>(null);
 
@@ -170,12 +182,65 @@ export default function MobileChainLadder({
         </div>
       )}
 
+      {orderLegs.length > 0 ? (
+        <button
+          type="button"
+          className="mobile-chain__pending-strip"
+          onClick={() => setTicketOpen(true)}
+          data-testid="mobile-chain-pending-strip"
+        >
+          <span className="mobile-chain__pending-count">
+            {orderLegs.length} {orderLegs.length === 1 ? "LEG" : "LEGS"}
+          </span>
+          <span className="mobile-chain__pending-action">Build order →</span>
+        </button>
+      ) : null}
+
+      <MobileOrderTicket
+        open={ticketOpen && orderLegs.length > 0}
+        ticker={ticker}
+        legs={orderLegs}
+        prices={prices}
+        onClose={() => setTicketOpen(false)}
+        onRemoveLeg={(id) => onRemoveLeg?.(id)}
+        onUpdateLeg={(id, updates) => onUpdateLeg?.(id, updates)}
+        onClearLegs={() => onClearLegs?.()}
+      />
+
       {selected ? (
         <BottomSheet
           open
           onClose={() => setSelected(null)}
           title={`${ticker.toUpperCase()} ${selected.strike} ${selected.right === "C" ? "Call" : "Put"}`}
           testId="mobile-chain-detail-sheet"
+          footer={
+            onAddLeg ? (
+              <div className="mobile-chain__detail-actions">
+                <button
+                  type="button"
+                  className="mobile-chain__detail-buy"
+                  onClick={() => {
+                    onAddLeg(selected.strike, selected.right, "BUY");
+                    setSelected(null);
+                  }}
+                  data-testid="mobile-chain-detail-buy"
+                >
+                  BUY
+                </button>
+                <button
+                  type="button"
+                  className="mobile-chain__detail-sell"
+                  onClick={() => {
+                    onAddLeg(selected.strike, selected.right, "SELL");
+                    setSelected(null);
+                  }}
+                  data-testid="mobile-chain-detail-sell"
+                >
+                  SELL
+                </button>
+              </div>
+            ) : null
+          }
         >
           <div className="mobile-chain__detail">
             <div className="mobile-chain__detail-row">
