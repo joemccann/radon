@@ -242,6 +242,184 @@ describe("<Ib2faControls />", () => {
   });
 });
 
+describe("<Ib2faControls /> — gateway power", () => {
+  function gatewayUnit(active_state: string, sub_state = "running") {
+    return {
+      unit: "radon-ib-gateway.service",
+      load_state: "loaded",
+      active_state,
+      sub_state,
+      description: "IB Gateway container",
+      can_control: true,
+    };
+  }
+
+  it("shows Stop Gateway when the gateway is running", () => {
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: true })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("active")}
+        servicesSupported
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    const btn = screen.getByTestId("gateway-power-button");
+    expect(btn.textContent).toBe("Stop Gateway");
+    expect(btn.className).toContain("admin-btn-danger");
+    expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/running/i);
+  });
+
+  it("shows Start Gateway when the gateway is stopped", () => {
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: false, auth_state: "unreachable" })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("inactive", "dead")}
+        servicesSupported
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    const btn = screen.getByTestId("gateway-power-button");
+    expect(btn.textContent).toBe("Start Gateway");
+    expect(btn.className).toContain("admin-btn-primary");
+    expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/offline/i);
+  });
+
+  it("Stop opens a destructive type-to-confirm dialog enumerating the cascade dependents", () => {
+    const onStopGateway = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: true })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("active")}
+        servicesSupported
+        onStopGateway={onStopGateway}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("gateway-power-button"));
+    const cascade = screen.getByTestId("admin-confirm-cascade");
+    expect(cascade.textContent).toContain("radon-api.service");
+    expect(cascade.textContent).toContain("radon-relay.service");
+    expect(cascade.textContent).toContain("radon-monitor.service");
+
+    const confirm = screen.getByTestId("admin-confirm-action") as HTMLButtonElement;
+    // Gated behind typing the unit name.
+    expect(confirm.disabled).toBe(true);
+    expect(onStopGateway).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), {
+      target: { value: "radon-ib-gateway.service" },
+    });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+    expect(onStopGateway).toHaveBeenCalledTimes(1);
+  });
+
+  it("Start opens a non-destructive dialog mentioning one 2FA push and routes to the stack-recovery handler", async () => {
+    const onStartGateway = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: false, auth_state: "unreachable" })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("inactive", "dead")}
+        servicesSupported
+        onStopGateway={vi.fn()}
+        onStartGateway={onStartGateway}
+      />,
+    );
+    fireEvent.click(screen.getByTestId("gateway-power-button"));
+    const confirm = screen.getByTestId("admin-confirm");
+    expect(confirm.textContent).toMatch(/one IBKR Mobile 2FA push/i);
+    // No type-to-confirm gate on the recovery path.
+    expect(screen.queryByTestId("admin-confirm-typed-input")).toBeNull();
+    fireEvent.click(screen.getByTestId("admin-confirm-action"));
+    await Promise.resolve();
+    expect(onStartGateway).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables the power button when services are not supported (off-VPS)", () => {
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: true })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("active")}
+        servicesSupported={false}
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("gateway-power-disabled-reason").textContent).toMatch(/Read-only/i);
+  });
+
+  it("disables the power button while the gateway is transitional", () => {
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: false })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("deactivating", "stop")}
+        servicesSupported
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    const btn = screen.getByTestId("gateway-power-button") as HTMLButtonElement;
+    expect(btn.disabled).toBe(true);
+    expect(btn.textContent).toBe("Stopping...");
+  });
+
+  it("gates Start when a 2FA push lock is already held (no stacked pushes)", () => {
+    const health = buildHealth({
+      port_listening: false,
+      auth_state: "awaiting_2fa",
+      restart_backoff: {
+        attempt_count: 1,
+        last_attempt_at: 0,
+        next_attempt_after: 0,
+        next_attempt_in_secs: 30,
+        last_outcome: "awaiting_2fa",
+        push_lock: {
+          holder: "ib_watchdog",
+          acquired_at: 0,
+          expires_at: 0,
+          remaining_secs: 30,
+          reason: "watchdog_restart",
+        },
+      },
+    });
+    render(
+      <Ib2faControls
+        health={health}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("inactive", "dead")}
+        servicesSupported
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    expect((screen.getByTestId("gateway-power-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByTestId("gateway-power-disabled-reason").textContent).toContain("ib_watchdog");
+  });
+});
+
 describe("<ServiceControlPanel />", () => {
   function services(overrides: Partial<ServicesListResponse> = {}): ServicesListResponse {
     return {

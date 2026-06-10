@@ -248,6 +248,36 @@ export function unitVerdict(unit: UnitStatus): UnitVerdict {
   return { label: "Unknown", tone: "neutral" };
 }
 
+// ---------------------------------------------------------------------------
+// Gateway power state: the dedicated Stop/Start control inside the IB Gateway
+// controls card. Drive the button primarily off the gateway unit's
+// active_state (the authoritative systemd verdict), with port_listening as a
+// secondary hint — port_listening can linger true for a moment after a stop
+// (socket lingering) or read true while awaiting_2fa (port up, not authed).
+// ---------------------------------------------------------------------------
+
+export type GatewayPowerState = "running" | "stopped" | "transitional";
+
+/**
+ * Derive the power state of the IB Gateway from the gateway systemd unit and
+ * the /health port_listening flag. `activating`/`deactivating` are
+ * transitional (button disabled so the operator can't double-fire). Otherwise
+ * `active` (or a listening port as a fallback) is running; everything else
+ * (inactive / failed / unknown, port down) is stopped.
+ */
+export function gatewayPowerState(opts: {
+  unit: UnitStatus | null | undefined;
+  portListening: boolean | null | undefined;
+}): GatewayPowerState {
+  const active = opts.unit?.active_state;
+  if (active === "activating" || active === "reloading") return "transitional";
+  if (active === "deactivating") return "transitional";
+  if (active === "active") return "running";
+  if (active === "inactive" || active === "failed") return "stopped";
+  // No unit row (or an unknown state): fall back to the port hint.
+  return opts.portListening ? "running" : "stopped";
+}
+
 /**
  * Why a service control button is disabled, for a self-explaining tooltip
  * (mirrors forcePushDisabledReason). Returns null when the button is enabled.

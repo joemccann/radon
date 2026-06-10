@@ -12220,6 +12220,37 @@ body[data-mobile="true"] td.right {
   flex-wrap: wrap;
 }
 
+/* Gateway power: dedicated full-width Stop/Start control inside the IB Gateway
+   controls card. Sits in its own block (not the three-up actions row) so the
+   single power button is a large, unambiguous target. */
+.admin-gateway-power {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border-dim);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.admin-gateway-power-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-secondary);
+}
+
+.admin-gateway-power-status[data-state="stopped"] {
+  color: var(--negative);
+}
+
+.admin-gateway-power-status[data-state="transitional"] {
+  color: var(--warning);
+}
+
+.admin-gateway-power-btn {
+  width: 100%;
+}
+
 .admin-btn {
   font-family: var(--font-sans);
   font-size: 12px;
@@ -12526,6 +12557,12 @@ body[data-mobile="true"] td.right {
   .admin-actions-row .admin-btn {
     flex: 1 1 auto;
     min-width: 0;
+  }
+
+  /* Gateway power button spans full width with a comfortable touch height
+     (>= 44px) so Stop/Start is one unmistakable tap target at 393px. */
+  .admin-gateway-power-btn {
+    padding: 12px 14px;
   }
 }
 

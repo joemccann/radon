@@ -12,10 +12,51 @@ import {
   formatRelativeTime,
   formatUptime,
   forcePushDisabledReason,
+  gatewayPowerState,
   isForcePushDisabled,
   unitActivityLabel,
   unitTone,
 } from "../lib/adminFormat";
+import type { UnitStatus } from "../lib/adminTypes";
+
+function gatewayRow(active_state: string, sub_state = "running"): UnitStatus {
+  return {
+    unit: "radon-ib-gateway.service",
+    load_state: "loaded",
+    active_state,
+    sub_state,
+    description: "IB Gateway container",
+    can_control: true,
+  };
+}
+
+describe("gatewayPowerState", () => {
+  it("reports running when the unit is active", () => {
+    expect(gatewayPowerState({ unit: gatewayRow("active"), portListening: true })).toBe("running");
+  });
+  it("reports stopped when the unit is inactive even if the port still lingers", () => {
+    expect(gatewayPowerState({ unit: gatewayRow("inactive", "dead"), portListening: true })).toBe(
+      "stopped",
+    );
+  });
+  it("reports stopped when the unit failed", () => {
+    expect(gatewayPowerState({ unit: gatewayRow("failed", "failed"), portListening: false })).toBe(
+      "stopped",
+    );
+  });
+  it("reports transitional while activating or deactivating", () => {
+    expect(gatewayPowerState({ unit: gatewayRow("activating", "start"), portListening: false })).toBe(
+      "transitional",
+    );
+    expect(gatewayPowerState({ unit: gatewayRow("deactivating", "stop"), portListening: true })).toBe(
+      "transitional",
+    );
+  });
+  it("falls back to the port hint when there is no unit row", () => {
+    expect(gatewayPowerState({ unit: null, portListening: true })).toBe("running");
+    expect(gatewayPowerState({ unit: null, portListening: false })).toBe("stopped");
+  });
+});
 
 describe("authStateTone", () => {
   it("maps authenticated to positive", () => {

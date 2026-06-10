@@ -1,18 +1,32 @@
 "use client";
 
 import { useState } from "react";
-import type { AdminHealthPayload } from "@/lib/adminTypes";
+import type { AdminHealthPayload, UnitStatus } from "@/lib/adminTypes";
 import {
   forcePushDisabledReason,
+  gatewayPowerState,
   isForcePushDisabled,
+  unitDependents,
 } from "@/lib/adminFormat";
 import ConfirmDialog from "./ConfirmDialog";
+
+const GATEWAY_UNIT = "radon-ib-gateway.service";
 
 type Ib2faControlsProps = {
   health: AdminHealthPayload | null;
   onForcePush: () => Promise<void>;
   onResetBackoff: () => Promise<void>;
   onRestartStack: () => Promise<void>;
+  /** The radon-ib-gateway.service unit row (filtered from the table, still
+   *  surfaced here for the power control's active_state). */
+  gatewayUnit?: UnitStatus | null;
+  /** Whether the host supports systemctl control (false off-VPS). */
+  servicesSupported?: boolean;
+  /** Targeted per-unit stop of the gateway (control_unit / systemctl stop). */
+  onStopGateway?: () => Promise<void>;
+  /** Full-stack recovery (radon restart): brings the gateway + dependents back
+   *  in order. Reuses the Restart All Services path. */
+  onStartGateway?: () => Promise<void>;
   onAfter?: () => void;
 };
 
@@ -26,18 +40,42 @@ export default function Ib2faControls({
   onForcePush,
   onResetBackoff,
   onRestartStack,
+  gatewayUnit = null,
+  servicesSupported = true,
+  onStopGateway,
+  onStartGateway,
   onAfter,
 }: Ib2faControlsProps) {
   const [showForceConfirm, setShowForceConfirm] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
   const [showRestartConfirm, setShowRestartConfirm] = useState(false);
+  const [showStopConfirm, setShowStopConfirm] = useState(false);
+  const [showStartConfirm, setShowStartConfirm] = useState(false);
   const [pendingForce, setPendingForce] = useState(false);
   const [pendingReset, setPendingReset] = useState(false);
   const [pendingRestart, setPendingRestart] = useState(false);
+  const [pendingPower, setPendingPower] = useState(false);
 
   const pushLock = health?.ib_gateway?.restart_backoff?.push_lock ?? null;
   const disableForce = isForcePushDisabled({ pushLock, pending: pendingForce });
   const disableReason = forcePushDisabledReason({ pushLock, pending: pendingForce });
+
+  const powerState = gatewayPowerState({
+    unit: gatewayUnit,
+    portListening: health?.ib_gateway?.port_listening,
+  });
+  const gatewayDependents = unitDependents(GATEWAY_UNIT);
+  // Start triggers a fresh 2FA login, so gate it on the same push lock as
+  // Force 2FA to keep two pushes from racing (feedback_2fa_push_stacking).
+  const startBlockedByPush = isForcePushDisabled({ pushLock, pending: false });
+  const powerDisabledReason = !servicesSupported
+    ? "Read-only: this browser is not on the Hetzner VPS."
+    : powerState === "transitional"
+      ? "Gateway is mid-transition. Wait for it to settle."
+      : powerState === "stopped" && startBlockedByPush
+        ? (forcePushDisabledReason({ pushLock, pending: false }) ?? "A 2FA push is already in flight.")
+        : null;
+  const powerDisabled = pendingPower || powerDisabledReason !== null;
 
   const runForce = async () => {
     setPendingForce(true);
@@ -71,6 +109,45 @@ export default function Ib2faControls({
       onAfter?.();
     }
   };
+
+  const runStop = async () => {
+    setPendingPower(true);
+    try {
+      await onStopGateway?.();
+    } finally {
+      setPendingPower(false);
+      setShowStopConfirm(false);
+      onAfter?.();
+    }
+  };
+
+  const runStart = async () => {
+    setPendingPower(true);
+    try {
+      await onStartGateway?.();
+    } finally {
+      setPendingPower(false);
+      setShowStartConfirm(false);
+      onAfter?.();
+    }
+  };
+
+  const powerStatusLine =
+    powerState === "running"
+      ? "Gateway is running. IB data plane live."
+      : powerState === "transitional"
+        ? "Gateway is mid-transition."
+        : "Gateway is stopped. IB, orders relay, and monitor are offline.";
+
+  const powerButtonLabel = pendingPower
+    ? "Working..."
+    : powerState === "transitional"
+      ? gatewayUnit?.active_state === "deactivating"
+        ? "Stopping..."
+        : "Starting..."
+      : powerState === "running"
+        ? "Stop Gateway"
+        : "Start Gateway";
 
   return (
     <section className="admin-card" data-testid="ib-controls">
@@ -119,6 +196,36 @@ export default function Ib2faControls({
         </p>
       )}
 
+      <div className="admin-gateway-power" data-testid="gateway-power">
+        <span className="admin-card-note-inline">Gateway power</span>
+        <p
+          className="admin-gateway-power-status"
+          data-testid="gateway-power-status"
+          data-state={powerState}
+        >
+          {powerStatusLine}
+        </p>
+        <button
+          type="button"
+          className={`admin-btn admin-gateway-power-btn ${powerState === "running" ? "admin-btn-danger" : "admin-btn-primary"}`}
+          onClick={() =>
+            powerState === "running"
+              ? setShowStopConfirm(true)
+              : setShowStartConfirm(true)
+          }
+          disabled={powerDisabled}
+          title={powerDisabledReason ?? undefined}
+          data-testid="gateway-power-button"
+        >
+          {powerButtonLabel}
+        </button>
+        {powerDisabledReason && (
+          <p className="admin-card-note" data-testid="gateway-power-disabled-reason">
+            {powerDisabledReason}
+          </p>
+        )}
+      </div>
+
       <ConfirmDialog
         open={showForceConfirm}
         title="Force 2FA push?"
@@ -147,6 +254,27 @@ export default function Ib2faControls({
         pending={pendingRestart}
         onConfirm={runRestart}
         onCancel={() => setShowRestartConfirm(false)}
+      />
+      <ConfirmDialog
+        open={showStopConfirm}
+        title="Stop the IB Gateway?"
+        body="This runs systemctl stop on the IB Gateway. It takes IB offline and cascade-stops the API, realtime relay, and monitor. Those will NOT come back on their own. To bring everything back, use Start Gateway (or Restart All Services), which restarts the whole stack in order."
+        confirmLabel="Stop Gateway"
+        destructive
+        affectedUnits={gatewayDependents}
+        requireTyped={GATEWAY_UNIT}
+        pending={pendingPower}
+        onConfirm={runStop}
+        onCancel={() => setShowStopConfirm(false)}
+      />
+      <ConfirmDialog
+        open={showStartConfirm}
+        title="Start the IB Gateway?"
+        body="This starts the IB Gateway and brings the API, relay, and monitor back in order. Starting the gateway triggers one IBKR Mobile 2FA push to your phone. Approve it promptly, and approve only ONE push to avoid stacking. This takes about 60 to 90 seconds and the page will briefly lose its connection while FastAPI cycles."
+        confirmLabel="Start Gateway"
+        pending={pendingPower}
+        onConfirm={runStart}
+        onCancel={() => setShowStartConfirm(false)}
       />
     </section>
   );

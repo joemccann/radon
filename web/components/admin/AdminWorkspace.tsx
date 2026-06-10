@@ -264,6 +264,38 @@ export default function AdminWorkspace() {
     void fetchServices();
   }, [appendLog, fetchHealth, fetchServices]);
 
+  // Targeted per-unit stop of the gateway. Leaves it cleanly stopped + stable
+  // (watchdog stands down on a port-down gateway). Start is NOT a per-unit
+  // start — it routes through restartStack so the cascade dependents recover.
+  const stopGateway = useCallback(async () => {
+    const at = new Date().toISOString();
+    const unit = "radon-ib-gateway.service";
+    try {
+      const res = await fetch(`/api/admin/services/${unit}/stop`, {
+        method: "POST",
+        cache: "no-store",
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        const detail = typeof body.error === "string" ? body.error : `HTTP ${res.status}`;
+        appendLog({ at, action: "service-action", target: `${unit} stop`, ok: false, detail });
+      } else {
+        appendLog({
+          at,
+          action: "service-action",
+          target: `${unit} stop`,
+          ok: true,
+          detail: typeof body.detail === "string" ? body.detail.slice(0, 120) : "ok",
+        });
+      }
+    } catch (err) {
+      const detail = err instanceof Error ? err.message : "gateway stop failed";
+      appendLog({ at, action: "service-action", target: `${unit} stop`, ok: false, detail });
+    }
+    void fetchServices();
+    void fetchHealth();
+  }, [appendLog, fetchHealth, fetchServices]);
+
   const flashRow = useCallback((unit: string, ok: boolean) => {
     if (flashTimerRef.current !== null) {
       window.clearTimeout(flashTimerRef.current);
@@ -356,6 +388,10 @@ export default function AdminWorkspace() {
               onForcePush={forcePush}
               onResetBackoff={resetBackoff}
               onRestartStack={restartStack}
+              gatewayUnit={units.find((u) => u.unit === "radon-ib-gateway.service") ?? null}
+              servicesSupported={services?.supported ?? false}
+              onStopGateway={stopGateway}
+              onStartGateway={restartStack}
             />
           </div>
           <ServiceControlPanel
