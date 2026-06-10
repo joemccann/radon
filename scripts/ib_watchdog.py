@@ -29,14 +29,16 @@ import argparse
 import json
 import logging
 import os
+import signal
 import subprocess
 import sys
+import threading
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional, TypeVar
 
 # Cross-process advisory lock that prevents two restart paths (this
 # watchdog + scripts/api/ib_gateway.restart_ib_gateway) from firing two
@@ -72,6 +74,58 @@ DEFAULT_RESTART_UNIT = "radon-ib-gateway.service"
 # hangs we've seen each lasted 10+ minutes, so 3 cycles trips well
 # before user impact while skipping transient blips.
 DEFAULT_THRESHOLD_CYCLES = 3
+
+# Hard ceiling on a single cycle. Belt-and-suspenders against ANY sub-step
+# blocking forever (the proven root cause of the gateway staying UNREACHABLE
+# for 6+ hours when a libsql commit hung with no native timeout). main()
+# arms a SIGALRM for this many seconds and exits cleanly if it fires, so the
+# every-minute oneshot timer can always run the next tick.
+CYCLE_HARD_TIMEOUT_SECS = 45
+
+# Per-sub-step timeouts. Each must be comfortably under CYCLE_HARD_TIMEOUT_SECS
+# so an individual stuck call is caught and abandoned BEFORE the whole-cycle
+# alarm fires — keeping the normal failure mode "this sub-step failed,
+# continue" rather than "kill the process."
+SERVICE_HEALTH_WRITE_TIMEOUT_SECS = 8.0
+LOCK_OP_TIMEOUT_SECS = 5.0
+
+
+# --- Bounded sub-step execution ---------------------------------------------
+
+_T = TypeVar("_T")
+
+
+class _SubStepTimeout(Exception):
+    """A bounded sub-step exceeded its timeout and was abandoned."""
+
+
+def _run_bounded(label: str, timeout: float, fn: Callable[[], _T]) -> _T:
+    """Run ``fn`` in a daemon thread and abandon it if it exceeds ``timeout``.
+
+    libsql's commit() and (in pathological storage states) the filesystem
+    lock ops have no native timeout, so a single hung call can stall the
+    oneshot cycle indefinitely. We run such calls on a daemon thread and
+    join with a deadline. On timeout we raise ``_SubStepTimeout``; the
+    abandoned thread is a daemon and dies with the process — it can never
+    keep the next cycle from running.
+    """
+    result: list[_T] = []
+    error: list[BaseException] = []
+
+    def _target() -> None:
+        try:
+            result.append(fn())
+        except BaseException as exc:  # noqa: BLE001 — propagate to caller
+            error.append(exc)
+
+    worker = threading.Thread(target=_target, name=f"watchdog-{label}", daemon=True)
+    worker.start()
+    worker.join(timeout)
+    if worker.is_alive():
+        raise _SubStepTimeout(f"{label} exceeded {timeout:.0f}s")
+    if error:
+        raise error[0]
+    return result[0]
 
 
 # --- /health response handling ----------------------------------------------
@@ -263,34 +317,96 @@ def trigger_restart(unit: str, dry_run: bool = False) -> bool:
 # --- service_health write ---------------------------------------------------
 
 
+def _write_service_health(
+    state_label: str,
+    error_message: Optional[str],
+) -> None:
+    """Perform the actual Turso write. Module-level (not a closure) so tests
+    can patch it directly and so the lazy import that keeps the script usable
+    in dev environments without Radon's full dependency surface is isolated
+    from the bounding logic in ``record_service_health``."""
+    from scripts.db.writer import record_service_health as _write
+
+    _write(
+        "ib-watchdog",
+        state_label,
+        started_at=None,
+        finished_at=None,  # writer fills timestamp
+        error={"message": error_message} if error_message else None,
+    )
+
+
 def record_service_health(
     state_label: str,
     error_message: Optional[str] = None,
 ) -> None:
     """Best-effort heartbeat into Turso so the banner can show our state.
 
-    Imports the writer lazily so the script remains useful in dev
-    environments without the full Radon dependency surface — a
-    missing writer just logs and continues.
+    The write goes through ``_run_bounded`` because libsql's commit() makes a
+    synchronous network call to Turso with NO native timeout — a slow or
+    unreachable backend was the proven cause of the watchdog hanging for 6+
+    hours. On timeout we skip the heartbeat for this cycle; the row is
+    best-effort by contract. A missing writer (dev environments) is also
+    tolerated.
     """
     try:
-        # Lazy import — keeps the script importable in unit tests
-        # that mock subprocess.run / urlopen but don't have Turso
-        # creds configured.
-        from scripts.db.writer import record_service_health as _write
+        _run_bounded(
+            "service-health-write",
+            SERVICE_HEALTH_WRITE_TIMEOUT_SECS,
+            lambda: _write_service_health(state_label, error_message),
+        )
+    except _SubStepTimeout as exc:
+        LOG.warning("service_health write abandoned (%s); continuing", exc)
     except ImportError:
         LOG.debug("service_health writer not available in this environment")
-        return
-    try:
-        _write(
-            "ib-watchdog",
-            state_label,
-            started_at=None,
-            finished_at=None,  # writer fills timestamp
-            error={"message": error_message} if error_message else None,
-        )
     except Exception as exc:  # pragma: no cover — never crash the watchdog
         LOG.warning("service_health write failed: %s", exc)
+
+
+# --- Bounded 2FA-lock access ------------------------------------------------
+
+# Sentinel holder used when a bounded lock op times out. Surfaces in
+# last_outcome so an operator can see the deferral was caused by a stuck
+# filesystem op rather than a real competing push.
+_LOCK_TIMEOUT_HOLDER = "lock-op-timeout"
+
+
+def _check_2fa_push_lock_bounded(now: float):
+    """Bounded ``check_2fa_push_lock``. On timeout, conservatively report a
+    synthetic held lock so the caller DEFERS its restart (never fires blind)."""
+    try:
+        return _run_bounded(
+            "2fa-lock-check",
+            LOCK_OP_TIMEOUT_SECS,
+            lambda: ib_2fa_lock.check_2fa_push_lock(now=now),
+        )
+    except _SubStepTimeout as exc:
+        LOG.warning("2FA lock check abandoned (%s); deferring restart", exc)
+        return ib_2fa_lock.PushLock(
+            holder=_LOCK_TIMEOUT_HOLDER,
+            acquired_at=now,
+            expires_at=now,
+            reason="lock check timed out",
+        )
+
+
+def _acquire_2fa_push_lock_bounded(now: float, *, reason: str):
+    """Bounded ``acquire_2fa_push_lock``. On timeout, report (False, None) so
+    the caller treats it as a lost race and skips the restart this cycle."""
+    try:
+        return _run_bounded(
+            "2fa-lock-acquire",
+            LOCK_OP_TIMEOUT_SECS,
+            lambda: ib_2fa_lock.acquire_2fa_push_lock(
+                WATCHDOG_LOCK_HOLDER,
+                ttl_secs=ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
+                reason=reason,
+                now=now,
+            ),
+        )
+    except _SubStepTimeout as exc:
+        LOG.warning("2FA lock acquire abandoned (%s); skipping restart", exc)
+        return (False, None)
 
 
 # --- Stuck-awaiting-2FA handler ---------------------------------------------
@@ -333,7 +449,7 @@ def _handle_stuck_awaiting_2fa(
 
     # Threshold hit. Respect any in-flight push the FastAPI side may have
     # acquired between our /health probe and now.
-    existing_lock = ib_2fa_lock.check_2fa_push_lock(now=clock())
+    existing_lock = _check_2fa_push_lock_bounded(now=clock())
     if existing_lock is not None and existing_lock.holder != WATCHDOG_LOCK_HOLDER:
         LOG.warning(
             "stuck_2fa threshold hit but 2FA push lock raced — held by %r — "
@@ -345,11 +461,9 @@ def _handle_stuck_awaiting_2fa(
         record_service_health("ok")
         return state
 
-    acquired, lock_now = ib_2fa_lock.acquire_2fa_push_lock(
-        WATCHDOG_LOCK_HOLDER,
-        ttl_secs=ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
-        reason=f"stuck awaiting 2FA for {state.stuck_2fa_count} cycles",
+    acquired, lock_now = _acquire_2fa_push_lock_bounded(
         now=clock(),
+        reason=f"stuck awaiting 2FA for {state.stuck_2fa_count} cycles",
     )
     if not acquired:
         LOG.warning(
@@ -486,7 +600,7 @@ def run_cycle(
     # mid-2FA-push, restarting here would stack a second push on top —
     # the failure pattern that motivated this lock. Skip this cycle and
     # let the FastAPI path's push resolve first.
-    existing_lock = ib_2fa_lock.check_2fa_push_lock(now=clock())
+    existing_lock = _check_2fa_push_lock_bounded(now=clock())
     if existing_lock is not None and existing_lock.holder != WATCHDOG_LOCK_HOLDER:
         LOG.warning(
             "api hang sustained %s cycles but 2FA push lock held by %r "
@@ -513,11 +627,9 @@ def run_cycle(
 
     # Take the lock BEFORE issuing the restart. If acquire fails (extremely
     # rare race), treat it the same as "another holder owns it" and skip.
-    acquired, lock_now = ib_2fa_lock.acquire_2fa_push_lock(
-        WATCHDOG_LOCK_HOLDER,
-        ttl_secs=ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
-        reason=f"api hang sustained {state.degraded_count} cycles",
+    acquired, lock_now = _acquire_2fa_push_lock_bounded(
         now=clock(),
+        reason=f"api hang sustained {state.degraded_count} cycles",
     )
     if not acquired:
         LOG.warning(
@@ -574,16 +686,51 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def _abort_on_cycle_timeout(signum, frame):  # noqa: ARG001 — signal handler ABI
+    """SIGALRM handler: a sub-step blocked past the hard ceiling. Log and exit
+    so the next every-minute oneshot tick can run. A hung cycle that never
+    exits is the proven cause of the gateway staying unreachable for hours."""
+    LOG.error(
+        "cycle exceeded hard timeout of %ss: aborting and exiting so the next "
+        "tick can run",
+        CYCLE_HARD_TIMEOUT_SECS,
+    )
+    os._exit(2)
+
+
+def _arm_cycle_alarm() -> bool:
+    """Arm the whole-cycle SIGALRM watchdog. Returns True if armed.
+
+    SIGALRM is only available on the main thread of a Unix process, which is
+    exactly where the oneshot CLI runs. If unavailable (Windows / non-main
+    thread under test), we skip arming — the per-sub-step bounds still apply.
+    """
+    if not hasattr(signal, "SIGALRM"):
+        return False
+    try:
+        signal.signal(signal.SIGALRM, _abort_on_cycle_timeout)
+        signal.alarm(CYCLE_HARD_TIMEOUT_SECS)
+        return True
+    except (ValueError, OSError) as exc:
+        LOG.warning("could not arm cycle alarm (%s); relying on sub-step bounds", exc)
+        return False
+
+
 def main(argv: Optional[list[str]] = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
-    state = run_cycle(
-        health_url=args.health_url,
-        health_timeout=args.health_timeout,
-        state_path=args.state_path,
-        restart_unit=args.restart_unit,
-        threshold=args.threshold,
-        dry_run=args.dry_run,
-    )
+    armed = _arm_cycle_alarm()
+    try:
+        state = run_cycle(
+            health_url=args.health_url,
+            health_timeout=args.health_timeout,
+            state_path=args.state_path,
+            restart_unit=args.restart_unit,
+            threshold=args.threshold,
+            dry_run=args.dry_run,
+        )
+    finally:
+        if armed:
+            signal.alarm(0)  # disarm — cycle finished within the ceiling
     LOG.info("cycle done: %s", state.last_outcome)
     return 0
 
