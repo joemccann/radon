@@ -10,6 +10,7 @@ check_ib_gateway() so an internet GET can't drive the pool-reconnect / heal
 side effects on that call path.
 """
 
+import asyncio
 import os
 import sys
 from types import SimpleNamespace
@@ -94,6 +95,75 @@ class TestHealthPayloadScoping:
         result = await server.health(req)
 
         assert result["ib_gateway"]["auth_state"] == "awaiting_2fa"
+
+
+class TestHealthProbeBounding:
+    """/health must NEVER hang. The IB gateway probe (check_ib_gateway) can block
+    for tens of seconds while the pool reconnects after a 2FA approval; when it
+    does, uvicorn workers pile up and every health-dependent UI surface shows a
+    timeout / RELAY OFFLINE state even though IB is healthy. The probe is bounded
+    by asyncio.wait_for and falls back to a degraded payload on timeout/error,
+    while keeping the payload shape backward-compatible.
+    """
+
+    @pytest.mark.asyncio
+    async def test_hanging_probe_returns_degraded_promptly(self, monkeypatch):
+        async def _hangs(*args, **kwargs):
+            await asyncio.sleep(60)  # simulate a pool mid-reconnect wedge
+
+        monkeypatch.setattr(server, "check_ib_gateway", _hangs)
+        monkeypatch.setattr(server, "ib_pool", SimpleNamespace(status=lambda: {"sync": {"connected": False}}))
+        monkeypatch.setattr(server, "HEALTH_GATEWAY_PROBE_TIMEOUT_SECS", 0.05)
+
+        req = _request("127.0.0.1")
+        result = await asyncio.wait_for(server.health(req), timeout=2.0)
+
+        # HTTP 200 + structured payload, same top-level keys as the happy path.
+        assert result["status"] == "ok"
+        assert set(result) >= {"status", "test_mode", "ib_gateway", "ib_pool", "uw"}
+        # Degraded gateway: flagged, and the web-parsed nested keys still present.
+        assert result["ib_gateway"]["probe_timed_out"] is True
+        assert result["ib_gateway"]["auth_state"] == "unknown"
+        assert result["ib_gateway"]["port_listening"] is False
+        assert "container_state" in result["ib_gateway"]
+        # Pool status (synchronous, fast) is still surfaced unchanged.
+        assert result["ib_pool"] == {"sync": {"connected": False}}
+
+    @pytest.mark.asyncio
+    async def test_raising_probe_returns_degraded(self, monkeypatch):
+        async def _boom(*args, **kwargs):
+            raise RuntimeError("pool inspection blew up")
+
+        monkeypatch.setattr(server, "check_ib_gateway", _boom)
+        monkeypatch.setattr(server, "ib_pool", SimpleNamespace(status=lambda: {}))
+
+        req = _request("127.0.0.1")
+        result = await server.health(req)
+
+        assert result["status"] == "ok"
+        assert result["ib_gateway"]["probe_timed_out"] is True
+        assert result["ib_gateway"]["auth_state"] == "unknown"
+
+    @pytest.mark.asyncio
+    async def test_healthy_probe_returns_normal_payload(self, monkeypatch):
+        async def _gw(*args, **kwargs):
+            return {
+                "auth_state": "authenticated",
+                "port_listening": True,
+                "container_state": "running",
+                "managed_accounts": ["U1234567"],
+            }
+
+        monkeypatch.setattr(server, "check_ib_gateway", _gw)
+        monkeypatch.setattr(server, "ib_pool", SimpleNamespace(status=lambda: {"sync": {"connected": True}}))
+
+        req = _request("127.0.0.1")
+        result = await server.health(req)
+
+        assert result["ib_gateway"]["auth_state"] == "authenticated"
+        assert result["ib_gateway"]["port_listening"] is True
+        assert "probe_timed_out" not in result["ib_gateway"]
+        assert result["ib_pool"] == {"sync": {"connected": True}}
 
 
 class TestHealthLite:

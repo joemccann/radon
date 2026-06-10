@@ -106,6 +106,15 @@ def _next_test_order_ids() -> tuple[int, int]:
 
 IB_HEARTBEAT_INTERVAL_SECS = 15
 
+# Worst-case wall-clock budget for the /health IB gateway probe. The probe can
+# block for tens of seconds when the pool is mid-reconnect after a 2FA approval
+# (handle_auth_state_transition -> pool.reconnect_all bounded at 30s + heal 10s).
+# When it does, uvicorn workers pile up and every health-dependent UI surface
+# shows a scary "operation aborted due to timeout" / RELAY OFFLINE state even
+# though IB is healthy. /health must ALWAYS return fast with a structured
+# payload; recovery itself stays on the unbounded _ib_recovery_heartbeat_loop.
+HEALTH_GATEWAY_PROBE_TIMEOUT_SECS = 2.5
+
 
 async def _ib_recovery_heartbeat_tick() -> None:
     """Drive check_ib_gateway WITH the pool once, so the documented
@@ -956,7 +965,33 @@ async def health(request: Request):
     # Pass the pool itself so the auth-state transition handler can autorecover
     # from the documented "pool stuck after 2FA" failure mode without an
     # operator step. See feedback_ib_pool_stuck_after_2fa.md.
-    gw = await check_ib_gateway(pool_status=pool_status, pool=ib_pool)
+    #
+    # Bound the probe: check_ib_gateway can block for tens of seconds when the
+    # pool is reconnecting (see HEALTH_GATEWAY_PROBE_TIMEOUT_SECS). On timeout or
+    # any error we fall back to a fast "degraded" gateway dict (probe_timed_out)
+    # rather than hanging the endpoint. The payload SHAPE stays identical so the
+    # web IBStatusContext / admin panel keep parsing the same keys. Recovery is
+    # NOT done here — the unbounded _ib_recovery_heartbeat_loop owns it.
+    try:
+        gw = await asyncio.wait_for(
+            check_ib_gateway(pool_status=pool_status, pool=ib_pool),
+            timeout=HEALTH_GATEWAY_PROBE_TIMEOUT_SECS,
+        )
+    except Exception as exc:  # defensive: never hang or 500 /health
+        timed_out = isinstance(exc, asyncio.TimeoutError)
+        logger.warning(
+            "/health gateway probe %s after %.1fs; returning degraded status",
+            "timed out" if timed_out else f"raised {type(exc).__name__}",
+            HEALTH_GATEWAY_PROBE_TIMEOUT_SECS,
+        )
+        gw = {
+            "port_listening": False,
+            "auth_state": "unknown",
+            "service_state": "unknown",
+            "container_state": "unknown",
+            "upstream_dead": False,
+            "probe_timed_out": True,
+        }
     return {
         "status": "ok",
         "test_mode": test_mode,
