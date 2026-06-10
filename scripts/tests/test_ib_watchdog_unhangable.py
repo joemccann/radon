@@ -247,3 +247,30 @@ class TestHappyPathUnaffected:
         assert rc == 0
         assert CYCLE_HARD_TIMEOUT_SECS in alarm_calls  # armed
         assert alarm_calls[-1] == 0  # disarmed last
+
+
+def test_watchdog_forces_no_replica_on_import():
+    """Regression: the watchdog unit shipped without
+    Environment=RADON_DB_NO_REPLICA=1, so get_db() took the replica branch and
+    ran conn.sync() against a multi-GB replica.db every cycle, hanging the
+    oneshot. The module must force the flag at import so it can NEVER resurrect
+    the retired embedded replica regardless of unit env. Run in a subprocess
+    with a deliberately clean env so a CI-set value can't mask a regression.
+    """
+    import os
+    import subprocess
+    import sys
+
+    env = {k: v for k, v in os.environ.items() if k != "RADON_DB_NO_REPLICA"}
+    code = (
+        "import os, scripts.ib_watchdog;"
+        "print(os.environ.get('RADON_DB_NO_REPLICA'))"
+    )
+    out = subprocess.run(
+        [sys.executable, "-c", code],
+        capture_output=True, text=True, timeout=30,
+        cwd=os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+        env=env,
+    )
+    assert out.returncode == 0, out.stderr
+    assert out.stdout.strip() == "1", f"expected RADON_DB_NO_REPLICA=1, got {out.stdout!r}"
