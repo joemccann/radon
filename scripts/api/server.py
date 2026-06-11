@@ -14,14 +14,16 @@ import hashlib
 import json
 import logging
 import os
+import queue
 import re
 import sys
+import threading
 from datetime import datetime, timedelta, timezone
 import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Callable, Iterable, List, Optional, Tuple
 
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -287,8 +289,62 @@ def _write_cache(path: Path, data: dict) -> None:
     _maybe_dual_write_to_db(path, data)
 
 
+# Dedicated bounded background writer for the best-effort DB mirror +
+# service_health heartbeat. These are SYNCHRONOUS libsql writes that can hang
+# on a Turso/network blip and have no native timeout. Running them inline on
+# the single FastAPI event loop froze the entire API: py-spy caught the loop
+# blocked in upsert_vcg_snapshot -> _maybe_dual_write_to_db -> _write_cache, so
+# /health and every request timed out until a restart (recurred every few
+# minutes as the vcg/gex/cri/scanner timers each hit this path). Hand the work
+# to a daemon thread so a slow/hung write degrades only the mirror, never
+# request handling. The queue is bounded so a sustained hang can't grow memory.
+_DB_MIRROR_QUEUE: "queue.Queue[Callable[[], None]]" = queue.Queue(maxsize=256)
+_db_mirror_thread: Optional[threading.Thread] = None
+_db_mirror_lock = threading.Lock()
+
+
+def _db_mirror_worker() -> None:
+    while True:
+        job = _DB_MIRROR_QUEUE.get()
+        try:
+            job()
+        except Exception as exc:  # noqa: BLE001 — best-effort mirror
+            print(f"[server] db mirror job failed: {exc}", file=sys.stderr)
+        finally:
+            _DB_MIRROR_QUEUE.task_done()
+
+
+def _ensure_db_mirror_worker() -> None:
+    global _db_mirror_thread
+    if _db_mirror_thread is not None and _db_mirror_thread.is_alive():
+        return
+    with _db_mirror_lock:
+        if _db_mirror_thread is None or not _db_mirror_thread.is_alive():
+            _db_mirror_thread = threading.Thread(
+                target=_db_mirror_worker, name="db-mirror", daemon=True
+            )
+            _db_mirror_thread.start()
+
+
 def _maybe_dual_write_to_db(path: Path, data: dict) -> None:
-    """Best-effort DB mirror for known JSON caches.
+    """Enqueue the best-effort DB mirror; NEVER block the event loop.
+
+    The actual upsert + service_health write (``_do_dual_write_to_db``) are
+    synchronous libsql calls that can hang; this is called sync from
+    ``_write_cache`` inside async handlers, so doing them inline froze the
+    FastAPI event loop. Hand them to the background writer instead.
+    """
+    name = getattr(path, "name", str(path))
+    _ensure_db_mirror_worker()
+    try:
+        _DB_MIRROR_QUEUE.put_nowait(lambda: _do_dual_write_to_db(path, data))
+    except queue.Full:
+        print(f"[server] db mirror queue full; dropping {name}", file=sys.stderr)
+
+
+def _do_dual_write_to_db(path: Path, data: dict) -> None:
+    """Best-effort DB mirror for known JSON caches (runs on the background
+    writer thread, never the event loop).
 
     Phase 2 of the Turso source-of-truth migration extends this to cover
     scanner.json, flow_analysis.json, performance.json, discover_sp500.json.
