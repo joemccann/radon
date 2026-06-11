@@ -54,13 +54,13 @@ describe("unitVerdict", () => {
 });
 
 describe("unitDependents / cascade map", () => {
-  it("ib-gateway carries down the data plane", () => {
+  it("ib-gateway carries down the data plane (not api, which Wants the gateway)", () => {
     expect(unitDependents("radon-ib-gateway.service")).toEqual([
-      "radon-api.service", "radon-relay.service", "radon-monitor.service",
+      "radon-relay.service", "radon-monitor.service",
     ]);
   });
   it("no dependents for a leaf", () => expect(unitDependents("radon-leap.service")).toEqual([]));
-  it("map is the source of truth", () => expect(UNIT_DEPENDENTS["radon-ib-gateway.service"]).toHaveLength(3));
+  it("map is the source of truth", () => expect(UNIT_DEPENDENTS["radon-ib-gateway.service"]).toHaveLength(2));
 });
 
 describe("serviceControlDisabledReason", () => {
