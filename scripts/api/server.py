@@ -335,6 +335,16 @@ def _maybe_dual_write_to_db(path: Path, data: dict) -> None:
     FastAPI event loop. Hand them to the background writer instead.
     """
     name = getattr(path, "name", str(path))
+    # 2026-06-11: even on the background thread, libsql's commit() holds the GIL
+    # during its blocking write, so a hung Turso write still froze the FastAPI
+    # event loop (py-spy: MainThread GIL-starved while the db-mirror thread sat
+    # in upsert_*). Gate the mirror OFF by default until it runs in a separate
+    # PROCESS (own GIL, killable). The JSON caches are still written by
+    # _write_cache, so reads fall back to disk; only the Turso snapshot mirror
+    # is paused. Re-enable with RADON_DB_MIRROR_DISABLED=0 once the subprocess
+    # writer lands. See feedback_no_sync_libsql_on_fastapi_event_loop.
+    if os.environ.get("RADON_DB_MIRROR_DISABLED", "1") == "1":
+        return
     _ensure_db_mirror_worker()
     try:
         _DB_MIRROR_QUEUE.put_nowait(lambda: _do_dual_write_to_db(path, data))
