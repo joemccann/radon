@@ -10,7 +10,7 @@
  *   - Service rows render with the start / restart / stop trio.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import IbGatewayCard from "../components/admin/IbGatewayCard";
 import Ib2faControls from "../components/admin/Ib2faControls";
 import ServiceControlPanel from "../components/admin/ServiceControlPanel";
@@ -308,7 +308,9 @@ describe("<Ib2faControls /> — gateway power", () => {
     );
     fireEvent.click(screen.getByTestId("gateway-power-button"));
     const cascade = screen.getByTestId("admin-confirm-cascade");
-    expect(cascade.textContent).toContain("radon-api.service");
+    // radon-api is Wants (not Requires) the gateway, so it survives a stop and
+    // is NOT a cascade dependent. Only relay + monitor go down.
+    expect(cascade.textContent).not.toContain("radon-api.service");
     expect(cascade.textContent).toContain("radon-relay.service");
     expect(cascade.textContent).toContain("radon-monitor.service");
 
@@ -382,6 +384,68 @@ describe("<Ib2faControls /> — gateway power", () => {
     const btn = screen.getByTestId("gateway-power-button") as HTMLButtonElement;
     expect(btn.disabled).toBe(true);
     expect(btn.textContent).toBe("Stopping...");
+  });
+
+  it("flips the button to Start Gateway immediately after a confirmed Stop (optimistic)", async () => {
+    const onStopGateway = vi.fn().mockResolvedValue(undefined);
+    render(
+      <Ib2faControls
+        health={buildHealth({ port_listening: true })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gatewayUnit("active")}
+        servicesSupported
+        onStopGateway={onStopGateway}
+        onStartGateway={vi.fn()}
+      />,
+    );
+    expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stop Gateway");
+    fireEvent.click(screen.getByTestId("gateway-power-button"));
+    fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), {
+      target: { value: "radon-ib-gateway.service" },
+    });
+    fireEvent.click(screen.getByTestId("admin-confirm-action"));
+    // The gatewayUnit prop is still "active", but the button flips at once.
+    await waitFor(() =>
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway"),
+    );
+  });
+
+  it("reconciles the optimistic flip with the authoritative poll (never sticks stale)", async () => {
+    const onStopGateway = vi.fn().mockResolvedValue(undefined);
+    const props = (gw: ReturnType<typeof gatewayUnit>) => (
+      <Ib2faControls
+        health={buildHealth({ port_listening: false })}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={gw}
+        servicesSupported
+        onStopGateway={onStopGateway}
+        onStartGateway={vi.fn()}
+      />
+    );
+    const { rerender } = render(props(gatewayUnit("active")));
+    fireEvent.click(screen.getByTestId("gateway-power-button"));
+    fireEvent.change(screen.getByTestId("admin-confirm-typed-input"), {
+      target: { value: "radon-ib-gateway.service" },
+    });
+    fireEvent.click(screen.getByTestId("admin-confirm-action"));
+    await waitFor(() =>
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway"),
+    );
+    // Poll catches up to inactive: the override matches + clears, still Start.
+    rerender(props(gatewayUnit("inactive", "dead")));
+    await waitFor(() =>
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Start Gateway"),
+    );
+    // Gateway comes back active: with the override cleared the button reflects
+    // the poll again instead of sticking on the optimistic Start.
+    rerender(props(gatewayUnit("active")));
+    await waitFor(() =>
+      expect(screen.getByTestId("gateway-power-button").textContent).toBe("Stop Gateway"),
+    );
   });
 
   it("gates Start when a 2FA push lock is already held (no stacked pushes)", () => {

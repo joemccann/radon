@@ -207,10 +207,13 @@ export function unitKind(unit: UnitStatus): UnitKind {
  * Static cascade map: stopping a key carries down its dependents, which do NOT
  * auto-restart (feedback_systemd_cascade_stop_no_autorecover). Builds the
  * high-severity Stop dialog. The cascade is fixed + documented, so no API call.
+ *
+ * radon-api is deliberately NOT listed: it Wants (not Requires) the gateway, so
+ * it survives a deliberate gateway stop. That is load-bearing for the operator
+ * page, which needs radon-api up to detect the stopped state and issue Start.
  */
 export const UNIT_DEPENDENTS: Record<string, string[]> = {
   "radon-ib-gateway.service": [
-    "radon-api.service",
     "radon-relay.service",
     "radon-monitor.service",
   ],

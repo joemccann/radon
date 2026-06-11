@@ -1,16 +1,21 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { AdminHealthPayload, UnitStatus } from "@/lib/adminTypes";
 import {
   forcePushDisabledReason,
   gatewayPowerState,
   isForcePushDisabled,
   unitDependents,
+  type GatewayPowerState,
 } from "@/lib/adminFormat";
 import ConfirmDialog from "./ConfirmDialog";
 
 const GATEWAY_UNIT = "radon-ib-gateway.service";
+// After a confirmed Stop/Start the unit-state poll lags by a beat, so we flip
+// the button optimistically. This is the safety ceiling: the override always
+// clears after this window even if the poll never settles, so it can't stick.
+const OPTIMISTIC_POWER_MAX_MS = 120_000;
 
 type Ib2faControlsProps = {
   health: AdminHealthPayload | null;
@@ -55,15 +60,39 @@ export default function Ib2faControls({
   const [pendingReset, setPendingReset] = useState(false);
   const [pendingRestart, setPendingRestart] = useState(false);
   const [pendingPower, setPendingPower] = useState(false);
+  // Optimistic power target set on a confirmed Stop/Start so the button flips
+  // immediately rather than waiting for the next /admin/services poll. Cleared
+  // once the poll settles to the expected terminal state (or after the safety
+  // window) so it never sticks stale.
+  const [optimisticPower, setOptimisticPower] = useState<GatewayPowerState | null>(null);
 
   const pushLock = health?.ib_gateway?.restart_backoff?.push_lock ?? null;
   const disableForce = isForcePushDisabled({ pushLock, pending: pendingForce });
   const disableReason = forcePushDisabledReason({ pushLock, pending: pendingForce });
 
-  const powerState = gatewayPowerState({
+  const polledPowerState = gatewayPowerState({
     unit: gatewayUnit,
     portListening: health?.ib_gateway?.port_listening,
   });
+  const powerState = optimisticPower ?? polledPowerState;
+
+  // Reconcile the optimistic override with the authoritative poll: clear it
+  // once the poll confirms the expected terminal state, or after the safety
+  // window so a missed/failed action can never leave the button wrong forever.
+  useEffect(() => {
+    if (optimisticPower === null) return undefined;
+    const settled =
+      (optimisticPower === "stopped" && polledPowerState === "stopped") ||
+      ((optimisticPower === "running" || optimisticPower === "transitional") &&
+        polledPowerState === "running");
+    if (settled) {
+      setOptimisticPower(null);
+      return undefined;
+    }
+    const timer = setTimeout(() => setOptimisticPower(null), OPTIMISTIC_POWER_MAX_MS);
+    return () => clearTimeout(timer);
+  }, [optimisticPower, polledPowerState]);
+
   const gatewayDependents = unitDependents(GATEWAY_UNIT);
   // Start triggers a fresh 2FA login, so gate it on the same push lock as
   // Force 2FA to keep two pushes from racing (feedback_2fa_push_stacking).
@@ -114,6 +143,8 @@ export default function Ib2faControls({
     setPendingPower(true);
     try {
       await onStopGateway?.();
+      // Flip to "Start Gateway" immediately; the poll settles a beat later.
+      setOptimisticPower("stopped");
     } finally {
       setPendingPower(false);
       setShowStopConfirm(false);
@@ -125,6 +156,9 @@ export default function Ib2faControls({
     setPendingPower(true);
     try {
       await onStartGateway?.();
+      // Start is a full-stack restart (~60-90s); show it as in-transition
+      // until the poll confirms the gateway is back up.
+      setOptimisticPower("transitional");
     } finally {
       setPendingPower(false);
       setShowStartConfirm(false);
