@@ -28,7 +28,17 @@ After restart, IB Gateway sits at IBKR Mobile push prompt with API socket open �
 
 IBC-side relogin on 2FA timeout is **disabled** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). **Do not re-enable** anywhere; bypasses the push lock.
 
+**4. Watchdog API-hang self-heal (2026-06-10).** Separate from stuck-2FA: `is_api_hang()` fires when the gateway is authenticated + `port_listening` but `upstream_dead` (the Java API listener wedged in place — socat accepts TCP but the API handshake times out, Docker's TCP healthcheck misses it). After 3 cycles it restarts the gateway via the lock. The api-watchdog runs as a oneshot every minute; it MUST have `TimeoutStartSec=60` (set on `radon-ib-watchdog.service`) and force `RADON_DB_NO_REPLICA=1` (in `scripts/ib_watchdog.py` + the unit) — without those it hangs forever on its own probe / a 1.36GB replica sync and permanently stalls (see `feedback_gateway_api_hang_and_watchdog_self_hang`). A `radon restart` does NOT hold the push lock and can stack pushes with the watchdog (see `feedback_radon_restart_stacks_2fa_with_watchdog`).
+
 Code: `scripts/api/ib_gateway.py:restart_ib_gateway`, `scripts/ib_watchdog.py:run_cycle`, `scripts/utils/ib_2fa_lock.py`. Full state-machine derivation in `docs/ib-gateway-recovery.md`.
+
+---
+
+## Event-Loop Discipline (never freeze the single uvicorn worker)
+
+uvicorn runs ONE worker (one asyncio event loop). **Never run a synchronous/blocking libsql call (`db.execute`/`db.commit`) or other unbounded blocking I/O directly in an async handler** — a hung direct-cloud Turso write froze the whole API (`/health` + `/health/lite` timed out, every request stalled) while the relay/data plane stayed fine; the recurring trigger was `_maybe_dual_write_to_db` running the mirror inline. Fire-and-forget DB side-effects (the dual-write mirror + `service_health` heartbeat) now go through a dedicated bounded background thread (`_db_mirror_worker` in `server.py`, `queue.Queue(maxsize=256)`); request-scoped blocking I/O uses `asyncio.to_thread`. Diagnose a wedge with `py-spy dump --pid <uvicorn MainPID>` (MainThread blocked in the offending frame). See `feedback_no_sync_libsql_on_fastapi_event_loop`.
+
+**`radon-api` survives a gateway stop.** Its unit uses `Wants=` (NOT `Requires=`) `radon-ib-gateway.service`, so a deliberate gateway stop (the operator page's "Stop Gateway" control) does not cascade-kill api — the control plane (`/health`, `/admin/services`, the Start action) stays up. radon-cloud `radon-api.service`. The operator page's gateway Stop/Start lives in `web/components/admin/Ib2faControls.tsx` (Stop is type-to-confirm cascade-aware for relay+monitor; Start reuses the full-stack `radon restart`).
 
 ---
 

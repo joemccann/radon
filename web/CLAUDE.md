@@ -220,7 +220,7 @@ cushion = excess_liquidity / net_liquidation
 
 ## WebSocket State (`usePrices.ts`)
 
-State machine: `idle → connecting → open → closed`. `connStateRef` idempotent connect, `socketGenRef` ignores stale events, diff-based sub/unsub, exponential backoff (1s–30s, max 10). Stale tick detection at 30s; 45s no-ticks triggers Gateway restart via the relay layer (120s cooldown there).
+State machine: `idle → connecting → open → closed`. `connStateRef` idempotent connect, `socketGenRef` ignores stale events, diff-based sub/unsub, exponential backoff (1s–30s, max 10). Stale tick detection at 45s drives a bounded recovery ladder in the relay (pure core in `scripts/lib/staleDataMachine.js`): farm-OK → resubscribe, else up to K=3 socket reconnects, then **escalate to an alert** (writes a `service_health` error row `ib-realtime-relay` for the watchdog). The relay NEVER restarts the IB Gateway itself (avoids 2FA-stacking). Gateway farm-down (gateway authenticated but relay gets zero ticks) needs a full `radon restart`, not a relay-only restart. See `project_relay_stale_tick_ladder_2026_06_05`.
 
 ---
 
