@@ -158,3 +158,100 @@ def test_remaining_lock_secs_counts_down_toward_expiry():
     assert ib_2fa_lock.remaining_lock_secs(now=1100.0) == 500
     # Past expiry → 0, never negative.
     assert ib_2fa_lock.remaining_lock_secs(now=2000.0) == 0
+
+
+# --- CLI entry point ---------------------------------------------------------
+#
+# `python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder>}`
+# is consumed by shell control planes (radon-cloud/scripts/operator-radon.sh)
+# that cannot import the module. Exit codes are the contract:
+#   0 = free / acquired / released, 1 = held by another holder, 2 = usage error.
+
+
+def test_cli_check_exits_zero_when_free(capsys):
+    assert ib_2fa_lock.main(["check"]) == 0
+    assert "free" in capsys.readouterr().out
+
+
+def test_cli_check_exits_nonzero_and_names_holder_when_held(capsys):
+    ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+    assert ib_2fa_lock.main(["check"]) == 1
+    err = capsys.readouterr().err
+    assert "ib-watchdog" in err
+    assert "remaining" in err
+
+
+def test_cli_acquire_succeeds_on_free_lock(capsys, _redirect_lock_path: Path):
+    assert ib_2fa_lock.main(["acquire", "radon-cli"]) == 0
+    assert "acquired" in capsys.readouterr().out
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held is not None
+    assert held.holder == "radon-cli"
+
+
+def test_cli_acquire_refused_names_holder_and_remaining(capsys):
+    ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+    assert ib_2fa_lock.main(["acquire", "radon-cli"]) == 1
+    err = capsys.readouterr().err
+    assert "ib-watchdog" in err
+    assert "remaining" in err
+    # Lock untouched — still owned by the original holder.
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held is not None and held.holder == "ib-watchdog"
+
+
+def test_cli_acquire_same_holder_refreshes_lease():
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cli", ttl_secs=600)
+    assert ib_2fa_lock.main(["acquire", "radon-cli"]) == 0
+
+
+def test_cli_release_own_lock(capsys):
+    ib_2fa_lock.acquire_2fa_push_lock("radon-cli", ttl_secs=600)
+    assert ib_2fa_lock.main(["release", "radon-cli"]) == 0
+    assert "released" in capsys.readouterr().out
+    assert ib_2fa_lock.check_2fa_push_lock() is None
+
+
+def test_cli_release_refuses_lock_held_by_another_holder(capsys):
+    ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+    assert ib_2fa_lock.main(["release", "radon-cli"]) == 1
+    assert "ib-watchdog" in capsys.readouterr().err
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held is not None and held.holder == "ib-watchdog"
+
+
+def test_cli_release_when_free_is_noop():
+    assert ib_2fa_lock.main(["release", "radon-cli"]) == 0
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [[], ["bogus"], ["acquire"], ["release"], ["check", "extra"]],
+)
+def test_cli_usage_errors_exit_two(argv):
+    assert ib_2fa_lock.main(argv) == 2
+
+
+def test_cli_resolves_via_python_dash_m(tmp_path: Path):
+    """The shell control planes invoke `python3 -m scripts.utils.ib_2fa_lock`
+    from the repo root — pin that module path + exit-code contract end to end."""
+    import subprocess
+    import sys as _sys
+
+    repo_root = Path(__file__).resolve().parents[2]
+    env = dict(**__import__("os").environ)
+    env["IB_2FA_LOCK_PATH"] = str(tmp_path / "cli-lock.json")
+
+    acquire = subprocess.run(
+        [_sys.executable, "-m", "scripts.utils.ib_2fa_lock", "acquire", "radon-cli"],
+        cwd=repo_root, env=env, capture_output=True, text=True,
+    )
+    assert acquire.returncode == 0
+    assert "acquired" in acquire.stdout
+
+    refused = subprocess.run(
+        [_sys.executable, "-m", "scripts.utils.ib_2fa_lock", "acquire", "ib-watchdog"],
+        cwd=repo_root, env=env, capture_output=True, text=True,
+    )
+    assert refused.returncode == 1
+    assert "radon-cli" in refused.stderr

@@ -45,6 +45,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sys
 import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -218,3 +219,72 @@ def remaining_lock_secs(now: Optional[float] = None) -> int:
         return 0
     now = now if now is not None else time.time()
     return max(0, int(lock.expires_at - now))
+
+
+# --- CLI entry point ---------------------------------------------------------
+#
+# Shell control planes that cannot import this module (the radon operator
+# CLI in radon-cloud/scripts/operator-radon.sh) consult the lock via
+#
+#   python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder>}
+#
+# Exit codes are the contract: 0 = free / acquired / released,
+# 1 = held by another holder, 2 = usage error. Success markers print to
+# stdout; refusals print holder + remaining seconds to stderr so callers
+# can surface them verbatim.
+
+_CLI_USAGE = "usage: python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder>}"
+
+
+def _print_held(lock: PushLock) -> None:
+    remaining = remaining_lock_secs()
+    detail = f" reason={lock.reason!r}" if lock.reason else ""
+    print(f"held holder={lock.holder} remaining={remaining}s{detail}", file=sys.stderr)
+
+
+def _cli_check() -> int:
+    lock = check_2fa_push_lock()
+    if lock is None:
+        print("free")
+        return 0
+    _print_held(lock)
+    return 1
+
+
+def _cli_acquire(holder: str) -> int:
+    acquired, lock = acquire_2fa_push_lock(holder, reason=f"cli acquire by {holder}")
+    if acquired:
+        assert lock is not None
+        print(f"acquired holder={lock.holder} ttl={remaining_lock_secs()}s")
+        return 0
+    assert lock is not None
+    _print_held(lock)
+    return 1
+
+
+def _cli_release(holder: str) -> int:
+    lock = check_2fa_push_lock()
+    if lock is None:
+        print("free")
+        return 0
+    if lock.holder != holder:
+        _print_held(lock)
+        return 1
+    release_2fa_push_lock()
+    print(f"released holder={holder}")
+    return 0
+
+
+def main(argv: list[str]) -> int:
+    if argv == ["check"]:
+        return _cli_check()
+    if len(argv) == 2 and argv[0] == "acquire":
+        return _cli_acquire(argv[1])
+    if len(argv) == 2 and argv[0] == "release":
+        return _cli_release(argv[1])
+    print(_CLI_USAGE, file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main(sys.argv[1:]))

@@ -1008,6 +1008,8 @@ async def admin_service_action(unit: str, action: str):
     """Run ``systemctl <action> <unit>``. Allowlist-gated to radon-* units."""
     result = await admin_services.control_unit(unit, action)
     if not result.ok:
+        if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
+            raise HTTPException(status_code=409, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
     return result.to_dict()
 

@@ -23,6 +23,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 
 from scripts.api import services as admin_services  # noqa: E402
+from utils import ib_2fa_lock  # noqa: E402
 
 
 class TestIsValidUnit:
@@ -304,6 +305,77 @@ class TestDeriveHelpers:
     def test_derive_last_exit_code_handles_empty_status(self) -> None:
         parsed = {"Type": "oneshot", "ExecMainStatus": ""}
         assert admin_services._derive_last_exit_code(parsed) is None
+
+
+class TestControlUnitGatewayPushLock:
+    """Gateway start/restart from the admin panel must hold the shared 2FA
+    push lock — the same lock the FastAPI restart path and the watchdog use —
+    so the panel can never stack a second IBKR push (DUR-03)."""
+
+    GATEWAY = "radon-ib-gateway.service"
+
+    @pytest.fixture(autouse=True)
+    def _redirect_lock_path(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "ib-2fa-push-lock.json"))
+
+    def _control(self, unit: str, action: str, systemctl_calls: list) -> admin_services.ActionResult:
+        async def fake_systemctl(*args: str, **_kw: object) -> tuple[str, str, int]:
+            systemctl_calls.append(args)
+            return ("", "", 0)
+
+        with patch.object(admin_services, "is_systemd_available", return_value=True), \
+             patch.object(admin_services, "_systemctl", side_effect=fake_systemctl):
+            return asyncio.run(admin_services.control_unit(unit, action))
+
+    def test_restart_refused_while_lock_held_by_another_holder(self) -> None:
+        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+        calls: list = []
+        result = self._control(self.GATEWAY, "restart", calls)
+        assert result.ok is False
+        assert result.returncode == admin_services.PUSH_LOCK_HELD_RC
+        assert "ib-watchdog" in result.detail
+        assert calls == []  # systemctl must never fire under a foreign lock
+        # Lock untouched.
+        held = ib_2fa_lock.check_2fa_push_lock()
+        assert held is not None and held.holder == "ib-watchdog"
+
+    def test_start_refused_while_lock_held_by_another_holder(self) -> None:
+        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+        calls: list = []
+        result = self._control(self.GATEWAY, "start", calls)
+        assert result.ok is False
+        assert result.returncode == admin_services.PUSH_LOCK_HELD_RC
+        assert calls == []
+
+    def test_restart_acquires_lock_and_keeps_it_after_systemctl(self) -> None:
+        """The push is still pending when systemctl returns — the lock must
+        stay held (crash-safe TTL clears it), never released inline."""
+        calls: list = []
+        result = self._control(self.GATEWAY, "restart", calls)
+        assert result.ok is True
+        assert calls == [("restart", self.GATEWAY)]
+        held = ib_2fa_lock.check_2fa_push_lock()
+        assert held is not None
+        assert held.holder == admin_services.ADMIN_PANEL_LOCK_HOLDER
+
+    def test_stop_is_never_gated_by_the_lock(self) -> None:
+        """Stopping the gateway fires no 2FA push — must proceed even while
+        another holder owns the lock."""
+        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+        calls: list = []
+        result = self._control(self.GATEWAY, "stop", calls)
+        assert result.ok is True
+        assert calls == [("stop", self.GATEWAY)]
+
+    def test_non_gateway_units_are_never_gated(self) -> None:
+        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+        calls: list = []
+        result = self._control("radon-api.service", "restart", calls)
+        assert result.ok is True
+        assert calls == [("restart", "radon-api.service")]
+        # And the foreign lock is untouched.
+        held = ib_2fa_lock.check_2fa_push_lock()
+        assert held is not None and held.holder == "ib-watchdog"
 
 
 class TestRestartFullStack:

@@ -22,9 +22,20 @@ import logging
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, List, Optional
+
+# scripts/utils lives under <repo>/scripts/utils; this module lives at
+# <repo>/scripts/api. Add the scripts dir to sys.path so the shared
+# 2FA push-lock module imports cleanly under any pytest rootdir.
+_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
+if str(_SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_SCRIPTS_DIR))
+
+from utils import ib_2fa_lock  # noqa: E402
 
 logger = logging.getLogger("radon.services")
 
@@ -322,6 +333,23 @@ async def list_units_with_status() -> List[UnitStatus]:
 
 ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
 
+# Cycling the IB Gateway fires an IBKR Mobile 2FA push — start/restart on this
+# unit must hold the shared cross-process push lock so the panel never stacks
+# a second push on top of the FastAPI restart path or the watchdog self-heal.
+# Stop fires no push and is never gated.
+GATEWAY_UNIT = "radon-ib-gateway.service"
+_GATEWAY_PUSH_ACTIONS = frozenset({"start", "restart"})
+
+# Identifier this module uses when taking the shared 2FA push lock — distinct
+# from the FastAPI restart path and the watchdog so the lock file names the
+# component mid-2FA-cycle.
+ADMIN_PANEL_LOCK_HOLDER = "admin-panel"
+
+# ActionResult.returncode sentinel for "refused: 2FA push lock held by another
+# holder". The route maps it to HTTP 409 (conflict, retry later) instead of
+# the generic 400/502 buckets.
+PUSH_LOCK_HELD_RC = 409
+
 
 @dataclass
 class ActionResult:
@@ -357,9 +385,46 @@ async def control_unit(unit: str, action: str) -> ActionResult:
             -1,
         )
 
+    if unit == GATEWAY_UNIT and action in _GATEWAY_PUSH_ACTIONS:
+        refusal = _take_gateway_push_lock(unit, action)
+        if refusal is not None:
+            return refusal
+        # The lock is deliberately NOT released after systemctl returns —
+        # the 2FA push is still pending at that point. The crash-safe TTL
+        # (DEFAULT_LOCK_TTL_SECS) or the authenticated-probe release in
+        # restart_ib_gateway clears it.
+
     stdout, stderr, rc = await _systemctl(action, unit, timeout=60.0)
     detail = stderr or stdout or f"systemctl exited with rc={rc}"
     return ActionResult(unit, action, rc == 0, detail, rc)
+
+
+def _take_gateway_push_lock(unit: str, action: str) -> Optional[ActionResult]:
+    """Acquire the shared 2FA push lock for a gateway cycle.
+
+    Returns ``None`` when acquired (caller proceeds) or a refusal
+    :class:`ActionResult` naming the current holder when another restart
+    path already has a push in flight.
+    """
+    acquired, current = ib_2fa_lock.acquire_2fa_push_lock(
+        ADMIN_PANEL_LOCK_HOLDER, reason=f"admin panel {action} {unit}",
+    )
+    if acquired:
+        return None
+    assert current is not None  # acquire returns (False, lock) on refusal
+    remaining = ib_2fa_lock.remaining_lock_secs()
+    logger.warning(
+        "admin panel %s %s refused — 2FA push lock held by %r (%ds remaining)",
+        action, unit, current.holder, remaining,
+    )
+    return ActionResult(
+        unit, action, False,
+        f"2FA push lock held by {current.holder!r} ({remaining}s remaining). "
+        "Cycling the gateway now would stack a second IBKR push and every "
+        "approval would be rejected. Approve the pending push (or wait for "
+        "the lock to expire), then POST /ib/reset-backoff to retry.",
+        PUSH_LOCK_HELD_RC,
+    )
 
 
 # Path to the operator CLI installed by radon-cloud/scripts/setup-vps.sh.
