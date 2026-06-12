@@ -34,8 +34,6 @@ def _dual_write_flex_state_to_app_config(config: Dict[str, Any], days_remaining:
     (JSON blob of which thresholds have already fired). Disk JSON remains
     canonical; this gives the UI a fast key lookup path.
     """
-    import os as _os
-    _os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
     try:
         from db.writer import upsert_app_config
     except ImportError:

@@ -30,9 +30,20 @@ function absolutizeMedia(images) {
   });
 }
 
-export function getDb() {
-  if (cached) return cached;
+// Embedded replicas were retired on 2026-05-20 after WAL conflicts between
+// multi-writer hosts (feedback_libsql_replica_one_writer.md). Mirrors
+// web/lib/db.ts: direct-to-cloud is the default; a replica requires an
+// explicit RADON_DB_USE_REPLICA=1 opt-in, and the legacy
+// RADON_DB_NO_REPLICA=1 kill switch still forces the direct path.
+function shouldUseReplica() {
+  return (
+    process.env.NODE_ENV !== "test" &&
+    process.env.RADON_DB_USE_REPLICA === "1" &&
+    process.env.RADON_DB_NO_REPLICA !== "1"
+  );
+}
 
+export function resolveClientConfig() {
   const url = process.env.TURSO_DB_URL;
   const authToken = process.env.TURSO_AUTH_TOKEN;
   if (!url) {
@@ -41,14 +52,19 @@ export function getDb() {
     );
   }
 
-  const useReplica = !process.env.RADON_DB_NO_REPLICA;
+  if (!shouldUseReplica()) return { url, authToken };
 
-  cached = createClient(
-    useReplica
-      ? { url: `file:${REPLICA_PATH}`, syncUrl: url, authToken, syncInterval: 60 }
-      : { url, authToken },
+  console.warn(
+    `[radon-db] WARNING: RADON_DB_USE_REPLICA=1 — opening the RETIRED libsql ` +
+      `embedded replica at ${REPLICA_PATH}. Only one process per host may hold ` +
+      `it (WalConflict). Direct-to-cloud has been the default since 2026-05-20.`,
   );
+  return { url: `file:${REPLICA_PATH}`, syncUrl: url, authToken, syncInterval: 60 };
+}
 
+export function getDb() {
+  if (cached) return cached;
+  cached = createClient(resolveClientConfig());
   return cached;
 }
 

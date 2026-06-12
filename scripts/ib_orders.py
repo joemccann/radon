@@ -16,7 +16,6 @@ Usage:
 import argparse
 import json
 import math
-import os
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -33,9 +32,6 @@ try:
     load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
     pass
-
-# Bypass embedded replica for writes — see migration plan §D1.
-os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
@@ -264,8 +260,6 @@ def _dual_write_orders_to_db(data: dict) -> None:
     """Phase 3 — mirror orders.json into the open_orders + executed_orders
     tables. Per-row schema (one row per permId / execId) avoids the
     torn-blob risk of orders.json fdopen writes."""
-    import os
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
     try:
         from db.writer import (
             ensure_no_replica_for_writers,

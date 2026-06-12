@@ -6,15 +6,10 @@ Subcommands:
   ack <service> [--hours N] [--reason TEXT]    silence a service
   clear <service>                              remove its ack
   status                                       list active acks
-
-Reads `RADON_DB_NO_REPLICA=1` at top of module — writers don't need the
-embedded replica and a second WAL holder caused crashes during the
-Phase 6 migration. Same pattern as scripts/cash_flow_sync.py et al.
 """
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,9 +24,6 @@ _SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-
-# Writers must not hold the embedded replica open — Phase 6 lesson.
-os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
 # Load .env files so TURSO_* + channel creds are visible to subprocess runs.
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent

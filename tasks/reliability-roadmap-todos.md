@@ -7,12 +7,12 @@ Source: `tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/
 
 ## NOW — stops active bleeding
 
-- [ ] **DUR-01** (M, high) Unfreeze DB-first reads and pull `service_health` heartbeats out of the disabled mirror — Turso snapshots frozen at 2026-06-11 while fresher JSON sits on disk; 7 services' heartbeats dark since `2647c93`.
+- [x] **DUR-01** (M, high) Unfreeze DB-first reads and pull `service_health` heartbeats out of the disabled mirror — Turso snapshots frozen at 2026-06-11 while fresher JSON sits on disk; 7 services' heartbeats dark since `2647c93`.
 - [ ] **DUR-02** (S, high) Kill the `radon-beta-nextjs` crash loop (156,481 restarts over 10 days, beta 502); add `StartLimit*` flap brakes + journald caps to all radon units, with alerting on flap.
-- [ ] **DUR-03** (S, high) Enforce the 2FA push lock in the `radon` CLI (radon-cloud repo) — it still bypasses `scripts/utils/ib_2fa_lock.py`; one restart broker for the gateway.
+- [x] **DUR-03** (S, high) Enforce the 2FA push lock in the `radon` CLI (radon-cloud repo) — it still bypasses `scripts/utils/ib_2fa_lock.py`; one restart broker for the gateway.
 - [ ] **DUR-05** (M, high) Make the deploy health gate independent of radon-api (it has blocked deploys carrying its own fix); add retry to `migrate.py`.
 - [ ] **DUR-06** (M, high) Bring live ops config under git (live `/etc/caddy/Caddyfile`, VPS `deploy.sh`, beta units) + daily drift audit between repo and prod.
-- [ ] **DUR-07** (S, high) Flip the embedded-replica default to OFF in code (not just `RADON_DB_NO_REPLICA` env); shared systemd env drop-in for unit-level invariants.
+- [x] **DUR-07** (S, high) Flip the embedded-replica default to OFF in code (not just `RADON_DB_NO_REPLICA` env); shared systemd env drop-in for unit-level invariants.
 
 ## NEXT — structural durability
 

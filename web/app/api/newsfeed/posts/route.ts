@@ -48,7 +48,7 @@ export async function GET() {
   try {
     const db = getDb();
     // Force a replica pull before SELECT. The newsfeed scraper writes
-    // direct-to-cloud (`RADON_DB_NO_REPLICA=1` in scripts/newsfeed/index.js)
+    // direct-to-cloud (the default — embedded replica is opt-in only)
     // and Next.js reads from the embedded replica — when the replica's
     // background `syncInterval: 60` worker silently stalls, the dashboard
     // serves rows that are hours behind Turso. Observed on Hetzner

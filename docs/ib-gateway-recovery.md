@@ -56,7 +56,7 @@ A distinct failure from stuck-2FA: the IB Gateway Java API listener wedges **in 
 
 The api-watchdog is a oneshot fired every minute (`radon-ib-watchdog.timer`). Two unit-level requirements keep it from breaking itself (it nearly never fired because of these):
 - **`TimeoutStartSec=60`** — `Type=oneshot` has no default start timeout, so a hung cycle (its own probe, or a slow DB write) runs forever and, since oneshot can't overlap, permanently stalls the timer. The 6h hang on 2026-06-10 was exactly this.
-- **`Environment=RADON_DB_NO_REPLICA=1`** (also forced in `scripts/ib_watchdog.py`) — without it `get_db()` resurrected a multi-GB embedded `data/replica.db` and `conn.sync()`'d it every cycle, hanging the oneshot.
+- **No embedded replica** — when `get_db()` still defaulted to the replica, a missing `Environment=RADON_DB_NO_REPLICA=1` resurrected a multi-GB embedded `data/replica.db` and `conn.sync()`'d it every cycle, hanging the oneshot. Structurally fixed by DUR-07: direct-to-cloud is the code default (replica opt-in only via `RADON_DB_USE_REPLICA=1`), and the fleet drop-in `radon-.service.d/common.conf` keeps `RADON_DB_NO_REPLICA=1` as belt-and-suspenders.
 
 See `feedback_gateway_api_hang_and_watchdog_self_hang`. Gateway-side farm-down (gateway authenticated but the relay gets zero ticks) is recovered by a full `radon restart`, not a relay-only restart.
 

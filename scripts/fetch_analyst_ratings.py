@@ -48,8 +48,6 @@ from clients.uw_client import UWClient
 IB_CLIENT_ID = CLIENT_IDS["fetch_analyst_ratings"]
 
 # Load .env so TURSO_DB_URL resolves for the dual-write to analyst_ratings.
-# Bypass embedded replica per migration plan §D1.
-import os as _os
 _PROJECT_DIR = Path(__file__).resolve().parent.parent
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]
@@ -57,7 +55,6 @@ try:
     load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
     pass
-_os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
 # File paths
 DATA_DIR = Path(__file__).parent.parent / "data"

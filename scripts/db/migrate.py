@@ -21,10 +21,6 @@ import re
 import sys
 from pathlib import Path
 
-# Bypass embedded replica — writers don't need it and it can WAL-conflict
-# with the long-running radon-nextjs reader. See plan §D1.
-os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]

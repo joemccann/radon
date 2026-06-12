@@ -37,14 +37,6 @@ INTERNALS_SKEW_CACHE_TTL_SECONDS = 60 * 15
 if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
-# One-writer rule for the libsql embedded replica on this host: only
-# radon-nextjs holds the replica; everyone else streams straight to
-# Turso. Setting this before the first `from db.client import get_db`
-# anywhere in this process so request handlers can't accidentally open
-# a second replica handle that races radon-nextjs for the WAL
-# checkpoint lock. See CLAUDE.md + feedback_libsql_replica_one_writer.md.
-os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 from api.ib_pool import IBPool
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
 from api.ib_gateway import (

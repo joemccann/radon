@@ -20,7 +20,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
                                             media.radon.run (Caddy static)
 ```
 
-- **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. `RADON_DB_NO_REPLICA=1` is set on every systemd unit (radon-nextjs, radon-api, radon-relay, radon-monitor, radon-newsfeed). The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
+- **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
 - **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd services (cloud mode). The `docker/services/` directory in this repo is a containerized alternative we designed but did not deploy — production currently uses host-installed services at `/home/radon/radon-cloud/services/*.service`.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
@@ -106,8 +106,9 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
    ├─ caddy/Caddyfile        (app.radon.run + media.radon.run)
    ├─ media/                 (rsync target for newsfeed images)
    ├─ scripts/deploy.sh      (health-gated CI deploy)
-   ├─ services/*.service     (radon-{nextjs,api,relay,monitor,refresh,ib-gateway},
-   │                          every unit has Environment=RADON_DB_NO_REPLICA=1)
+   ├─ services/*.service     (radon-{nextjs,api,relay,monitor,refresh,ib-gateway};
+   │                          shared env invariants live in the prefix drop-in
+   │                          radon-.service.d/common.conf, e.g. RADON_DB_NO_REPLICA=1)
    └─ docker-compose.yml     (ib-gateway container)
 ```
 

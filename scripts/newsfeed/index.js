@@ -1,12 +1,4 @@
 #!/usr/bin/env node
-// The newsfeed scraper is write-only (upsertPost + recordServiceHealth).
-// Force direct-to-cloud DB writes instead of opening the embedded replica
-// — Next.js holds the replica file open continuously on Hetzner, and a
-// second writer racing on the same WAL surfaced as `WalConflict` every
-// poll cycle. Read-side consumers are unaffected: Next.js's replica
-// picks up the posts on its next 60s sync.
-process.env.RADON_DB_NO_REPLICA = process.env.RADON_DB_NO_REPLICA ?? "1";
-
 import path from "path";
 import { fileURLToPath, pathToFileURL } from "url";
 import fs from "fs-extra";

@@ -249,22 +249,28 @@ class TestHappyPathUnaffected:
         assert alarm_calls[-1] == 0  # disarmed last
 
 
-def test_watchdog_forces_no_replica_on_import():
+def test_watchdog_cannot_resurrect_replica_with_clean_env():
     """Regression: the watchdog unit shipped without
-    Environment=RADON_DB_NO_REPLICA=1, so get_db() took the replica branch and
-    ran conn.sync() against a multi-GB replica.db every cycle, hanging the
-    oneshot. The module must force the flag at import so it can NEVER resurrect
-    the retired embedded replica regardless of unit env. Run in a subprocess
-    with a deliberately clean env so a CI-set value can't mask a regression.
+    Environment=RADON_DB_NO_REPLICA=1 while get_db() defaulted to the replica,
+    so it ran conn.sync() against a multi-GB replica.db every cycle, hanging
+    the oneshot. The fix is structural now — db.client defaults to
+    direct-to-cloud and the replica is opt-in only (DUR-07) — so importing the
+    watchdog with a completely clean env must leave the replica branch OFF.
+    Run in a subprocess so CI-set env values can't mask a regression.
     """
     import os
     import subprocess
     import sys
 
-    env = {k: v for k, v in os.environ.items() if k != "RADON_DB_NO_REPLICA"}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        if k not in ("RADON_DB_NO_REPLICA", "RADON_DB_USE_REPLICA", "PYTEST_CURRENT_TEST")
+    }
     code = (
-        "import os, scripts.ib_watchdog;"
-        "print(os.environ.get('RADON_DB_NO_REPLICA'))"
+        "import scripts.ib_watchdog;"
+        "from scripts.db.client import _replica_opted_in;"
+        "print(_replica_opted_in())"
     )
     out = subprocess.run(
         [sys.executable, "-c", code],
@@ -273,4 +279,7 @@ def test_watchdog_forces_no_replica_on_import():
         env=env,
     )
     assert out.returncode == 0, out.stderr
-    assert out.stdout.strip() == "1", f"expected RADON_DB_NO_REPLICA=1, got {out.stdout!r}"
+    assert out.stdout.strip() == "False", (
+        f"expected the replica branch OFF after a clean-env watchdog import, "
+        f"got {out.stdout!r}"
+    )

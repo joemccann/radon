@@ -62,10 +62,6 @@ try:
 except ImportError:
     pass
 
-# Bypass embedded replica — see migration plan §D1.
-import os as _os
-_os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 from utils.atomic_io import atomic_save, verified_load  # noqa: E402
 
 DEFAULT_TRADE_LOG = PROJECT_ROOT / "data" / "trade_log.json"

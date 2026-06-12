@@ -13,7 +13,6 @@ Usage:
 
 import argparse
 import json
-import os
 import re
 import subprocess
 import sys
@@ -34,7 +33,6 @@ try:
     load_dotenv(_PROJECT_DIR / "web" / ".env")
 except Exception:
     pass
-os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
 # Add project root to path
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -372,8 +370,6 @@ def _dual_write_watchlist_to_db(account: str, subcategory: Dict, touched_tickers
     """
     if not touched_tickers:
         return
-    import os as _os
-    _os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
     try:
         from db.writer import upsert_watchlist_ticker
     except ImportError:

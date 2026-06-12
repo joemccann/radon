@@ -1200,17 +1200,12 @@ def save_portfolio(portfolio: dict):
     checksum = atomic_save(str(PORTFOLIO_PATH), portfolio)
     print(f"✓ Saved portfolio to {PORTFOLIO_PATH} (checksum: {checksum[:12]}…)")
 
-    # Phase 3 dual-write — best-effort, non-fatal. Bypass the local
-    # embedded replica (RADON_DB_NO_REPLICA=1) because the long-running
-    # radon-nextjs process holds the replica.db open with a 60s background
-    # sync, which causes "Failed to checkpoint WAL: database is locked"
-    # when this short-lived writer also opens it. The writer doesn't read
-    # so it doesn't need the replica — it streams directly to Turso cloud.
+    # Phase 3 dual-write — best-effort, non-fatal. The writer streams
+    # directly to Turso cloud (embedded replica is opt-in only).
     try:
         import sys as _sys
         from datetime import datetime as _datetime, timezone as _tz
         _sys.path.insert(0, str(Path(__file__).parent))
-        os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
         from db.writer import record_service_health, upsert_portfolio_snapshot
         taken_at = _datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
         upsert_portfolio_snapshot(taken_at, portfolio)

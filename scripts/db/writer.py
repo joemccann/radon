@@ -26,13 +26,13 @@ except ImportError:  # pragma: no cover
 
 
 def ensure_no_replica_for_writers() -> None:
-    """Writers don't need the embedded replica — they only stream INSERTs
-    to cloud. Setting this before get_db() avoids "Failed to checkpoint WAL:
-    database is locked" when the long-running radon-nextjs reader holds the
-    same replica.db open. See migration plan §D1.
+    """Belt-and-suspenders replica kill switch for writer entry points.
 
-    Call this at the top of every writer entry point — BEFORE the first
-    get_db() call in the process. It's a no-op if already set.
+    Since DUR-07 the embedded replica is OFF by default (opt-in only via
+    RADON_DB_USE_REPLICA=1 in db.client), so this is normally redundant.
+    Kept because writers must never open the replica even if a future
+    operator opts a host in: RADON_DB_NO_REPLICA beats RADON_DB_USE_REPLICA.
+    No-op if already set.
     """
     os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 

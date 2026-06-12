@@ -202,6 +202,6 @@ class TestAnalystRatingsImportable:
         _stub_writer(monkeypatch)
         if "fetch_analyst_ratings" in sys.modules:
             del sys.modules["fetch_analyst_ratings"]
-        # Don't actually run main(); just import to verify the dotenv +
-        # RADON_DB_NO_REPLICA bootstrap doesn't error.
+        # Don't actually run main(); just import to verify the dotenv
+        # bootstrap doesn't error.
         import fetch_analyst_ratings  # noqa: F401

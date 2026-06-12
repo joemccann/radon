@@ -199,12 +199,8 @@ class MonitorDaemon:
         self.state_file.write_text(json.dumps(state, indent=2))
         logger.debug(f"Saved state to {self.state_file}")
 
-        # Best-effort dual-write to Turso. Long-lived daemon — set
-        # RADON_DB_NO_REPLICA at module top so the first get_db() in
-        # this process bypasses the embedded replica.
+        # Best-effort dual-write to Turso (direct-to-cloud by default).
         try:
-            import os
-            os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
             from db.writer import upsert_daemon_state
             saved_at = state["saved_at"]
             for handler in self.handlers:

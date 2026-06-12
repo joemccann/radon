@@ -1,7 +1,6 @@
-"""libSQL client + embedded replica for Python schedulers.
+"""libSQL client for Python schedulers.
 
-Mirror of `web/lib/db.ts`. Same Turso DB, same replica file path.
-Reads hit the local SQLite file (fast); writes stream to the cloud.
+Mirror of `web/lib/db.ts`. Same Turso DB, same direct-to-cloud default.
 
 Usage:
     from scripts.db.client import get_db, sync_db
@@ -10,17 +9,17 @@ Usage:
                "VALUES (?, ?, datetime('now'))", ("cri-scan", "ok"))
     rows = db.execute("SELECT payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1").rows
 
-The first call to `get_db()` creates and back-fills the replica from the
-cloud (one-time, ~5s). Subsequent reads are SQLite-direct.
-
-In tests / CI we skip the embedded replica (no replica path) and use
-the cloud client directly. Set `RADON_DB_NO_REPLICA=1` to force the
-direct path.
+Embedded replicas were retired on 2026-05-20 after WAL conflicts between
+multi-writer hosts (feedback_libsql_replica_one_writer.md). The safe
+default is a direct cloud connection; opening a replica requires an
+explicit `RADON_DB_USE_REPLICA=1` opt-in and logs a loud warning. The
+legacy `RADON_DB_NO_REPLICA=1` kill switch still forces the direct path.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Optional
@@ -52,12 +51,35 @@ def _read_env() -> tuple[str, str]:
     return url, token
 
 
+def _replica_opted_in() -> bool:
+    """The retired embedded replica is opt-in ONLY: explicit
+    RADON_DB_USE_REPLICA=1, not killed by the legacy RADON_DB_NO_REPLICA
+    switch, and never under pytest."""
+    return (
+        os.environ.get("RADON_DB_USE_REPLICA") == "1"
+        and not os.environ.get("RADON_DB_NO_REPLICA")
+        and not os.environ.get("PYTEST_CURRENT_TEST")
+    )
+
+
+def _warn_replica_opt_in() -> None:
+    print(
+        "[radon-db] WARNING: RADON_DB_USE_REPLICA=1 — opening the RETIRED "
+        f"libsql embedded replica at {_REPLICA_PATH}. Only one process per "
+        "host may hold it (WalConflict). Direct-to-cloud has been the "
+        "default since 2026-05-20; see feedback_libsql_replica_one_writer.md.",
+        file=sys.stderr,
+        flush=True,
+    )
+
+
 def get_db() -> object:
     """Return a process-wide singleton libSQL connection.
 
-    Uses the embedded replica unless RADON_DB_NO_REPLICA is set or
-    we're running under pytest. Returns a `libsql_experimental.Connection`
-    with `.execute(sql, params)`, `.executemany`, `.commit()`, `.sync()`.
+    Connects direct-to-cloud unless the replica is explicitly opted in
+    via RADON_DB_USE_REPLICA=1 (see `_replica_opted_in`). Returns a
+    `libsql_experimental.Connection` with `.execute(sql, params)`,
+    `.executemany`, `.commit()`, `.sync()`.
 
     Test-pollution guard: if pytest is the caller (PYTEST_CURRENT_TEST is
     set) and the test hasn't explicitly opted in via RADON_DB_TEST_WRITE_OK,
@@ -88,12 +110,9 @@ def get_db() -> object:
             )
 
         url, token = _read_env()
-        use_replica = (
-            not os.environ.get("RADON_DB_NO_REPLICA")
-            and not os.environ.get("PYTEST_CURRENT_TEST")
-        )
 
-        if use_replica:
+        if _replica_opted_in():
+            _warn_replica_opt_in()
             _REPLICA_PATH.parent.mkdir(parents=True, exist_ok=True)
             conn = libsql.connect(
                 str(_REPLICA_PATH),

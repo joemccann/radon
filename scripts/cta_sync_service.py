@@ -3,17 +3,6 @@
 
 from __future__ import annotations
 
-import os as _os
-
-# MUST run BEFORE the `db.writer` import below. This script is invoked from
-# Next.js via `web/app/api/menthorq/cta/route.ts:314` (spawn → run_cta_sync.sh
-# → python -m scripts.cta_sync_service), and the spawned subprocess inherits
-# Next.js's environment where RADON_DB_NO_REPLICA is intentionally unset
-# (Next.js IS the canonical replica reader). Without this defensive setdefault,
-# the first `upsert_menthorq_cta` call opens the embedded replica file while
-# Next.js holds it open → WAL contention.
-_os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 import argparse
 import contextlib
 import json

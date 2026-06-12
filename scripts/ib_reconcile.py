@@ -65,8 +65,6 @@ def save_json(filepath: str, data: dict):
 
 
 def _dual_write_reconciliation_to_db(data: dict) -> None:
-    import os
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
     try:
         from db.writer import upsert_reconciliation_log
     except ImportError:

@@ -45,11 +45,6 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-# Bypass embedded replica when writing CRI snapshots (avoids WAL contention
-# with the long-running radon-nextjs reader). See migration plan §D1.
-import os as _os
-_os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 # Load env before any db.* import so TURSO_DB_URL resolves.
 try:
     from dotenv import load_dotenv  # type: ignore[import-untyped]

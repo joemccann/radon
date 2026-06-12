@@ -18,16 +18,6 @@ Usage:
   python3 -m monitor_daemon.run --list-handlers
 """
 
-# MUST run BEFORE any handler import. Several handlers (journal_sync,
-# cash_flow_sync) import `db.writer` at module load, which in turn caches
-# the libSQL client on first call. If RADON_DB_NO_REPLICA isn't set by
-# then, `get_db()` opens the embedded replica file — putting a second
-# permanent replica writer alongside `radon-nextjs` and starving its
-# WAL. The setdefault inside daemon.save_state() runs AFTER handlers on
-# the first cycle, which is too late.
-import os as _os
-_os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 import argparse
 import json
 import logging

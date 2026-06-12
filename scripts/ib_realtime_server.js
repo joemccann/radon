@@ -562,10 +562,9 @@ function isUSMarketHours() {
 const GATEWAY_MODE = process.env.IB_GATEWAY_MODE || "docker";
 
 /* Best-effort relay health write. The relay must never stall ticks on a DB
- * hiccup, so the writer import + call are dynamic + try/catch'd. NO_REPLICA
- * is forced on so the relay writes direct-to-cloud (no embedded replica). */
+ * hiccup, so the writer import + call are dynamic + try/catch'd. The writer
+ * is direct-to-cloud by default (embedded replica is opt-in only). */
 async function writeRelayHealth(state, error) {
-  process.env.RADON_DB_NO_REPLICA = process.env.RADON_DB_NO_REPLICA || "1";
   try {
     const { recordServiceHealth } = await import("./db/writer.js");
     await recordServiceHealth(RELAY_HEALTH_SERVICE, state, error ? { error } : {});

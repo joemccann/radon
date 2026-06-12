@@ -40,16 +40,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, TypeVar
 
-# The embedded libsql replica was retired 2026-05-20 (WAL conflicts between
-# multi-writer hosts); every radon process must write direct-to-cloud. This
-# unit shipped WITHOUT Environment=RADON_DB_NO_REPLICA=1 (every other radon-*
-# unit has it), so get_db() took the replica branch and ran conn.sync() against
-# a multi-GB data/replica.db on every minute-long oneshot cycle, hanging it and
-# resurrecting the forbidden replica. Force the flag here so the watchdog can
-# never use the replica regardless of unit env. See
-# feedback_libsql_replica_one_writer.
-os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-
 # Cross-process advisory lock that prevents two restart paths (this
 # watchdog + scripts/api/ib_gateway.restart_ib_gateway) from firing two
 # IBKR Mobile 2FA pushes within minutes of each other. IBKR's backend
