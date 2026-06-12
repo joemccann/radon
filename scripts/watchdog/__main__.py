@@ -59,6 +59,16 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
         line = f"  {outcome.service:24s} {outcome.status:8s} fired={outcome.fired}"
         print(line)
 
+    # Systemd unit flap/failure alarm rides the continuous timer only —
+    # one probe per 5 min is enough and keeps the other buckets pure
+    # service_health checks. ALERT-ONLY; see scripts/watchdog/units.py.
+    if args.bucket == "continuous":
+        from scripts.watchdog import units
+        unit_outcomes = units.check_units(now=now)
+        for outcome in unit_outcomes:
+            print(f"  {outcome.service:24s} {outcome.status:8s} fired={outcome.fired}")
+        fired.extend(unit_outcomes)
+
     # Root-cause-aware dispatch: when IB Gateway is the upstream root
     # cause (auth_state ∈ awaiting_2fa, unreachable) AND ≥2 IB-dependent
     # services degraded in this cycle, collapse them into one Pushover

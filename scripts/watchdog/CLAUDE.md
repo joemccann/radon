@@ -15,6 +15,12 @@ Monitors every `scheduled` service in `web/lib/serviceHealthWindows.ts`, notifie
 
 ---
 
+## Systemd Unit Alarm (`units.py`)
+
+Rides the continuous bucket only (`__main__._cmd_bucket`, NOT in `SCHEDULED_SERVICES` — the CI contract test locks that dict to the TS file). Probes `systemctl show 'radon-*' -p Id,ActiveState,SubState,Result,NRestarts` (read-only) and alerts on: `ActiveState=failed` (P1; `Result=start-limit-hit` never auto-recovers — the DUR-02 StartLimit brake in radon-cloud unit files depends on this alarm), 2-consecutive-cycle `auto-restart` flap (P1), per-cycle NRestarts delta (P3). Last-cycle state in `data/watchdog_units_state.json` (gitignored). **ALERT-ONLY** — never restarts anything (`feedback_ib_auto_recovery_conservative`). No own `service_health` row (matches siblings; `watchdog-alerts` dispatcher row covers it). No-op on hosts without systemctl.
+
+---
+
 ## Anti-Flood
 
 - 2-consecutive-failure hysteresis before alerting.
