@@ -97,6 +97,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # replica-watchdog — 24h window. NOT included in any bucket below
     # to avoid recursive alerting (watchdog alerting on its own alerts row).
     "watchdog-alerts":  {"open": 24 * _HOUR, "closed": 24 * _HOUR, "requires_ib": False},
+    # config-drift — daily VPS configuration-drift audit (radon-cloud
+    # scripts/drift_audit.py via radon-drift-audit.timer). Heartbeats
+    # ok/error every run, 24/7 incl. weekends, so the window is a
+    # uniform 26h (cadence + timer jitter). Filesystem + systemctl
+    # only — no IB dependency.
+    "config-drift":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
 }
 
 
@@ -129,6 +135,9 @@ BUCKETS: dict[str, list[str]] = {
         "llm-token-index",
         "leap-scan",
         "garch-scan",
+        # Daily drift audit on the VPS — hourly check surfaces a missed
+        # run within 1h of the 26h window expiring.
+        "config-drift",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

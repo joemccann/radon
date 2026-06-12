@@ -205,6 +205,16 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // umbrella (which requires_ib=true does) would suppress the very alert
   // we want. Alert-only — the relay never restarts the Gateway itself.
   "ib-realtime-relay": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``config-drift`` is the daily VPS configuration-drift audit
+  // (radon-cloud scripts/drift_audit.py via radon-drift-audit.timer).
+  // It diffs live system config (Caddyfile, compose, systemd units +
+  // drop-ins, polkit, sudoers, /usr/local/bin/radon) against the
+  // radon-cloud repo copies and heartbeats ok/error on EVERY run.
+  // Daily 24/7 cadence — uniform 26h window (cadence + timer jitter);
+  // weekends are normal run days so no wide closed window is needed.
+  // Reads the filesystem + systemctl only — no IB dependency.
+  "config-drift": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 };
 
 const DEFAULT_WINDOW: Window = {
