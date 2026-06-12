@@ -43,6 +43,12 @@ _PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
+try:
+    from db.scan_mirror import mirror_scan_snapshot  # type: ignore
+except Exception:  # pragma: no cover — DB layer optional
+    def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
+        return None
+
 # ── constants ─────────────────────────────────────────────────────
 OLS_WINDOW = 21        # Rolling regression window (business days)
 Z_WINDOW = 63          # Standardisation lookback (business days)
@@ -1118,6 +1124,9 @@ Examples:
         if cached is not None and str(cached.get("credit_proxy", proxy)).upper() == proxy:
             print("  Serving cached VCG (market closed); skipping fetch.", file=sys.stderr)
             if args.json:
+                # Heartbeat the cached serve too — see
+                # feedback_service_health_heartbeat.
+                mirror_scan_snapshot("vcg-scan", cached)
                 print(json.dumps(cached, indent=2))
             return
 
@@ -1156,6 +1165,7 @@ Examples:
     # Output
     if args.json:
         result = build_json_output(signal, model, common_dates, proxy, market_open, bt, vix_floor=args.vix_floor, vcg_trigger=args.vcg_trigger)
+        mirror_scan_snapshot("vcg-scan", result)
         print(json.dumps(result, indent=2))
     else:
         # Print summary

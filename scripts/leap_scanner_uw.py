@@ -52,6 +52,14 @@ from dataclasses import dataclass, field, asdict
 
 from clients.uw_client import UWClient, UWAPIError
 
+try:
+    from db.scan_mirror import mirror_scan_snapshot  # type: ignore
+except Exception:  # pragma: no cover — DB layer optional
+    def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
+        return None
+
+DASHBOARD_CACHE_PATH = Path(__file__).resolve().parent.parent / "data" / "leap.json"
+
 # Preset ticker groups
 PRESETS = {
     "sectors": ["XLB", "XLC", "XLE", "XLF", "XLI", "XLK", "XLP", "XLRE", "XLU", "XLV", "XLY"],
@@ -756,10 +764,13 @@ def main():
             # Opportunities → LEAP tab can read the latest scan via the
             # /api/leap route. Other scans (scanner, discover) follow the
             # same data/<scan>.json convention.
-            cache_path = Path(__file__).resolve().parent.parent / "data" / "leap.json"
+            cache_path = DASHBOARD_CACHE_PATH
             cache_path.parent.mkdir(parents=True, exist_ok=True)
             cache_path.write_text(json.dumps(json_data, indent=2))
             print(f"✓ Dashboard cache saved to {cache_path}")
+            # No leap table in Turso — the file cache is canonical; the
+            # service_health row lets the banner spot a stale scheduled scan.
+            mirror_scan_snapshot("leap-scan", json_data)
 
 
 if __name__ == "__main__":

@@ -12,6 +12,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createClient, type Client } from "@libsql/client";
 
+// The route now reads BOTH sources and serves the fresher one (DUR-01).
+// Pin the disk fallback to "absent" so these tests exercise the DB
+// scan_time parse in isolation — the real data/discover.json on this
+// machine would otherwise win the freshness comparison.
+vi.mock("fs/promises", () => ({
+  readFile: vi.fn().mockRejectedValue(new Error("ENOENT")),
+}));
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return {
+    ...actual,
+    statSync: vi.fn(() => {
+      throw new Error("ENOENT");
+    }),
+  };
+});
+
 const SCHEMA_SQL = `
 CREATE TABLE IF NOT EXISTS discover_snapshots (
   scan_time   TEXT NOT NULL,

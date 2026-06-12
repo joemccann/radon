@@ -36,7 +36,7 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 
 ## Service Health / Timers
 
-- `_maybe_dual_write_to_db()` records `service_health` rows for recognized JSON caches.
+- Each scan subprocess records its own snapshot + `service_health` row via `scripts/db/scan_mirror.py` (the FastAPI-side mirror is gone).
 - Scheduled writers must heartbeat every cycle, including no-change cycles.
 - Failures record `state=error` with `last_error.message`.
 - Hetzner timers live in `radon-cloud/services/`; wrappers use literal env parsing to avoid `$VAR` expansion.

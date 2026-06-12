@@ -4,7 +4,7 @@ import { statSync } from "fs";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
-import { parseScanTime } from "@/lib/parseScanTime";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -43,30 +43,29 @@ function buildCacheMeta(filePath: string): CacheMeta {
   }
 }
 
-async function readDiscoverFromDb(): Promise<{
-  data: Record<string, unknown>;
-  fetchedAtMs: number;
-} | null> {
-  try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT scan_time, payload FROM discover_snapshots ORDER BY scan_time DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { scan_time: string; payload: string };
-    return {
-      data: JSON.parse(row.payload) as Record<string, unknown>,
-      // Hetzner writes scan_time via Python `datetime.now().isoformat()`,
-      // which is naive (no offset). JS `Date.parse` treats naive ISO as
-      // local time, shifting the instant by the viewer's UTC offset and
-      // making the freshness banner lie. parseScanTime treats naive
-      // strings as UTC.
-      fetchedAtMs: parseScanTime(row.scan_time)?.getTime() ?? Date.now(),
-    };
-  } catch {
-    return null;
-  }
+async function readDiscoverFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT scan_time, payload FROM discover_snapshots ORDER BY scan_time DESC LIMIT 1`,
+    args: [],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+  return {
+    data: JSON.parse(row.payload) as Record<string, unknown>,
+    // Hetzner writes scan_time via Python `datetime.now().isoformat()`,
+    // which is naive (no offset). JS `Date.parse` treats naive ISO as
+    // local time, shifting the instant by the viewer's UTC offset and
+    // making the freshness banner lie. contentTimestampMs treats naive
+    // strings as UTC.
+    timestampMs: contentTimestampMs(row.scan_time),
+  };
+}
+
+async function readDiscoverFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const raw = await readFile(DISCOVER_CACHE_PATH, "utf-8");
+  const data = JSON.parse(raw) as Record<string, unknown>;
+  return { data, timestampMs: contentTimestampMs(data.discovery_time) };
 }
 
 function buildCacheMetaFromMs(ms: number): CacheMeta {
@@ -81,34 +80,35 @@ function buildCacheMetaFromMs(ms: number): CacheMeta {
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const fromDb = await readDiscoverFromDb();
-  if (fromDb) {
+  // Fresher of DB row and disk JSON, so a stalled writer on either side
+  // can never freeze the panel.
+  const result = await dbFirstRead({
+    fromDb: readDiscoverFromDb,
+    fromDisk: readDiscoverFromDisk,
+    maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+    label: "discover",
+  });
+  if (result.ok) {
+    const cache_meta =
+      result.source === "db"
+        ? buildCacheMetaFromMs(result.timestampMs ?? Date.now())
+        : buildCacheMeta(DISCOVER_CACHE_PATH);
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ...fromDb.data, cache_meta: buildCacheMetaFromMs(fromDb.fetchedAtMs) }),
+      NextResponse.json({ ...result.data, cache_meta }),
       requestId,
     );
   }
-  try {
-    const raw = await readFile(DISCOVER_CACHE_PATH, "utf-8");
-    const data = JSON.parse(raw);
-    const cache_meta = buildCacheMeta(DISCOVER_CACHE_PATH);
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ ...data, cache_meta }),
-      requestId,
-    );
-  } catch {
-    const cache_meta = buildCacheMeta(DISCOVER_CACHE_PATH);
-    return setNoStoreResponseHeaders(
-      NextResponse.json({
-        discovery_time: "",
-        alerts_analyzed: 0,
-        candidates_found: 0,
-        candidates: [],
-        cache_meta,
-      }),
-      requestId,
-    );
-  }
+  const cache_meta = buildCacheMeta(DISCOVER_CACHE_PATH);
+  return setNoStoreResponseHeaders(
+    NextResponse.json({
+      discovery_time: "",
+      alerts_analyzed: 0,
+      candidates_found: 0,
+      candidates: [],
+      cache_meta,
+    }),
+    requestId,
+  );
 }
 
 export async function POST(): Promise<Response> {

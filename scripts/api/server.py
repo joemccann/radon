@@ -14,16 +14,14 @@ import hashlib
 import json
 import logging
 import os
-import queue
 import re
 import sys
-import threading
 from datetime import datetime, timedelta, timezone
 import sys
 import time
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Callable, Iterable, List, Optional, Tuple
+from typing import Any, Iterable, List, Optional, Tuple
 
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -267,10 +265,10 @@ def _read_cache(path: Path) -> Optional[dict]:
 def _write_cache(path: Path, data: dict) -> None:
     """Write JSON to cache file atomically via temp file + os.replace().
 
-    Phase 3 dual-write: also persists supported caches (vcg, gex, cri) to
-    Turso so app.radon.run reads see the same payload without depending on
-    the laptop's filesystem. Failures are silently logged and never break
-    the file write.
+    The Turso snapshot + service_health mirror that used to piggyback here
+    lives in the scan subprocesses now (db/scan_mirror.py) — synchronous
+    libsql writes on this process starved the event loop even from a worker
+    thread. See feedback_no_sync_libsql_on_fastapi_event_loop.
     """
     import tempfile
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -285,162 +283,6 @@ def _write_cache(path: Path, data: dict) -> None:
         except OSError:
             pass
         raise
-
-    _maybe_dual_write_to_db(path, data)
-
-
-# Dedicated bounded background writer for the best-effort DB mirror +
-# service_health heartbeat. These are SYNCHRONOUS libsql writes that can hang
-# on a Turso/network blip and have no native timeout. Running them inline on
-# the single FastAPI event loop froze the entire API: py-spy caught the loop
-# blocked in upsert_vcg_snapshot -> _maybe_dual_write_to_db -> _write_cache, so
-# /health and every request timed out until a restart (recurred every few
-# minutes as the vcg/gex/cri/scanner timers each hit this path). Hand the work
-# to a daemon thread so a slow/hung write degrades only the mirror, never
-# request handling. The queue is bounded so a sustained hang can't grow memory.
-_DB_MIRROR_QUEUE: "queue.Queue[Callable[[], None]]" = queue.Queue(maxsize=256)
-_db_mirror_thread: Optional[threading.Thread] = None
-_db_mirror_lock = threading.Lock()
-
-
-def _db_mirror_worker() -> None:
-    while True:
-        job = _DB_MIRROR_QUEUE.get()
-        try:
-            job()
-        except Exception as exc:  # noqa: BLE001 — best-effort mirror
-            print(f"[server] db mirror job failed: {exc}", file=sys.stderr)
-        finally:
-            _DB_MIRROR_QUEUE.task_done()
-
-
-def _ensure_db_mirror_worker() -> None:
-    global _db_mirror_thread
-    if _db_mirror_thread is not None and _db_mirror_thread.is_alive():
-        return
-    with _db_mirror_lock:
-        if _db_mirror_thread is None or not _db_mirror_thread.is_alive():
-            _db_mirror_thread = threading.Thread(
-                target=_db_mirror_worker, name="db-mirror", daemon=True
-            )
-            _db_mirror_thread.start()
-
-
-def _maybe_dual_write_to_db(path: Path, data: dict) -> None:
-    """Enqueue the best-effort DB mirror; NEVER block the event loop.
-
-    The actual upsert + service_health write (``_do_dual_write_to_db``) are
-    synchronous libsql calls that can hang; this is called sync from
-    ``_write_cache`` inside async handlers, so doing them inline froze the
-    FastAPI event loop. Hand them to the background writer instead.
-    """
-    name = getattr(path, "name", str(path))
-    # 2026-06-11: even on the background thread, libsql's commit() holds the GIL
-    # during its blocking write, so a hung Turso write still froze the FastAPI
-    # event loop (py-spy: MainThread GIL-starved while the db-mirror thread sat
-    # in upsert_*). Gate the mirror OFF by default until it runs in a separate
-    # PROCESS (own GIL, killable). The JSON caches are still written by
-    # _write_cache, so reads fall back to disk; only the Turso snapshot mirror
-    # is paused. Re-enable with RADON_DB_MIRROR_DISABLED=0 once the subprocess
-    # writer lands. See feedback_no_sync_libsql_on_fastapi_event_loop.
-    if os.environ.get("RADON_DB_MIRROR_DISABLED", "1") == "1":
-        return
-    _ensure_db_mirror_worker()
-    try:
-        _DB_MIRROR_QUEUE.put_nowait(lambda: _do_dual_write_to_db(path, data))
-    except queue.Full:
-        print(f"[server] db mirror queue full; dropping {name}", file=sys.stderr)
-
-
-def _do_dual_write_to_db(path: Path, data: dict) -> None:
-    """Best-effort DB mirror for known JSON caches (runs on the background
-    writer thread, never the event loop).
-
-    Phase 2 of the Turso source-of-truth migration extends this to cover
-    scanner.json, flow_analysis.json, performance.json, discover_sp500.json.
-    On dual-write failure we record a non-OK service_health row so the
-    <ServiceHealthBanner /> in WorkspaceShell surfaces it.
-    """
-    name = path.name
-    # Bypass the embedded replica for short-lived writers (avoids WAL
-    # collision with radon-nextjs reader). Setting before importing
-    # db.writer so the first get_db() in this process honors it.
-    os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
-    try:
-        from db.writer import (
-            record_service_health,
-            upsert_cri_snapshot,
-            upsert_discover_snapshot,
-            upsert_discover_sp500_snapshot,
-            upsert_flow_analysis_snapshot,
-            upsert_gex_snapshot,
-            upsert_oi_changes,
-            upsert_performance_snapshot,
-            upsert_scanner_snapshot,
-            upsert_vcg_snapshot,
-        )
-    except ImportError:
-        return
-
-    scan_iso = data.get("scan_time") if isinstance(data, dict) else None
-    fallback_iso = scan_iso or _today_et_str()
-    service: Optional[str] = None
-    try:
-        if name == "vcg.json":
-            service = "vcg-scan"
-            upsert_vcg_snapshot(fallback_iso, data)
-        elif name == "gex.json":
-            service = "gex-scan"
-            ticker = data.get("ticker", "SPX") if isinstance(data, dict) else "SPX"
-            upsert_gex_snapshot(ticker, fallback_iso, data)
-        elif name == "cri.json":
-            service = "cri-scan"
-            session_date = (data.get("date") if isinstance(data, dict) else None) or _today_et_str()
-            upsert_cri_snapshot(session_date, fallback_iso, data)
-        elif name == "discover.json":
-            service = "discover"
-            upsert_discover_snapshot(fallback_iso, data)
-        elif name == "discover_sp500.json":
-            service = "discover-sp500"
-            upsert_discover_sp500_snapshot(fallback_iso, data)
-        elif name == "oi_changes.json":
-            service = "oi-changes"
-            upsert_oi_changes(fallback_iso, data)
-        elif name == "scanner.json":
-            service = "scanner"
-            upsert_scanner_snapshot(fallback_iso, data)
-        elif name == "flow_analysis.json":
-            service = "flow-analysis"
-            upsert_flow_analysis_snapshot(fallback_iso, data)
-        elif name == "performance.json":
-            service = "performance"
-            taken_at = (data.get("computed_at") if isinstance(data, dict) else None) or fallback_iso
-            upsert_performance_snapshot(taken_at, data)
-        elif name == "leap.json":
-            service = "leap-scan"
-            # No leap_snapshots table — file cache is canonical for this scan.
-            # We still want a service_health row so the banner can surface
-            # staleness when the timer stops firing.
-        elif name == "garch_convergence.json":
-            service = "garch-scan"
-            # Same as leap: file cache is canonical, row only drives the banner.
-        else:
-            return  # unknown JSON — no DB target
-        if service:
-            record_service_health(service, "ok", finished_at=scan_iso)
-    except Exception as exc:  # noqa: BLE001 — best-effort
-        print(f"[server] db dual-write non-fatal for {name}: {exc}", file=sys.stderr)
-        # Surface the failure via service_health so the UI banner can pick
-        # it up — silent failure was the root cause of today's TSLA-fill
-        # incident. record_service_health itself can fail (transitively
-        # using the same DB) so we wrap a second time.
-        if service:
-            try:
-                record_service_health(
-                    service, "error", finished_at=scan_iso, error={"detail": str(exc)},
-                )
-            except Exception:
-                pass
 
 
 def _today_et_str() -> str:
@@ -1649,12 +1491,9 @@ async def leap_scan(preset: str = "mag7", min_gap: float = 10.0):
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
         _leap_last_scan = _time.monotonic()
+        # The leap scanner subprocess wrote the JSON cache atomically AND
+        # recorded its own service_health[leap-scan] row (db/scan_mirror.py).
         cached = _read_cache(DATA_DIR / "leap.json")
-        # The leap scanner subprocess already wrote the JSON atomically;
-        # we just need the DB dual-write so service_health[leap-scan] gets
-        # an "ok" row and the banner can detect a stale scheduled scan.
-        if cached:
-            _maybe_dual_write_to_db(DATA_DIR / "leap.json", cached)
         return cached or {"scan_time": "", "min_gap": min_gap, "results": []}
 
 
@@ -1712,9 +1551,9 @@ async def garch_convergence_scan(preset: str = "mega-tech"):
     """Run GARCH convergence scan (garch_convergence.py --preset X --json).
 
     Mirrors /leap/scan semantics: 600s cooldown + lock, subprocess writes
-    data/garch_convergence.json directly, we re-read the cache file after
-    the subprocess completes and route through _maybe_dual_write_to_db so
-    service_health[garch-scan] gets an "ok" row.
+    data/garch_convergence.json directly (and records its own
+    service_health[garch-scan] row), we re-read the cache file after the
+    subprocess completes.
 
     Built-in presets: semis, mega-tech, energy, china-etf, all. File
     presets (data/presets/) also accepted.
@@ -1742,8 +1581,6 @@ async def garch_convergence_scan(preset: str = "mega-tech"):
             raise HTTPException(status_code=502, detail=result.error)
         _garch_last_scan = _time.monotonic()
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
-        if cached:
-            _maybe_dual_write_to_db(DATA_DIR / "garch_convergence.json", cached)
         return cached or {"scan_time": "", "tickers": {}, "pairs": []}
 
 

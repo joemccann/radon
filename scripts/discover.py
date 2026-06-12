@@ -38,6 +38,12 @@ from utils.market_calendar import (
 )
 from utils.darkpool_cache import get_cached_darkpool, set_cached_darkpool
 
+try:
+    from db.scan_mirror import mirror_scan_snapshot  # type: ignore
+except Exception:  # pragma: no cover — DB layer optional
+    def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
+        return None
+
 WATCHLIST = Path(__file__).parent.parent / "data" / "watchlist.json"
 PORTFOLIO = Path(__file__).parent.parent / "data" / "portfolio.json"
 
@@ -605,6 +611,8 @@ def main():
         top=args.top,
     )
 
+    if not result.get("error"):
+        mirror_scan_snapshot("discover", result)
     print(json.dumps(result, indent=2))
 
 

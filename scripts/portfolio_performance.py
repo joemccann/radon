@@ -51,6 +51,12 @@ from utils.price_cache import (  # noqa: E402
     TTL_AFTER_CLOSE,
 )
 
+try:
+    from db.scan_mirror import mirror_scan_snapshot  # type: ignore  # noqa: E402
+except Exception:  # pragma: no cover — DB layer optional
+    def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
+        return None
+
 _DEFAULT_WORKERS = 8
 _MIN_WORKERS = 1
 _MAX_WORKERS = 20
@@ -1431,6 +1437,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     payload = build_payload(benchmark_symbol=args.benchmark.upper())
     if args.json:
+        mirror_scan_snapshot("performance", payload, taken_at=payload.get("computed_at"))
         print(json.dumps(payload, indent=2))
     else:
         summary = payload["summary"]

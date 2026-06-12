@@ -48,6 +48,12 @@ if str(_SCRIPT_DIR) not in sys.path:
 
 from clients.uw_client import UWClient, UWAPIError
 
+try:
+    from db.scan_mirror import mirror_scan_snapshot  # type: ignore
+except Exception:  # pragma: no cover — DB layer optional
+    def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
+        return None
+
 # ── built-in pair presets ─────────────────────────────────────────
 PAIR_PRESETS: Dict[str, Dict[str, Any]] = {
     "semis": {
@@ -805,6 +811,9 @@ Examples:
         cache_path.parent.mkdir(parents=True, exist_ok=True)
         cache_path.write_text(json.dumps(json_data, indent=2))
         print(f"✓ Dashboard cache saved to {cache_path}", file=sys.stderr)
+        # No garch table in Turso — the file cache is canonical; the
+        # service_health row lets the banner spot a stale scheduled scan.
+        mirror_scan_snapshot("garch-scan", json_data)
         # Still emit to stdout so callers parsing via `run_script` see the
         # payload directly without a second file read.
         print(json.dumps(json_data, indent=2))

@@ -88,7 +88,6 @@ def test_garch_scan_returns_cache_payload_after_subprocess(client):
     with (
         patch("scripts.api.server.run_script", side_effect=_stub) as run_mock,
         patch("scripts.api.server._read_cache", return_value=cache_payload),
-        patch("scripts.api.server._maybe_dual_write_to_db") as dual_mock,
     ):
         resp = client.post("/garch-convergence/scan?preset=semis")
 
@@ -105,9 +104,8 @@ def test_garch_scan_returns_cache_payload_after_subprocess(client):
     assert "--json" in args[1]
     assert "--no-open" in args[1]
 
-    # Cache file was routed through the dual-write so service_health[garch-scan]
-    # gets an "ok" row.
-    dual_mock.assert_called_once()
+    # service_health[garch-scan] is recorded by the subprocess itself now
+    # (db/scan_mirror.py) — the route no longer mirrors the cache to Turso.
 
 
 def test_garch_scan_uses_default_preset_when_omitted(client):
@@ -119,7 +117,6 @@ def test_garch_scan_uses_default_preset_when_omitted(client):
     with (
         patch("scripts.api.server.run_script", side_effect=_stub) as run_mock,
         patch("scripts.api.server._read_cache", return_value={"pairs": []}),
-        patch("scripts.api.server._maybe_dual_write_to_db"),
     ):
         resp = client.post("/garch-convergence/scan")
 
@@ -138,7 +135,6 @@ def test_garch_scan_surfaces_subprocess_failure_as_502(client):
     with (
         patch("scripts.api.server.run_script", side_effect=_stub),
         patch("scripts.api.server._read_cache", return_value=None),
-        patch("scripts.api.server._maybe_dual_write_to_db"),
     ):
         resp = client.post("/garch-convergence/scan?preset=energy")
 
@@ -159,7 +155,6 @@ def test_garch_scan_returns_empty_envelope_when_cache_missing(client):
     with (
         patch("scripts.api.server.run_script", side_effect=_stub),
         patch("scripts.api.server._read_cache", return_value=None),
-        patch("scripts.api.server._maybe_dual_write_to_db"),
     ):
         resp = client.post("/garch-convergence/scan")
 

@@ -5,6 +5,7 @@ import { isPerformanceBehindPortfolioSync, isPortfolioBehindCurrentEtSession } f
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -63,35 +64,42 @@ function triggerBackgroundRebuild(): void {
   radonFetch("/performance/background", { method: "POST", timeout: 5_000 }).catch(() => {});
 }
 
-/** Phase 2.3 — read latest performance snapshot from Turso. Falls back
- *  to disk JSON in the GET handler when the DB is empty/unreachable. */
-async function readPerformanceFromDb(): Promise<Record<string, unknown> | null> {
-  try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT payload FROM performance_snapshots ORDER BY taken_at DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { payload: string };
-    return JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+/** Phase 2.3 — latest Turso snapshot, timestamped by the taken_at row key. */
+async function readPerformanceFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT taken_at, payload FROM performance_snapshots ORDER BY taken_at DESC LIMIT 1`,
+    args: [],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { taken_at: string; payload: string };
+  return {
+    data: JSON.parse(row.payload) as Record<string, unknown>,
+    timestampMs: contentTimestampMs(row.taken_at),
+  };
+}
+
+async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const data = await readJsonFile(PERFORMANCE_PATH);
+  if (!data) return null;
+  return { data, timestampMs: contentTimestampMs(data.last_sync) };
 }
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const [stale, dbCached, fileCached, initialPortfolioSnapshot] = await Promise.all([
+  const [stale, perfRead, initialPortfolioSnapshot] = await Promise.all([
     isPerformanceStale(),
-    readPerformanceFromDb(),
-    readJsonFile(PERFORMANCE_PATH),
+    // Fresher of DB row and disk JSON — a frozen writer on either side
+    // never wins. The downstream freshness logic uses whichever was served.
+    dbFirstRead({
+      fromDb: readPerformanceFromDb,
+      fromDisk: readPerformanceFromDisk,
+      maxAgeMs: CACHE_TTL_MS,
+      label: "performance",
+    }),
     readJsonFile(PORTFOLIO_PATH),
   ]);
-  // DB-first: prefer the fresher snapshot. Fall back to disk JSON when
-  // DB is empty or behind. The downstream freshness logic uses whichever
-  // was returned.
-  const cachedPerformance = dbCached ?? fileCached;
+  const cachedPerformance = perfRead.ok ? perfRead.data : null;
 
   let portfolioSnapshot = initialPortfolioSnapshot;
   const portfolioLastSync = extractTimestampValue(portfolioSnapshot, "last_sync");

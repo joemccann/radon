@@ -28,6 +28,12 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.uw_client import UWClient
 
+try:
+    from db.scan_mirror import mirror_scan_snapshot  # type: ignore
+except Exception:  # pragma: no cover — DB layer optional
+    def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
+        return None
+
 
 def fetch_ticker_oi_changes(
     ticker: str,
@@ -221,12 +227,17 @@ Examples:
             )
             ticker = args.ticker.upper()
         
+        output = {
+            'ticker': ticker,
+            'market_wide': args.market,
+            'data': data,
+        }
+        if args.market:
+            # Only the market-wide scan heartbeats — per-ticker evaluation
+            # lookups would mask a dead scheduled scan.
+            mirror_scan_snapshot("oi-changes", output)
+
         if args.json:
-            output = {
-                'ticker': ticker,
-                'market_wide': args.market,
-                'data': data,
-            }
             print(json.dumps(output, indent=2))
         else:
             print_results(data, ticker)

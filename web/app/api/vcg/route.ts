@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
-import { readFile, stat } from "fs/promises";
+import { readFile } from "fs/promises";
 import { join } from "path";
 import { isVcgDataStale } from "@/lib/vcgStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -46,32 +47,40 @@ function todayET(): string {
   return new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
 }
 
-async function readCachedVcgFromDb(): Promise<Record<string, unknown> | null> {
-  try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT payload FROM vcg_snapshots ORDER BY scan_time DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { payload: string };
-    return JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+// Mirrors the intraday scan_time TTL in vcgStaleness.ts.
+const VCG_MAX_AGE_MS = 60_000;
+
+async function readVcgFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT scan_time, payload FROM vcg_snapshots ORDER BY scan_time DESC LIMIT 1`,
+    args: [],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+  return {
+    data: JSON.parse(row.payload) as Record<string, unknown>,
+    timestampMs: contentTimestampMs(row.scan_time),
+  };
 }
 
+async function readVcgFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const raw = await readFile(CACHE_PATH, "utf-8");
+  const jsonStart = raw.indexOf("{");
+  if (jsonStart === -1) return null;
+  const data = JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>;
+  return { data, timestampMs: contentTimestampMs(data.scan_time) };
+}
+
+/** Fresher of the Turso row and data/vcg.json — a frozen writer on either side never wins. */
 async function readCachedVcg(): Promise<Record<string, unknown> | null> {
-  const fromDb = await readCachedVcgFromDb();
-  if (fromDb) return fromDb;
-  try {
-    const raw = await readFile(CACHE_PATH, "utf-8");
-    const jsonStart = raw.indexOf("{");
-    if (jsonStart === -1) return null;
-    return JSON.parse(raw.slice(jsonStart)) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+  const result = await dbFirstRead({
+    fromDb: readVcgFromDb,
+    fromDisk: readVcgFromDisk,
+    maxAgeMs: VCG_MAX_AGE_MS,
+    label: "vcg",
+  });
+  return result.ok ? result.data : null;
 }
 
 function normalizeVcgPayload(raw: Record<string, unknown>): Record<string, unknown> {
@@ -113,7 +122,9 @@ export async function GET(): Promise<Response> {
 
   (data as Record<string, unknown>).market_open = currentMarketOpen;
 
-  // Stale-while-revalidate
+  // Stale-while-revalidate. `cached` is the FRESHER of DB row and disk
+  // JSON, so a stale verdict here means BOTH sources are stale — a frozen
+  // DB mirror alone can no longer loop the background rescan.
   const stale = cached
     ? isVcgDataStale(cached as { scan_time?: string; market_open?: boolean }, todayET(), currentMarketOpen)
     : true;

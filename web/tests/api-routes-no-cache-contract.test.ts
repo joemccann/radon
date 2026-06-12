@@ -94,7 +94,7 @@ describe("client hooks/components — every fetch must use cache: 'no-store'", (
 // source-of-truth migration). Each must invoke a DB read function from
 // inside its GET handler — the DB-first contract.
 const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
-  { path: "app/api/vcg/route.ts", dbHelperPattern: /readCachedVcgFromDb\s*\(/ },
+  { path: "app/api/vcg/route.ts", dbHelperPattern: /readVcgFromDb\b/ },
   { path: "app/api/gex/route.ts", dbHelperPattern: /readCachedGexFromDb\s*\(/ },
   { path: "app/api/gamma-rotation/route.ts", dbHelperPattern: /readCachedGammaRotationFromDb\s*\(/ },
   { path: "app/api/discover/route.ts", dbHelperPattern: /readDiscoverFromDb\s*\(/ },

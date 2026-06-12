@@ -4,6 +4,7 @@ import { statSync } from "fs";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
+import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -42,55 +43,56 @@ function buildCacheMeta(filePath: string): CacheMeta {
   }
 }
 
-/** Phase 2 — read latest from Turso flow_analysis_snapshots. */
-async function readFlowAnalysisFromDb(): Promise<Record<string, unknown> | null> {
-  try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT payload FROM flow_analysis_snapshots ORDER BY scan_time DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { payload: string };
-    return JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
+/** Phase 2 — latest Turso snapshot, timestamped by the scan_time row key. */
+async function readFlowAnalysisFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT scan_time, payload FROM flow_analysis_snapshots ORDER BY scan_time DESC LIMIT 1`,
+    args: [],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { scan_time: string; payload: string };
+  return {
+    data: JSON.parse(row.payload) as Record<string, unknown>,
+    timestampMs: contentTimestampMs(row.scan_time),
+  };
+}
+
+async function readFlowAnalysisFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
+  const raw = await readFile(CACHE_PATH, "utf-8");
+  const data = JSON.parse(raw) as Record<string, unknown>;
+  return { data, timestampMs: contentTimestampMs(data.analysis_time) };
 }
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const fromDb = await readFlowAnalysisFromDb();
-  if (fromDb) {
-    const cache_meta = buildCacheMeta(CACHE_PATH);
+  // Fresher of DB row and disk JSON, so a stalled writer on either side
+  // can never freeze the panel.
+  const result = await dbFirstRead({
+    fromDb: readFlowAnalysisFromDb,
+    fromDisk: readFlowAnalysisFromDisk,
+    maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+    label: "flow-analysis",
+  });
+  const cache_meta = buildCacheMeta(CACHE_PATH);
+  if (result.ok) {
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ...fromDb, cache_meta }),
+      NextResponse.json({ ...result.data, cache_meta }),
       requestId,
     );
   }
-  try {
-    const raw = await readFile(CACHE_PATH, "utf-8");
-    const data = JSON.parse(raw);
-    const cache_meta = buildCacheMeta(CACHE_PATH);
-    return setNoStoreResponseHeaders(
-      NextResponse.json({ ...data, cache_meta }),
-      requestId,
-    );
-  } catch {
-    const cache_meta = buildCacheMeta(CACHE_PATH);
-    return setNoStoreResponseHeaders(
-      NextResponse.json({
-        analysis_time: "",
-        positions_scanned: 0,
-        supports: [],
-        against: [],
-        watch: [],
-        neutral: [],
-        cache_meta,
-      }),
-      requestId,
-    );
-  }
+  return setNoStoreResponseHeaders(
+    NextResponse.json({
+      analysis_time: "",
+      positions_scanned: 0,
+      supports: [],
+      against: [],
+      watch: [],
+      neutral: [],
+      cache_meta,
+    }),
+    requestId,
+  );
 }
 
 export async function POST(): Promise<Response> {
