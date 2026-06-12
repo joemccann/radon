@@ -318,32 +318,31 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 1
 
     # Defer the import so unit tests that monkeypatch writers can stay light.
+    from db.service_cycle import service_cycle
     from db.writer import (
         record_llm_token_index,
         get_llm_token_index_base_raw,
-        record_service_health,
         ensure_no_replica_for_writers,
     )
 
     ensure_no_replica_for_writers()
 
+    # service_cycle (DUR-14) heartbeats ok on clean exit; on failure it
+    # writes error (+ retry embargo) BEFORE re-raising into the except
+    # below, which converts to the exit code the timer unit expects.
     try:
-        base_raw = get_llm_token_index_base_raw()
-        index_value = normalize_against_base(result.raw_avg_usd, base_raw)
+        with service_cycle("llm-token-index", market_hours_class="daily") as cycle:
+            base_raw = get_llm_token_index_base_raw()
+            index_value = normalize_against_base(result.raw_avg_usd, base_raw)
 
-        record_llm_token_index(
-            date_str=date_str,
-            index_value=index_value,
-            raw_avg_usd=result.raw_avg_usd,
-            components=result.components,
-            methodology_version=METHODOLOGY_VERSION,
-        )
-
-        record_service_health(
-            service="llm-token-index",
-            state="ok",
-            finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        )
+            record_llm_token_index(
+                date_str=date_str,
+                index_value=index_value,
+                raw_avg_usd=result.raw_avg_usd,
+                components=result.components,
+                methodology_version=METHODOLOGY_VERSION,
+            )
+            cycle.finished_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         logging.info(
             "[llm_token_index] persisted date=%s index_value=%.4f raw_avg_usd=%.4f models=%d",
@@ -352,15 +351,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         return 0
     except Exception as exc:
         logging.exception("[llm_token_index] DB write failed: %s", exc)
-        try:
-            record_service_health(
-                service="llm-token-index",
-                state="error",
-                finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                error={"message": str(exc)},
-            )
-        except Exception:  # pragma: no cover — health write should never block exit
-            pass
         return 1
 
 

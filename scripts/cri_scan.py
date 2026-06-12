@@ -1642,13 +1642,18 @@ Examples:
             **result,
         }
         # Phase 3 dual-write — best-effort, never breaks the JSON pipeline.
+        # service_cycle (DUR-14) heartbeats ok on success and writes error
+        # (+ retry embargo) when the upsert fails, re-raising into the
+        # non-fatal except below.
         try:
             sys.path.insert(0, str(_PROJECT_DIR / "scripts"))
-            from db.writer import record_service_health, upsert_cri_snapshot
+            from db.service_cycle import service_cycle
+            from db.writer import upsert_cri_snapshot
             scan_iso = output["scan_time"]
             session_date_iso = output.get("date") or scan_iso.split("T", 1)[0]
-            upsert_cri_snapshot(session_date_iso, scan_iso, output)
-            record_service_health("cri-scan", "ok", finished_at=scan_iso)
+            with service_cycle("cri-scan", market_hours_class="intraday") as cycle:
+                cycle.finished_at = scan_iso
+                upsert_cri_snapshot(session_date_iso, scan_iso, output)
         except Exception as exc:  # noqa: BLE001
             print(f"[cri-scan] db dual-write non-fatal: {exc}", file=sys.stderr)
         print(json.dumps(output, indent=2))

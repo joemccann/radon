@@ -21,6 +21,9 @@ class PresetRebalanceHandler(BaseHandler):
     name = "preset_rebalance"
     interval_seconds = WEEKLY  # Run weekly
     requires_market_hours = False
+    # Shipped for months with NO service_health row — exactly the silent-
+    # writer class DUR-14 closes. BaseHandler.run() heartbeats this now.
+    service_name = "preset-rebalance"
 
     def execute(self) -> Dict[str, Any]:
         # Import here to avoid circular / slow imports at daemon startup

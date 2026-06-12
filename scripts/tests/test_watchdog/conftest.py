@@ -30,6 +30,19 @@ def _split_statements(sql: str) -> list[str]:
     return [s.strip() for s in re.split(r";\s*$", stripped, flags=re.MULTILINE) if s.strip()]
 
 
+@pytest.fixture(autouse=True)
+def _isolate_digest_state(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """Point the DUR-14 P2/P3 digest state file at a per-test tmp dir so
+    dispatching non-P1 outcomes in tests never writes the real
+    data/watchdog_digest_state.json
+    (cf. feedback_test_pollution_to_production)."""
+    from watchdog import notify
+
+    monkeypatch.setattr(
+        notify, "DIGEST_STATE_PATH", tmp_path / "watchdog_digest_state.json"
+    )
+
+
 @pytest.fixture
 def db_conn(monkeypatch: pytest.MonkeyPatch) -> Iterator[sqlite3.Connection]:
     """In-memory sqlite with init + watchdog schema applied; patched in

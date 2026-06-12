@@ -37,6 +37,11 @@ class ReplicaWatchdogHandler(BaseHandler):
     name = "replica-watchdog"
     interval_seconds = 60
     requires_market_hours = False
+    # Deliberate opt-OUT of the DUR-14 structural heartbeat: this writer
+    # has bespoke ok/syncing/error row semantics (event-driven heal cycle)
+    # and records its own row every cycle — a structural ok after execute
+    # would clobber the syncing/error states it just wrote.
+    service_name = None
 
     # Tunables (class constants so tests can override).
     SERVICE_NAME = "radon-nextjs.service"

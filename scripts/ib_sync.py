@@ -1206,10 +1206,12 @@ def save_portfolio(portfolio: dict):
         import sys as _sys
         from datetime import datetime as _datetime, timezone as _tz
         _sys.path.insert(0, str(Path(__file__).parent))
-        from db.writer import record_service_health, upsert_portfolio_snapshot
+        from db.service_cycle import service_cycle
+        from db.writer import upsert_portfolio_snapshot
         taken_at = _datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
-        upsert_portfolio_snapshot(taken_at, portfolio)
-        record_service_health("portfolio-sync", "ok", finished_at=taken_at)
+        with service_cycle("portfolio-sync", market_hours_class="intraday") as cycle:
+            cycle.finished_at = taken_at
+            upsert_portfolio_snapshot(taken_at, portfolio)
     except Exception as exc:  # noqa: BLE001
         print(f"  Warning: portfolio db dual-write failed: {exc}")
 

@@ -59,13 +59,17 @@ except Exception:  # pragma: no cover
 
 try:
     sys.path.insert(0, str(_PROJECT_DIR / "scripts"))
-    from db.writer import record_service_health, upsert_gex_snapshot  # type: ignore
+    from db.service_cycle import service_cycle  # type: ignore
+    from db.writer import upsert_gex_snapshot  # type: ignore
 except Exception:  # pragma: no cover — DB layer optional
+    from contextlib import contextmanager
+
     def upsert_gex_snapshot(*args, **kwargs):  # type: ignore
         return None
 
-    def record_service_health(*args, **kwargs):  # type: ignore
-        return None
+    @contextmanager
+    def service_cycle(*args, **kwargs):  # type: ignore
+        yield type("NoopCycle", (), {"finished_at": None})()
 
 
 def _bucket_size_for(ticker: str, spot: float) -> int:
@@ -824,8 +828,9 @@ def persist_snapshot(ticker: str, result: Dict[str, Any], cache_path: Path) -> N
     atomic_save(str(cache_path), result)
     try:
         scan_iso = result.get("scan_time") or datetime.now(timezone.utc).isoformat()
-        upsert_gex_snapshot(ticker, scan_iso, result)
-        record_service_health("gex-scan", "ok", finished_at=scan_iso)
+        with service_cycle("gex-scan", market_hours_class="on-demand") as cycle:
+            cycle.finished_at = scan_iso
+            upsert_gex_snapshot(ticker, scan_iso, result)
     except Exception as exc:  # noqa: BLE001 — DB write must never crash the pipeline
         print(f"[gex-scan] db dual-write non-fatal: {exc}", file=sys.stderr)
 

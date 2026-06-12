@@ -218,17 +218,17 @@ def _emit_grouped_pushover(*, title: str, message: str) -> Optional[str]:
     if not creds:
         return None
     user, token = creds
-    payload = {
-        "token": token,
-        "user": user,
-        "title": title,
-        "message": message,
-        "priority": 1,
-    }
+    # Grouped IB-outage alerts are P1 — emergency priority with
+    # retry/expire, same escalation as the per-service path (DUR-14).
+    payload = notify.build_pushover_payload(
+        user=user,
+        token=token,
+        title=title,
+        message=message,
+        severity=GROUPED_ALERT_SEVERITY,
+    )
     try:
-        status, body = notify._http_post(
-            "https://api.pushover.net/1/messages.json", payload
-        )
+        status, body = notify._http_post(notify.PUSHOVER_API_URL, payload)
     except Exception as exc:  # noqa: BLE001 — channel transport failures must surface
         log.warning("grouped pushover transport failure: %s", exc)
         return f"pushover transport failed: {exc}"

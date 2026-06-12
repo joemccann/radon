@@ -95,7 +95,7 @@ class CashFlowSyncHandler(BaseHandler):
     name = "cash_flow_sync"
     interval_seconds = CHECK_INTERVAL
     requires_market_hours = False
-    _SERVICE_NAME = "cash-flow-sync"
+    service_name = "cash-flow-sync"
 
     def __init__(self) -> None:
         super().__init__()
@@ -170,39 +170,32 @@ class CashFlowSyncHandler(BaseHandler):
         and BaseHandler latched ``last_run``. With both ``_execute_inner``
         raising and ``BaseHandler.run()`` enforcing the contract, the bug
         is structurally impossible.
-        """
-        try:
-            from db.writer import _now_iso, record_service_health  # type: ignore
-        except Exception as exc:  # pragma: no cover — hosts without libsql
-            logger.warning("service_health heartbeat unavailable: %s", exc)
-            return self._execute_inner()
 
-        started_at = _now_iso()
+        Heartbeats route through ``self.record_cycle_health`` (DUR-14) so
+        the structural heartbeat in ``BaseHandler.run()`` knows this cycle
+        recorded its own richer row (throttle metadata) and never clobbers
+        it with a plain ok/error.
+        """
+        started_at = self._utc_now_iso()
         try:
             result = self._execute_inner()
         except Exception as exc:
-            self._record_failure(record_service_health, started_at, str(exc))
+            self._record_failure(started_at, str(exc))
             raise
 
         # Defence in depth: if a future caller stubs ``_execute_inner``
         # to return a soft-failure dict (status=error), promote it to a
-        # raised exception here so ``record_service_health`` fires
-        # before BaseHandler.run() applies the same contract enforcement.
+        # raised exception here so the failure heartbeat fires before
+        # BaseHandler.run() applies the same contract enforcement.
         # Two layers — ``execute()`` and ``BaseHandler.run()`` — make the
         # 2026-05-14 latching bug impossible regardless of test stubs.
         inner_error = result.get("error") if result.get("status") == "error" else None
         if inner_error:
-            self._record_failure(record_service_health, started_at, str(inner_error))
+            self._record_failure(started_at, str(inner_error))
             raise RuntimeError(str(inner_error))
 
-        try:
-            self._mark_success()
-            record_service_health(
-                self._SERVICE_NAME, "ok",
-                started_at=started_at, finished_at=_now_iso(),
-            )
-        except Exception as exc:
-            logger.warning("record_service_health failed: %s", exc)
+        self._mark_success()
+        self.record_cycle_health("ok", started_at=started_at)
 
         return result
 
@@ -211,13 +204,10 @@ class CashFlowSyncHandler(BaseHandler):
     # ------------------------------------------------------------------
     def _record_failure(
         self,
-        record_service_health,
         started_at: str,
         message: str,
     ) -> None:
         """Persist failure heartbeat with next_attempt_at metadata."""
-        from db.writer import _now_iso  # local import — keeps top tidy
-
         is_throttle = "FlexThrottleError" in message or any(
             f"code {code}" in message for code in ("1001", "1018", "1019")
         )
@@ -233,14 +223,11 @@ class CashFlowSyncHandler(BaseHandler):
             )
 
         next_attempt_at = self._next_attempt_iso(now_utc)
-        try:
-            record_service_health(
-                self._SERVICE_NAME, "error",
-                started_at=started_at, finished_at=_now_iso(),
-                error={"message": message, "next_attempt_at": next_attempt_at},
-            )
-        except Exception as exc:
-            logger.warning("record_service_health(error) failed: %s", exc)
+        self.record_cycle_health(
+            "error",
+            started_at=started_at,
+            error={"message": message, "next_attempt_at": next_attempt_at},
+        )
 
     def _mark_success(self) -> None:
         """Reset the circuit breaker after a successful sync."""

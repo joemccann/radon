@@ -68,6 +68,15 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # cooldown-gated dispatch fires normally. See scripts/watchdog/grouping.py.
     grouping.dispatch_with_grouping(outcomes=fired, now=now)
 
+    # The daily bucket carries the once-per-UTC-day P2/P3 digest flush
+    # (DUR-14). On send failure flush_daily_digest records the dispatcher
+    # error on the watchdog-alerts row itself and we must not overwrite
+    # it with the quiet-cycle ok heartbeat below; pending entries retry
+    # on the next hourly daily-bucket run.
+    digest_error = None
+    if args.bucket == "daily":
+        digest_error = notify.flush_daily_digest(now=now)
+
     print(f"[watchdog] bucket={args.bucket} fired={len(fired)}/{len(report.outcomes)}")
 
     # Heartbeat the watchdog-alerts row when this bucket cycle dispatched
@@ -77,7 +86,7 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # watchdog-alerts even after the underlying issue heals. Same
     # heartbeat-on-success pattern as replica-watchdog (see
     # feedback_service_health_heartbeat.md).
-    if not fired:
+    if not fired and not digest_error:
         notify.heartbeat_ok(bucket=args.bucket, now=now)
     return 0
 

@@ -54,39 +54,13 @@ class FlexTokenCheck(BaseHandler):
     name = "flex_token_check"
     interval_seconds = CHECK_INTERVAL
     requires_market_hours = False
-    _SERVICE_NAME = "flex-token-check"
+    service_name = "flex-token-check"  # structural heartbeat via BaseHandler.run()
 
     def execute(self) -> Dict[str, Any]:
-        """Wrap inner logic with service_health heartbeat (success+error)."""
-        try:
-            from db.writer import _now_iso, record_service_health  # type: ignore
-        except Exception as exc:  # pragma: no cover — hosts without libsql
-            logger.warning("service_health heartbeat unavailable: %s", exc)
-            return self._execute_inner()
-
-        started_at = _now_iso()
-        try:
-            result = self._execute_inner()
-            result["events_pruned"] = self._prune_service_health_events()
-        except Exception as exc:
-            try:
-                record_service_health(
-                    self._SERVICE_NAME, "error",
-                    started_at=started_at, finished_at=_now_iso(),
-                    error={"message": str(exc)},
-                )
-            except Exception as inner:
-                logger.warning("record_service_health(error) failed: %s", inner)
-            raise
-
-        try:
-            record_service_health(
-                self._SERVICE_NAME, "ok",
-                started_at=started_at, finished_at=_now_iso(),
-            )
-        except Exception as exc:
-            logger.warning("record_service_health failed: %s", exc)
-
+        result = self._execute_inner()
+        # DB errors here propagate so the BaseHandler contract retries next
+        # cycle (and writes the structural error row) instead of latching.
+        result["events_pruned"] = self._prune_service_health_events()
         return result
 
     @staticmethod

@@ -261,9 +261,9 @@ def _dual_write_orders_to_db(data: dict) -> None:
     tables. Per-row schema (one row per permId / execId) avoids the
     torn-blob risk of orders.json fdopen writes."""
     try:
+        from db.service_cycle import service_cycle
         from db.writer import (
             ensure_no_replica_for_writers,
-            record_service_health,
             replace_open_orders_for_session,
             upsert_executed_order,
         )
@@ -276,39 +276,32 @@ def _dual_write_orders_to_db(data: dict) -> None:
         # set on each fills() call; cancelled / filled orders simply
         # disappear from the snapshot, so DELETE+INSERT keeps DB in sync
         # without manual diff logic.
-        open_rows: list[tuple[int, dict]] = []
-        for o in data.get("open_orders", []):
-            perm_id = o.get("permId")
-            if not isinstance(perm_id, int):
-                continue
-            open_rows.append((perm_id, o))
-        replace_open_orders_for_session(open_rows)
+        # service_cycle (DUR-14): ok heartbeat on clean exit, error row
+        # (+ retry embargo) on failure, re-raised into the non-fatal
+        # except below — the disk JSON stays the failure-safe path.
+        with service_cycle("orders-sync", market_hours_class="intraday") as cycle:
+            cycle.finished_at = data.get("last_sync")
+            open_rows: list[tuple[int, dict]] = []
+            for o in data.get("open_orders", []):
+                perm_id = o.get("permId")
+                if not isinstance(perm_id, int):
+                    continue
+                open_rows.append((perm_id, o))
+            replace_open_orders_for_session(open_rows)
 
-        # Executed orders: per-row upsert keyed by execId. IB's exec_id is
-        # globally unique within an account, so INSERT OR REPLACE is safe.
-        for e in data.get("executed_orders", []):
-            exec_id = e.get("execId")
-            if not isinstance(exec_id, str) or not exec_id:
-                continue
-            fill_time = e.get("time") or ""
-            perm_id = e.get("contract", {}).get("permId") if isinstance(e.get("contract"), dict) else None
-            if not isinstance(perm_id, int):
-                perm_id = None
-            upsert_executed_order(exec_id, e, fill_time, perm_id=perm_id)
-
-        record_service_health("orders-sync", "ok", finished_at=data.get("last_sync"))
+            # Executed orders: per-row upsert keyed by execId. IB's exec_id is
+            # globally unique within an account, so INSERT OR REPLACE is safe.
+            for e in data.get("executed_orders", []):
+                exec_id = e.get("execId")
+                if not isinstance(exec_id, str) or not exec_id:
+                    continue
+                fill_time = e.get("time") or ""
+                perm_id = e.get("contract", {}).get("permId") if isinstance(e.get("contract"), dict) else None
+                if not isinstance(perm_id, int):
+                    perm_id = None
+                upsert_executed_order(exec_id, e, fill_time, perm_id=perm_id)
     except Exception as exc:  # noqa: BLE001 — best-effort
         print(f"  Warning: orders db dual-write failed: {exc}", file=sys.stderr)
-        try:
-            from db.writer import record_service_health
-            record_service_health(
-                "orders-sync",
-                "error",
-                finished_at=data.get("last_sync"),
-                error={"detail": str(exc)},
-            )
-        except Exception:
-            pass
 
 
 def display_orders(open_orders: list, executed_orders: list):

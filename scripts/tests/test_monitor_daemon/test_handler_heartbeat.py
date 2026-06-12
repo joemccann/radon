@@ -7,6 +7,12 @@ The banner is structurally blind to handler outcomes that don't write to
 to a real ``record_service_health(...)`` call so a stale ``ok`` or a
 silenced error can never re-emerge.
 
+DUR-14: the heartbeat moved from per-handler execute() wrappers into
+``BaseHandler.run()`` (structural — see
+test_base_handler_structural_heartbeat.py), so these tests now drive
+``run()``, the daemon's actual entry point. cash_flow_sync keeps a custom
+execute() wrapper for throttle metadata and is still pinned via execute().
+
 Service-name kebab-case mapping is asserted alongside state semantics
 because the staleness gate keys off the kebab name.
 
@@ -90,7 +96,7 @@ class TestFillMonitorHeartbeat:
             mock_cls.return_value = mock_client
 
             handler = FillMonitorHandler(send_notifications=False)
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "fill-monitor", "ok"), (
             f"Expected fill-monitor 'ok' heartbeat, got {fake_db_writer.call_args_list!r}"
@@ -105,7 +111,7 @@ class TestFillMonitorHeartbeat:
             mock_cls.return_value = mock_client
 
             handler = FillMonitorHandler(send_notifications=False)
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "fill-monitor", "error"), (
             f"Expected fill-monitor 'error' heartbeat, got {fake_db_writer.call_args_list!r}"
@@ -129,7 +135,7 @@ class TestExitOrdersHeartbeat:
             mock_cls.return_value = mock_client
 
             handler = ExitOrdersHandler(trade_log_path=trade_log)
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "exit-orders", "ok")
 
@@ -163,7 +169,7 @@ class TestExitOrdersHeartbeat:
             mock_cls.return_value = mock_client
 
             handler = ExitOrdersHandler(trade_log_path=trade_log)
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "exit-orders", "error")
 
@@ -186,7 +192,7 @@ class TestJournalSyncHeartbeat:
             mock_cls.return_value = mock_client
 
             handler = JournalSyncHandler(trade_log_path=trade_log)
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "journal-sync", "ok")
 
@@ -203,7 +209,7 @@ class TestJournalSyncHeartbeat:
             mock_cls.return_value = mock_client
 
             handler = JournalSyncHandler(trade_log_path=trade_log)
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "journal-sync", "error")
 
@@ -280,7 +286,7 @@ class TestFlexTokenCheckHeartbeat:
         # Block the dual-write side path so the test stays hermetic.
         with patch.object(mod, "_dual_write_flex_state_to_app_config", return_value=None):
             handler = mod.FlexTokenCheck()
-            handler.execute()
+            handler.run()
 
         assert _called_with_state(fake_db_writer, "flex-token-check", "ok")
 
@@ -293,8 +299,9 @@ class TestFlexTokenCheckHeartbeat:
 
         with patch.object(mod, "_dual_write_flex_state_to_app_config", return_value=None):
             handler = mod.FlexTokenCheck()
-            with pytest.raises(Exception):
-                handler.execute()
+            result = handler.run()  # run() converts the raise into status=error
+            assert result["status"] == "error"
+            assert handler.last_run is None  # raise-don't-latch preserved
 
         assert _called_with_state(fake_db_writer, "flex-token-check", "error")
 

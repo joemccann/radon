@@ -232,6 +232,14 @@ class TestNoNewTriggerWhileBlind:
 
 
 class TestQuietWindowParsing:
+    @pytest.fixture(autouse=True)
+    def _default_windows(self, monkeypatch):
+        # conftest neutralizes the windows for determinism; these tests
+        # exercise the shipped default spec, so pin it back explicitly.
+        monkeypatch.setenv(
+            ib_watchdog.QUIET_WINDOWS_ENV, ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
+        )
+
     def test_default_windows_cover_both_scheduled_restarts(self):
         # 23:45 UTC (current IBC default) and 09:05 UTC (pending dur-08 patch).
         assert quiet_window_active(_utc(23, 45)) is True
@@ -265,6 +273,12 @@ class TestQuietWindowParsing:
 
 
 class TestQuietWindowSuppression:
+    @pytest.fixture(autouse=True)
+    def _default_windows(self, monkeypatch):
+        monkeypatch.setenv(
+            ib_watchdog.QUIET_WINDOWS_ENV, ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
+        )
+
     @pytest.mark.parametrize("now", [_utc(23, 50), _utc(0, 5), _utc(9, 10)])
     def test_hang_does_not_advance_counter_in_window(self, state_path, now):
         save_state(state_path, WatchdogState(degraded_count=1))

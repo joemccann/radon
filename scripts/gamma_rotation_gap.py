@@ -501,11 +501,12 @@ def persist_snapshot(payload: Dict[str, Any], *, write_json: bool = True, write_
         atomic_save(str(CACHE_PATH), payload)
     if write_db:
         try:
-            from db.writer import ensure_no_replica_for_writers, record_service_health, upsert_gamma_rotation_snapshot
+            from db.service_cycle import service_cycle
+            from db.writer import upsert_gamma_rotation_snapshot
 
-            ensure_no_replica_for_writers()
-            upsert_gamma_rotation_snapshot(payload["scan_time"], payload)
-            record_service_health(SERVICE_NAME, "ok", finished_at=payload["scan_time"])
+            with service_cycle(SERVICE_NAME, market_hours_class="on-demand") as cycle:
+                cycle.finished_at = payload["scan_time"]
+                upsert_gamma_rotation_snapshot(payload["scan_time"], payload)
         except Exception as exc:
             print(f"  DB persist failed: {exc}", file=sys.stderr)
 
@@ -539,15 +540,9 @@ def main() -> int:
         persist_snapshot(payload, write_json=not args.no_cache, write_db=not args.no_db)
     except Exception as exc:
         try:
-            from db.writer import ensure_no_replica_for_writers, record_service_health
+            from db.service_cycle import record_failed_cycle
 
-            ensure_no_replica_for_writers()
-            record_service_health(
-                SERVICE_NAME,
-                "error",
-                finished_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                error={"message": str(exc)},
-            )
+            record_failed_cycle(SERVICE_NAME, exc)
         except Exception:
             pass
         print(f"Gamma Rotation Gap scan failed: {exc}", file=sys.stderr)

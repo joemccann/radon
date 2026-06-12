@@ -35,30 +35,28 @@ from utils.cta_sync_health import (  # noqa: E402
 )
 
 try:
-    from db.writer import record_service_health, upsert_menthorq_cta  # noqa: E402
+    from db.service_cycle import service_cycle  # noqa: E402
+    from db.writer import upsert_menthorq_cta  # noqa: E402
 except ImportError:  # pragma: no cover
-    record_service_health = None  # type: ignore[assignment]
+    service_cycle = None  # type: ignore[assignment]
     upsert_menthorq_cta = None  # type: ignore[assignment]
 
 
 def _dual_write_cta_to_db(target_date: str, payload: dict[str, Any], finished_at: str) -> None:
-    """Phase 2 dual-write — best-effort. Failures don't break the sync."""
-    if upsert_menthorq_cta is None or record_service_health is None:
+    """Phase 2 dual-write — best-effort. Failures don't break the sync.
+
+    service_cycle (DUR-14) owns the heartbeat: ok on clean exit, error
+    (+ retry embargo) on upsert failure, re-raised into the non-fatal
+    except below.
+    """
+    if upsert_menthorq_cta is None or service_cycle is None:
         return
     try:
-        upsert_menthorq_cta(target_date, payload, fetched_at=finished_at)
-        record_service_health("cta-sync", "ok", finished_at=finished_at)
+        with service_cycle("cta-sync", market_hours_class="daily") as cycle:
+            cycle.finished_at = finished_at
+            upsert_menthorq_cta(target_date, payload, fetched_at=finished_at)
     except Exception as exc:  # noqa: BLE001 — best-effort, log + continue
         print(f"[cta-sync] db dual-write non-fatal: {exc}", file=sys.stderr)
-        try:
-            record_service_health(
-                "cta-sync",
-                "error",
-                finished_at=finished_at,
-                error={"message": str(exc)},
-            )
-        except Exception:  # noqa: BLE001
-            pass
 
 
 class CtaSyncLockError(RuntimeError):

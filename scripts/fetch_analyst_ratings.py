@@ -792,15 +792,19 @@ def main():
             cache["ratings"][ticker] = data
     save_json(RATINGS_CACHE_FILE, cache)
 
-    # Phase 3 dual-write — best-effort.
+    # Phase 3 dual-write — best-effort. service_cycle (DUR-14) heartbeats
+    # ok on clean exit and error (+ retry embargo) on failure, re-raising
+    # into the non-fatal except below.
     try:
         sys.path.insert(0, str(Path(__file__).parent))
-        from db.writer import record_service_health, upsert_analyst_ratings
+        from db.service_cycle import service_cycle
+        from db.writer import upsert_analyst_ratings
         fetched_at = cache["last_updated"]
-        for ticker, data in ratings_dict.items():
-            if not data.get("error"):
-                upsert_analyst_ratings(ticker, fetched_at, data)
-        record_service_health("analyst-ratings", "ok", finished_at=fetched_at)
+        with service_cycle("analyst-ratings", market_hours_class="on-demand") as cycle:
+            cycle.finished_at = fetched_at
+            for ticker, data in ratings_dict.items():
+                if not data.get("error"):
+                    upsert_analyst_ratings(ticker, fetched_at, data)
     except Exception as exc:  # noqa: BLE001
         print(f"  Warning: analyst_ratings db dual-write failed: {exc}", file=sys.stderr)
 

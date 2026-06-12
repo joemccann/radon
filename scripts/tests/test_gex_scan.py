@@ -523,7 +523,7 @@ class TestPersistThenEnrich:
 
         with patch("gex_scan.atomic_save") as mock_save, \
              patch("gex_scan.upsert_gex_snapshot") as mock_upsert, \
-             patch("gex_scan.record_service_health"), \
+             patch("gex_scan.service_cycle"), \
              patch("gex_scan.fetch_mq_levels", side_effect=RuntimeError("playwright timeout")):
 
             uw_only = self._baseline_result(mq=None)
@@ -553,7 +553,7 @@ class TestPersistThenEnrich:
 
         with patch("gex_scan.atomic_save") as mock_save, \
              patch("gex_scan.upsert_gex_snapshot") as mock_upsert, \
-             patch("gex_scan.record_service_health"), \
+             patch("gex_scan.service_cycle"), \
              patch("gex_scan.fetch_mq_levels", return_value=mq_payload):
 
             uw_only = self._baseline_result(mq=None)
@@ -576,7 +576,7 @@ class TestPersistThenEnrich:
 
         with patch("gex_scan.atomic_save") as mock_save, \
              patch("gex_scan.upsert_gex_snapshot") as mock_upsert, \
-             patch("gex_scan.record_service_health"), \
+             patch("gex_scan.service_cycle"), \
              patch("gex_scan.fetch_mq_levels", return_value=None):
 
             uw_only = self._baseline_result(mq=None)

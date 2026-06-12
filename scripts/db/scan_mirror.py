@@ -9,6 +9,22 @@ subprocess has its own GIL, so a hung Turso write can only stall that scan,
 never the API. The JSON cache in ``data/`` stays authoritative and is written
 by the caller before this mirror runs; a failed Turso write degrades only the
 mirror.
+
+Division of labor vs ``db.service_cycle`` (DUR-14)
+==================================================
+
+This module stays the single chokepoint for MIRROR-FED scans — every
+service in :data:`SNAPSHOT_UPSERTS`. It owns the snapshot upsert AND the
+service_health heartbeat together and NEVER raises, because the mirror is
+best-effort by definition.
+
+STANDALONE writers (cri_scan, gex_scan, ib_sync, ib_orders,
+cta_sync_service, llm_token_index, gamma_rotation_gap,
+fetch_analyst_ratings) own their snapshot writes inline and wrap them in
+``db.service_cycle.service_cycle`` instead, which heartbeats ok on every
+clean exit and writes error + a ~5-min retry embargo BEFORE re-raising.
+Don't add a standalone writer here, and don't hand a mirror-fed scan a
+service_cycle — one chokepoint per writer family.
 """
 
 from __future__ import annotations

@@ -46,3 +46,13 @@ def _stub_jvm_forensics_capture(monkeypatch):
         "capture_jvm_forensics",
         lambda **kwargs: jvm_forensics.CaptureResult(steps={"stubbed": "conftest"}),
     )
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_quiet_windows(monkeypatch):
+    """The DUR-10 scheduled-restart quiet windows default to wall-clock UTC
+    ranges (23:40-00:15, 09:00-09:30), which made watchdog ladder tests fail
+    when the suite happened to run inside a window. Tests are deterministic
+    by default; quiet-window behavior tests set the env explicitly.
+    """
+    monkeypatch.setenv("RADON_GW_RESTART_QUIET_WINDOWS_UTC", "")
