@@ -237,6 +237,46 @@ function resolveOpeningLegBasis(
   };
 }
 
+/** Net cash received by a group's closing option fills in dollars
+ *  (SLD positive, BOT negative). Null when any fill is unpriced or sideless. */
+function closedGroupCloseCash(group: PositionFillGroup): number | null {
+  const optFills = group.fills.filter((f) => f.contract.secType === "OPT");
+  if (optFills.length === 0) return null;
+  let closeCash = 0;
+  for (const fill of optFills) {
+    if (fill.avgPrice == null || !Number.isFinite(fill.avgPrice)) return null;
+    const cashSign = fill.side === "SLD" || fill.side === "SELL"
+      ? 1
+      : fill.side === "BOT" || fill.side === "BUY"
+        ? -1
+        : 0;
+    if (cashSign === 0) return null;
+    closeCash += cashSign * fill.avgPrice * Math.abs(fill.quantity) * 100;
+  }
+  return closeCash;
+}
+
+/** Entry cash implied by the realized-P&L identity openCash = pnl − closeCash,
+ *  in dollars (credit positive, debit negative). Sign-correct for both long
+ *  (debit) and short (credit) entries — a buy-to-close ADDS the cover cost to
+ *  the basis instead of subtracting it. */
+function closedGroupOpenCash(group: PositionFillGroup): number | null {
+  if (group.totalPnL == null) return null;
+  const closeCash = closedGroupCloseCash(group);
+  if (closeCash == null) return null;
+  const openCash = group.totalPnL - closeCash;
+  return Math.abs(openCash) < 0.01 ? null : openCash;
+}
+
+/** Return on risk % for a closed fill group: realized P&L over the entry basis
+ *  implied by the P&L identity. Shared by the Executed Orders table cell and
+ *  the share-card fallback so both surfaces always agree. */
+export function closedGroupReturnPct(group: PositionFillGroup): number | null {
+  const openCash = closedGroupOpenCash(group);
+  if (openCash == null || group.totalPnL == null) return null;
+  return (group.totalPnL / Math.abs(openCash)) * 100;
+}
+
 /** Build share data for a position group (aggregated fills).
  *  For BAG/combo closing groups, uses the matching opening group's net combo
  *  price as cost basis for accurate P&L % (e.g. risk reversal opened at $0.25
@@ -286,8 +326,20 @@ export function positionGroupShareData(
       // on the same underlying (e.g., new PLTR Bull Call Spread vs closed PLTR Long Call).
       // Extract key structure words from the group description for fuzzy matching.
       const descWords = group.description.replace(/[()$,]/g, " ").toLowerCase().split(/\s+/).filter(Boolean);
+      const closeStrikes = new Set(
+        group.fills
+          .filter((f) => f.contract.secType === "OPT")
+          .map((f) => f.contract.strike)
+          .filter((s): s is number => s != null),
+      );
       const matchingPosition = portfolioPositions.find((p) => {
         if (p.ticker !== group.symbol) return false;
+        // Every strike in the closed group must exist on the candidate's legs —
+        // word overlap alone matched a closed MU $1000 Call to a live $1050 Call.
+        if (closeStrikes.size > 0) {
+          const legStrikes = new Set(p.legs.map((l) => l.strike).filter((s): s is number => s != null));
+          if (![...closeStrikes].every((strike) => legStrikes.has(strike))) return false;
+        }
         const posWords = p.structure.replace(/[()$,]/g, " ").toLowerCase().split(/\s+/).filter(Boolean);
         // At least 2 key words must overlap (e.g., "long" + "call", or "bull" + "spread")
         const overlap = posWords.filter((w) => descWords.includes(w));
@@ -321,23 +373,16 @@ export function positionGroupShareData(
       }
     }
 
-    // Fallback for fully-closed positions no longer in portfolio:
-    // derive entry price from exit price and realized P&L.
-    // entryPrice = exitPrice - realizedPNL / (quantity * multiplier)
-    if (entryPrice == null && group.totalPnL != null) {
-      const optFills = group.fills.filter((f) => f.contract.secType === "OPT");
-      const totalQty = optFills.reduce((sum, f) => sum + f.quantity, 0);
-      // Derive exit price: BAG netPrice, or weighted avg of OPT fills
-      let exitPx = group.netPrice;
-      if (exitPx == null && totalQty > 0) {
-        const weightedSum = optFills.reduce((s, f) => s + (f.avgPrice ?? 0) * f.quantity, 0);
-        exitPx = weightedSum / totalQty;
-      }
-      if (totalQty > 0 && exitPx != null) {
-        const mult = optFills[0]?.contract.secType === "OPT" ? 100 : 1;
-        entryPrice = exitPx - (group.totalPnL / (totalQty * mult));
+    // Fallback for fully-closed positions no longer in portfolio: derive the
+    // entry basis from the realized-P&L identity (openCash = pnl − closeCash),
+    // which is sign-correct for both debit (long) and credit (short) entries.
+    if (entryPrice == null) {
+      const openCash = closedGroupOpenCash(group);
+      if (openCash != null) {
+        const comboUnits = Math.max(group.totalQuantity, 1);
+        entryPrice = -(openCash / 100) / comboUnits;
         if (entryNotional === 0) {
-          entryNotional = Math.abs(entryPrice) * totalQty * mult;
+          entryNotional = Math.abs(openCash);
         }
       }
     }
@@ -345,18 +390,7 @@ export function positionGroupShareData(
     if (entryNotional > 0) {
       pnlPct = (group.totalPnL / entryNotional) * 100;
     } else {
-      // Fallback: derive entry notional from exit notional - P&L
-      // Return on Risk = P&L / Capital at Risk (entry cost)
-      const optFills = group.fills.filter((f) => f.contract.secType === "OPT");
-      const exitNotional = optFills.reduce((sum, f) => {
-        const mult = f.contract.secType === "OPT" ? 100 : 1;
-        return sum + Math.abs((f.avgPrice ?? 0) * f.quantity * mult);
-      }, 0);
-      const derivedEntry = Math.abs(exitNotional - (group.totalPnL ?? 0));
-      if (derivedEntry > 0) {
-        entryNotional = derivedEntry;
-        pnlPct = (group.totalPnL / derivedEntry) * 100;
-      }
+      pnlPct = closedGroupReturnPct(group);
     }
   }
 
@@ -2405,6 +2439,9 @@ function OrdersSections({
                 {execFilter.filtered.map((group) => {
                   const isExpanded = expandedGroups.has(group.id);
                   const isCancelled = group.fills[0]?.side === "CANCELLED";
+                  const shareData = group.isClosing && group.totalPnL != null
+                    ? positionGroupShareData(group, positionGroups, portfolio?.positions, portfolio?.trade_log_dates)
+                    : null;
                   return (
                     <React.Fragment key={group.id}>
                       {/* Position group header row */}
@@ -2437,18 +2474,15 @@ function OrdersSections({
                         <td className="right">{group.totalCommission !== 0 ? fmtPrice(group.totalCommission) : "—"}</td>
                         <td className={`right ${group.totalPnL != null ? (group.totalPnL >= 0 ? "positive" : "negative") : ""}`}>
                           {group.totalPnL != null ? (() => {
-                            // Return on Risk: P&L / entry notional. Entry = exit - P&L.
-                            const optFills = group.fills.filter((f) => f.contract.secType === "OPT");
-                            const exitNotional = optFills.reduce((sum, f) => sum + Math.abs((f.avgPrice ?? 0) * f.quantity * 100), 0);
-                            const entryNotional = Math.abs(exitNotional - group.totalPnL);
-                            const pct = entryNotional > 0 ? (group.totalPnL / entryNotional) * 100 : null;
+                            // Same Return on Risk % the share card carries — single source of truth.
+                            const pct = shareData?.pnlPct ?? closedGroupReturnPct(group);
                             return `${group.totalPnL >= 0 ? "+" : ""}${fmtPrice(group.totalPnL)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}`;
                           })() : "—"}
                         </td>
                         <td>{new Date(group.time).toLocaleTimeString()}</td>
                         <td>
-                          {group.isClosing && group.totalPnL != null && (
-                            <SharePnlButton data={positionGroupShareData(group, positionGroups, portfolio?.positions, portfolio?.trade_log_dates)} />
+                          {shareData != null && (
+                            <SharePnlButton data={shareData} />
                           )}
                         </td>
                       </tr>

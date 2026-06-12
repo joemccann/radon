@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { positionGroupShareData, type PositionFillGroup } from "../components/WorkspaceSections";
+import { closedGroupReturnPct, positionGroupShareData, type PositionFillGroup } from "../components/WorkspaceSections";
 import type { ExecutedOrder } from "../lib/types";
 
 function makeOptionFill(
@@ -261,5 +261,120 @@ describe("positionGroupShareData", () => {
     expect(data.entryPrice).toBeCloseTo(1.02, 2);
     expect(data.exitPrice).toBeCloseTo(4.0, 2);
     expect(data.pnlPct).toBeCloseTo(292.45, 1);
+  });
+});
+
+/* Regression: MU 2026-06-12 $1000 short call, covered BOT 15 @ $2.00 with
+ * realized P&L +$70,441.24. The orders page showed +104.4% (long-only
+ * identity entry = exit − pnl applied to a short close) and the share card
+ * showed +69.00% (fuzzy portfolio fallback matched the UNRELATED still-open
+ * MU Short Call $1050 — 10 contracts, avg_cost $10,209.09 — because the
+ * 2-word overlap never compared strikes). Correct short-credit basis:
+ * credit received = buy-back cost + realized P&L = $73,441.24 → +95.9%. */
+describe("short call buy-to-close return %", () => {
+  const realizedPnl = 70441.2398;
+  const exitCost = 2.0 * 15 * 100;
+  const creditBasis = exitCost + realizedPnl; // credit received at entry
+  const expectedPct = (realizedPnl / creditBasis) * 100; // ≈ +95.9
+
+  const muShortCallClose: PositionFillGroup = {
+    id: "close-mu-1000c",
+    symbol: "MU",
+    description: "Closed MU 6/12 (Short $1000 Call)",
+    isClosing: true,
+    totalQuantity: 15,
+    netPrice: 2.0,
+    totalCommission: -6.7237,
+    totalPnL: realizedPnl,
+    time: "2026-06-12T18:57:31+00:00",
+    fills: [
+      makeOptionFill({
+        execId: "close-mu-cover",
+        symbol: "MU",
+        side: "BOT",
+        quantity: 15,
+        avgPrice: 2.0,
+        realizedPNL: realizedPnl,
+        time: "2026-06-12T18:57:31+00:00",
+        contract: { symbol: "MU", conId: 879417508, strike: 1000, right: "C", expiry: "2026-06-12" },
+      }),
+    ],
+  };
+
+  const unrelatedOpenShortCall = {
+    id: 2,
+    ticker: "MU",
+    structure: "Short Call $1050.0",
+    structure_type: "undefined",
+    risk_profile: "undefined",
+    expiry: "2026-06-19",
+    contracts: 10,
+    direction: "SHORT",
+    entry_cost: -102090.88,
+    max_risk: null,
+    market_value: null,
+    legs: [
+      {
+        direction: "SHORT" as const,
+        contracts: 10,
+        type: "Call" as const,
+        strike: 1050,
+        entry_cost: -102090.88,
+        avg_cost: 10209.088136,
+        market_price: null,
+        market_value: null,
+      },
+    ],
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-05-29",
+  };
+
+  it("derives the short-credit basis when no opening fills or portfolio match exist", () => {
+    const data = positionGroupShareData(muShortCallClose, [muShortCallClose]);
+
+    expect(data.pnlPct).toBeCloseTo(expectedPct, 6);
+    // Entry per-share is the credit received (credits negative per sign convention)
+    expect(data.entryPrice).toBeCloseTo(-(creditBasis / 100 / 15), 6);
+  });
+
+  it("never borrows basis from a different-strike position on the same underlying", () => {
+    const data = positionGroupShareData(muShortCallClose, [muShortCallClose], [unrelatedOpenShortCall]);
+
+    // Pre-fix: fuzzy 2-word overlap matched "Short Call $1050.0" → +69.00%
+    expect(data.pnlPct).toBeCloseTo(expectedPct, 6);
+    expect(data.entryTime).not.toBe("2026-05-29");
+  });
+
+  it("closedGroupReturnPct (orders table cell) agrees with the share card", () => {
+    // Pre-fix the orders cell showed +104.4% = pnl / |exit − pnl| for this short
+    expect(closedGroupReturnPct(muShortCallClose)).toBeCloseTo(expectedPct, 6);
+  });
+
+  it("closedGroupReturnPct keeps long-close math unchanged", () => {
+    const longClose: PositionFillGroup = {
+      id: "close-long",
+      symbol: "AAOI",
+      description: "Closed AAOI Long Call",
+      isClosing: true,
+      totalQuantity: 10,
+      netPrice: 3.0,
+      totalCommission: -2.0,
+      totalPnL: 2000,
+      time: "2026-06-12T15:00:00+00:00",
+      fills: [
+        makeOptionFill({
+          execId: "close-long-1",
+          side: "SLD",
+          quantity: 10,
+          avgPrice: 3.0,
+          realizedPNL: 2000,
+          time: "2026-06-12T15:00:00+00:00",
+        }),
+      ],
+    };
+    // Bought 10 @ $1.00 ($1,000 basis), sold @ $3.00 → +200%
+    expect(closedGroupReturnPct(longClose)).toBeCloseTo(200, 6);
   });
 });
