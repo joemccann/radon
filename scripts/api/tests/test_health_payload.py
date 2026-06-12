@@ -206,6 +206,7 @@ class TestHealthLite:
 
         result = await server.health_lite()
 
+        assert isinstance(result.pop("loop_lag_ms"), float)
         assert result == {
             "status": "ok",
             "auth_state": "awaiting_2fa",
@@ -226,6 +227,7 @@ class TestHealthLite:
 
         result = await server.health_lite()
 
+        assert isinstance(result.pop("loop_lag_ms"), float)
         assert result == {
             "status": "ok",
             "auth_state": "unknown",

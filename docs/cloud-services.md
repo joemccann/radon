@@ -244,6 +244,26 @@ ssh radon@ib-gateway 'journalctl -u radon-api --since "1 hour ago"'
 
 Service health for every dual-writing scheduler lands in the `service_health` table; the dashboard's status strip can render this without scraping logs.
 
+### Host metrics (DUR-12)
+
+`scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (radon-cloud) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
+
+### Log shipping (DUR-12)
+
+journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Library/LaunchAgents/com.radon.journal-pull.plist`, daily + RunAtLoad) runs `scripts/journal_pull.sh`, which ssh-pulls `journalctl --since yesterday -o export | gzip` into `data/journal_archive/` (gitignored) and prunes local snapshots older than 30 days. Laptop-initiated by design — VPS-push to a sleeping laptop fails silently (media-rsync precedent). Inspect a snapshot with `zcat <file> | journalctl --file=- ...` or `gunzip` + `journalctl --root` import tooling.
+
+### Error tracking — Sentry (not wired; recommended next step)
+
+No Sentry SDK is installed (no DSN exists; an unconfigured SDK is dead-weight). When ready, the free tier (5k errors/mo) is plenty for a solo operator:
+
+1. Create a Sentry org + two projects: `radon-api` (Python) and `radon-web` (Next.js). Copy each DSN.
+2. Put DSNs in `/home/radon/radon-cloud/.env` (`SENTRY_DSN_API`) and `web/.env` (`NEXT_PUBLIC_SENTRY_DSN`); never in the repo.
+3. FastAPI: `pip install sentry-sdk`, then in `scripts/api/server.py` startup gate on the env var — `sentry_sdk.init(dsn, traces_sample_rate=0)` (errors only; tracing would duplicate what host_metrics already covers). The asyncio + FastAPI integrations are automatic.
+4. Next.js: `@sentry/nextjs` via the wizard, but keep `tracesSampleRate: 0` and disable session replay — error capture only. Mind the Edge-runtime middleware constraint (`feedback_middleware_edge_runtime`): do not import Sentry helpers into `web/middleware.ts`.
+5. Set both projects' alert rule to "new issue" → the existing Pushover webhook, so paging stays single-channel.
+
+Until then, errors surface via `service_health` rows (the watchdog buckets page on them) and the journald snapshots above.
+
 ## Rollback
 
 The migration was implemented as dual-write at every step — every prior JSON read path is still valid as a fallback. To revert:
@@ -267,11 +287,74 @@ When MenthorQ's session cookie rotates, the headless Playwright run will fail. T
 - **Caddy admin API** — listens on localhost only. `caddy reload --config ~/radon-cloud/caddy/Caddyfile --adapter caddyfile` works without sudo via the `radon-caddy` sudoers rule (`sudo cp` + `systemctl reload caddy`).
 - **media.radon.run** — public reads, no upload endpoint. If you ever gate access, swap the `file_server` block for `auth_request` calling Clerk-issued JWTs.
 
+## DB backup & restore (DUR-13)
+
+The Turso `journal` table is the canonical trade store; the JSON mirrors
+in `data/` are frequently stale and are NOT a disaster-recovery story.
+Nightly full-database dumps are the recovery story.
+
+### Architecture
+
+| Piece | Where | What |
+|---|---|---|
+| `radon-db-backup.timer` | VPS (`radon-cloud/services/`) | Nightly 07:52 UTC (off-hours, deliberately not :00/:30), `Persistent=true` |
+| `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
+| `radon-cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page; the DB is ~1.4 GB, direct-to-cloud reads run ~1 MB/s ⇒ ~20–25 min). Emits portable SQL (schema + INSERTs, `sqlite3 .dump`-style), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than 30 days in-script. |
+| `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window (`web/lib/serviceHealthWindows.ts` + `scripts/watchdog/services.py` daily bucket), so ONE missed night alerts before the second dump is lost. A backup timer with no liveness signal is the canonical silently-dead backup. |
+| `com.radon.db-backup-pull` | laptop launchd (`~/Library/LaunchAgents/`) | `RunAtLoad` + daily 05:30 local; rsyncs the dump dir over Tailscale (`radon@ib-gateway`, same key as the media push) into `data/db_backups/` (gitignored). Deliberately NO `--delete`: a wiped/compromised VPS must not be able to empty the off-box copy on the next pull. |
+
+### Restore runbook
+
+**1. Scratch restore (verify a dump / inspect old data)** — plain sqlite3,
+no Turso involved:
+
+```bash
+gunzip -c data/db_backups/radon-<stamp>.sql.gz | sqlite3 /tmp/radon_restore.db
+sqlite3 /tmp/radon_restore.db "SELECT COUNT(*) FROM journal; SELECT COUNT(*) FROM service_health;"
+```
+
+Run this drill after any change to `db_backup.py` and compare counts
+against prod (`PYTHONPATH` + `get_db()` per Health & observability above).
+
+**2. Full restore to a NEW Turso DB + URL swap** (DB lost/corrupted):
+
+```bash
+turso auth login                                   # CLI: /opt/homebrew/bin/turso (laptop)
+turso db create radon-restore-$(date +%Y%m%d)
+gunzip -c data/db_backups/radon-<stamp>.sql.gz | turso db shell radon-restore-<date>
+turso db tokens create radon-restore-<date>
+turso db show radon-restore-<date> --url
+```
+
+Then swap `TURSO_DB_URL` + `TURSO_AUTH_TOKEN` in ALL THREE env files —
+laptop root `.env`, laptop `web/.env`, VPS `/home/radon/radon-cloud/.env` —
+and restart the stack (`ssh root@ib-gateway radon restart`; mind the 2FA
+push-lock rules). Do NOT repoint by editing the old DB in place.
+
+**3. Partial-table surgery** (bad rows written to one table — the
+2026-05-14 MagicMock incident wrote garbage contracts to the prod
+`journal` and recovery was manual row surgery):
+
+```bash
+# Restore the last-good dump into a scratch DB (step 1), then diff:
+sqlite3 /tmp/radon_restore.db "SELECT ib_exec_id FROM journal" | sort > /tmp/good_ids
+# Delete only the poisoned rows from prod via get_db(), keyed on ib_exec_id
+# (or INSERT the good rows back). NEVER DROP/replace the prod table wholesale —
+# writers are live against it.
+```
+
+**4. Platform PITR** — OPEN QUESTION. The `turso` CLI is not
+authenticated on the laptop and absent on the VPS, so whether the current
+plan includes point-in-time restore is unverified. Operator: `turso auth
+login && turso org show` / check the Turso dashboard. Until verified,
+treat the nightly dumps as the only restore path.
+
 ## Known gaps
 
 | # | Item | Owner |
 |---|------|-------|
-| 1 | Nightly retention sweep on snapshot tables | Future |
-| 2 | restic backup of `radon_media` volume to B2/S3 | Future |
+| 1 | Nightly retention sweep on snapshot tables (`portfolio_snapshots` is ~680 MB and dominates the nightly dump) | Future |
+| 2 | restic backup of `radon_media` volume to B2/S3 (DB backups shipped 2026-06-12 — see "DB backup & restore" above; media volume still unbacked) | Future |
 | 3 | systemd timer for `oi_changes` (currently on-demand only) | Future |
 | 4 | Vercel Edge replica for a public read-only dashboard | Future |
+| 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |

@@ -110,6 +110,12 @@ data/seasonality_cache/
 data/darkpool_cache/
 data/price_history_cache/
 data/service_health/
+# Nightly Turso dump pulls (DUR-13, rsync'd from the VPS — never commit)
+data/db_backups/
+# Daily journald snapshots pulled from the VPS (DUR-12, laptop launchd job)
+data/journal_archive/
+# host_metrics sampler's capped local fallback when Turso writes fail (DUR-12)
+data/host_metrics_fallback.jsonl
 logs/*
 !logs/.gitkeep
 logs/menthorq_artifacts/

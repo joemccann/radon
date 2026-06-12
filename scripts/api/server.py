@@ -902,10 +902,25 @@ async def health(request: Request):
     }
 
 
+async def _measure_event_loop_lag_ms() -> float:
+    """One timed call_soon roundtrip on the running loop (DUR-12).
+
+    Microseconds when the loop is healthy; a loop starved by blocking work
+    (the libsql dual-write wedge class) shows milliseconds-to-seconds.
+    Never blocks — the await IS the measurement.
+    """
+    loop = asyncio.get_running_loop()
+    queued_at = loop.time()
+    woke = loop.create_future()
+    loop.call_soon(woke.set_result, None)
+    await woke
+    return (loop.time() - queued_at) * 1000.0
+
+
 @app.get("/health/lite")
 async def health_lite():
     """Side-effect-free, account-free coarse IB state for high-frequency pollers
-    (the standalone health daemon).
+    (the standalone health daemon + the host-metrics sampler).
 
     Unlike /health, this passes pool=None: it must NEVER trigger
     handle_auth_state_transition / pool.reconnect_all(). The 2FA-recovery
@@ -914,9 +929,13 @@ async def health_lite():
     the very recovery it observes. The payload is coarse on purpose — never
     managed_accounts (IBKR account IDs), ports, restart backoff, or topology.
 
+    ``loop_lag_ms`` is the event-loop health signal the host-metrics sampler
+    persists every minute (scripts/host_metrics_sampler.py).
+
     NOT in AUTH_EXEMPT_PATHS: the in-box daemon reaches it from loopback (covered
     by the bypass); public callers via Caddy /api/ib/health/lite get 401.
     """
+    loop_lag_ms = await _measure_event_loop_lag_ms()
     pool_status = ib_pool.status() if ib_pool else None
     gw = await check_ib_gateway(pool_status=pool_status, pool=None)
     return {
@@ -925,6 +944,7 @@ async def health_lite():
         "service_state": gw.get("service_state", "unknown"),
         "upstream_dead": gw.get("upstream_dead", False),
         "port_listening": gw.get("port_listening", False),
+        "loop_lag_ms": round(loop_lag_ms, 3),
     }
 
 

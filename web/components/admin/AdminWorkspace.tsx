@@ -9,6 +9,7 @@ import type {
   ServicesListResponse,
 } from "@/lib/adminTypes";
 import type { ReliabilityHistoryPayload } from "@/lib/adminReliability";
+import type { HostMetricsPayload } from "@/lib/adminHostMetrics";
 
 /** Latest action result; drives the row-level success/failure flash. */
 export type FlashTarget = {
@@ -22,6 +23,7 @@ import ServiceControlPanel from "./ServiceControlPanel";
 import RestartLog from "./RestartLog";
 import SystemStatusBar from "./SystemStatusBar";
 import ReliabilityStrip from "./ReliabilityStrip";
+import HostMetricsStrip from "./HostMetricsStrip";
 import WriterFreshnessTable from "./WriterFreshnessTable";
 
 type EdgePayload = (EdgeHealthStatus & { reachable?: boolean }) | null;
@@ -70,6 +72,7 @@ export default function AdminWorkspace() {
   const [edgeLoaded, setEdgeLoaded] = useState(false);
 
   const [reliability, setReliability] = useState<ReliabilityHistoryPayload | null>(null);
+  const [hostMetrics, setHostMetrics] = useState<HostMetricsPayload | null>(null);
 
   // Epoch ms of the last successful poll, + a 1s tick so "updated Ns ago"
   // counts up live without a fetch.
@@ -89,6 +92,7 @@ export default function AdminWorkspace() {
   const servicesInflightRef = useRef(false);
   const edgeInflightRef = useRef(false);
   const reliabilityInflightRef = useRef(false);
+  const hostMetricsInflightRef = useRef(false);
   const flashTimerRef = useRef<number | null>(null);
 
   const fetchHealth = useCallback(async () => {
@@ -169,6 +173,24 @@ export default function AdminWorkspace() {
     }
   }, []);
 
+  // The 1h host_metrics window behind the CPU / memory / loop-lag strip
+  // (DUR-12). Always-200 route: a missing table or unreachable DB is data
+  // (`missing: true`), not an exception. Minutely samples + a 60s poll keep
+  // the strip one sample behind at worst.
+  const fetchHostMetrics = useCallback(async () => {
+    if (hostMetricsInflightRef.current) return;
+    hostMetricsInflightRef.current = true;
+    try {
+      const res = await fetch("/api/admin/host-metrics", { cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as HostMetricsPayload | null;
+      if (data && Array.isArray(data.rows)) setHostMetrics(data);
+    } catch {
+      // Keep the last good payload; the tiles flag staleness themselves.
+    } finally {
+      hostMetricsInflightRef.current = false;
+    }
+  }, []);
+
   // True while any visible unit is in a transitional state — drives a faster
   // poll cadence so the operator sees activating -> active without waiting.
   const hasTransitionalUnit = hasTransitionalRow(services);
@@ -178,6 +200,7 @@ export default function AdminWorkspace() {
     void fetchServices();
     void fetchEdge();
     void fetchReliability();
+    void fetchHostMetrics();
     const healthId = window.setInterval(fetchHealth, HEALTH_POLL_MS);
     const servicesInterval = hasTransitionalUnit
       ? SERVICES_TRANSITIONAL_POLL_MS
@@ -185,13 +208,15 @@ export default function AdminWorkspace() {
     const servicesId = window.setInterval(fetchServices, servicesInterval);
     const edgeId = window.setInterval(fetchEdge, EDGE_POLL_MS);
     const reliabilityId = window.setInterval(fetchReliability, RELIABILITY_POLL_MS);
+    const hostMetricsId = window.setInterval(fetchHostMetrics, RELIABILITY_POLL_MS);
     return () => {
       window.clearInterval(healthId);
       window.clearInterval(servicesId);
       window.clearInterval(edgeId);
       window.clearInterval(reliabilityId);
+      window.clearInterval(hostMetricsId);
     };
-  }, [fetchHealth, fetchServices, fetchEdge, fetchReliability, hasTransitionalUnit]);
+  }, [fetchHealth, fetchServices, fetchEdge, fetchReliability, fetchHostMetrics, hasTransitionalUnit]);
 
   // 1s ticker so the "updated Ns ago" indicator counts up between polls.
   useEffect(() => {
@@ -408,6 +433,8 @@ export default function AdminWorkspace() {
           history={reliability}
           loading={reliabilityLoading}
         />
+
+        <HostMetricsStrip metrics={hostMetrics} />
 
         <div className="admin-grid">
           <div className="admin-ib-row">

@@ -231,6 +231,31 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // size + duration detail. 48h window: one missed night alerts before
   // the second dump is lost. Reads Turso + local disk only — no IB.
   "db-backup": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``host-metrics`` is the minute-cadence host/process sampler on the VPS
+  // (main-repo scripts/host_metrics_sampler.py via radon-cloud
+  // radon-host-metrics.timer, DUR-12). Heartbeats ok/error on EVERY run,
+  // 24/7 — a uniform 10-min window absorbs a few missed firings while
+  // surfacing a dead sampler quickly. Reads /proc + systemctl +
+  // /health/lite only — no IB dependency.
+  "host-metrics": { open: 10 * MIN, extended: 10 * MIN, closed: 10 * MIN, category: "scheduled", requires_ib: false },
+
+  // ``performance`` and ``oi-changes`` are mirror-fed scans (db.scan_mirror
+  // SNAPSHOT_UPSERTS) that wrote heartbeats since DUR-01 but were never
+  // registered here — they silently inherited the 1h default and would flap
+  // the banner overnight. Both only run when a user hits their FastAPI scan
+  // endpoint, so they're on-demand like scanner/discover. performance is
+  // IB-primary with cache/UW/Yahoo fallbacks and still records ok when IB
+  // is unreachable, so requires_ib=false (same rationale as analyst-ratings).
+  "performance": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  "oi-changes": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+
+  // ``preset-rebalance`` runs WEEKLY inside the monitor daemon (index
+  // constituent refresh, Sundays). It shipped for months with no
+  // service_health row at all; the DUR-14 structural heartbeat in
+  // BaseHandler.run() covers it now. 8-day uniform window = weekly cadence
+  // + one day of daemon-restart drift. UW/static data only — no IB.
+  "preset-rebalance": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
 };
 
 const DEFAULT_WINDOW: Window = {

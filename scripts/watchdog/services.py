@@ -103,6 +103,25 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # uniform 26h (cadence + timer jitter). Filesystem + systemctl
     # only — no IB dependency.
     "config-drift":     {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # db-backup — nightly full Turso dump on the VPS (radon-cloud
+    # scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7).
+    # Heartbeats ok/error every run with size + duration detail. 48h
+    # window mirrors web/lib/serviceHealthWindows.ts: one missed night
+    # alerts before the second dump is lost. Turso + local disk — no IB.
+    "db-backup":        {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
+    # host-metrics — minute-cadence host/process sampler on the VPS
+    # (main-repo scripts/host_metrics_sampler.py via radon-cloud
+    # radon-host-metrics.timer, DUR-12). Heartbeats ok/error every run,
+    # 24/7; uniform 10-min window mirrors web/lib/serviceHealthWindows.ts.
+    # Reads /proc + systemctl + /health/lite only — no IB dependency.
+    "host-metrics":     {"open": 10 * _MIN, "closed": 10 * _MIN, "requires_ib": False},
+    # preset-rebalance — WEEKLY index-constituent refresh inside the
+    # monitor daemon (Sundays). Heartbeats via the DUR-14 structural
+    # BaseHandler.run() write. 8-day window = weekly cadence + one day of
+    # daemon-restart drift. UW/static data only — no IB. In the daily
+    # bucket: the hourly check surfaces a missed week within 1h of the
+    # window expiring.
+    "preset-rebalance": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
 }
 
 
@@ -125,6 +144,9 @@ BUCKETS: dict[str, list[str]] = {
         # recovery). The error bucket below catches the escalation; including
         # it in continuous lets the 24h staleness window flag a dead relay.
         "ib-realtime-relay",
+        # Minute-cadence host sampler heartbeat — the 10-min staleness
+        # window flags a dead sampler within one continuous cycle.
+        "host-metrics",
     ],
     "daily": [
         "cash-flow-sync",
@@ -138,6 +160,12 @@ BUCKETS: dict[str, list[str]] = {
         # Daily drift audit on the VPS — hourly check surfaces a missed
         # run within 1h of the 26h window expiring.
         "config-drift",
+        # Nightly DB backup on the VPS — hourly check surfaces a missed
+        # dump within 1h of the 48h window expiring.
+        "db-backup",
+        # Weekly preset rebalance (monitor daemon) — hourly check surfaces
+        # a missed week within 1h of the 8-day window expiring.
+        "preset-rebalance",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:
