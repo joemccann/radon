@@ -67,6 +67,7 @@ class FlexTokenCheck(BaseHandler):
         started_at = _now_iso()
         try:
             result = self._execute_inner()
+            result["events_pruned"] = self._prune_service_health_events()
         except Exception as exc:
             try:
                 record_service_health(
@@ -87,6 +88,22 @@ class FlexTokenCheck(BaseHandler):
             logger.warning("record_service_health failed: %s", exc)
 
         return result
+
+    @staticmethod
+    def _prune_service_health_events() -> int | None:
+        """DUR-11: daily retention sweep of the append-only history table.
+
+        Piggybacks on this handler because it is the existing daily,
+        24/7 monitor-daemon slot. Import failures (hosts without libsql
+        or an older db.writer) skip gracefully; DB errors propagate so
+        BaseHandler retries next cycle instead of latching last_run.
+        """
+        try:
+            from db.writer import prune_service_health_events
+        except Exception as exc:  # pragma: no cover — hosts without libsql
+            logger.warning("service_health_events prune unavailable: %s", exc)
+            return None
+        return prune_service_health_events()
 
     def _execute_inner(self) -> Dict[str, Any]:
         if not CONFIG_PATH.exists():

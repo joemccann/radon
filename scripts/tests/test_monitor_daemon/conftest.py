@@ -36,6 +36,7 @@ _WRITER_NAMES = (
     "upsert_journal_entry",
     "record_service_health",
     "upsert_cash_flow",
+    "prune_service_health_events",
 )
 
 

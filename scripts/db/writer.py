@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 try:
@@ -558,3 +558,31 @@ def record_service_health(
         ),
     )
     db.commit()
+
+
+SERVICE_HEALTH_EVENTS_RETENTION_DAYS = 90
+
+
+def prune_service_health_events(
+    retention_days: int = SERVICE_HEALTH_EVENTS_RETENTION_DAYS,
+) -> int:
+    """Delete ``service_health_events`` rows older than the retention window.
+
+    The table (migration 0011) is append-only via triggers on
+    ``service_health``; the daily flex_token_check handler calls this once a
+    day. Raises on DB errors so the handler's BaseHandler contract retries
+    instead of burning the daily slot. Returns rows deleted (0 when the
+    driver doesn't report a rowcount).
+    """
+    cutoff = (
+        (datetime.now(timezone.utc) - timedelta(days=retention_days))
+        .isoformat()
+        .replace("+00:00", "Z")
+    )
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM service_health_events WHERE created_at < ?", (cutoff,)
+    )
+    db.commit()
+    deleted = getattr(cursor, "rowcount", None)
+    return deleted if isinstance(deleted, int) and deleted >= 0 else 0

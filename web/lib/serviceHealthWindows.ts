@@ -206,6 +206,15 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // we want. Alert-only — the relay never restarts the Gateway itself.
   "ib-realtime-relay": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by
+  // radon-cloud deploy.sh after each green post-deploy gate (DUR-11). The
+  // triggers from migration 0011 mirror it into service_health_events so
+  // deploys show on the admin reliability history. Deploy cadence is
+  // human-driven and irregular (days or weeks apart), so it must never be
+  // treated as a silent daemon: on-demand category + a 365-day window keep
+  // the freshness banner structurally quiet about it.
+  "deploy": { open: 365 * DAY, extended: 365 * DAY, closed: 365 * DAY, category: "on-demand", requires_ib: false },
+
   // ``config-drift`` is the daily VPS configuration-drift audit
   // (radon-cloud scripts/drift_audit.py via radon-drift-audit.timer).
   // It diffs live system config (Caddyfile, compose, systemd units +
@@ -215,6 +224,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // weekends are normal run days so no wide closed window is needed.
   // Reads the filesystem + systemctl only — no IB dependency.
   "config-drift": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``db-backup`` is the nightly full Turso dump on the VPS (radon-cloud
+  // scripts/db_backup.py via radon-db-backup.timer, 07:52 UTC, 24/7 —
+  // weekends are normal run days). Heartbeats ok/error on EVERY run with
+  // size + duration detail. 48h window: one missed night alerts before
+  // the second dump is lost. Reads Turso + local disk only — no IB.
+  "db-backup": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
 };
 
 const DEFAULT_WINDOW: Window = {

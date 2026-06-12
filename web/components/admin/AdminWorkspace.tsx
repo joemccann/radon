@@ -8,6 +8,7 @@ import type {
   ServiceAction,
   ServicesListResponse,
 } from "@/lib/adminTypes";
+import type { ReliabilityHistoryPayload } from "@/lib/adminReliability";
 
 /** Latest action result; drives the row-level success/failure flash. */
 export type FlashTarget = {
@@ -27,6 +28,9 @@ type EdgePayload = (EdgeHealthStatus & { reachable?: boolean }) | null;
 
 const HEALTH_POLL_MS = 5_000;
 const EDGE_POLL_MS = 5_000;
+// History tiles aggregate a 7-day window; minute-level freshness is plenty
+// and keeps the Turso events query (bounded + indexed) off the hot poll path.
+const RELIABILITY_POLL_MS = 60_000;
 // Aligned with HEALTH_POLL_MS for now — both endpoints hit local FastAPI and
 // have similar refresh budgets. Tune independently if /admin/services proves
 // expensive under load (current implementation runs a single ``systemctl
@@ -65,6 +69,8 @@ export default function AdminWorkspace() {
   const [edgeReachable, setEdgeReachable] = useState(false);
   const [edgeLoaded, setEdgeLoaded] = useState(false);
 
+  const [reliability, setReliability] = useState<ReliabilityHistoryPayload | null>(null);
+
   // Epoch ms of the last successful poll, + a 1s tick so "updated Ns ago"
   // counts up live without a fetch.
   const [lastUpdatedAt, setLastUpdatedAt] = useState<number | null>(null);
@@ -82,6 +88,7 @@ export default function AdminWorkspace() {
   const healthInflightRef = useRef(false);
   const servicesInflightRef = useRef(false);
   const edgeInflightRef = useRef(false);
+  const reliabilityInflightRef = useRef(false);
   const flashTimerRef = useRef<number | null>(null);
 
   const fetchHealth = useCallback(async () => {
@@ -144,6 +151,24 @@ export default function AdminWorkspace() {
     }
   }, []);
 
+  // The 7-day service_health_events history behind the uptime / MTTR /
+  // transitions / deploy tiles. The route is always-200 (missing table or
+  // unreachable DB is data — `missing: true` — not an exception).
+  const fetchReliability = useCallback(async () => {
+    if (reliabilityInflightRef.current) return;
+    reliabilityInflightRef.current = true;
+    try {
+      const res = await fetch("/api/admin/reliability", { cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as ReliabilityHistoryPayload | null;
+      if (data && Array.isArray(data.events)) setReliability(data);
+    } catch {
+      // Keep the last good payload; the tiles degrade to "--" only when
+      // nothing has ever loaded.
+    } finally {
+      reliabilityInflightRef.current = false;
+    }
+  }, []);
+
   // True while any visible unit is in a transitional state — drives a faster
   // poll cadence so the operator sees activating -> active without waiting.
   const hasTransitionalUnit = hasTransitionalRow(services);
@@ -152,18 +177,21 @@ export default function AdminWorkspace() {
     void fetchHealth();
     void fetchServices();
     void fetchEdge();
+    void fetchReliability();
     const healthId = window.setInterval(fetchHealth, HEALTH_POLL_MS);
     const servicesInterval = hasTransitionalUnit
       ? SERVICES_TRANSITIONAL_POLL_MS
       : SERVICES_POLL_MS;
     const servicesId = window.setInterval(fetchServices, servicesInterval);
     const edgeId = window.setInterval(fetchEdge, EDGE_POLL_MS);
+    const reliabilityId = window.setInterval(fetchReliability, RELIABILITY_POLL_MS);
     return () => {
       window.clearInterval(healthId);
       window.clearInterval(servicesId);
       window.clearInterval(edgeId);
+      window.clearInterval(reliabilityId);
     };
-  }, [fetchHealth, fetchServices, fetchEdge, hasTransitionalUnit]);
+  }, [fetchHealth, fetchServices, fetchEdge, fetchReliability, hasTransitionalUnit]);
 
   // 1s ticker so the "updated Ns ago" indicator counts up between polls.
   useEffect(() => {
@@ -377,6 +405,7 @@ export default function AdminWorkspace() {
           edge={edge}
           health={health}
           edgeReachable={edgeReachable}
+          history={reliability}
           loading={reliabilityLoading}
         />
 
