@@ -63,12 +63,15 @@ def _split_statements(sql: str) -> list[str]:
 
 @pytest.fixture
 def db_conn(monkeypatch: pytest.MonkeyPatch) -> Iterator[sqlite3.Connection]:
-    """In-memory sqlite with the service_health schema; patched into the
-    libsql singleton so ``record_service_health`` writes here.
+    """In-memory sqlite behind a fake ``api.db_http.hrana_execute``.
+
+    The heal path reads AND writes ``service_health`` over the bounded
+    hrana HTTP pipeline (sync libsql is banned in the API process —
+    DUR-09); the fake preserves its rows-as-tuples + autocommit contract.
     """
-    # check_same_thread=False — production libsql is thread-safe; we use
-    # ``asyncio.to_thread`` for the writer/reader calls so the connection
-    # may be touched from the event loop's worker pool.
+    # check_same_thread=False — the heal path runs the hrana call through
+    # ``asyncio.to_thread`` so the connection is touched from the event
+    # loop's worker pool.
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     for migration in _MIGRATIONS:
         sql = migration.read_text(encoding="utf-8")
@@ -81,13 +84,14 @@ def db_conn(monkeypatch: pytest.MonkeyPatch) -> Iterator[sqlite3.Connection]:
                 raise
     conn.commit()
 
-    import db.client as client_mod
-    monkeypatch.setattr(client_mod, "_cached", conn, raising=False)
-    monkeypatch.setattr(client_mod, "get_db", lambda: conn)
+    import api.db_http as db_http_mod
 
-    import importlib
-    import db.writer as writer_mod
-    importlib.reload(writer_mod)
+    def fake_hrana_execute(sql: str, args=(), timeout=None):
+        rows = conn.execute(sql, tuple(args)).fetchall()
+        conn.commit()  # hrana pipelines autocommit per request
+        return rows
+
+    monkeypatch.setattr(db_http_mod, "hrana_execute", fake_hrana_execute)
 
     try:
         yield conn
@@ -294,29 +298,33 @@ def test_no_error_rows_is_silent_noop(db_conn, caplog):
 
 
 def test_db_write_hang_does_not_block_transition_handler(db_conn, caplog, monkeypatch):
-    """If record_service_health hangs forever, the heal step bails out via
-    wait_for and the transition handler returns without raising.
+    """If the hrana write hangs (e.g. a stalled socket inside the bound),
+    the heal step bails out via wait_for and the transition handler returns
+    without raising.
     """
     _insert_health(
         db_conn, "fill-monitor", "error",
         "Failed to connect to IB on 127.0.0.1:4001",
     )
 
-    # Replace the writer's record_service_health with one that hangs forever
-    # via threading.Event.wait(). asyncio.to_thread + a long block would also
-    # work but threading.Event makes the intent explicit.
-    import db.writer as writer_mod
+    # Replace hrana_execute with one that hangs via threading.Event.wait().
+    # asyncio.to_thread + a long block would also work but threading.Event
+    # makes the intent explicit. Reads must still work so the heal step
+    # reaches the write.
+    import api.db_http as db_http_mod
     import threading
     hang_event = threading.Event()
 
-    def hanging_writer(*_args, **_kwargs):
+    def hanging_hrana(sql: str, args=(), timeout=None):
+        if sql.lstrip().upper().startswith("SELECT"):
+            return db_conn.execute(sql, tuple(args)).fetchall()
         # > our heal timeout, but short enough that the test finishes quickly
         # even though asyncio.wait_for cannot cancel a running threadpool task.
         # The thread is joined at interpreter exit.
         hang_event.wait(timeout=2.0)
-        return None
+        return []
 
-    monkeypatch.setattr(writer_mod, "record_service_health", hanging_writer)
+    monkeypatch.setattr(db_http_mod, "hrana_execute", hanging_hrana)
 
     ib_gateway._auth_transition_state["previous_auth_state"] = "awaiting_2fa"
     pool = _make_mock_pool({"sync": True, "orders": True, "data": True})
@@ -375,15 +383,19 @@ def test_cold_start_does_not_clear_error_rows(db_conn):
 
 
 # ---------------------------------------------------------------------------
-# Test 7: heal uses record_service_health (writer interface), no raw SQL
+# Test 7: heal writes use the canonical shared upsert, one per service
 # ---------------------------------------------------------------------------
 
 
-def test_heal_uses_writer_interface(db_conn, monkeypatch):
-    """Mock record_service_health and assert it's called per IB-dependent error
-    service. This pins the API surface — a refactor that bypasses the writer
-    and goes straight to SQL is a contract break.
+def test_heal_uses_canonical_service_health_upsert(db_conn, monkeypatch):
+    """Spy the hrana seam and assert each IB-dependent error service is
+    cleared via ``db.service_health_sql.SERVICE_HEALTH_UPSERT_SQL`` — the
+    SAME statement ``record_service_health`` uses. This pins the
+    single-source contract: a refactor that hand-rolls its own SQL here is
+    a contract break (serialization/timestamps must stay defined once).
     """
+    from db.service_health_sql import SERVICE_HEALTH_UPSERT_SQL
+
     _insert_health(
         db_conn, "fill-monitor", "error",
         "Failed to connect to IB on 127.0.0.1:4001",
@@ -393,15 +405,16 @@ def test_heal_uses_writer_interface(db_conn, monkeypatch):
         "TimeoutError on 127.0.0.1:4001",
     )
 
-    import db.writer as writer_mod
-    calls: list[tuple] = []
-    real_writer = writer_mod.record_service_health
+    import api.db_http as db_http_mod
+    writes: list[tuple] = []
+    real_hrana = db_http_mod.hrana_execute  # the sqlite-backed fixture fake
 
-    def spy_writer(service: str, state: str, **kwargs):
-        calls.append((service, state, kwargs))
-        return real_writer(service, state, **kwargs)
+    def spy_hrana(sql: str, args=(), timeout=None):
+        if not sql.lstrip().upper().startswith("SELECT"):
+            writes.append((sql, tuple(args)))
+        return real_hrana(sql, args, timeout)
 
-    monkeypatch.setattr(writer_mod, "record_service_health", spy_writer)
+    monkeypatch.setattr(db_http_mod, "hrana_execute", spy_hrana)
 
     ib_gateway._auth_transition_state["previous_auth_state"] = "awaiting_2fa"
     pool = _make_mock_pool({"sync": True, "orders": True, "data": True})
@@ -413,9 +426,10 @@ def test_heal_uses_writer_interface(db_conn, monkeypatch):
         )
     )
 
-    assert len(calls) == 2, f"expected 2 writer calls, got {len(calls)}: {calls}"
-    seen_services = {c[0] for c in calls}
+    assert len(writes) == 2, f"expected 2 upsert writes, got {len(writes)}: {writes}"
+    seen_services = {args[0] for _, args in writes}
     assert seen_services == {"fill-monitor", "journal-sync"}
-    for service, state, kwargs in calls:
-        assert state == "ok"
-        assert kwargs.get("error") is None, "error must be cleared to NULL"
+    for sql, args in writes:
+        assert sql == SERVICE_HEALTH_UPSERT_SQL, "must use the shared canonical upsert"
+        assert args[1] == "ok"
+        assert args[4] is None, "last_error must be cleared to NULL"

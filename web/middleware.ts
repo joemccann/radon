@@ -32,17 +32,31 @@ export function isLocalDevAuthBypassEnabled(
   return isLocalHost(url);
 }
 
+// Share-card link previews — link-preview bots (Twitter, Slack, iMessage)
+// have no Clerk session and can't sign in. EXPLICIT list, not a pattern:
+// the old `/^\/api(?:\/[^/]+)*\/share(?:\/.*)?$/` regex silently published
+// any future `/api/**/share*` path the moment its route file shipped. A new
+// share route must be added here deliberately (and to the filesystem pin in
+// web/tests/middleware-share-allowlist.test.ts, which fails until it is).
+export const PUBLIC_SHARE_API_ROUTES = [
+  "/api/gex/share",
+  "/api/gex/share/content",
+  "/api/internals/share",
+  "/api/internals/share/content",
+  "/api/menthorq/cta/share",
+  "/api/menthorq/cta/share/content",
+  "/api/regime/share",
+  "/api/regime/share/content",
+  "/api/share/pnl",
+  "/api/vcg/share",
+  "/api/vcg/share/content",
+] as const;
+
 // Public allowlist. Every other route — pages AND /api/* — requires a Clerk
 // session. The narrow exemptions:
 //
 //   /sign-in, /sign-up                  — Clerk auth flow pages
-//   /api/.../share, /api/.../share/...  — share-card link previews; link-
-//                                          preview bots (Twitter, Slack,
-//                                          iMessage) have no Clerk session
-//                                          and can't sign in. Matches both
-//                                          `/api/share/pnl` and nested
-//                                          shapes like `/api/menthorq/cta/
-//                                          share/content`.
+//   PUBLIC_SHARE_API_ROUTES             — share-card link previews (above)
 //   /api/service-health                 — dashboard banner data; intentionally
 //                                          accessible so monitoring pollers
 //                                          and the future public status page
@@ -56,7 +70,7 @@ export function isLocalDevAuthBypassEnabled(
 export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
-  /^\/api(?:\/[^/]+)*\/share(?:\/.*)?$/,
+  ...PUBLIC_SHARE_API_ROUTES,
   "/api/service-health",
   "/api/health",
 ]);

@@ -30,6 +30,11 @@ if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
 from utils import ib_2fa_lock  # noqa: E402
+from api import db_http  # noqa: E402
+from db.service_health_sql import (  # noqa: E402
+    SERVICE_HEALTH_UPSERT_SQL,
+    service_health_upsert_args,
+)
 
 logger = logging.getLogger("radon.ib_gateway")
 
@@ -703,27 +708,26 @@ def _query_ib_dependent_error_services() -> List[str]:
     is currently ``state=error`` AND whose ``last_error`` looks like an IB
     outage. Anything else is left alone.
 
-    Uses lazy imports so this helper stays cheap to import in environments
-    without libsql / Turso credentials (e.g. unit-test runners that mock the
-    DB layer). Any read failure degrades to an empty list — auto-heal is a
-    nice-to-have, not a critical path.
+    Reads over the bounded hrana HTTP pipeline (``api.db_http``) — sync
+    libsql is banned in this process because its GIL-holding native calls
+    starve the event loop even from a worker thread. Any read failure
+    degrades to an empty list — auto-heal is a nice-to-have, not a
+    critical path.
     """
     try:
         # ``_SCRIPTS_DIR`` is already on sys.path (added at module import) so
-        # the flat ``db.client`` / ``watchdog.services`` shape works under
-        # both ``python -m scripts.api.server`` and pytest.
-        from db.client import get_db  # type: ignore[import-not-found]
+        # the flat ``watchdog.services`` shape works under both
+        # ``python -m scripts.api.server`` and pytest.
         from watchdog.services import requires_ib  # type: ignore[import-not-found]
     except ImportError as exc:
         logger.debug("auth heal: dependencies unavailable (%s); skipping query", exc)
         return []
 
     try:
-        db = get_db()
-        rows = db.execute(
+        rows = db_http.hrana_execute(
             "SELECT service, last_error FROM service_health WHERE state = ?",
             ("error",),
-        ).fetchall()
+        )
     except Exception as exc:  # noqa: BLE001 — best-effort
         logger.warning("auth heal: failed to query service_health: %s", exc)
         return []
@@ -743,23 +747,18 @@ def _query_ib_dependent_error_services() -> List[str]:
 async def _clear_service_health_error(service: str) -> None:
     """Write ``state=ok`` with ``last_error=NULL`` for one service.
 
-    Goes through the same ``record_service_health`` writer interface every
-    handler uses — no raw SQL — so the JSON serialization, timestamping,
-    and dual-write semantics stay in one place.
+    Executes the canonical upsert from ``db.service_health_sql`` — the same
+    statement ``record_service_health`` uses — over the bounded hrana HTTP
+    pipeline, so serialization and timestamping stay defined in one place
+    while this process never touches sync libsql (whose GIL-holding native
+    ``commit()`` made the old ``asyncio.to_thread`` wrapping a non-bound).
+    The hrana socket timeout is the real bound; ``to_thread`` keeps the
+    GIL-releasing network wait off the loop.
     """
-    try:
-        from db.writer import record_service_health  # type: ignore[import-not-found]
-    except ImportError as exc:
-        logger.debug("auth heal: writer unavailable (%s); cannot clear %s", exc, service)
-        return
-
-    # ``record_service_health`` is synchronous (libsql .execute / .commit).
-    # Run in a thread so a slow commit can't block the event loop.
     await asyncio.to_thread(
-        record_service_health,
-        service,
-        "ok",
-        error=None,
+        db_http.hrana_execute,
+        SERVICE_HEALTH_UPSERT_SQL,
+        service_health_upsert_args(service, "ok", error=None),
     )
 
 

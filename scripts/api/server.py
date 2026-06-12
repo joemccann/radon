@@ -38,6 +38,7 @@ if str(SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPTS_DIR))
 
 from api.ib_pool import IBPool
+from api import db_http
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
 from api.ib_gateway import (
     check_ib_gateway,
@@ -1686,9 +1687,31 @@ async def llm_token_index(days: int = Query(default=180, ge=1, le=3650)):
     ):
         return _llm_token_index_cache["data"]
 
+    # Bounded hrana read (db_http) — sync libsql is banned in this process
+    # (GIL-holding native calls starve the event loop even from a thread).
+    # `components` is intentionally omitted from the row shape so the chart
+    # payload stays light.
     try:
-        from db.writer import get_llm_token_index
-        rows = get_llm_token_index(limit_days=days)
+        raw_rows = await asyncio.to_thread(
+            db_http.hrana_execute,
+            """
+            SELECT date, index_value, raw_avg_usd, methodology_version
+            FROM llm_token_index
+            ORDER BY date DESC
+            LIMIT ?
+            """,
+            (int(days),),
+        )
+        rows = [
+            {
+                "date": row[0],
+                "index_value": float(row[1]),
+                "raw_avg_usd": float(row[2]),
+                "methodology_version": int(row[3]),
+            }
+            for row in raw_rows
+        ]
+        rows.reverse()  # ASC for chart consumption
     except Exception as exc:
         logger.warning("[llm-token-index] DB read failed: %s", exc)
         rows = []
@@ -2236,10 +2259,12 @@ async def cash_flows(
     rows: list[dict[str, Any]] = []
     db_error: Optional[str] = None
 
+    # Bounded hrana read (db_http) — sync libsql is banned in this process;
+    # this route runs on every /orders view, the exact hot path the 06-11
+    # wedge took down.
     try:
-        from db.client import get_db
-        db = get_db()
-        cursor = db.execute(
+        raw_rows = await asyncio.to_thread(
+            db_http.hrana_execute,
             """
             SELECT id, date, type, amount, currency, description, raw_type, synced_at
             FROM cash_flows
@@ -2248,7 +2273,7 @@ async def cash_flows(
             """,
             (cutoff_iso,),
         )
-        for row in cursor.fetchall():
+        for row in raw_rows:
             rows.append({
                 "id": row[0],
                 "date": row[1],
@@ -2296,7 +2321,7 @@ async def cash_flows(
     # ("Statement could not be generated"). When throttle is active we
     # surface the next_attempt_at so the operator knows when fresh data
     # will land instead of guessing.
-    sync_status = _load_cash_flow_sync_status()
+    sync_status = await asyncio.to_thread(_load_cash_flow_sync_status)
 
     return {
         "rows": rows,
@@ -2339,9 +2364,9 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
         "is_throttled": False,
     }
     try:
-        from db.client import get_db
-        db = get_db()
-        cursor = db.execute(
+        # Bounded hrana read; runs off-loop via asyncio.to_thread at the
+        # call site. Sync libsql is banned in this process.
+        rows = db_http.hrana_execute(
             """
             SELECT state, last_attempt_finished_at, last_error
             FROM service_health
@@ -2349,7 +2374,7 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
             """,
             ("cash-flow-sync",),
         )
-        row = cursor.fetchone()
+        row = rows[0] if rows else None
         if row is None:
             return payload
         state = row[0] or "unknown"

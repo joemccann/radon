@@ -234,13 +234,32 @@ class TestHealthLite:
             "port_listening": False,
         }
 
-    def test_lite_is_not_auth_exempt(self):
-        # Regression pin: /health/lite must NOT be auth-exempt, or it would be
-        # world-readable via Caddy /api/ib/health/lite. /health stays exempt
-        # (pure liveness). See feedback_health_endpoint_public_leak_and_trust_chokepoint.
+    def test_auth_exempt_paths_exact_pin(self):
+        # FULL set-equality pin, not membership checks: the perimeter is the
+        # set itself. Three incidents shipped with green CI because an exempt
+        # surface grew without review (world-callable /api/*, /health leaking
+        # IB account IDs via the Caddy /api/ib/* bypass). Any change to this
+        # set — adding OR removing — must update this test deliberately.
+        #
+        #   /health             — liveness probe; payload itself is
+        #                         trust-scoped (untrusted callers get
+        #                         {"status":"ok"} only)
+        #   /ws-ticket/validate — internal WS ticket validation
+        #   /docs, /openapi.json — FastAPI docs surface
+        #
+        # /health/lite must NEVER appear here — it would be world-readable
+        # via Caddy /api/ib/health/lite (loopback daemon is covered by the
+        # trusted-local bypass; public callers must get 401). See
+        # feedback_health_endpoint_public_leak_and_trust_chokepoint.
         from scripts.api.server import AUTH_EXEMPT_PATHS
+
+        assert AUTH_EXEMPT_PATHS == {
+            "/health",
+            "/ws-ticket/validate",
+            "/docs",
+            "/openapi.json",
+        }
         assert "/health/lite" not in AUTH_EXEMPT_PATHS
-        assert "/health" in AUTH_EXEMPT_PATHS
 
 
 class TestIbRecoveryHeartbeat:

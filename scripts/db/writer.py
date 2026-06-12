@@ -19,10 +19,15 @@ from typing import Any, Optional
 try:
     # When imported as `scripts.db.writer` from project root.
     from .client import get_db
+    from .service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
 except ImportError:  # pragma: no cover
     # When imported flat after sys.path.insert(scripts/) like the existing
     # services do (cta_sync_service.py et al).
     from db.client import get_db  # type: ignore[no-redef]
+    from db.service_health_sql import (  # type: ignore[no-redef]
+        SERVICE_HEALTH_UPSERT_SQL,
+        service_health_upsert_args,
+    )
 
 
 def ensure_no_replica_for_writers() -> None:
@@ -512,37 +517,6 @@ def record_llm_token_index(
     db.commit()
 
 
-def get_llm_token_index(limit_days: int = 180) -> list[dict[str, Any]]:
-    """Read the most recent N days of the LLM Token Index, sorted ASC.
-
-    Returns ``[{date, index_value, raw_avg_usd, methodology_version}]``.
-    `components` is intentionally omitted from the row shape so the chart
-    payload stays light; callers that need provenance should query the
-    table directly.
-    """
-    db = get_db()
-    rows = db.execute(
-        """
-        SELECT date, index_value, raw_avg_usd, methodology_version
-        FROM llm_token_index
-        ORDER BY date DESC
-        LIMIT ?
-        """,
-        (int(limit_days),),
-    ).fetchall()
-    out = [
-        {
-            "date": row[0],
-            "index_value": float(row[1]),
-            "raw_avg_usd": float(row[2]),
-            "methodology_version": int(row[3]),
-        }
-        for row in rows
-    ]
-    out.reverse()  # ASC for chart consumption
-    return out
-
-
 def get_llm_token_index_base_raw() -> Optional[float]:
     """Return the raw_avg_usd of the FIRST persisted row (earliest date).
 
@@ -566,26 +540,21 @@ def record_service_health(
     finished_at: Optional[str] = None,
     error: Optional[dict[str, Any]] = None,
 ) -> None:
-    """state ∈ {'ok', 'syncing', 'error', 'paused'}."""
+    """state ∈ {'ok', 'syncing', 'error', 'paused'}.
+
+    The statement + arg serialization live in ``db.service_health_sql`` so
+    the FastAPI heal path (which runs the same upsert over the bounded hrana
+    HTTP pipeline — sync libsql is banned in scripts/api) stays in lockstep.
+    """
     db = get_db()
     db.execute(
-        """
-        INSERT INTO service_health (service, state, last_attempt_started_at, last_attempt_finished_at, last_error, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(service) DO UPDATE SET
-          state                    = excluded.state,
-          last_attempt_started_at  = COALESCE(excluded.last_attempt_started_at, service_health.last_attempt_started_at),
-          last_attempt_finished_at = COALESCE(excluded.last_attempt_finished_at, service_health.last_attempt_finished_at),
-          last_error               = excluded.last_error,
-          updated_at               = excluded.updated_at
-        """,
-        (
+        SERVICE_HEALTH_UPSERT_SQL,
+        service_health_upsert_args(
             service,
             state,
-            started_at,
-            finished_at,
-            json.dumps(error) if error else None,
-            _now_iso(),
+            started_at=started_at,
+            finished_at=finished_at,
+            error=error,
         ),
     )
     db.commit()

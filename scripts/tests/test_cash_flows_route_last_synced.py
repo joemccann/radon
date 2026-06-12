@@ -46,7 +46,10 @@ def _split_statements(sql: str) -> list[str]:
 
 @pytest.fixture
 def app_with_inmem_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple]:
-    """FastAPI TestClient with `db.client.get_db` patched to in-mem SQLite.
+    """FastAPI TestClient with `api.db_http.hrana_execute` patched to in-mem
+    SQLite. The route reads Turso over the bounded hrana HTTP pipeline (sync
+    libsql is banned in the API process — DUR-09); the fake preserves the
+    rows-as-tuples contract.
 
     Auth bypass mirrors `test_api_flow_cache.py:app_client`: server.py
     auto-loads .env at import time so CLERK_JWKS_URL is set; we must
@@ -63,9 +66,12 @@ def app_with_inmem_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple]:
             conn.execute(stmt)
     conn.commit()
 
-    import db.client as client_mod
-    monkeypatch.setattr(client_mod, "_cached", conn, raising=False)
-    monkeypatch.setattr(client_mod, "get_db", lambda: conn)
+    import api.db_http as db_http_mod
+
+    def fake_hrana_execute(sql: str, args=(), timeout=None):
+        return conn.execute(sql, tuple(args)).fetchall()
+
+    monkeypatch.setattr(db_http_mod, "hrana_execute", fake_hrana_execute)
 
     from fastapi.testclient import TestClient
     from api import server

@@ -68,9 +68,78 @@ jobs:
       # applies `-m 'not integration'`, so the live MenthorQ suite is skipped.
       - run: python -m pytest scripts/tests scripts/api/tests
 
+  perimeter-smoke:
+    name: Perimeter smoke (next start + curl)
+    runs-on: ubuntu-latest
+    # First job in CI that runs `next build`; compile mode keeps it to a few
+    # minutes but budget for cold runner caches.
+    timeout-minutes: 12
+    env:
+      # Dummy-format Clerk keys: the publishable key must decode to a
+      # frontend-API domain ending in `$` (here base64("clerk.example.com$")).
+      # No Clerk network calls happen — an anonymous curl carries no session
+      # cookie, so the middleware 401s before any key verification.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
+      CLERK_SECRET_KEY: sk_test_radon_ci_perimeter_smoke_dummy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # Both bun projects, same as web-tests: next.config aliases @tools to
+      # the root lib/tools, so the build resolves modules from BOTH trees.
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      # Static half of the Edge-runtime guard: the no-restricted-syntax
+      # node:* ban on the middleware import graph (web/eslint.config.mjs).
+      # Scoped to the perimeter files so unrelated lint warnings can't block
+      # the gate; `next start` + curl below is the dynamic half.
+      - run: bunx eslint middleware.ts lib/apiContracts.ts
+        working-directory: web
+      # Locked build constraint: web/package.json `build` is
+      # `next build --experimental-build-mode=compile` (see web/CLAUDE.md).
+      - run: bun run build
+        working-directory: web
+      # Request-time perimeter assertions against the real production server.
+      # This is the only gate that catches the Edge-runtime crash class
+      # (node:* import in the middleware graph — tsc/vitest/build all pass;
+      # production 500s on EVERY route at request time, 2026-05-15) and
+      # default-deny regressions (world-callable /api/*, 60fcca8 era).
+      - name: next start + perimeter curls
+        working-directory: web
+        run: |
+          bunx next start -p 3000 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:3000/sign-in && break
+            sleep 1
+          done
+
+          fail=0
+          assert_status() {
+            path="$1"; want="$2"
+            got=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000${path}")
+            if [ "$got" = "$want" ]; then
+              echo "PASS ${path} -> ${got}"
+            else
+              echo "FAIL ${path} -> ${got} (expected ${want})"
+              fail=1
+            fi
+          }
+
+          # Public route boots and renders (a middleware crash = 500 here).
+          assert_status /sign-in 200
+          # Middleware-gated API is denied anonymously — exactly 401, not
+          # merely non-500.
+          assert_status /api/portfolio 401
+          # Unknown share scope stays default-deny (the /share allowlist is
+          # explicit; see web/tests/middleware-share-allowlist.test.ts).
+          assert_status /api/journal/share 401
+          exit $fail
+
   deploy:
     name: Deploy to VPS
-    needs: [web-tests, py-tests]
+    needs: [web-tests, py-tests, perimeter-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:

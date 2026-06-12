@@ -14,6 +14,23 @@ multi-writer hosts (feedback_libsql_replica_one_writer.md). The safe
 default is a direct cloud connection; opening a replica requires an
 explicit `RADON_DB_USE_REPLICA=1` opt-in and logs a loud warning. The
 legacy `RADON_DB_NO_REPLICA=1` kill switch still forces the direct path.
+
+TIMEOUT REALITY (DUR-09, libsql_experimental 0.0.55 — the version pinned
+on prod): `libsql.connect()` exposes NO connect/execute/commit timeout
+(signature: database, isolation_level, check_same_thread, uri, sync_url,
+sync_interval, auth_token, encryption_key, autocommit), and the native
+calls hold the GIL while blocked — so a thread-timeout wrapper around
+them is a lie (the "timed-out" call keeps starving the process). DO NOT
+add one. The bound for the subprocess/daemon consumers of this module
+must come from process-level supervision instead:
+  - subprocess scans: the FastAPI `run_script` timeout already kills them
+  - systemd services/oneshots (monitor daemon, watchdog, timers): set
+    `RuntimeMaxSec=` on the radon-cloud unit (precedent: 2fbc73f /
+    TimeoutStartSec=60 on radon-ib-watchdog). Recommended: RuntimeMaxSec
+    sized to ~3x the unit's normal cycle for oneshots/timers.
+The FastAPI process must NEVER import this module at all — it uses the
+bounded HTTP pipeline in scripts/api/db_http.py (enforced by the
+test_no_sync_libsql_in_api.py lint).
 """
 
 from __future__ import annotations

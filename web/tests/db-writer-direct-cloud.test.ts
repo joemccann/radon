@@ -3,6 +3,11 @@
 // RADON_DB_USE_REPLICA=1, and the legacy RADON_DB_NO_REPLICA kill switch
 // still forces it off. Companion to db-direct-cloud.test.ts.
 //
+// DUR-09 — the direct-cloud config rewrites libsql:// to https:// (HTTP
+// transport, the only one that honours a custom fetch) and installs the
+// bounded fetch so every request carries a real timeout. See
+// db-writer-bounds.test.ts for the retry/circuit behavior.
+//
 // NOTE: scripts/ resolves @libsql/client from the ROOT node_modules (web has
 // its own copy), so vi.mock on the bare specifier cannot intercept it. We
 // pin the decision through the exported pure resolver instead — getDb() is a
@@ -37,8 +42,9 @@ describe("scripts/db/writer.js direct-cloud default", () => {
     const config = writer.resolveClientConfig();
 
     expect(config).toEqual({
-      url: "libsql://example.turso.io",
+      url: "https://example.turso.io",
       authToken: "token",
+      fetch: expect.any(Function),
     });
   });
 
@@ -70,8 +76,9 @@ describe("scripts/db/writer.js direct-cloud default", () => {
     const config = writer.resolveClientConfig();
 
     expect(config).toEqual({
-      url: "libsql://example.turso.io",
+      url: "https://example.turso.io",
       authToken: "token",
+      fetch: expect.any(Function),
     });
   });
 
@@ -82,8 +89,9 @@ describe("scripts/db/writer.js direct-cloud default", () => {
     const config = writer.resolveClientConfig();
 
     expect(config).toEqual({
-      url: "libsql://example.turso.io",
+      url: "https://example.turso.io",
       authToken: "token",
+      fetch: expect.any(Function),
     });
   });
 });
