@@ -20,6 +20,20 @@ signal that isn't this specific degradation pattern (e.g. awaiting
 2FA — which the 2FA backoff in scripts/api/ib_gateway.py already
 handles and is NOT this bug).
 
+DUR-10 hardening:
+  - SECOND SENSOR: when /health is unreachable (radon-api down, deploy
+    window) the watchdog probes the gateway DIRECTLY — bounded TCP
+    connect + IB API handshake — instead of going blind. The fallback
+    may only CONTINUE an existing api-hang episode (the handshake
+    itself must show upstream-dead); "api unreachable" alone can never
+    mint a new restart trigger, because every restart costs a 2FA push.
+  - QUIET WINDOWS around the gateway's own scheduled nightly restart,
+    when the relogin transiently looks exactly like an api-hang (see
+    ``quiet_window_active``).
+  - service_health heartbeats go over the bounded stdlib hrana HTTP
+    transport (``scripts/db/hrana_http``), never sync libsql.
+  - one per-step duration summary line per cycle (``CycleTimings``).
+
 See ``docs/ib-gateway-healthcheck-hardening.md`` for the design.
 """
 
@@ -30,13 +44,17 @@ import json
 import logging
 import os
 import signal
+import socket
+import struct
 import subprocess
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
+from contextlib import contextmanager
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, TypeVar
 
@@ -89,6 +107,47 @@ CYCLE_HARD_TIMEOUT_SECS = 45
 SERVICE_HEALTH_WRITE_TIMEOUT_SECS = 8.0
 LOCK_OP_TIMEOUT_SECS = 5.0
 
+# --- DUR-10: direct gateway probe (second sensor) ----------------------------
+
+# Host/port resolution matches the relay (ib_realtime_server.js) and FastAPI
+# (scripts/api/ib_gateway.py): IB_GATEWAY_HOST / IB_GATEWAY_PORT, defaulting
+# to localhost:4001 (on the VPS the container binds 4001 to loopback).
+GATEWAY_PROBE_CONNECT_TIMEOUT_SECS = 3.0
+GATEWAY_PROBE_HANDSHAKE_TIMEOUT_SECS = 5.0
+
+# Verdicts from probe_gateway_direct.
+GATEWAY_ALIVE = "alive"      # TCP + IB API handshake answered
+GATEWAY_WEDGED = "wedged"    # TCP accepted but the API never answered — upstream-dead
+GATEWAY_DEAD = "dead"        # TCP refused — port down, Docker restart policy owns it
+GATEWAY_UNKNOWN = "unknown"  # connect timeout / network ambiguity — can't tell
+
+# The isolated health daemon (scripts/health_service, :8330). Used ONLY to
+# attribute api-down vs box-down for the service_health message — NEVER for
+# gateway state: its ib-gateway probe is TCP-only, which is exactly the
+# port-listening-but-upstream-dead false-healthy this watchdog exists to catch.
+HEALTH_DAEMON_STATUS_URL = os.environ.get(
+    "RADON_HEALTH_STATUS_URL", "http://127.0.0.1:8330/status"
+)
+HEALTH_DAEMON_TIMEOUT_SECS = 3.0
+
+# --- DUR-10: scheduled-restart quiet windows ----------------------------------
+
+# After the gateway's own IBC AutoRestartTime fires, the relogin transiently
+# looks EXACTLY like an api-hang (socat keeps 4001 listening, upstream dead)
+# for up to a few minutes. Counting those cycles is how the watchdog ended up
+# force-restarting a mid-relogin gateway at ~23:51 UTC nightly. Two windows:
+#   23:40-00:15  the CURRENT IBC default AutoRestartTime (11:45 PM session-
+#                local = 23:45 UTC) plus the 00:00 UTC session rollover
+#                re-detections. Remove this entry (via the env override)
+#                once radon-cloud pending/dur-08-compose.patch — which moves
+#                the restart to 09:05 UTC — is applied and clean nights are
+#                observed.
+#   09:00-09:30  the pending dur-08 patch's AUTO_RESTART_TIME=09:05 AM
+#                (= 09:05 UTC), pre-armed so the operator can apply the
+#                patch without a watchdog race.
+QUIET_WINDOWS_ENV = "RADON_GW_RESTART_QUIET_WINDOWS_UTC"
+DEFAULT_QUIET_WINDOWS_UTC = "23:40-00:15,09:00-09:30"
+
 
 # --- Bounded sub-step execution ---------------------------------------------
 
@@ -126,6 +185,47 @@ def _run_bounded(label: str, timeout: float, fn: Callable[[], _T]) -> _T:
     if error:
         raise error[0]
     return result[0]
+
+
+# --- Per-step cycle timing (DUR-10) -------------------------------------------
+
+
+class CycleTimings:
+    """Collects per-step wall-clock durations for the single summary line
+    each cycle logs — the evidence trail for hunting residual hangs."""
+
+    def __init__(self) -> None:
+        self._steps: dict[str, float] = {}
+        self._started = time.monotonic()
+
+    @contextmanager
+    def step(self, label: str):
+        t0 = time.monotonic()
+        try:
+            yield
+        finally:
+            self._steps[label] = self._steps.get(label, 0.0) + (time.monotonic() - t0)
+
+    def summary(self) -> str:
+        parts = " ".join(f"{k}={v:.2f}s" for k, v in self._steps.items())
+        total = time.monotonic() - self._started
+        return f"{parts} total={total:.2f}s".strip()
+
+
+# The cycle is a single-threaded oneshot; a module-level current-timings slot
+# lets deep call sites (record_service_health, forensics) attribute their
+# durations without threading a parameter through every signature.
+_ACTIVE_TIMINGS: Optional[CycleTimings] = None
+
+
+@contextmanager
+def _timed(label: str):
+    timings = _ACTIVE_TIMINGS
+    if timings is None:
+        yield
+    else:
+        with timings.step(label):
+            yield
 
 
 # --- /health response handling ----------------------------------------------
@@ -187,6 +287,130 @@ def fetch_health(url: str, timeout: float) -> Optional[GatewayState]:
     if state is None:
         LOG.warning("health payload missing ib_gateway")
     return state
+
+
+# --- Second sensor: direct gateway probe (DUR-10) -----------------------------
+
+# The IB API handshake prefix + supported-version range, exactly what ibapi
+# clients send first. Any reply at all proves the API thread is dispatching.
+_IB_API_SIGNATURE = b"API\x00"
+_IB_API_VERSION_RANGE = b"v100..187"
+
+
+def probe_gateway_direct(
+    host: Optional[str] = None,
+    port: Optional[int] = None,
+    *,
+    connect_timeout: float = GATEWAY_PROBE_CONNECT_TIMEOUT_SECS,
+    handshake_timeout: float = GATEWAY_PROBE_HANDSHAKE_TIMEOUT_SECS,
+) -> str:
+    """Bounded direct gateway probe: TCP connect plus an IB API handshake
+    (server-version exchange). All stdlib; every socket op carries a timeout.
+
+    A bare TCP connect is NOT enough — socat keeps 4001 listening while the
+    JVM's API thread is wedged, which is the precise false-healthy this
+    watchdog exists to catch. The handshake separates the cases:
+
+      GATEWAY_ALIVE    server answered the version exchange
+      GATEWAY_WEDGED   TCP accepted but the API never answered (recv timeout)
+                       or the upstream closed without a handshake (socat
+                       accepting while the JVM socket is gone)
+      GATEWAY_DEAD     TCP refused — port down, Docker restart policy owns it
+      GATEWAY_UNKNOWN  connect timeout / other network ambiguity
+    """
+    host = host or os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
+    port = port or int(os.environ.get("IB_GATEWAY_PORT", "4001"))
+    try:
+        sock = socket.create_connection((host, port), timeout=connect_timeout)
+    except ConnectionRefusedError:
+        return GATEWAY_DEAD
+    except OSError as exc:
+        LOG.warning("direct gateway probe: connect to %s:%s failed: %s", host, port, exc)
+        return GATEWAY_UNKNOWN
+    try:
+        sock.settimeout(handshake_timeout)
+        sock.sendall(
+            _IB_API_SIGNATURE
+            + struct.pack(">I", len(_IB_API_VERSION_RANGE))
+            + _IB_API_VERSION_RANGE
+        )
+        data = sock.recv(4096)
+        return GATEWAY_ALIVE if data else GATEWAY_WEDGED
+    except (socket.timeout, TimeoutError):
+        return GATEWAY_WEDGED
+    except ConnectionResetError:
+        # socat resets the client when its upstream connect to the JVM fails.
+        return GATEWAY_WEDGED
+    except OSError as exc:
+        LOG.warning("direct gateway probe: handshake error: %s", exc)
+        return GATEWAY_UNKNOWN
+    finally:
+        sock.close()
+
+
+def attribute_api_down(
+    status_url: str = HEALTH_DAEMON_STATUS_URL,
+    timeout: float = HEALTH_DAEMON_TIMEOUT_SECS,
+) -> str:
+    """Ask the isolated health daemon (:8330) WHY /health is unreachable —
+    attribution for the operator only. Deliberately NEVER consulted for
+    gateway state (its ib-gateway probe is TCP-only)."""
+    try:
+        with urllib.request.urlopen(status_url, timeout=timeout) as resp:
+            payload = json.loads(resp.read(1_048_576))
+    except Exception:  # noqa: BLE001 — attribution is best-effort
+        return "attribution_unavailable"
+    probe = (payload.get("probes") or {}).get("radon-api") or {}
+    state = probe.get("state")
+    if state == "down":
+        return "radon_api_down"
+    if state == "up":
+        return "radon_api_probe_up"  # race: api came back between our probes
+    return "attribution_unavailable"
+
+
+# --- Scheduled-restart quiet windows (DUR-10) ----------------------------------
+
+
+def _parse_quiet_windows(spec: str) -> list[tuple[int, int]]:
+    """Parse "HH:MM-HH:MM[,HH:MM-HH:MM...]" (UTC) into minute-of-day pairs.
+    Bad entries are skipped with a warning — a typo must never disable the
+    watchdog, only the window."""
+    windows: list[tuple[int, int]] = []
+    for entry in spec.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            start_text, end_text = entry.split("-")
+            sh, sm = (int(p) for p in start_text.strip().split(":"))
+            eh, em = (int(p) for p in end_text.strip().split(":"))
+            if not (0 <= sh < 24 and 0 <= eh < 24 and 0 <= sm < 60 and 0 <= em < 60):
+                raise ValueError(entry)
+            windows.append((sh * 60 + sm, eh * 60 + em))
+        except ValueError:
+            LOG.warning("ignoring malformed quiet-window entry %r", entry)
+    return windows
+
+
+def quiet_window_active(now: Optional[datetime] = None) -> bool:
+    """True while inside a scheduled-gateway-restart quiet window (UTC).
+
+    During a window, api-hang/stuck-2FA detections are logged (and forensics
+    may fire) but no counter advances toward restart and the watchdog can
+    initiate no 2FA push — the gateway's own relogin is in progress and a
+    forced restart would stack pushes. Start inclusive, end exclusive;
+    windows may wrap midnight (23:40-00:15)."""
+    spec = os.environ.get(QUIET_WINDOWS_ENV, DEFAULT_QUIET_WINDOWS_UTC)
+    now = now if now is not None else datetime.now(timezone.utc)
+    minute = now.hour * 60 + now.minute
+    for start, end in _parse_quiet_windows(spec):
+        if start <= end:
+            if start <= minute < end:
+                return True
+        elif minute >= start or minute < end:  # wraps midnight
+            return True
+    return False
 
 
 # --- Degradation classification ---------------------------------------------
@@ -321,17 +545,20 @@ def _write_service_health(
     state_label: str,
     error_message: Optional[str],
 ) -> None:
-    """Perform the actual Turso write. Module-level (not a closure) so tests
-    can patch it directly and so the lazy import that keeps the script usable
-    in dev environments without Radon's full dependency surface is isolated
-    from the bounding logic in ``record_service_health``."""
-    from scripts.db.writer import record_service_health as _write
+    """Perform the actual Turso write over the bounded stdlib hrana HTTP
+    transport (``scripts/db/hrana_http``) — NEVER sync libsql: its native
+    calls have no timeout and were the suspected source of this watchdog's
+    post-Connection-refused 60s SIGTERM kills (148 timeout results in 7
+    days). Module-level so tests can patch it directly; the import is lazy
+    so dev environments without creds stay importable."""
+    try:
+        from db.hrana_http import write_service_health_http
+    except ImportError:
+        from scripts.db.hrana_http import write_service_health_http
 
-    _write(
+    write_service_health_http(
         "ib-watchdog",
         state_label,
-        started_at=None,
-        finished_at=None,  # writer fills timestamp
         error={"message": error_message} if error_message else None,
     )
 
@@ -342,25 +569,28 @@ def record_service_health(
 ) -> None:
     """Best-effort heartbeat into Turso so the banner can show our state.
 
-    The write goes through ``_run_bounded`` because libsql's commit() makes a
-    synchronous network call to Turso with NO native timeout — a slow or
-    unreachable backend was the proven cause of the watchdog hanging for 6+
-    hours. On timeout we skip the heartbeat for this cycle; the row is
-    best-effort by contract. A missing writer (dev environments) is also
-    tolerated.
+    The hrana transport carries a real 4s socket timeout; ``_run_bounded``
+    stays as belt-and-suspenders (urllib's timeout is per-socket-op, not
+    total-duration). On timeout we skip the heartbeat for this cycle; the
+    row is best-effort by contract. Missing creds (dev environments) are
+    tolerated quietly.
     """
     try:
-        _run_bounded(
-            "service-health-write",
-            SERVICE_HEALTH_WRITE_TIMEOUT_SECS,
-            lambda: _write_service_health(state_label, error_message),
-        )
+        with _timed("health_write"):
+            _run_bounded(
+                "service-health-write",
+                SERVICE_HEALTH_WRITE_TIMEOUT_SECS,
+                lambda: _write_service_health(state_label, error_message),
+            )
     except _SubStepTimeout as exc:
         LOG.warning("service_health write abandoned (%s); continuing", exc)
     except ImportError:
         LOG.debug("service_health writer not available in this environment")
     except Exception as exc:  # pragma: no cover — never crash the watchdog
-        LOG.warning("service_health write failed: %s", exc)
+        if "not configured" in str(exc):
+            LOG.debug("service_health write skipped: %s", exc)
+        else:
+            LOG.warning("service_health write failed: %s", exc)
 
 
 # --- Bounded 2FA-lock access ------------------------------------------------
@@ -425,6 +655,7 @@ def _handle_stuck_awaiting_2fa(
     dry_run: bool,
     clock: callable,
     threshold: int = DEFAULT_STUCK_2FA_THRESHOLD,
+    quiet: bool = False,
 ) -> "WatchdogState":
     """Increment the stuck-2FA counter and, when threshold is hit, fire a
     fresh push by restarting the IB Gateway unit. Respects the cross-process
@@ -432,6 +663,21 @@ def _handle_stuck_awaiting_2fa(
     pattern is what motivated the lock in the first place (see
     `feedback_2fa_push_stacking.md`).
     """
+    if quiet:
+        # Scheduled-restart quiet window: the gateway's own relogin may be
+        # parked at a transient 2FA-ish state. The watchdog must initiate
+        # NO push here — freeze the counter (don't reset: post-window the
+        # next cycle resumes from where we were).
+        LOG.warning(
+            "stuck-2FA signature during scheduled-restart quiet window — "
+            "freezing counter at %s, no push",
+            state.stuck_2fa_count,
+        )
+        state.last_outcome = "quiet_window:stuck_2fa_frozen"
+        save_state(state_path, state)
+        record_service_health("ok")
+        return state
+
     state.stuck_2fa_count += 1
     LOG.warning(
         "IB Gateway stuck awaiting 2FA (cycle %s/%s, no push in flight)",
@@ -513,99 +759,162 @@ def _capture_hang_forensics() -> None:
     try:
         import jvm_forensics
 
-        jvm_forensics.capture_jvm_forensics(budget_secs=FORENSICS_BUDGET_SECS)
+        with _timed("forensics"):
+            jvm_forensics.capture_jvm_forensics(budget_secs=FORENSICS_BUDGET_SECS)
     except Exception as exc:  # noqa: BLE001 — forensics never block the ladder
         LOG.warning("jvm forensic capture failed (non-fatal): %s", exc)
 
 
-# --- Main cycle -------------------------------------------------------------
+# --- Fallback path: /health unreachable (DUR-10 second sensor) ----------------
 
 
-def run_cycle(
+def _handle_primary_sensor_down(
     *,
-    health_url: str = DEFAULT_HEALTH_URL,
-    health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECS,
-    state_path: Path = DEFAULT_STATE_PATH,
-    restart_unit: str = DEFAULT_RESTART_UNIT,
-    threshold: int = DEFAULT_THRESHOLD_CYCLES,
-    dry_run: bool = False,
-    clock: callable = time.time,
-) -> WatchdogState:
-    """Execute one cycle. Returns the final state for inspection / testing.
-
-    Kept as a pure-ish function (no top-level side effects beyond
-    the dependencies it accepts) so tests can drive it deterministically.
+    state: "WatchdogState",
+    state_path: Path,
+    restart_unit: str,
+    threshold: int,
+    dry_run: bool,
+    clock: callable,
+    quiet: bool,
+) -> "WatchdogState":
+    """/health is unreachable — probe the gateway DIRECTLY rather than going
+    blind. Deploys produce Connection refused routinely, so this path may
+    only CONTINUE an existing api-hang episode (and only when the handshake
+    itself shows upstream-dead); it never starts one.
     """
-    state = load_state(state_path)
+    with _timed("direct_probe"):
+        verdict = probe_gateway_direct()
+        attribution = attribute_api_down()
+    LOG.warning(
+        "primary sensor (/health) unreachable — direct gateway probe=%s "
+        "attribution=%s degraded_count=%s",
+        verdict,
+        attribution,
+        state.degraded_count,
+    )
+    # Without /health we can't see auth_state; never age the stuck-2FA
+    # counter across an api outage (pre-DUR-10 behavior preserved).
+    state.stuck_2fa_count = 0
 
-    health = fetch_health(health_url, health_timeout)
-    if health is None:
-        # Can't tell — record but don't act. Keeps the watchdog from
-        # restarting the gateway when FastAPI itself is the broken thing.
-        # Reset stuck_2fa_count too: we have no evidence the 2FA prompt
-        # is still pending, so don't let the counter age across an outage.
-        state.last_outcome = "probe_unreachable"
-        state.stuck_2fa_count = 0
-        save_state(state_path, state)
-        record_service_health("ok", error_message=None)
-        return state
-
-    if not is_api_hang(health):
-        # api-hang counter resets unconditionally — it only counts the
-        # `upstream_dead with authenticated auth_state` pattern, and
-        # we're not seeing that.
-        if state.degraded_count > 0:
+    if verdict == GATEWAY_ALIVE:
+        if state.degraded_count:
             LOG.info(
-                "gateway no longer api-degraded "
-                "(service_state=%s auth_state=%s) — resetting counter from %s",
-                health.service_state,
-                health.auth_state,
+                "direct handshake answered — clearing api-hang episode (was %s)",
                 state.degraded_count,
             )
         state.degraded_count = 0
-
-        # Stuck-awaiting-2FA branch: separate failure mode from api-hang.
-        if is_stuck_awaiting_2fa(health):
-            return _handle_stuck_awaiting_2fa(
-                state=state,
-                state_path=state_path,
-                restart_unit=restart_unit,
-                dry_run=dry_run,
-                clock=clock,
-                threshold=threshold,
-            )
-
-        # If we're still in awaiting_2fa but a push lock holder OR a
-        # scheduled retry is active, recovery is in flight — freeze the
-        # stuck counter where it is. Don't reset (so the next cycle after
-        # the lock clears acts promptly) and don't increment (so the user
-        # has time to approve the in-flight push without us re-firing).
-        if health.auth_state == "awaiting_2fa":
-            state.last_outcome = (
-                f"awaiting_2fa_recovery_in_flight:"
-                f"push_lock={health.push_lock_active}"
-                f":next_attempt={int(health.next_attempt_in_secs)}s"
-            )
-            save_state(state_path, state)
-            record_service_health("ok")
-            return state
-
-        # Genuinely healthy — clear both counters.
-        state.stuck_2fa_count = 0
-        state.last_outcome = f"healthy:{health.service_state}/{health.auth_state}"
+        state.last_outcome = f"probe_unreachable:gateway_alive:{attribution}"
         save_state(state_path, state)
-        record_service_health("ok")
+        record_service_health(
+            "ok",
+            error_message=(
+                "primary sensor broken: radon-api /health unreachable "
+                f"({attribution}); direct gateway handshake OK"
+            ),
+        )
         return state
 
-    # API hang detected — increment.
+    if verdict == GATEWAY_DEAD:
+        # Port down — same rule as is_api_hang: Docker's restart policy
+        # owns recovery; an episode predicated on port-listening is over.
+        state.degraded_count = 0
+        state.last_outcome = f"probe_unreachable:gateway_port_down:{attribution}"
+        save_state(state_path, state)
+        record_service_health(
+            "ok",
+            error_message=(
+                "primary sensor broken: radon-api /health unreachable "
+                f"({attribution}); gateway port not listening (Docker restart "
+                "policy owns recovery)"
+            ),
+        )
+        return state
+
+    if verdict == GATEWAY_WEDGED and state.degraded_count > 0:
+        # The handshake itself shows upstream-dead — the existing episode
+        # continues through the normal ladder (incl. quiet-window gate).
+        return _advance_api_hang(
+            state=state,
+            state_path=state_path,
+            restart_unit=restart_unit,
+            threshold=threshold,
+            dry_run=dry_run,
+            clock=clock,
+            quiet=quiet,
+            evidence=f"direct handshake wedged ({attribution})",
+        )
+
+    if verdict == GATEWAY_WEDGED:
+        # Wedged handshake but NO existing episode: refuse to mint a new
+        # restart trigger while blind — every restart costs a 2FA push.
+        LOG.warning(
+            "direct handshake wedged but no existing api-hang episode — "
+            "not starting one while /health is unreachable"
+        )
+        state.last_outcome = f"probe_unreachable:gateway_wedged_no_episode:{attribution}"
+    else:  # GATEWAY_UNKNOWN — can't tell; freeze everything.
+        state.last_outcome = f"probe_unreachable:gateway_unknown:{attribution}"
+
+    save_state(state_path, state)
+    record_service_health(
+        "ok",
+        error_message=(
+            "primary sensor broken: radon-api /health unreachable "
+            f"({attribution}); direct gateway probe={verdict}"
+        ),
+    )
+    return state
+
+
+# --- Api-hang ladder ----------------------------------------------------------
+
+
+def _advance_api_hang(
+    *,
+    state: "WatchdogState",
+    state_path: Path,
+    restart_unit: str,
+    threshold: int,
+    dry_run: bool,
+    clock: callable,
+    quiet: bool,
+    evidence: str,
+) -> "WatchdogState":
+    """One confirmed api-hang observation: advance the counter and, at
+    threshold, restart the gateway under the cross-process 2FA push lock.
+    During a scheduled-restart quiet window the observation is logged (and
+    forensics may fire) but the counter freezes and no push can start."""
+    if quiet:
+        LOG.warning(
+            "api hang observed (%s) during scheduled-restart quiet window — "
+            "counter frozen at %s, no restart",
+            evidence,
+            state.degraded_count,
+        )
+        # Capture evidence once per quiet episode: a hang seen here has no
+        # 0 -> 1 transition to hook, so key off the previous outcome.
+        if state.degraded_count == 0 and not state.last_outcome.startswith(
+            "quiet_window"
+        ):
+            _capture_hang_forensics()
+        state.last_outcome = "quiet_window:api_hang_observed"
+        save_state(state_path, state)
+        record_service_health(
+            "ok",
+            error_message=(
+                "api hang observed during scheduled-restart quiet window; "
+                "suppressed (gateway's own restart in progress)"
+            ),
+        )
+        return state
+
     state.degraded_count += 1
     LOG.warning(
-        "api hang detected (cycle %s/%s) — port=%s upstream_dead=%s auth=%s",
+        "api hang detected (cycle %s/%s) — %s",
         state.degraded_count,
         threshold,
-        health.port_listening,
-        health.upstream_dead,
-        health.auth_state,
+        evidence,
     )
 
     # DUR-08: on the 0 -> 1 transition (new hang episode), capture JVM
@@ -627,7 +936,8 @@ def run_cycle(
     # mid-2FA-push, restarting here would stack a second push on top —
     # the failure pattern that motivated this lock. Skip this cycle and
     # let the FastAPI path's push resolve first.
-    existing_lock = _check_2fa_push_lock_bounded(now=clock())
+    with _timed("lock"):
+        existing_lock = _check_2fa_push_lock_bounded(now=clock())
     if existing_lock is not None and existing_lock.holder != WATCHDOG_LOCK_HOLDER:
         LOG.warning(
             "api hang sustained %s cycles but 2FA push lock held by %r "
@@ -654,10 +964,11 @@ def run_cycle(
 
     # Take the lock BEFORE issuing the restart. If acquire fails (extremely
     # rare race), treat it the same as "another holder owns it" and skip.
-    acquired, lock_now = _acquire_2fa_push_lock_bounded(
-        now=clock(),
-        reason=f"api hang sustained {state.degraded_count} cycles",
-    )
+    with _timed("lock"):
+        acquired, lock_now = _acquire_2fa_push_lock_bounded(
+            now=clock(),
+            reason=f"api hang sustained {state.degraded_count} cycles",
+        )
     if not acquired:
         LOG.warning(
             "2FA push lock raced: now held by %r — refusing restart",
@@ -673,13 +984,14 @@ def run_cycle(
         state.degraded_count,
         restart_unit,
     )
-    ok = trigger_restart(restart_unit, dry_run=dry_run)
+    with _timed("restart"):
+        ok = trigger_restart(restart_unit, dry_run=dry_run)
     state.last_restart_at = clock()
     state.degraded_count = 0  # Reset; let the next cycle observe recovery
     state.last_outcome = f"restarted:{'ok' if ok else 'fail'}"
     save_state(state_path, state)
     record_service_health(
-        "error" if ok else "error",
+        "error",
         error_message=(
             f"triggered {restart_unit} restart after {threshold} cycles of api hang"
             if ok
@@ -687,6 +999,140 @@ def run_cycle(
         ),
     )
     return state
+
+
+# --- Main cycle -------------------------------------------------------------
+
+
+def run_cycle(
+    *,
+    health_url: str = DEFAULT_HEALTH_URL,
+    health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECS,
+    state_path: Path = DEFAULT_STATE_PATH,
+    restart_unit: str = DEFAULT_RESTART_UNIT,
+    threshold: int = DEFAULT_THRESHOLD_CYCLES,
+    dry_run: bool = False,
+    clock: callable = time.time,
+    utcnow: Optional[Callable[[], datetime]] = None,
+) -> WatchdogState:
+    """Execute one cycle. Returns the final state for inspection / testing.
+
+    Wraps the real work in :class:`CycleTimings` so every cycle — success or
+    failure — ends with exactly one per-step duration summary line.
+    """
+    global _ACTIVE_TIMINGS
+    timings = CycleTimings()
+    _ACTIVE_TIMINGS = timings
+    outcome = "crashed"
+    try:
+        state = _run_cycle_steps(
+            health_url=health_url,
+            health_timeout=health_timeout,
+            state_path=state_path,
+            restart_unit=restart_unit,
+            threshold=threshold,
+            dry_run=dry_run,
+            clock=clock,
+            utcnow=utcnow,
+        )
+        outcome = state.last_outcome
+        return state
+    finally:
+        _ACTIVE_TIMINGS = None
+        LOG.info("cycle steps: %s outcome=%s", timings.summary(), outcome)
+
+
+def _run_cycle_steps(
+    *,
+    health_url: str,
+    health_timeout: float,
+    state_path: Path,
+    restart_unit: str,
+    threshold: int,
+    dry_run: bool,
+    clock: callable,
+    utcnow: Optional[Callable[[], datetime]],
+) -> WatchdogState:
+    state = load_state(state_path)
+    quiet = quiet_window_active((utcnow or (lambda: datetime.now(timezone.utc)))())
+
+    with _timed("probe"):
+        health = fetch_health(health_url, health_timeout)
+    if health is None:
+        # Primary sensor down — fall back to the direct gateway probe
+        # instead of going blind (DUR-10).
+        return _handle_primary_sensor_down(
+            state=state,
+            state_path=state_path,
+            restart_unit=restart_unit,
+            threshold=threshold,
+            dry_run=dry_run,
+            clock=clock,
+            quiet=quiet,
+        )
+
+    if not is_api_hang(health):
+        # api-hang counter resets unconditionally — it only counts the
+        # `upstream_dead with authenticated auth_state` pattern, and
+        # we're not seeing that.
+        if state.degraded_count > 0:
+            LOG.info(
+                "gateway no longer api-degraded "
+                "(service_state=%s auth_state=%s) — resetting counter from %s",
+                health.service_state,
+                health.auth_state,
+                state.degraded_count,
+            )
+        state.degraded_count = 0
+
+        # Stuck-awaiting-2FA branch: separate failure mode from api-hang.
+        if is_stuck_awaiting_2fa(health):
+            return _handle_stuck_awaiting_2fa(
+                state=state,
+                state_path=state_path,
+                restart_unit=restart_unit,
+                dry_run=dry_run,
+                clock=clock,
+                threshold=threshold,
+                quiet=quiet,
+            )
+
+        # If we're still in awaiting_2fa but a push lock holder OR a
+        # scheduled retry is active, recovery is in flight — freeze the
+        # stuck counter where it is. Don't reset (so the next cycle after
+        # the lock clears acts promptly) and don't increment (so the user
+        # has time to approve the in-flight push without us re-firing).
+        if health.auth_state == "awaiting_2fa":
+            state.last_outcome = (
+                f"awaiting_2fa_recovery_in_flight:"
+                f"push_lock={health.push_lock_active}"
+                f":next_attempt={int(health.next_attempt_in_secs)}s"
+            )
+            save_state(state_path, state)
+            record_service_health("ok")
+            return state
+
+        # Genuinely healthy — clear both counters.
+        state.stuck_2fa_count = 0
+        state.last_outcome = f"healthy:{health.service_state}/{health.auth_state}"
+        save_state(state_path, state)
+        record_service_health("ok")
+        return state
+
+    # API hang detected — advance the ladder (quiet-window aware).
+    return _advance_api_hang(
+        state=state,
+        state_path=state_path,
+        restart_unit=restart_unit,
+        threshold=threshold,
+        dry_run=dry_run,
+        clock=clock,
+        quiet=quiet,
+        evidence=(
+            f"port={health.port_listening} upstream_dead={health.upstream_dead} "
+            f"auth={health.auth_state}"
+        ),
+    )
 
 
 def _parse_args(argv: list[str]) -> argparse.Namespace:

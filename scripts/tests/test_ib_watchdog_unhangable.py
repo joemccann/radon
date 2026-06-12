@@ -98,6 +98,8 @@ class TestProbePathNeverHangs:
 
         with (
             patch("ib_watchdog.fetch_health", side_effect=fake_fetch),
+            patch("ib_watchdog.probe_gateway_direct", return_value="unknown"),
+            patch("ib_watchdog.attribute_api_down", return_value="attribution_unavailable"),
             patch("ib_watchdog._write_service_health", side_effect=hanging_write),
             patch.object(ib_watchdog, "SERVICE_HEALTH_WRITE_TIMEOUT_SECS", 0.2),
         ):
@@ -105,7 +107,7 @@ class TestProbePathNeverHangs:
             result = run_cycle(state_path=state_path, dry_run=True)
             elapsed = time.monotonic() - started
 
-        assert result.last_outcome == "probe_unreachable"
+        assert result.last_outcome.startswith("probe_unreachable")
         assert elapsed < 5, f"cycle blocked {elapsed:.1f}s on a hung write"
 
     def test_service_health_write_timeout_does_not_raise(self, state_path):

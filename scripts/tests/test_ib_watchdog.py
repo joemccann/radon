@@ -60,7 +60,10 @@ def _payload(
 def _drive_cycle(state_path: Path, payload: dict | None, **kwargs):
     """Run a single cycle with the given /health payload mocked.
 
-    ``payload=None`` simulates a probe failure (network error).
+    ``payload=None`` simulates a probe failure (network error). The DUR-10
+    direct gateway probe is pinned to "unknown" (ambiguous) so these tests
+    keep exercising the conservative leave-state-alone path; the full
+    fallback decision table lives in test_ib_watchdog_dur10.py.
     """
 
     def fake_fetch(url: str, timeout: float):
@@ -72,6 +75,8 @@ def _drive_cycle(state_path: Path, payload: dict | None, **kwargs):
         patch("ib_watchdog.fetch_health", side_effect=fake_fetch),
         patch("ib_watchdog.trigger_restart", return_value=True) as restart_mock,
         patch("ib_watchdog.record_service_health"),
+        patch("ib_watchdog.probe_gateway_direct", return_value="unknown"),
+        patch("ib_watchdog.attribute_api_down", return_value="attribution_unavailable"),
     ):
         result = run_cycle(state_path=state_path, dry_run=True, **kwargs)
     return result, restart_mock
@@ -207,7 +212,7 @@ class TestProbeFailure:
         result, restart = _drive_cycle(state_path, None)
         assert result.degraded_count == 2  # unchanged
         restart.assert_not_called()
-        assert result.last_outcome == "probe_unreachable"
+        assert result.last_outcome.startswith("probe_unreachable")
 
     def test_probe_failure_does_not_trigger_restart_even_at_threshold(self, state_path):
         # Belt-and-suspenders: even if we were one cycle from
