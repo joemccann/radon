@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import time
 from pathlib import Path
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
@@ -31,6 +32,49 @@ except Exception:
     pass
 
 MIGRATIONS_DIR = Path(__file__).resolve().parent / "migrations"
+
+RETRY_BACKOFF_SECONDS = (2, 5, 15)
+
+_TRANSPORT_ERROR_MARKERS = ("hrana", "dns", "timeout", "timed out", "connection")
+
+_BOOTSTRAP_SQL = """
+    CREATE TABLE IF NOT EXISTS schema_migrations (
+      version    INTEGER PRIMARY KEY,
+      applied_at TEXT    NOT NULL
+    )
+    """
+
+
+def _is_transport_error(exc: BaseException) -> bool:
+    """libsql_experimental raises bare ValueError for everything, so classify
+    by message: Hrana/dns/timeout/connection failures are retryable transport
+    blips (the 2026-06-12 incident was ValueError("Hrana: dns error") on a
+    transient Turso DNS failure); SQL/schema errors are not."""
+    message = str(exc).lower()
+    return any(marker in message for marker in _TRANSPORT_ERROR_MARKERS)
+
+
+def _connect_with_retry(libsql, url: str, token: str):
+    """Connect and bootstrap schema_migrations, retrying transport-class
+    failures with RETRY_BACKOFF_SECONDS between attempts. This runs as
+    radon-api's ExecStartPre — a hard failure here blocks service startup,
+    so transient network blips must not be fatal. Non-transport errors
+    (SQL syntax, schema) propagate immediately."""
+    remaining_delays = list(RETRY_BACKOFF_SECONDS)
+    while True:
+        try:
+            db = libsql.connect(url, auth_token=token)
+            db.execute(_BOOTSTRAP_SQL)
+            db.commit()
+            return db
+        except Exception as exc:
+            if not _is_transport_error(exc) or not remaining_delays:
+                raise
+            delay = remaining_delays.pop(0)
+            sys.stderr.write(
+                f"[migrate] transport error ({exc}); retrying in {delay}s\n"
+            )
+            time.sleep(delay)
 
 
 def _list_migrations() -> list[tuple[int, str, Path]]:
@@ -75,17 +119,7 @@ def main() -> None:
         )
         sys.exit(1)
 
-    db = libsql.connect(url, auth_token=token)
-
-    db.execute(
-        """
-        CREATE TABLE IF NOT EXISTS schema_migrations (
-          version    INTEGER PRIMARY KEY,
-          applied_at TEXT    NOT NULL
-        )
-        """
-    )
-    db.commit()
+    db = _connect_with_retry(libsql, url, token)
 
     applied = {row[0] for row in db.execute("SELECT version FROM schema_migrations").fetchall()}
     migrations = _list_migrations()

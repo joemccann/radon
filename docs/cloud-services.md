@@ -129,13 +129,50 @@ From the laptop: `ssh root@ib-gateway radon stop`. Useful for off-hours shutdown
 
 ### Day-to-day deploys
 
-`.github/workflows/deploy.yml` runs `bash scripts/deploy.sh` on every push to `main`:
+CI runs `bash scripts/deploy.sh` (from `radon-cloud`) on every push to `main`:
 
 1. `git fetch origin main && git reset --hard origin/main` → applies repo changes.
 2. `pip install -r requirements.txt` → picks up new Python deps (e.g. `libsql-experimental`).
 3. `npm install && npm run build` → compile-mode build (no prerender, all routes dynamic).
-4. `sudo systemctl restart radon-nextjs radon-api radon-relay radon-monitor` → reload services.
-5. Health check `curl http://localhost:8321/health` with retries → rolls back to previous commit on failure.
+4. Pre-teardown: `wait_for_gateway_ready` reads the FULL `:8321/health` (while the old radon-api still serves it) so the relay is never restarted into a mid-restart / awaiting-2FA gateway. Bounded 60s, warn-and-proceed.
+5. `sudo systemctl restart radon-{nextjs,api,relay,monitor,newsfeed}` → reload services.
+6. **Layered post-deploy gate** (`deploy_gate`) → rolls back to the previous commit on failure.
+
+#### Post-deploy gate (DUR-05, 2026-06-12)
+
+The gate measures only what the deployed code controls — it must never fail (or hang) for IB-side reasons. On 2026-06-11 the old gate curled the full `/health` of the freshly restarted radon-api; a wedged event loop hung the probe, the GitHub Actions step SIGTERMed at ~3min, and the deploy rolled back the fix for the very wedge being measured.
+
+Layers, in order:
+
+1. `systemctl is-active` on every restarted unit (`SERVICES` array) — instant.
+2. `:8321/health/lite` — process-up probe, no IB probing. Bounded: 6 attempts × (5s curl timeout + 5s wait) = 60s worst case.
+3. `:8330/status` (isolated health daemon) — **advisory log only**, never a rollback trigger: its verdict includes IB-gateway state. `:8330/healthz` is deliberately unused (vacuous zero-I/O 200).
+
+The full `/health` (IB auth state) is used only by the pre-teardown `wait_for_gateway_ready`. Worst-case gate time ≈ 65s — well inside the CI step budget.
+
+#### Escape hatches
+
+| Env var | Effect |
+|---|---|
+| `RADON_DEPLOY_SKIP_PREFLIGHT=1` | Skips the required-env-var preflight only. |
+| `RADON_DEPLOY_NO_GATE=1` | Still **runs** every gate layer and logs results loudly, but skips rollback-on-failure. Use to force-deploy a fix for a wedge class that kills `/health/lite` itself. |
+
+#### Manual server-only deploy (when CI is unusable)
+
+When Actions is down, the gate is wedged, or the fix must land NOW (push the commit to `origin/main` first so the VPS can fetch it):
+
+```bash
+ssh root@ib-gateway
+sudo -u radon RADON_DEPLOY_NO_GATE=1 bash /home/radon/radon-cloud/scripts/deploy.sh
+# then read the loud [gate] log lines and verify by hand:
+systemctl status 'radon-*' --no-pager
+curl -s http://localhost:8321/health/lite
+curl -s http://localhost:8330/status
+```
+
+`deploy.sh` is sourceable (`main` is guarded behind a `BASH_SOURCE` check), so the gate can be dry-exercised without deploying: `bash -c 'source /home/radon/radon-cloud/scripts/deploy.sh; deploy_gate'`.
+
+Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-class Turso failures (Hrana / dns / timeout / connection) with 2s/5s/15s backoff before failing startup — a transient DNS blip hard-failed radon-api on 2026-06-12. SQL/schema errors still fail immediately.
 
 ### Build constraint
 

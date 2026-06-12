@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -90,3 +91,101 @@ class TestListMigrations:
         # Must be sorted
         versions = [r[0] for r in rows]
         assert versions == sorted(versions)
+
+
+DNS_BLIP = ValueError(
+    "Hrana: dns error: failed to lookup address information: Try again"
+)
+SQL_SYNTAX_ERROR = ValueError('near "CREATEX": syntax error')
+
+
+@pytest.fixture
+def recorded_sleeps(migrate_module, monkeypatch):
+    """Capture backoff sleeps instead of actually waiting."""
+    sleeps: list[float] = []
+    monkeypatch.setattr(migrate_module.time, "sleep", sleeps.append)
+    return sleeps
+
+
+class TestIsTransportError:
+    @pytest.mark.parametrize("message", [
+        "Hrana: dns error: failed to lookup address information",
+        "Hrana: stream closed",
+        "connection refused",
+        "request timed out",
+        "operation timeout",
+    ])
+    def test_transport_class_messages_match(self, migrate_module, message):
+        assert migrate_module._is_transport_error(ValueError(message)) is True
+
+    @pytest.mark.parametrize("message", [
+        'near "CREATEX": syntax error',
+        "no such table: schema_migrations_typo",
+        "UNIQUE constraint failed: schema_migrations.version",
+    ])
+    def test_sql_and_schema_errors_do_not_match(self, migrate_module, message):
+        assert migrate_module._is_transport_error(ValueError(message)) is False
+
+
+class TestConnectWithRetry:
+    """The 2026-06-12 incident: a transient Turso DNS blip raised
+    ValueError("Hrana: dns error") from libsql.connect at radon-api
+    ExecStartPre and hard-failed startup with no retry."""
+
+    def test_transient_dns_error_then_success_succeeds_with_backoff(
+        self, migrate_module, recorded_sleeps
+    ):
+        good_db = MagicMock(name="db")
+        libsql = MagicMock()
+        libsql.connect.side_effect = [DNS_BLIP, good_db]
+
+        db = migrate_module._connect_with_retry(libsql, "libsql://x", "tok")
+
+        assert db is good_db
+        assert recorded_sleeps == [2]
+        assert libsql.connect.call_count == 2
+
+    def test_transient_error_on_bootstrap_execute_is_retried(
+        self, migrate_module, recorded_sleeps
+    ):
+        bad_db = MagicMock(name="bad_db")
+        bad_db.execute.side_effect = DNS_BLIP
+        good_db = MagicMock(name="good_db")
+        libsql = MagicMock()
+        libsql.connect.side_effect = [bad_db, good_db]
+
+        db = migrate_module._connect_with_retry(libsql, "libsql://x", "tok")
+
+        assert db is good_db
+        assert recorded_sleeps == [2]
+        good_db.execute.assert_called_once()
+        good_db.commit.assert_called_once()
+
+    def test_non_transport_error_fails_immediately_without_retry(
+        self, migrate_module, recorded_sleeps
+    ):
+        bad_db = MagicMock(name="bad_db")
+        bad_db.execute.side_effect = SQL_SYNTAX_ERROR
+        libsql = MagicMock()
+        libsql.connect.return_value = bad_db
+
+        with pytest.raises(ValueError, match="syntax error"):
+            migrate_module._connect_with_retry(libsql, "libsql://x", "tok")
+
+        assert recorded_sleeps == []
+        assert libsql.connect.call_count == 1
+
+    def test_exhausted_retries_raise_after_full_backoff_ladder(
+        self, migrate_module, recorded_sleeps
+    ):
+        libsql = MagicMock()
+        libsql.connect.side_effect = DNS_BLIP
+
+        with pytest.raises(ValueError, match="dns error"):
+            migrate_module._connect_with_retry(libsql, "libsql://x", "tok")
+
+        assert recorded_sleeps == [2, 5, 15]
+        assert libsql.connect.call_count == 4
+
+    def test_backoff_ladder_is_2_5_15(self, migrate_module):
+        assert tuple(migrate_module.RETRY_BACKOFF_SECONDS) == (2, 5, 15)
