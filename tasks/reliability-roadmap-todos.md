@@ -29,6 +29,18 @@ Source: `tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/
 
 - [ ] **DUR-16** (L, high) Synthetic user-path + data-plane freshness probe (login → dashboard → data fresh) with 3 explicit SLOs.
 
+## Candidates from 2026-06-12 investigations (SPCX short rejection + MU share-card fix)
+
+- [ ] **SPX-01** (S, high) `scripts/ib_place_order.py:226-303` — on terminal-failed status (Inactive/Rejected/Cancelled), grace-wait ~1-2s for the pending IB errorEvent, re-check the error buffer, and fall back to `trade.log` entries with `errorCode != 0`; fold the IB 201 reason into the returned message. (SPCX short returned bare "Order Inactive" because the poll broke before the 201 landed.)
+- [ ] **SPX-02** (S, high) `scripts/api/server.py:1411-1441` `/orders/place` — log the failure detail server-side before raising `HTTPException(502)` so rejection reasons survive in journald. (The SPCX reject reason now exists nowhere; gateway logs are `.ibgzenc`-encrypted.)
+- [ ] **SPX-03** (M, med) `GET /short-availability/{ticker}` — bounded ib_pool tick-236 probe (tick 46 difficulty + tick 89 shares, streaming-only per `feedback_ib_snapshot_no_generic_ticks`, `asyncio.wait_for` bounds) with UW `get_short_data()` fallback for fee/rebate; 200 + `missing: true` semantics; validate freshness + instrument name (UW served stale rows for the recycled SPCX ticker).
+- [ ] **SPX-04** (M, med) OrderTab — LOCATE/FEE chip inside `OrderRiskGate` when action=SELL with no held position: red NO LOCATE / amber HTB+fee / green EASY+shares, with as_of + source.
+- [ ] **SPX-05** (S, low) Consider re-enabling the stock branch of `nakedShortGuard` (`web/lib/nakedShortGuard.ts:216-231` `_checkNakedShortRiskImpl`) as warn-not-block for SELL-stock-no-position. (Gate 4 disabled 2026-04-30; warn-only respects that while catching the SPCX case pre-flight.)
+- [ ] **SPX-06** (S, low) `docs/ib_tws_api.md` corrections — line 337: tick 236 missing the 1.5/2.5 difficulty bands and tick 89 entirely; line 411: "Inactive" missing the short-sale-rejection case.
+- [ ] **JRN-01** (M, high) Journal ingest gap — exec `0002920b.6a26c483.01.01` (2026-06-08 SLD 7 MU C1000 @ $25.00) exists in Turso `executed_orders` but is absent from the `journal` table. Root-cause the ingest path (monitor daemon journal_sync? Flex rehydrate?), backfill the row, and add a reconciliation check (executed_orders ↔ journal) so silent drops surface in service_health.
+
+Deferred, not picked up: relay tick-236 streaming subscription (`scripts/ib_realtime_server.js:841`) — only if SPX-04 needs live data rather than on-demand probes.
+
 ## Rejected (already covered)
 
 - DUR-04 Tier-3 off-box prober — already shipped/enabled (`fd4ad67`); residuals folded into DUR-12/DUR-16.
