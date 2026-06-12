@@ -496,6 +496,28 @@ def _handle_stuck_awaiting_2fa(
     return state
 
 
+# --- DUR-08: JVM forensic capture on first hang detection --------------------
+
+# How many seconds of the cycle the forensic capture may consume. Must stay
+# well inside CYCLE_HARD_TIMEOUT_SECS minus the health probe + service_health
+# write bounds, or the SIGALRM ceiling could kill the cycle mid-capture.
+FORENSICS_BUDGET_SECS = 25.0
+
+
+def _capture_hang_forensics() -> None:
+    """Snapshot JVM evidence (thread dump via kill -3, docker logs/stats/ps)
+    the FIRST time is_api_hang trips in an episode — before the restart
+    ladder recycles the JVM and destroys the evidence. Bounded and
+    best-effort by contract: any failure logs and returns; the restart
+    ladder must never be blocked or delayed past its schedule."""
+    try:
+        import jvm_forensics
+
+        jvm_forensics.capture_jvm_forensics(budget_secs=FORENSICS_BUDGET_SECS)
+    except Exception as exc:  # noqa: BLE001 — forensics never block the ladder
+        LOG.warning("jvm forensic capture failed (non-fatal): %s", exc)
+
+
 # --- Main cycle -------------------------------------------------------------
 
 
@@ -585,6 +607,11 @@ def run_cycle(
         health.upstream_dead,
         health.auth_state,
     )
+
+    # DUR-08: on the 0 -> 1 transition (new hang episode), capture JVM
+    # forensics once before any restart destroys the evidence.
+    if state.degraded_count == 1:
+        _capture_hang_forensics()
 
     if state.degraded_count < threshold:
         state.last_outcome = f"degraded_{state.degraded_count}_of_{threshold}"

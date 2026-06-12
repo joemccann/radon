@@ -25,7 +25,20 @@ services:
       TWOFA_TIMEOUT_ACTION: exit
       RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
       EXISTING_SESSION_DETECTED_ACTION: primary
-      AUTO_RESTART_TIME: "23:58 ET"
+      # DUR-08: IBC's AutoRestartTime expects "hh:mm AM/PM" interpreted in the
+      # GATEWAY SESSION timezone (jts.ini TimeZone — Africa/Abidjan = UTC on
+      # our hosts), NOT ET. The previous "23:58 ET" was an invalid format, so
+      # IBC fell back to the gateway's default nightly restart at 11:45 PM
+      # session-local = 23:45 UTC — the anchor of the nightly api-hang wedge
+      # cluster (23:51-00:09 UTC). 09:05 AM session-local = 09:05 UTC =
+      # 05:05 ET: outside RTH, outside IBKR's NA server reset (23:45-00:45 ET),
+      # and quiet for the relay. If the relogin wedges here it cascades nothing.
+      AUTO_RESTART_TIME: "09:05 AM"
+      # DUR-08: GC visibility for the JVM API-listener wedge. JAVA_TOOL_OPTIONS
+      # is picked up additively by the gateway JVM; unified gc logging goes to
+      # container stdout, so `docker logs` (and the watchdog's forensic
+      # capture) records GC behaviour leading into a hang.
+      JAVA_TOOL_OPTIONS: "-Xlog:gc*:stdout:time,uptime,level,tags"
       VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}
     ports:
       - "127.0.0.1:${IB_LIVE_PORT:-4001}:4003"
