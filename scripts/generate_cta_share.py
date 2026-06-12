@@ -27,6 +27,7 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from utils.card_screenshot import screenshot_card  # noqa: E402
+from utils.cta_sync import latest_closed_trading_day  # noqa: E402
 
 CACHE_DIR = PROJECT_ROOT / "data" / "menthorq_cache"
 REPORTS_DIR = PROJECT_ROOT / "reports"
@@ -35,18 +36,64 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 # ── Data loading ─────────────────────────────────────────────────────────────
 
-def load_cta(target_date: Optional[str] = None) -> dict:
+def _payload_is_valid(data: object) -> bool:
+    if not isinstance(data, dict):
+        return False
+    tables = data.get("tables")
+    if not isinstance(tables, dict):
+        return False
+    main = tables.get("main")
+    return isinstance(main, list) and len(main) > 0
+
+
+def _load_cta_from_db() -> Optional[dict]:
+    """Latest menthorq_cta row from Turso — the same source the CTA page reads."""
+    try:
+        from db.client import get_db  # lazy: disk fallback must work without libsql
+
+        rows = get_db().execute(
+            "SELECT payload FROM menthorq_cta ORDER BY date DESC LIMIT 1"
+        ).fetchall()
+        if not rows:
+            return None
+        data = json.loads(rows[0][0])
+    except Exception as exc:  # noqa: BLE001 — any DB failure falls back to disk
+        print(f"[cta-share] db read unavailable, using disk cache: {exc}", file=sys.stderr)
+        return None
+    return data if _payload_is_valid(data) else None
+
+
+def _load_cta_from_disk() -> Optional[dict]:
     files = sorted(CACHE_DIR.glob("cta_????-??-??.json"))
     if not files:
-        raise FileNotFoundError("No CTA cache files found.")
+        return None
+    with open(files[-1]) as f:
+        data = json.load(f)
+    return data if _payload_is_valid(data) else None
+
+
+def load_cta(target_date: Optional[str] = None) -> dict:
     if target_date:
         path = CACHE_DIR / f"cta_{target_date}.json"
         if not path.exists():
             raise FileNotFoundError(f"CTA cache not found for {target_date}")
-    else:
-        path = files[-1]
-    with open(path) as f:
-        return json.load(f)
+        with open(path) as f:
+            return json.load(f)
+
+    candidates = [d for d in (_load_cta_from_db(), _load_cta_from_disk()) if d]
+    if not candidates:
+        raise FileNotFoundError("No CTA data found in Turso or the local cache.")
+    return max(candidates, key=lambda d: d.get("date") or "")
+
+
+def assess_freshness(data_date: str, now: Optional[datetime] = None) -> dict:
+    """Compare the loaded payload's date against the latest closed trading day."""
+    expected = latest_closed_trading_day(now)
+    return {
+        "stale": (data_date or "") < expected,
+        "data_date": data_date,
+        "expected_date": expected,
+    }
 
 
 def get_row(rows: list, *keywords: str) -> Optional[dict]:
@@ -381,7 +428,12 @@ def card4_bonds(data: dict, ds: str) -> str:
 
 # ── Preview HTML ──────────────────────────────────────────────────────────────
 
-def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
+def build_preview(
+    cards_b64: list,
+    tweet_text: str,
+    ds: str,
+    expected_date: Optional[str] = None,
+) -> str:
     imgs_html = ""
     labels = [
         ("The Coil Is Set · Squeeze Meter", "cta-card-1-squeeze-meter.png"),
@@ -404,6 +456,13 @@ def build_preview(cards_b64: list, tweet_text: str, ds: str) -> str:
 
     tweet_escaped = tweet_text.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
 
+    stale_html = ""
+    if expected_date:
+        stale_html = f"""
+  <div style="grid-column:1/-1;padding:10px 14px;border:1px solid #F5A623;border-radius:3px;background:rgba(245,166,35,0.08);font-family:'IBM Plex Mono',monospace;font-size:11px;color:#F5A623;line-height:1.5">
+    ⚠ STALE DATA — this report reflects {ds}; the latest closed session is {expected_date}. Wait for the CTA sync to land before posting.
+  </div>"""
+
     return f"""<!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -424,7 +483,7 @@ body{{background:#07090d;color:#e2e8f0;font-family:'Inter',sans-serif;min-height
 .cards-hdr{{font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:#475569;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid #1e293b}}
 </style>
 </head><body>
-<div class="layout">
+<div class="layout">{stale_html}
   <div class="intro"><strong>CTA Report — X Share</strong><br>Tweet text + 4 infographic cards · {ds} · Analyzed by Radon</div>
   <div class="panel">
     <div class="panel-hdr">Tweet Copy</div>
@@ -614,6 +673,12 @@ def main():
 
     data = load_cta(args.date)
     ds = data.get("date") or args.date or date.today().strftime("%Y-%m-%d")
+    freshness = assess_freshness(ds)
+    if freshness["stale"]:
+        print(
+            f"⚠ CTA data is stale: {ds} < expected {freshness['expected_date']}",
+            file=sys.stderr,
+        )
 
     # Generate card HTMLs
     generators = [card1_squeeze, card2_equity, card3_commodities, card4_bonds]
@@ -664,7 +729,12 @@ def main():
     tweet_text = build_tweet(data, ds)
 
     # Build preview HTML
-    preview_html = build_preview(cards_b64, tweet_text, ds)
+    preview_html = build_preview(
+        cards_b64,
+        tweet_text,
+        ds,
+        expected_date=freshness["expected_date"] if freshness["stale"] else None,
+    )
     preview_path = str(REPORTS_DIR / f"tweet-cta-{ds}.html")
     with open(preview_path, "w") as f:
         f.write(preview_html)
@@ -678,6 +748,7 @@ def main():
         "png_paths": [p for p in png_paths if p.endswith(".png")],
         "date": ds,
         "tweet_length": len(tweet_text),
+        **freshness,
     }
 
     if args.json:

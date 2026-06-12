@@ -7,7 +7,17 @@ import { useDialogChrome } from "@/lib/useDialogChrome";
 type ShareResponse = {
   preview_path?: string;
   error?: string;
+  stale?: boolean;
+  data_date?: string;
+  expected_date?: string;
 };
+
+function buildStaleNotice(data: ShareResponse): string | null {
+  if (!data.stale) return null;
+  const dataDate = data.data_date ?? "an earlier session";
+  const expected = data.expected_date ?? "the latest closed session";
+  return `STALE DATA — this report reflects ${dataDate}; the latest closed session is ${expected}. Wait for the data sync to land before posting.`;
+}
 
 type ShareReportModalProps = {
   modalTitle: string;
@@ -32,6 +42,7 @@ export default function ShareReportModal({
 }: ShareReportModalProps) {
   const [sharing, setSharing] = useState(false);
   const [shareError, setShareError] = useState<string | null>(null);
+  const [staleNotice, setStaleNotice] = useState<string | null>(null);
   const [shareUrl, setShareUrl] = useState<string | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
@@ -80,6 +91,8 @@ export default function ShareReportModal({
         setShareError("Share generation did not return a preview path.");
         return;
       }
+
+      setStaleNotice(buildStaleNotice(data));
 
       const htmlRes = await fetch(
         `${resolvedContentEndpoint}?path=${encodeURIComponent(previewPath)}`
@@ -182,6 +195,22 @@ export default function ShareReportModal({
                 <X size={14} />
               </button>
             </div>
+            {staleNotice && (
+              <div
+                style={{
+                  margin: "8px 12px",
+                  padding: "7px 10px",
+                  border: "1px solid var(--warn)",
+                  borderRadius: "3px",
+                  background: "color-mix(in srgb, var(--warn) 8%, transparent)",
+                  fontFamily: "var(--font-mono, monospace)",
+                  fontSize: "10px",
+                  color: "var(--warn)",
+                }}
+              >
+                {staleNotice}
+              </div>
+            )}
             <iframe
               className="cta-share-iframe"
               src={shareUrl}

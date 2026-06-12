@@ -328,8 +328,20 @@ function triggerBackgroundSync(expectedDate: string): void {
   };
 
   if (typeof child.on === "function") {
-    child.on("close", clearInFlight);
-    child.on("error", clearInFlight);
+    child.on("close", (code: number | null) => {
+      if (code !== 0) {
+        console.error(
+          `[cta-sync] background sync exited ${code} (target ${expectedDate})`,
+        );
+      }
+      clearInFlight();
+    });
+    child.on("error", (err: Error) => {
+      console.error(
+        `[cta-sync] background sync spawn failed (target ${expectedDate}): ${err.message}`,
+      );
+      clearInFlight();
+    });
   }
   setTimeout(clearInFlight, 30_000);
 
