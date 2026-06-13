@@ -16,14 +16,14 @@ Source: `tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/
 
 ## NEXT — structural durability
 
-- [ ] **DUR-08** (L, high) Root-cause the nightly JVM API-listener wedge (78 hang detections / 26 forced restarts in 7 days, clustering ~19:51–20:09 ET — re-confirm window before building); deploy autoheal sidecar / scheduled-restart mitigation.
-- [ ] **DUR-09** (L, high) Finish the sync-libsql purge: out-of-process mirror writer (in-script scan writes, not GIL-vulnerable worker threads) + bounded DB client (timeouts + retries everywhere).
-- [ ] **DUR-10** (M, high) Watchdog second sensor (don't depend solely on FastAPI `/health`) + auto-start cascade victims after gateway recovery.
-- [ ] **DUR-13** (M, high) Backup/restore for the canonical Turso `journal` table (laptop-pull dumps; restore drill).
-- [ ] **DUR-11** (M, med) Append-only `service_health_events` history + deploy markers in Turso (so incidents can be correlated after the fact).
-- [ ] **DUR-12** (M, med) Minimal host/process metrics + off-box log shipping, solo-operator sized (no self-managed Prometheus stack).
-- [ ] **DUR-14** (M, med) `service_health` writer-contract library (heartbeat-every-cycle, staleness windows, writer-state semantics enforced in one place) + alert escalation channel.
-- [ ] **DUR-15** (S, med) Perimeter CI guards: public-surface snapshot test (what is reachable unauthenticated) + Edge-runtime smoke test (catches `node:*` imports in the middleware graph).
+- [x] **DUR-08** (L, high) ~~Root-cause the nightly JVM wedge~~ DONE 06-12: forensic hook live; ROOT CAUSE = the gateway's own default 23:45 UTC auto-restart wedging during relogin (in-tree AUTO_RESTART_TIME "23:58 ET" was invalid IBC format). **OPERATOR ACTION REMAINING:** apply `radon-cloud pending/dur-08-compose.patch` (moves restart to 09:05 UTC + GC logging) — recreates the container, costs ONE 2FA push; watchdog quiet windows already live on both old + new slots.
+- [x] **DUR-09** (L, high) Finish the sync-libsql purge: out-of-process mirror writer (in-script scan writes, not GIL-vulnerable worker threads) + bounded DB client (timeouts + retries everywhere).
+- [x] **DUR-10** (M, high) Watchdog second sensor (don't depend solely on FastAPI `/health`) + auto-start cascade victims after gateway recovery.
+- [x] **DUR-13** (M, high) Backup/restore for the canonical Turso `journal` table (laptop-pull dumps; restore drill).
+- [x] **DUR-11** (M, med) Append-only `service_health_events` history + deploy markers in Turso (so incidents can be correlated after the fact).
+- [x] **DUR-12** (M, med) Minimal host/process metrics + off-box log shipping, solo-operator sized (no self-managed Prometheus stack).
+- [x] **DUR-14** (M, med) `service_health` writer-contract library (heartbeat-every-cycle, staleness windows, writer-state semantics enforced in one place) + alert escalation channel.
+- [x] **DUR-15** (S, med) Perimeter CI guards: public-surface snapshot test (what is reachable unauthenticated) + Edge-runtime smoke test (catches `node:*` imports in the middleware graph).
 
 ## LATER — step change
 

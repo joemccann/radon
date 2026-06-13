@@ -301,7 +301,7 @@ Nightly full-database dumps are the recovery story.
 | `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
 | `radon-cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page; the DB is ~1.4 GB, direct-to-cloud reads run ~1 MB/s ⇒ ~20–25 min). Emits portable SQL (schema + INSERTs, `sqlite3 .dump`-style), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than 30 days in-script. |
 | `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window (`web/lib/serviceHealthWindows.ts` + `scripts/watchdog/services.py` daily bucket), so ONE missed night alerts before the second dump is lost. A backup timer with no liveness signal is the canonical silently-dead backup. |
-| `com.radon.db-backup-pull` | laptop launchd (`~/Library/LaunchAgents/`) | `RunAtLoad` + daily 05:30 local; rsyncs the dump dir over Tailscale (`radon@ib-gateway`, same key as the media push) into `data/db_backups/` (gitignored). Deliberately NO `--delete`: a wiped/compromised VPS must not be able to empty the off-box copy on the next pull. |
+| `com.radon.db-backup-pull` | laptop launchd (`~/Library/LaunchAgents/`) | `RunAtLoad` + daily 08:37 local (after the 08:23 journal pull); runs `scripts/db_backup_pull.sh` (journal-pull pattern): rsyncs the dump dir over Tailscale (`radon@ib-gateway`, same key as the media push) into `data/db_backups/` (gitignored), fails loudly if no non-empty dump landed, prunes local copies older than 30 days. Deliberately NO `--delete`: a wiped/compromised VPS must not be able to empty the off-box copy on the next pull. |
 
 ### Restore runbook
 
@@ -315,6 +315,10 @@ sqlite3 /tmp/radon_restore.db "SELECT COUNT(*) FROM journal; SELECT COUNT(*) FRO
 
 Run this drill after any change to `db_backup.py` and compare counts
 against prod (`PYTHONPATH` + `get_db()` per Health & observability above).
+Last drill 2026-06-12: 37 tables / 80,171 rows round-tripped exactly
+(`PRAGMA integrity_check` ok); `journal`/`executed_orders` matched prod,
+remaining deltas were post-dump live drift only (`service_health` +1 =
+host-metrics first heartbeat, `posts` +1, `portfolio_snapshots` +58).
 
 **2. Full restore to a NEW Turso DB + URL swap** (DB lost/corrupted):
 
