@@ -50,15 +50,16 @@ def _result_with(num_prints: int, daily: list[dict] | None = None) -> SimpleName
 def app_client(monkeypatch):
     """Late-imported FastAPI TestClient.
 
-    Auth bypass: the server's auth middleware short-circuits when
-    CLERK_JWKS_URL is unset (the "no auth configured" dev path). The
-    server module loads .env at import time which re-sets the var, so
-    we must delenv AFTER import for the runtime check to fail.
+    Auth bypass: reach route logic via the trusted-local (server-to-server)
+    bypass — the established pattern. Do NOT unset CLERK_JWKS_URL to disable
+    auth: the middleware now fails CLOSED on that (see test_auth_fail_closed.py).
     """
     from fastapi.testclient import TestClient
     from api import server  # noqa: WPS433 — import-after-path
+    from api import auth
 
-    monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
 
     return TestClient(server.app), server
 

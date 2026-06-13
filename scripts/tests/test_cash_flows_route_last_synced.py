@@ -75,7 +75,10 @@ def app_with_inmem_db(monkeypatch: pytest.MonkeyPatch) -> Iterator[tuple]:
 
     from fastapi.testclient import TestClient
     from api import server
-    monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
+    from api import auth
+    # Trusted-local bypass — auth now fails CLOSED when JWKS is unset.
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
 
     try:
         yield TestClient(server.app), conn

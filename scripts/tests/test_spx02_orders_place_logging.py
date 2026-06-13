@@ -73,11 +73,14 @@ def _infra_error_result(error: str = "IB Gateway is not accepting connections") 
 
 @pytest.fixture
 def app_client(monkeypatch):
-    """FastAPI TestClient with auth disabled."""
+    """FastAPI TestClient reaching routes via the trusted-local bypass."""
     from fastapi.testclient import TestClient
     from api import server
+    from api import auth
 
-    monkeypatch.delenv("CLERK_JWKS_URL", raising=False)
+    # Trusted-local bypass — auth now fails CLOSED when JWKS is unset.
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
     return TestClient(server.app), server
 
 

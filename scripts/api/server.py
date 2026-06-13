@@ -216,12 +216,11 @@ async def auth_middleware(request: Request, call_next):
     if request.url.path in AUTH_EXEMPT_PATHS:
         return await call_next(request)
 
-    if not os.environ.get("CLERK_JWKS_URL"):
-        return await call_next(request)
-
     # Skip auth for genuine server-to-server calls from localhost or tailnet
     # (Next.js → FastAPI; cloud-thin laptop dev → Hetzner FastAPI over Tailscale).
     # Requests forwarded through the public reverse proxy are NOT trusted.
+    # Checked BEFORE the JWKS-configured gate so a server-to-server call never
+    # depends on Clerk being configured.
     if is_trusted_local_request(request):
         return await call_next(request)
 
@@ -230,6 +229,23 @@ async def auth_middleware(request: Request, call_next):
     if service_identity:
         request.state.user = service_identity
         return await call_next(request)
+
+    # FAIL CLOSED: an untrusted/public request that reached here has no
+    # server-to-server bypass and no API key, so it MUST present a valid Clerk
+    # JWT. If CLERK_JWKS_URL is unset we cannot verify one — that is a deploy
+    # misconfiguration, NOT an open door. Returning call_next() here would make
+    # all 47 routes (orders/place, pi/exec, admin/*) world-callable through the
+    # public Caddy proxy on a single missing env var (the "middleware is the
+    # perimeter" / world-callable-/api/* incident class). Deny with 503. The
+    # only way to disable auth is the explicit, loud, dev-only opt-in below —
+    # never set RADON_AUTH_DISABLED on a public deployment.
+    if not os.environ.get("CLERK_JWKS_URL"):
+        if os.environ.get("RADON_AUTH_DISABLED") == "1":
+            return await call_next(request)
+        return JSONResponse(
+            status_code=503,
+            content={"detail": "Authentication unavailable: server auth is not configured."},
+        )
 
     try:
         payload = await verify_clerk_jwt(request)
