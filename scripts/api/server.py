@@ -2465,6 +2465,265 @@ def _load_cash_flow_sync_status() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# Short availability probe
+# ---------------------------------------------------------------------------
+
+# IB generic tick IDs for short availability:
+#   46 = shortable (difficulty score: 3.0 easy / 1.5-2.5 locate / <1.5 no)
+#   89 = short shares available
+# Must be STREAMING (not snapshot) — per feedback_ib_snapshot_no_generic_ticks.md.
+_SHORT_AVAIL_GENERIC_TICKS = "236"
+_SHORT_TICK_DIFFICULTY = 46   # float field tickerId
+_SHORT_TICK_SHARES = 89       # float field tickerId
+_SHORT_PROBE_TIMEOUT_SECS = 6.0
+_SHORTABLE_EASY_THRESHOLD = 2.5   # >= easy to borrow
+_SHORTABLE_NO_THRESHOLD = 1.5     # <  no shares available
+
+# UW short data freshness: refuse rows older than 3 trading days
+_UW_SHORT_DATA_MAX_AGE_DAYS = 3
+
+
+def _derive_shortability(difficulty: Optional[float]) -> Optional[bool]:
+    """Map IB tick 46 difficulty score to shortable boolean.
+
+    3.0 = easy, 1.5-2.5 = locate required, <1.5 = not shortable.
+    Returns True (easy), None (locate-only), or False (not shortable).
+    """
+    if difficulty is None:
+        return None
+    if difficulty >= _SHORTABLE_EASY_THRESHOLD:
+        return True
+    if difficulty < _SHORTABLE_NO_THRESHOLD:
+        return False
+    return None  # locate-only — neither clearly shortable nor blocked
+
+
+def _probe_short_ticks_in_thread(client: Any, ticker: str) -> dict:
+    """Run a bounded streaming market data probe for short availability ticks.
+
+    Uses STREAMING (not snapshot) to receive generic ticks 46 + 89.
+    Polls up to _SHORT_PROBE_TIMEOUT_SECS for both fields to arrive,
+    then cancels the subscription.
+
+    Returns dict with 'difficulty' and 'shortable_shares' (both may be None).
+    """
+    from ib_insync import Stock
+
+    contract = Stock(ticker, "SMART", "USD")
+    try:
+        qualified = client.ib.qualifyContracts(contract)
+    except Exception:
+        qualified = []
+    if not qualified:
+        return {"difficulty": None, "shortable_shares": None}
+
+    ticker_obj = client.ib.reqMktData(qualified[0], _SHORT_AVAIL_GENERIC_TICKS, False, False)
+
+    # Poll for tick data arrival; sleep in small increments
+    poll_interval = 0.2
+    elapsed = 0.0
+    while elapsed < _SHORT_PROBE_TIMEOUT_SECS:
+        difficulty = getattr(ticker_obj, f"tick{_SHORT_TICK_DIFFICULTY}", None)
+        shares = getattr(ticker_obj, f"tick{_SHORT_TICK_SHARES}", None)
+        # ib_insync stores generic ticks in the tickerId-indexed attributes;
+        # fall back to direct attribute name search on the Ticker object
+        if difficulty is None:
+            difficulty = _read_generic_tick(ticker_obj, _SHORT_TICK_DIFFICULTY)
+        if shares is None:
+            shares = _read_generic_tick(ticker_obj, _SHORT_TICK_SHARES)
+        if difficulty is not None:
+            break
+        client.ib.sleep(poll_interval)
+        elapsed += poll_interval
+
+    # Re-read after final sleep
+    difficulty = _read_generic_tick(ticker_obj, _SHORT_TICK_DIFFICULTY)
+    shares = _read_generic_tick(ticker_obj, _SHORT_TICK_SHARES)
+
+    try:
+        client.ib.cancelMktData(qualified[0])
+    except Exception:
+        pass
+
+    return {
+        "difficulty": difficulty,
+        "shortable_shares": shares,
+    }
+
+
+def _read_generic_tick(ticker_obj: Any, tick_id: int) -> Optional[float]:
+    """Read a generic tick value from an ib_insync Ticker object.
+
+    ib_insync stores generic tick data in `ticks` list as GenericTick objects,
+    and also populates named attributes like `shortableShares` (tick 89) and
+    `shortable` (tick 46).
+    """
+    # Named shortcut attributes on Ticker
+    _NAMED = {
+        46: ("shortable",),
+        89: ("shortableShares",),
+    }
+    for attr in _NAMED.get(tick_id, ()):
+        val = getattr(ticker_obj, attr, None)
+        if val is not None and val == val:  # exclude NaN
+            try:
+                return float(val)
+            except (TypeError, ValueError):
+                pass
+
+    # Walk the raw ticks list
+    for tick in getattr(ticker_obj, "ticks", []):
+        if getattr(tick, "tickType", None) == tick_id:
+            val = getattr(tick, "value", None)
+            if val is not None:
+                try:
+                    return float(val)
+                except (TypeError, ValueError):
+                    pass
+    return None
+
+
+def _uw_short_data_is_fresh(raw: dict, ticker: str) -> bool:
+    """Check UW short data row for staleness and instrument identity.
+
+    UW can serve stale rows for recycled tickers (e.g. SPCX was a SPAC ETF
+    before a new company reused the symbol). Reject rows older than
+    _UW_SHORT_DATA_MAX_AGE_DAYS trading days.
+    """
+    data_rows = raw.get("data") or []
+    if not data_rows:
+        return False
+    latest = data_rows[0] if isinstance(data_rows, list) else None
+    if not isinstance(latest, dict):
+        return False
+    as_of_str = latest.get("date") or latest.get("as_of") or ""
+    if not as_of_str:
+        return False
+    try:
+        from datetime import date
+        as_of = date.fromisoformat(str(as_of_str)[:10])
+        age_days = (datetime.now(timezone.utc).date() - as_of).days
+        return age_days <= _UW_SHORT_DATA_MAX_AGE_DAYS
+    except Exception:
+        return False
+
+
+def _extract_uw_fee_rebate(raw: dict) -> tuple[Optional[float], Optional[float], Optional[str]]:
+    """Extract fee_rate, rebate_rate, and as_of from a UW short data response."""
+    data_rows = raw.get("data") or []
+    if not data_rows or not isinstance(data_rows, list):
+        return None, None, None
+    latest = data_rows[0] if data_rows else None
+    if not isinstance(latest, dict):
+        return None, None, None
+    fee_rate = _safe_float(latest.get("fee_rate") or latest.get("borrowRate"))
+    rebate_rate = _safe_float(latest.get("rebate_rate") or latest.get("rebateRate"))
+    as_of = latest.get("date") or latest.get("as_of")
+    return fee_rate, rebate_rate, str(as_of) if as_of else None
+
+
+def _safe_float(val: Any) -> Optional[float]:
+    """Parse a value to float, returning None on failure or NaN."""
+    if val is None:
+        return None
+    try:
+        f = float(val)
+        return None if f != f else f  # exclude NaN
+    except (TypeError, ValueError):
+        return None
+
+
+@app.get("/short-availability/{ticker}")
+async def short_availability(ticker: str, request: Request):
+    """Short availability data for a ticker.
+
+    Primary: IB streaming probe for tick 46 (difficulty) + tick 89 (shortable shares).
+    Fallback: UW get_short_data() for fee_rate / rebate_rate when IB has no data.
+
+    ALWAYS returns 200 with missing:true when no data is available.
+    Never raises 4xx (per feedback_http_status_for_real_errors.md).
+    """
+    upper = ticker.upper().strip()
+    if not _TICKER_RE.match(upper):
+        return JSONResponse({"ticker": upper, "shortable": None, "difficulty": None,
+                             "shortable_shares": None, "fee_rate": None, "rebate_rate": None,
+                             "source": "none", "as_of": datetime.now(timezone.utc).isoformat(),
+                             "missing": True})
+
+    difficulty: Optional[float] = None
+    shortable_shares: Optional[float] = None
+    fee_rate: Optional[float] = None
+    rebate_rate: Optional[float] = None
+    source = "none"
+    as_of = datetime.now(timezone.utc).isoformat()
+
+    # --- IB probe (primary) ---
+    if ib_pool is not None and ib_pool.is_connected("data"):
+        try:
+            async with ib_pool.acquire("data") as client:
+                result = await asyncio.wait_for(
+                    asyncio.to_thread(_probe_short_ticks_in_thread, client, upper),
+                    timeout=_SHORT_PROBE_TIMEOUT_SECS + 2.0,
+                )
+            difficulty = result.get("difficulty")
+            shortable_shares = result.get("shortable_shares")
+            if difficulty is not None or shortable_shares is not None:
+                source = "ib"
+                as_of = datetime.now(timezone.utc).isoformat()
+        except asyncio.TimeoutError:
+            logger.warning("short-availability/%s: IB probe timed out", upper)
+        except Exception as exc:
+            logger.warning("short-availability/%s: IB probe error: %s", upper, exc)
+
+    # --- UW fallback (for fee/rebate or when IB returned nothing) ---
+    if uw_available:
+        try:
+            raw = await asyncio.to_thread(_fetch_uw_short_data, upper)
+            if raw is not None:
+                if _uw_short_data_is_fresh(raw, upper):
+                    uw_fee, uw_rebate, uw_as_of = _extract_uw_fee_rebate(raw)
+                    fee_rate = uw_fee
+                    rebate_rate = uw_rebate
+                    if source == "none":
+                        source = "uw"
+                        as_of = uw_as_of or as_of
+                else:
+                    logger.info(
+                        "short-availability/%s: UW data too old, ignoring (SPCX-style stale row)",
+                        upper,
+                    )
+        except Exception as exc:
+            logger.warning("short-availability/%s: UW fallback error: %s", upper, exc)
+
+    shortable = _derive_shortability(difficulty)
+    missing = source == "none"
+
+    return JSONResponse({
+        "ticker": upper,
+        "shortable": shortable,
+        "difficulty": difficulty,
+        "shortable_shares": shortable_shares,
+        "fee_rate": fee_rate,
+        "rebate_rate": rebate_rate,
+        "source": source,
+        "as_of": as_of,
+        "missing": missing,
+    })
+
+
+def _fetch_uw_short_data(ticker: str) -> Optional[dict]:
+    """Fetch UW short data synchronously (intended for asyncio.to_thread)."""
+    try:
+        with UWClient() as client:
+            return client.get_short_data(ticker)
+    except UWNotFoundError:
+        return None
+    except UWAPIError as exc:
+        logger.info("short-availability/%s: UW get_short_data error: %s", ticker, exc)
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
