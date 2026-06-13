@@ -17,8 +17,10 @@
 
 import type { PortfolioData } from "@/lib/types";
 import { OrderConfirmSummary } from "../components/OrderConfirmSummary";
+import { LocateFeeChip } from "../components/LocateFeeChip";
 import { useOrderRisk, type OrderRiskInput, type OrderRiskState } from "./useOrderRisk";
 import { useRecordOrderRiskTrace } from "./telemetry";
+import { useShortAvailability } from "../hooks/useShortAvailability";
 
 export interface OrderRiskGateProps {
   /**
@@ -95,13 +97,73 @@ export function OrderRiskGate({
       (state?.summary.undefinedRiskReason != null && state.summary.undefinedRiskReason.length > 0),
   );
 
+  // LOCATE/FEE chip: shown when a SELL/SHORT order has no held position in
+  // the underlying. Applicable to both option SELL legs and linear SELL orders.
+  const locateEnabled = resolveLocateChipEnabled(input, portfolio);
+  const locateTicker = locateEnabled ? (input?.ticker ?? null) : null;
+  const { status: locateStatus, data: locateData } = useShortAvailability(
+    locateTicker,
+    locateEnabled,
+  );
+
   if (state == null) return null;
 
+  const showLocateChip = locateEnabled && locateStatus != null && locateData != null;
+
   return (
-    <OrderConfirmSummary
-      summary={state.summary}
-      variant={variant}
-      className={className}
-    />
+    <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      <OrderConfirmSummary
+        summary={state.summary}
+        variant={variant}
+        className={className}
+      />
+      {showLocateChip && (
+        <LocateFeeChip status={locateStatus} data={locateData} />
+      )}
+    </div>
+  );
+}
+
+/**
+ * Determines whether the LOCATE/FEE chip should fire for this order.
+ *
+ * Rules:
+ *   - For option orders: at least one leg must be SELL action.
+ *   - For linear orders: action must be SELL.
+ *   - The portfolio (when loaded) must have NO position in the underlying.
+ *     When portfolio is still loading (undefined), we do NOT fetch yet so we
+ *     avoid a stale/wrong chip showing before coverage is known.
+ */
+function resolveLocateChipEnabled(
+  input: OrderRiskInput | null,
+  portfolio: PortfolioData | null | undefined,
+): boolean {
+  if (input == null) return false;
+
+  const hasSellLeg = inputHasSellLeg(input);
+  if (!hasSellLeg) return false;
+
+  // Portfolio still loading — do not show chip yet.
+  if (portfolio === undefined) return false;
+
+  // No portfolio context — assume no position; show chip.
+  if (portfolio === null) return true;
+
+  return !portfolioHasPositionForTicker(portfolio, input.ticker);
+}
+
+function inputHasSellLeg(input: OrderRiskInput): boolean {
+  if (input.type === "linear") return input.action === "SELL";
+  // Option order: any leg with action SELL
+  const opt = input as { chainLegs: { action: string }[] };
+  return opt.chainLegs.some((l) => l.action === "SELL");
+}
+
+function portfolioHasPositionForTicker(
+  portfolio: PortfolioData,
+  ticker: string,
+): boolean {
+  return portfolio.positions.some(
+    (p) => p.ticker.toUpperCase() === ticker.toUpperCase(),
   );
 }
