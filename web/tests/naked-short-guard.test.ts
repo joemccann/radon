@@ -73,6 +73,57 @@ const longOption = (
 
 /* ---------- tests ---------- */
 
+// SPX-05: stock branch re-enabled as warn-not-block; option/combo still disabled.
+describe("checkNakedShortRisk — stock warn branch (SPX-05)", () => {
+  it("SPX-05-1. SELL stock, no position → warn (allowed=true, reason present)", () => {
+    const order = makeOrder({ action: "SELL", type: "stock", symbol: "AAPL", quantity: 100 });
+    const result = checkNakedShortRisk(order, makePortfolio());
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBeDefined();
+    expect(result.reason).toContain("no long shares held");
+    expect(result.reason).toContain("AAPL");
+  });
+
+  it("SPX-05-2. SELL stock, selling more than held → warn (allowed=true, reason present)", () => {
+    const order = makeOrder({ action: "SELL", type: "stock", symbol: "AAPL", quantity: 200 });
+    const portfolio = makePortfolio([longStock("AAPL", 100)]);
+    const result = checkNakedShortRisk(order, portfolio);
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBeDefined();
+    expect(result.reason).toContain("selling 200 shares but only 100 held");
+  });
+
+  it("SPX-05-3. SELL stock, sufficient shares held → ok (allowed=true, no reason)", () => {
+    const order = makeOrder({ action: "SELL", type: "stock", symbol: "AAPL", quantity: 50 });
+    const portfolio = makePortfolio([longStock("AAPL", 100)]);
+    const result = checkNakedShortRisk(order, portfolio);
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("SPX-05-4. SELL call (option short) → allowed, no reason (option branch still disabled)", () => {
+    const order = makeOrder({
+      action: "SELL",
+      type: "option",
+      symbol: "AAPL",
+      right: "C",
+      strike: 300,
+      expiry: "2026-04-17",
+      quantity: 5,
+    });
+    const result = checkNakedShortRisk(order, makePortfolio());
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+
+  it("SPX-05-5. BUY stock → allowed, no reason", () => {
+    const order = makeOrder({ action: "BUY", type: "stock", symbol: "AAPL" });
+    const result = checkNakedShortRisk(order, makePortfolio());
+    expect(result.allowed).toBe(true);
+    expect(result.reason).toBeUndefined();
+  });
+});
+
 // Guard is disabled at the export boundary; suite skipped.
 describe.skip("checkNakedShortRisk", () => {
   it("1. BUY stock → allowed", () => {

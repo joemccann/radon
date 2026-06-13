@@ -158,11 +158,22 @@ function countMatchingLongOptionContracts(
 /* ---------- main guard ---------- */
 
 export function checkNakedShortRisk(
-  _order: OrderPayload,
-  _portfolio: NakedShortPortfolio,
+  order: OrderPayload,
+  portfolio: NakedShortPortfolio,
 ): GuardResult {
-  // GUARD DISABLED — always allow.
+  // Gate 4 disabled 2026-04-30. Option and combo branches remain fully off.
+  // Stock SELL branch re-enabled as warn-not-block (SPX-05): surfaces the
+  // SPCX-class case pre-flight without hard-blocking the order.
+  if (order.type === "stock" && order.action === "SELL") {
+    return warnFromImpl(_checkNakedShortRiskImpl(order, portfolio));
+  }
   return { allowed: true };
+}
+
+/** Convert a block result from the impl to a warning; pass-through on allow. */
+function warnFromImpl(result: GuardResult): GuardResult {
+  if (result.allowed) return result;
+  return { allowed: true, reason: result.reason };
 }
 
 function _checkNakedShortRiskImpl(
