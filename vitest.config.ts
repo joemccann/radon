@@ -20,6 +20,10 @@ export default defineConfig({
       "web/tests/**/*.test.tsx",
     ],
     environment: "node",
+    // Global @testing-library cleanup so jsdom components (and their leaked
+    // effects/timers/WebSocket handlers) can't bleed into the next test — the
+    // cross-test leak that made `vitest --coverage` throw window-undefined.
+    setupFiles: ["./vitest.setup.ts"],
     coverage: {
       provider: "v8",
       // Non-regressing RATCHET, not a vanity target. Each threshold sits 1-4%

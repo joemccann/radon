@@ -43,8 +43,12 @@ jobs:
       # gitignored data/*.json runtime caches, so they can't run in this
       # Bun-only, data-less unit job (this mirrors pytest's `-m 'not
       # integration'`). They still run locally where Python + data exist.
+      #
+      # --coverage enforces the vitest.config.ts thresholds (lines/funcs/
+      # branches) as a non-regressing ratchet — symmetric with the pytest
+      # --cov-fail-under gate. @vitest/coverage-v8 is a declared devDep.
       - run: >-
-          bunx vitest run --config vitest.config.ts
+          bunx vitest run --config vitest.config.ts --coverage
           --exclude '**/web/tests/integration.test.ts'
           --exclude '**/lib/tools/__tests__/kelly.test.ts'
           --exclude '**/lib/tools/__tests__/runner.test.ts'
