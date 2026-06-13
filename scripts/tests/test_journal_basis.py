@@ -17,9 +17,17 @@ import ib_sync  # noqa: E402
 from clients.journal_basis import compute_open_basis_for_ticker  # noqa: E402
 
 
-class _FakeResult:
+class _FakeCursor:
+    """Mirrors the REAL libsql_experimental cursor (0.0.55): rows come back
+    via fetchall(); there is NO .rows attribute. The old _FakeResult exposed
+    .rows and let `result.rows` ship green while raising AttributeError on
+    every production lookup (CTA-01)."""
+
     def __init__(self, rows):
-        self.rows = rows
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
 
 
 class _FakeDb:
@@ -29,7 +37,7 @@ class _FakeDb:
 
     def execute(self, sql, params=()):
         self.calls.append((sql, params))
-        return _FakeResult(self._rows)
+        return _FakeCursor(self._rows)
 
 
 def _journal_row(payload: dict, filled_at: str) -> dict:

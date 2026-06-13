@@ -7,7 +7,7 @@ Usage:
     db = get_db()
     db.execute("INSERT OR REPLACE INTO service_health(service, state, updated_at) "
                "VALUES (?, ?, datetime('now'))", ("cri-scan", "ok"))
-    rows = db.execute("SELECT payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1").rows
+    rows = db.execute("SELECT payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1").fetchall()
 
 Embedded replicas were retired on 2026-05-20 after WAL conflicts between
 multi-writer hosts (feedback_libsql_replica_one_writer.md). The safe

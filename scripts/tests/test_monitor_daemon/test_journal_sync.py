@@ -281,8 +281,10 @@ class TestSellCloseLabeling:
         return patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db_mock)
 
     def _fake_db(self, rows):
-        result = MagicMock()
-        result.rows = rows
+        # Real libsql cursors expose fetchall(), NOT .rows (CTA-01): keep the
+        # fake driver-faithful so a .rows regression fails here.
+        result = MagicMock(spec=["fetchall"])
+        result.fetchall.return_value = rows
         db = MagicMock()
         db.execute.return_value = result
         return db

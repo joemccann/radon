@@ -126,7 +126,7 @@ def prior_net_qty_for_contract(
     )
 
     net_qty = 0.0
-    for row in result.rows:
+    for row in result.fetchall():
         payload = _payload_from_row(row)
         if _normalize_ticker(payload.get("ticker") or payload.get("symbol")) != normalized_ticker:
             continue
@@ -179,7 +179,7 @@ def compute_open_basis_for_ticker(db, ticker: str) -> dict[str, float]:
     )
 
     buckets: dict[str, dict[str, Any]] = {}
-    for row in result.rows:
+    for row in result.fetchall():
         payload = _payload_from_row(row)
         if _normalize_ticker(payload.get("ticker") or payload.get("symbol")) != normalized_ticker:
             continue
