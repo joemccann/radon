@@ -16,7 +16,7 @@ Source: `tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/
 
 ## NEXT — structural durability
 
-- [x] **DUR-08** (L, high) ~~Root-cause the nightly JVM wedge~~ DONE 06-12: forensic hook live; ROOT CAUSE = the gateway's own default 23:45 UTC auto-restart wedging during relogin (in-tree AUTO_RESTART_TIME "23:58 ET" was invalid IBC format). **OPERATOR ACTION REMAINING:** apply `radon-cloud pending/dur-08-compose.patch` (moves restart to 09:05 UTC + GC logging) — recreates the container, costs ONE 2FA push; watchdog quiet windows already live on both old + new slots.
+- [x] **DUR-08** (L, high) ~~Root-cause the nightly JVM wedge~~ DONE 06-12: forensic hook live; ROOT CAUSE = the gateway's own default 23:45 UTC auto-restart wedging during relogin (in-tree AUTO_RESTART_TIME "23:58 ET" was invalid IBC format). **APPLIED 2026-06-13 00:30 UTC** (radon-cloud `21d9391`): restart pinned to 09:05 UTC; GC logging via the persistent vmoptions file (image launcher blanks JAVA_TOOL_OPTIONS); gateway re-authenticated in 24s, zero forced restarts.
 - [x] **DUR-09** (L, high) Finish the sync-libsql purge: out-of-process mirror writer (in-script scan writes, not GIL-vulnerable worker threads) + bounded DB client (timeouts + retries everywhere).
 - [x] **DUR-10** (M, high) Watchdog second sensor (don't depend solely on FastAPI `/health`) + auto-start cascade victims after gateway recovery.
 - [x] **DUR-13** (M, high) Backup/restore for the canonical Turso `journal` table (laptop-pull dumps; restore drill).

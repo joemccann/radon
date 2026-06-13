@@ -34,11 +34,11 @@ services:
       # 05:05 ET: outside RTH, outside IBKR's NA server reset (23:45-00:45 ET),
       # and quiet for the relay. If the relogin wedges here it cascades nothing.
       AUTO_RESTART_TIME: "09:05 AM"
-      # DUR-08: GC visibility for the JVM API-listener wedge. JAVA_TOOL_OPTIONS
-      # is picked up additively by the gateway JVM; unified gc logging goes to
-      # container stdout, so `docker logs` (and the watchdog's forensic
-      # capture) records GC behaviour leading into a hang.
-      JAVA_TOOL_OPTIONS: "-Xlog:gc*:stdout:time,uptime,level,tags"
+      # DUR-08: GC logging does NOT work via JAVA_TOOL_OPTIONS — the image's
+      # launcher blanks it before starting the JVM (verified on the java
+      # process /proc environ). It lives instead in the persistent ib-config
+      # volume: Jts/ibgateway/<ver>/ibgateway.vmoptions gets
+      # `-Xlog:gc*:stdout:time,uptime,level,tags` (applied live 2026-06-13).
       VNC_SERVER_PASSWORD: ${VNC_SERVER_PASSWORD:-}
     ports:
       - "127.0.0.1:${IB_LIVE_PORT:-4001}:4003"
