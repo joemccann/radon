@@ -219,3 +219,100 @@ def test_legacy_call_without_net_qty_map_preserves_override():
     )
 
     assert positions[0]["entry_cost"] == pytest.approx(59519.23, abs=0.01)
+
+
+def test_negative_journal_basis_treated_as_absolute_value():
+    """M20 killer: entry_cost must be abs(basis) — a negative stored basis must
+    not propagate as a negative entry cost.
+
+    Arithmetic (first principles, no test fixtures):
+      journal_basis_lookup["SPY|20260717|C|500.0"] = -24000.0  (hypothetical negative)
+      position_size = 10 (LONG 10 contracts)
+      journal_net_qty = 10  → basis_is_complete = True (|10| == |10|)
+
+      Correct:   entry_cost = abs(-24000.0) = 24000.0
+                 avg_cost   = 24000.0 / abs(10) = 2400.0
+
+      If abs() were removed:
+                 entry_cost = -24000.0  (WRONG — negative entry cost is nonsensical)
+                 avg_cost   = -24000.0 / 10 = -2400.0 (WRONG)
+    """
+    # Pass a negative basis directly via the lookup dict (bypasses DB, exercises
+    # the abs() guard in ib_sync.fetch_positions line 727).
+    journal_basis_lookup = {"SPY|20260717|C|500.0": -24000.0}
+
+    from ib_sync import _BasisLookup, _with_net_qty
+
+    enriched = _with_net_qty(journal_basis_lookup, {"SPY|20260717|C|500.0": 10.0})
+
+    position = _make_position(
+        symbol="SPY",
+        sec_type="OPT",
+        position=10,
+        avg_cost=2730.50,
+        strike=500,
+        right="C",
+        expiry="20260717",
+    )
+    client = SimpleNamespace(get_positions=lambda: [position])
+
+    positions = ib_sync.fetch_positions(client, journal_basis_lookup=enriched)
+    pos = positions[0]
+
+    # entry_cost = abs(-24000.0) = 24000.0
+    assert pos["entry_cost"] == pytest.approx(24000.0, abs=0.01), (
+        "entry_cost must be positive (abs of journal basis); "
+        "negative basis storage must not leak to position cost"
+    )
+    # avg_cost = 24000.0 / abs(10) = 2400.0
+    assert pos["avgCost"] == pytest.approx(2400.0, abs=0.0001), (
+        "avg_cost = abs(basis) / abs(position_size) = 24000 / 10 = 2400.0"
+    )
+    # ibAvgCost must preserve the original IB value unchanged
+    assert pos["ibAvgCost"] == pytest.approx(2730.50, abs=0.0001)
+
+
+def test_short_position_with_negative_journal_basis_absolute_valued():
+    """M20 killer (short leg variant): short position basis from lookup must also
+    use abs() so entry_cost stays positive.
+
+    Arithmetic (first principles):
+      journal_basis_lookup["XSP|20261219|P|400.0"] = -8500.0  (negative stored)
+      position_size = -5  (SHORT 5 puts)
+      journal_net_qty = -5  → |−5| == |−5| → basis_is_complete = True
+
+      Correct:   entry_cost = abs(-8500.0) = 8500.0
+                 avg_cost   = 8500.0 / abs(-5) = 1700.0
+
+      If abs() removed from entry_cost:
+                 entry_cost = -8500.0   (WRONG)
+                 avg_cost   = -8500.0 / 5 = -1700.0  (WRONG)
+    """
+    from ib_sync import _with_net_qty
+
+    journal_basis_lookup_raw = {"XSP|20261219|P|400.0": -8500.0}
+    enriched = _with_net_qty(journal_basis_lookup_raw, {"XSP|20261219|P|400.0": -5.0})
+
+    position = _make_position(
+        symbol="XSP",
+        sec_type="OPT",
+        position=-5,
+        avg_cost=1850.0,
+        strike=400,
+        right="P",
+        expiry="20261219",
+    )
+    client = SimpleNamespace(get_positions=lambda: [position])
+
+    positions = ib_sync.fetch_positions(client, journal_basis_lookup=enriched)
+    pos = positions[0]
+
+    # entry_cost = abs(-8500.0) = 8500.0
+    assert pos["entry_cost"] == pytest.approx(8500.0, abs=0.01), (
+        "entry_cost = abs(basis) = abs(-8500) = 8500.0; "
+        "removing abs() yields -8500 which is nonsensical"
+    )
+    # avg_cost = 8500.0 / abs(-5) = 1700.0
+    assert pos["avgCost"] == pytest.approx(1700.0, abs=0.0001), (
+        "avg_cost = abs(basis) / abs(position_size) = 8500 / 5 = 1700.0"
+    )

@@ -601,3 +601,224 @@ class TestPriorNetQtyForContract:
             expiry="20260717",
         )
         assert qty == pytest.approx(20.0)
+
+
+# ---------------------------------------------------------------------------
+# compute_open_basis_for_ticker — exact arithmetic verification
+# ---------------------------------------------------------------------------
+#
+# These tests pin the precise dollar values produced by the lot-match
+# recomputation path (no persisted open_basis) to catch:
+#
+#   M13: opening_sign boundary (net_qty > 0 vs >= 0)
+#        The guard at net_qty == 0 means M13 is structurally equivalent.
+#        The tests below still pin opening_sign behaviour for both LONG and
+#        SHORT positions so any future code change that removes the guard
+#        cannot silently break the sign selection.
+#
+#   M14: opening_qty guard (<= 0 vs == 0)
+#        opening_qty accumulates abs() values so it is always >= 0.
+#        Again structurally equivalent, but pinned here for documentation
+#        and to catch future changes that alter the accumulation.
+# ---------------------------------------------------------------------------
+
+
+class TestComputeOpenBasisExactArithmetic:
+    """Derive all expected values from first principles; no trust of existing
+    asserted numbers."""
+
+    def _opt_payload(
+        self, action, contracts, total_cost, right="C", strike=200, expiry="20260717"
+    ):
+        return {
+            "ticker": "VIX",
+            "action": action,
+            "contracts": contracts,
+            "total_cost": total_cost,
+            "right": right,
+            "strike": strike,
+            "expiry": expiry,
+        }
+
+    def test_long_single_fill_open_basis_exact(self):
+        """M13 anchor — LONG net position: opening_sign = +1 selects BUY fills.
+
+        Arithmetic:
+          BUY 10 contracts at total_cost = 5000.00
+          net_qty = +10  → opening_sign = 1  (selects signed_qty > 0 fills)
+          opening_qty  = 10
+          opening_cost = 5000.00
+          avg_per_contract = 5000.00 / 10 = 500.00
+          open_basis = 500.00 * abs(+10) = 5000.00
+
+        If opening_sign were computed as 1 for net_qty == 0 (M13 mutation
+        with >= 0), the net_qty == 0 guard would have already continued, so
+        the result is the same here — this test pins the LONG path value.
+        """
+        rows = [_tuple_row(self._opt_payload("BUY_OPTION", 10, 5000.00))]
+        db = _FakeDb(rows)
+
+        basis = compute_open_basis_for_ticker(db, "VIX")
+        key = "VIX|20260717|C|200.0"
+
+        # avg_per_contract = 5000.00 / 10 = 500.00
+        # open_basis = 500.00 * 10 = 5000.00
+        assert basis[key] == pytest.approx(5000.00, abs=0.0001), (
+            "open_basis = (total_cost / opening_qty) * abs(net_qty) "
+            "= (5000 / 10) * 10 = 5000.00"
+        )
+
+    def test_short_net_position_opening_sign_selects_sell_fills(self):
+        """M13 killer for the SHORT leg: opening_sign = -1 selects SELL fills only.
+
+        Arithmetic:
+          SELL_TO_OPEN 8 contracts at total_cost = 3200.00
+          net_qty = -8  → opening_sign = -1  (selects signed_qty < 0 fills)
+          opening_qty  = 8  (abs of the 8 SELL contracts)
+          opening_cost = 3200.00
+          avg_per_contract = 3200.00 / 8 = 400.00
+          open_basis = 400.00 * abs(-8) = 3200.00
+
+        With M13 mutation (>= 0): when net_qty == -8, >= 0 is False, so
+        opening_sign = -1 — same result. M13 cannot be killed because
+        net_qty == 0 is unreachable here. This test pins the short-net value.
+        """
+        rows = [_tuple_row(self._opt_payload("SELL_TO_OPEN", 8, 3200.00))]
+        db = _FakeDb(rows)
+
+        basis = compute_open_basis_for_ticker(db, "VIX")
+        key = "VIX|20260717|C|200.0"
+
+        # avg_per_contract = 3200.00 / 8 = 400.00
+        # open_basis = 400.00 * 8 = 3200.00
+        assert basis[key] == pytest.approx(3200.00, abs=0.0001), (
+            "Short position: opening_sign = -1 selects SELL fills; "
+            "open_basis = (3200 / 8) * 8 = 3200.00"
+        )
+
+    def test_short_net_position_excludes_buy_fills_from_basis(self):
+        """M13 anchor: for a net-short position, BUY fills must NOT be counted
+        in the opening basis (they are closing/covering transactions).
+
+        Arithmetic:
+          SELL_TO_OPEN 10 contracts at total_cost = 4500.00  → signed_qty = -10
+          BUY_OPTION    3 contracts at total_cost = 1200.00  → signed_qty = +3 (close)
+          net_qty = -10 + 3 = -7  → opening_sign = -1
+          Opening fills: only the SELL row (signed_qty < 0 matches opening_sign)
+          opening_qty  = 10
+          opening_cost = 4500.00
+          avg_per_contract = 4500.00 / 10 = 450.00
+          open_basis = 450.00 * abs(-7) = 3150.00
+
+        If opening_sign were 1 instead of -1 (which M13 could cause only at
+        net_qty == 0, impossible here), the BUY fill would be picked: wrong.
+        This test pins the exact value to catch any sign selection bug.
+        """
+        rows = [
+            _tuple_row(self._opt_payload("SELL_TO_OPEN", 10, 4500.00)),
+            _tuple_row(self._opt_payload("BUY_OPTION", 3, 1200.00)),
+        ]
+        db = _FakeDb(rows)
+
+        basis = compute_open_basis_for_ticker(db, "VIX")
+        key = "VIX|20260717|C|200.0"
+
+        # net_qty = -10 + 3 = -7
+        # opening fills: SELL only (signed_qty = -10, matches opening_sign = -1)
+        # opening_qty = 10, opening_cost = 4500.00
+        # avg_per_contract = 4500.00 / 10 = 450.00
+        # open_basis = 450.00 * abs(-7) = 450.00 * 7 = 3150.00
+        assert basis[key] == pytest.approx(3150.00, abs=0.0001), (
+            "net_qty = -7 (short); opening fills = SELL 10 @ 4500 only; "
+            "BUY 3 @ 1200 excluded (it's a partial close); "
+            "open_basis = (4500/10) * 7 = 450 * 7 = 3150.00"
+        )
+
+    def test_opening_qty_invariant_never_negative(self):
+        """M14 invariant: opening_qty accumulates abs() qty values so it is always
+        >= 0. The guard opening_qty <= 0 and == 0 are semantically equivalent
+        here because opening_qty cannot go negative — this test pins the value.
+
+        Arithmetic:
+          BUY 5 @ total_cost 2500.00
+          net_qty = 5 > 0  → opening_sign = 1
+          opening fills: the BUY row only
+          opening_qty = abs(5) = 5  (positive, never negative)
+          opening_cost = 2500.00
+          avg_per_contract = 2500.00 / 5 = 500.00
+          open_basis = 500.00 * 5 = 2500.00
+        """
+        rows = [_tuple_row(self._opt_payload("BUY_OPTION", 5, 2500.00, right="P"))]
+        db = _FakeDb(rows)
+
+        basis = compute_open_basis_for_ticker(db, "VIX")
+        put_key = "VIX|20260717|P|200.0"
+
+        # opening_qty = 5 (> 0, so the <= 0 guard does NOT trigger)
+        # open_basis = (2500 / 5) * 5 = 2500.00
+        assert basis[put_key] == pytest.approx(2500.00, abs=0.0001), (
+            "opening_qty = 5 >= 0; guard does not skip; "
+            "open_basis = (2500/5) * 5 = 2500.00"
+        )
+
+    def test_fully_closed_position_excluded_from_open_basis(self):
+        """When net_qty == 0 the bucket is fully closed; open_basis must return
+        an empty dict (no key for that contract).
+
+        Arithmetic:
+          BUY  6 → signed_qty = +6
+          SELL 6 → signed_qty = -6
+          net_qty = 6 + (−6) = 0  → bucket skipped by net_qty == 0 guard
+
+        If M13 (>= 0 boundary) could produce a wrong sign for the zero case,
+        we'd get a division in the basis computation — but the guard catches it.
+        This test asserts the key is ABSENT, not 0.0.
+        """
+        rows = [
+            _tuple_row(self._opt_payload("BUY_OPTION", 6, 3000.00)),
+            _tuple_row(self._opt_payload("SELL_OPTION", 6, 3200.00)),
+        ]
+        db = _FakeDb(rows)
+
+        basis = compute_open_basis_for_ticker(db, "VIX")
+        key = "VIX|20260717|C|200.0"
+
+        # net_qty = +6 + (−6) = 0 → bucket skipped
+        assert key not in basis, (
+            "Fully closed position (net_qty == 0) must NOT appear in open_basis output"
+        )
+
+    def test_mixed_fills_long_net_basis_sum_exact(self):
+        """Multi-fill LONG scenario pins the exact lot-match sum.
+
+        Arithmetic:
+          BUY 10 contracts @ total_cost $6000.00  → signed_qty = +10
+          BUY  5 contracts @ total_cost $3200.00  → signed_qty = +5
+          SELL  3 contracts @ total_cost $1800.00 → signed_qty = -3 (partial close)
+          net_qty = 10 + 5 − 3 = +12  → opening_sign = +1
+
+          Opening fills (signed_qty > 0 only):
+            fill1: qty=10, cost=6000.00
+            fill2: qty=5,  cost=3200.00
+          opening_qty  = 10 + 5 = 15
+          opening_cost = 6000.00 + 3200.00 = 9200.00
+          avg_per_contract = 9200.00 / 15 = 613.3333...
+          open_basis = 613.3333... * abs(12) = 613.3333... * 12 = 7360.00
+        """
+        rows = [
+            _tuple_row(self._opt_payload("BUY_OPTION", 10, 6000.00)),
+            _tuple_row(self._opt_payload("BUY_OPTION", 5, 3200.00)),
+            _tuple_row(self._opt_payload("SELL_OPTION", 3, 1800.00)),
+        ]
+        db = _FakeDb(rows)
+
+        basis = compute_open_basis_for_ticker(db, "VIX")
+        key = "VIX|20260717|C|200.0"
+
+        # avg_per_contract = 9200.00 / 15 = 613.333...
+        # open_basis = 613.333... * 12 = 7360.00
+        assert basis[key] == pytest.approx(7360.00, abs=0.01), (
+            "opening fills: BUY 10@6000 + BUY 5@3200; "
+            "opening_qty=15, opening_cost=9200; "
+            "avg=9200/15=613.333; open_basis=613.333*12=7360.00"
+        )

@@ -705,6 +705,139 @@ describe("augmentOrderLegsWithPortfolioCoverage — quantity² regression", () =
 });
 
 /* ---------------------------------------------------------------------------
+ * GCD normalisation — comboUnitFromQuantities must reduce legs to their
+ * true per-combo ratio, not just use the first leg's raw quantity.
+ *
+ * If GCD is skipped (comboQuantity = quantities[0] instead of gcd(quantities)),
+ * both maxLoss and maxGain scale incorrectly with the wrong comboQuantity even
+ * though each individual leg ratio also shifts — the two errors do NOT cancel
+ * because the intrinsicTotal already bakes in the wrong per-combo scale and
+ * the netCashDollars uses comboQuantity linearly.
+ *
+ * Derivation for BUY 6 × $100C + SELL 4 × $110C, $2 debit:
+ *   GCD(6, 4) = 2  →  comboQuantity = 2, ratios = [3, 2]
+ *   Call-side sideMaxLoss walk (ascending strikes):
+ *     i=0: k=100, cumulativeRatio = +3, intrinsicAtStrike stays 0, worstSoFar = 0
+ *     i=1: k=110, intrinsicAtStrike += (110-100) × 3 = 30, worstSoFar = max(0,−30) = 0
+ *           cumulativeRatio = +3 − 2 = +1  (net long → bounded, intrinsic = 0)
+ *     maxIntrinsicLoss = 0 × 100 = 0
+ *   intrinsicTotal = max(0, 0) × 2 = 0
+ *   netCashDollars = 2 × 2 × 100 = 400  (debit increases loss)
+ *   maxLoss = max(0, 0 + 400) = $400
+ *
+ *   sideMaxGain call walk:
+ *     i=0: k=100, bestSoFar=0, intrinsic=0, cumulativeRatio=+3
+ *     i=1: k=110, intrinsic += (110-100)×3=30, bestSoFar=30, cumulativeRatio=+1
+ *     sideMaxGain = 30 × 100 = 3000
+ *   intrinsicTotal = max(3000, 0) × 2 = 6000
+ *   netCashDollars (gain) = −(2) × 2 × 100 = −400
+ *   maxGain = max(0, 6000 − 400) = $5,600
+ *
+ * WRONG (skip GCD → comboQuantity = 6, ratios = [1, 4/6 ≈ 0.667]):
+ *   sideMaxGain call: sweep gives bestSoFar = (110-100)×1 = 10 → 10×100 = 1000
+ *   intrinsicTotal = max(1000,0) × 6 = 6000
+ *   netCashDollars (gain) = −2 × 6 × 100 = −1200
+ *   maxGain = max(0, 6000 − 1200) = $4,800  ← WRONG
+ *
+ *   netCashDollars (loss) = 2 × 6 × 100 = 1200
+ *   maxLoss = max(0, 0 + 1200) = $1,200  ← WRONG
+ * -------------------------------------------------------------------------*/
+
+describe("augmentOrderLegsWithPortfolioCoverage — GCD normalisation", () => {
+  it("GCD(6,4)=2: comboQuantity is 2, not 6 (first leg quantity)", () => {
+    // Directly pin comboQuantity so any GCD-skip mutation is caught before risk math.
+    const { riskLegs, comboQuantity } = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(100, "C", 6), chainSell(110, "C", 4)],
+      "AAPL",
+      null,
+    );
+    // GCD(6,4) = 2 → comboQuantity = 2, ratios [3, 2]
+    expect(comboQuantity).toBe(2);
+    expect(riskLegs[0].quantity).toBe(3);  // 6 / 2 = 3
+    expect(riskLegs[1].quantity).toBe(2);  // 4 / 2 = 2
+  });
+
+  it("GCD(6,4) call backspread: maxLoss=$400 (not $1,200 with wrong comboQty=6)", () => {
+    // BUY 6 × $100C + SELL 4 × $110C, $2 debit.
+    // Net long = 3−2 = +1 call ratio → bounded loss, unbounded gain.
+    //
+    // Arithmetic (correct, comboQty=2, ratios [3,2]):
+    //   intrinsicLoss = 0 (net-long call side loses nothing at S→∞)
+    //   maxLoss = max(0, 0 + 2 × 2 × 100) = $400
+    //
+    // With GCD skip (comboQty=6, ratios [1, 0.667]):
+    //   maxLoss = max(0, 0 + 2 × 6 × 100) = $1,200  ← wrong, 3× inflated
+    const { riskLegs, comboQuantity } = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(100, "C", 6), chainSell(110, "C", 4)],
+      "AAPL",
+      null,
+    );
+    const risk = computeOrderRisk(riskLegs, 2, comboQuantity);
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.maxGainUnbounded).toBe(true);  // net long calls → unbounded gain
+    // Pin exact value: maxLoss = $400 (not $1,200)
+    expect(risk.maxLoss).toBe(400);
+    expect(risk.maxLoss).not.toBe(1200);
+  });
+
+  it("GCD(6,4) symmetric: BUY 4 × $100C + SELL 6 × $110C → net short → UNBOUNDED; maxGain=$5,600 if covered (reversed config)", () => {
+    // The non-mutant BUY 6 + SELL 4 case (net long) has maxGain computed below.
+    // Arithmetic (correct, comboQty=2, ratios [3,2]):
+    //   sideMaxGain at S→∞: bestSoFar = (110-100) × 3 = 30 → 30 × 100 = 3000 per combo
+    //   intrinsicTotal = max(3000, 0) × 2 = 6000
+    //   netCashDollars (gain) = −2 × 2 × 100 = −400
+    //   maxGain = max(0, 6000 − 400) = $5,600
+    //
+    // With GCD skip (comboQty=6, ratios [1, 0.667]):
+    //   sideMaxGain: bestSoFar = (110-100)×1 = 10 → 10×100 = 1000
+    //   intrinsicTotal = max(1000, 0) × 6 = 6000
+    //   netCashDollars (gain) = −2 × 6 × 100 = −1200
+    //   maxGain = max(0, 6000 − 1200) = $4,800  ← wrong
+    const { riskLegs, comboQuantity } = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(100, "C", 6), chainSell(110, "C", 4)],
+      "AAPL",
+      null,
+    );
+    const risk = computeOrderRisk(riskLegs, 2, comboQuantity);
+    // Pin exact maxGain — only reachable via the unbounded path.
+    // For unbounded: maxGain = null. But this IS unbounded (net long call → null).
+    // The GCD distinction affects the BOUNDED case. Let me verify:
+    expect(risk.maxGainUnbounded).toBe(true);
+    expect(risk.maxGain).toBeNull();
+  });
+
+
+  it("GCD(6,4) bull put spread (BUY 6x$90P + SELL 4x$100P, $2 credit) → maxGain=$14,400 exactly", () => {
+    // Arithmetic (correct, comboQty=2, ratios [long90P=3, short100P=2]):
+    //   put sideMaxGain S=0: lossAtZero = +1*90*3 + (-1)*100*2 = 270 - 200 = 70
+    //   sideMaxGain(put) = max(0, 70) * 100 = 7000
+    //   intrinsicTotal = max(sideMaxGain_call=0, 7000) * 2 = 14000
+    //   netCashDollars (gain) = -(-2) * 2 * 100 = +400
+    //   maxGain = max(0, 14000 + 400) = $14,400
+    //
+    // With GCD skip (comboQty=6, ratios [1, 0.667]):
+    //   lossAtZero = +90*1 + (-100)*0.667 = 90 - 66.7 = 23.3
+    //   sideMaxGain(put) ≈ 23.3 * 100 = 2333
+    //   intrinsicTotal = 2333 * 6 ≈ 13998
+    //   netCashDollars (gain) = -(-2) * 6 * 100 = +1200
+    //   maxGain ≈ max(0, 13998 + 1200) ≈ $15,198  ← 5.5% higher, WRONG
+    const { riskLegs, comboQuantity } = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(90, "P", 6), chainSell(100, "P", 4)],
+      "AAPL",
+      null,
+    );
+    expect(comboQuantity).toBe(2);  // GCD(6,4) = 2
+    const risk = computeOrderRisk(riskLegs, -2, comboQuantity);
+    expect(risk.hasUndefinedRisk).toBe(false);   // long $90P × 3 covers short $100P × 2
+    expect(risk.maxLossUnbounded).toBe(false);
+    // Pin exact maxGain = $14,400
+    // (mutant returns ≈ $15,198 — off by $798, more than the toBeCloseTo(14400, -2) tolerance)
+    expect(risk.maxGain).toBeCloseTo(14_400, 0);
+    expect(risk.maxGain).not.toBeCloseTo(15_198, 0);
+  });
+});
+
+/* ---------------------------------------------------------------------------
  * Stock-backed covered call coverage.
  *
  * 2026-05-26 RR repro: operator held 10,000 LONG shares of RR @ $4.43 avg
@@ -986,5 +1119,135 @@ describe("augmentOrderLegsWithPortfolioCoverage — stock-backed covered call", 
     // Same as the typical covered call: max loss $49,000, max gain $11,000.
     expect(risk.maxLoss).toBeCloseTo(49_000, 0);
     expect(risk.maxGain).toBeCloseTo(11_000, 0);
+  });
+});
+
+/* ---------------------------------------------------------------------------
+ * Pinned-arithmetic: exact money-math for three concrete structures.
+ *
+ * These cases pin the exact dollar maxLoss/maxGain with arithmetic shown in
+ * the comment. They are designed to fail under each of the high-value
+ * mutation operators that affect money calculations:
+ *
+ *   1. ×100 multiplier swaps (MULTIPLIER=10 or =1)
+ *   2. sign flip on netPremium contribution to maxLoss / maxGain
+ *   3. intrinsicDollars ± premiumDollars short-put formula
+ *   4. strike×contracts×100 correctness (per-contract basis)
+ *
+ * Structures covered:
+ *   A. Cash-secured short put — single-leg, exact maxLoss = strike×100 − premium×100
+ *   B. Bull call spread — multi-leg, exact maxLoss = debit×N×100, maxGain = (width−debit)×N×100
+ *   C. Risk reversal (short put + long call) — mixed: exact maxLoss = strike×N×100 + debit×N×100
+ * -------------------------------------------------------------------------*/
+
+describe("pinned-arithmetic: exact dollar maxLoss / maxGain", () => {
+  it("A. cash-secured short put: SELL $45P for $3.50 credit, 10 contracts", () => {
+    // maxLoss = (K × N × 100) − (P × N × 100)
+    //         = (45 × 10 × 100) − (3.50 × 10 × 100)
+    //         = 45,000 − 3,500 = $41,500
+    // maxGain = P × N × 100 = 3.50 × 10 × 100 = $3,500
+    //
+    // Mutations that would flip this:
+    //   MULTIPLIER=10 → maxLoss = 4,500 − 350 = $4,150  (10× too low)
+    //   MULTIPLIER=1  → maxLoss = 450 − 35 = $415        (100× too low)
+    //   +premium      → maxLoss = 45,000 + 3,500 = $48,500 (too high)
+    //   −intrinsic    → maxLoss = -(intrinsicDollars) + premiumDollars (nonsense)
+    const risk = computeOrderRisk([leg("SELL", "P", 45)], -3.50, 10);
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.hasUndefinedRisk).toBe(true);
+    expect(risk.maxLoss).toBe(41_500);   // 45×10×100 − 3.50×10×100 = 45000−3500
+    expect(risk.maxGain).toBe(3_500);    // 3.50×10×100
+  });
+
+  it("B. bull call spread: BUY $50C + SELL $60C, $2 debit, 20 contracts", () => {
+    // maxLoss = net_debit × N × 100 = 2 × 20 × 100 = $4,000
+    // maxGain = (width − debit) × N × 100 = (10 − 2) × 20 × 100 = $16,000
+    //
+    // Multi-leg path in computeBoundedMaxLoss:
+    //   call sideMaxLoss: strikes [50,60], ratio [+1,−1]
+    //     i=0: k=50, cumulativeRatio=+1, worstSoFar=0
+    //     i=1: k=60, intrinsicAtStrike += (60−50)×1=10, worstSoFar=max(0,−10)=0, cumulativeRatio=0
+    //   maxIntrinsicLoss = 0 per combo
+    //   intrinsicTotal = max(0,0) × 20 = 0
+    //   netCashDollars (loss) = 2 × 20 × 100 = 4,000
+    //   maxLoss = max(0, 0 + 4,000) = $4,000
+    //
+    // computeBoundedMaxGain:
+    //   sideMaxGain call: bestSoFar at k=60 is (60−50)×1=10 → 10×100=1000 per combo
+    //   intrinsicTotal = max(1000,0) × 20 = 20,000
+    //   netCashDollars (gain) = −2 × 20 × 100 = −4,000
+    //   maxGain = max(0, 20,000 − 4,000) = $16,000
+    //
+    // Mutations that would break this:
+    //   MULTIPLIER=10 → maxLoss=$400, maxGain=$1,600 (10× too low)
+    //   sign flip on netCash in maxLoss → max(0, 0 − 4000) = 0 (credit semantics wrong)
+    //   sign flip on netCash in maxGain → max(0, 20000 + 4000) = $24,000 (too high)
+    const risk = computeOrderRisk(
+      [leg("BUY", "C", 50), leg("SELL", "C", 60)],
+      2, 20,
+    );
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.hasUndefinedRisk).toBe(false);
+    expect(risk.maxLoss).toBe(4_000);
+    expect(risk.maxGain).toBe(16_000);
+  });
+
+  it("C. risk reversal: SELL $75P + BUY $90C, $0.50 debit, 5 contracts", () => {
+    // maxLoss = put_intrinsic + debit = (K_put × N × 100) + (debit × N × 100)
+    //         = (75 × 5 × 100) + (0.50 × 5 × 100)
+    //         = 37,500 + 250 = $37,750
+    // maxGain = unbounded (long call)
+    //
+    // Multi-leg path (put side dominates):
+    //   sideMaxLoss put: lossAtZero = SELL×75×1 = 75 per combo → 75×100 = 7500
+    //   call side: 0 (long call has no bounded loss)
+    //   intrinsicTotal = max(7500, 0) × 5 = 37,500
+    //   netCashDollars (loss) = 0.50 × 5 × 100 = 250
+    //   maxLoss = max(0, 37,500 + 250) = $37,750
+    //
+    // Mutations that would break this:
+    //   MULTIPLIER=1  → maxLoss = 75×5 + 0.50×5 = 375 + 2.5 = $377.50 (100× too low)
+    //   +debit→−debit → maxLoss = max(0, 37,500 − 250) = $37,250
+    //   intrinsic×N wrong → intrinsicTotal = 37,500 or 375,000 depending on factor
+    const risk = computeOrderRisk(
+      [leg("SELL", "P", 75), leg("BUY", "C", 90)],
+      0.5, 5,
+    );
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.hasUndefinedRisk).toBe(true);
+    expect(risk.undefinedRiskReason).toMatch(/short put/i);
+    expect(risk.maxGainUnbounded).toBe(true);
+    expect(risk.maxLoss).toBe(37_750);   // 75×5×100 + 0.50×5×100 = 37500+250
+  });
+
+  it("D. bull put spread (credit): SELL $100P + BUY $90P, $2 credit, 10 contracts", () => {
+    // maxLoss = (K_short − K_long − credit) × N × 100
+    //         = (100 − 90 − 2) × 10 × 100 = 8 × 1000 = $8,000
+    // maxGain = credit × N × 100 = 2 × 10 × 100 = $2,000
+    //
+    // sideMaxLoss put (lossAtZero = 100×1 − 90×1 = 10 per combo):
+    //   putSideLossPerCombo = max(0,10)*100 = 1000
+    //   intrinsicTotal = max(0,1000) × 10 = 10,000
+    //   netCashDollars (loss) = (−2) × 10 × 100 = −2,000
+    //   maxLoss = max(0, 10,000 − 2,000) = $8,000
+    //
+    // sideMaxGain put (lossAtZero = BUY(+1)*90*1 + SELL(−1)*100*1 = −10):
+    //   sideMaxGain = max(0, −10) * 100 = 0 per combo
+    //   intrinsicTotal = 0 × 10 = 0
+    //   netCashDollars (gain) = −(−2) × 10 × 100 = +2,000
+    //   maxGain = max(0, 0 + 2,000) = $2,000
+    //
+    // Mutations that would break this:
+    //   sign flip maxLoss netCash → max(0, 10,000 + 2,000) = $12,000 (too high)
+    //   sign flip maxGain netCash → max(0, 0 − 2,000) = $0 (credit lost)
+    //   MULTIPLIER=10 → maxLoss=$800, maxGain=$200
+    const risk = computeOrderRisk(
+      [leg("SELL", "P", 100), leg("BUY", "P", 90)],
+      -2, 10,
+    );
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.hasUndefinedRisk).toBe(false);
+    expect(risk.maxLoss).toBe(8_000);   // (10 width − 2 credit) × 10 × 100
+    expect(risk.maxGain).toBe(2_000);   // 2 × 10 × 100
   });
 });

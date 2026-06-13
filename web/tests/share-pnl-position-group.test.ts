@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { closedGroupReturnPct, positionGroupShareData, type PositionFillGroup } from "../components/WorkspaceSections";
-import type { ExecutedOrder } from "../lib/types";
+import type { ExecutedOrder, PortfolioPosition } from "../lib/types";
 
 function makeOptionFill(
   overrides: Partial<ExecutedOrder> & { contract?: Partial<ExecutedOrder["contract"]> } = {},
@@ -376,5 +376,362 @@ describe("short call buy-to-close return %", () => {
     };
     // Bought 10 @ $1.00 ($1,000 basis), sold @ $3.00 → +200%
     expect(closedGroupReturnPct(longClose)).toBeCloseTo(200, 6);
+  });
+});
+
+/* ── Mutation-test strengthening — kill survivors found by manual analysis ──
+ *
+ * Each describe block targets a specific surviving mutant identified by the
+ * mutation testing session (2026-06-13). Arithmetic is derived from first
+ * principles and shown inline so a wrong assertion cannot hide a real bug.
+ */
+
+describe("multi-leg portfolio fallback — direction sign must be: LONG = paid (−1), SHORT = received (+1)", () => {
+  /* Bull Call Spread: Long $90 Call / Short $95 Call, 10 contracts.
+   *
+   * avg_cost is per-CONTRACT for options (already ×100):
+   *   LONG $90 Call  avg_cost = 800  → per-share = 800 / 100 = $8.00
+   *   SHORT $95 Call avg_cost = 300  → per-share = 300 / 100 = $3.00
+   *
+   * Net entry price (per share, sign convention: paid = negative):
+   *   sign(LONG)  = −1  →  −1 × 8.00 = −8.00
+   *   sign(SHORT) = +1  →  +1 × 3.00 = +3.00
+   *   netCost = −8.00 + 3.00 = −5.00  (net debit)
+   *
+   * Mutating LONG→+1 / SHORT→−1 gives netCost = +8.00 − 3.00 = +5.00 (wrong sign).
+   * The test pins entryPrice < 0 (debit position) to kill that mutant.
+   *
+   * entryNotional = |−5.00| × 10 contracts × 100 = $5,000
+   * pnlPct        = 2,500 / 5,000 × 100 = +50%
+   */
+  const totalPnL = 2500;
+  const longAvgCostPerContract = 800;
+  const shortAvgCostPerContract = 300;
+  const contracts = 10;
+  const multiplier = 100;
+  const longPerShare = longAvgCostPerContract / multiplier;    // $8.00
+  const shortPerShare = shortAvgCostPerContract / multiplier;  // $3.00
+  const netCost = -longPerShare + shortPerShare;               // −5.00 (debit)
+  const entryNotional = Math.abs(netCost) * contracts * multiplier; // $5,000
+  const expectedPct = (totalPnL / entryNotional) * 100;       // +50%
+
+  const closeGroup: PositionFillGroup = {
+    id: "close-bcs",
+    symbol: "AAOI",
+    description: "Closed AAOI Bull Call Spread (Long $90 / Short $95)",
+    isClosing: true,
+    totalQuantity: contracts,
+    netPrice: 2.50,
+    totalCommission: -5.00,
+    totalPnL,
+    time: "2026-06-13T15:00:00+00:00",
+    fills: [
+      makeOptionFill({
+        execId: "close-long-leg",
+        side: "BOT",
+        quantity: contracts,
+        avgPrice: 3.0,
+        realizedPNL: totalPnL,
+        time: "2026-06-13T15:00:00+00:00",
+        contract: { conId: 990001, strike: 90, right: "C", expiry: "2026-06-20" },
+      }),
+    ],
+  };
+
+  const portfolioCombo: PortfolioPosition = {
+    id: 10,
+    ticker: "AAOI",
+    structure: "Bull Call Spread",
+    structure_type: "defined",
+    risk_profile: "defined",
+    expiry: "2026-06-20",
+    contracts,
+    direction: "LONG",
+    entry_cost: entryNotional,
+    max_risk: entryNotional,
+    market_value: null,
+    legs: [
+      {
+        direction: "LONG",
+        contracts,
+        type: "Call",
+        strike: 90,
+        entry_cost: longAvgCostPerContract * contracts,
+        avg_cost: longAvgCostPerContract,
+        market_price: null,
+        market_value: null,
+      },
+      {
+        direction: "SHORT",
+        contracts,
+        type: "Call",
+        strike: 95,
+        entry_cost: -(shortAvgCostPerContract * contracts),
+        avg_cost: shortAvgCostPerContract,
+        market_price: null,
+        market_value: null,
+      },
+    ],
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-06-01",
+  };
+
+  it("multi-leg net cost uses LONG=paid(−1) / SHORT=received(+1) sign convention", () => {
+    const data = positionGroupShareData(closeGroup, [closeGroup], [portfolioCombo]);
+
+    // entryPrice must be negative — a net debit position was paid for
+    // Mutation M14 (sign flip: LONG→+1, SHORT→−1) gives +5.00 (wrong)
+    expect(data.entryPrice).toBeCloseTo(netCost, 6);   // ≈ −5.00
+    expect(data.entryPrice).toBeLessThan(0);
+
+    // pnlPct = 2500 / 5000 × 100 = +50.00%
+    // Mutation M14 leaves |entryNotional| the same → pnlPct is still 50%,
+    // BUT entryPrice sign is wrong. Pin both so any sign-flip on either leg is caught.
+    expect(data.pnlPct).toBeCloseTo(expectedPct, 4);  // +50.00%
+    expect(data.entryTime).toBe("2026-06-01");
+  });
+});
+
+describe("closedGroupCloseCash — side='SELL' alias must equal side='SLD'", () => {
+  /* The production cashSign guard accepts `fill.side === "SLD" || fill.side === "SELL"`.
+   * Mutating this to `fill.side === "SLD"` (dropping the SELL alias) makes any fill
+   * with side="SELL" return cashSign=0 → closedGroupCloseCash returns null
+   * → closedGroupReturnPct returns null (wrong — should be +200%).
+   *
+   * SLD 5 contracts @ $3.00, pnl = $1,000
+   *   closeCash = +1 × 3.00 × 5 × 100 = +$1,500   (received cash)
+   *   openCash  = 1,000 − 1,500 = −$500             (paid at entry)
+   *   pnlPct    = 1,000 / |−500| × 100 = +200%
+   *
+   * Same arithmetic applies when side="SELL" (the IB alias). Mutation M18 drops
+   * the alias, producing null instead of +200%.
+   */
+  const qty = 5;
+  const closePrice = 3.00;
+  const pnl = 1000;
+  // closeCash = +1 × 3.00 × 5 × 100 = 1,500
+  const closeCash = closePrice * qty * 100;
+  // openCash = 1,000 − 1,500 = −500
+  const openCash = pnl - closeCash;
+  // pnlPct = 1,000 / 500 × 100 = 200%
+  const expectedPct = (pnl / Math.abs(openCash)) * 100;
+
+  const groupWithSellAlias: PositionFillGroup = {
+    id: "close-sell-alias",
+    symbol: "NVDA",
+    description: "Closed NVDA Long Call (SELL alias)",
+    isClosing: true,
+    totalQuantity: qty,
+    netPrice: closePrice,
+    totalCommission: -1.25,
+    totalPnL: pnl,
+    time: "2026-06-13T14:00:00+00:00",
+    fills: [
+      makeOptionFill({
+        execId: "close-sell-1",
+        symbol: "NVDA",
+        side: "SELL",   // IB alias for SLD — must give cashSign = +1
+        quantity: qty,
+        avgPrice: closePrice,
+        realizedPNL: pnl,
+        time: "2026-06-13T14:00:00+00:00",
+        contract: { conId: 880001, symbol: "NVDA", secType: "OPT", strike: 150, right: "C", expiry: "2026-07-18" },
+      }),
+    ],
+  };
+
+  it("treats side='SELL' identically to side='SLD' when computing closedGroupReturnPct", () => {
+    // Mutation M18 drops the SELL alias → cashSign=0 → returns null
+    expect(closedGroupReturnPct(groupWithSellAlias)).toBeCloseTo(expectedPct, 6);  // +200%
+  });
+
+  it("treats side='BUY' identically to side='BOT' for a buy-to-close group", () => {
+    /* BOT / BUY = paid cash → cashSign = −1
+     * BOT 5 @ $3.00, pnl = $1,000 (short, bought to cover)
+     *   closeCash = −1 × 3.00 × 5 × 100 = −$1,500   (paid to close)
+     *   openCash  = 1,000 − (−1,500) = +$1,500        (credit received at open)
+     *   pnlPct    = 1,000 / 1,500 × 100 ≈ +66.67%
+     */
+    const shortPnl = 1000;
+    const shortClosePrice = 3.00;
+    const shortCloseCash = -shortClosePrice * qty * 100;  // −1,500
+    const shortOpenCash = shortPnl - shortCloseCash;       // +1,500
+    const shortExpectedPct = (shortPnl / Math.abs(shortOpenCash)) * 100;  // 66.67%
+
+    const groupWithBuyAlias: PositionFillGroup = {
+      id: "close-buy-alias",
+      symbol: "NVDA",
+      description: "Closed NVDA Short Call (BUY alias)",
+      isClosing: true,
+      totalQuantity: qty,
+      netPrice: shortClosePrice,
+      totalCommission: -1.25,
+      totalPnL: shortPnl,
+      time: "2026-06-13T14:30:00+00:00",
+      fills: [
+        makeOptionFill({
+          execId: "close-buy-1",
+          symbol: "NVDA",
+          side: "BUY",   // IB alias for BOT — must give cashSign = −1
+          quantity: qty,
+          avgPrice: shortClosePrice,
+          realizedPNL: shortPnl,
+          time: "2026-06-13T14:30:00+00:00",
+          contract: { conId: 880002, symbol: "NVDA", secType: "OPT", strike: 150, right: "C", expiry: "2026-07-18" },
+        }),
+      ],
+    };
+
+    expect(closedGroupReturnPct(groupWithBuyAlias)).toBeCloseTo(shortExpectedPct, 6);
+  });
+});
+
+describe("positionGroupShareData — isClosing gate: non-closing groups must yield null pnlPct", () => {
+  /* Mutation M26 drops `&& group.isClosing` from the main P&L guard.
+   * If an opening group has totalPnL = 0 (non-null), the mutated code enters
+   * the P&L branch and computes openCash from the opening fills, yielding
+   * pnlPct = 0 / |openCash| × 100 = 0 instead of null.
+   *
+   * Input: opening BOT group, 10 contracts @ $2.00, totalPnL = 0 (not null)
+   *   isClosing = false  ← the critical flag
+   *   fills: BOT 10 @ $2.00 (opening position)
+   *
+   * Correct: pnlPct must be null (not yet closed)
+   * M26 mutation: openCash = 0 − (−2.00×10×100) = +2,000 → pnlPct = 0%
+   */
+  const openingGroup: PositionFillGroup = {
+    id: "open-bcs",
+    symbol: "SPY",
+    description: "Opened SPY Long Put",
+    isClosing: false,  // opening position — must NOT compute P&L %
+    totalQuantity: 10,
+    netPrice: 2.00,
+    totalCommission: -2.50,
+    totalPnL: 0,  // zero but non-null (triggers M26 if isClosing check is dropped)
+    time: "2026-06-13T10:00:00+00:00",
+    fills: [
+      makeOptionFill({
+        execId: "open-spy-put",
+        symbol: "SPY",
+        side: "BOT",
+        quantity: 10,
+        avgPrice: 2.00,
+        realizedPNL: 0,
+        time: "2026-06-13T10:00:00+00:00",
+        contract: { conId: 770001, symbol: "SPY", secType: "OPT", strike: 500, right: "P", expiry: "2026-07-18" },
+      }),
+    ],
+  };
+
+  it("returns null pnlPct for a non-closing group even when totalPnL is 0 (not null)", () => {
+    // Mutation M26 drops `&& group.isClosing` → pnlPct becomes 0, not null
+    const data = positionGroupShareData(openingGroup, [openingGroup], []);
+    expect(data.pnlPct).toBeNull();
+    // entryPrice and exitPrice must also be null for opening groups
+    expect(data.entryPrice).toBeNull();
+    expect(data.exitPrice).toBeNull();
+  });
+});
+
+describe("portfolio fuzzy-match word-overlap threshold — requires >= 2 words, not >= 1", () => {
+  /* Mutation M15 weakens `overlap.length >= 2` to `>= 1`, allowing a position
+   * with only 1 matching word to become the entry basis. The strike check runs
+   * first and must pass for this to be a problem, so we construct a case where:
+   *  - strikes match (close group strike 200 = portfolio leg strike 200)
+   *  - only 1 word overlaps between the close description and the portfolio structure
+   *
+   * Close description: "Closed NVDA Naked Call"       words: [closed, nvda, naked, call]
+   * Portfolio structure: "Bull Call Spread"            words: [bull, call, spread]
+   * Overlap: ["call"] — exactly 1 word.
+   *
+   * With >= 2: no match → falls through to P&L identity.
+   * With >= 1: matches → uses portfolio avg_cost ($500/contract = $5/share) as
+   *            entryPrice, yielding entryNotional = 5.00 × 5 × 100 = $2,500,
+   *            pnlPct = 1,500 / 2,500 × 100 = +60% (WRONG).
+   *
+   * Correct via P&L identity:
+   *   closeCash = +1 × 4.00 × 5 × 100 = +$2,000  (SLD = received)
+   *   openCash  = 1,500 − 2,000 = −$500            (paid at entry)
+   *   pnlPct    = 1,500 / 500 × 100 = +300%        (CORRECT)
+   */
+  const qty = 5;
+  const closePricePerShare = 4.00;
+  const pnl = 1500;
+  // P&L identity:
+  const closeCash = closePricePerShare * qty * 100;   // +$2,000
+  const openCash = pnl - closeCash;                   // −$500
+  const correctPct = (pnl / Math.abs(openCash)) * 100; // +300%
+
+  // Wrong pnlPct if 1-word match accidentally picks up the unrelated portfolio position
+  const portfolioAvgCostPerContract = 500;
+  const wrongEntryNotional = (portfolioAvgCostPerContract / 100) * qty * 100; // $2,500
+  const wrongPct = (pnl / wrongEntryNotional) * 100; // +60%
+
+  const closeGroup: PositionFillGroup = {
+    id: "close-naked-call",
+    symbol: "NVDA",
+    description: "Closed NVDA Naked Call",
+    isClosing: true,
+    totalQuantity: qty,
+    netPrice: closePricePerShare,
+    totalCommission: -1.25,
+    totalPnL: pnl,
+    time: "2026-06-13T16:00:00+00:00",
+    fills: [
+      makeOptionFill({
+        execId: "close-naked-1",
+        symbol: "NVDA",
+        side: "SLD",
+        quantity: qty,
+        avgPrice: closePricePerShare,
+        realizedPNL: pnl,
+        time: "2026-06-13T16:00:00+00:00",
+        contract: { conId: 990201, symbol: "NVDA", secType: "OPT", strike: 200, right: "C", expiry: "2026-07-18" },
+      }),
+    ],
+  };
+
+  // Portfolio has a Bull Call Spread on NVDA $200 Call — same strike, only 1 word overlap
+  const unrelatedBullSpread: PortfolioPosition = {
+    id: 20,
+    ticker: "NVDA",
+    structure: "Bull Call Spread",
+    structure_type: "defined",
+    risk_profile: "defined",
+    expiry: "2026-07-18",
+    contracts: qty,
+    direction: "LONG",
+    entry_cost: wrongEntryNotional,
+    max_risk: wrongEntryNotional,
+    market_value: null,
+    legs: [
+      {
+        direction: "LONG",
+        contracts: qty,
+        type: "Call",
+        strike: 200,  // same strike as close group
+        entry_cost: portfolioAvgCostPerContract * qty,
+        avg_cost: portfolioAvgCostPerContract,
+        market_price: null,
+        market_value: null,
+      },
+    ],
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-05-15",
+  };
+
+  it("requires >= 2 overlapping words: 1-word match 'call' does not hijack entry basis", () => {
+    const data = positionGroupShareData(closeGroup, [closeGroup], [unrelatedBullSpread]);
+
+    // M15 mutation (>= 1) would pick up 'call' overlap → pnlPct = +60% (wrong)
+    // Correct via P&L identity: pnlPct = 1,500 / 500 × 100 = +300%
+    expect(data.pnlPct).toBeCloseTo(correctPct, 4);      // +300%
+    expect(data.pnlPct).not.toBeCloseTo(wrongPct, 0);    // must NOT be ≈ 60%
+    // entryTime must not come from the unrelated spread (entry_date: 2026-05-15)
+    expect(data.entryTime).not.toBe("2026-05-15");
   });
 });
