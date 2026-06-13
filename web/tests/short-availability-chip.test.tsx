@@ -158,6 +158,80 @@ describe("<LocateFeeChip /> — EASY state", () => {
   });
 });
 
+describe("<LocateFeeChip /> — SPX-03 AAPL live repro", () => {
+  it("renders EASY (not NO LOCATE) for shortable:true + 190M shares + fee_rate:null", () => {
+    // This is the AAPL live case: tick 89 (shortable_shares) arrived but tick 46
+    // (difficulty) did not. After the server fix, shortable=true is derived from
+    // shares > 0, so the chip must render green EASY, never red NO LOCATE.
+    render(
+      <LocateFeeChip
+        status="easy"
+        data={makeData({ shortable: true, shortable_shares: 190_797_965, fee_rate: null, difficulty: null, missing: false })}
+      />,
+    );
+    const chip = screen.getByTestId("locate-fee-chip");
+    expect(chip.getAttribute("data-status")).toBe("easy");
+    expect(chip.textContent).toContain("EASY");
+    expect(chip.textContent).not.toContain("NO LOCATE");
+    // Positive green token for easy-to-borrow
+    const chipSpan = chip.querySelector("span");
+    expect(chipSpan?.style.color).toBe("var(--positive)");
+  });
+
+  it("renders EASY with 190.8M share count formatted correctly", () => {
+    render(
+      <LocateFeeChip
+        status="easy"
+        data={makeData({ shortable: true, shortable_shares: 190_797_965, fee_rate: null, missing: false })}
+      />,
+    );
+    const chip = screen.getByTestId("locate-fee-chip");
+    // 190_797_965 / 1_000_000 = 190.8M
+    expect(chip.textContent).toContain("190.8M");
+  });
+
+  it("renders HTB with fee for locate-only (difficulty 1.5-2.5 range)", () => {
+    render(
+      <LocateFeeChip
+        status="htb"
+        data={makeData({ shortable: null, difficulty: 2.0, shortable_shares: 50_000, fee_rate: 4.75, missing: false })}
+      />,
+    );
+    const chip = screen.getByTestId("locate-fee-chip");
+    expect(chip.getAttribute("data-status")).toBe("htb");
+    expect(chip.textContent).toContain("HTB");
+    expect(chip.textContent).toContain("4.75%");
+    const chipSpan = chip.querySelector("span");
+    expect(chipSpan?.style.color).toBe("var(--warning)");
+  });
+
+  it("renders NO LOCATE only for shortable:false", () => {
+    render(
+      <LocateFeeChip
+        status="no-locate"
+        data={makeData({ shortable: false, difficulty: 1.0, shortable_shares: 0, fee_rate: null, missing: false })}
+      />,
+    );
+    const chip = screen.getByTestId("locate-fee-chip");
+    expect(chip.getAttribute("data-status")).toBe("no-locate");
+    expect(chip.textContent).toContain("NO LOCATE");
+    const chipSpan = chip.querySelector("span");
+    expect(chipSpan?.style.color).toBe("var(--negative)");
+  });
+
+  it("renders NO LOCATE for fully missing data (both difficulty and shares absent)", () => {
+    render(
+      <LocateFeeChip
+        status="no-locate"
+        data={makeData({ shortable: null, difficulty: null, shortable_shares: null, fee_rate: null, missing: true })}
+      />,
+    );
+    const chip = screen.getByTestId("locate-fee-chip");
+    expect(chip.getAttribute("data-status")).toBe("no-locate");
+    expect(chip.textContent).toContain("NO LOCATE");
+  });
+});
+
 describe("<LocateFeeChip /> — secondary metadata", () => {
   it("includes IB source in secondary text", () => {
     render(

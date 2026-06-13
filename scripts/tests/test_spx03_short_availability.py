@@ -43,13 +43,18 @@ _SHORTABLE_NO_THRESHOLD = 1.5
 _UW_SHORT_DATA_MAX_AGE_DAYS = 3
 
 
-def _derive_shortability(difficulty: Optional[float]) -> Optional[bool]:
-    if difficulty is None:
-        return None
-    if difficulty >= _SHORTABLE_EASY_THRESHOLD:
+def _derive_shortability(
+    difficulty: Optional[float],
+    shortable_shares: Optional[float] = None,
+) -> Optional[bool]:
+    if difficulty is not None:
+        if difficulty >= _SHORTABLE_EASY_THRESHOLD:
+            return True
+        if difficulty < _SHORTABLE_NO_THRESHOLD:
+            return False
+        return None  # locate-only
+    if shortable_shares is not None and shortable_shares > 0:
         return True
-    if difficulty < _SHORTABLE_NO_THRESHOLD:
-        return False
     return None
 
 
@@ -364,7 +369,7 @@ class TestShortAvailabilityLogic:
                     as_of = uw_as_of or as_of
 
         return {
-            "shortable": _derive_shortability(difficulty),
+            "shortable": _derive_shortability(difficulty, shortable_shares),
             "difficulty": difficulty,
             "shortable_shares": shortable_shares,
             "fee_rate": fee_rate,
@@ -447,3 +452,59 @@ class TestShortAvailabilityLogic:
         # Note: 0.0 is falsy in Python; our code checks `is not None`
         assert r["source"] == "ib"
         assert r["missing"] is False
+
+    # ------------------------------------------------------------------
+    # SPX-03 fix: AAPL live repro — shortable_shares > 0 without difficulty
+    # ------------------------------------------------------------------
+
+    def _run_with_shares(self, ib_result=None):
+        """Simulate the fixed route logic (difficulty + shares → shortable)."""
+        difficulty: Optional[float] = None
+        shortable_shares: Optional[float] = None
+        source = "none"
+
+        if ib_result is not None:
+            difficulty = ib_result.get("difficulty")
+            shortable_shares = ib_result.get("shortable_shares")
+            if difficulty is not None or shortable_shares is not None:
+                source = "ib"
+
+        return {
+            "shortable": _derive_shortability(difficulty, shortable_shares),
+            "difficulty": difficulty,
+            "shortable_shares": shortable_shares,
+            "source": source,
+            "missing": source == "none",
+        }
+
+    def test_aapl_repro_no_difficulty_with_shares_returns_true(self):
+        """AAPL live case: difficulty=None + 190M shares → shortable MUST be True."""
+        r = self._run_with_shares(ib_result={"difficulty": None, "shortable_shares": 190_797_965})
+        assert r["shortable"] is True
+        assert r["source"] == "ib"
+        assert r["missing"] is False
+
+    def test_difficulty_present_easy_unchanged(self):
+        """When difficulty IS present (>=2.5), derivation is unchanged."""
+        r = self._run_with_shares(ib_result={"difficulty": 3.0, "shortable_shares": 1_000_000})
+        assert r["shortable"] is True
+
+    def test_difficulty_present_no_borrow_unchanged(self):
+        """When difficulty IS present (<1.5), derivation is unchanged regardless of shares."""
+        r = self._run_with_shares(ib_result={"difficulty": 1.0, "shortable_shares": 500_000})
+        assert r["shortable"] is False
+
+    def test_difficulty_present_locate_unchanged(self):
+        """When difficulty IS present (1.5-2.5), locate-only regardless of shares."""
+        r = self._run_with_shares(ib_result={"difficulty": 2.0, "shortable_shares": 100_000})
+        assert r["shortable"] is None
+
+    def test_both_absent_stays_none(self):
+        """Both difficulty and shortable_shares absent → shortable stays None."""
+        r = self._run_with_shares(ib_result={"difficulty": None, "shortable_shares": None})
+        assert r["shortable"] is None
+
+    def test_shares_zero_with_no_difficulty_stays_none(self):
+        """shares=0 + no difficulty → None (no evidence of availability)."""
+        r = self._run_with_shares(ib_result={"difficulty": None, "shortable_shares": 0.0})
+        assert r["shortable"] is None

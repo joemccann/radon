@@ -2483,19 +2483,31 @@ _SHORTABLE_NO_THRESHOLD = 1.5     # <  no shares available
 _UW_SHORT_DATA_MAX_AGE_DAYS = 3
 
 
-def _derive_shortability(difficulty: Optional[float]) -> Optional[bool]:
-    """Map IB tick 46 difficulty score to shortable boolean.
+def _derive_shortability(
+    difficulty: Optional[float],
+    shortable_shares: Optional[float] = None,
+) -> Optional[bool]:
+    """Map IB tick 46 difficulty score (and/or tick 89 shares) to shortable boolean.
 
-    3.0 = easy, 1.5-2.5 = locate required, <1.5 = not shortable.
-    Returns True (easy), None (locate-only), or False (not shortable).
+    When difficulty IS present:
+      >= 2.5 → True (easy), < 1.5 → False (not shortable), 1.5-2.5 → None (locate-only).
+
+    When difficulty is absent but shortable_shares is a positive number, shortable
+    MUST be True — you cannot have 190M borrowable shares and "unknown" shortability
+    (SPX-03 AAPL live repro: tick 89 arrived in the ~6s window, tick 46 did not).
+
+    shortable stays None ONLY when BOTH difficulty AND shortable_shares are absent
+    or shortable_shares is zero/None with no difficulty signal.
     """
-    if difficulty is None:
-        return None
-    if difficulty >= _SHORTABLE_EASY_THRESHOLD:
+    if difficulty is not None:
+        if difficulty >= _SHORTABLE_EASY_THRESHOLD:
+            return True
+        if difficulty < _SHORTABLE_NO_THRESHOLD:
+            return False
+        return None  # locate-only range — neither clearly shortable nor blocked
+    if shortable_shares is not None and shortable_shares > 0:
         return True
-    if difficulty < _SHORTABLE_NO_THRESHOLD:
-        return False
-    return None  # locate-only — neither clearly shortable nor blocked
+    return None
 
 
 def _probe_short_ticks_in_thread(client: Any, ticker: str) -> dict:
@@ -2695,7 +2707,7 @@ async def short_availability(ticker: str, request: Request):
         except Exception as exc:
             logger.warning("short-availability/%s: UW fallback error: %s", upper, exc)
 
-    shortable = _derive_shortability(difficulty)
+    shortable = _derive_shortability(difficulty, shortable_shares)
     missing = source == "none"
 
     return JSONResponse({
