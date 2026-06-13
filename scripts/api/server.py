@@ -1293,9 +1293,31 @@ async def orders_place(request: Request):
         "ib_place_order.py", ["--json", order_json], timeout=25
     )
     if not result.ok:
+        # SPX-02: log infra failures before raising so the reason survives journald
+        logger.warning(
+            "orders/place infra error for %s %s %s: %s",
+            body.get("action", "?"),
+            body.get("quantity", "?"),
+            body.get("symbol", "?"),
+            result.error,
+        )
         raise HTTPException(status_code=502, detail=result.error)
     if result.data and result.data.get("status") == "error":
-        raise HTTPException(status_code=502, detail=result.data.get("message", "Order failed"))
+        # SPX-02: log the full structured detail (including ib_error_code / ib_error_text
+        # from the grace-wait) so the reason survives journald even when IB Gateway
+        # logs are encrypted (.ibgzenc).  Preserve the structured dict in the
+        # HTTPException detail so radonFetch's coerceRadonErrorDetail can unwrap it
+        # rather than collapsing to "[object Object]".
+        error_detail = result.data
+        logger.warning(
+            "orders/place rejected by IB for %s %s %s: %s (ib_error_code=%s)",
+            body.get("action", "?"),
+            body.get("quantity", "?"),
+            body.get("symbol", "?"),
+            error_detail.get("message", "Order failed"),
+            error_detail.get("ib_error_code"),
+        )
+        raise HTTPException(status_code=502, detail=error_detail)
     return result.data
 
 

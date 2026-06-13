@@ -31,6 +31,80 @@ from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWA
 CLIENT_ID = CLIENT_IDS.get("ib_place_order", 26)
 PORT = DEFAULT_GATEWAY_PORT
 
+# Grace-wait constants for SPX-01: async 201-class errors arrive after the
+# confirm-poll loop breaks on a terminal-failed state.
+_GRACE_WAIT_POLLS = 5
+_GRACE_WAIT_INTERVAL = 0.3   # seconds per poll; total grace budget ≈ 1.5s
+
+
+def _grace_wait_for_ib_error(client, ib_errors: list, trade) -> tuple:
+    """Poll the error buffer for up to ~1.5s waiting for an async IB error.
+
+    Returns (ib_error_code, ib_error_text) if found, else (None, None).
+
+    Three-step fallback:
+      1. ib_errors buffer already has an entry (arrived before/during poll)
+      2. Poll the buffer at 300 ms intervals for up to 1.5s
+      3. Scan trade.log for the latest TradeLogEntry with errorCode != 0
+    """
+    if ib_errors:
+        code, text = ib_errors[0]
+        return code, text
+
+    for _ in range(_GRACE_WAIT_POLLS):
+        client.sleep(_GRACE_WAIT_INTERVAL)
+        if ib_errors:
+            code, text = ib_errors[0]
+            return code, text
+
+    latest_log_entry = _extract_error_from_trade_log(trade)
+    if latest_log_entry is not None:
+        return latest_log_entry
+
+    return None, None
+
+
+def _extract_error_from_trade_log(trade):
+    """Scan trade.log for the most recent entry with a non-zero errorCode.
+
+    Returns (errorCode, message) or None if none found.
+    """
+    entries = getattr(trade, "log", None) or []
+    for entry in reversed(entries):
+        code = getattr(entry, "errorCode", 0)
+        if code and code != 0:
+            return code, getattr(entry, "message", "")
+    return None
+
+
+def _build_terminal_error(status: str, order_id: int, perm_id: int,
+                          ib_error_code, ib_error_text) -> dict:
+    """Build the error return dict for a terminal-failed order.
+
+    If an IB reason was captured (from the error buffer or trade.log), include
+    it as structured fields and embed it in the human-readable message.
+    When no reason arrived, fall back to a clean message naming the status.
+    """
+    if ib_error_code is not None:
+        message = f"Order {status} — IB error {ib_error_code}: {ib_error_text}"
+        return {
+            "status": "error",
+            "message": message,
+            "orderId": order_id,
+            "permId": perm_id,
+            "initialStatus": status,
+            "ib_error_code": ib_error_code,
+            "ib_error_text": ib_error_text,
+        }
+
+    return {
+        "status": "error",
+        "message": f"Order {status} (no IB reason received)",
+        "orderId": order_id,
+        "permId": perm_id,
+        "initialStatus": status,
+    }
+
 
 def place_order(params: dict) -> dict:
     """Place a limit order and return result as dict."""
@@ -286,21 +360,17 @@ def place_order(params: dict) -> dict:
         # in the wait window, surface that as an error — the UI shouldn't
         # show "Order placed" for a rejected order even when status comes
         # without an explicit errorEvent.
+        #
+        # SPX-01: the async IB errorEvent (e.g. 201 "shares not available for
+        # short sale") can arrive AFTER the poll loop broke on the terminal
+        # state.  Grace-wait up to ~1.5s (5×300 ms) for it to land.
         if status in ("Rejected", "Cancelled", "ApiCancelled", "Inactive"):
-            why = ""
-            if trade.orderStatus is not None:
-                # `whyHeld` / `lastFillPrice` may carry IB's reason text on
-                # some rejections; surface whatever's there.
-                wh = getattr(trade.orderStatus, "whyHeld", None)
-                if wh:
-                    why = f" ({wh})"
-            return {
-                "status": "error",
-                "message": f"Order {status}{why}",
-                "orderId": order_id,
-                "permId": perm_id,
-                "initialStatus": status,
-            }
+            ib_error_code, ib_error_text = _grace_wait_for_ib_error(
+                client, ib_errors, trade
+            )
+            return _build_terminal_error(
+                status, order_id, perm_id, ib_error_code, ib_error_text
+            )
 
         return {
             "status": "ok",
