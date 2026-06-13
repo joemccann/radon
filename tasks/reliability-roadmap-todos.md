@@ -27,7 +27,7 @@ Source: `tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/
 
 ## LATER — step change
 
-- [ ] **DUR-16** (L, high) Synthetic user-path + data-plane freshness probe (login → dashboard → data fresh) with 3 explicit SLOs.
+- [x] **DUR-16** (L, high) Synthetic user-path + data-plane freshness probe (login → dashboard → data fresh) with 3 explicit SLOs.
 
 ## Candidates from 2026-06-12 investigations (SPCX short rejection + MU share-card fix)
 
