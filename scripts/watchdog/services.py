@@ -122,6 +122,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # bucket: the hourly check surfaces a missed week within 1h of the
     # window expiring.
     "preset-rebalance": {"open": 8 * _DAY, "closed": 8 * _DAY, "requires_ib": False},
+    # journal-reconcile — daily cross-check of executed_orders vs journal
+    # (JRN-01). Detects silent DB-upsert drops. Runs 24/7 inside the
+    # monitor daemon (requires_market_hours=False). Pure Turso read — no IB
+    # dependency. 26h window = daily cadence + timer jitter; weekends are
+    # normal run days so no wide closed window is needed.
+    "journal-reconcile": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
 }
 
 
@@ -166,6 +172,9 @@ BUCKETS: dict[str, list[str]] = {
         # Weekly preset rebalance (monitor daemon) — hourly check surfaces
         # a missed week within 1h of the 8-day window expiring.
         "preset-rebalance",
+        # Daily journal reconcile (monitor daemon) — hourly check surfaces a
+        # missed run within 1h of the 26h window expiring.
+        "journal-reconcile",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

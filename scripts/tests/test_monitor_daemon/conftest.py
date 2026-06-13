@@ -60,6 +60,7 @@ def _block_writes_in_monitor_daemon_tests(monkeypatch: pytest.MonkeyPatch):
         "monitor_daemon.handlers.journal_sync",
         "monitor_daemon.handlers.cash_flow_sync",
         "monitor_daemon.handlers.replica_watchdog",
+        "monitor_daemon.handlers.journal_reconcile",
     ):
         try:
             module = __import__(module_name, fromlist=["*"])

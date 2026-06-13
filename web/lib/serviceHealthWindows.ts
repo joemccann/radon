@@ -258,6 +258,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // BaseHandler.run() covers it now. 8-day uniform window = weekly cadence
   // + one day of daemon-restart drift. UW/static data only — no IB.
   "preset-rebalance": { open: 8 * DAY, extended: 8 * DAY, closed: 8 * DAY, category: "scheduled", requires_ib: false },
+
+  // ``journal-reconcile`` is the JRN-01 cross-check handler: daily scan of
+  // executed_orders vs journal to detect silent DB-upsert drops. Runs 24/7
+  // inside the monitor daemon (requires_market_hours=False). Pure Turso read
+  // — no IB dependency. 26h window = daily cadence + timer jitter; weekends
+  // are normal run days so no wide closed window is needed.
+  "journal-reconcile": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 };
 
 const DEFAULT_WINDOW: Window = {
