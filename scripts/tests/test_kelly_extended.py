@@ -6,10 +6,16 @@ Kills: M1-M6, M15-M18, M20 (scalar + __main__ mutations).
 import json
 import subprocess
 import sys
+from pathlib import Path
 
 import pytest
 
 from kelly import kelly
+
+# Repo root + kelly.py derived from this file's location — never hardcode an
+# absolute local path (it breaks in CI where the checkout is elsewhere).
+_REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+_KELLY_SCRIPT = Path(__file__).resolve().parent.parent / "kelly.py"
 
 
 class TestKellyScalarFormula:
@@ -239,18 +245,15 @@ class TestKellyCLISizing:
     Kills M15 (0.025→0.05), M16 (min→max).
     """
 
-    KELLY_SCRIPT = "scripts/kelly.py"
-    PROJECT_ROOT = "/Users/joemccann/dev/apps/finance/radon"
-
     def _run_cli(self, prob, odds, fraction, bankroll):
         r = subprocess.run(
-            [sys.executable, self.KELLY_SCRIPT,
+            [sys.executable, str(_KELLY_SCRIPT),
              "--prob", str(prob),
              "--odds", str(odds),
              "--fraction", str(fraction),
              "--bankroll", str(bankroll)],
             capture_output=True, text=True,
-            cwd=self.PROJECT_ROOT
+            cwd=str(_REPO_ROOT)
         )
         assert r.returncode == 0, f"CLI failed: {r.stderr}"
         return json.loads(r.stdout)
