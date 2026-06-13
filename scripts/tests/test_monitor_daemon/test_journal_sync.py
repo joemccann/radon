@@ -525,5 +525,226 @@ class TestSellCloseLabeling:
         assert actions == {"SELL-A": "SELL_OPTION", "SELL-B": "SELL_OPTION"}
 
 
+class TestReconcileDbMissing:
+    """JRN-02: disk-on-DB reconciliation — re-attempts failed Turso upserts.
+
+    The root bug: _dual_write swallows exceptions and disk-dedup then permanently
+    skips the row. The fix: every execute() cycle computes the set of exec_ids
+    present on disk but absent from the journal table, and retries their upsert.
+
+    These tests are RED until _reconcile_db_missing() is added to journal_sync.py.
+    """
+
+    def _fake_db(self, journal_exec_ids: list[str]):
+        """Return a mock DB whose journal table contains the given exec_ids."""
+        rows = [(json.dumps({"ib_exec_id": eid}),) for eid in journal_exec_ids]
+        result = MagicMock(spec=["fetchall"])
+        result.fetchall.return_value = rows
+        db = MagicMock()
+        db.execute.return_value = result
+        return db
+
+    def _make_trade_log(self, path: Path, rows: list[dict]) -> None:
+        atomic_save(str(path), {"trades": rows})
+
+    def test_reconcile_retries_disk_row_absent_from_journal(self, trade_log_path):
+        """A row on disk but not in journal must be re-upserted on next execute()."""
+        disk_row = {
+            "id": 580,
+            "date": "2026-05-29",
+            "ticker": "MU",
+            "structure": "Closed Call $1050 2026-07-17",
+            "decision": "IB_AUTO_IMPORT",
+            "action": "SELL_TO_OPEN",
+            "fill_price": 110.0,
+            "total_cost": 33002.7844,
+            "commission": 2.7844,
+            "ib_exec_id": "0002920b.6a19d5a9.01.01",
+            "contracts": 3,
+            "strike": 1050.0,
+            "right": "C",
+            "expiry": "20260717",
+        }
+        self._make_trade_log(trade_log_path, [disk_row])
+
+        upserted: list[tuple] = []
+
+        def fake_upsert(trade_id, entry, filled_at):
+            upserted.append((trade_id, entry, filled_at))
+
+        # DB journal is EMPTY (the upsert previously failed and was swallowed).
+        empty_db = self._fake_db([])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = []  # no NEW fills this cycle
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            result = handler.execute()
+
+        assert len(upserted) == 1, (
+            "_reconcile_db_missing must upsert the disk row absent from journal. "
+            f"Got {len(upserted)} upserts."
+        )
+        trade_id, entry, filled_at = upserted[0]
+        assert trade_id == "0002920b.6a19d5a9.01.01"
+        assert entry["ticker"] == "MU"
+        assert entry["action"] == "SELL_TO_OPEN"
+        assert result.get("reconciled", 0) == 1, (
+            "execute() result must include reconciled count"
+        )
+
+    def test_reconcile_skips_disk_rows_already_in_journal(self, trade_log_path):
+        """Rows whose exec_id is already in journal must NOT be re-upserted."""
+        exec_id = "0002920b.6a19d5a9.01.01"
+        disk_row = {
+            "id": 580,
+            "date": "2026-05-29",
+            "ticker": "MU",
+            "action": "SELL_TO_OPEN",
+            "fill_price": 110.0,
+            "total_cost": 33002.7844,
+            "commission": 2.7844,
+            "ib_exec_id": exec_id,
+            "contracts": 3,
+        }
+        self._make_trade_log(trade_log_path, [disk_row])
+
+        upserted: list[tuple] = []
+
+        def fake_upsert(trade_id, entry, filled_at):
+            upserted.append((trade_id, entry, filled_at))
+
+        # DB journal already has this exec_id.
+        db_with_row = self._fake_db([exec_id])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db_with_row), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = []
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            result = handler.execute()
+
+        assert len(upserted) == 0, (
+            "Row already in journal should not be re-upserted"
+        )
+        assert result.get("reconciled", 0) == 0
+
+    def test_reconcile_respects_window_days(self, trade_log_path):
+        """Disk rows older than RECONCILE_WINDOW_DAYS are skipped by the reconciler."""
+        from datetime import timedelta
+        old_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        old_disk_row = {
+            "id": 1,
+            "date": old_date,
+            "ticker": "MU",
+            "action": "SELL_TO_OPEN",
+            "ib_exec_id": "old.exec.id.far.outside.window",
+            "contracts": 1,
+        }
+        recent_disk_row = {
+            "id": 2,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "ticker": "MU",
+            "action": "SELL_TO_OPEN",
+            "ib_exec_id": "recent.exec.id.inside.window",
+            "contracts": 1,
+        }
+        self._make_trade_log(trade_log_path, [old_disk_row, recent_disk_row])
+
+        upserted_ids: list[str] = []
+
+        def fake_upsert(trade_id, entry, filled_at):
+            upserted_ids.append(trade_id)
+
+        empty_db = self._fake_db([])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = []
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            handler.execute()
+
+        assert "old.exec.id.far.outside.window" not in upserted_ids, (
+            "Rows older than RECONCILE_WINDOW_DAYS must be skipped"
+        )
+        assert "recent.exec.id.inside.window" in upserted_ids, (
+            "Recent disk-only rows must be reconciled"
+        )
+
+    def test_reconcile_does_not_duplicate_new_candidates(self, trade_log_path):
+        """A fill that is brand new (not on disk yet) must not appear in reconcile AND candidates."""
+        new_fill = _mock_fill(
+            exec_id="NEW-FILL-XYZ",
+            symbol="AAPL",
+            side="BOT",
+            shares=100,
+            price=200.0,
+        )
+        upserted_ids: list[str] = []
+
+        def fake_upsert(trade_id, entry, filled_at):
+            upserted_ids.append(trade_id)
+
+        empty_db = self._fake_db([])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = [new_fill]
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            handler.execute()
+
+        # The new fill goes through the normal candidates path, not reconcile.
+        # It must be upserted exactly once.
+        assert upserted_ids.count("NEW-FILL-XYZ") == 1, (
+            f"New fill must be upserted exactly once. Got: {upserted_ids}"
+        )
+
+    def test_reconcile_swallowed_upsert_does_not_abort_cycle(self, trade_log_path):
+        """If the reconcile upsert fails, the cycle continues — no exception bubbles up."""
+        disk_row = {
+            "id": 1,
+            "date": datetime.now().strftime("%Y-%m-%d"),
+            "ticker": "MU",
+            "action": "SELL_TO_OPEN",
+            "ib_exec_id": "bad.upsert.exec.id",
+            "contracts": 1,
+        }
+        self._make_trade_log(trade_log_path, [disk_row])
+
+        def exploding_upsert(trade_id, entry, filled_at):
+            raise RuntimeError("Turso is down again")
+
+        empty_db = self._fake_db([])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", exploding_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = []
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            result = handler.execute()  # must not raise
+
+        assert "error" not in result or "fills" in str(result), (
+            "Reconcile upsert failure must be swallowed and logged, not bubbled up"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

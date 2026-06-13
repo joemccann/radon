@@ -589,5 +589,351 @@ class TestBuildJournalRow:
         assert filled_at == "2026-06-08"
 
 
+# ── JRN-02: --from-executed-orders tests ─────────────────────────────────────
+# These are the no_disk_row gaps: VIX P10, MU P800, MU C1050@108.
+# The --from-executed-orders flag rebuilds the journal row from the EO payload
+# using journal_sync's labeling logic (not hand-fabricated fields).
+# These tests are RED until _build_journal_row_from_executed_order() + the
+# from_executed_orders flag are implemented in backfill_journal_from_executed_orders.py.
+
+# VIX P10 no_disk_row gap — RCA canonical payload
+VIX_P10_EXEC_ID = "0000fb35.6a10834c.01.01"
+VIX_P10_FILL_TIME = "2026-05-22T20:07:28Z"
+VIX_P10_EO_PAYLOAD = {
+    "execId": VIX_P10_EXEC_ID,
+    "contract": {
+        "conId": 817812324,
+        "symbol": "VIX",
+        "secType": "OPT",
+        "strike": 10.0,
+        "right": "P",
+        "lastTradeDateOrContractMonth": "20260616",
+    },
+    "side": "BOT",
+    "quantity": 1.0,
+    "avgPrice": 0.01,
+    "commission": 1.1507,
+    "time": VIX_P10_FILL_TIME,
+    "exchange": "CBOE",
+}
+
+# MU P800 no_disk_row gap — RCA canonical payload
+MU_P800_EXEC_ID = "0001108f.6a19b7e9.01.01"
+MU_P800_FILL_TIME = "2026-05-29T19:58:53Z"
+MU_P800_EO_PAYLOAD = {
+    "execId": MU_P800_EXEC_ID,
+    "contract": {
+        "conId": 849278266,
+        "symbol": "MU",
+        "secType": "OPT",
+        "strike": 800.0,
+        "right": "P",
+        "lastTradeDateOrContractMonth": "20260717",
+    },
+    "side": "BOT",
+    "quantity": 5.0,
+    "avgPrice": 59.0,
+    "commission": 2.2412,
+    "time": MU_P800_FILL_TIME,
+    "exchange": "PSE",
+}
+
+# MU C1050 @108 no_disk_row gap — RCA canonical payload
+MU_C1050_108_EXEC_ID = "0002920b.6a2b2035.01.01"
+MU_C1050_108_FILL_TIME = "2026-06-11T19:59:08Z"
+MU_C1050_108_EO_PAYLOAD = {
+    "execId": MU_C1050_108_EXEC_ID,
+    "contract": {
+        "conId": 877967302,
+        "symbol": "MU",
+        "secType": "OPT",
+        "strike": 1050.0,
+        "right": "C",
+        "lastTradeDateOrContractMonth": "20260717",
+    },
+    "side": "SLD",
+    "quantity": 2.0,
+    "avgPrice": 108.0,
+    "commission": 1.848,
+    "time": MU_C1050_108_FILL_TIME,
+    "exchange": "PHLX",
+}
+
+
+def _insert_eo_with_contract_payload(conn, exec_id, eo_payload, fill_time):
+    """Insert an executed_orders row with the given payload dict."""
+    _insert_executed_order(conn, exec_id, eo_payload, fill_time)
+
+
+class TestFromExecutedOrdersFlag:
+    """--from-executed-orders: rebuild journal row from EO payload when no disk row.
+
+    These tests are RED until the feature is implemented.
+    """
+
+    def test_from_eo_flag_is_false_by_default(self, monkeypatch, tmp_path):
+        """Calling backfill() without from_executed_orders must default to False."""
+        mod = _import_backfill()
+        import inspect
+        sig = inspect.signature(mod.backfill)
+        assert "from_executed_orders" in sig.parameters, (
+            "backfill() must accept from_executed_orders parameter"
+        )
+        assert sig.parameters["from_executed_orders"].default is False, (
+            "from_executed_orders must default to False (opt-in only)"
+        )
+
+    def test_no_disk_row_still_refuses_without_flag(self, monkeypatch, tmp_path):
+        """Without --from-executed-orders, no_disk_row gaps must still be refused."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, VIX_P10_EXEC_ID, VIX_P10_EO_PAYLOAD, VIX_P10_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])  # empty disk
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[VIX_P10_EXEC_ID],
+            dry_run=True,
+            trade_log_path=trade_log,
+            from_executed_orders=False,
+        )
+
+        assert len(actions) == 1
+        assert actions[0]["status"] == "no_disk_row", (
+            "Without --from-executed-orders, no_disk_row must still be refused"
+        )
+
+    def test_vix_p10_buy_option_from_eo(self, monkeypatch, tmp_path):
+        """VIX P10 no_disk_row gap: BOT 1 @0.01 → BUY_OPTION, prior_qty=0."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, VIX_P10_EXEC_ID, VIX_P10_EO_PAYLOAD, VIX_P10_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])  # no disk row
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[VIX_P10_EXEC_ID],
+            dry_run=True,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        assert len(actions) == 1
+        a = actions[0]
+        assert a["status"] in ("dry_run", "dry_run_from_eo"), (
+            f"Expected dry_run or dry_run_from_eo, got {a['status']!r}"
+        )
+        p = a["payload"]
+        assert p["action"] == "BUY_OPTION", f"Expected BUY_OPTION, got {p['action']!r}"
+        assert p["ticker"] == "VIX"
+        assert p["contracts"] == 1
+        assert p["strike"] == 10.0
+        assert p["right"] == "P"
+        assert p["expiry"] == "20260616"
+        # total_cost = 1 * 0.01 * 100 + 1.1507 = 2.1507
+        assert abs(p["total_cost"] - 2.1507) < 1e-4, f"total_cost {p['total_cost']} != 2.1507"
+        assert p["ib_exec_id"] == VIX_P10_EXEC_ID
+        assert a["filled_at"] == "2026-05-22"
+
+    def test_mu_p800_buy_option_from_eo(self, monkeypatch, tmp_path):
+        """MU P800 no_disk_row gap: BOT 5 @59.0 → BUY_OPTION, prior_qty=0."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, MU_P800_EXEC_ID, MU_P800_EO_PAYLOAD, MU_P800_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[MU_P800_EXEC_ID],
+            dry_run=True,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        assert len(actions) == 1
+        p = actions[0]["payload"]
+        assert p["action"] == "BUY_OPTION"
+        assert p["ticker"] == "MU"
+        assert p["contracts"] == 5
+        assert p["strike"] == 800.0
+        assert p["right"] == "P"
+        # total_cost = 5 * 59.0 * 100 + 2.2412 = 29502.2412
+        assert abs(p["total_cost"] - 29502.2412) < 1e-4, f"total_cost {p['total_cost']} != 29502.2412"
+        assert actions[0]["filled_at"] == "2026-05-29"
+
+    def test_mu_c1050_108_sell_to_open_from_eo_with_prior_state(self, monkeypatch, tmp_path):
+        """MU C1050 @108: prior_qty=-8 (short), SLD 2 → SELL_TO_OPEN.
+
+        The prior state must be seeded from the journal, not from disk.
+        We pre-seed the journal with the @110 (3@SELL_TO_OPEN) and @95 (5@SELL_TO_OPEN)
+        fills so prior_qty = -8, then verify @108 SLD 2 labels as SELL_TO_OPEN.
+        """
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, MU_C1050_108_EXEC_ID, MU_C1050_108_EO_PAYLOAD, MU_C1050_108_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])
+
+        # Seed journal: @110 SLD 3 + @95 SLD 5 = prior_qty = -8 for MU C1050 2026-07-17
+        _insert_journal(conn, "0002920b.6a19d5a9.01.01", {
+            "ticker": "MU", "action": "SELL_TO_OPEN", "contracts": 3,
+            "total_cost": 33002.7844, "strike": 1050.0, "right": "C",
+            "expiry": "20260717", "ib_exec_id": "0002920b.6a19d5a9.01.01",
+        }, "2026-05-29")
+        _insert_journal(conn, "0002920b.6a2b0bc6.01.01", {
+            "ticker": "MU", "action": "SELL_TO_OPEN", "contracts": 5,
+            "total_cost": 47502.0, "strike": 1050.0, "right": "C",
+            "expiry": "20260717", "ib_exec_id": "0002920b.6a2b0bc6.01.01",
+        }, "2026-06-11")
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[MU_C1050_108_EXEC_ID],
+            dry_run=True,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        assert len(actions) == 1
+        p = actions[0]["payload"]
+        assert p["action"] == "SELL_TO_OPEN", (
+            f"prior_qty=-8 (short), SLD 2 → still short, expected SELL_TO_OPEN, got {p['action']!r}"
+        )
+        assert p["contracts"] == 2
+        assert p["ticker"] == "MU"
+        assert p["strike"] == 1050.0
+        assert p["right"] == "C"
+        # total_cost = 2 * 108 * 100 + 1.848 = 21601.848
+        assert abs(p["total_cost"] - 21601.848) < 1e-4, f"total_cost {p['total_cost']} != 21601.848"
+        assert actions[0]["filled_at"] == "2026-06-11"
+
+    def test_from_eo_idempotent_when_already_in_journal(self, monkeypatch, tmp_path):
+        """Re-running with --from-executed-orders when row already in journal → skipped."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, VIX_P10_EXEC_ID, VIX_P10_EO_PAYLOAD, VIX_P10_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])
+
+        # Pre-seed journal with the row already present.
+        _insert_journal(conn, VIX_P10_EXEC_ID, {
+            "ticker": "VIX", "action": "BUY_OPTION", "contracts": 1,
+            "ib_exec_id": VIX_P10_EXEC_ID,
+        }, "2026-05-22")
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[VIX_P10_EXEC_ID],
+            dry_run=False,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        assert actions[0]["status"] == "skipped", (
+            f"Already in journal → must skip, got {actions[0]['status']!r}"
+        )
+        assert len(_journal_rows(conn)) == 1  # only the pre-seeded row
+
+    def test_from_eo_execute_writes_to_journal(self, monkeypatch, tmp_path):
+        """--from-executed-orders --execute actually inserts the VIX P10 row."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, VIX_P10_EXEC_ID, VIX_P10_EO_PAYLOAD, VIX_P10_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])
+        monkeypatch.setenv("RADON_DB_TEST_WRITE_OK", "1")
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[VIX_P10_EXEC_ID],
+            dry_run=False,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        assert actions[0]["status"] in ("inserted", "inserted_from_eo"), (
+            f"Expected inserted/inserted_from_eo, got {actions[0]['status']!r}"
+        )
+        rows = _journal_rows(conn)
+        assert len(rows) == 1
+        p = rows[0]["payload"]
+        assert p["action"] == "BUY_OPTION"
+        assert p["ticker"] == "VIX"
+        assert rows[0]["trade_id"] == VIX_P10_EXEC_ID
+
+    def test_from_eo_sorts_by_fill_time_for_prior_qty_accuracy(self, monkeypatch, tmp_path):
+        """Multiple EO gaps for the same contract must be processed fill_time ASC.
+
+        We insert MU C1050 @110 (no disk row, prior=0) and @108 (no disk row, prior=-3 after @110).
+        Without correct ordering, @108 might see prior=0 and label wrong.
+        This tests the ordering contract without seeding journal rows first.
+        """
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+
+        exec_id_110 = "0002920b.6a19d5a9.01.01"
+        fill_time_110 = "2026-05-29T15:12:32Z"
+        eo_110 = {
+            "execId": exec_id_110,
+            "contract": {
+                "symbol": "MU", "secType": "OPT",
+                "strike": 1050.0, "right": "C",
+                "lastTradeDateOrContractMonth": "20260717",
+            },
+            "side": "SLD", "quantity": 3.0, "avgPrice": 110.0, "commission": 2.7844,
+            "time": fill_time_110,
+        }
+
+        exec_id_108 = MU_C1050_108_EXEC_ID
+        fill_time_108 = MU_C1050_108_FILL_TIME
+        eo_108 = dict(MU_C1050_108_EO_PAYLOAD)
+
+        _insert_eo_with_contract_payload(conn, exec_id_110, eo_110, fill_time_110)
+        _insert_eo_with_contract_payload(conn, exec_id_108, eo_108, fill_time_108)
+        trade_log = _make_trade_log_json(tmp_path, [])
+
+        mod = _import_backfill()
+        # Process both together — @110 first (fill_time ASC) then @108
+        actions = mod.backfill(
+            conn,
+            exec_ids=[exec_id_110, exec_id_108],
+            dry_run=True,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        actions_by_id = {a["exec_id"]: a for a in actions}
+        # @110: prior=0, SLD → SELL_TO_OPEN
+        assert actions_by_id[exec_id_110]["payload"]["action"] == "SELL_TO_OPEN"
+        # @108: prior=-3 (after @110 processed), SLD → SELL_TO_OPEN
+        assert actions_by_id[exec_id_108]["payload"]["action"] == "SELL_TO_OPEN"
+
+    def test_from_eo_uses_structure_label_from_journal_sync(self, monkeypatch, tmp_path):
+        """structure field must match journal_sync._structure_label output, not hand-crafted."""
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_eo_with_contract_payload(conn, VIX_P10_EXEC_ID, VIX_P10_EO_PAYLOAD, VIX_P10_FILL_TIME)
+        trade_log = _make_trade_log_json(tmp_path, [])
+
+        mod = _import_backfill()
+        actions = mod.backfill(
+            conn,
+            exec_ids=[VIX_P10_EXEC_ID],
+            dry_run=True,
+            trade_log_path=trade_log,
+            from_executed_orders=True,
+        )
+
+        structure = actions[0]["payload"]["structure"]
+        # JournalSyncHandler._structure_label("BUY", "OPT", 10.0, "P", "20260616")
+        # → "Long Put $10 2026-06-16"
+        assert "Put" in structure, f"structure must contain right label, got: {structure!r}"
+        assert "$10" in structure, f"structure must contain strike, got: {structure!r}"
+        assert "2026-06-16" in structure, f"structure must contain expiry ISO, got: {structure!r}"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

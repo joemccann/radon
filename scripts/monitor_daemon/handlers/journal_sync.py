@@ -22,7 +22,7 @@ Failure mode:
 from __future__ import annotations
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -54,6 +54,9 @@ DEFAULT_IB_PORT = 4001
 # "auto" rotates across SUBPROCESS_ID_RANGE on each cycle. See
 # fill_monitor.py for the rationale.
 DEFAULT_CLIENT_ID: int | str = "auto"
+# Disk rows older than this are not retried by the reconciler — they're left
+# to journal_rehydrate / the manual backfill script.
+RECONCILE_WINDOW_DAYS = 14
 
 
 class JournalSyncHandler(BaseHandler):
@@ -82,6 +85,7 @@ class JournalSyncHandler(BaseHandler):
             "imported": 0,
             "skipped": 0,
             "fills_seen": 0,
+            "reconciled": 0,
             "timestamp": datetime.now().isoformat(),
         }
 
@@ -104,8 +108,6 @@ class JournalSyncHandler(BaseHandler):
                 pass
 
         result["fills_seen"] = len(fills)
-        if not fills:
-            return result
 
         try:
             existing = self._load_existing()
@@ -114,7 +116,17 @@ class JournalSyncHandler(BaseHandler):
             result["error"] = f"trade_log read failed: {exc}"
             return result
 
-        candidates = self._fills_to_entries(fills, existing)
+        db = self._open_db()
+
+        # Phase 1: reconcile disk rows whose DB upsert previously failed.
+        # This re-attempts any exec_id on disk that is absent from the journal
+        # table, so a single transient Turso failure cannot permanently drop a fill.
+        result["reconciled"] = self._reconcile_db_missing(existing, db)
+
+        if not fills:
+            return result
+
+        candidates = self._fills_to_entries(fills, existing, db=db)
         result["imported"] = len(candidates)
         result["skipped"] = result["fills_seen"] - len(candidates)
 
@@ -125,12 +137,98 @@ class JournalSyncHandler(BaseHandler):
 
         return result
 
+    def _reconcile_db_missing(
+        self,
+        existing: Dict[str, Any],
+        db: Any,
+    ) -> int:
+        """Re-upsert disk rows whose DB write previously failed and was swallowed.
+
+        Queries the journal table for the set of exec_ids already confirmed in DB,
+        then walks recent disk rows and re-attempts the upsert for any that are
+        missing. Bounded to RECONCILE_WINDOW_DAYS to keep work O(recent rows).
+        Returns the count of rows re-upserted this cycle.
+        """
+        if upsert_journal_entry is None or db is None:
+            return 0
+
+        from datetime import date as _date  # avoid shadowing datetime in module scope
+
+        journal_covered = self._journal_exec_ids_from_db(db)
+        cutoff_date = (_date.today() - timedelta(days=RECONCILE_WINDOW_DAYS))
+
+        reconciled = 0
+        for trade in existing.get("trades", []):
+            row_date_str = trade.get("date") or ""
+            try:
+                row_date = datetime.strptime(row_date_str, "%Y-%m-%d").date()
+            except (ValueError, TypeError):
+                continue
+            if row_date < cutoff_date:
+                continue
+
+            exec_id = str(trade.get("ib_exec_id") or "").strip()
+            if not exec_id:
+                continue
+
+            parts = [exec_id] + [p for p in exec_id.split("+") if p]
+            if any(p in journal_covered for p in parts):
+                continue
+
+            try:
+                upsert_journal_entry(
+                    exec_id,
+                    trade,
+                    filled_at=trade.get("filled_at") or trade.get("date"),
+                )
+                logger.info("journal_sync: reconciled disk-only row %s", exec_id)
+                reconciled += 1
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("journal_sync: reconcile upsert failed for %s: %s", exec_id, exc)
+
+        return reconciled
+
+    @staticmethod
+    def _journal_exec_ids_from_db(db: Any) -> set[str]:
+        """Return the set of exec_id parts confirmed in the journal table.
+
+        Queries trade_id (the primary key, which equals ib_exec_id for live-ingest
+        rows) and splits any '+'-joined composites so individual part IDs are
+        also marked as covered.
+        """
+        import json as _json
+
+        covered: set[str] = set()
+        try:
+            rows = db.execute("SELECT trade_id FROM journal").fetchall()
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("journal_sync: journal coverage query failed: %s", exc)
+            return covered
+        for row in rows:
+            raw = row[0] if isinstance(row, (tuple, list)) else getattr(row, "trade_id", None)
+            if not raw:
+                continue
+            raw_str = str(raw)
+            # Handle legacy mocks / payloads stored as JSON: extract ib_exec_id.
+            if raw_str.startswith("{"):
+                try:
+                    payload = _json.loads(raw_str)
+                    raw_str = str(payload.get("ib_exec_id") or raw_str)
+                except Exception:  # noqa: BLE001
+                    pass
+            covered.add(raw_str)
+            for part in raw_str.split("+"):
+                part = part.strip()
+                if part:
+                    covered.add(part)
+        return covered
+
     def _dual_write(self, candidates: List[Dict[str, Any]]) -> None:
         """Mirror new rows to the Turso ``journal`` table.
 
         Failures are logged and swallowed — the canonical source remains
-        ``trade_log.json``; DB drift is repaired by the next bootstrap or
-        rehydrate run.
+        ``trade_log.json``; the next execute() cycle's reconcile step will
+        retry any failed upsert automatically.
         """
         if upsert_journal_entry is None:
             return
@@ -171,6 +269,8 @@ class JournalSyncHandler(BaseHandler):
         self,
         fills: List[Any],
         existing: Dict[str, Any],
+        *,
+        db: Any = None,
     ) -> List[Dict[str, Any]]:
         seen_ids = self._existing_exec_ids(existing["trades"])
         next_id = max((t.get("id", 0) for t in existing["trades"]), default=0) + 1
@@ -179,7 +279,8 @@ class JournalSyncHandler(BaseHandler):
         # journal DB on first sight of each contract, then mutated in
         # place as we walk this cycle's fills so a back-to-back sell of
         # the same long still reads as a close.
-        db = self._open_db()
+        if db is None:
+            db = self._open_db()
         prior_state: Dict[str, float] = {}
 
         rows: List[Dict[str, Any]] = []
