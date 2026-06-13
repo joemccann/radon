@@ -549,9 +549,14 @@ class TestReconcileDbMissing:
 
     def test_reconcile_retries_disk_row_absent_from_journal(self, trade_log_path):
         """A row on disk but not in journal must be re-upserted on next execute()."""
+        from datetime import timedelta
+        # Window-relative date: a fixed past date rots once it falls outside
+        # RECONCILE_WINDOW_DAYS (the original "2026-05-29" failed in CI the day
+        # it crossed the 14-day boundary while passing locally on the boundary).
+        recent_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
         disk_row = {
             "id": 580,
-            "date": "2026-05-29",
+            "date": recent_date,
             "ticker": "MU",
             "structure": "Closed Call $1050 2026-07-17",
             "decision": "IB_AUTO_IMPORT",
@@ -599,10 +604,14 @@ class TestReconcileDbMissing:
 
     def test_reconcile_skips_disk_rows_already_in_journal(self, trade_log_path):
         """Rows whose exec_id is already in journal must NOT be re-upserted."""
+        from datetime import timedelta
+        # Within-window date so the skip is proven to come from journal-presence,
+        # not from the row falling outside RECONCILE_WINDOW_DAYS.
+        recent_date = (datetime.now() - timedelta(days=3)).strftime("%Y-%m-%d")
         exec_id = "0002920b.6a19d5a9.01.01"
         disk_row = {
             "id": 580,
-            "date": "2026-05-29",
+            "date": recent_date,
             "ticker": "MU",
             "action": "SELL_TO_OPEN",
             "fill_price": 110.0,
