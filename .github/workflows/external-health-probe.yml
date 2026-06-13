@@ -10,6 +10,14 @@ name: Tier-3 external health probe
 #
 # It cannot reach Tailscale :8321 / TCP :4001 from here by design — the edge's
 # /edge-health/status already aggregates those internal probes.
+#
+# DUR-16: the probe also walks the unauthenticated user path (/dashboard must
+# hit the Clerk wall) and the bearer-auth /api/probe/freshness aggregate, and
+# appends one external_probe_runs history row per run. The probe step MUST be
+# allowed to fail the job (no `|| true`): probe.py exits nonzero when the edge
+# or user path is down (or freshness is explicitly stale during RTH), and
+# GitHub's default email on a FAILED workflow run is the operator alert that
+# closes the DUR-04 "records the outage but notifies no human" residual.
 
 on:
   # TURSO_DB_URL + TURSO_AUTH_TOKEN repo secrets are configured (verified by a
@@ -46,5 +54,8 @@ jobs:
         env:
           TURSO_DB_URL: ${{ secrets.TURSO_DB_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          RADON_PROBE_FRESHNESS_TOKEN: ${{ secrets.RADON_PROBE_FRESHNESS_TOKEN }}
           EXTERNAL_PROBE_SOURCE: github-actions/edge
+        # No `|| true` here — a nonzero exit (edge/user-path down, or stale
+        # freshness during RTH) must fail the job so GitHub emails the operator.
         run: PYTHONPATH=scripts python -m health_probe.probe

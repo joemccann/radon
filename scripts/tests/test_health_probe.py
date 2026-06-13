@@ -276,25 +276,394 @@ class TestUpsertErrorSurfacing:
             "latency_ms": 1, "detail": "edge_ok", "checked_at": "x"})
 
 
+# ── user-path probe: unauthenticated /dashboard must hit the Clerk wall ──────
+#
+# Live evidence (2026-06-12, curl against production):
+#   * Accept: text/html  -> 307 with
+#     Location: https://app.radon.run/sign-in?redirect_url=...
+#     and x-clerk-auth-status: signed-out
+#   * no Accept header   -> 404 protect-rewrite, still carrying
+#     x-clerk-auth-status: signed-out
+# Healthy = the Clerk middleware answered: a 3xx to a sign-in location, or any
+# response carrying the x-clerk-auth-status header. A 5xx (Edge-runtime crash
+# class), a timeout, or a 200 WITHOUT Clerk headers (perimeter bypass) fails.
+
+def _user_path_raw(status=307, location="https://app.radon.run/sign-in?redirect_url=x",
+                   clerk_auth_status="signed-out", latency_ms=80):
+    return {"reachable": True, "http_status": status, "location": location,
+            "clerk_auth_status": clerk_auth_status, "latency_ms": latency_ms}
+
+
+class TestClassifyUserPath:
+    def test_307_to_on_domain_sign_in_is_ok(self):
+        result = probe.classify_user_path(_user_path_raw())
+        assert result == {"ok": 1, "detail": "clerk_redirect"}
+
+    def test_3xx_to_clerk_domain_is_ok(self):
+        raw = _user_path_raw(status=302, location="https://clerk.radon.run/sign-in", clerk_auth_status=None)
+        assert probe.classify_user_path(raw)["ok"] == 1
+
+    def test_404_protect_rewrite_with_clerk_header_is_ok(self):
+        raw = _user_path_raw(status=404, location=None)
+        result = probe.classify_user_path(raw)
+        assert result["ok"] == 1
+        assert result["detail"] == "clerk_protect_404"
+
+    def test_200_sign_in_served_inline_with_clerk_header_is_ok(self):
+        raw = _user_path_raw(status=200, location=None)
+        assert probe.classify_user_path(raw)["ok"] == 1
+
+    def test_200_without_clerk_header_is_a_perimeter_failure(self):
+        raw = _user_path_raw(status=200, location=None, clerk_auth_status=None)
+        result = probe.classify_user_path(raw)
+        assert result == {"ok": 0, "detail": "user_path_http_200_no_clerk"}
+
+    def test_3xx_to_unexpected_location_fails(self):
+        raw = _user_path_raw(status=307, location="https://evil.example/", clerk_auth_status=None)
+        assert probe.classify_user_path(raw)["ok"] == 0
+
+    def test_500_fails(self):
+        raw = _user_path_raw(status=500, location=None, clerk_auth_status=None)
+        result = probe.classify_user_path(raw)
+        assert result == {"ok": 0, "detail": "user_path_http_500"}
+
+    def test_timeout_fails(self):
+        result = probe.classify_user_path({"reachable": False, "detail": "timeout"})
+        assert result["ok"] == 0
+        assert result["detail"] == "user_path_unreachable:timeout"
+
+
+class _FakeOpener:
+    def __init__(self, response=None, raises=None):
+        self._response = response
+        self._raises = raises
+
+    def open(self, *_a, **_k):
+        if self._raises:
+            raise self._raises
+        return self._response
+
+
+class TestProbeUserPath:
+    def test_redirect_is_captured_not_followed(self, monkeypatch):
+        headers = {"Location": "https://app.radon.run/sign-in?redirect_url=x",
+                   "x-clerk-auth-status": "signed-out"}
+        exc = urllib.error.HTTPError("u", 307, "redirect", headers, io.BytesIO(b""))
+        monkeypatch.setattr(probe.urllib.request, "build_opener",
+                            lambda *a: _FakeOpener(raises=exc))
+        raw = probe.probe_user_path("https://app.radon.run/dashboard")
+        assert raw["reachable"] is True
+        assert raw["http_status"] == 307
+        assert "/sign-in" in raw["location"]
+        assert raw["clerk_auth_status"] == "signed-out"
+
+    def test_timeout_is_unreachable(self, monkeypatch):
+        monkeypatch.setattr(probe.urllib.request, "build_opener",
+                            lambda *a: _FakeOpener(raises=socket.timeout()))
+        raw = probe.probe_user_path("https://app.radon.run/dashboard")
+        assert raw == {"reachable": False, "detail": "timeout"}
+
+    def test_plain_200_captures_clerk_header(self, monkeypatch):
+        resp = _FakeResp(b"<html>", 200)
+        resp.headers = {"x-clerk-auth-status": "signed-out"}
+        monkeypatch.setattr(probe.urllib.request, "build_opener",
+                            lambda *a: _FakeOpener(response=resp))
+        raw = probe.probe_user_path("https://app.radon.run/dashboard")
+        assert raw["http_status"] == 200
+        assert raw["clerk_auth_status"] == "signed-out"
+
+
+# ── freshness probe: /api/probe/freshness contract ──────────────────────────
+#
+# Recorded contract fixture (the web half builds the endpoint against this
+# exact shape — see DUR-16). The endpoint goes live only when the web half
+# deploys; until then production answers 404/401 which MUST classify as
+# endpoint_pending (freshness_ok NULL), not a failure.
+
+FRESHNESS_CONTRACT_FIXTURE = {
+    "generated_at": "2026-06-12T19:00:00Z",
+    "market_state": "open",
+    "checks": {
+        "relay_tick": {"applicable": True, "age_secs": 4.2, "fresh": True},
+        "vcg_scan": {"applicable": True, "age_secs": 640.0, "fresh": True},
+        "gex_scan": {"applicable": True, "age_secs": 810.0, "fresh": True},
+        "journal": {"applicable": True, "age_secs": 120.0, "fresh": True},
+    },
+    "all_fresh": True,
+}
+
+FRESHNESS_QUIET_MARKET_FIXTURE = {
+    "generated_at": "2026-06-13T02:00:00Z",
+    "market_state": "closed",
+    "checks": {
+        "relay_tick": {"applicable": False, "age_secs": None, "fresh": None},
+        "vcg_scan": {"applicable": False, "age_secs": None, "fresh": None},
+        "gex_scan": {"applicable": False, "age_secs": None, "fresh": None},
+        "journal": {"applicable": False, "age_secs": None, "fresh": None},
+    },
+    "all_fresh": None,
+}
+
+
+def _freshness_raw(status=200, payload=None):
+    return {"reachable": True, "http_status": status, "latency_ms": 60,
+            "payload": FRESHNESS_CONTRACT_FIXTURE if payload is None else payload}
+
+
+class TestClassifyFreshness:
+    def test_200_all_fresh_true_is_healthy(self):
+        result = probe.classify_freshness(_freshness_raw())
+        assert result["freshness_ok"] == 1
+        assert result["tick_fresh"] == 1
+        assert result["scan_fresh"] == 1
+        assert result["market_state"] == "open"
+        assert result["detail"] == "fresh"
+
+    def test_200_all_fresh_null_quiet_market_is_healthy(self):
+        result = probe.classify_freshness(_freshness_raw(payload=FRESHNESS_QUIET_MARKET_FIXTURE))
+        assert result["freshness_ok"] == 1
+        assert result["tick_fresh"] is None
+        assert result["scan_fresh"] is None
+        assert result["market_state"] == "closed"
+
+    def test_200_all_fresh_false_is_unhealthy_with_per_check_flags(self):
+        payload = {
+            "generated_at": "x", "market_state": "open", "all_fresh": False,
+            "checks": {
+                "relay_tick": {"applicable": True, "age_secs": 900.0, "fresh": False},
+                "vcg_scan": {"applicable": True, "age_secs": 100.0, "fresh": True},
+                "gex_scan": {"applicable": True, "age_secs": 99999.0, "fresh": False},
+                "journal": {"applicable": True, "age_secs": 10.0, "fresh": True},
+            },
+        }
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+        assert result["freshness_ok"] == 0
+        assert result["tick_fresh"] == 0
+        assert result["scan_fresh"] == 0  # any stale scan poisons the pair
+        assert result["detail"] == "stale"
+
+    def test_scan_fresh_is_null_safe_across_the_pair(self):
+        payload = {
+            "market_state": "open", "all_fresh": True,
+            "checks": {
+                "relay_tick": {"applicable": True, "fresh": True},
+                "vcg_scan": {"applicable": True, "fresh": True},
+                "gex_scan": {"applicable": False, "fresh": None},
+            },
+        }
+        assert probe.classify_freshness(_freshness_raw(payload=payload))["scan_fresh"] == 1
+
+    def test_404_is_endpoint_pending_not_failure(self):
+        result = probe.classify_freshness(_freshness_raw(status=404, payload={}))
+        assert result["freshness_ok"] is None
+        assert result["detail"] == "endpoint_pending"
+        assert result["market_state"] is None
+
+    def test_401_is_endpoint_pending_not_failure(self):
+        result = probe.classify_freshness(_freshness_raw(status=401, payload={}))
+        assert result["freshness_ok"] is None
+        assert result["detail"] == "endpoint_pending"
+
+    def test_500_is_unhealthy_but_market_state_unknown(self):
+        result = probe.classify_freshness(_freshness_raw(status=500, payload={}))
+        assert result["freshness_ok"] == 0
+        assert result["detail"] == "freshness_http_500"
+        assert result["market_state"] is None
+
+    def test_timeout_is_unhealthy_but_market_state_unknown(self):
+        result = probe.classify_freshness({"reachable": False, "detail": "timeout"})
+        assert result["freshness_ok"] == 0
+        assert result["detail"] == "freshness_unreachable:timeout"
+        assert result["market_state"] is None
+
+    def test_missing_token_is_pending_like_not_failure(self):
+        result = probe.classify_freshness({"reachable": False, "detail": "no_token", "skipped": True})
+        assert result["freshness_ok"] is None
+        assert result["detail"] == "freshness_no_token"
+
+
+class TestProbeFreshness:
+    def test_sends_bearer_and_parses_payload(self, monkeypatch):
+        captured = {}
+
+        def _fake_urlopen(request, timeout=None):
+            captured["auth"] = request.headers.get("Authorization")
+            return _FakeResp(json.dumps(FRESHNESS_CONTRACT_FIXTURE).encode(), 200)
+        monkeypatch.setattr(probe.urllib.request, "urlopen", _fake_urlopen)
+        raw = probe.probe_freshness("https://app.radon.run/api/probe/freshness", "tok123")
+        assert captured["auth"] == "Bearer tok123"
+        assert raw["http_status"] == 200
+        assert raw["payload"]["all_fresh"] is True
+
+    def test_no_token_skips_the_request(self, monkeypatch):
+        def _boom(*a, **k):
+            raise AssertionError("must not hit the network without a token")
+        monkeypatch.setattr(probe.urllib.request, "urlopen", _boom)
+        raw = probe.probe_freshness("https://app.radon.run/api/probe/freshness", "")
+        assert raw == {"reachable": False, "detail": "no_token", "skipped": True}
+
+
+# ── exit-code policy: arms GitHub's workflow-failure email (DUR-04 residual) ─
+
+class TestExitCodePolicy:
+    def test_all_healthy_exits_zero(self):
+        assert probe.exit_code_for(1, 1, 1, "open") == 0
+
+    def test_edge_down_exits_nonzero(self):
+        assert probe.exit_code_for(0, 1, None, None) == probe.EXIT_UNHEALTHY
+
+    def test_user_path_down_exits_nonzero(self):
+        assert probe.exit_code_for(1, 0, 1, "open") == probe.EXIT_UNHEALTHY
+
+    def test_stale_freshness_during_rth_exits_nonzero(self):
+        assert probe.exit_code_for(1, 1, 0, "open") == probe.EXIT_UNHEALTHY
+
+    def test_stale_freshness_off_hours_exits_zero(self):
+        assert probe.exit_code_for(1, 1, 0, "closed") == 0
+        assert probe.exit_code_for(1, 1, 0, "extended") == 0
+
+    def test_stale_freshness_with_unknown_market_state_exits_zero(self):
+        assert probe.exit_code_for(1, 1, 0, None) == 0
+
+    def test_endpoint_pending_exits_zero(self):
+        assert probe.exit_code_for(1, 1, None, "open") == 0
+
+
+# ── history row construction ─────────────────────────────────────────────────
+
+class TestBuildRunsRow:
+    def _edge_row(self, ok=1, latency=90, detail="edge_ok"):
+        return {"source": "src", "ok": ok, "http_status": 200,
+                "latency_ms": latency, "detail": detail, "checked_at": "2026-06-12T19:00:00Z"}
+
+    def test_assembles_all_columns(self):
+        user = {"ok": 1, "detail": "clerk_redirect"}
+        fresh = {"freshness_ok": 1, "tick_fresh": 1, "scan_fresh": 1,
+                 "market_state": "open", "detail": "fresh"}
+        row = probe.build_runs_row(self._edge_row(), user, fresh,
+                                   run_at="2026-06-12T19:00:00Z", latency_ms=120.0)
+        assert row["run_at"] == "2026-06-12T19:00:00Z"
+        assert row["edge_ok"] == 1
+        assert row["user_path_ok"] == 1
+        assert row["freshness_ok"] == 1
+        assert row["tick_fresh"] == 1
+        assert row["scan_fresh"] == 1
+        assert row["latency_ms"] == 120.0
+        detail = json.loads(row["detail"])
+        assert detail == {"edge": "edge_ok", "user_path": "clerk_redirect",
+                          "freshness": "fresh", "market_state": "open"}
+
+    def test_pending_freshness_keeps_nulls(self):
+        user = {"ok": 1, "detail": "clerk_redirect"}
+        fresh = {"freshness_ok": None, "tick_fresh": None, "scan_fresh": None,
+                 "market_state": None, "detail": "endpoint_pending"}
+        row = probe.build_runs_row(self._edge_row(), user, fresh,
+                                   run_at="x", latency_ms=None)
+        assert row["freshness_ok"] is None
+        assert row["tick_fresh"] is None
+        assert row["scan_fresh"] is None
+        assert row["latency_ms"] is None
+        assert json.loads(row["detail"])["freshness"] == "endpoint_pending"
+
+
+# ── turso_http: history insert + 30d prune pipeline ──────────────────────────
+
+class TestBuildInsertRunPipeline:
+    _ROW = {"run_at": "2026-06-12T19:00:00Z", "edge_ok": 1, "user_path_ok": 1,
+            "freshness_ok": None, "tick_fresh": None, "scan_fresh": None,
+            "detail": "{}", "latency_ms": 120.0}
+
+    def test_insert_carries_every_column_as_named_arg(self):
+        body = turso_http.build_insert_run_pipeline(self._ROW)
+        stmt = body["requests"][0]["stmt"]
+        assert "INSERT INTO external_probe_runs" in stmt["sql"]
+        names = {a["name"]: a["value"] for a in stmt["named_args"]}
+        assert names["run_at"] == {"type": "text", "value": "2026-06-12T19:00:00Z"}
+        assert names["edge_ok"] == {"type": "integer", "value": "1"}
+        assert names["freshness_ok"] == {"type": "null"}
+        assert names["latency_ms"] == {"type": "float", "value": 120.0}
+
+    def test_pipeline_prunes_rows_older_than_30_days(self):
+        body = turso_http.build_insert_run_pipeline(self._ROW)
+        prune = body["requests"][1]["stmt"]["sql"]
+        assert "DELETE FROM external_probe_runs" in prune
+        assert "-30 days" in prune
+        assert body["requests"][-1] == {"type": "close"}
+
+
 # ── run_probe orchestration (mocked transport + DB) ──────────────────────────
 
+def _patch_happy_network(monkeypatch):
+    monkeypatch.setattr(probe, "probe_endpoint",
+                        lambda url, **k: _ok_probe(payload={"ok": True}))
+    monkeypatch.setattr(probe, "probe_user_path", lambda url, **k: _user_path_raw())
+    monkeypatch.setattr(probe, "probe_freshness", lambda url, token, **k: _freshness_raw())
+
+
 class TestRunProbe:
-    def test_writes_classified_row(self, monkeypatch):
-        monkeypatch.setattr(probe, "probe_endpoint",
-                            lambda url, **k: _ok_probe(payload={"ok": True}))
-        written = {}
+    def test_writes_classified_row_and_history_row(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        written, history = {}, {}
         monkeypatch.setattr(probe, "upsert_external_probe", lambda row: written.update(row))
-        row = probe.run_probe(source="test/edge")
-        assert row["source"] == "test/edge"
-        assert row["ok"] == 1
-        assert written == row  # the exact classified row reached the writer
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: history.update(row))
+        outcome = probe.run_probe(source="test/edge")
+        assert outcome["edge_row"]["source"] == "test/edge"
+        assert outcome["edge_row"]["ok"] == 1
+        assert written == outcome["edge_row"]  # the exact classified row reached the writer
+        assert history == outcome["runs_row"]
+        assert history["edge_ok"] == 1
+        assert history["user_path_ok"] == 1
+        assert history["freshness_ok"] == 1
+        assert outcome["exit_code"] == 0
+
+    def test_user_path_internal_error_is_isolated_and_fails_loud(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+
+        def _bug(url, **k):
+            raise RuntimeError("probe bug")
+        monkeypatch.setattr(probe, "probe_user_path", _bug)
+        written, history = {}, {}
+        monkeypatch.setattr(probe, "upsert_external_probe", lambda row: written.update(row))
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: history.update(row))
+        outcome = probe.run_probe(source="test/edge")
+        assert written["ok"] == 1  # edge write still landed
+        assert history["user_path_ok"] == 0
+        assert "internal" in json.loads(history["detail"])["user_path"]
+        assert outcome["exit_code"] == probe.EXIT_UNHEALTHY
+
+    def test_unhealthy_edge_exits_nonzero(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "probe_endpoint",
+                            lambda url, **k: {"reachable": False, "detail": "timeout"})
+        monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == probe.EXIT_UNHEALTHY
+
+    def test_pending_freshness_keeps_exit_zero(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "probe_freshness",
+                            lambda url, token, **k: _freshness_raw(status=404, payload={}))
+        monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
+        history = {}
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: history.update(row))
+        assert probe.main() == 0
+        assert history["freshness_ok"] is None
 
     def test_main_returns_1_when_write_fails(self, monkeypatch):
-        monkeypatch.setattr(probe, "probe_endpoint", lambda url, **k: _ok_probe(payload={"ok": True}))
+        _patch_happy_network(monkeypatch)
 
         def _boom(_row):
             raise turso_http.TursoHttpError("down")
         monkeypatch.setattr(probe, "upsert_external_probe", _boom)
+        assert probe.main() == 1
+
+    def test_main_returns_1_when_history_write_fails(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
+
+        def _boom(_row):
+            raise turso_http.TursoHttpError("down")
+        monkeypatch.setattr(probe, "insert_external_probe_run", _boom)
         assert probe.main() == 1
 
 

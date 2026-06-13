@@ -89,6 +89,44 @@ def build_upsert_pipeline(row: dict) -> dict:
     }
 
 
+# DUR-16: keep the append-only history bounded without a separate janitor —
+# the prober itself deletes anything older than this on every run (the
+# 0008-era in-probe prune style; same precedent as host_metrics).
+RUNS_RETENTION_DAYS = 30
+
+_RUNS_PRUNE_SQL = (
+    "DELETE FROM external_probe_runs "
+    "WHERE run_at < datetime('now', '-%d days')" % RUNS_RETENTION_DAYS
+)
+
+
+def build_insert_run_pipeline(row: dict) -> dict:
+    """Build the /v2/pipeline body for one append-only external_probe_runs row
+    (DUR-16 history) plus the bounded 30-day prune. close=True as above."""
+    sql = (
+        "INSERT INTO external_probe_runs "
+        "(run_at, edge_ok, user_path_ok, freshness_ok, tick_fresh, scan_fresh, detail, latency_ms) "
+        "VALUES (:run_at, :edge_ok, :user_path_ok, :freshness_ok, :tick_fresh, :scan_fresh, :detail, :latency_ms)"
+    )
+    columns = ("run_at", "edge_ok", "user_path_ok", "freshness_ok",
+               "tick_fresh", "scan_fresh", "detail", "latency_ms")
+    return {
+        "requests": [
+            {
+                "type": "execute",
+                "stmt": {
+                    "sql": sql,
+                    "named_args": [
+                        {"name": column, "value": _arg(row.get(column))} for column in columns
+                    ],
+                },
+            },
+            {"type": "execute", "stmt": {"sql": _RUNS_PRUNE_SQL}},
+            {"type": "close"},
+        ]
+    }
+
+
 def _arg(value) -> dict:
     """Encode a Python scalar as a Hrana typed value."""
     if value is None:
@@ -114,9 +152,18 @@ def _raise_on_pipeline_error(parsed: dict) -> None:
 
 def upsert_external_probe(row: dict) -> None:
     """POST the UPSERT pipeline to Turso. Raises TursoHttpError on any failure."""
+    _post_pipeline(build_upsert_pipeline(row))
+
+
+def insert_external_probe_run(row: dict) -> None:
+    """POST one history row (+ prune) to Turso. Raises TursoHttpError on failure."""
+    _post_pipeline(build_insert_run_pipeline(row))
+
+
+def _post_pipeline(pipeline: dict) -> None:
     db_url, token = _read_env()
     endpoint = http_base_url(db_url).rstrip("/") + PIPELINE_PATH
-    body = json.dumps(build_upsert_pipeline(row)).encode("utf-8")
+    body = json.dumps(pipeline).encode("utf-8")
     request = urllib.request.Request(
         endpoint,
         data=body,
