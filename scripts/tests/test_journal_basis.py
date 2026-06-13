@@ -40,12 +40,11 @@ class _FakeDb:
         return _FakeCursor(self._rows)
 
 
-def _journal_row(payload: dict, filled_at: str) -> dict:
-    return {
-        "payload": json.dumps(payload),
-        "filled_at": filled_at,
-        "written_at": filled_at,
-    }
+def _journal_row(payload: dict, filled_at: str) -> tuple:
+    # Driver-faithful row shape: libsql fetchall() returns plain TUPLES in
+    # SELECT order (payload, filled_at, written_at) — not dicts (CTA-01
+    # layer 2: name-based access read every real row as empty).
+    return (json.dumps(payload), filled_at, filled_at)
 
 
 def _aaoi_rows() -> list[dict]:

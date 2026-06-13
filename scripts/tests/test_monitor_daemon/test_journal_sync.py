@@ -289,12 +289,10 @@ class TestSellCloseLabeling:
         db.execute.return_value = result
         return db
 
-    def _row(self, payload: dict, filled_at: str = "2026-04-15T10:00:00Z") -> dict:
-        return {
-            "payload": json.dumps(payload),
-            "filled_at": filled_at,
-            "written_at": filled_at,
-        }
+    def _row(self, payload: dict, filled_at: str = "2026-04-15T10:00:00Z") -> tuple:
+        # Driver-faithful tuple in SELECT order (payload, filled_at,
+        # written_at) — real libsql rows are tuples, not dicts (CTA-01).
+        return (json.dumps(payload), filled_at, filled_at)
 
     def test_sell_closing_prior_long_labels_as_sell_option(self, trade_log_path):
         """Prior BUY of 65 USAX $45 calls + today's SELL 65 = SELL_OPTION."""

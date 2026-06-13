@@ -6,9 +6,21 @@ import json
 from typing import Any, Optional
 
 
+# Both journal queries below SELECT exactly these columns, in this order.
+# Real libsql_experimental cursors return plain tuples, so name-based access
+# must fall back to position or every row silently reads as empty (CTA-01,
+# layer 2 — the .rows AttributeError was masking this).
+_JOURNAL_COLUMNS = ("payload", "filled_at", "written_at")
+
+
 def _row_value(row: Any, key: str) -> Any:
     if isinstance(row, dict):
         return row.get(key)
+    if isinstance(row, (tuple, list)):
+        try:
+            return row[_JOURNAL_COLUMNS.index(key)]
+        except (ValueError, IndexError):
+            return None
     return getattr(row, key, None)
 
 
