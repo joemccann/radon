@@ -1,10 +1,12 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import {
   getRequestId,
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
+import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -79,7 +81,57 @@ export function isApiPath(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+// Bearer-gated probe surface (DUR-16) — the Tier-3 off-box prober (GitHub
+// Actions, no Clerk session) authenticates with
+// `Authorization: Bearer ${RADON_PROBE_FRESHNESS_TOKEN}` instead of Clerk.
+// DELIBERATELY not in isPublicRoute: a public listing would skip the bearer
+// check entirely. EXPLICIT list, same default-deny discipline as
+// PUBLIC_SHARE_API_ROUTES — a new probe route must be added here AND to the
+// filesystem pin in web/tests/middleware-share-allowlist.test.ts.
+export const PROBE_BEARER_API_ROUTES = ["/api/probe/freshness"] as const;
+
+export function isProbeBearerRoute(pathname: string): boolean {
+  return (PROBE_BEARER_API_ROUTES as readonly string[]).includes(pathname);
+}
+
+/**
+ * Middleware gate for the probe routes. Returns:
+ *   - null                  — not a probe route; fall through to Clerk.
+ *   - NextResponse.next()   — correct bearer token; let the route run.
+ *   - 401 JSON              — missing/wrong token, or the server token is
+ *                             unset (fail closed). Body carries no detail
+ *                             about WHY, so the response doesn't help an
+ *                             attacker distinguish the cases.
+ *
+ * Token compare is timing-safe via Web Crypto (lib/probeAuth.ts) — the
+ * middleware runs in the Edge runtime, so node:crypto is off the table.
+ */
+export async function handleProbeBearerGate(
+  request: NextRequest,
+  expectedToken: string | undefined = process.env.RADON_PROBE_FRESHNESS_TOKEN,
+): Promise<NextResponse | null> {
+  if (!isProbeBearerRoute(request.nextUrl.pathname)) return null;
+  const authorized = await isAuthorizedProbeRequest(
+    request.headers.get("authorization"),
+    expectedToken,
+  );
+  if (authorized) return NextResponse.next();
+  const requestId = getRequestId();
+  const response = jsonApiError({
+    message: "Unauthorized",
+    status: 401,
+    code: "UNAUTHORIZED",
+    requestId,
+  });
+  return setNoStoreResponseHeaders(response, requestId);
+}
+
 export default clerkMiddleware(async (auth, request) => {
+  // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
+  // so the gate behaves identically in dev, tests, and production.
+  const probeGate = await handleProbeBearerGate(request);
+  if (probeGate) return probeGate;
+
   if (
     isLocalDevAuthBypassEnabled(request.nextUrl) ||
     isLocalAuthlessTestBypassEnabled(request.nextUrl)

@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 
-import { isApiPath, isPublicRoute } from "../middleware";
+import { isApiPath, isProbeBearerRoute, isPublicRoute, PROBE_BEARER_API_ROUTES } from "../middleware";
 
 function reqFor(pathname: string): NextRequest {
   return new NextRequest(`https://app.radon.run${pathname}`);
@@ -100,6 +100,31 @@ describe("isPublicRoute — explicit allowlist", () => {
     expect(isPublicRoute(reqFor("/api/shared-data"))).toBe(false);
     expect(isPublicRoute(reqFor("/api/foo/share-thing"))).toBe(false);
     expect(isPublicRoute(reqFor("/api/shareable"))).toBe(false);
+  });
+
+  it("DOES NOT exempt the bearer-gated probe routes — they are gated, not public", () => {
+    // DUR-16 (deliberate perimeter change): /api/probe/freshness is reachable
+    // without a Clerk session but ONLY through the middleware's timing-safe
+    // bearer gate (RADON_PROBE_FRESHNESS_TOKEN). Listing it in isPublicRoute
+    // would skip the bearer check entirely, so it must stay OUT of the
+    // public allowlist and IN the probe-bearer list.
+    for (const route of PROBE_BEARER_API_ROUTES) {
+      expect(isPublicRoute(reqFor(route)), route).toBe(false);
+      expect(isProbeBearerRoute(route), route).toBe(true);
+    }
+  });
+
+  it("DOES NOT exempt unknown probe-shaped scopes (default-deny)", () => {
+    const unknownProbeScopes = [
+      "/api/probe",
+      "/api/probe/other",
+      "/api/probe/freshness/extra",
+      "/api/probes/freshness",
+    ];
+    for (const path of unknownProbeScopes) {
+      expect(isPublicRoute(reqFor(path)), path).toBe(false);
+      expect(isProbeBearerRoute(path), path).toBe(false);
+    }
   });
 
   it("DOES NOT exempt page routes that aren't sign-in/sign-up", () => {

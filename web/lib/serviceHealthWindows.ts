@@ -194,12 +194,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // run — suppressing it during IB outages would defeat its purpose.
   "ib-watchdog": { open: 5 * MIN, extended: 5 * MIN, closed: 5 * MIN, category: "scheduled", requires_ib: false },
 
-  // ``ib-realtime-relay`` is an EVENT-DRIVEN writer: the WS relay only
-  // records a service_health row when its bounded stale-tick recovery
-  // ladder escalates (state=error) or when ticks resume (state=ok). A
-  // healthy relay writes nothing, so a tight window would flip it stale
-  // within minutes even though "silent" is the desired healthy state —
-  // use a 24h window so we still notice a dead relay process for a day.
+  // ``ib-realtime-relay`` is an EVENT-DRIVEN writer for state edges: the
+  // WS relay records error when its bounded stale-tick recovery ladder
+  // escalates and ok when ticks resume. Since DUR-16 it ALSO refreshes
+  // the row every 60s during RTH with last-tick detail (the freshness
+  // probe reads it), but off-hours a healthy relay still writes nothing,
+  // so a tight window would flip it stale overnight even though "silent"
+  // is the desired healthy state — keep the 24h window so we still
+  // notice a dead relay process for a day.
   // requires_ib MUST be false: the relay alert is precisely the signal
   // that the IB data plane is dead, so grouping it under the IB-outage
   // umbrella (which requires_ib=true does) would suppress the very alert

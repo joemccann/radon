@@ -129,3 +129,27 @@ export function decideStaleAction(input) {
 export function isFarmStateCode(code) {
   return FARM_OK_CODES.has(code) || FARM_DOWN_CODES.has(code);
 }
+
+/** Cadence of the relay's RTH tick heartbeat (DUR-16). */
+export const TICK_HEARTBEAT_INTERVAL_MS = 60_000;
+
+/**
+ * DUR-16: should the relay refresh its service_health row with the
+ * current last-tick timestamp this cycle?
+ *
+ * The heartbeat exists so GET /api/probe/freshness can compute true tick
+ * age from the row's detail JSON (last_tick_at) instead of guessing from
+ * sparse event-driven writes. It runs ONLY during RTH (off-hours the relay
+ * stays event-driven, matching its serviceHealthWindows entry) and never
+ * while the error row is latched — escalation/recovery edges stay owned by
+ * the ladder. ok->ok upserts are suppressed by the migration-0011 events
+ * trigger, so the heartbeat adds zero history rows.
+ *
+ * @param {{now: number, isMarketHours: boolean, inError: boolean, lastHeartbeatAt: number}} input
+ * @returns {boolean}
+ */
+export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHeartbeatAt }) {
+  if (!isMarketHours) return false;
+  if (inError) return false;
+  return now - lastHeartbeatAt >= TICK_HEARTBEAT_INTERVAL_MS;
+}

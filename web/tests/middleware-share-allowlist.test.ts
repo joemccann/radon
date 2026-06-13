@@ -13,6 +13,12 @@
  *      route.* under web/app/api without updating PUBLIC_SHARE_API_ROUTES
  *      fails this test, forcing a deliberate perimeter decision.
  *
+ * The same default-deny discipline applies to the DUR-16 probe scope:
+ * `/api/probe/*` routes are bearer-gated (not Clerk-public, not anonymous),
+ * and any route file landing under web/app/api/probe without being
+ * enumerated in PROBE_BEARER_API_ROUTES fails the filesystem pin below —
+ * forcing the same deliberate perimeter decision.
+ *
  * Companion: web/tests/middleware-auth.test.ts pins the broader isPublicRoute
  * behavior (sign-in/sign-up, service-health, protected API deny-list).
  */
@@ -21,13 +27,18 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 
-import { isPublicRoute, PUBLIC_SHARE_API_ROUTES } from "../middleware";
+import {
+  isProbeBearerRoute,
+  isPublicRoute,
+  PROBE_BEARER_API_ROUTES,
+  PUBLIC_SHARE_API_ROUTES,
+} from "../middleware";
 
 function reqFor(pathname: string): NextRequest {
   return new NextRequest(`https://app.radon.run${pathname}`);
 }
 
-function collectShareRoutesFromFilesystem(): string[] {
+function collectRoutesFromFilesystem(matchesScope: (urlPath: string) => boolean): string[] {
   const apiRoot = join(__dirname, "..", "app", "api");
   const found: string[] = [];
 
@@ -36,13 +47,21 @@ function collectShareRoutesFromFilesystem(): string[] {
       if (entry.isDirectory()) {
         walk(join(dir, entry.name), `${urlPath}/${entry.name}`);
       } else if (/^route\.(ts|tsx|js|jsx)$/.test(entry.name)) {
-        if (urlPath.split("/").includes("share")) found.push(urlPath);
+        if (matchesScope(urlPath)) found.push(urlPath);
       }
     }
   }
 
   walk(apiRoot, "/api");
   return found.sort();
+}
+
+function collectShareRoutesFromFilesystem(): string[] {
+  return collectRoutesFromFilesystem((urlPath) => urlPath.split("/").includes("share"));
+}
+
+function collectProbeRoutesFromFilesystem(): string[] {
+  return collectRoutesFromFilesystem((urlPath) => urlPath.startsWith("/api/probe/") || urlPath === "/api/probe");
 }
 
 describe("PUBLIC_SHARE_API_ROUTES — explicit share allowlist", () => {
@@ -72,5 +91,19 @@ describe("PUBLIC_SHARE_API_ROUTES — explicit share allowlist", () => {
   it("allowlist matches the share route files on disk exactly", () => {
     const onDisk = collectShareRoutesFromFilesystem();
     expect([...PUBLIC_SHARE_API_ROUTES].sort()).toEqual(onDisk);
+  });
+});
+
+describe("PROBE_BEARER_API_ROUTES — explicit bearer-gated probe allowlist (DUR-16)", () => {
+  it("every enumerated probe route is bearer-gated, NOT Clerk-public", () => {
+    for (const route of PROBE_BEARER_API_ROUTES) {
+      expect(isProbeBearerRoute(route), route).toBe(true);
+      expect(isPublicRoute(reqFor(route)), route).toBe(false);
+    }
+  });
+
+  it("allowlist matches the probe route files on disk exactly", () => {
+    const onDisk = collectProbeRoutesFromFilesystem();
+    expect([...PROBE_BEARER_API_ROUTES].sort()).toEqual(onDisk);
   });
 });

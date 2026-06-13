@@ -59,7 +59,7 @@ export default defineConfig([
     // Uses no-restricted-syntax (not no-restricted-imports) so it layers on
     // top of the global no-restricted-imports rule instead of replacing it
     // for these files.
-    files: ["middleware.ts", "lib/apiContracts.ts"],
+    files: ["middleware.ts", "lib/apiContracts.ts", "lib/probeAuth.ts"],
     rules: {
       "no-restricted-syntax": [
         "error",

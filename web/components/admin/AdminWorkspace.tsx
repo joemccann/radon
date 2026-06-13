@@ -10,6 +10,7 @@ import type {
 } from "@/lib/adminTypes";
 import type { ReliabilityHistoryPayload } from "@/lib/adminReliability";
 import type { HostMetricsPayload } from "@/lib/adminHostMetrics";
+import type { SloPayload } from "@/lib/adminSlo";
 
 /** Latest action result; drives the row-level success/failure flash. */
 export type FlashTarget = {
@@ -23,6 +24,7 @@ import ServiceControlPanel from "./ServiceControlPanel";
 import RestartLog from "./RestartLog";
 import SystemStatusBar from "./SystemStatusBar";
 import ReliabilityStrip from "./ReliabilityStrip";
+import SloStrip from "./SloStrip";
 import HostMetricsStrip from "./HostMetricsStrip";
 import WriterFreshnessTable from "./WriterFreshnessTable";
 
@@ -73,6 +75,7 @@ export default function AdminWorkspace() {
 
   const [reliability, setReliability] = useState<ReliabilityHistoryPayload | null>(null);
   const [hostMetrics, setHostMetrics] = useState<HostMetricsPayload | null>(null);
+  const [slo, setSlo] = useState<SloPayload | null>(null);
 
   // Epoch ms of the last successful poll, + a 1s tick so "updated Ns ago"
   // counts up live without a fetch.
@@ -93,6 +96,7 @@ export default function AdminWorkspace() {
   const edgeInflightRef = useRef(false);
   const reliabilityInflightRef = useRef(false);
   const hostMetricsInflightRef = useRef(false);
+  const sloInflightRef = useRef(false);
   const flashTimerRef = useRef<number | null>(null);
 
   const fetchHealth = useCallback(async () => {
@@ -191,6 +195,24 @@ export default function AdminWorkspace() {
     }
   }, []);
 
+  // The 7-day external_probe_runs history behind the SLO attainment tiles
+  // (DUR-16). Always-200 route: a missing table or unreachable DB is data
+  // (`missing: true`), not an exception.
+  const fetchSlo = useCallback(async () => {
+    if (sloInflightRef.current) return;
+    sloInflightRef.current = true;
+    try {
+      const res = await fetch("/api/admin/slo", { cache: "no-store" });
+      const data = (await res.json().catch(() => null)) as SloPayload | null;
+      if (data && Array.isArray(data.rows)) setSlo(data);
+    } catch {
+      // Keep the last good payload; the tiles degrade to "--" only when
+      // nothing has ever loaded.
+    } finally {
+      sloInflightRef.current = false;
+    }
+  }, []);
+
   // True while any visible unit is in a transitional state — drives a faster
   // poll cadence so the operator sees activating -> active without waiting.
   const hasTransitionalUnit = hasTransitionalRow(services);
@@ -201,6 +223,7 @@ export default function AdminWorkspace() {
     void fetchEdge();
     void fetchReliability();
     void fetchHostMetrics();
+    void fetchSlo();
     const healthId = window.setInterval(fetchHealth, HEALTH_POLL_MS);
     const servicesInterval = hasTransitionalUnit
       ? SERVICES_TRANSITIONAL_POLL_MS
@@ -209,14 +232,16 @@ export default function AdminWorkspace() {
     const edgeId = window.setInterval(fetchEdge, EDGE_POLL_MS);
     const reliabilityId = window.setInterval(fetchReliability, RELIABILITY_POLL_MS);
     const hostMetricsId = window.setInterval(fetchHostMetrics, RELIABILITY_POLL_MS);
+    const sloId = window.setInterval(fetchSlo, RELIABILITY_POLL_MS);
     return () => {
       window.clearInterval(healthId);
       window.clearInterval(servicesId);
       window.clearInterval(edgeId);
       window.clearInterval(reliabilityId);
       window.clearInterval(hostMetricsId);
+      window.clearInterval(sloId);
     };
-  }, [fetchHealth, fetchServices, fetchEdge, fetchReliability, fetchHostMetrics, hasTransitionalUnit]);
+  }, [fetchHealth, fetchServices, fetchEdge, fetchReliability, fetchHostMetrics, fetchSlo, hasTransitionalUnit]);
 
   // 1s ticker so the "updated Ns ago" indicator counts up between polls.
   useEffect(() => {
@@ -433,6 +458,8 @@ export default function AdminWorkspace() {
           history={reliability}
           loading={reliabilityLoading}
         />
+
+        <SloStrip slo={slo} />
 
         <HostMetricsStrip metrics={hostMetrics} />
 

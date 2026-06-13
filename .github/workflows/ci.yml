@@ -81,6 +81,10 @@ jobs:
       # cookie, so the middleware 401s before any key verification.
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
       CLERK_SECRET_KEY: sk_test_radon_ci_perimeter_smoke_dummy
+      # Dummy bearer token for the DUR-16 probe-gate asserts below. The
+      # authorized curl is the only request-time proof that the timing-safe
+      # Web Crypto compare runs in the real Edge middleware runtime.
+      RADON_PROBE_FRESHNESS_TOKEN: rpf_ci_perimeter_smoke_dummy
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
@@ -95,7 +99,7 @@ jobs:
       # node:* ban on the middleware import graph (web/eslint.config.mjs).
       # Scoped to the perimeter files so unrelated lint warnings can't block
       # the gate; `next start` + curl below is the dynamic half.
-      - run: bunx eslint middleware.ts lib/apiContracts.ts
+      - run: bunx eslint middleware.ts lib/apiContracts.ts lib/probeAuth.ts
         working-directory: web
       # Locked build constraint: web/package.json `build` is
       # `next build --experimental-build-mode=compile` (see web/CLAUDE.md).
@@ -117,8 +121,12 @@ jobs:
 
           fail=0
           assert_status() {
-            path="$1"; want="$2"
-            got=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000${path}")
+            path="$1"; want="$2"; auth="${3:-}"
+            if [ -n "$auth" ]; then
+              got=$(curl -s -o /dev/null -w "%{http_code}" -H "Authorization: ${auth}" "http://127.0.0.1:3000${path}")
+            else
+              got=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:3000${path}")
+            fi
             if [ "$got" = "$want" ]; then
               echo "PASS ${path} -> ${got}"
             else
@@ -135,6 +143,13 @@ jobs:
           # Unknown share scope stays default-deny (the /share allowlist is
           # explicit; see web/tests/middleware-share-allowlist.test.ts).
           assert_status /api/journal/share 401
+          # DUR-16 probe gate: anonymous + wrong-token denied; the correct
+          # bearer passes the timing-safe Web Crypto compare in the REAL
+          # Edge middleware runtime and reaches the route (which 200s even
+          # without Turso creds — quiet/unproven checks are data, not 5xx).
+          assert_status /api/probe/freshness 401
+          assert_status /api/probe/freshness 401 "Bearer wrong-token"
+          assert_status /api/probe/freshness 200 "Bearer ${RADON_PROBE_FRESHNESS_TOKEN}"
           exit $fail
 
   deploy:

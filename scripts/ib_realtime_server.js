@@ -37,6 +37,7 @@ import { RateLimiter } from "./lib/rate-limiter.js";
 import {
   decideStaleAction,
   isFarmStateCode,
+  shouldWriteTickHeartbeat,
   STALE_DATA_THRESHOLD_MS,
   STALE_CHECK_INTERVAL_MS,
 } from "./lib/staleDataMachine.js";
@@ -543,6 +544,9 @@ let relayHealthInError = false;
 // that recovery-from-error alone would never clear. We write "ok" once on the
 // first healthy tick of each process. See feedback_service_health_heartbeat.
 let relayHealthInitialized = false;
+// Epoch ms of the last RTH tick heartbeat (DUR-16). 0 so the first healthy
+// RTH stale-check cycle of each process writes immediately.
+let lastTickHeartbeatAt = 0;
 
 const RELAY_HEALTH_SERVICE = "ib-realtime-relay";
 
@@ -2337,14 +2341,29 @@ staleCheckTimer = setInterval(() => {
   if (shuttingDown || ibGatewayRestarting) return;
 
   const now = Date.now();
+  const marketHours = isUSMarketHours();
   const activeSubscriptions = symbolSubscribers.size;
   const elapsed = now - lastTickTimestamp;
+
+  // DUR-16: RTH tick heartbeat for /api/probe/freshness. Refreshes the
+  // relay's service_health row with the last-tick timestamp so the probe
+  // computes true tick age. ok->ok upserts are suppressed by the 0011
+  // events trigger; the error<->ok edges stay owned by the ladder below.
+  if (shouldWriteTickHeartbeat({ now, isMarketHours: marketHours, inError: relayHealthInError, lastHeartbeatAt: lastTickHeartbeatAt })) {
+    lastTickHeartbeatAt = now;
+    void writeRelayHealth("ok", {
+      heartbeat: "tick",
+      last_tick_at: new Date(lastTickTimestamp).toISOString(),
+      tick_age_secs: Math.round(elapsed / 1000),
+      active_subscriptions: activeSubscriptions,
+    });
+  }
 
   const action = decideStaleAction({
     now,
     lastTickAt: lastTickTimestamp,
     ibConnected,
-    isMarketHours: isUSMarketHours(),
+    isMarketHours: marketHours,
     activeSubscriptions,
     reconnectCycles: staleReconnectCycles,
     farmState: lastFarmStateCode,

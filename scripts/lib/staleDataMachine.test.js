@@ -8,6 +8,8 @@ import {
   ESCALATION_COOLDOWN_MS,
   FARM_OK_CODES,
   FARM_DOWN_CODES,
+  shouldWriteTickHeartbeat,
+  TICK_HEARTBEAT_INTERVAL_MS,
 } from "./staleDataMachine.js";
 
 const NOW = 1_700_000_000_000;
@@ -159,5 +161,43 @@ describe("decideStaleAction", () => {
         }),
       ),
     ).toBe("none");
+  });
+});
+
+describe("shouldWriteTickHeartbeat (DUR-16 freshness-probe heartbeat)", () => {
+  function hbInput(overrides = {}) {
+    return {
+      now: NOW,
+      isMarketHours: true,
+      inError: false,
+      lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS,
+      ...overrides,
+    };
+  }
+
+  it("writes during RTH once the interval has elapsed", () => {
+    expect(shouldWriteTickHeartbeat(hbInput())).toBe(true);
+    expect(
+      shouldWriteTickHeartbeat(hbInput({ lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 1 })),
+    ).toBe(true);
+  });
+
+  it("throttles inside the interval", () => {
+    expect(
+      shouldWriteTickHeartbeat(hbInput({ lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS + 1 })),
+    ).toBe(false);
+    expect(shouldWriteTickHeartbeat(hbInput({ lastHeartbeatAt: NOW }))).toBe(false);
+  });
+
+  it("never writes off-hours — the relay stays event-driven outside RTH", () => {
+    expect(shouldWriteTickHeartbeat(hbInput({ isMarketHours: false }))).toBe(false);
+  });
+
+  it("never writes while the error row is latched — the ladder owns that edge", () => {
+    expect(shouldWriteTickHeartbeat(hbInput({ inError: true }))).toBe(false);
+  });
+
+  it("fires immediately on the first RTH cycle of a fresh process (lastHeartbeatAt=0)", () => {
+    expect(shouldWriteTickHeartbeat(hbInput({ lastHeartbeatAt: 0 }))).toBe(true);
   });
 });
