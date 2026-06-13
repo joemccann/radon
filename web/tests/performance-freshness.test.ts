@@ -59,6 +59,23 @@ describe("performance freshness", () => {
     expect(latestPortfolioTargetDateET(new Date("2026-03-14T16:10:00Z"))).toBe("2026-03-13");
   });
 
+  it("never rolls the ET session date early near ET midnight (double-shift regression)", () => {
+    // 2026-06-13T01:06Z = Friday 21:06 ET. The old toEtDate() re-parsed an ET
+    // wall-clock string as a host-local instant, so on a PT host the second ET
+    // conversion pushed this to Saturday and flagged a fresh portfolio as
+    // behind-session, firing a spurious /portfolio/sync from the route.
+    expect(latestPortfolioTargetDateET(new Date("2026-06-13T01:06:58Z"))).toBe("2026-06-12");
+    // ET midnight boundary lands on the right side in both directions.
+    expect(latestPortfolioTargetDateET(new Date("2026-06-12T03:59:00Z"))).toBe("2026-06-11");
+    expect(latestPortfolioTargetDateET(new Date("2026-06-12T04:01:00Z"))).toBe("2026-06-12");
+    // Saturday + Sunday in ET both walk back to Friday.
+    expect(latestPortfolioTargetDateET(new Date("2026-06-14T01:00:00Z"))).toBe("2026-06-12");
+    expect(latestPortfolioTargetDateET(new Date("2026-06-15T01:00:00Z"))).toBe("2026-06-12");
+    // A current-instant last_sync is never behind the current session.
+    const nowIso = new Date().toISOString();
+    expect(isPortfolioBehindCurrentEtSession(nowIso)).toBe(false);
+  });
+
   it("marks a portfolio snapshot as behind when it still points at a prior ET session", () => {
     expect(isPortfolioBehindCurrentEtSession("2026-03-12T13:23:21Z", "2026-03-13")).toBe(true);
     expect(isPortfolioBehindCurrentEtSession("2026-03-13T13:23:21Z", "2026-03-13")).toBe(false);

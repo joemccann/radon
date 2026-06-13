@@ -22,24 +22,33 @@ export function portfolioAsOfFromLastSync(lastSync: string | null | undefined): 
   return scanTimeToEtDate(lastSync);
 }
 
-function toEtDate(now: Date): Date {
-  return new Date(now.toLocaleString("en-US", { timeZone: ET_TIME_ZONE }));
-}
-
 function formatEtDate(value: Date): string {
   return value.toLocaleDateString("sv", { timeZone: ET_TIME_ZONE });
 }
 
-function isTradingWeekday(value: Date): boolean {
-  const day = value.getDay();
-  return day !== 0 && day !== 6;
+/**
+ * Weekday evaluated IN ET from the true instant. Never re-parse a
+ * toLocaleString() rendering back into a Date: that interprets ET wall
+ * time as a host-local instant and the next ET conversion shifts it a
+ * second time, rolling the session date early near ET midnight (the
+ * offset depends on the host timezone, so the bug is invisible on UTC
+ * CI and live on a PT laptop).
+ */
+function isTradingWeekdayEt(value: Date): boolean {
+  const weekday = new Intl.DateTimeFormat("en-US", {
+    timeZone: ET_TIME_ZONE,
+    weekday: "short",
+  }).format(value);
+  return weekday !== "Sat" && weekday !== "Sun";
 }
 
-export function latestPortfolioTargetDateET(now: Date = new Date()): string {
-  const candidate = toEtDate(now);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-  while (!isTradingWeekday(candidate)) {
-    candidate.setDate(candidate.getDate() - 1);
+export function latestPortfolioTargetDateET(now: Date = new Date()): string {
+  let candidate = now;
+
+  while (!isTradingWeekdayEt(candidate)) {
+    candidate = new Date(candidate.getTime() - DAY_MS);
   }
 
   return formatEtDate(candidate);
