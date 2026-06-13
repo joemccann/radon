@@ -47,7 +47,10 @@ except ImportError:
     sys.exit(1)
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
-from clients.journal_basis import compute_open_basis_for_ticker
+from clients.journal_basis import (
+    compute_open_basis_for_ticker,
+    prior_net_qty_for_contract,
+)
 from db.client import get_db
 
 # Default connection settings
@@ -610,45 +613,89 @@ def _journal_basis_key(symbol: str, expiry, right, strike) -> Optional[str]:
     return f"{symbol_value}|{digits}|{right_value}|{strike_value}"
 
 
-def build_journal_basis_lookup(client: IBClient) -> dict[str, float]:
-    """Build a per-contract open-basis lookup from raw journal rows."""
+def build_journal_basis_lookup(client: IBClient, db=None) -> dict[str, float]:
+    """Build a per-contract open-basis lookup from raw journal rows.
+
+    Also records the journal net qty for each option contract on the returned
+    dict's ``net_qty`` sidecar so ``fetch_positions`` can reject an override
+    whose journal basis reflects fewer fills than the live position holds
+    (the MU 1050 C incomplete-journal class). ``db`` is injectable for tests.
+    """
+    lookup: dict[str, float] = {}
+    net_qty_lookup: dict[str, float] = {}
+
     try:
         raw_positions = client.get_positions()
     except Exception as exc:
         print(f"  Warning: journal basis prefetch skipped, positions unavailable: {exc}")
-        return {}
+        return _with_net_qty(lookup, net_qty_lookup)
 
-    tickers = sorted(
-        {
-            str(pos.contract.symbol).strip().upper()
-            for pos in raw_positions
-            if getattr(getattr(pos, "contract", None), "secType", None) == "OPT"
-            and getattr(getattr(pos, "contract", None), "symbol", None)
-        }
-    )
-    if not tickers:
-        return {}
+    option_positions = [
+        pos
+        for pos in raw_positions
+        if getattr(getattr(pos, "contract", None), "secType", None) == "OPT"
+        and getattr(getattr(pos, "contract", None), "symbol", None)
+    ]
+    if not option_positions:
+        return _with_net_qty(lookup, net_qty_lookup)
 
-    try:
-        db = get_db()
-    except Exception as exc:
-        print(f"  Warning: journal basis unavailable, falling back to IB avgCost: {exc}")
-        return {}
+    if db is None:
+        try:
+            db = get_db()
+        except Exception as exc:
+            print(f"  Warning: journal basis unavailable, falling back to IB avgCost: {exc}")
+            return _with_net_qty(lookup, net_qty_lookup)
 
-    lookup: dict[str, float] = {}
+    tickers = sorted({str(pos.contract.symbol).strip().upper() for pos in option_positions})
     for ticker in tickers:
         try:
             lookup.update(compute_open_basis_for_ticker(db, ticker))
         except Exception as exc:
             print(f"  Warning: journal basis lookup failed for {ticker}: {exc}")
-    return lookup
+
+    for pos in option_positions:
+        contract = pos.contract
+        journal_key = _journal_basis_key(
+            contract.symbol,
+            getattr(contract, "lastTradeDateOrContractMonth", None),
+            getattr(contract, "right", None),
+            getattr(contract, "strike", None),
+        )
+        if not journal_key or journal_key in net_qty_lookup:
+            continue
+        try:
+            net_qty_lookup[journal_key] = prior_net_qty_for_contract(
+                db,
+                ticker=contract.symbol,
+                sec_type=contract.secType,
+                strike=getattr(contract, "strike", None),
+                right=getattr(contract, "right", None),
+                expiry=getattr(contract, "lastTradeDateOrContractMonth", None),
+            )
+        except Exception as exc:
+            print(f"  Warning: journal net-qty lookup failed for {journal_key}: {exc}")
+
+    return _with_net_qty(lookup, net_qty_lookup)
+
+
+class _BasisLookup(dict):
+    """Open-basis dict that also carries a per-key journal net-qty sidecar."""
+
+    net_qty: dict[str, float]
+
+
+def _with_net_qty(lookup: dict, net_qty_lookup: dict) -> "_BasisLookup":
+    enriched = _BasisLookup(lookup)
+    enriched.net_qty = net_qty_lookup
+    return enriched
 
 
 def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, float]] = None) -> list:
     """Fetch all positions from IB"""
     positions = client.get_positions()
     journal_basis_lookup = journal_basis_lookup or {}
-    
+    journal_net_qty_lookup = getattr(journal_basis_lookup, "net_qty", {}) or {}
+
     formatted = []
     for pos in positions:
         contract = pos.contract
@@ -671,8 +718,20 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
             getattr(contract, 'strike', None),
         )
         if journal_key and journal_key in journal_basis_lookup and position_size != 0:
-            entry_cost = abs(float(journal_basis_lookup[journal_key]))
-            avg_cost = entry_cost / abs(position_size)
+            journal_net = journal_net_qty_lookup.get(journal_key)
+            basis_is_complete = (
+                journal_net is None
+                or abs(journal_net) == abs(position_size)
+            )
+            if basis_is_complete:
+                entry_cost = abs(float(journal_basis_lookup[journal_key]))
+                avg_cost = entry_cost / abs(position_size)
+            else:
+                print(
+                    f"  Warning: journal basis SKIPPED for {journal_key}: "
+                    f"journal_net_qty={journal_net} != position_qty={position_size} "
+                    f"— keeping IB avgCost (incomplete journal)"
+                )
         
         formatted.append({
             "symbol": contract.symbol,
