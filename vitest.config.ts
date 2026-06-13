@@ -22,6 +22,15 @@ export default defineConfig({
     environment: "node",
     coverage: {
       provider: "v8",
+      // Non-regressing RATCHET, not a vanity target. Each threshold sits 1-4%
+      // below current measured coverage (~79% lines) so the suite passes today
+      // while catching a regression. Raise these over time as coverage climbs;
+      // never lower them to make a red build pass.
+      thresholds: {
+        lines: 75,
+        functions: 78,
+        branches: 65,
+      },
       include: [
         "site/app/**/*.ts",
         "site/lib/**/*.ts",

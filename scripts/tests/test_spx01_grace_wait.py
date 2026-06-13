@@ -108,13 +108,19 @@ def _make_client(trade: MagicMock,
 # Invoke the function under test with IBClient patched
 # ---------------------------------------------------------------------------
 
-def _invoke_place_order(params: dict, client_mock: MagicMock) -> dict:
-    """Call ib_place_order.place_order() with IBClient replaced by client_mock."""
+def _invoke_place_order(params: dict, client_mock: MagicMock,
+                        _clock=None) -> dict:
+    """Call ib_place_order.place_order() with IBClient replaced by client_mock.
+
+    _clock: optional injectable clock for tests that need to control the
+    confirm-poll deadline without real wall-clock waiting.
+    """
     with patch("ib_place_order.IBClient", return_value=client_mock), \
          patch("ib_place_order.Stock", return_value=MagicMock()), \
          patch("ib_place_order.LimitOrder", return_value=MagicMock()):
         import ib_place_order
-        return ib_place_order.place_order(params)
+        kwargs = {} if _clock is None else {"_clock": _clock}
+        return ib_place_order.place_order(params, **kwargs)
 
 
 _STOCK_PARAMS = {
@@ -237,11 +243,26 @@ class TestGraceWaitCapturesDelayed201:
         assert result["permId"] == 12345
 
     def test_no_grace_wait_on_perm_id_zero_limbo(self):
-        """permId==0 + PendingSubmit hits the existing stuck-in-limbo path, not grace-wait."""
+        """permId==0 + PendingSubmit hits the existing stuck-in-limbo path, not grace-wait.
+
+        Uses an already-expired clock so the confirm-poll deadline fires
+        immediately — no real wall-clock waiting required.
+        """
         trade = _make_trade(status="PendingSubmit", perm_id=0)
         client = _make_client(trade, ib_errors_to_inject=None)
 
-        result = _invoke_place_order(_STOCK_PARAMS, client)
+        # Expired-clock: returns a value that makes `_clock() < deadline` false
+        # on the very first iteration.  The deadline is set as
+        # `_clock() + 6.0`; if both calls return the same large constant the
+        # loop body never executes once.
+        _t = [0.0]
+
+        def _expired_clock():
+            v = _t[0]
+            _t[0] += 7.0  # each call advances by 7 > the 6s deadline budget
+            return v
+
+        result = _invoke_place_order(_STOCK_PARAMS, client, _clock=_expired_clock)
 
         assert result["status"] == "error"
         # Must NOT have ib_error_code (that is only for the terminal-failed grace-wait path)

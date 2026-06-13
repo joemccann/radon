@@ -37,18 +37,39 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 _SKIP_DIRS = {"tests", "__pycache__", "node_modules", ".venv"}
 
+# Cache the rglob walk AND the parsed ASTs once at import time so each
+# collector does not repeat the filesystem traversal or AST parse.
+# Immutable after module load — safe to share across test functions.
+_PYTHON_FILES: list[Path] = [
+    path
+    for path in _SCRIPTS_DIR.rglob("*.py")
+    if not _SKIP_DIRS.intersection(path.relative_to(_SCRIPTS_DIR).parts)
+]
 
-def _python_files():
-    for path in _SCRIPTS_DIR.rglob("*.py"):
-        if not _SKIP_DIRS.intersection(path.relative_to(_SCRIPTS_DIR).parts):
-            yield path
 
-
-def _parse(path: Path) -> ast.Module | None:
+def _parse_uncached(path: Path) -> ast.Module | None:
     try:
         return ast.parse(path.read_text(encoding="utf-8"))
     except SyntaxError:
         return None
+
+
+# (path, tree) pairs; tree is None for files that failed to parse.
+_PARSED_TREES: list[tuple[Path, ast.Module | None]] = [
+    (path, _parse_uncached(path)) for path in _PYTHON_FILES
+]
+
+
+def _python_files():
+    return _PYTHON_FILES
+
+
+def _parse(path: Path) -> ast.Module | None:
+    """Return the cached AST for path, or None if it did not parse."""
+    for p, tree in _PARSED_TREES:
+        if p == path:
+            return tree
+    return None
 
 
 def _module_str_constants(tree: ast.Module) -> dict[str, str]:
@@ -66,12 +87,11 @@ def _module_str_constants(tree: ast.Module) -> dict[str, str]:
     return constants
 
 
-def collect_service_cycle_names() -> dict[str, list[str]]:
+def _build_service_cycle_names() -> dict[str, list[str]]:
     """``service_cycle(<name>, …)`` first args (string literals or
     module-level constants), name → files."""
     found: dict[str, list[str]] = {}
-    for path in _python_files():
-        tree = _parse(path)
+    for path, tree in _PARSED_TREES:
         if tree is None:
             continue
         constants = _module_str_constants(tree)
@@ -97,7 +117,17 @@ def collect_service_cycle_names() -> dict[str, list[str]]:
     return found
 
 
-def collect_handler_service_names() -> dict[str, list[str]]:
+# Pre-compute all collector results once at module load so every test
+# reads from the cache rather than re-walking the AST forest.
+_SERVICE_CYCLE_NAMES: dict[str, list[str]] = _build_service_cycle_names()
+
+
+def collect_service_cycle_names() -> dict[str, list[str]]:
+    """Return cached ``service_cycle(<name>, …)`` first-arg names → files."""
+    return _SERVICE_CYCLE_NAMES
+
+
+def _build_handler_service_names() -> dict[str, list[str]]:
     """Class-level ``service_name = "<literal>"`` on handler classes."""
     found: dict[str, list[str]] = {}
     handlers_dir = _SCRIPTS_DIR / "monitor_daemon" / "handlers"
@@ -119,10 +149,25 @@ def collect_handler_service_names() -> dict[str, list[str]]:
     return found
 
 
-def collect_scan_mirror_names() -> set[str]:
-    from db.scan_mirror import SNAPSHOT_UPSERTS
+_HANDLER_SERVICE_NAMES: dict[str, list[str]] = _build_handler_service_names()
 
+
+def collect_handler_service_names() -> dict[str, list[str]]:
+    """Return cached class-level ``service_name`` literals → files."""
+    return _HANDLER_SERVICE_NAMES
+
+
+def _build_scan_mirror_names() -> set[str]:
+    from db.scan_mirror import SNAPSHOT_UPSERTS
     return set(SNAPSHOT_UPSERTS.keys())
+
+
+_SCAN_MIRROR_NAMES: set[str] = _build_scan_mirror_names()
+
+
+def collect_scan_mirror_names() -> set[str]:
+    """Return cached SNAPSHOT_UPSERTS key set."""
+    return _SCAN_MIRROR_NAMES
 
 
 def ts_registered_services() -> set[str]:

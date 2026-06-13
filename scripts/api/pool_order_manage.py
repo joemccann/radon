@@ -36,6 +36,7 @@ async def pool_cancel_order(
     order_id: int = 0,
     perm_id: int = 0,
     max_wait: float = 5.0,
+    poll_interval: float = 0.5,
 ) -> dict:
     """Cancel an open order using a pool connection (master clientId=0).
 
@@ -53,7 +54,6 @@ async def pool_cancel_order(
     await asyncio.to_thread(client.cancel_order, trade.order)
 
     # Poll for confirmation (order disappears or status → Cancelled)
-    poll_interval = 0.5
     elapsed = 0.0
     while elapsed < max_wait:
         await asyncio.sleep(poll_interval)
@@ -92,6 +92,7 @@ async def pool_modify_order(
     new_quantity: Optional[int] = None,
     outside_rth: Optional[bool] = None,
     max_wait: float = 5.0,
+    poll_interval: float = 0.5,
 ) -> dict:
     """Modify an open order using a pool connection (master clientId=0).
 
@@ -145,7 +146,6 @@ async def pool_modify_order(
     await asyncio.to_thread(client.place_order, trade.contract, trade.order)
 
     # Poll for confirmation
-    poll_interval = 0.5
     elapsed = 0.0
     while elapsed < max_wait:
         await asyncio.sleep(poll_interval)

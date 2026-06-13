@@ -48,7 +48,8 @@ class TestPoolCancelOrder:
         client.get_open_orders.side_effect = [[trade], []]
         client.ib.client.clientId = 0  # master
 
-        result = await pool_cancel_order(client, order_id=10, perm_id=12345)
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345,
+                                        poll_interval=0.001)
         assert result["status"] == "ok"
         client.cancel_order.assert_called_once_with(trade.order)
 
@@ -63,7 +64,8 @@ class TestPoolCancelOrder:
         client.get_open_orders.side_effect = [[trade], [cancelled_trade]]
         client.ib.client.clientId = 0
 
-        result = await pool_cancel_order(client, order_id=10, perm_id=12345)
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345,
+                                        poll_interval=0.001)
         assert result["status"] == "ok"
 
     @pytest.mark.asyncio
@@ -75,7 +77,8 @@ class TestPoolCancelOrder:
         client.get_open_orders.return_value = []
         client.ib.client.clientId = 0
 
-        result = await pool_cancel_order(client, order_id=10, perm_id=0)
+        result = await pool_cancel_order(client, order_id=10, perm_id=0,
+                                        poll_interval=0.001)
         assert result["status"] == "error"
         assert "not found" in result["message"].lower()
 
@@ -89,7 +92,8 @@ class TestPoolCancelOrder:
         client.get_open_orders.return_value = [trade]
         client.ib.client.clientId = 0
 
-        result = await pool_cancel_order(client, order_id=10, perm_id=12345)
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345,
+                                        poll_interval=0.001)
         assert result["status"] == "error"
         assert "Filled" in result["message"]
 
@@ -104,7 +108,8 @@ class TestPoolCancelOrder:
         client.get_open_orders.side_effect = [[trade_a, trade_b], [trade_a]]
         client.ib.client.clientId = 0
 
-        result = await pool_cancel_order(client, order_id=0, perm_id=222)
+        result = await pool_cancel_order(client, order_id=0, perm_id=222,
+                                        poll_interval=0.001)
         assert result["status"] == "ok"
         client.cancel_order.assert_called_once_with(trade_b.order)
 
@@ -119,7 +124,8 @@ class TestPoolCancelOrder:
         client.get_open_orders.side_effect = [[trade], []]
         client.ib.client.clientId = 0  # master — no reconnect needed
 
-        result = await pool_cancel_order(client, order_id=10, perm_id=12345)
+        result = await pool_cancel_order(client, order_id=10, perm_id=12345,
+                                        poll_interval=0.001)
         assert result["status"] == "ok"
         # Should NOT disconnect/reconnect — master can cancel anything
         client.disconnect.assert_not_called()
@@ -145,7 +151,8 @@ class TestPoolModifyOrder:
         client.ib.client.clientId = 0
 
         result = await pool_modify_order(
-            client, order_id=10, perm_id=12345, new_price=6.0
+            client, order_id=10, perm_id=12345, new_price=6.0,
+            poll_interval=0.001,
         )
         assert result["status"] == "ok"
         client.place_order.assert_called_once()
@@ -160,7 +167,8 @@ class TestPoolModifyOrder:
         client.ib.client.clientId = 0
 
         result = await pool_modify_order(
-            client, order_id=10, perm_id=0, new_price=6.0
+            client, order_id=10, perm_id=0, new_price=6.0,
+            poll_interval=0.001,
         )
         assert result["status"] == "error"
 
@@ -176,7 +184,8 @@ class TestPoolModifyOrder:
         client.ib.client.clientId = 0
 
         result = await pool_modify_order(
-            client, order_id=10, perm_id=12345, new_price=6.0
+            client, order_id=10, perm_id=12345, new_price=6.0,
+            poll_interval=0.001,
         )
         assert result["status"] == "ok"
         client.disconnect.assert_not_called()
@@ -198,7 +207,8 @@ class TestPoolModifyOrder:
         client.ib.client.clientId = 0
 
         result = await pool_modify_order(
-            client, order_id=10, perm_id=12345, new_quantity=50
+            client, order_id=10, perm_id=12345, new_quantity=50,
+            poll_interval=0.001,
         )
         # Verify the VOL fields were reset before place_order was called
         assert trade.order.volatility == 1.7976931348623157e+308
@@ -215,7 +225,8 @@ class TestPoolModifyOrder:
         client.ib.client.clientId = 0
 
         result = await pool_modify_order(
-            client, order_id=10, perm_id=12345, new_price=6.0
+            client, order_id=10, perm_id=12345, new_price=6.0,
+            poll_interval=0.001,
         )
         assert result["status"] == "error"
         assert "LMT" in result["message"]

@@ -106,8 +106,12 @@ def _build_terminal_error(status: str, order_id: int, perm_id: int,
     }
 
 
-def place_order(params: dict) -> dict:
-    """Place a limit order and return result as dict."""
+def place_order(params: dict, _clock=time.time) -> dict:
+    """Place a limit order and return result as dict.
+
+    _clock: zero-arg callable returning current time in seconds (injectable
+    for tests; defaults to time.time preserving production behaviour).
+    """
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
@@ -297,7 +301,7 @@ def place_order(params: dict) -> dict:
         # Combos get the longer deadline because IB risk-checks each leg
         # independently AND the SmartRouting + NonGuaranteed handshake adds
         # ~3-5s on top of single-leg latency.
-        deadline = time.time() + (12.0 if order_type == "combo" else 6.0)
+        deadline = _clock() + (12.0 if order_type == "combo" else 6.0)
         terminal_states = {
             "Submitted",
             "PreSubmitted",
@@ -307,7 +311,7 @@ def place_order(params: dict) -> dict:
             "Inactive",
             "Rejected",
         }
-        while time.time() < deadline:
+        while _clock() < deadline:
             client.sleep(0.5)
             if trade.order.permId != 0:
                 break

@@ -5,6 +5,8 @@ Supports two auth methods:
 2. API key — headless machine-to-machine auth (scoped to read-only data endpoints)
 """
 
+from __future__ import annotations
+
 import hmac
 import ipaddress
 import os

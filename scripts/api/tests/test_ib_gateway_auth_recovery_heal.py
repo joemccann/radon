@@ -321,7 +321,7 @@ def test_db_write_hang_does_not_block_transition_handler(db_conn, caplog, monkey
         # > our heal timeout, but short enough that the test finishes quickly
         # even though asyncio.wait_for cannot cancel a running threadpool task.
         # The thread is joined at interpreter exit.
-        hang_event.wait(timeout=2.0)
+        hang_event.wait(timeout=0.1)
         return []
 
     monkeypatch.setattr(db_http_mod, "hrana_execute", hanging_hrana)

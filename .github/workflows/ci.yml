@@ -62,11 +62,24 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r scripts/requirements-api.txt
-          pip install pytest pytest-asyncio
+          pip install pytest pytest-asyncio pytest-cov
       # Run from the repo ROOT — pyproject.toml pins pythonpath so `import
       # ib_sync` / `from api.*` / trade_blotter all resolve. addopts already
       # applies `-m 'not integration'`, so the live MenthorQ suite is skipped.
-      - run: python -m pytest scripts/tests scripts/api/tests
+      # scripts/trade_blotter is listed explicitly: without it the blotter
+      # tests (29 collected) are orphaned — pythonpath includes the dir, but it
+      # is not a collection target unless named.
+      #
+      # --cov-fail-under is a non-regressing RATCHET, not a vanity target. With
+      # --cov-branch over the whole scripts+api tree the measured combined
+      # statement+branch coverage is 66.5% (the bare 71% statement figure does
+      # not count partial branches). 64 sits ~2.5pts below that so it passes
+      # today while catching a coverage regression. Raise it over time as
+      # coverage climbs; never lower it to make a red build pass.
+      - run: >-
+          python -m pytest scripts/tests scripts/api/tests scripts/trade_blotter
+          --cov=scripts --cov=api --cov-branch --cov-report=term-missing
+          --cov-fail-under=64
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)

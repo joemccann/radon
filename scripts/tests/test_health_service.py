@@ -106,8 +106,10 @@ class _JsonHandler(BaseHTTPRequestHandler):
         pass
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def json_server():
+    """Real local HTTP server shared across the module to avoid per-test
+    teardown overhead from ThreadingHTTPServer.shutdown()'s 0.5s poll."""
     server = ThreadingHTTPServer(("127.0.0.1", 0), _JsonHandler)
     t = threading.Thread(target=server.serve_forever, daemon=True)
     t.start()
@@ -416,8 +418,10 @@ class TestUnitStateCacheRefresh:
 # --- HTTP wiring smoke test (real ephemeral server) ---
 
 class TestServerSmoke:
-    @pytest.fixture
+    @pytest.fixture(scope="class")
     def running(self):
+        """Health server shared across the class to avoid per-test
+        shutdown overhead from ThreadingHTTPServer.shutdown()'s 0.5s poll."""
         server, cache = serve.build_server(bind="127.0.0.1", port=0, units=[])
         t = threading.Thread(target=server.serve_forever, daemon=True)
         t.start()
