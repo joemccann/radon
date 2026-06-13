@@ -334,7 +334,8 @@ ticker = ib.reqMktData(contract, genericTickList='233', snapshot=False)
 | 225 | Auction Values | Auction price/volume/imbalance |
 | 232 | RT Volume | Real-time time & sales |
 | 233 | RT Volume (extended) | Real-time volume with last price/size |
-| 236 | Shortable | 0=not shortable, >0=shortable |
+| 236 | Shortable | Shortable difficulty: ≈3.0 easy, 1.5–2.5 locate-only, <1.5 not shortable (streaming only) |
+| 89 | Shortable Shares | Available share count for short sale (streaming only) |
 | 256 | Fundamental Ratios | P/E, dividend yield, etc. |
 | 258 | Volatility | Real-time volatility |
 | 293 | Time Zone | Instrument time zone |
@@ -408,7 +409,7 @@ ticker = ib.reqMktData(contract, genericTickList='233', snapshot=False)
 | `ApiCancelled` | Cancelled via API before submission |
 | `Cancelled` | Cancelled |
 | `Filled` | Fully filled |
-| `Inactive` | Inactive (e.g., outside market hours) |
+| `Inactive` | Inactive (e.g., outside market hours, or short-sale rejection); often pairs with an async errorEvent (201 class, e.g. "shares not available for short sale / locate required") that arrives after the status change |
 
 ---
 
