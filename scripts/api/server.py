@@ -26,6 +26,7 @@ from typing import Any, Iterable, List, Optional, Tuple
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 # Ensure scripts/ is on sys.path for client imports
 SCRIPTS_DIR = Path(__file__).parent.parent
@@ -257,6 +258,51 @@ async def auth_middleware(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# Secret scrubbing for error responses
+# ---------------------------------------------------------------------------
+# Error paths interpolate raw upstream text (str(exc), subprocess stderr,
+# result.error) into HTTPException detail at ~64 sites. A libsql/Turso failure,
+# an IB error, or a subprocess crash can carry the Turso URL, an auth token, or
+# an IB account id in that text — which would then ride out to the client (the
+# same information-disclosure class as the /health account-id leak). Rather than
+# scrub at 64 call sites, scrub once at the single chokepoint every raised
+# HTTPException flows through: a custom handler.
+_SECRET_SCRUB_PATTERNS = [
+    (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
+    (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
+    (re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE), r"\1\2[redacted]"),
+    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
+    (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
+]
+
+
+def _scrub_secrets(value):
+    """Redact Turso URLs, auth tokens/JWTs, and IB account ids from any string
+    (recursing into dict/list detail payloads) before it reaches the client."""
+    if isinstance(value, str):
+        for pattern, repl in _SECRET_SCRUB_PATTERNS:
+            value = pattern.sub(repl, value)
+        return value
+    if isinstance(value, dict):
+        return {k: _scrub_secrets(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_scrub_secrets(v) for v in value]
+    return value
+
+
+@app.exception_handler(StarletteHTTPException)
+async def scrubbed_http_exception_handler(request: Request, exc: StarletteHTTPException):
+    """Replaces the default HTTPException handler so the detail (which often
+    carries raw upstream error text) is scrubbed of secrets before it is
+    serialized to the client. Status + headers are preserved."""
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={"detail": _scrub_secrets(exc.detail)},
+        headers=getattr(exc, "headers", None),
+    )
 
 
 # ---------------------------------------------------------------------------

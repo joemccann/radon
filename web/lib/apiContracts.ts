@@ -76,6 +76,22 @@ export function setCacheResponseHeaders(
   return response;
 }
 
+// Routes pass raw err.message / detail (often a LibsqlError carrying the Turso
+// URL + auth token, or an account id) straight into the client error body. Scrub
+// at this single chokepoint every error response flows through — the same
+// information-disclosure class as the /health account-id leak.
+const SECRET_SCRUB_PATTERNS: Array<[RegExp, string]> = [
+  [/libsql:\/\/[^\s'"]+/gi, "[redacted-db-url]"],
+  [/https:\/\/[a-z0-9.-]+\.turso\.io[^\s'"]*/gi, "[redacted-db-url]"],
+  [/(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+/gi, "$1$2[redacted]"],
+  [/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g, "[redacted-jwt]"],
+  [/\bU\d{6,}\b/g, "[redacted-account]"],
+];
+
+export function scrubSecrets(value: string): string {
+  return SECRET_SCRUB_PATTERNS.reduce((acc, [pat, repl]) => acc.replace(pat, repl), value);
+}
+
 export function jsonApiError(params: {
   message: string;
   status?: number;
@@ -87,11 +103,12 @@ export function jsonApiError(params: {
   const code: ErrorCode =
     params.code ??
     (status === 404 ? "NOT_FOUND" : status >= 500 ? "INTERNAL_ERROR" : "BAD_REQUEST");
+  const detail = params.detail ? scrubSecrets(params.detail) : undefined;
   return NextResponse.json(
     {
-      error: params.message,
+      error: scrubSecrets(params.message),
       code,
-      ...(params.detail ? { detail: params.detail } : {}),
+      ...(detail ? { detail } : {}),
       requestId: params.requestId,
     },
     { status },

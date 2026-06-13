@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
+import { scrubSecrets } from "@/lib/apiContracts";
 
 export const runtime = "nodejs";
 
@@ -20,7 +21,10 @@ export async function GET(request: Request): Promise<Response> {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to fetch ratings";
     return NextResponse.json(
-      { error: "Failed to fetch ratings", detail: message },
+      // Scrub the raw upstream error before it reaches the client — a LibsqlError
+      // carries the Turso URL/token. This route builds its body inline rather
+      // than via jsonApiError, so it must scrub explicitly.
+      { error: "Failed to fetch ratings", detail: scrubSecrets(message) },
       { status: 502 },
     );
   }

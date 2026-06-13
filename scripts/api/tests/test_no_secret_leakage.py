@@ -53,22 +53,13 @@ SECRET_NEEDLES = (FAKE_TURSO_URL, FAKE_AUTH_TOKEN, FAKE_ACCOUNT_ID, "SEKRET")
 # auth token / account id, it rides out in the response body — the exact
 # /health-account-id leak class, just on the error paths instead of /health.
 #
-# Per the stream brief we do NOT patch server.py here; we PIN the leak with a
-# strict xfail. The assertion is NOT weakened — it still demands a scrubbed
-# body. strict=True means: the moment server.py is fixed to scrub these details,
-# the test XPASSes and pytest turns that into a FAILURE, forcing whoever lands
-# the fix to drop the xfail. That keeps the invariant honest while the suite is
-# green today. Each route is marked individually so a partial fix flips only
-# the routes it actually scrubbed.
-LEAKS_TODAY = pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "FINDING: route echoes upstream exception/stderr/result.error verbatim "
-        "into HTTPException detail; a Turso URL / auth_token / account id in "
-        "that message leaks to the caller. Scrub the detail in server.py, then "
-        "remove this xfail."
-    ),
-)
+# FIXED: the leak is closed by the scrubbed HTTPException handler in server.py
+# (_scrub_secrets redacts Turso URLs / auth tokens / account ids from every
+# raised HTTPException detail at one chokepoint). These are now REAL passing
+# assertions, not xfails — LEAKS_TODAY is a no-op decorator so the per-route
+# markers stay as documentation of which routes carried the leak.
+def LEAKS_TODAY(func):  # noqa: N802 — was a strict-xfail; leak now fixed, asserts pass
+    return func
 
 
 @dataclass

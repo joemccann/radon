@@ -95,7 +95,7 @@ describe("Next.js user-write routes — no secret leakage in error responses", (
   // Each case is `it.fails` = strict-xfail: passes ONLY while the route still
   // leaks. A fix that scrubs the detail flips it to a failure (remove .fails).
 
-  it.fails("PUT /api/profile does not leak DB error secrets", async () => {
+  it("PUT /api/profile does not leak DB error secrets", async () => {
     const { PUT } = await import("../app/api/profile/route");
     const res = await PUT(
       req("http://localhost/api/profile", {
@@ -106,13 +106,13 @@ describe("Next.js user-write routes — no secret leakage in error responses", (
     await expectNoSecretInBody(res, "PUT /api/profile");
   });
 
-  it.fails("GET /api/profile does not leak DB error secrets", async () => {
+  it("GET /api/profile does not leak DB error secrets", async () => {
     const { GET } = await import("../app/api/profile/route");
     const res = await GET();
     await expectNoSecretInBody(res, "GET /api/profile");
   });
 
-  it.fails("POST /api/watchlist does not leak DB error secrets", async () => {
+  it("POST /api/watchlist does not leak DB error secrets", async () => {
     const { POST } = await import("../app/api/watchlist/route");
     const res = await POST(
       req("http://localhost/api/watchlist", {
@@ -123,13 +123,13 @@ describe("Next.js user-write routes — no secret leakage in error responses", (
     await expectNoSecretInBody(res, "POST /api/watchlist");
   });
 
-  it.fails("GET /api/watchlist does not leak DB error secrets", async () => {
+  it("GET /api/watchlist does not leak DB error secrets", async () => {
     const { GET } = await import("../app/api/watchlist/route");
     const res = await GET();
     await expectNoSecretInBody(res, "GET /api/watchlist");
   });
 
-  it.fails("POST /api/bookmarks does not leak DB error secrets", async () => {
+  it("POST /api/bookmarks does not leak DB error secrets", async () => {
     const { POST } = await import("../app/api/bookmarks/route");
     const res = await POST(
       req("http://localhost/api/bookmarks", {
@@ -140,13 +140,13 @@ describe("Next.js user-write routes — no secret leakage in error responses", (
     await expectNoSecretInBody(res, "POST /api/bookmarks");
   });
 
-  it.fails("GET /api/bookmarks does not leak DB error secrets", async () => {
+  it("GET /api/bookmarks does not leak DB error secrets", async () => {
     const { GET } = await import("../app/api/bookmarks/route");
     const res = await GET();
     await expectNoSecretInBody(res, "GET /api/bookmarks");
   });
 
-  it.fails("GET /api/ticker/ratings does not leak upstream error secrets", async () => {
+  it("GET /api/ticker/ratings does not leak upstream error secrets", async () => {
     const { GET } = await import("../app/api/ticker/ratings/route");
     const res = await GET(req("http://localhost/api/ticker/ratings?ticker=AAPL"));
     await expectNoSecretInBody(res, "GET /api/ticker/ratings");
