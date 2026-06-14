@@ -881,6 +881,9 @@ body {
   align-items: center;
   gap: 14px;
   min-width: 0;
+  /* Equal flex on the two side clusters (with .header-actions) so the centered
+   *  futures strip lands dead-center regardless of each side's content width. */
+  flex: 1 1 0;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -953,6 +956,8 @@ body {
   align-items: center;
   gap: 16px;
   min-width: 0;
+  /* Hold natural width between the two flex:1 side clusters so it stays centered. */
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 11px;
   letter-spacing: 0.04em;
@@ -999,6 +1004,10 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  /* Mirror .telemetry-rail's flex so the futures strip centers; keep contents
+   *  pinned to the right edge. */
+  flex: 1 1 0;
+  justify-content: flex-end;
 }
 
 .search-input {
