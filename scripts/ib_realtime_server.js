@@ -336,16 +336,13 @@ const fundamentalsStore = new LRUCache(500); // symbol → FundamentalsData (LRU
  * (id, position, marketMaker, operation, side, price, size, isSmartDepth)
  * (equity/SMART) — the trailing isSmartDepth arg is @stoqey-specific.
  *
- * REALTIME TRADEOFF (Phase 1): depth + tick-by-tick require realtime market
- * data (type 1), but the main relay connection requests delayed-frozen
- * (type 4) at the ib "connected" handler BY DESIGN so closed-market L1
- * queries return last known prices. reqMarketDataType is per-connection /
- * global, so when depth is enabled we flip the shared connection to type 1.
- * This makes the watchlist L1 realtime too while depth is on. The production
- * follow-up is a DEDICATED realtime depth IB client (its own clientId in the
- * 10-19 relay range) that owns all reqMktDepth tickets so the watchlist L1
- * can stay delayed-frozen. That second connection is intentionally NOT built
- * in this phase to keep the change surgical.
+ * REALTIME: the main connection now requests realtime market data (type 1)
+ * unconditionally at the ib "connected" handler (operator decision 2026-06-14)
+ * — delayed-frozen (type 4) made the header futures strip and every watchlist
+ * quote lag the market by ~15 min. Off-hours, IB holds the last live values so
+ * closed-market reads still return last-known prices. A dedicated realtime
+ * client per channel is no longer needed for correctness; depth simply shares
+ * the already-realtime connection.
  */
 const DEPTH_ENABLED = Boolean(process.env.RADON_DEPTH_ENABLED && process.env.RADON_DEPTH_ENABLED !== "0" && process.env.RADON_DEPTH_ENABLED !== "false");
 const MAX_CONCURRENT_DEPTH = 3;
@@ -2035,17 +2032,14 @@ function wireIBEvents() {
     ibConnectionIssue = null;
     console.log(`IB connected (clientId ${IB_CLIENT_ID_POOL[activeClientIdIndex]})`);
     reconnectTimer = null;
-    if (DEPTH_ENABLED) {
-      // Depth + tick-by-tick require realtime (type 1). reqMarketDataType is
-      // per-connection/global, so enabling depth flips the shared connection
-      // to realtime (the watchlist L1 becomes realtime too). The production
-      // follow-up is a dedicated realtime depth client; see the DEPTH note.
-      ib.reqMarketDataType(1);
-    } else {
-      // Request Delayed-Frozen data so closed-market queries return last known prices
-      // Type 4 cascades: Live → Delayed → Frozen → Delayed-Frozen
-      ib.reqMarketDataType(4);
-    }
+    // Real-time market data (type 1) for ALL L1 — a trading terminal must not
+    // show ~15-min delayed quotes. Was delayed-frozen (type 4) when depth was
+    // off, which made the header futures strip (and every watchlist quote) lag
+    // the real market; flipped to always-realtime per operator decision
+    // 2026-06-14. Off-hours, IB holds the last live values (frozen) so
+    // closed-market reads still return last-known prices; explicit close ticks
+    // (type 9) continue to populate PriceData.close for % -change math.
+    ib.reqMarketDataType(1);
     cleanupSymbolStateForReconnect();
     if (DEPTH_ENABLED) cleanupDepthForReconnect();
     searchCache.clear(); // Invalidate stale search results from IB-down period
