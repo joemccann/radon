@@ -199,73 +199,60 @@ jobs:
           assert_status /api/probe/freshness 200 "Bearer ${RADON_PROBE_FRESHNESS_TOKEN}"
           exit $fail
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # e2e-smoke (DEFERRED — plan + blocker documented, NOT YET WIRED)
-  # ───────────────────────────────────────────────────────────────────────────
-  # GOAL: a curated, fully-mocked Playwright subset that gates deploy on the
-  # shipped P0/P1 financial regressions (/orders + /portfolio P&L formatting,
-  # account metric cards, share-pnl). These specs are `page.route`-mocked
-  # end-to-end — NO live IB, NO live network, NO prod DB — and use only
-  # web-first assertions (zero `waitForTimeout`), so they are deterministic by
-  # construction.
-  #
-  # FEASIBILITY — VERIFIED LOCALLY (2026-06-13):
-  #   • Auth WITHOUT a Clerk session is solved. `web/middleware.ts`
-  #     `isLocalAuthlessTestBypassEnabled` skips Clerk when RADON_AUTHLESS_TEST=1
-  #     AND the request host is loopback — checked BEFORE Clerk, independent of
-  #     NODE_ENV. So a production `next start` + RADON_AUTHLESS_TEST=1 renders
-  #     authenticated pages with no session. Confirmed: a compile-mode build
-  #     (the locked `next build --experimental-build-mode=compile`) with the same
-  #     dummy Clerk keys as perimeter-smoke serves GET /orders → 200, 28 KB of
-  #     the real app shell (title "Radon Terminal", positions/orders DOM).
-  #   • Build succeeds in compile mode with the dummy keys (exit 0).
-  #   • Specs are deterministic: e.g. e2e/orders-partial-realized-pnl.spec.ts
-  #     stubs 6 routes (portfolio/orders/prices/regime/ib-status/blotter) and
-  #     asserts exact P&L text ("+$17,275.97 (+156.0%) · 3 sold"). No timeouts.
-  #
-  # BLOCKER — why this is NOT wired yet:
-  #   The job could not be brought to a verified GREEN run in the dev sandbox:
-  #   Playwright's bundled headless Chromium cannot open loopback sockets here —
-  #   `page.goto("http://127.0.0.1:<port>/orders")` fails instantly with
-  #   net::ERR_NAME_NOT_RESOLVED, while `page.request.get(...)` (the Node-side
-  #   request context) returns 200 against the SAME server, and `curl` returns
-  #   200 + full HTML. The browser process is network-isolated locally; this
-  #   constraint does NOT exist on GitHub runners. Per the gate philosophy
-  #   ("a flaky/red required gate is worse than none"), a job that was never
-  #   observed passing end-to-end is not promoted to a deploy-blocking `needs:`
-  #   on the strength of curl alone.
-  #
-  # PLAN to land it (one focused follow-up on a runner with browser loopback):
-  #   1. Job `e2e-smoke`, runs-on ubuntu-latest, timeout-minutes: 15.
-  #      env: the SAME dummy Clerk keys as perimeter-smoke + RADON_AUTHLESS_TEST=1
-  #      + NEXT_PUBLIC_RADON_AUTHLESS_TEST=1.
-  #   2. bun install (root + web), `bun run build` (web), then
-  #      `bunx playwright install --with-deps chromium`.
-  #   3. `bunx next start -p 3000 &` ; wait until GET /orders returns 200.
-  #   4. Run the no-server config against the running server, scoped to ONLY the
-  #      curated list below (do NOT run the whole e2e dir — many specs need a
-  #      live server / depth feed / RTH data):
-  #        PLAYWRIGHT_PORT=3000 bunx playwright test \
-  #          --config=playwright.no-server.config.ts --project=chromium \
-  #          orders-partial-realized-pnl orders-realized-pnl-portfolio-fallback \
-  #          account-metric-cards account-day-move-ib-daily-pnl \
-  #          day-move-ib-daily-pnl realized-pnl dollar-delta-leverage
-  #      (All seven: 5–8 page.route stubs each, zero waitForTimeout, relative or
-  #      127.0.0.1:3000 page.goto — compatible with port 3000. Excluded on
-  #      purpose: share-pnl-entry-exit.spec.ts has ZERO page.route stubs, so it
-  #      is NOT self-contained; chain-builder specs render heavier order-entry
-  #      DOM — add only after the core P&L set is proven stable in CI.)
-  #   5. On first GREEN CI run, add `e2e-smoke` to deploy's `needs:`. Add it to
-  #      the list LAST — never gate deploy on a spec set whose first CI run was
-  #      red. If first-paint SSR is noisy (the Clerk `useSession` boundary logs
-  #      during SSR but recovers to a 200 full-HTML render), set `retries: 1`
-  #      for this run ONLY — that absorbs cold-start jitter WITHOUT weakening any
-  #      assertion. Never relax the P&L text expectations to make it green.
-  # ───────────────────────────────────────────────────────────────────────────
+  e2e-smoke:
+    name: E2E smoke (Playwright, curated P&L set)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Same dummy Clerk keys as perimeter-smoke — build + start require them
+      # even though the authless bypass skips real Clerk validation at request time.
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
+      CLERK_SECRET_KEY: sk_test_radon_ci_perimeter_smoke_dummy
+      # Auth bypass: middleware skips Clerk when this is "1" AND the request
+      # host is loopback (isLocalAuthlessTestBypassEnabled in web/middleware.ts).
+      RADON_AUTHLESS_TEST: "1"
+      NEXT_PUBLIC_RADON_AUTHLESS_TEST: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+      # Both bun projects — same as perimeter-smoke: next.config aliases @tools
+      # to root lib/tools, so the build resolves modules from BOTH trees.
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      # Locked build constraint: web/package.json `build` is
+      # `next build --experimental-build-mode=compile` (matches perimeter-smoke).
+      - run: bun run build
+        working-directory: web
+      # Install only the chromium browser — keeps the step fast vs. full install.
+      - run: bunx playwright install --with-deps chromium
+        working-directory: web
+      - name: Start server + run curated e2e specs
+        working-directory: web
+        run: |
+          bunx next start -p 3000 &
+          for i in $(seq 1 30); do
+            curl -sf -o /dev/null http://127.0.0.1:3000/orders && break
+            sleep 1
+          done
+
+          PLAYWRIGHT_PORT=3000 bunx playwright test \
+            --config=playwright.no-server.config.ts \
+            --project=chromium \
+            --retries=1 \
+            orders-partial-realized-pnl \
+            orders-realized-pnl-portfolio-fallback \
+            account-metric-cards \
+            account-day-move-ib-daily-pnl \
+            day-move-ib-daily-pnl \
+            realized-pnl \
+            dollar-delta-leverage
 
   deploy:
     name: Deploy to VPS
-    needs: [secret-scan, web-tests, py-tests, perimeter-smoke]
+    needs: [secret-scan, web-tests, py-tests, perimeter-smoke] # add e2e-smoke here after first green run
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
