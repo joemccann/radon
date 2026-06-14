@@ -15,11 +15,15 @@ export default defineConfig({
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "on-first-retry",
     launchOptions: {
-      // CI chromium inherits http(s)_proxy from the environment and routes even
-      // loopback through it, yielding ERR_NAME_NOT_RESOLVED for 127.0.0.1 (curl
-      // bypasses the proxy, which is why the wait-loop passes). Force a direct
-      // connection. No-op locally where no proxy is set.
-      args: ["--no-proxy-server", "--proxy-bypass-list=*"],
+      // CI chromium returns ERR_NAME_NOT_RESOLVED for loopback (even the literal
+      // IP 127.0.0.1) while curl from the same shell gets 200 and no proxy is
+      // set. Canonical CI-chromium hardening + forcing the system resolver
+      // (AsyncDns off) so a valid IPv4 literal can't fail name resolution.
+      args: [
+        "--no-sandbox",
+        "--disable-dev-shm-usage",
+        "--disable-features=AsyncDns",
+      ],
     },
   },
   projects: [
