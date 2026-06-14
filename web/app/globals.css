@@ -947,10 +947,50 @@ body {
 .rail-integrity-dot-warn { background: var(--warn);        animation: pulse 2.4s ease-in-out infinite; }
 .rail-integrity-dot-dead { background: var(--fault);       animation: none; }
 
+/* Index-futures quote strip (ES/NQ/RTY) — centered header slot. */
+.futures-strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.futures-cell {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.futures-label {
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.futures-last {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.futures-chg {
+  font-variant-numeric: tabular-nums;
+}
+
 @media (max-width: 1100px) {
   /* On narrow viewports, retain section + integrity, drop the metadata pairs. */
   .telemetry-rail .rail-meta,
   .telemetry-rail .rail-sep:nth-of-type(-n+2) {
+    display: none;
+  }
+  /* The futures strip needs horizontal room; hide it below the header budget. */
+  .futures-strip {
     display: none;
   }
 }

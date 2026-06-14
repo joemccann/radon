@@ -1832,9 +1832,11 @@ async function handleClientMessage(client, data) {
         // front-month FUTURE, not a stock — otherwise IB resolves the equity
         // ticker of the same name (ES = Eversource Energy ~$67) and the quote bar
         // shows the wrong instrument while the depth ladder shows the future.
-        // Gated on DEPTH_ENABLED (front-month resolution lives in the depth path).
+        // Front-month L1 is decoupled from DEPTH_ENABLED so the header futures
+        // strip (ES/NQ/RTY last + prior close) streams without the depth flag;
+        // the depth LADDER (reqMktDepth) stays gated on DEPTH_ENABLED elsewhere.
         let ibContract;
-        if (DEPTH_ENABLED && DEPTH_FUTURES_SYMBOLS.has(symbol)) {
+        if (DEPTH_FUTURES_SYMBOLS.has(symbol)) {
           const resolvedFut = await resolveFuturesFrontMonth(symbol);
           ibContract = resolvedFut || stockContract(symbol, "SMART", "USD");
         } else {

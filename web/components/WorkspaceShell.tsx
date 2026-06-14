@@ -15,6 +15,8 @@ import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
 import { usePreviousClose } from "@/lib/usePreviousClose";
+import { useGlobexOpen, HEADER_FUTURES } from "@/lib/futuresSession";
+import FuturesStrip, { type FuturesQuote } from "@/components/FuturesStrip";
 import { type OptionContract, type IndexContract, optionKey, portfolioLegToContract, uniqueOptionContracts } from "@/lib/pricesProtocol";
 import { isIndexSymbol, indexExchangeFor } from "@/lib/indexSymbols";
 import Sidebar from "@/components/Sidebar";
@@ -51,6 +53,9 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const { toasts, addToast, removeToast } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
+  // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
+  // independent of the equities session above.
+  const globexOpen = useGlobexOpen();
 
   const { data: portfolio, syncing: portfolioSyncing, error: portfolioError, lastSync: portfolioLastSync, syncNow: portfolioSyncNow } = usePortfolio(isMarketActive);
 
@@ -152,8 +157,16 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   }, [tickerParam]);
 
   const allSymbols = useMemo(
-    () => [...new Set([...portfolioSymbols, ...orderSymbols, ...regimeStocks, ...tickerSymbols])],
-    [portfolioSymbols, orderSymbols, regimeStocks, tickerSymbols],
+    () => {
+      const base = [...portfolioSymbols, ...orderSymbols, ...regimeStocks, ...tickerSymbols];
+      // Subscribe ES/NQ/RTY front-month L1 only while Globex is open (the relay
+      // resolves these roots to the active future; off-session there's nothing
+      // to stream). The relay returns the equity ticker of the same name unless
+      // it recognises these as futures roots — it does (DEPTH_FUTURES_SYMBOLS).
+      if (globexOpen) base.push(...HEADER_FUTURES.map((f) => f.symbol));
+      return [...new Set(base)];
+    },
+    [portfolioSymbols, orderSymbols, regimeStocks, tickerSymbols, globexOpen],
   );
 
   const tickerDetail = useTickerDetail();
@@ -232,6 +245,15 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
 
   // Backfill missing previous-close from Yahoo Finance / UW for day-change calc
   const prices = usePreviousClose(rawPrices);
+
+  // Header index-futures strip: ES/NQ/RTY last + prior-close, gated on Globex.
+  const futuresQuotes = useMemo<FuturesQuote[]>(() => {
+    if (!globexOpen) return [];
+    return HEADER_FUTURES.map((f) => {
+      const p = prices[f.symbol];
+      return { label: f.label, last: p?.last ?? null, close: p?.close ?? null };
+    });
+  }, [globexOpen, prices]);
 
   // Realized P&L derived from today's session fills (executed_orders), not IB account summary.
   // IB's reqPnL().realizedPnL can include non-trade events and diverges from fill-level data.
@@ -375,6 +397,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           onToggleFullscreen={toggleFullscreen}
           onToggleTheme={toggleTheme}
           theme={resolvedTheme}
+          futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} /> : null}
           onSearchUnavailable={handleSearchUnavailable}
           lastSync={lastSync}
         >

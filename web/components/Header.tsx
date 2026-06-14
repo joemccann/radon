@@ -13,6 +13,9 @@ type HeaderProps = {
   onToggleTheme: () => void;
   theme?: "dark" | "light";
   children?: ReactNode;
+  /** Center slot — the live index-futures (ES/NQ/RTY) quote strip. With the
+   *  header's space-between layout, a third flex child auto-centers. */
+  futuresStrip?: ReactNode;
   onSearchUnavailable?: () => void;
   /** Latest portfolio/orders sync timestamp — surfaced as SAMPLE in the
    *  telemetry rail. Replaces the previous "Last sync" pill that lived
@@ -56,6 +59,7 @@ export default function Header({
   onToggleTheme,
   theme,
   children,
+  futuresStrip,
   onSearchUnavailable,
   lastSync,
 }: HeaderProps) {
@@ -110,6 +114,7 @@ export default function Header({
           {integrity.text}
         </span>
       </div>
+      {futuresStrip ?? null}
       <div className="header-actions" suppressHydrationWarning>
         {children}
         <TickerSearch
