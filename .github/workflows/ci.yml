@@ -199,67 +199,45 @@ jobs:
           assert_status /api/probe/freshness 200 "Bearer ${RADON_PROBE_FRESHNESS_TOKEN}"
           exit $fail
 
-  e2e-smoke:
-    name: E2E smoke (Playwright, curated P&L set)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    env:
-      # Same dummy Clerk keys as perimeter-smoke — build + start require them
-      # even though the authless bypass skips real Clerk validation at request time.
-      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
-      CLERK_SECRET_KEY: sk_test_radon_ci_perimeter_smoke_dummy
-      # Auth bypass: middleware skips Clerk when this is "1" AND the request
-      # host is loopback (isLocalAuthlessTestBypassEnabled in web/middleware.ts).
-      RADON_AUTHLESS_TEST: "1"
-      NEXT_PUBLIC_RADON_AUTHLESS_TEST: "1"
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version: latest
-      # Both bun projects — same as perimeter-smoke: next.config aliases @tools
-      # to root lib/tools, so the build resolves modules from BOTH trees.
-      - run: bun install --frozen-lockfile
-      - run: bun install --frozen-lockfile
-        working-directory: web
-      # Locked build constraint: web/package.json `build` is
-      # `next build --experimental-build-mode=compile` (matches perimeter-smoke).
-      - run: bun run build
-        working-directory: web
-      # Install only the chromium browser — keeps the step fast vs. full install.
-      - run: bunx playwright install --with-deps chromium
-        working-directory: web
-      - name: Start server + run curated e2e specs
-        working-directory: web
-        run: |
-          bunx next start -p 3000 &
-          for i in $(seq 1 30); do
-            curl -sf -o /dev/null http://127.0.0.1:3000/orders && break
-            sleep 1
-          done
-
-          # Diagnostic for the chromium ERR_NAME_NOT_RESOLVED-on-loopback blocker:
-          # proxy env (none expected), what next bound to, and shell reachability.
-          echo "PROXY ENV:"; env | grep -iE 'proxy' || echo "  (none set)"
-          echo "LISTENERS on :3000:"; ss -tlnp 2>/dev/null | grep ':3000' || echo "  (none)"
-          getent hosts localhost || true
-          curl -sS -o /dev/null -w "curl 127.0.0.1/portfolio -> %{http_code}\n" http://127.0.0.1:3000/portfolio || true
-
-          PLAYWRIGHT_PORT=3000 bunx playwright test \
-            --config=playwright.no-server.config.ts \
-            --project=chromium \
-            --retries=1 \
-            orders-partial-realized-pnl \
-            orders-realized-pnl-portfolio-fallback \
-            account-metric-cards \
-            account-day-move-ib-daily-pnl \
-            day-move-ib-daily-pnl \
-            realized-pnl \
-            dollar-delta-leverage
+  # ───────────────────────────────────────────────────────────────────────────
+  # e2e-smoke (DEFERRED — blocker now CONFIRMED on GitHub runners, NOT just local)
+  # ───────────────────────────────────────────────────────────────────────────
+  # GOAL: a curated, fully-mocked Playwright subset gating deploy on the shipped
+  # P0/P1 financial regressions (/orders + /portfolio P&L, account metric cards,
+  # share-pnl). Specs are page.route-mocked end-to-end (no live IB/network/DB),
+  # web-first assertions, zero waitForTimeout — deterministic by construction.
+  #
+  # BLOCKER (empirically confirmed on ubuntu-latest, 4 CI iterations 2026-06-13):
+  #   Playwright's headless chromium returns net::ERR_NAME_NOT_RESOLVED for the
+  #   server on loopback — for the literal IP http://127.0.0.1:3000, not just the
+  #   "localhost" hostname. RULED OUT, with in-job diagnostics each time:
+  #     • Proxy:    `env | grep proxy` → none set; --no-proxy-server changed nothing.
+  #     • DNS:      using the literal IP (no name to resolve); --disable-features=
+  #                 AsyncDns (force system resolver) changed nothing.
+  #     • Bind:     `ss -tlnp` → next-server LISTEN on *:3000 (all ifaces).
+  #     • Reach:    `curl http://127.0.0.1:3000/portfolio` → 200 from the SAME shell.
+  #     • Sandbox:  --no-sandbox --disable-dev-shm-usage changed nothing.
+  #   So the server is up and shell-reachable; only the BROWSER process cannot open
+  #   a loopback connection. This is the same isolation seen locally — the original
+  #   plan's assumption that it "does NOT exist on GitHub runners" is DISPROVEN.
+  #
+  # MOST PROMISING NEXT LEAD (do this on a throwaway branch, never iterate on main):
+  #   The server also listens on the runner's LAN IP (next prints "Network:
+  #   http://10.1.0.x:3000"); chromium's normal (non-loopback) network stack may
+  #   work there. BUT navigating via the LAN IP bypasses the loopback check in
+  #   web/middleware.ts:isLocalAuthlessTestBypassEnabled, so Clerk would block the
+  #   pages. Landing this needs EITHER: (a) extend the authless bypass to accept the
+  #   runner's private IP under RADON_AUTHLESS_TEST (scoped, CI-only), then point
+  #   baseURL at that IP; OR (b) run the job inside a container image where chromium
+  #   loopback works; OR (c) assert at the API layer (page.request.get returns 200
+  #   on loopback even when page.goto fails) — but these specs assert DOM, so (c)
+  #   means rewriting them. Promote to deploy.needs ONLY after a GREEN run is
+  #   observed; never gate on a spec set whose first CI run was red.
+  # ───────────────────────────────────────────────────────────────────────────
 
   deploy:
     name: Deploy to VPS
-    needs: [secret-scan, web-tests, py-tests, perimeter-smoke] # add e2e-smoke here after first green run
+    needs: [secret-scan, web-tests, py-tests, perimeter-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
     steps:
