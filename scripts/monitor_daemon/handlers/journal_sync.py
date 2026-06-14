@@ -122,6 +122,8 @@ class JournalSyncHandler(BaseHandler):
         # This re-attempts any exec_id on disk that is absent from the journal
         # table, so a single transient Turso failure cannot permanently drop a fill.
         result["reconciled"] = self._reconcile_db_missing(existing, db)
+        if result["reconciled"]:
+            self._maybe_heal_reconcile(db)
 
         if not fills:
             return result
@@ -134,6 +136,9 @@ class JournalSyncHandler(BaseHandler):
             existing["trades"].extend(candidates)
             atomic_save(str(self.trade_log_path), existing)
             self._dual_write(candidates)
+            # A live fill that filled a previously-missing exec_id may have
+            # closed the gap the daily journal-reconcile flagged.
+            self._maybe_heal_reconcile(db)
 
         return result
 
@@ -187,6 +192,22 @@ class JournalSyncHandler(BaseHandler):
                 logger.warning("journal_sync: reconcile upsert failed for %s: %s", exec_id, exc)
 
         return reconciled
+
+    @staticmethod
+    def _maybe_heal_reconcile(db: Any) -> None:
+        """JRN-03: after writing journal rows, clear the daily journal-reconcile
+        error row if its flagged gaps are now covered — so the watchdog stops
+        re-alerting a gap that's already repaired, rather than waiting ~24h for
+        the next reconcile pass. Cheap (gated on the error state) and best-effort.
+        """
+        if db is None:
+            return
+        try:
+            from .journal_reconcile import heal_journal_reconcile_if_recovered
+
+            heal_journal_reconcile_if_recovered(db)
+        except Exception as exc:  # noqa: BLE001 — never break a write path on a heal probe
+            logger.warning("journal_sync: reconcile heal check failed: %s", exc)
 
     @staticmethod
     def _journal_exec_ids_from_db(db: Any) -> set[str]:

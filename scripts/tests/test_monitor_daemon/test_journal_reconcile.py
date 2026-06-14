@@ -34,6 +34,7 @@ from monitor_daemon.handlers.journal_reconcile import (  # noqa: E402
     _find_gaps,
     _is_bag_combo_parent,
     _journal_exec_id_parts,
+    heal_journal_reconcile_if_recovered,
 )
 
 
@@ -467,3 +468,97 @@ class TestRegistrationRequirements:
         # Must not import IBClient or ib_insync
         assert "IBClient" not in src
         assert "ib_insync" not in src
+
+
+# ---------------------------------------------------------------------------
+# JRN-03: heal-on-recovery — clear the latched error row the moment the
+# flagged gaps are actually journaled, instead of waiting up to 24h for the
+# next daily reconcile pass.
+# ---------------------------------------------------------------------------
+
+def _make_heal_db(
+    state: "str | None",
+    executed_rows: list[tuple],
+    journal_rows: list[tuple],
+) -> MagicMock:
+    """Mock DB routing three query shapes: the service_health state read, the
+    executed_orders window, and the journal coverage window."""
+    db = MagicMock()
+
+    def _execute(sql: str, params: tuple = ()):
+        cursor = MagicMock(spec=["fetchall"])
+        if "service_health" in sql:
+            cursor.fetchall.return_value = [(state,)] if state is not None else []
+        elif "executed_orders" in sql:
+            cursor.fetchall.return_value = executed_rows
+        else:
+            cursor.fetchall.return_value = journal_rows
+        return cursor
+
+    db.execute.side_effect = _execute
+    return db
+
+
+class TestHealOnRecovery:
+    def test_heals_when_error_and_gaps_now_covered(self):
+        """error row + the previously-missing fill is now journaled → flip to ok."""
+        exec_a = _exec_row("000205d2.6a26a327.01.01", "EWY")
+        jnl_a = _journal_row("000205d2.6a26a327.01.01", "EWY")  # now present
+        db = _make_heal_db("error", [exec_a], [jnl_a])
+
+        with patch(
+            "monitor_daemon.handlers.journal_reconcile.record_service_health"
+        ) as rec:
+            healed = heal_journal_reconcile_if_recovered(db)
+
+        assert healed is True
+        rec.assert_called_once()
+        args, kwargs = rec.call_args
+        assert args[0] == "journal-reconcile"
+        assert args[1] == "ok"
+
+    def test_does_not_heal_when_gaps_remain(self):
+        """error row + the fill is STILL missing from journal → leave error untouched."""
+        exec_a = _exec_row("000205d2.6a26a327.01.01", "EWY")
+        db = _make_heal_db("error", [exec_a], [])  # no journal coverage
+
+        with patch(
+            "monitor_daemon.handlers.journal_reconcile.record_service_health"
+        ) as rec:
+            healed = heal_journal_reconcile_if_recovered(db)
+
+        assert healed is False
+        rec.assert_not_called()
+
+    def test_noop_when_row_not_in_error(self):
+        """ok/healthy row → cheap exit, no windowed re-scan, no write."""
+        db = _make_heal_db("ok", [], [])
+
+        with patch(
+            "monitor_daemon.handlers.journal_reconcile.record_service_health"
+        ) as rec:
+            healed = heal_journal_reconcile_if_recovered(db)
+
+        assert healed is False
+        rec.assert_not_called()
+        # only the cheap single-row state read should have run — never the
+        # executed_orders / journal windowed scans.
+        executed_query_ran = any(
+            "executed_orders" in c.args[0] for c in db.execute.call_args_list
+        )
+        assert executed_query_ran is False
+
+    def test_noop_when_no_row(self):
+        """no service_health row yet (never run) → nothing to heal."""
+        db = _make_heal_db(None, [], [])
+
+        with patch(
+            "monitor_daemon.handlers.journal_reconcile.record_service_health"
+        ) as rec:
+            healed = heal_journal_reconcile_if_recovered(db)
+
+        assert healed is False
+        rec.assert_not_called()
+
+    def test_noop_when_db_none(self):
+        assert heal_journal_reconcile_if_recovered(None) is False

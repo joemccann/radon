@@ -628,6 +628,22 @@ def main() -> None:
         len(no_disk),
     )
 
+    # JRN-03: a real backfill may have closed the gap the daily journal-reconcile
+    # handler flagged. Heal its service_health row now so the watchdog stops
+    # re-alerting an already-repaired gap, instead of waiting ~24h for the next
+    # reconcile pass. No-op unless the row is currently in error AND zero gaps
+    # remain after this write.
+    if not dry_run and inserted:
+        try:
+            from monitor_daemon.handlers.journal_reconcile import (
+                heal_journal_reconcile_if_recovered,
+            )
+
+            if heal_journal_reconcile_if_recovered(db):
+                log.info("journal-reconcile service_health healed error -> ok (gaps now covered)")
+        except Exception as exc:  # noqa: BLE001
+            log.warning("journal-reconcile heal check failed: %s", exc)
+
     if dry_run and dry_run_rows:
         print("\n=== ROWS THAT WOULD BE INSERTED ===")
         for a in dry_run_rows:

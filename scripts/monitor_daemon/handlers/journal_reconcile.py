@@ -36,10 +36,22 @@ from typing import Any
 
 from .base import BaseHandler
 
+try:
+    # JRN-03 heal-on-recovery writes the journal-reconcile row back to ok the
+    # moment its flagged gaps are journaled. Optional so libsql-less unit hosts
+    # still import the module (the heal is a no-op there).
+    from db.writer import record_service_health  # type: ignore
+except Exception:  # pragma: no cover — DB layer optional in unit tests
+    record_service_health = None  # type: ignore[assignment]
+
 logger = logging.getLogger(__name__)
 
 # Run once per day.  24h in seconds.
 RECONCILE_INTERVAL = 86_400
+
+# service_health row key — must match JournalReconcileHandler.service_name and
+# the registrations in web/lib/serviceHealthWindows.ts + scripts/watchdog/services.py.
+SERVICE_NAME = "journal-reconcile"
 
 # Look back this many calendar days when scanning executed_orders.
 RECONCILE_WINDOW_DAYS = 7
@@ -344,10 +356,74 @@ class JournalReconcileHandler(BaseHandler):
             # stays ok, last_run latches so it re-checks tomorrow), but the
             # journal DATA is incomplete, so the row goes error with the gap
             # list. /admin, the banner, DUR-11 history, and the watchdog all
-            # see it. State clears to ok automatically once the gaps are
-            # backfilled.
+            # see it. State clears to ok the moment the gaps are journaled —
+            # promptly via heal_journal_reconcile_if_recovered() on the
+            # write paths (JRN-03), or on this handler's next daily pass.
             result["error"] = (
                 f"{count} executed fill(s) missing from journal: {sample}"
                 + (" (truncated)" if count > _MAX_GAP_DETAIL else "")
             )
         return result
+
+
+def _service_health_state(db: Any, service: str) -> "str | None":
+    """Current ``service_health.state`` for ``service`` (None when no row)."""
+    cursor = db.execute(
+        "SELECT state FROM service_health WHERE service = ?",
+        (service,),
+    )
+    rows = cursor.fetchall()
+    if not rows:
+        return None
+    return rows[0][0]
+
+
+def heal_journal_reconcile_if_recovered(db: Any) -> bool:
+    """Flip the journal-reconcile service_health row from error → ok the moment
+    its flagged gaps are actually journaled.
+
+    Without this, a daily handler that latches ``state=error`` keeps the
+    watchdog re-alerting for up to 24h after a backfill closes the gap (the
+    stale-row class: the row is read again every watchdog cycle until the next
+    daily reconcile rewrites it). Called from the gap-closing paths —
+    journal_sync after it writes/reconciles rows, and the backfill script after
+    ``--execute`` — so the alert clears within one cycle of the repair.
+
+    Cheap by construction: a single-row state read gates everything; the
+    windowed gap re-scan (pure Turso reads, no IB — the same detection the daily
+    pass runs) only executes while an error is actually latched, which is
+    transient. Returns True only when it healed the row.
+    """
+    if db is None or record_service_health is None:
+        return False
+
+    try:
+        if _service_health_state(db, SERVICE_NAME) != "error":
+            return False
+    except Exception as exc:  # noqa: BLE001 — never let a heal probe crash a write path
+        logger.warning("journal-reconcile heal: state read failed: %s", exc)
+        return False
+
+    window_start_ts, window_start_date = JournalReconcileHandler._window_boundaries()
+    try:
+        exec_items = _executed_orders_in_window(db, window_start_ts)
+        coverage = _build_journal_coverage(db, window_start_date)
+        gaps = _find_gaps(exec_items, coverage)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("journal-reconcile heal: gap re-scan failed: %s", exc)
+        return False
+
+    if gaps:
+        return False
+
+    try:
+        now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        record_service_health(SERVICE_NAME, "ok", finished_at=now)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("journal-reconcile heal: record ok failed: %s", exc)
+        return False
+
+    logger.info(
+        "journal-reconcile: outstanding gaps cleared — healed service_health error -> ok"
+    )
+    return True
