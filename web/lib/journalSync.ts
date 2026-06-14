@@ -73,7 +73,15 @@ function execIdParts(id: string | undefined): string[] {
 /** Map sec_type + action + optional contract details to a human-readable structure string */
 function resolveStructure(secType: string, action: string, strike?: number, expiry?: string, right?: string): string {
   const typeLabel = secType === "STK" ? "Stock" : secType === "OPT" ? "Option" : secType === "BAG" ? "Spread" : secType;
-  const side = action.includes("BUY") ? "Long" : action.includes("SELL") || action === "CLOSED" ? "Closed" : action;
+  // A sold-to-open call is a Short position, not a Closed one. Only a
+  // close-long sell (SELL_OPTION) or a round-trip (CLOSED) reads "Closed".
+  const side = action.includes("BUY")
+    ? "Long"
+    : action === "SELL_TO_OPEN"
+      ? "Short"
+      : action.includes("SELL") || action === "CLOSED"
+        ? "Closed"
+        : action;
 
   // Include contract details for options when available
   if ((secType === "OPT" || secType === "BAG") && strike && right) {

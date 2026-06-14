@@ -755,5 +755,26 @@ class TestReconcileDbMissing:
         )
 
 
+class TestStructureLabel:
+    """`_structure_label` must distinguish open-short from close-long sells.
+
+    A SELL_TO_OPEN (writing a new short call) is a *Short* position, NOT a
+    *Closed* one — the old two-branch "Long if BUY else Closed" mislabeled
+    every sold-to-open short as "Closed Call".
+    """
+
+    def test_sell_to_open_is_short(self):
+        s = JournalSyncHandler._structure_label("SELL_TO_OPEN", "OPT", 215, "C", "20260717")
+        assert s == "Short Call $215 2026-07-17"
+
+    def test_sell_option_close_long_stays_closed(self):
+        s = JournalSyncHandler._structure_label("SELL_OPTION", "OPT", 215, "C", "20260717")
+        assert s == "Closed Call $215 2026-07-17"
+
+    def test_buy_option_is_long(self):
+        s = JournalSyncHandler._structure_label("BUY_OPTION", "OPT", 1000, "C", "20260612")
+        assert s == "Long Call $1000 2026-06-12"
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -439,8 +439,7 @@ class JournalSyncHandler(BaseHandler):
         right = getattr(contract, "right", None) if sec_type in ("OPT", "BAG") else None
         expiry = getattr(contract, "lastTradeDateOrContractMonth", None) if sec_type in ("OPT", "BAG") else None
 
-        side_label = "BUY" if action in ("BUY", "BUY_OPTION") else "SELL"
-        structure = self._structure_label(side_label, sec_type, strike, right, expiry)
+        structure = self._structure_label(action, sec_type, strike, right, expiry)
 
         entry: Dict[str, Any] = {
             "id": next_id,
@@ -496,9 +495,17 @@ class JournalSyncHandler(BaseHandler):
         return None
 
     @staticmethod
-    def _structure_label(side: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
+    def _structure_label(action: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
         type_label = {"STK": "Stock", "OPT": "Option", "BAG": "Spread"}.get(sec_type, sec_type)
-        side_label = "Long" if side == "BUY" else "Closed"
+        # A sold-to-open call is a SHORT position, not a Closed one. Only a
+        # close-long sell (SELL_OPTION) or a round-trip (CLOSED) reads "Closed".
+        a = (action or "").upper()
+        if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
+            side_label = "Long"
+        elif a == "SELL_TO_OPEN":
+            side_label = "Short"
+        else:
+            side_label = "Closed"
         if sec_type in ("OPT", "BAG") and strike and right:
             right_label = "Call" if right == "C" else "Put" if right == "P" else right
             if expiry and len(str(expiry)) == 8 and str(expiry).isdigit():

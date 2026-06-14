@@ -30,6 +30,7 @@ sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 from journal_rehydrate import (  # noqa: E402
     rehydrate,
     rehydrate_from_executions,
+    _structure_label,
 )
 from trade_blotter.models import Execution, SecurityType, Side  # noqa: E402
 from utils.atomic_io import atomic_save, verified_load  # noqa: E402
@@ -685,6 +686,23 @@ class TestStockRoundTripPnl:
         assert row["proceeds"] == pytest.approx(37847.08, abs=0.01)
         assert row["realized_pnl"] == pytest.approx(844.58, abs=0.5)
         assert row["realized_quantity"] == 50
+
+
+class TestStructureLabel:
+    """Rehydrate's structure label must match journal_sync: a sold-to-open
+    short call is "Short Call", a close-long sell stays "Closed Call"."""
+
+    def test_sell_to_open_is_short(self):
+        assert _structure_label("SELL_TO_OPEN", "OPT", 215, "C", "2026-07-17") == "Short Call $215 2026-07-17"
+
+    def test_sell_option_close_long_stays_closed(self):
+        assert _structure_label("SELL_OPTION", "OPT", 215, "C", "2026-07-17") == "Closed Call $215 2026-07-17"
+
+    def test_closed_roundtrip_stays_closed(self):
+        assert _structure_label("CLOSED", "OPT", 215, "C", "2026-07-17") == "Closed Call $215 2026-07-17"
+
+    def test_buy_option_is_long(self):
+        assert _structure_label("BUY_OPTION", "OPT", 1000, "C", "2026-06-12") == "Long Call $1000 2026-06-12"
 
 
 if __name__ == "__main__":
