@@ -9,7 +9,10 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    // 127.0.0.1, not "localhost": headless chromium on GitHub runners can fail
+    // DNS resolution of the hostname (net::ERR_NAME_NOT_RESOLVED) while the IP
+    // always works. Relative goto()s in specs resolve against this baseURL.
+    baseURL: `http://127.0.0.1:${PORT}`,
     trace: "on-first-retry",
   },
   projects: [
