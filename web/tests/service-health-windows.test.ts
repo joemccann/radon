@@ -202,6 +202,50 @@ describe("DB-name aligned writers (orders-sync / portfolio-sync / orders-read-co
 });
 
 /**
+ * Regression: cash-flow-sync and llm-token-index both had uniform 25h
+ * windows that fired every Saturday morning. cash-flow-sync skips
+ * weekends (runs Mon-Fri at 17:00 ET only); llm-token-index has not
+ * fired on weekends in practice. Both need a closed-state window that
+ * covers the Fri-run → Mon-run gap (~72h) without alerting.
+ *
+ * Prior behavior (2026-06-13): 25h uniform window → Saturday morning alert
+ * (18-24h after Fri run) with "market closed" annotation in the digest.
+ */
+describe("weekend false-positive regression — cash-flow-sync and llm-token-index", () => {
+  // Fri 17:00 ET = Fri 22:00 UTC — last write for cash-flow-sync / llm-token-index.
+  const FRI_22UTC = Date.parse("2026-05-08T22:00:00Z");
+  const friFinish = new Date(FRI_22UTC).toISOString();
+
+  it.each([
+    "cash-flow-sync",
+    "llm-token-index",
+  ])("%s: a Friday-5PM-ET finish does not flip to stale by Saturday noon ET", (service) => {
+    // Sat noon ET = Sat 16:00 UTC ≈ 18h after the Fri run. Old 25h window made this stale.
+    const SAT_NOON_UTC = Date.parse("2026-05-09T16:00:00Z");
+    expect(isStale(service, friFinish, "closed", SAT_NOON_UTC)).toBe(false);
+  });
+
+  it.each([
+    "cash-flow-sync",
+    "llm-token-index",
+  ])("%s: a Friday-5PM-ET finish does not flip to stale by Sunday evening", (service) => {
+    // Sun 20:00 UTC ≈ 46h after the Fri run. Old 25h window made this stale.
+    const SUN_EVENING_UTC = Date.parse("2026-05-10T20:00:00Z");
+    expect(isStale(service, friFinish, "closed", SUN_EVENING_UTC)).toBe(false);
+  });
+
+  it.each([
+    "cash-flow-sync",
+    "llm-token-index",
+  ])("%s: still alerts quickly during market hours when missed", (service) => {
+    // 26h ago on a Wednesday market-hours check → stale (open window = 25h).
+    const WED_MARKET = Date.parse("2026-05-13T15:00:00Z"); // 11 AM ET Wed
+    const twentySixHAgo = new Date(WED_MARKET - 26 * 60 * 60_000).toISOString();
+    expect(isStale(service, twentySixHAgo, "open", WED_MARKET)).toBe(true);
+  });
+});
+
+/**
  * Each entry in SERVICE_FRESHNESS_WINDOWS now carries a ``category``
  * field so the banner can distinguish:
  *

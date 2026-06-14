@@ -1,8 +1,9 @@
 """The daily bucket fires regardless of hour.
 
-cash-flow-sync runs ~once per day, flex-token-check ~once per day, so
-their 25h freshness window is what catches actual failure. The watchdog
-timer fires every hour and we expect the bucket to always run.
+cash-flow-sync runs once per ET trading day; its open-state window is 25h
+(catches a missed weekday run quickly) and its closed-state window is 4d
+(covers the weekend gap). flex-token-check has a uniform 25h window.
+The watchdog timer fires every hour and we expect the bucket to always run.
 """
 from __future__ import annotations
 
@@ -50,7 +51,9 @@ class TestDailyBucket:
     def test_daily_fires_when_cash_flow_silent_for_26h(self, db_conn):
         from watchdog import check
 
-        # cash-flow-sync window is 25h. Past 26h is stale.
+        # cash-flow-sync open-state window is 25h. This test runs at 11:00
+        # ET on a Wednesday (market open), so market_state="open" and the
+        # 25h open window applies. Past 26h is stale during market hours.
         now = datetime(2026, 5, 13, 15, 0, tzinfo=timezone.utc)
         _seed(db_conn, "cash-flow-sync", "ok", now - timedelta(hours=26))
         _seed(db_conn, "flex-token-check", "ok", now - timedelta(hours=22))
@@ -58,6 +61,30 @@ class TestDailyBucket:
         report = check.check_bucket(bucket="daily", now=now + timedelta(hours=1))
         fired = [o for o in report.outcomes if o.fired]
         assert any(o.service == "cash-flow-sync" for o in fired)
+
+    def test_cash_flow_sync_not_stale_on_saturday_after_friday_run(self, db_conn):
+        """Regression: cash-flow-sync fires at 17:00 ET on trading days only.
+        A Friday 17:00 ET run (22:00 UTC) must NOT flip to stale by Saturday
+        noon ET (16:00 UTC Saturday) — that's only ~18h, well inside 4d.
+        Even Saturday at midnight UTC (~40h after Friday 22:00 UTC) must
+        stay fresh. The prior 25h uniform closed window caused a false
+        positive here every weekend.
+        """
+        from watchdog import check
+
+        # Friday May 8 at 22:00 UTC = Friday 6 PM ET. Last sync.
+        fri_run = datetime(2026, 5, 8, 22, 0, tzinfo=timezone.utc)
+        # Saturday May 9 at 16:00 UTC = Saturday noon ET (~18h later).
+        sat_noon = datetime(2026, 5, 9, 16, 0, tzinfo=timezone.utc)
+        _seed(db_conn, "cash-flow-sync", "ok", fri_run)
+        report = check.check_bucket(bucket="daily", now=sat_noon)
+        outcomes = {o.service: o for o in report.outcomes}
+        cfs = outcomes.get("cash-flow-sync")
+        assert cfs is not None
+        assert cfs.status == "healthy", (
+            f"cash-flow-sync should be healthy on Saturday noon after a Friday run, "
+            f"but got status={cfs.status!r} message={cfs.message!r}"
+        )
 
 
 class TestErrorBucket:

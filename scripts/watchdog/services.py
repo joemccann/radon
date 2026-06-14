@@ -18,7 +18,7 @@ right batch at the right interval:
  * ``continuous`` — always-on writers; the timer fires every 5 min,
    24/7.
  * ``daily`` — once-per-day writers; the timer fires hourly so any
-   delay surfaces within 1h of the 25h window expiring.
+   delay surfaces within 1h of the open-state window expiring.
  * ``error`` — orthogonal sweep; flags any scheduled service in
    ``state == 'error'`` past 2 consecutive cycles regardless of
    staleness.
@@ -59,7 +59,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "orders-sync":      {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "portfolio-sync":   {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "journal-sync":     {"open": 10 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
-    "cash-flow-sync":   {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
+    # cash-flow-sync fires at 17:00 ET on trading days only; skips weekends
+    # + US holidays. Longest legit gap: Fri 17:00 ET → Mon 17:00 ET ≈ 72h.
+    # Prior 25h closed window tripped every Saturday. Widened to 4 days.
+    "cash-flow-sync":   {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "fill-monitor":     {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "exit-orders":      {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
@@ -68,12 +71,13 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "cta-sync":         {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
     # Daily-cadence writers (mirror web/lib/serviceHealthWindows.ts):
     #  * llm-token-index — radon-llm-index.timer, once/UTC-day 06:30; pulls
-    #    Artificial Analysis only, no IB. 25h window covers cadence + drift.
+    #    Artificial Analysis only, no IB. Has not fired on weekends in
+    #    practice; closed widened to 4d to cover Fri-06:30 → Mon-06:30 gap.
     #  * leap-scan       — radon-leap.timer, once daily 14:00 UTC + on-demand;
     #    UW-only. 26h open covers a weekend, 3d closed the long gap.
     #  * garch-scan      — on-demand dashboard refresh (+ optional timer, not
     #    yet shipped); UW-only. Same daily windows as leap-scan.
-    "llm-token-index":  {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
+    "llm-token-index":  {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     # ib-watchdog polls FastAPI /health every 60s and heartbeats a row each

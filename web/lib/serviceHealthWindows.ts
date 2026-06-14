@@ -60,9 +60,9 @@ const DAY = 24 * HOUR;
  *   portfolio-sync       10m open, 3d closed   (writer: scripts/ib_sync.py)
  *   orders-read-compare  10m open, 3d closed   (writer: web/app/api/orders/route.ts)
  *   journal-sync         10m always
- *   cash-flow-sync       25h (daily handler)
- *   fill-monitor         5m open, 1h closed
- *   exit-orders          5m open, 1h closed
+ *   cash-flow-sync       25h open, 4d closed  (trading-day only; skips weekends)
+ *   fill-monitor         5m open, 3d closed
+ *   exit-orders          5m open, 3d closed
  *   flex-token-check     25h (daily)
  *   cri-scan             35m open, 1d closed
  *   gex-scan             30m open, 1d closed
@@ -100,7 +100,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // pattern above so the row only fires when the writer should have
   // run inside market hours but didn't.
   "journal-sync": { open: 10 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
-  "cash-flow-sync": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
+  // ``cash-flow-sync`` fires once per ET trading day at 17:00 ET and
+  // skips weekends + US holidays. The longest legitimate quiet period
+  // is Fri 17:00 ET → Mon 17:00 ET ≈ 72h. The prior 25h uniform
+  // window tripped every Saturday morning. ``closed`` and ``extended``
+  // are widened to 4 days to cover the weekend gap (Fri–Mon) plus one
+  // holiday-drift day; ``open`` stays at 25h to catch a missed weekday
+  // run quickly during trading hours.
+  "cash-flow-sync": { open: 25 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // Both ``fill-monitor`` and ``exit-orders`` only run during market
   // hours via the monitor daemon. Their 1h closed window assumed the
@@ -112,11 +119,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
 
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``llm-token-index`` runs once per UTC day at 06:30 via
-  // radon-llm-index.timer (Hetzner). 25h window covers the normal cadence
-  // plus a couple-hour drift; any longer silence indicates the timer or
-  // the Artificial Analysis API is broken. Pulls AA only — no IB.
-  "llm-token-index": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
+  // ``llm-token-index`` fires once per UTC day at 06:30 via
+  // radon-llm-index.timer (Hetzner). The timer is scheduled daily but
+  // has not fired on weekends in practice, giving a Fri-06:30-UTC →
+  // Mon-06:30-UTC gap of ~72h. The prior 25h uniform window tripped
+  // every Saturday morning. ``closed`` and ``extended`` are widened to
+  // 4 days to cover the weekend gap; ``open`` stays at 25h to catch a
+  // missed weekday run quickly during trading hours. Pulls AA only — no IB.
+  "llm-token-index": { open: 25 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
   // cri-scan + vcg-scan run on Mon-Fri-only systemd timers (see CLAUDE.md
   // autonomous timers table). Closed-hour window must cover the
