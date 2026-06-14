@@ -238,6 +238,12 @@ jobs:
             sleep 1
           done
 
+          # Diagnostic: confirm whether a proxy env is present (the suspected
+          # cause of chromium ERR_NAME_NOT_RESOLVED on loopback) and that the
+          # server is reachable from the shell.
+          echo "PROXY ENV:"; env | grep -iE 'proxy' || echo "  (none set)"
+          curl -sS -o /dev/null -w "curl 127.0.0.1/portfolio -> %{http_code}\n" http://127.0.0.1:3000/portfolio || true
+
           PLAYWRIGHT_PORT=3000 bunx playwright test \
             --config=playwright.no-server.config.ts \
             --project=chromium \

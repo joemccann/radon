@@ -14,6 +14,13 @@ export default defineConfig({
     // always works. Relative goto()s in specs resolve against this baseURL.
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: "on-first-retry",
+    launchOptions: {
+      // CI chromium inherits http(s)_proxy from the environment and routes even
+      // loopback through it, yielding ERR_NAME_NOT_RESOLVED for 127.0.0.1 (curl
+      // bypasses the proxy, which is why the wait-loop passes). Force a direct
+      // connection. No-op locally where no proxy is set.
+      args: ["--no-proxy-server", "--proxy-bypass-list=*"],
+    },
   },
   projects: [
     {
