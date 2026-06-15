@@ -90,6 +90,46 @@ def _ib_dependent(outcome: CheckOutcome) -> bool:
     return services_mod.requires_ib(outcome.service)
 
 
+# A radon-api restart (e.g. a deploy) briefly reports auth_state=awaiting_2fa
+# during pool warmup, before the recovery heartbeat confirms authentication
+# (~seconds). That is NOT a real 2FA prompt — suppress the grouped page when the
+# api restarted within this window so a deploy doesn't wake the operator.
+API_WARMUP_SUPPRESS_S = 180
+
+
+def _api_recently_restarted(now: datetime, threshold_s: int = API_WARMUP_SUPPRESS_S) -> bool:
+    """True iff radon-api's last (re)start was within ``threshold_s`` seconds.
+
+    Reads ``systemctl show radon-api.service -p ActiveEnterTimestamp``. Returns
+    False on any error / non-systemd host (so the only effect is to NOT suppress
+    — a genuine awaiting_2fa still pages).
+    """
+    import subprocess  # noqa: PLC0415 — lazy; only the VPS watchdog path needs it
+
+    try:
+        out = subprocess.run(
+            ["systemctl", "show", "radon-api.service", "-p", "ActiveEnterTimestamp", "--value"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+    except Exception:  # noqa: BLE001 — no systemd / not installed → don't suppress
+        return False
+    if not out:
+        return False
+    # systemd emits e.g. "Mon 2026-06-15 13:50:04 UTC" (hosts run TZ=UTC).
+    try:
+        from datetime import timezone
+
+        parts = out.split()
+        started = datetime.strptime(f"{parts[1]} {parts[2]}", "%Y-%m-%d %H:%M:%S").replace(
+            tzinfo=timezone.utc
+        )
+    except Exception:  # noqa: BLE001 — unparseable → don't suppress
+        return False
+    return 0 <= (now - started).total_seconds() <= threshold_s
+
+
 def _format_grouped_message(*, auth_state: str, services: list[str]) -> str:
     n = len(services)
     listing = ", ".join(sorted(services))
@@ -130,11 +170,23 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
             health_payload = {"auth_state": "unknown"}
         auth_state = health_payload.get("auth_state") or "unknown"
         if auth_state in GROUPING_AUTH_STATES:
-            grouped_handled, grouped_dispatcher_error = _dispatch_grouped(
-                ib_outcomes=ib_failing,
-                auth_state=auth_state,
-                now=now,
-            )
+            if auth_state == "awaiting_2fa" and _api_recently_restarted(now):
+                # Warmup transient from a radon-api restart (a deploy), not a
+                # real 2FA prompt — the recovery heartbeat clears it in seconds.
+                # Absorb the IB failures so they don't spam per-service, but send
+                # NO push: there is nothing for the operator to approve.
+                log.info(
+                    "IB grouping suppressed — radon-api restarted <%ds ago; "
+                    "awaiting_2fa is pool warmup, not a real 2FA prompt",
+                    API_WARMUP_SUPPRESS_S,
+                )
+                grouped_handled = {o.service for o in ib_failing}
+            else:
+                grouped_handled, grouped_dispatcher_error = _dispatch_grouped(
+                    ib_outcomes=ib_failing,
+                    auth_state=auth_state,
+                    now=now,
+                )
 
     # Everything not absorbed into the grouped alert falls through to the
     # regular per-service path (cooldown gate + Pushover). The per-service

@@ -125,6 +125,39 @@ class TestGroupedAlertOnIbAwaiting2fa:
         # Operator action hint.
         assert "reset-backoff" in msg or "Approve on phone" in msg
 
+    def test_api_warmup_suppresses_grouped_2fa_push(self, db_conn, monkeypatch, fresh_now):
+        """A radon-api restart (a deploy) briefly reports awaiting_2fa during
+        pool warmup. The grouped 2FA page must be SUPPRESSED (no push) — there's
+        nothing to approve — while the IB failures are still absorbed (no
+        per-service spam)."""
+        from watchdog import check, grouping
+
+        monkeypatch.setenv("PUSHOVER_USER", "u")
+        monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+
+        for svc in ("vcg-scan", "cri-scan", "orders-sync", "portfolio-sync"):
+            _seed(db_conn, svc, "ok", fresh_now - timedelta(minutes=60))
+        for tick in (fresh_now, fresh_now + timedelta(minutes=5)):
+            check.check_bucket(bucket="intraday", now=tick)
+        report = check.check_bucket(bucket="intraday", now=fresh_now + timedelta(minutes=10))
+        fired = [o for o in report.outcomes if o.fired]
+
+        http_calls = []
+
+        def fake_http_post(url, payload, headers=None):
+            http_calls.append((url, payload))
+            return (200, b"")
+
+        with patch("watchdog.notify._http_post", side_effect=fake_http_post), \
+             patch("watchdog.grouping.fetch_health", return_value={"auth_state": "awaiting_2fa"}), \
+             patch("watchdog.grouping._api_recently_restarted", return_value=True):
+            grouping.dispatch_with_grouping(outcomes=fired, now=fresh_now + timedelta(minutes=10))
+
+        # Zero pushes — the warmup transient is suppressed, IB services absorbed.
+        assert _push_calls(http_calls) == [], (
+            f"expected NO push during api warmup, got {_push_calls(http_calls)}"
+        )
+
     def test_non_ib_services_still_alert_per_service(self, db_conn, monkeypatch, fresh_now):
         from watchdog import check, grouping
 
