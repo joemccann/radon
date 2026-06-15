@@ -111,7 +111,16 @@ def main() -> int:
     statuses = f"cri: {'OK' if cri_ok else 'FAIL'}, vcg: {'OK' if vcg_ok else 'FAIL'}"
     _log(f"Data refresh complete ({statuses})")
 
-    return 0 if (cri_ok and vcg_ok) else 1
+    # A scan that soft-fails (timeout / bad output) keeps the existing JSON and
+    # retries on the next 15-min run — graceful, transient degradation, NOT a
+    # process crash. Exiting non-zero would mark the systemd unit "failed" and
+    # page the operator for self-healing noise (cri_scan timed out once
+    # post-close on 2026-06-15, fine on every neighbouring run). Data freshness
+    # is monitored separately by the cri-scan/vcg-scan staleness watchers, which
+    # catch a PERSISTENT failure (stale JSON / no service_health heartbeat). So
+    # the unit succeeds whenever the refresh RAN; only an unhandled crash
+    # (Python's own non-zero exit) trips the unit-failed alarm.
+    return 0
 
 
 if __name__ == "__main__":
