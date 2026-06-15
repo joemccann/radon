@@ -43,10 +43,14 @@ describe("GET /api/discover", () => {
 
 // --- Structural: normalizeNumber rejects negatives ---
 
-describe("ib_realtime_server.js requests frozen market data", () => {
-  it("requests frozen market data on connect", () => {
+describe("ib_realtime_server.js requests realtime market data", () => {
+  it("requests realtime (type 1), not delayed-frozen, on connect", () => {
+    // Flipped from delayed-frozen (type 4) to realtime (type 1) on 2026-06-14 —
+    // the delayed feed made the header futures strip + every watchlist quote lag
+    // the market by ~15 min. Off-hours, IB holds the last live values.
     const content = readFileSync(resolve(projectRoot, "scripts", "ib_realtime_server.js"), "utf8");
-    expect(content.includes("reqMarketDataType(4)")).toBeTruthy();
+    expect(content.includes("reqMarketDataType(1)")).toBeTruthy();
+    expect(content.includes("reqMarketDataType(4)")).toBeFalsy();
   });
 });
 
