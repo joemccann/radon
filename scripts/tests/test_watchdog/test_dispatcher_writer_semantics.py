@@ -186,7 +186,9 @@ class TestGroupedDispatchSemantics:
         monkeypatch.setenv("PUSHOVER_USER", "u")
         monkeypatch.setenv("PUSHOVER_TOKEN", "t")
 
-        fresh_now = datetime(2026, 5, 19, 14, 0, tzinfo=timezone.utc)
+        # 11:00 ET — past the 35m open-bell grace so the seeded scanners are
+        # genuinely stale (10:00 ET would be inside cri-scan's grace window).
+        fresh_now = datetime(2026, 5, 19, 15, 0, tzinfo=timezone.utc)
 
         # Seed 4 IB intraday services as past-window so all 4 fire.
         for svc in ("vcg-scan", "cri-scan", "orders-sync", "portfolio-sync"):

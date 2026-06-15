@@ -66,8 +66,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "fill-monitor":     {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "exit-orders":      {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
-    "cri-scan":         {"open": 35 * _MIN, "closed": 1 * _DAY, "requires_ib": True},
-    "vcg-scan":         {"open": 15 * _MIN, "closed": 1 * _DAY, "requires_ib": True},
+    # closed = 3d (not 1d) to cover the Fri->Mon weekend gap — these run on
+    # Mon-Fri-only timers, so over the weekend they're legitimately silent.
+    # Matches web/lib/serviceHealthWindows.ts.
+    "cri-scan":         {"open": 35 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    "vcg-scan":         {"open": 15 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "cta-sync":         {"open": 25 * _HOUR, "closed": 72 * _HOUR, "requires_ib": False},
     # Daily-cadence writers (mirror web/lib/serviceHealthWindows.ts):
     #  * llm-token-index — radon-llm-index.timer, once/UTC-day 06:30; pulls

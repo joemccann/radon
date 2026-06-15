@@ -77,6 +77,50 @@ class TestIntradayBucketGate:
         assert fired2[0].service == "vcg-scan"
 
 
+class TestIntradayOpenBellGraceAndWeekend:
+    """A RTH-only scanner (cri-scan) that was legitimately silent over the
+    weekend must NOT fire 'silent for 2d — market open' at the 9:30 bell, but a
+    genuine intra-session stall must still trip. June 2026 is EDT (ET = UTC-4)."""
+
+    FRI_CLOSE = datetime(2026, 6, 12, 20, 0, tzinfo=timezone.utc)  # Fri 16:00 ET
+
+    def _seed_others_fresh(self, db_conn, now):
+        for other in ("vcg-scan", "orders-sync", "portfolio-sync"):
+            _seed(db_conn, other, "ok", now - timedelta(minutes=2))
+
+    def test_cri_scan_graced_at_open_bell(self, db_conn):
+        from watchdog import check
+        # Mon 09:35 ET — 5 min after the bell, before cri-scan's first RTH run.
+        now = datetime(2026, 6, 15, 13, 35, tzinfo=timezone.utc)
+        _seed(db_conn, "cri-scan", "ok", self.FRI_CLOSE)  # last wrote Friday
+        self._seed_others_fresh(db_conn, now)
+        report = check.check_bucket(bucket="intraday", now=now)
+        cri = next(o for o in report.outcomes if o.service == "cri-scan")
+        assert cri.status == "healthy", cri.message
+
+    def test_cri_scan_stale_after_grace_window(self, db_conn):
+        from watchdog import check
+        # Mon 10:30 ET — 60 min into RTH, past the 35m grace; a still-silent
+        # scanner is a real failure and must trip.
+        now = datetime(2026, 6, 15, 14, 30, tzinfo=timezone.utc)
+        _seed(db_conn, "cri-scan", "ok", self.FRI_CLOSE)
+        self._seed_others_fresh(db_conn, now)
+        report = check.check_bucket(bucket="intraday", now=now)
+        cri = next(o for o in report.outcomes if o.service == "cri-scan")
+        assert cri.status == "stale", cri.message
+
+    def test_cri_scan_not_stale_premarket_extended_weekend(self, db_conn):
+        from watchdog import check
+        # Mon 08:00 ET (extended) — last write Friday is ~64h old; the 3d closed
+        # window covers the weekend gap (would have fired with the old 1d window).
+        now = datetime(2026, 6, 15, 12, 0, tzinfo=timezone.utc)
+        _seed(db_conn, "cri-scan", "ok", self.FRI_CLOSE)
+        self._seed_others_fresh(db_conn, now)
+        report = check.check_bucket(bucket="intraday", now=now)
+        cri = next(o for o in report.outcomes if o.service == "cri-scan")
+        assert cri.status == "healthy", cri.message
+
+
 class TestContinuousBucketAlwaysRuns:
     def test_continuous_bucket_runs_off_hours(self, db_conn):
         from watchdog import check

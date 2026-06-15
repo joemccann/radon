@@ -135,6 +135,23 @@ def _intraday_timer_window_active(now: datetime) -> bool:
     return _market_state_for(now) in {"open", "extended"}
 
 
+def _seconds_since_open(now: datetime) -> int:
+    """Seconds since today's 9:30 ET opening bell, clamped to >= 0.
+
+    Used to grace a RTH-only scanner at the open: it cannot be 'stale during
+    the open' before the market has been open long enough for it to run its
+    first session cycle. Returns a huge value if tz data is unavailable so the
+    caller falls back to the raw wall-clock age (no grace) rather than masking.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+        et = now.astimezone(ZoneInfo("America/New_York"))
+    except Exception:
+        return 1 << 30
+    open_et = et.replace(hour=9, minute=30, second=0, microsecond=0)
+    return max(0, int((et - open_et).total_seconds()))
+
+
 # ── core check ──────────────────────────────────────────────────────
 
 def check_service(*, service: str, kind: str, now: datetime, market_state: str) -> CheckOutcome:
@@ -213,7 +230,17 @@ def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_
         try:
             updated = _parse_iso(health["updated_at"])
             age_s = int((now - updated).total_seconds())
-            is_stale = age_s > window_s
+            # Open-bell grace for RTH-only intraday scanners (cri-scan, vcg-scan,
+            # …): at 9:30 their wall-clock age spans the overnight/weekend gap
+            # when they legitimately don't run, so the tight open window would
+            # fire a false "silent for 2d — market open". Cap the effective age
+            # at how long the market has been open today — one window of grace to
+            # produce the first session write. A genuinely silent scanner still
+            # trips once the session has been open longer than its window.
+            effective_age = age_s
+            if market_state == "open" and service in services_mod.BUCKETS["intraday"]:
+                effective_age = min(age_s, _seconds_since_open(now))
+            is_stale = effective_age > window_s
         except Exception:
             is_stale = True
 

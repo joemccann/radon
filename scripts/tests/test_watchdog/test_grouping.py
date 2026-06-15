@@ -65,8 +65,10 @@ def _ungroup_messages(push_calls: list) -> list[str]:
 
 @pytest.fixture
 def fresh_now() -> datetime:
-    # 10:00 ET = 14:00 UTC (EDT). Inside market hours so intraday bucket fires.
-    return datetime(2026, 5, 13, 14, 0, tzinfo=timezone.utc)
+    # 11:00 ET = 15:00 UTC (EDT). Inside market hours AND past the 35m open-bell
+    # grace, so the intraday scanners (cri-scan/vcg-scan) are genuinely stale
+    # here when seeded old — the grouping logic under test needs real staleness.
+    return datetime(2026, 5, 13, 15, 0, tzinfo=timezone.utc)
 
 
 class TestGroupedAlertOnIbAwaiting2fa:
