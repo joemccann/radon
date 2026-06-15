@@ -152,19 +152,51 @@ def _log_alert_event(outcome: CheckOutcome) -> None:
 
 
 def build_pushover_payload(*, user: str, token: str, title: str, message: str,
-                           severity: Optional[str]) -> dict:
+                           severity: Optional[str], tag: Optional[str] = None) -> dict:
     """Single source for severity → Pushover priority mapping. P1 is
     EMERGENCY (priority=2 + retry/expire, repeats until acknowledged);
     everything else (digest pushes) is normal priority. Shared with the
-    grouped IB-outage path in ``grouping.py``."""
+    grouped IB-outage path in ``grouping.py``.
+
+    ``tag`` stamps emergency pushes so they can be cancelled by tag once the
+    condition recovers (``cancel_emergency``) — otherwise an emergency keeps
+    re-alerting every 60s for the full hour even after the outage clears."""
     payload = {"token": token, "user": user, "title": title, "message": message}
     if severity == "P1":
         payload["priority"] = 2
         payload["retry"] = PUSHOVER_EMERGENCY_RETRY_SECS
         payload["expire"] = PUSHOVER_EMERGENCY_EXPIRE_SECS
+        if tag:
+            payload["tag"] = tag
     else:
         payload["priority"] = 0
     return payload
+
+
+PUSHOVER_CANCEL_BY_TAG_URL = "https://api.pushover.net/1/receipts/cancel_by_tag/{tag}.json"
+
+
+def cancel_emergency(tag: str) -> Optional[str]:
+    """Cancel any unacknowledged P1 emergency pushes carrying ``tag`` so a
+    recovered/transient alert stops re-alerting before its 1h expire. Returns a
+    dispatcher-error string on failure, ``None`` on success / no creds."""
+    creds = _pushover_creds()
+    if not creds:
+        return None
+    _user, token = creds
+    from urllib.parse import quote
+
+    url = PUSHOVER_CANCEL_BY_TAG_URL.format(tag=quote(str(tag), safe=""))
+    try:
+        status, body = _http_post(url, {"token": token})
+    except Exception as exc:  # noqa: BLE001
+        log.warning("pushover cancel_by_tag transport failure: %s", exc)
+        return f"pushover cancel transport failed: {exc}"
+    if status >= 400:
+        log.warning("pushover cancel non-2xx (%s): %r", status, body[:200])
+        return f"pushover cancel {status}"
+    log.info("cancelled emergency push(es) tag=%s", tag)
+    return None
 
 
 def _post_pushover(payload: dict) -> Optional[str]:
@@ -199,6 +231,7 @@ def _emit_pushover(outcome: CheckOutcome) -> Optional[str]:
         title=f"radon watchdog: {outcome.service}",
         message=outcome.message,
         severity="P1",
+        tag=outcome.service,  # so cancel_emergency(service) clears it on recovery
     )
     return _post_pushover(payload)
 

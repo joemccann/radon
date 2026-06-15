@@ -109,6 +109,43 @@ def record_success(*, service: str, kind: str) -> None:
     db.commit()
 
 
+# A P1 emergency push keeps re-alerting for this long (notify.PUSHOVER_EMERGENCY
+# _EXPIRE_SECS). An emergency is only worth cancelling while still inside it.
+_EMERGENCY_EXPIRE_S = 3600
+
+
+def active_emergency_services(*, now: Optional[datetime] = None) -> list[str]:
+    """Services with a P1 emergency push that is still in its retry window
+    (last_outcome='notified', notified < expire ago). These can be cancelled on
+    recovery so they stop re-alerting after the condition clears."""
+    now = now or datetime.now(timezone.utc)
+    db = _get_db()
+    rows = db.execute(
+        "SELECT service, last_notified_at FROM watchdog_cooldowns "
+        "WHERE kind='severity:P1' AND last_outcome='notified' AND last_notified_at IS NOT NULL"
+    ).fetchall()
+    active = []
+    for service, last_notified in rows:
+        try:
+            if (now - _parse_iso(last_notified)).total_seconds() < _EMERGENCY_EXPIRE_S:
+                active.append(service)
+        except Exception:  # noqa: BLE001
+            continue
+    return active
+
+
+def mark_emergency_resolved(*, service: str) -> None:
+    """Flip a P1 row's outcome so we don't repeatedly cancel an already-cancelled
+    emergency on subsequent recovered cycles."""
+    db = _get_db()
+    db.execute(
+        "UPDATE watchdog_cooldowns SET last_outcome='resolved' "
+        "WHERE service=? AND kind='severity:P1' AND last_outcome='notified'",
+        (service,),
+    )
+    db.commit()
+
+
 def cooldown_allows_fire(*, service: str, severity: str, now: Optional[datetime] = None) -> bool:
     """True if no notification for (service, severity) has fired in
     the last hour. Returns True on first-ever check.

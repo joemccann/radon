@@ -68,6 +68,12 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # cooldown-gated dispatch fires normally. See scripts/watchdog/grouping.py.
     grouping.dispatch_with_grouping(outcomes=fired, now=now)
 
+    # Cancel-on-recovery: a P1 Pushover emergency re-alerts every 60s for a full
+    # hour, even after the condition clears (a transient blip thus spams for an
+    # hour). Once the service is healthy again — or IB is authenticated, for the
+    # grouped key — cancel its emergency push so it stops paging.
+    _reconcile_recovered_emergencies(report=report, now=now)
+
     # The daily bucket carries the once-per-UTC-day P2/P3 digest flush
     # (DUR-14). On send failure flush_daily_digest records the dispatcher
     # error on the watchdog-alerts row itself and we must not overwrite
@@ -89,6 +95,34 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     if not fired and not digest_error:
         notify.heartbeat_ok(bucket=args.bucket, now=now)
     return 0
+
+
+def _reconcile_recovered_emergencies(*, report, now) -> None:
+    """Cancel still-retrying P1 emergency pushes whose condition has recovered.
+
+    Per-service: the service is healthy in this cycle's report. Grouped
+    (ib-gateway-grouped): IB is no longer in a grouping auth-state. Health is
+    only fetched when a grouped emergency is actually active, so a quiet cycle
+    costs one cheap cooldown read and no network."""
+    from . import cooldown, grouping, notify
+
+    active = cooldown.active_emergency_services(now=now)
+    if not active:
+        return
+    healthy = {o.service for o in report.outcomes if o.status == "healthy"}
+    for svc in active:
+        if svc == grouping.GROUPED_ALERT_KEY:
+            try:
+                auth = (grouping.fetch_health() or {}).get("auth_state") or "unknown"
+            except Exception:  # noqa: BLE001
+                auth = "unknown"
+            recovered = auth != "unknown" and auth not in grouping.GROUPING_AUTH_STATES
+        else:
+            recovered = svc in healthy
+        if recovered:
+            notify.cancel_emergency(svc)
+            cooldown.mark_emergency_resolved(service=svc)
+            print(f"  [recovery] cancelled emergency push for {svc}")
 
 
 def _cmd_ack(args: argparse.Namespace) -> int:

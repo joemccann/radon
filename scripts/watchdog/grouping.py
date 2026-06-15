@@ -278,6 +278,7 @@ def _emit_grouped_pushover(*, title: str, message: str) -> Optional[str]:
         title=title,
         message=message,
         severity=GROUPED_ALERT_SEVERITY,
+        tag=GROUPED_ALERT_KEY,  # so cancel_emergency clears it when IB recovers
     )
     try:
         status, body = notify._http_post(notify.PUSHOVER_API_URL, payload)
