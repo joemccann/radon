@@ -164,11 +164,14 @@ def test_awaiting_2fa_payload_increments_stuck_counter_without_lock(state_path):
     cycle must reset the api-hang counter (different failure mode) and
     increment `stuck_2fa_count` toward the 3-cycle threshold WITHOUT
     acquiring the push lock yet — the threshold gates the lock acquire."""
+    # Genuine stuck-2FA: upstream_dead is False (container running + healthy,
+    # parked at the prompt). upstream_dead=True is the JVM acceptor hang →
+    # is_api_hang owns it (2026-06-15 loop fix).
     payload = {
         "ib_gateway": {
             "service_state": "unhealthy",
             "port_listening": True,
-            "upstream_dead": True,
+            "upstream_dead": False,
             "auth_state": "awaiting_2fa",
             "restart_backoff": {
                 "attempt_count": 0,
@@ -196,7 +199,7 @@ def test_stuck_2fa_threshold_fires_fresh_push(state_path):
         "ib_gateway": {
             "service_state": "unhealthy",
             "port_listening": True,
-            "upstream_dead": True,
+            "upstream_dead": False,
             "auth_state": "awaiting_2fa",
             "restart_backoff": {
                 "attempt_count": 0,
@@ -224,7 +227,7 @@ def test_stuck_2fa_does_not_fire_when_push_lock_active(state_path):
         "ib_gateway": {
             "service_state": "unhealthy",
             "port_listening": True,
-            "upstream_dead": True,
+            "upstream_dead": False,
             "auth_state": "awaiting_2fa",
             "restart_backoff": {
                 "attempt_count": 1,
@@ -252,7 +255,7 @@ def test_stuck_2fa_does_not_fire_when_backoff_scheduled(state_path):
         "ib_gateway": {
             "service_state": "unhealthy",
             "port_listening": True,
-            "upstream_dead": True,
+            "upstream_dead": False,
             "auth_state": "awaiting_2fa",
             "restart_backoff": {
                 "attempt_count": 2,

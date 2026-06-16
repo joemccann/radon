@@ -53,7 +53,7 @@ import time
 import urllib.error
 import urllib.request
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Optional, TypeVar
@@ -87,6 +87,11 @@ DEFAULT_HEALTH_URL = "http://127.0.0.1:8321/health"
 DEFAULT_HEALTH_TIMEOUT_SECS = 5.0
 DEFAULT_STATE_PATH = Path("/var/lib/radon/ib-watchdog-state.json")
 DEFAULT_RESTART_UNIT = "radon-ib-gateway.service"
+# After a watchdog-initiated gateway restart resolves auth back to
+# `authenticated`, the FastAPI ib_pool can stay stuck disconnected — every
+# IB route then 502s "unresponsive" until radon-api is bounced once. This is
+# the documented pool-stuck-after-2FA remedy (feedback_ib_pool_stuck_after_2fa).
+DEFAULT_API_UNIT = "radon-api.service"
 # Three consecutive degraded readings (60s apart) = ~3 min of hang
 # before we restart. Calibrated against today's incidents: the JVM
 # hangs we've seen each lasted 10+ minutes, so 3 cycles trips well
@@ -420,15 +425,23 @@ def is_api_hang(state: GatewayState) -> bool:
     """The specific failure mode this watchdog exists to catch.
 
     TCP socket is bound (port_listening) but the upstream API isn't
-    responding to handshakes (upstream_dead). This is distinct from
-    awaiting_2fa (handled by `is_stuck_awaiting_2fa`) and from a
-    fully-down gateway (port_listening would be False — Docker
-    `restart: always` handles that).
+    responding to handshakes (upstream_dead). This is the JVM
+    API-acceptor hang, distinct from a fully-down gateway
+    (port_listening would be False — Docker `restart: always` handles
+    that).
+
+    ``upstream_dead`` is the decisive signal and OVERRIDES auth_state.
+    On 2026-06-15 a dead JVM acceptor produced a never-connecting pool
+    whose cached auth_state still read ``awaiting_2fa``; the watchdog
+    misclassified it as stuck-2FA and looped 15 gateway restarts (each
+    a real 2FA push) because restarting does nothing for a dead
+    upstream. When ``upstream_dead`` is True it is ALWAYS the api-hang —
+    a forced 2FA re-auth cannot fix a wedged acceptor. The genuine
+    stuck-2FA case (``is_stuck_awaiting_2fa``) has ``upstream_dead`` False
+    (container running + healthy, parked at the prompt).
     """
     if not state.port_listening:
         return False  # Port down → Docker restart policy handles it
-    if state.auth_state == "awaiting_2fa":
-        return False  # Handled by stuck-2FA path below
     return state.upstream_dead
 
 
@@ -445,6 +458,10 @@ def is_stuck_awaiting_2fa(state: GatewayState) -> bool:
 
     We fire when ALL of:
       - auth_state is awaiting_2fa (gateway is genuinely stuck)
+      - upstream is NOT dead (a wedged JVM acceptor is the api-hang,
+        NOT a 2FA problem — firing a fresh push does nothing for a dead
+        upstream and only spams IBKR; see `is_api_hang` + the 2026-06-15
+        15× restart loop)
       - no push lock holder (nothing else has a push in flight)
       - no scheduled retry pending (`next_attempt_in_secs <= 0`)
     The push lock is the cross-process safety against stacking — IBKR
@@ -453,6 +470,8 @@ def is_stuck_awaiting_2fa(state: GatewayState) -> bool:
     """
     if state.auth_state != "awaiting_2fa":
         return False
+    if state.upstream_dead:
+        return False  # JVM acceptor hang → is_api_hang owns this
     if state.push_lock_active:
         return False  # A push is already pending; let it resolve
     if state.next_attempt_in_secs > 0:
@@ -473,6 +492,17 @@ class WatchdogState:
     # `degraded_count` (the api-hang case) so the two failure modes don't
     # cross-pollute thresholds.
     stuck_2fa_count: int = 0
+    # Epoch timestamps of watchdog-initiated stuck-2FA gateway restarts.
+    # Bounds the stuck-2FA branch to STUCK_2FA_MAX_RESTARTS_PER_HOUR within
+    # a rolling hour with exponential backoff between them, so this branch
+    # can NEVER loop 15× again (2026-06-15 incident).
+    stuck_2fa_restart_history: list = field(default_factory=list)
+    # Set True when THIS watchdog restarts the gateway (api-hang or stuck-2FA
+    # path). When a later cycle observes auth back at `authenticated`, the
+    # watchdog bounces radon-api ONCE to un-stick the ib_pool, then clears the
+    # flag. Idempotent: the api restart fires on the auth→authenticated edge,
+    # never in a loop (feedback_ib_pool_stuck_after_2fa).
+    pending_pool_reconnect: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -480,15 +510,22 @@ class WatchdogState:
             "last_restart_at": self.last_restart_at,
             "last_outcome": self.last_outcome,
             "stuck_2fa_count": self.stuck_2fa_count,
+            "stuck_2fa_restart_history": list(self.stuck_2fa_restart_history),
+            "pending_pool_reconnect": self.pending_pool_reconnect,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "WatchdogState":
+        history = data.get("stuck_2fa_restart_history", [])
         return cls(
             degraded_count=int(data.get("degraded_count", 0)),
             last_restart_at=float(data.get("last_restart_at", 0.0)),
             last_outcome=str(data.get("last_outcome", "init")),
             stuck_2fa_count=int(data.get("stuck_2fa_count", 0)),
+            stuck_2fa_restart_history=[float(t) for t in history]
+            if isinstance(history, list)
+            else [],
+            pending_pool_reconnect=bool(data.get("pending_pool_reconnect", False)),
         )
 
 
@@ -646,6 +683,41 @@ def _acquire_2fa_push_lock_bounded(now: float, *, reason: str):
 # slow to approve a push isn't punished by an immediate re-fire.
 DEFAULT_STUCK_2FA_THRESHOLD = 3
 
+# Rolling-hour cap on watchdog-initiated stuck-2FA gateway restarts. Each
+# restart is a real IBKR 2FA push; on 2026-06-15 a misclassified dead-upstream
+# looped 15 restarts/pushes in ~3h. Even genuine awaiting_2fa must be bounded:
+# if two fresh pushes inside an hour don't resolve auth, a third won't either —
+# something needs an operator, not more pushes.
+STUCK_2FA_RESTART_WINDOW_SECS = 3600
+STUCK_2FA_MAX_RESTARTS_PER_HOUR = 2
+# Exponential backoff between consecutive stuck-2FA restarts within the window:
+# base * 2**(restarts_already_in_window). Spaces a legitimate second push out
+# from the first so the user has time to approve before we re-fire.
+STUCK_2FA_BACKOFF_BASE_SECS = 300
+
+
+def _prune_restart_history(history: list, now: float) -> list:
+    """Drop restart timestamps older than the rolling window."""
+    cutoff = now - STUCK_2FA_RESTART_WINDOW_SECS
+    return [t for t in history if t >= cutoff]
+
+
+def _stuck_2fa_restart_blocked(history: list, now: float) -> Optional[str]:
+    """Return a human-readable reason the stuck-2FA restart is blocked this
+    cycle (rolling-hour cap or backoff not yet elapsed), or None if it may
+    proceed. ``history`` must already be pruned to the window."""
+    if len(history) >= STUCK_2FA_MAX_RESTARTS_PER_HOUR:
+        return (
+            f"stuck_2fa_cap:{len(history)}_of_"
+            f"{STUCK_2FA_MAX_RESTARTS_PER_HOUR}_in_hour"
+        )
+    if history:
+        backoff = STUCK_2FA_BACKOFF_BASE_SECS * (2 ** (len(history) - 1))
+        elapsed = now - max(history)
+        if elapsed < backoff:
+            return f"stuck_2fa_backoff:{int(backoff - elapsed)}s_remaining"
+    return None
+
 
 def _handle_stuck_awaiting_2fa(
     *,
@@ -693,7 +765,35 @@ def _handle_stuck_awaiting_2fa(
         record_service_health("ok")
         return state
 
-    # Threshold hit. Respect any in-flight push the FastAPI side may have
+    # Threshold hit. Rolling-hour cap + exponential backoff BEFORE any lock
+    # work or restart — even a legitimately-stuck 2FA can NEVER loop 15× like
+    # 2026-06-15. If two pushes inside an hour haven't resolved auth, a third
+    # won't; the situation needs an operator, not more pushes.
+    state.stuck_2fa_restart_history = _prune_restart_history(
+        state.stuck_2fa_restart_history, clock()
+    )
+    blocked = _stuck_2fa_restart_blocked(state.stuck_2fa_restart_history, clock())
+    if blocked is not None:
+        LOG.warning(
+            "stuck_2fa threshold hit but restart capped/backed-off (%s) — "
+            "no push this cycle",
+            blocked,
+        )
+        # Keep the counter at threshold (don't reset) so the moment the cap /
+        # backoff clears the next cycle can act immediately.
+        state.stuck_2fa_count = threshold
+        state.last_outcome = blocked
+        save_state(state_path, state)
+        record_service_health(
+            "ok",
+            error_message=(
+                f"stuck awaiting 2FA but watchdog restart {blocked} — "
+                "operator may need to intervene"
+            ),
+        )
+        return state
+
+    # Respect any in-flight push the FastAPI side may have
     # acquired between our /health probe and now.
     existing_lock = _check_2fa_push_lock_bounded(now=clock())
     if existing_lock is not None and existing_lock.holder != WATCHDOG_LOCK_HOLDER:
@@ -727,8 +827,17 @@ def _handle_stuck_awaiting_2fa(
         restart_unit,
     )
     ok = trigger_restart(restart_unit, dry_run=dry_run)
-    state.last_restart_at = clock()
+    restart_at = clock()
+    state.last_restart_at = restart_at
+    # Record this restart in the rolling-hour history (only on a real attempt)
+    # so the cap + backoff see it next cycle.
+    state.stuck_2fa_restart_history = _prune_restart_history(
+        state.stuck_2fa_restart_history, restart_at
+    )
+    state.stuck_2fa_restart_history.append(restart_at)
     state.stuck_2fa_count = 0  # Reset; next cycle observes recovery
+    # Arm the one-shot radon-api bounce once auth resolves (see above).
+    state.pending_pool_reconnect = True
     state.last_outcome = f"stuck_2fa_push_fired:{'ok' if ok else 'fail'}"
     save_state(state_path, state)
     record_service_health(
@@ -988,6 +1097,10 @@ def _advance_api_hang(
         ok = trigger_restart(restart_unit, dry_run=dry_run)
     state.last_restart_at = clock()
     state.degraded_count = 0  # Reset; let the next cycle observe recovery
+    # Arm the one-shot radon-api bounce: once auth resolves back to
+    # authenticated, the ib_pool may stay stuck disconnected until api is
+    # restarted (feedback_ib_pool_stuck_after_2fa).
+    state.pending_pool_reconnect = True
     state.last_outcome = f"restarted:{'ok' if ok else 'fail'}"
     save_state(state_path, state)
     record_service_health(
@@ -996,6 +1109,43 @@ def _advance_api_hang(
             f"triggered {restart_unit} restart after {threshold} cycles of api hang"
             if ok
             else f"FAILED to restart {restart_unit} after {threshold} cycles of api hang"
+        ),
+    )
+    return state
+
+
+# --- Pool reconnect after watchdog-initiated recovery ------------------------
+
+
+def _reconnect_pool_after_recovery(
+    *,
+    state: "WatchdogState",
+    state_path: Path,
+    api_unit: str,
+    dry_run: bool,
+    health: GatewayState,
+) -> "WatchdogState":
+    """A prior watchdog-initiated gateway restart has resolved (auth back at
+    authenticated). Bounce radon-api ONCE so the ib_pool — which can stay
+    stuck disconnected after the gateway recovers — reconnects. The flag is
+    cleared regardless of restart outcome so this fires exactly once per
+    recovery and can never loop (feedback_ib_pool_stuck_after_2fa)."""
+    LOG.warning(
+        "gateway recovered to authenticated after watchdog restart — "
+        "bouncing %s once to un-stick the ib_pool",
+        api_unit,
+    )
+    with _timed("api_reconnect"):
+        ok = trigger_restart(api_unit, dry_run=dry_run)
+    state.pending_pool_reconnect = False  # one-shot — never loop
+    state.last_outcome = f"pool_reconnect:{'ok' if ok else 'fail'}:{health.auth_state}"
+    save_state(state_path, state)
+    record_service_health(
+        "ok",
+        error_message=(
+            f"restarted {api_unit} once to reconnect ib_pool after gateway recovery"
+            if ok
+            else f"FAILED to restart {api_unit} for ib_pool reconnect"
         ),
     )
     return state
@@ -1010,6 +1160,7 @@ def run_cycle(
     health_timeout: float = DEFAULT_HEALTH_TIMEOUT_SECS,
     state_path: Path = DEFAULT_STATE_PATH,
     restart_unit: str = DEFAULT_RESTART_UNIT,
+    api_unit: str = DEFAULT_API_UNIT,
     threshold: int = DEFAULT_THRESHOLD_CYCLES,
     dry_run: bool = False,
     clock: callable = time.time,
@@ -1030,6 +1181,7 @@ def run_cycle(
             health_timeout=health_timeout,
             state_path=state_path,
             restart_unit=restart_unit,
+            api_unit=api_unit,
             threshold=threshold,
             dry_run=dry_run,
             clock=clock,
@@ -1048,6 +1200,7 @@ def _run_cycle_steps(
     health_timeout: float,
     state_path: Path,
     restart_unit: str,
+    api_unit: str,
     threshold: int,
     dry_run: bool,
     clock: callable,
@@ -1114,6 +1267,20 @@ def _run_cycle_steps(
 
         # Genuinely healthy — clear both counters.
         state.stuck_2fa_count = 0
+
+        # One-shot pool reconnect: if a prior watchdog-initiated gateway
+        # restart is now resolved (auth back to authenticated), the FastAPI
+        # ib_pool may still be stuck disconnected. Bounce radon-api ONCE to
+        # un-stick it, then clear the flag so this never loops.
+        if state.pending_pool_reconnect and health.auth_state == "authenticated":
+            return _reconnect_pool_after_recovery(
+                state=state,
+                state_path=state_path,
+                api_unit=api_unit,
+                dry_run=dry_run,
+                health=health,
+            )
+
         state.last_outcome = f"healthy:{health.service_state}/{health.auth_state}"
         save_state(state_path, state)
         record_service_health("ok")
@@ -1145,6 +1312,11 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     )
     p.add_argument("--state-path", type=Path, default=DEFAULT_STATE_PATH)
     p.add_argument("--restart-unit", default=DEFAULT_RESTART_UNIT)
+    p.add_argument(
+        "--api-unit",
+        default=DEFAULT_API_UNIT,
+        help="radon-api unit to bounce once after gateway recovery (ib_pool reconnect)",
+    )
     p.add_argument(
         "--threshold",
         type=int,
@@ -1198,6 +1370,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             health_timeout=args.health_timeout,
             state_path=args.state_path,
             restart_unit=args.restart_unit,
+            api_unit=args.api_unit,
             threshold=args.threshold,
             dry_run=args.dry_run,
         )

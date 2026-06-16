@@ -84,8 +84,10 @@ def _hang_payload() -> dict:
 
 
 def _stuck_2fa_payload() -> dict:
+    # Genuine stuck-2FA: upstream_dead False (container healthy, parked at the
+    # prompt). upstream_dead=True is the JVM acceptor hang → api-hang path.
     return _payload(
-        service_state="unhealthy", upstream_dead=True, auth_state="awaiting_2fa"
+        service_state="unhealthy", upstream_dead=False, auth_state="awaiting_2fa"
     )
 
 

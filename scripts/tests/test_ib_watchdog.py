@@ -95,12 +95,19 @@ class TestIsApiHang:
         s = GatewayState("unhealthy", False, True, "unreachable")
         assert is_api_hang(s) is False
 
-    def test_awaiting_2fa_is_not_a_hang(self):
-        # The 2FA backoff in scripts/api/ib_gateway.py handles this.
-        # Restarting here would just re-fire the 2FA push and make
-        # the rate-limit worse.
-        s = GatewayState("unhealthy", True, True, "awaiting_2fa")
+    def test_awaiting_2fa_without_upstream_dead_is_not_a_hang(self):
+        # Genuine stuck-2FA: container running + healthy, parked at the
+        # prompt. upstream_dead is False; the stuck-2FA path handles it.
+        s = GatewayState("unhealthy", True, False, "awaiting_2fa")
         assert is_api_hang(s) is False
+
+    def test_awaiting_2fa_with_upstream_dead_IS_a_hang(self):
+        # 2026-06-15 loop fix: a dead JVM acceptor (upstream_dead) whose
+        # cached pool auth_state still reads awaiting_2fa is the api-hang,
+        # NOT a 2FA problem. upstream_dead overrides auth_state — firing a
+        # fresh push does nothing for a dead upstream and looped 15× before.
+        s = GatewayState("unhealthy", True, True, "awaiting_2fa")
+        assert is_api_hang(s) is True
 
     def test_port_open_but_upstream_dead_is_the_hang(self):
         s = GatewayState("unhealthy", True, True, "authenticated")
@@ -134,12 +141,15 @@ class TestHealthyCycle:
         # But awaiting_2fa with no push lock and no scheduled retry IS the
         # stuck-2FA failure mode — that counter must start incrementing so
         # the threshold trips a fresh push after 3 cycles.
+        # NOTE: a genuine stuck-2FA has upstream_dead=False (container running
+        # + healthy, parked at the prompt). upstream_dead=True is the JVM
+        # acceptor hang → is_api_hang owns it (2026-06-15 loop fix).
         save_state(state_path, WatchdogState(degraded_count=2))
         result, restart = _drive_cycle(
             state_path,
             _payload(
                 service_state="unhealthy",
-                upstream_dead=True,
+                upstream_dead=False,
                 auth_state="awaiting_2fa",
             ),
         )
