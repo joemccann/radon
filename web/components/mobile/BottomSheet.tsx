@@ -9,17 +9,36 @@ type BottomSheetProps = {
   onClose: () => void;
   title?: ReactNode;
   children: ReactNode;
+  /**
+   * Sticky footer rendered inside the .m-sheet__footer thumb-zone.
+   * Backward-compatible with callers that already pass a footer node.
+   */
   footer?: ReactNode;
+  /**
+   * Optional isolated destructive action slot rendered below the footer
+   * with a --negative tinted border-top separator.
+   */
+  destructive?: ReactNode;
   testId?: string;
   /**
-   * Optional explicit max-height, falls back to "90dvh".
+   * Optional explicit max-height. When omitted the .m-sheet class enforces
+   * 88vh; pass a value only when a caller needs a tighter ceiling.
    */
   maxHeight?: string;
 };
 
 const DRAG_DISMISS_THRESHOLD = 80;
 
-export function BottomSheet({ open, onClose, title, children, footer, testId, maxHeight }: BottomSheetProps) {
+export function BottomSheet({
+  open,
+  onClose,
+  title,
+  children,
+  footer,
+  destructive,
+  testId,
+  maxHeight,
+}: BottomSheetProps) {
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const dragStartRef = useRef<{ y: number; offset: number } | null>(null);
 
@@ -61,10 +80,11 @@ export function BottomSheet({ open, onClose, title, children, footer, testId, ma
       />
       <div
         ref={sheetRef}
-        className="mobile-sheet"
+        className="mobile-sheet m-sheet"
         style={sheetStyle}
         data-testid={testId ? `${testId}-panel` : undefined}
       >
+        {/* Grip handle — drag target + visual affordance */}
         <div
           className="mobile-sheet__handle-bar"
           onPointerDown={handlePointerDown}
@@ -74,7 +94,7 @@ export function BottomSheet({ open, onClose, title, children, footer, testId, ma
           role="separator"
           aria-label="Drag to dismiss"
         >
-          <div className="mobile-sheet__handle" aria-hidden />
+          <div className="mobile-sheet__handle m-sheet__grip" aria-hidden />
         </div>
 
         {title || true ? (
@@ -92,9 +112,11 @@ export function BottomSheet({ open, onClose, title, children, footer, testId, ma
           </div>
         ) : null}
 
-        <div className="mobile-sheet__body">{children}</div>
+        <div className="mobile-sheet__body m-sheet__body-scroll">{children}</div>
 
-        {footer ? <div className="mobile-sheet__footer">{footer}</div> : null}
+        {footer ? <div className="mobile-sheet__footer m-sheet__footer">{footer}</div> : null}
+
+        {destructive ? <div className="m-sheet__destructive">{destructive}</div> : null}
       </div>
     </div>
   );

@@ -2,10 +2,8 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useUser } from "@clerk/nextjs";
 import { LayoutDashboard, Circle, ClipboardList, Sparkles, Menu } from "lucide-react";
 import type { ComponentType, SVGProps } from "react";
-import { useProfile } from "@/lib/useProfile";
 
 type MobileTab = {
   label: string;
@@ -23,15 +21,6 @@ const TABS: MobileTab[] = [
   { label: "More", icon: Menu, action: "openMore" },
 ];
 
-function monogramFor(name: string | null, email: string | null): string {
-  const source = (name ?? email ?? "").trim();
-  if (!source) return "·";
-  const parts = source.replace(/@.*$/, "").split(/[\s._-]+/).filter(Boolean);
-  if (parts.length === 0) return source.slice(0, 2).toUpperCase();
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[1][0]).toUpperCase();
-}
-
 type MobileTabBarProps = {
   onOpenMore: () => void;
 };
@@ -43,31 +32,9 @@ function isActive(pathname: string, paths: string[] | undefined): boolean {
 
 export default function MobileTabBar({ onOpenMore }: MobileTabBarProps) {
   const pathname = usePathname() ?? "";
-  const { profile } = useProfile();
-  const { user } = useUser();
-  const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  const avatarUrl = profile?.avatar_url ?? user?.imageUrl ?? null;
-  const monogram = monogramFor(profile?.username ?? null, email);
-  const profileActive = isActive(pathname, ["/profile"]);
 
   return (
     <nav className="mobile-tab-bar" aria-label="Primary mobile navigation" data-testid="mobile-tab-bar">
-      <Link
-        href="/profile"
-        className={`mobile-tab-bar__item mobile-tab-bar__item--profile${profileActive ? " mobile-tab-bar__item--active" : ""}`}
-        data-testid="mobile-tab-profile"
-        aria-label="Profile"
-      >
-        <span className="mobile-tab-bar__avatar">
-          {avatarUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={avatarUrl} alt="" width={22} height={22} />
-          ) : (
-            <span className="mobile-tab-bar__monogram">{monogram}</span>
-          )}
-        </span>
-        <span className="mobile-tab-bar__label">Profile</span>
-      </Link>
       {TABS.map((tab) => {
         const Icon = tab.icon;
         const active = isActive(pathname, tab.matchPaths);

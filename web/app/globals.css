@@ -23,6 +23,12 @@
   --safe-left: env(safe-area-inset-left, 0px);
   --mobile-app-bar-height: 56px;
   --mobile-tab-bar-height: 64px;
+  /* Minimum touch target dimension per WCAG / Apple HIG. */
+  --touch-min: 44px;
+  /* Mobile metric value size tiers. */
+  --m-val-hero: 20px;
+  --m-val-primary: 17px;
+  --m-val-secondary: 13px;
 }
 
 [data-theme="dark"] {
@@ -10249,6 +10255,8 @@ body[data-mobile="true"] .toast-container {
   padding: 4px 8px;
   border-radius: 4px;
   border: 1px solid var(--border-dim);
+  /* Upgrade to 44px touch target per --touch-min contract. */
+  min-height: var(--touch-min);
 }
 
 .mobile-app-bar__status-dot {
@@ -10285,6 +10293,48 @@ body[data-mobile="true"] .toast-container {
 
 .mobile-app-bar__search:active {
   background: var(--bg-hover);
+}
+
+.mobile-app-bar__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.mobile-app-bar__avatar-img {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  object-fit: cover;
+  display: block;
+  border: 1px solid var(--border-dim);
+}
+
+.mobile-app-bar__avatar--active .mobile-app-bar__avatar-img {
+  border-color: var(--signal-core);
+}
+
+.mobile-app-bar__avatar-monogram {
+  width: 28px;
+  height: 28px;
+  border-radius: 4px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--signal-core);
+}
+
+.mobile-app-bar__avatar--active .mobile-app-bar__avatar-monogram {
+  border-color: var(--signal-core);
 }
 
 .mobile-tab-bar {
@@ -12780,4 +12830,304 @@ body[data-mobile="true"] td.right {
   font-size: 12px;
   color: var(--text-secondary);
 }
+
+/* ── Mobile Design System Primitives ── */
+
+/* Touch target floor for pressable elements that the button rule misses. */
+.tap-target {
+  min-height: var(--touch-min);
+  min-width: var(--touch-min);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* ── .m-metric: label-above-value metric cell ── */
+.m-metric {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.m-metric__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 400;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+}
+
+.m-metric__value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  font-size: var(--m-val-primary);
+}
+
+.m-metric__value--hero     { font-size: var(--m-val-hero); }
+.m-metric__value--primary  { font-size: var(--m-val-primary); }
+.m-metric__value--secondary { font-size: var(--m-val-secondary); }
+
+.m-metric__value--pos  { color: var(--positive); }
+.m-metric__value--neg  { color: var(--negative); }
+.m-metric__value--warn { color: var(--warn); }
+.m-metric__value--mut  { color: var(--text-muted); }
+
+/* ── .m-signal-card ── */
+.m-signal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.m-signal-card__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  gap: 8px;
+}
+
+.m-signal-card__ticker {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.m-signal-card__score {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 4px;
+  letter-spacing: 0.04em;
+}
+
+.m-signal-card__score--pos  {
+  background: color-mix(in srgb, var(--positive) 16%, transparent);
+  color: var(--positive);
+  border: 1px solid color-mix(in srgb, var(--positive) 30%, transparent);
+}
+.m-signal-card__score--warn {
+  background: color-mix(in srgb, var(--warn) 16%, transparent);
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent);
+}
+.m-signal-card__score--neg  {
+  background: color-mix(in srgb, var(--negative) 16%, transparent);
+  color: var(--negative);
+  border: 1px solid color-mix(in srgb, var(--negative) 30%, transparent);
+}
+
+.m-signal-card__signals {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 12px;
+  border-top: 1px solid var(--line-grid);
+}
+
+.m-signal-card__stats {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px 4px;
+  padding: 10px 12px;
+  border-top: 1px solid var(--line-grid);
+}
+
+/* ── .m-pill: large decision pill ── */
+.m-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  width: 100%;
+  padding: 8px 14px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border: 1px solid transparent;
+}
+
+.m-pill--pos {
+  background: color-mix(in srgb, var(--positive) 14%, transparent);
+  color: var(--positive);
+  border-color: color-mix(in srgb, var(--positive) 30%, transparent);
+}
+
+.m-pill--neg {
+  background: color-mix(in srgb, var(--negative) 14%, transparent);
+  color: var(--negative);
+  border-color: color-mix(in srgb, var(--negative) 30%, transparent);
+}
+
+.m-pill--warn {
+  background: color-mix(in srgb, var(--warn) 14%, transparent);
+  color: var(--warn);
+  border-color: color-mix(in srgb, var(--warn) 30%, transparent);
+}
+
+/* ── .m-leg: order leg / fill row ── */
+.m-leg {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--line-grid);
+  border-radius: 0 4px 4px 0;
+  background: var(--bg-panel);
+}
+
+.m-leg__direction {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.m-leg__price {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.m-leg__sub {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.m-leg--buy {
+  border-left-color: var(--positive);
+  background: color-mix(in srgb, var(--positive) 5%, transparent);
+}
+
+.m-leg--buy .m-leg__direction {
+  color: var(--positive);
+}
+
+.m-leg--sell {
+  border-left-color: var(--negative);
+  background: color-mix(in srgb, var(--negative) 5%, transparent);
+}
+
+.m-leg--sell .m-leg__direction {
+  color: var(--negative);
+}
+
+/* ── .m-submit: order submit button tints ── */
+.m-submit--debit {
+  background: color-mix(in srgb, var(--positive) 18%, transparent);
+  color: var(--positive);
+  border: 1px solid color-mix(in srgb, var(--positive) 35%, transparent);
+}
+
+.m-submit--credit {
+  background: color-mix(in srgb, var(--negative) 18%, transparent);
+  color: var(--negative);
+  border: 1px solid color-mix(in srgb, var(--negative) 35%, transparent);
+}
+
+/* ── .m-sheet: bottom sheet contract ── */
+.m-sheet {
+  position: relative;
+  background: var(--bg-panel);
+  border-top: 1px solid var(--line-grid);
+  border-top-left-radius: 14px;
+  border-top-right-radius: 14px;
+  padding-bottom: var(--safe-bottom);
+  max-height: 88vh;
+  display: flex;
+  flex-direction: column;
+  animation: mobile-sheet-in 240ms var(--ease-out);
+  will-change: transform;
+  overflow: hidden;
+}
+
+.m-sheet__grip {
+  width: 36px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line-grid);
+  margin: 10px auto 6px;
+  flex-shrink: 0;
+}
+
+.m-sheet__body-scroll {
+  overflow-y: auto;
+  flex: 1;
+  overscroll-behavior: contain;
+}
+
+.m-sheet__footer {
+  padding: 12px 16px calc(12px + var(--safe-bottom));
+  border-top: 1px solid var(--line-grid);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.m-sheet__destructive {
+  border-top: 1px solid color-mix(in srgb, var(--negative) 30%, transparent);
+  padding: 12px 16px;
+  color: var(--negative);
+  flex-shrink: 0;
+}
+
+/* ── Mobile single-column teardown ── */
+
+body[data-mobile="true"] .dashboard-surface {
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-mobile="true"] .dashboard-surface__rail {
+  position: static;
+  max-height: none;
+  overflow-y: visible;
+}
+
+/* .cockpit already collapses via .cockpit--mobile set by the component;
+   this belt-and-suspenders rule catches any host where the prop is missed. */
+body[data-mobile="true"] .cockpit:not(.cockpit--mobile) {
+  display: flex;
+  flex-direction: column;
+  grid-template: none;
+}
+
+/* Flow analysis metric grid collapses from auto-fit minmax to 1 col on mobile. */
+body[data-mobile="true"] .ticker-flow-grid {
+  grid-template-columns: 1fr;
+}
+
+body[data-mobile="true"] .regime-panel {
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-mobile="true"] .regime-strip {
+  display: flex;
+  flex-direction: column;
+}
+
+body[data-mobile="true"] button {
+  min-height: var(--touch-min);
+}
+
+/* AppBar profile avatar: .mobile-app-bar__avatar is the 44px tap-target link.
+   Inner image uses .mobile-app-bar__avatar-img; fallback text .mobile-app-bar__avatar-monogram.
+   (Full definitions are above at line ~10298 alongside the app-bar block.) */
 
