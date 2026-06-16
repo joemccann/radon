@@ -41,8 +41,16 @@ function rowSummary(row: OpenOrderDisplayRow): { title: string; subtitle: string
   return {
     title: `${o.contract.symbol} · ${o.action}`,
     subtitle: `${o.totalQuantity}x ${o.orderType}${o.tif ? ` · ${o.tif}` : ""}`,
-    price: o.limitPrice != null ? fmtPrice(o.limitPrice) : o.orderType === "MKT" ? "MKT" : "—",
+    price: o.limitPrice != null ? fmtPrice(o.limitPrice) : o.orderType === "MKT" ? "MKT" : "--",
   };
+}
+
+function rowAction(row: OpenOrderDisplayRow): "BUY" | "SELL" | null {
+  if (row.kind === "single") return row.order.action === "SELL" ? "SELL" : "BUY";
+  // For combos derive from the first leg's action
+  const first = row.orders[0];
+  if (!first) return null;
+  return first.action === "SELL" ? "SELL" : "BUY";
 }
 
 function pendingFor(row: OpenOrderDisplayRow, cancels: HasPermId, modifies: HasPermId) {
@@ -111,33 +119,35 @@ export default function MobileOrderList({
         {rows.map((row) => {
           const summary = rowSummary(row);
           const pending = pendingFor(row, cancels, modifies);
-          const tone = row.kind === "single" && row.order.action === "SELL" ? "warning" : "default";
+          const action = rowAction(row);
+          const tone = action === "SELL" ? "negative" : "positive";
           const id = row.kind === "combo" ? row.id : `single-${row.order.permId}`;
 
           return (
-            <Card
-              key={id}
-              tone={tone}
-              testId={`mobile-order-${id}`}
-              onClick={() => setActiveRow(row)}
-              ariaLabel={summary.title}
-            >
-              <div className="mobile-card__title-row">
-                <div className="mobile-card__title">
-                  <span>{summary.title}</span>
-                  {(pending.cancel || pending.modify) ? <Loader2 size={12} className="cancel-spinner" /> : null}
+            <div key={id} className="m-card-press">
+              <Card
+                tone={tone}
+                testId={`mobile-order-${id}`}
+                onClick={() => setActiveRow(row)}
+                ariaLabel={summary.title}
+              >
+                <div className="mobile-card__title-row">
+                  <div className="mobile-card__title">
+                    <span>{summary.title}</span>
+                    {(pending.cancel || pending.modify) ? <Loader2 size={12} className="cancel-spinner" /> : null}
+                  </div>
+                  <div className="mobile-card__pnl">
+                    <div className="mobile-card__pnl-value">{summary.price}</div>
+                  </div>
                 </div>
-                <div className="mobile-card__pnl">
-                  <div className="mobile-card__pnl-value">{summary.price}</div>
+                <div className="mobile-card__chevron-row">
+                  <span className="mobile-card__subtitle">{summary.subtitle}</span>
+                  <span className="mobile-card__subtitle">
+                    {pending.cancel ? "Cancelling..." : pending.modify ? "Modifying..." : (row.kind === "combo" ? row.status : row.order.status)}
+                  </span>
                 </div>
-              </div>
-              <div className="mobile-card__chevron-row">
-                <span className="mobile-card__subtitle">{summary.subtitle}</span>
-                <span className="mobile-card__subtitle">
-                  {pending.cancel ? "Cancelling…" : pending.modify ? "Modifying…" : (row.kind === "combo" ? row.status : row.order.status)}
-                </span>
-              </div>
-            </Card>
+              </Card>
+            </div>
           );
         })}
       </div>
@@ -148,11 +158,10 @@ export default function MobileOrderList({
           onClose={closeSheet}
           title={target.title}
           testId="mobile-order-action-sheet"
-        >
-          <div className="mobile-action-sheet">
+          footer={
             <button
               type="button"
-              className="mobile-action-sheet__item mobile-action-sheet__item--modify"
+              className="mobile-action-sheet__item m-submit--debit"
               disabled={!target.modifyEnabled || target.isPendingModify}
               onClick={() => {
                 if (!activeRow) return;
@@ -167,6 +176,8 @@ export default function MobileOrderList({
             >
               Modify limit price
             </button>
+          }
+          destructive={
             <button
               type="button"
               className="mobile-action-sheet__item mobile-action-sheet__item--cancel"
@@ -184,7 +195,9 @@ export default function MobileOrderList({
             >
               Cancel order
             </button>
-          </div>
+          }
+        >
+          <div />
         </BottomSheet>
       ) : null}
     </>

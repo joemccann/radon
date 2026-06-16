@@ -5,6 +5,7 @@ import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
 import type { OrderPrefill } from "@/lib/TickerDetailContext";
 import { fmtPrice } from "@/lib/positionUtils";
+import { useViewport } from "@/lib/useViewport";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "@/components/SingleLegOrderTicket";
 import { OrderRiskGate, type LinearOrderRiskInput } from "@/lib/order";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
@@ -45,6 +46,51 @@ type BookTabProps = {
    *  OrderBook; the cockpit supplies a handler that publishes to the ticket. */
   onPriceClick?: (p: Omit<OrderPrefill, "nonce">) => void;
 };
+
+/* ─── Mobile Quote Row (Bid / Mid / Ask 3-col grid) ─── */
+
+function MobileQuoteRow({
+  bid,
+  ask,
+  last,
+  lastLabel = "LAST",
+  bidSize,
+  askSize,
+}: {
+  bid: number | null;
+  ask: number | null;
+  last: number | null;
+  lastLabel?: string;
+  bidSize: number | null;
+  askSize: number | null;
+}) {
+  const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+  return (
+    <div className="ckp-quote-row">
+      <div className="ckp-quote-cell ckp-quote-cell--bid">
+        <span className="ckp-quote-label">BID</span>
+        <span className="ckp-quote-price positive">
+          {bid != null ? fmtPrice(bid) : "---"}
+        </span>
+        <span className="ckp-quote-sub">{bidSize != null ? `${bidSize}` : ""}</span>
+      </div>
+      <div className="ckp-quote-cell ckp-quote-cell--mid ckp-quote-cell--active">
+        <span className="ckp-quote-label">{lastLabel}</span>
+        <span className="ckp-quote-price">
+          {last != null ? fmtPrice(last) : mid != null ? fmtPrice(mid) : "---"}
+        </span>
+        <span className="ckp-quote-sub">MID {mid != null ? fmtPrice(mid) : "---"}</span>
+      </div>
+      <div className="ckp-quote-cell ckp-quote-cell--ask">
+        <span className="ckp-quote-label">ASK</span>
+        <span className="ckp-quote-price negative">
+          {ask != null ? fmtPrice(ask) : "---"}
+        </span>
+        <span className="ckp-quote-sub">{askSize != null ? `${askSize}` : ""}</span>
+      </div>
+    </div>
+  );
+}
 
 /* ─── L1 Order Book ─── */
 
@@ -374,6 +420,9 @@ export default function BookTab({
   bookOnly = false,
   onPriceClick,
 }: BookTabProps) {
+  const { isMobile, hasMounted } = useViewport();
+  const mobile = isMobile && hasMounted;
+
   const priceData = tickerPriceData ?? prices[ticker] ?? null;
   const bid = priceData?.bid ?? null;
   const ask = priceData?.ask ?? null;
@@ -392,7 +441,16 @@ export default function BookTab({
   // TimeAndSales header-only empty state handles.
   const trades: Trade[] = tape?.[resolvedBookKey] ?? [];
 
-  const l1Fallback = (
+  const l1Fallback = mobile ? (
+    <MobileQuoteRow
+      bid={bid}
+      ask={ask}
+      last={last}
+      lastLabel={lastLabel}
+      bidSize={priceData?.bidSize ?? null}
+      askSize={priceData?.askSize ?? null}
+    />
+  ) : (
     <L1OrderBook
       bid={bid}
       ask={ask}

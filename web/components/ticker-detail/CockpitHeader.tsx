@@ -6,6 +6,7 @@ import type { PortfolioPosition } from "@/lib/types";
 import { fmtPrice } from "@/lib/positionUtils";
 import { toneClass } from "@/lib/format";
 import { useWatchlist } from "@/lib/useWatchlist";
+import { useViewport } from "@/lib/useViewport";
 import StarToggle from "@/components/StarToggle";
 import type { DeckKey } from "./AssetCockpit";
 
@@ -37,6 +38,9 @@ export default function CockpitHeader({
   live,
   onDeckChange,
 }: CockpitHeaderProps) {
+  const { isMobile, hasMounted } = useViewport();
+  const mobile = isMobile && hasMounted;
+
   const { last, deltaPct, spreadAbs, spreadPct } = useMemo(() => {
     const q = quotePriceData;
     const lastVal = q?.last ?? null;
@@ -74,6 +78,42 @@ export default function CockpitHeader({
       setWatchBusy(false);
     }
   }, [ticker, toggleWatch]);
+
+  if (mobile) {
+    // Mobile: condensed strip — ticker + last + day chg + live dot + position chip.
+    // Spread is dropped to keep the single row thumb-readable; position chip links
+    // to the p-deck where the full summary lives.
+    return (
+      <div className="cockpit-head ckh--mobile">
+        <span className="ckh-sym mono">{ticker}</span>
+        <StarToggle
+          active={isWatched(ticker)}
+          busy={watchBusy}
+          onToggle={handleToggleWatch}
+          size="sm"
+        />
+        {live && <span className="ckh-live" aria-label="Live feed" />}
+        <span className="ckh-spacer" />
+        <span className={`ckh-last mono ${deltaTone}`}>
+          {last != null ? fmtPrice(last) : "---"}
+          {lastLabel && <span className="ckh-lastlabel">{lastLabel}</span>}
+        </span>
+        {deltaPct != null && (
+          <span className={`ckh-delta mono ${deltaTone}`}>
+            {deltaPct >= 0 ? "+" : ""}
+            {Math.abs(deltaPct).toFixed(2)}%
+          </span>
+        )}
+        <button
+          type="button"
+          className={`ckh-poschip tap-target ${position ? "held" : ""}`}
+          onClick={() => onDeckChange("p")}
+        >
+          {chipLabel}
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="cockpit-head">

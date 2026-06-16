@@ -9,12 +9,14 @@ import {
   detectStructure,
   getComboEntryAction,
   normalizeComboOrder,
+  formatExpiry,
 } from "@/lib/optionsChainUtils";
 import { normalizeOptionExpiry } from "@/lib/pricesProtocol";
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { PortfolioData } from "@/lib/types";
 import { fmtPrice } from "@/lib/positionUtils";
 import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
+import BuySellRow from "./BuySellRow";
 import BottomSheet from "./BottomSheet";
 
 type MobileOrderTicketProps = {
@@ -37,8 +39,23 @@ type MobileOrderTicketProps = {
 
 const PRICE_INCREMENT = 0.05;
 
-function formatLeg(leg: OrderLeg): string {
-  return `${leg.action} ${leg.quantity}× ${leg.right === "C" ? "Call" : "Put"} $${leg.strike}`;
+function legDescription(leg: OrderLeg): string {
+  return `${leg.quantity}x $${leg.strike} ${leg.right === "C" ? "Call" : "Put"} ${formatExpiry(leg.expiry)}`;
+}
+
+function legMidPrice(leg: OrderLeg, prices: Record<string, PriceData>): string {
+  // Build the option key to look up live bid/ask
+  const key = `${leg.expiry}_${leg.strike}_${leg.right}`;
+  // Try to find a matching price key in the prices map
+  const matchKey = Object.keys(prices).find((k) => k.includes(key));
+  if (matchKey) {
+    const pd = prices[matchKey];
+    if (pd?.bid != null && pd?.ask != null) {
+      return fmtPrice((pd.bid + pd.ask) / 2);
+    }
+    if (pd?.last != null) return fmtPrice(pd.last);
+  }
+  return leg.limitPrice != null ? fmtPrice(leg.limitPrice) : "---";
 }
 
 export default function MobileOrderTicket({
@@ -220,11 +237,19 @@ export default function MobileOrderTicket({
 
   if (!open) return null;
 
-  const submitLabel = submitting
-    ? "Placing…"
-    : isDebit === false
-      ? `Submit (Credit ${signedLimitPrice ? fmtPrice(Math.abs(signedLimitPrice)) : ""})`
-      : `Submit (Debit ${signedLimitPrice ? fmtPrice(Math.abs(signedLimitPrice)) : ""})`;
+  // Direction label sits ABOVE the price in the submit button.
+  // Net CREDIT -> red (.m-submit--credit); Net DEBIT -> green (.m-submit--debit).
+  const netIsCredit = isDebit === false;
+  const submitColorClass = isValidPrice
+    ? netIsCredit
+      ? "m-submit--credit"
+      : "m-submit--debit"
+    : "";
+
+  const directionLabel = netIsCredit ? "SELL TO OPEN" : "BUY TO OPEN";
+  const netLabel = netIsCredit
+    ? `NET CREDIT ${signedLimitPrice && Number.isFinite(signedLimitPrice) ? fmtPrice(Math.abs(signedLimitPrice)) : ""}`
+    : `NET DEBIT ${signedLimitPrice && Number.isFinite(signedLimitPrice) ? fmtPrice(Math.abs(signedLimitPrice)) : ""}`;
 
   return (
     <BottomSheet
@@ -232,31 +257,54 @@ export default function MobileOrderTicket({
       onClose={onClose}
       title={`${ticker.toUpperCase()} · ${structure || "Order"}`}
       testId="mobile-order-ticket"
+      maxHeight="82vh"
       footer={
         <>
           {error ? <div className="mobile-ticket__error" data-testid="mobile-order-ticket-error">{error}</div> : null}
           {success ? <div className="mobile-ticket__success" data-testid="mobile-order-ticket-success">{success}</div> : null}
+          {/* Risk summary pinned just above the footer submit */}
+          <div className="mobile-ticket__risk" data-testid="mobile-order-ticket-risk">
+            <OrderRiskGate
+              input={riskInput}
+              portfolio={portfolio}
+              surface="mobile-ticket"
+              variant="info"
+            />
+          </div>
           <button
             type="button"
-            className="mobile-ticket__submit"
+            className={`mobile-ticket__submit${submitColorClass ? ` ${submitColorClass}` : ""}`}
             onClick={handleSubmit}
             disabled={!isValidPrice || submitting || legs.length === 0}
             data-testid="mobile-order-ticket-submit"
           >
-            {submitLabel}
+            {submitting ? (
+              "Placing..."
+            ) : (
+              <span className="mobile-ticket__submit-inner">
+                <span className="mobile-ticket__submit-direction">{directionLabel}</span>
+                <span className="mobile-ticket__submit-net">{netLabel}</span>
+              </span>
+            )}
           </button>
         </>
       }
     >
       <div className="mobile-ticket">
+        {/* 1. Legs — using BuySellRow for visual accent + 44px touch targets */}
         <div className="mobile-ticket__legs" data-testid="mobile-order-ticket-legs">
           {legs.map((leg) => (
-            <div key={leg.id} className="mobile-ticket__leg">
-              <div className="mobile-ticket__leg-desc">{formatLeg(leg)}</div>
+            <div key={leg.id} className="mobile-ticket__leg-row">
+              <BuySellRow
+                side={leg.action}
+                label={legDescription(leg)}
+                price={legMidPrice(leg, prices)}
+                sub={`${leg.right === "C" ? "Call" : "Put"} · ${formatExpiry(leg.expiry)}`}
+              />
               <div className="mobile-ticket__leg-controls">
                 <button
                   type="button"
-                  className="mobile-ticket__qty-btn"
+                  className="mobile-ticket__qty-btn tap-target"
                   aria-label="Decrease quantity"
                   onClick={() => onUpdateLeg(leg.id, { quantity: Math.max(1, leg.quantity - 1) })}
                   data-testid={`mobile-order-ticket-leg-${leg.id}-minus`}
@@ -266,7 +314,7 @@ export default function MobileOrderTicket({
                 <span className="mobile-ticket__qty-value">{leg.quantity}</span>
                 <button
                   type="button"
-                  className="mobile-ticket__qty-btn"
+                  className="mobile-ticket__qty-btn tap-target"
                   aria-label="Increase quantity"
                   onClick={() => onUpdateLeg(leg.id, { quantity: leg.quantity + 1 })}
                   data-testid={`mobile-order-ticket-leg-${leg.id}-plus`}
@@ -275,7 +323,7 @@ export default function MobileOrderTicket({
                 </button>
                 <button
                   type="button"
-                  className="mobile-ticket__leg-remove"
+                  className="mobile-ticket__leg-remove tap-target"
                   aria-label="Remove leg"
                   onClick={() => onRemoveLeg(leg.id)}
                   data-testid={`mobile-order-ticket-leg-${leg.id}-remove`}
@@ -287,60 +335,53 @@ export default function MobileOrderTicket({
           ))}
         </div>
 
-        <div className="mobile-ticket__quote">
-          <span className="mobile-ticket__quote-label">Bid</span>
-          <span className="mobile-ticket__quote-value">{signedQuote.bid != null ? fmtPrice(Math.abs(signedQuote.bid)) : "—"}</span>
-          <span className="mobile-ticket__quote-label">Mid</span>
-          <span className="mobile-ticket__quote-value">{signedQuote.mid != null ? fmtPrice(Math.abs(signedQuote.mid)) : "—"}</span>
-          <span className="mobile-ticket__quote-label">Ask</span>
-          <span className="mobile-ticket__quote-value">{signedQuote.ask != null ? fmtPrice(Math.abs(signedQuote.ask)) : "—"}</span>
+        {/* 2. Price stepper — after legs */}
+        <div className="mobile-ticket__price-section">
+          <div className="mobile-ticket__quote">
+            <span className="mobile-ticket__quote-label">Bid</span>
+            <span className="mobile-ticket__quote-value">{signedQuote.bid != null ? fmtPrice(Math.abs(signedQuote.bid)) : "—"}</span>
+            <span className="mobile-ticket__quote-label">Mid</span>
+            <span className="mobile-ticket__quote-value">{signedQuote.mid != null ? fmtPrice(Math.abs(signedQuote.mid)) : "—"}</span>
+            <span className="mobile-ticket__quote-label">Ask</span>
+            <span className="mobile-ticket__quote-value">{signedQuote.ask != null ? fmtPrice(Math.abs(signedQuote.ask)) : "—"}</span>
+          </div>
+
+          <div className="mobile-ticket__price-row">
+            <span className="mobile-ticket__price-label">Limit</span>
+            <button
+              type="button"
+              className="mobile-ticket__price-btn"
+              onClick={() => adjustPrice(-PRICE_INCREMENT)}
+              aria-label="Decrease limit price"
+              data-testid="mobile-order-ticket-price-down"
+            >
+              <Minus size={18} aria-hidden />
+            </button>
+            <input
+              className="mobile-ticket__price-input"
+              type="text"
+              inputMode="decimal"
+              value={limitPriceText}
+              onChange={(event) => {
+                setLimitPriceText(event.target.value);
+                setPriceManuallySet(true);
+              }}
+              data-testid="mobile-order-ticket-price-input"
+              aria-label="Limit price"
+            />
+            <button
+              type="button"
+              className="mobile-ticket__price-btn"
+              onClick={() => adjustPrice(PRICE_INCREMENT)}
+              aria-label="Increase limit price"
+              data-testid="mobile-order-ticket-price-up"
+            >
+              <Plus size={18} aria-hidden />
+            </button>
+          </div>
         </div>
 
-        <div className="mobile-ticket__price-row">
-          <span className="mobile-ticket__price-label">Limit</span>
-          <button
-            type="button"
-            className="mobile-ticket__price-btn"
-            onClick={() => adjustPrice(-PRICE_INCREMENT)}
-            aria-label="Decrease limit price"
-            data-testid="mobile-order-ticket-price-down"
-          >
-            <Minus size={18} aria-hidden />
-          </button>
-          <input
-            className="mobile-ticket__price-input"
-            type="text"
-            inputMode="decimal"
-            value={limitPriceText}
-            onChange={(event) => {
-              setLimitPriceText(event.target.value);
-              setPriceManuallySet(true);
-            }}
-            data-testid="mobile-order-ticket-price-input"
-            aria-label="Limit price"
-          />
-          <button
-            type="button"
-            className="mobile-ticket__price-btn"
-            onClick={() => adjustPrice(PRICE_INCREMENT)}
-            aria-label="Increase limit price"
-            data-testid="mobile-order-ticket-price-up"
-          >
-            <Plus size={18} aria-hidden />
-          </button>
-        </div>
-
-        {/* Risk summary owned by `<OrderRiskGate>` — covers WULF/RR/AAOI
-            bug class on mobile (was a structural gap before this commit). */}
-        <div className="mobile-ticket__risk" data-testid="mobile-order-ticket-risk">
-          <OrderRiskGate
-            input={riskInput}
-            portfolio={portfolio}
-            surface="mobile-ticket"
-            variant="info"
-          />
-        </div>
-
+        {/* 3. TIF — after price stepper */}
         <div className="mobile-ticket__tif" role="radiogroup" aria-label="Time in force">
           {(["DAY", "GTC"] as const).map((value) => (
             <button
@@ -356,6 +397,11 @@ export default function MobileOrderTicket({
             </button>
           ))}
         </div>
+
+        {/* Risk summary is now pinned in the footer (above submit).
+            This empty spacer keeps the body-scroll content from running
+            under the footer when the body is near the bottom of the sheet. */}
+        <div style={{ height: 8 }} aria-hidden />
       </div>
     </BottomSheet>
   );

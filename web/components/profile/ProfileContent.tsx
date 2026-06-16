@@ -69,6 +69,18 @@ function Avatar({
   );
 }
 
+/* ─── Source tag pill for bookmarks (mobile) ─────────── */
+
+function sourceDomain(source: string | null): string {
+  if (!source) return "SOURCE";
+  try {
+    const u = new URL(source.startsWith("http") ? source : `https://${source}`);
+    return u.hostname.replace(/^www\./, "").toUpperCase();
+  } catch {
+    return source.slice(0, 16).toUpperCase();
+  }
+}
+
 export default function ProfileContent({ prices }: { prices?: Record<string, PriceData> }) {
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
@@ -151,12 +163,117 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
     }
   }, [usernameDraft, profile?.username, validateUsername, saveProfile]);
 
+  if (compact) {
+    return (
+      <div className="profile-surface profile-surface--mobile">
+        {/* ── Mobile header: avatar LEFT of username ── */}
+        <section className="profile-header panel">
+          <div className="profile-m-identity">
+            <div className="profile-avatar profile-m-avatar" data-busy={photoBusy ? "true" : undefined}>
+              <Avatar url={avatarUrl} initials={initials} size={48} />
+              {photoBusy ? <span className="profile-avatar__spinner" aria-hidden /> : null}
+            </div>
+            <div className="profile-m-identity__fields">
+              <label className="profile-field">
+                <span className="profile-field__label">Username</span>
+                <input
+                  className={`profile-field__input${usernameError ? " profile-field__input--error" : ""}`}
+                  value={usernameValue}
+                  placeholder="Set a display name"
+                  spellCheck={false}
+                  disabled={usernameSaving}
+                  onChange={(e) => {
+                    setUsernameDraft(e.target.value);
+                    setUsernameError(validateUsername(e.target.value));
+                  }}
+                  onBlur={commitUsername}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") e.currentTarget.blur();
+                  }}
+                />
+                {usernameError ? (
+                  <span className="profile-field__error">{usernameError}</span>
+                ) : (
+                  <span className="profile-field__hint">Saves on blur or Enter.</span>
+                )}
+              </label>
+              <div className="profile-field">
+                <span className="profile-field__label">Email</span>
+                <span className="profile-field__readonly">{email ?? "Not available"}</span>
+              </div>
+            </div>
+          </div>
+          {photoError ? <span className="profile-field__error" style={{ display: "block", marginTop: "8px" }}>{photoError}</span> : null}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            className="profile-file-input"
+            onChange={onPhotoSelected}
+          />
+        </section>
+
+        {/* ── Mobile tab row: full-width segment control ── */}
+        <div className="m-segment" role="tablist" aria-label="Profile sections">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "bookmarks"}
+            className={`m-segment__item${tab === "bookmarks" ? " m-segment__item--active" : ""}`}
+            onClick={() => setTab("bookmarks")}
+          >
+            Bookmarks
+            <span className="profile-tab__count">{bookmarks.length}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={tab === "watchlist"}
+            className={`m-segment__item${tab === "watchlist" ? " m-segment__item--active" : ""}`}
+            onClick={() => setTab("watchlist")}
+          >
+            Watchlist
+            <span className="profile-tab__count">{watchlist.length}</span>
+          </button>
+        </div>
+
+        {tab === "bookmarks" ? (
+          <BookmarksPanelMobile
+            bookmarks={bookmarks}
+            isLoading={bookmarksLoading}
+            onUnstar={(b) => toggleBookmark({ id: b.post_id, snapshot: b.snapshot })}
+          />
+        ) : (
+          <WatchlistPanelMobile
+            watchlist={watchlist}
+            isLoading={watchlistLoading}
+            prices={prices}
+            onRemove={(symbol) => toggleWatch(symbol)}
+          />
+        )}
+
+        {/* ── Sticky Save Profile button ── */}
+        <div className="m-sticky-cta">
+          <button
+            type="button"
+            className="profile-m-save-btn"
+            onClick={onPickPhoto}
+            disabled={photoBusy}
+          >
+            {photoBusy ? "Processing..." : "Change photo"}
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  /* ── Desktop layout ── */
   return (
-    <div className={`profile-surface${compact ? " profile-surface--mobile" : ""}`}>
+    <div className="profile-surface">
       <section className="profile-header panel">
         <div className="profile-header__identity">
           <div className="profile-avatar" data-busy={photoBusy ? "true" : undefined}>
-            <Avatar url={avatarUrl} initials={initials} size={compact ? 72 : 96} />
+            <Avatar url={avatarUrl} initials={initials} size={96} />
             {photoBusy ? <span className="profile-avatar__spinner" aria-hidden /> : null}
           </div>
           <div className="profile-header__fields">
@@ -250,6 +367,8 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
   );
 }
 
+/* ─── Desktop BookmarksPanel ─────────────────────────── */
+
 function BookmarksPanel({
   bookmarks,
   isLoading,
@@ -298,6 +417,55 @@ function BookmarksPanel({
   );
 }
 
+/* ─── Mobile BookmarksPanel ──────────────────────────── */
+
+function BookmarksPanelMobile({
+  bookmarks,
+  isLoading,
+  onUnstar,
+}: {
+  bookmarks: Bookmark[];
+  isLoading: boolean;
+  onUnstar: (bookmark: Bookmark) => void | Promise<void>;
+}) {
+  if (isLoading && bookmarks.length === 0) {
+    return <div className="profile-empty">Loading bookmarks...</div>;
+  }
+  if (bookmarks.length === 0) {
+    return (
+      <div className="profile-empty">
+        No bookmarks yet. Star an article in the feed to save it here.
+      </div>
+    );
+  }
+  return (
+    <ul className="profile-list" aria-label="Saved articles">
+      {bookmarks.map((bookmark) => {
+        const view = readSnapshot(bookmark);
+        const domain = sourceDomain(view.source);
+        return (
+          <li className="profile-bookmark panel profile-bookmark--mobile" key={bookmark.id}>
+            <div className="profile-bookmark__body">
+              <div className="profile-bookmark__mobile-meta">
+                <span className="m-pill profile-bookmark__source-pill">{domain}</span>
+                {view.timestamp ? (
+                  <span className="profile-bookmark__time">{formatRelative(view.timestamp)}</span>
+                ) : null}
+              </div>
+              <span className="profile-bookmark__headline profile-bookmark__headline--mobile">
+                {view.headline}
+              </span>
+            </div>
+            <StarToggle active onToggle={() => onUnstar(bookmark)} label="SAVED" />
+          </li>
+        );
+      })}
+    </ul>
+  );
+}
+
+/* ─── Desktop WatchlistPanel ─────────────────────────── */
+
 function WatchlistPanel({
   watchlist,
   isLoading,
@@ -335,6 +503,48 @@ function WatchlistPanel({
     </ul>
   );
 }
+
+/* ─── Mobile WatchlistPanel ──────────────────────────── */
+
+function WatchlistPanelMobile({
+  watchlist,
+  isLoading,
+  prices,
+  onRemove,
+}: {
+  watchlist: WatchlistEntry[];
+  isLoading: boolean;
+  prices?: Record<string, PriceData>;
+  onRemove: (symbol: string) => void | Promise<void>;
+}) {
+  const { navigateToTicker } = useTickerNav();
+
+  if (isLoading && watchlist.length === 0) {
+    return <div className="profile-empty">Loading watchlist...</div>;
+  }
+  if (watchlist.length === 0) {
+    return (
+      <div className="profile-empty">
+        No symbols watched yet. Star a ticker to track it here.
+      </div>
+    );
+  }
+  return (
+    <ul className="profile-list" aria-label="Watched symbols">
+      {watchlist.map((entry) => (
+        <WatchRowMobile
+          key={entry.id}
+          entry={entry}
+          price={prices?.[entry.symbol]}
+          onOpen={() => navigateToTicker(entry.symbol)}
+          onRemove={() => onRemove(entry.symbol)}
+        />
+      ))}
+    </ul>
+  );
+}
+
+/* ─── Desktop WatchRow ───────────────────────────────── */
 
 function WatchRow({
   entry,
@@ -375,6 +585,62 @@ function WatchRow({
           <span className="profile-watch__last profile-watch__last--muted">---</span>
         )}
       </span>
+      <StarToggle active onToggle={onRemove} size="sm" />
+    </li>
+  );
+}
+
+/* ─── Mobile WatchRow ────────────────────────────────── */
+
+function WatchRowMobile({
+  entry,
+  price,
+  onOpen,
+  onRemove,
+}: {
+  entry: WatchlistEntry;
+  price?: PriceData;
+  onOpen: () => void;
+  onRemove: () => void | Promise<void>;
+}) {
+  const change = useMemo(() => {
+    if (!price || price.last == null || price.close == null || price.close === 0) return null;
+    const abs = price.last - price.close;
+    const pct = (abs / Math.abs(price.close)) * 100;
+    return { abs, pct, tone: abs >= 0 ? "positive" : "negative" as const };
+  }, [price]);
+
+  return (
+    <li className="profile-watch panel profile-watch--mobile m-card-press">
+      {/* Full-row press target navigates to ticker */}
+      <button
+        type="button"
+        className="profile-watch-m__press"
+        onClick={onOpen}
+        aria-label={`Open ${entry.symbol}`}
+      >
+        <div className="profile-watch-m__primary">
+          <span className="profile-watch__symbol" style={{ pointerEvents: "none" }}>{entry.symbol}</span>
+          {entry.sector ? (
+            <span className="profile-watch-m__sector">{entry.sector}</span>
+          ) : null}
+        </div>
+        <span className="profile-watch__price">
+          {price?.last != null ? (
+            <>
+              <span className="profile-watch__last">{price.last.toFixed(2)}</span>
+              {change ? (
+                <span className={`profile-watch__chg profile-watch__chg--${change.tone}`}>
+                  {change.abs >= 0 ? "+" : ""}
+                  {change.pct.toFixed(2)}%
+                </span>
+              ) : null}
+            </>
+          ) : (
+            <span className="profile-watch__last profile-watch__last--muted">---</span>
+          )}
+        </span>
+      </button>
       <StarToggle active onToggle={onRemove} size="sm" />
     </li>
   );

@@ -10,13 +10,13 @@ import {
   fmtPrice,
   resolveMarketValue,
   resolveEntryCost,
-  getMultiplier,
   getOptionDailyChg,
   getTodayPnlDollars,
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
 import TickerLink from "@/components/TickerLink";
 import Card from "./Card";
+import MetricCell from "./MetricCell";
 
 type MobilePositionListProps = {
   positions: PortfolioPosition[];
@@ -24,13 +24,13 @@ type MobilePositionListProps = {
   showExpiry?: boolean;
 };
 
-type ToneKey = "positive" | "negative" | "muted";
+type ToneKey = "pos" | "neg" | "mut";
 
 function toneFor(value: number | null | undefined): ToneKey {
-  if (value == null || !Number.isFinite(value)) return "muted";
-  if (value > 0) return "positive";
-  if (value < 0) return "negative";
-  return "muted";
+  if (value == null || !Number.isFinite(value)) return "mut";
+  if (value > 0) return "pos";
+  if (value < 0) return "neg";
+  return "mut";
 }
 
 function fmtPnl(value: number | null | undefined): string {
@@ -87,66 +87,73 @@ function PositionCard({ pos, prices, showExpiry }: { pos: PortfolioPosition; pri
   const dailyChg = isStock ? null : getOptionDailyChg(pos, prices);
 
   const pnlTone = toneFor(pnl);
-  const cardTone = pnlTone === "positive" ? "positive" : pnlTone === "negative" ? "negative" : "default";
+  const cardTone = pnlTone === "pos" ? "positive" : pnlTone === "neg" ? "negative" : "default";
 
   const handleToggle = () => setExpanded((prev) => !prev);
 
+  // Build compact subtitle: contracts x direction [· expiry] [· Day +x%]
+  const subtitleParts: string[] = [`${pos.contracts}x ${pos.direction}`];
+  if (showExpiry && pos.expiry && pos.expiry !== "N/A") subtitleParts.push(pos.expiry);
+  if (dailyChg != null) subtitleParts.push(`Day ${fmtPct(dailyChg)}`);
+
   return (
-    <Card
-      onClick={handleToggle}
-      tone={cardTone}
-      testId={`mobile-position-${pos.ticker}`}
-      ariaLabel={`${pos.ticker} ${pos.structure}`}
-    >
-      <div className="mobile-card__title-row">
-        <div className="mobile-card__title">
-          <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
-            <TickerLink ticker={pos.ticker} positionId={pos.id} />
-          </span>
-          <span className="mobile-card__subtitle">{pos.structure}</span>
+    <div className="m-card-press" data-testid={`mobile-position-${pos.ticker}`}>
+      <Card
+        onClick={handleToggle}
+        tone={cardTone}
+        ariaLabel={`${pos.ticker} ${pos.structure}`}
+      >
+        {/* Title row: ticker + structure subtitle + P&L + chevron */}
+        <div className="mobile-card__title-row">
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+                <TickerLink ticker={pos.ticker} positionId={pos.id} />
+              </span>
+              <span className="mobile-card__subtitle" style={{ fontSize: 11 }}>{subtitleParts.join(" · ")}</span>
+            </div>
+            <span className="mobile-card__subtitle" style={{ fontSize: 11 }}>{pos.structure}</span>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+            <div style={{ textAlign: "right" }}>
+              <div style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontWeight: 600, fontSize: 14, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
+                {fmtPnl(pnl)}
+              </div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
+                {fmtPct(pnlPct)}
+              </div>
+            </div>
+            <span className="mobile-card__chevron" aria-hidden>
+              {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+            </span>
+          </div>
         </div>
-        <div className={`mobile-card__pnl mobile-card-row__value--${pnlTone}`}>
-          <div className="mobile-card__pnl-value">{fmtPnl(pnl)}</div>
-          <div className="mobile-card__pnl-pct">{fmtPct(pnlPct)}</div>
-        </div>
-      </div>
 
-      <div className="mobile-card__metrics">
-        <div className="mobile-card__metric">
-          <span className="mobile-card__metric-label">MV</span>
-          <span className="mobile-card__metric-value">{mv != null ? fmtUsd(mv) : "—"}</span>
+        {/* 2x2 MetricCell grid */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", marginTop: 8 }}>
+          <MetricCell label="MV" value={mv != null ? fmtUsd(mv) : "—"} />
+          <MetricCell label="EC" value={fmtUsd(Math.abs(ec))} />
+          <MetricCell
+            label="Today"
+            value={fmtPnl(todayPnl)}
+            tone={toneFor(todayPnl)}
+          />
+          <MetricCell
+            label="P&L %"
+            value={fmtPct(pnlPct)}
+            tone={pnlTone}
+          />
         </div>
-        <div className="mobile-card__metric">
-          <span className="mobile-card__metric-label">EC</span>
-          <span className="mobile-card__metric-value">{fmtUsd(Math.abs(ec))}</span>
-        </div>
-        <div className="mobile-card__metric">
-          <span className="mobile-card__metric-label">Today</span>
-          <span className={`mobile-card__metric-value mobile-card__metric-value--${toneFor(todayPnl)}`}>
-            {fmtPnl(todayPnl)}
-          </span>
-        </div>
-      </div>
 
-      <div className="mobile-card__chevron-row">
-        <span className="mobile-card__subtitle">
-          {pos.contracts}x {pos.direction}
-          {showExpiry && pos.expiry && pos.expiry !== "N/A" ? ` · ${pos.expiry}` : ""}
-          {dailyChg != null ? ` · Day ${fmtPct(dailyChg)}` : ""}
-        </span>
-        <span className="mobile-card__chevron" aria-hidden>
-          {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-        </span>
-      </div>
-
-      {expanded ? (
-        <div className="mobile-card__detail" data-testid={`mobile-position-${pos.ticker}-legs`}>
-          {pos.legs.map((leg, idx) => (
-            <LegLine key={idx} leg={leg} prices={prices} ticker={pos.ticker} expiry={pos.expiry} />
-          ))}
-        </div>
-      ) : null}
-    </Card>
+        {expanded ? (
+          <div className="mobile-card__detail" data-testid={`mobile-position-${pos.ticker}-legs`}>
+            {pos.legs.map((leg, idx) => (
+              <LegLine key={idx} leg={leg} prices={prices} ticker={pos.ticker} expiry={pos.expiry} />
+            ))}
+          </div>
+        ) : null}
+      </Card>
+    </div>
   );
 }
 
@@ -183,7 +190,9 @@ function LegLine({ leg, prices, ticker, expiry }: { leg: PortfolioLeg; prices?: 
       <div className="mobile-card__leg-desc">{description}</div>
       <div className="mobile-card__leg-metrics">
         <span className="mobile-card__leg-meta">{marketPrice != null ? fmtPrice(marketPrice) : "—"}</span>
-        <span className={`mobile-card__leg-pnl mobile-card-row__value--${tone}`}>{fmtPnl(legPnl)}</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontSize: 12, color: tone === "pos" ? "var(--positive)" : tone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
+          {fmtPnl(legPnl)}
+        </span>
       </div>
     </div>
   );

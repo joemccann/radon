@@ -2,6 +2,7 @@
 
 import { useState, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
+import { useViewport } from "@/lib/useViewport";
 import DashboardNewsFeed from "@/components/DashboardNewsFeed";
 import { PortfolioSnapshotCard } from "./PortfolioSnapshotCard";
 import { OrdersSnapshotCard } from "./OrdersSnapshotCard";
@@ -26,16 +27,22 @@ function DashboardSection({
   children: ReactNode;
 }) {
   const [open, setOpen] = useState(true);
+  const { isMobile, hasMounted } = useViewport();
+  const mobile = isMobile && hasMounted;
+
   return (
     <section className={`dashboard-section dashboard-section--${id}`} data-testid={`dashboard-section-${id}`}>
       <button
         type="button"
-        className="dashboard-section__toggle"
+        // On mobile: give the toggle a full 44px tap target; suppress the label
+        // overhead so only the chevron + count remain as a compact collapse affordance.
+        className={`dashboard-section__toggle${mobile ? " tap-target" : ""}`}
         aria-expanded={open}
         aria-controls={`dashboard-section-body-${id}`}
+        aria-label={mobile ? label : undefined}
         onClick={() => setOpen((prev) => !prev)}
       >
-        <span className="dashboard-section__title">{label}</span>
+        {!mobile && <span className="dashboard-section__title">{label}</span>}
         <span className="dashboard-section__meta">
           {count ? <span>{count}</span> : null}
           {open ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}

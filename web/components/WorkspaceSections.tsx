@@ -54,6 +54,7 @@ import MobileOrderList from "./mobile/MobileOrderList";
 import MobileBlotterList from "./mobile/MobileBlotterList";
 import MobileExecutedList from "./mobile/MobileExecutedList";
 import MobileJournalList from "./mobile/MobileJournalList";
+import SignalCard from "./mobile/SignalCard";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable, {
   POSITION_COLUMNS,
@@ -846,32 +847,78 @@ function FlowTable({ rows, lastColumn }: { rows: FlowAnalysisPosition[]; lastCol
   );
 }
 
-function FlowMobileCards({ rows, lastColumn }: { rows: FlowAnalysisPosition[]; lastColumn: string }) {
+/* ── Inline buy_ratio sparkline (mobile) ── */
+function MobileFlowSparkline({ ratios }: { ratios?: { date: string; buy_ratio: number | null }[] }) {
+  if (!ratios || ratios.length === 0) return null;
+  const maxH = 18;
+  return (
+    <svg
+      width={ratios.length * 5}
+      height={maxH + 2}
+      aria-hidden="true"
+      style={{ display: "inline-block", verticalAlign: "middle", marginLeft: 4 }}
+    >
+      {ratios.map((d, i) => {
+        const r = d.buy_ratio;
+        const h = r == null ? 2 : Math.max(2, Math.round(r * maxH));
+        const fill = r == null ? "var(--text-muted)" : r >= 0.55 ? "var(--positive)" : r <= 0.45 ? "var(--negative)" : "var(--warn)";
+        return (
+          <rect
+            key={i}
+            x={i * 5}
+            y={maxH + 2 - h}
+            width={3}
+            height={h}
+            rx={1}
+            fill={fill}
+          />
+        );
+      })}
+    </svg>
+  );
+}
+
+function flowLabelTone(flowClass: string): "pos" | "neg" | "warn" | "mut" {
+  if (flowClass === "accum" || flowClass === "bullish") return "pos";
+  if (flowClass === "distrib" || flowClass === "bearish") return "neg";
+  if (flowClass === "lean-bullish" || flowClass === "lean-bearish") return "warn";
+  return "mut";
+}
+
+function FlowMobileCards({ rows }: { rows: FlowAnalysisPosition[] }) {
   const { sorted } = useSort(rows, flowPosExtract);
   return (
-    <div className="mobile-signal-list" data-testid="mobile-flow-list">
-      {sorted.map((item) => (
-        <article className="mobile-signal-card" key={`${item.ticker}-${item.position}`}>
-          <div className="mobile-signal-card__head">
-            <TickerLink ticker={item.ticker} />
-            <span className={`pill ${item.flow_class}`}>{item.flow_label}</span>
-          </div>
-          <div className="mobile-signal-card__body">
-            <div>
-              <span className="mobile-signal-card__label">Position</span>
-              <span>{item.position}</span>
-            </div>
-            <div>
-              <span className="mobile-signal-card__label">Strength</span>
-              <span>{item.strength}</span>
-            </div>
-          </div>
-          <div className="mobile-signal-card__note">
-            <span className="mobile-signal-card__label">{lastColumn}</span>
-            <span>{item.note}</span>
-          </div>
-        </article>
-      ))}
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }} data-testid="mobile-flow-list">
+      {sorted.map((item) => {
+        const buyPct = item.buy_ratio != null ? Math.round(item.buy_ratio * 100) : null;
+        return (
+          <SignalCard
+            key={`${item.ticker}-${item.position}`}
+            ticker={item.ticker}
+            score={Math.min(100, Math.max(0, Math.round(item.strength)))}
+            signals={[
+              {
+                label: item.flow_label,
+                tone: flowLabelTone(item.flow_class),
+              },
+            ]}
+            stats={[
+              {
+                label: "Position",
+                value: item.position,
+              },
+              {
+                label: "Buy Ratio",
+                value: buyPct != null ? `${buyPct}%` : "---",
+              },
+              {
+                label: "Strength",
+                value: String(item.strength),
+              },
+            ]}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -879,7 +926,7 @@ function FlowMobileCards({ rows, lastColumn }: { rows: FlowAnalysisPosition[]; l
 function ResponsiveFlowTable({ rows, lastColumn }: { rows: FlowAnalysisPosition[]; lastColumn: string }) {
   const { isMobile, hasMounted } = useViewport();
   if (hasMounted && isMobile) {
-    return <FlowMobileCards rows={rows} lastColumn={lastColumn} />;
+    return <FlowMobileCards rows={rows} />;
   }
   return (
     <div className="table-wrap">
@@ -905,8 +952,12 @@ function FlowSections({ tickerParam }: { tickerParam?: string }) {
   );
 }
 
+type FlowSegment = "supports" | "against" | "watch" | "neutral";
+
 function FlowSectionsBody() {
   const { data, syncing, error, lastSync } = useFlowAnalysis(true);
+  const { isMobile, hasMounted } = useViewport();
+  const [activeSegment, setActiveSegment] = useState<FlowSegment>("supports");
 
   const supportsArr = data?.supports ?? [];
   const againstArr = data?.against ?? [];
@@ -914,8 +965,91 @@ function FlowSectionsBody() {
   const neutralArr = data?.neutral ?? [];
   const totalScanned = data?.positions_scanned ?? 0;
 
-  // Action items = against positions (flow contradicts trade direction)
   const actionItems = againstArr.filter((p) => p.strength >= 15);
+
+  if (hasMounted && isMobile) {
+    const segmentRows: Record<FlowSegment, FlowAnalysisPosition[]> = {
+      supports: supportsArr,
+      against: againstArr,
+      watch: watchArr,
+      neutral: neutralArr,
+    };
+    const segmentLabels: { key: FlowSegment; label: string }[] = [
+      { key: "supports", label: "Supports" },
+      { key: "against", label: "Against" },
+      { key: "watch", label: "Watch" },
+      { key: "neutral", label: "Neutral" },
+    ];
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {error && (
+          <div style={{ padding: "8px 16px" }}>
+            <div className="alert-item bearish">{error}</div>
+          </div>
+        )}
+        {actionItems.length > 0 && (
+          <div style={{ margin: "8px 16px" }}>
+            <div className="alert-box">
+              <div className="alert-title">
+                <TriangleAlert size={14} />
+                ACTION ITEMS
+              </div>
+              {actionItems.map((item) => (
+                <div key={`${item.ticker}-${item.position}`} className="alert-item">
+                  <span className="alert-ticker">{item.ticker}</span> — {item.position}: {item.note}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Segment control */}
+        <div className="m-segment" role="tablist" aria-label="Flow sections">
+          {segmentLabels.map(({ key, label }) => (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={activeSegment === key}
+              className={`m-segment__item${activeSegment === key ? " m-segment__item--active" : ""}`}
+              onClick={() => setActiveSegment(key)}
+              type="button"
+            >
+              {label}
+              {segmentRows[key].length > 0 && (
+                <span
+                  style={{
+                    marginLeft: 4,
+                    fontSize: 10,
+                    fontFamily: "var(--font-mono)",
+                    opacity: 0.7,
+                  }}
+                >
+                  {segmentRows[key].length}
+                </span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        <div style={{ padding: "12px 16px" }}>
+          {segmentRows[activeSegment].length > 0 ? (
+            <FlowMobileCards rows={segmentRows[activeSegment]} />
+          ) : (
+            <div className="alert-item" style={{ textAlign: "center", padding: "24px 0" }}>
+              {syncing ? "Scanning portfolio flow..." : `No ${activeSegment} positions`}
+            </div>
+          )}
+        </div>
+
+        {lastSync && (
+          <div className="report-meta" style={{ padding: "0 16px 12px", margin: 0 }}>
+            {new Date(lastSync).toLocaleTimeString()} · {totalScanned} positions
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1224,11 +1358,24 @@ const scannerSigExtract = (item: ScannerSignal, key: ScannerSortKey): string | n
   }
 };
 
+function scannerSignalTone(signal: string): "pos" | "warn" | "neg" {
+  if (signal === "STRONG") return "pos";
+  if (signal === "MODERATE") return "warn";
+  return "neg";
+}
+
+function scannerDirTone(dir: string): "pos" | "neg" | "mut" {
+  if (dir === "ACCUMULATION") return "pos";
+  if (dir === "DISTRIBUTION") return "neg";
+  return "mut";
+}
+
 function ScannerSections() {
-  const { data, syncing, error, lastSync } = useScanner(true);
+  const { data, syncing, error, lastSync, syncNow } = useScanner(true);
   const signals = data?.top_signals ?? [];
   const { sorted, sort, toggle } = useSort(signals, scannerSigExtract);
   const { isMobile, hasMounted } = useViewport();
+  const [sortKey, setSortKey] = useState<ScannerSortKey>("score");
 
   const signalClass = (signal: string) => {
     if (signal === "STRONG") return "bullish";
@@ -1241,6 +1388,173 @@ function ScannerSections() {
     if (dir === "DISTRIBUTION") return "distrib";
     return "neutral";
   };
+
+  const mobileSortKeys: { key: ScannerSortKey; label: string }[] = [
+    { key: "score", label: "Score" },
+    { key: "strength", label: "Strength" },
+    { key: "buy_ratio", label: "Buy %" },
+    { key: "num_prints", label: "Prints" },
+  ];
+
+  if (hasMounted && isMobile) {
+    const mobileSorted = [...signals].sort((a, b) => {
+      const av = scannerSigExtract(a, sortKey) ?? 0;
+      const bv = scannerSigExtract(b, sortKey) ?? 0;
+      return typeof av === "number" && typeof bv === "number" ? bv - av : String(av).localeCompare(String(bv));
+    });
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {/* Mobile section header strip */}
+        <div className="m-scanner-header">
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <Sparkles size={13} style={{ color: "var(--text-muted)" }} />
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-primary)", textTransform: "uppercase" }}>
+              Scanner
+            </span>
+            <span
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                fontWeight: 600,
+                padding: "1px 6px",
+                borderRadius: 4,
+                background: "color-mix(in srgb, var(--positive) 14%, transparent)",
+                color: "var(--positive)",
+                border: "1px solid color-mix(in srgb, var(--positive) 28%, transparent)",
+              }}
+            >
+              {data?.signals_found ?? 0}
+            </span>
+            {lastSync && (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--text-muted)", marginLeft: 4 }}>
+                {new Date(lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            )}
+          </div>
+          <button
+            type="button"
+            className="tap-target"
+            onClick={syncNow}
+            disabled={syncing}
+            aria-label="Rescan"
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 4,
+              fontFamily: "var(--font-mono)",
+              fontSize: 11,
+              fontWeight: 600,
+              color: syncing ? "var(--text-muted)" : "var(--signal-core)",
+              background: "none",
+              border: "none",
+              cursor: syncing ? "default" : "pointer",
+              padding: "0 4px",
+            }}
+          >
+            <Loader2 size={12} style={{ opacity: syncing ? 1 : 0.6, animation: syncing ? "spin 1s linear infinite" : "none" }} />
+            {syncing ? "SCANNING" : "RESCAN"}
+          </button>
+        </div>
+
+        {error && (
+          <div style={{ padding: "8px 16px" }}>
+            <div className="alert-item bearish">{error}</div>
+          </div>
+        )}
+
+        {/* Sort bar */}
+        {signals.length > 0 && (
+          <div className="m-sortbar">
+            {mobileSortKeys.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`m-chip${sortKey === key ? " m-chip--active" : ""}`}
+                onClick={() => setSortKey(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {signals.length === 0 && !syncing && !error && (
+          <div style={{ padding: "24px 16px" }}>
+            <SectionEmptyState icon={Sparkles} headline="No scanner signals" secondary="Waiting for initial scan..." />
+          </div>
+        )}
+
+        {mobileSorted.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 16px 16px" }} data-testid="mobile-scanner-list">
+            {mobileSorted.map((row) => {
+              const dirTone = scannerDirTone(row.direction);
+              const dirLabel = row.direction === "ACCUMULATION" ? "ACCUM" : row.direction === "DISTRIBUTION" ? "DISTRIB" : row.direction;
+              const sustainedSuffix = row.sustained_days > 0 ? ` ${row.sustained_days}d` : "";
+              return (
+                <SignalCard
+                  key={`scanner-mobile-${row.ticker}`}
+                  ticker={row.ticker}
+                  score={Math.round(row.score)}
+                  signals={[
+                    {
+                      label: `${dirLabel}${sustainedSuffix}`,
+                      tone: dirTone,
+                    },
+                    {
+                      label: row.signal,
+                      tone: scannerSignalTone(row.signal),
+                    },
+                  ]}
+                  stats={[
+                    {
+                      label: "Buy Ratio",
+                      value: row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "---",
+                    },
+                    {
+                      label: "Strength",
+                      value: row.strength.toFixed(1),
+                    },
+                    {
+                      label: "Prints",
+                      value: row.num_prints.toLocaleString(),
+                    },
+                  ]}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {/* Sticky scan CTA */}
+        <div className="m-sticky-cta">
+          <button
+            type="button"
+            onClick={syncNow}
+            disabled={syncing}
+            style={{
+              width: "100%",
+              minHeight: 44,
+              fontFamily: "var(--font-mono)",
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: "0.08em",
+              textTransform: "uppercase",
+              background: syncing
+                ? "color-mix(in srgb, var(--text-muted) 12%, transparent)"
+                : "color-mix(in srgb, var(--signal-core) 14%, transparent)",
+              color: syncing ? "var(--text-muted)" : "var(--signal-core)",
+              border: `1px solid ${syncing ? "transparent" : "color-mix(in srgb, var(--signal-core) 30%, transparent)"}`,
+              borderRadius: 4,
+              cursor: syncing ? "default" : "pointer",
+            }}
+          >
+            {syncing ? "Scanning..." : "Run Scan"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1272,43 +1586,7 @@ function ScannerSections() {
             />
           </div>
         )}
-        {signals.length > 0 && hasMounted && isMobile && (
-          <div className="section-body">
-            <div className="mobile-signal-list" data-testid="mobile-scanner-list">
-              {sorted.map((row) => (
-                <article className="mobile-signal-card" key={`scanner-mobile-${row.ticker}`}>
-                  <div className="mobile-signal-card__head">
-                    <TickerLink ticker={row.ticker} />
-                    <span className={signalClass(row.signal)}>{row.signal}</span>
-                  </div>
-                  <div className="mobile-signal-card__body">
-                    <div>
-                      <span className="mobile-signal-card__label">Direction</span>
-                      <span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Score</span>
-                      <span>{row.score.toFixed(1)}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Strength</span>
-                      <span>{row.strength.toFixed(1)}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Buy Ratio</span>
-                      <span>{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "---"}</span>
-                    </div>
-                  </div>
-                  <div className="mobile-signal-card__foot">
-                    <span>{row.sustained_days > 0 ? `${row.sustained_days}d sustained` : "No sustained run"}</span>
-                    <span>{row.num_prints.toLocaleString()} prints</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        )}
-        {signals.length > 0 && !(hasMounted && isMobile) && (
+        {signals.length > 0 && (
           <div className="section-body table-wrap">
             <table>
               <thead>
@@ -1373,11 +1651,24 @@ const discoverExtract = (item: DiscoverCandidate, key: DiscoverSortKey): string 
   }
 };
 
+function discoverDpTone(dir: string): "pos" | "neg" | "warn" | "mut" {
+  if (dir === "ACCUMULATION") return "pos";
+  if (dir === "DISTRIBUTION") return "neg";
+  return "mut";
+}
+
+function discoverBiasTone(bias: string): "pos" | "neg" | "warn" | "mut" {
+  if (bias === "BULLISH" || bias === "CALLS") return "pos";
+  if (bias === "BEARISH" || bias === "PUTS") return "neg";
+  return "mut";
+}
+
 function DiscoverSections() {
   const { data, syncing, error, lastSync } = useDiscover(true);
   const candidates = data?.candidates ?? [];
   const { sorted, sort, toggle } = useSort<DiscoverCandidate, DiscoverSortKey>(candidates, discoverExtract, "score", "desc");
   const { isMobile, hasMounted } = useViewport();
+  const [discoverSortKey, setDiscoverSortKey] = useState<DiscoverSortKey>("score");
 
   const fmtPremium = (v: number) => {
     if (v >= 1_000_000) return `$${(v / 1_000_000).toFixed(1)}M`;
@@ -1402,6 +1693,94 @@ function DiscoverSections() {
     if (score >= 40) return "neutral";
     return "bearish";
   };
+
+  const discoverMobileSortKeys: { key: DiscoverSortKey; label: string }[] = [
+    { key: "score", label: "Score" },
+    { key: "dp_buy_ratio", label: "Buy %" },
+    { key: "total_premium", label: "Premium" },
+    { key: "sweeps", label: "Sweeps" },
+    { key: "alerts", label: "Alerts" },
+  ];
+
+  if (hasMounted && isMobile) {
+    const mobileSortedCandidates = [...candidates].sort((a, b) => {
+      const av = discoverExtract(a, discoverSortKey) ?? 0;
+      const bv = discoverExtract(b, discoverSortKey) ?? 0;
+      return typeof av === "number" && typeof bv === "number" ? bv - av : String(av).localeCompare(String(bv));
+    });
+
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {error && (
+          <div style={{ padding: "8px 16px" }}>
+            <div className="alert-item bearish">{error}</div>
+          </div>
+        )}
+
+        {candidates.length === 0 && !syncing && !error && (
+          <div style={{ padding: "24px 16px" }}>
+            <SectionEmptyState icon={Search} headline="No candidates found" secondary="Waiting for initial scan..." />
+          </div>
+        )}
+
+        {/* Sort bar */}
+        {candidates.length > 0 && (
+          <div className="m-sortbar">
+            {discoverMobileSortKeys.map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                className={`m-chip${discoverSortKey === key ? " m-chip--active" : ""}`}
+                onClick={() => setDiscoverSortKey(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+
+        {mobileSortedCandidates.length > 0 && (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, padding: "8px 16px 16px" }} data-testid="mobile-discover-list">
+            {mobileSortedCandidates.map((c) => (
+              <SignalCard
+                key={`discover-mobile-${c.ticker}`}
+                ticker={c.ticker}
+                score={Math.round(c.score)}
+                signals={[
+                  {
+                    label: c.dp_direction === "ACCUMULATION" ? "ACCUM" : c.dp_direction === "DISTRIBUTION" ? "DISTRIB" : c.dp_direction,
+                    tone: discoverDpTone(c.dp_direction),
+                  },
+                  {
+                    label: c.options_bias,
+                    tone: discoverBiasTone(c.options_bias),
+                  },
+                ]}
+                stats={[
+                  {
+                    label: "Buy Ratio",
+                    value: `${(c.dp_buy_ratio * 100).toFixed(1)}%`,
+                  },
+                  {
+                    label: "Premium",
+                    value: fmtPremium(c.total_premium),
+                  },
+                  {
+                    label: "Sweeps",
+                    value: String(c.sweeps),
+                  },
+                  {
+                    label: "Alerts",
+                    value: String(c.alerts),
+                  },
+                ]}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <>
@@ -1433,51 +1812,7 @@ function DiscoverSections() {
             />
           </div>
         )}
-        {candidates.length > 0 && hasMounted && isMobile && (
-          <div className="section-body">
-            <div className="mobile-signal-list" data-testid="mobile-discover-list">
-              {sorted.map((c) => (
-                <article className="mobile-signal-card" key={`discover-mobile-${c.ticker}`}>
-                  <div className="mobile-signal-card__head">
-                    <TickerLink ticker={c.ticker} />
-                    <span className={scoreClass(c.score)}>{c.score.toFixed(1)}</span>
-                  </div>
-                  <div className="mobile-signal-card__body">
-                    <div>
-                      <span className="mobile-signal-card__label">DP Direction</span>
-                      <span className={dpClass(c.dp_direction)}>{c.dp_direction}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">DP Strength</span>
-                      <span>{c.dp_strength.toFixed(1)}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Buy Ratio</span>
-                      <span>{(c.dp_buy_ratio * 100).toFixed(1)}%</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Options Bias</span>
-                      <span className={biasClass(c.options_bias)}>{c.options_bias}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Alerts</span>
-                      <span>{c.alerts}</span>
-                    </div>
-                    <div>
-                      <span className="mobile-signal-card__label">Premium</span>
-                      <span>{fmtPremium(c.total_premium)}</span>
-                    </div>
-                  </div>
-                  <div className="mobile-signal-card__foot">
-                    <span>{c.sweeps} sweeps</span>
-                    <span>{c.sector || c.issue_type || "—"}</span>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </div>
-        )}
-        {candidates.length > 0 && !(hasMounted && isMobile) && (
+        {candidates.length > 0 && (
           <div className="section-body table-wrap">
             <table>
               <thead>

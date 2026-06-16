@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { AlertTriangle, Check, Shield, X, Zap } from "lucide-react";
+import { useViewport } from "@/lib/useViewport";
+import MetricCell from "./mobile/MetricCell";
 import CriHistoryChart from "./CriHistoryChart";
 import RegimeRelationshipView from "./RegimeRelationshipView";
 import VcgPanel from "./VcgPanel";
@@ -131,6 +133,8 @@ export default function RegimePanel({
 }: RegimePanelProps) {
   const router = useRouter();
   const pathname = usePathname();
+  const { isMobile, hasMounted } = useViewport();
+  const compact = hasMounted && isMobile;
   const activeTab = tabFromPathname(pathname);
   const goToTab = (tab: RegimeTab) => router.push(`/regime/${tab}`);
   const { data, loading, syncing, lastSync } = useRegime(marketState, { endpoint: dataEndpoint });
@@ -280,7 +284,22 @@ export default function RegimePanel({
     ? spyVal < ma
     : data?.crash_trigger?.conditions.spx_below_100d_ma ?? false;
 
-  const tabBar = (
+  const tabBar = compact ? (
+    <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
+      {(["cri", "vcg", "gex", "grg", "llm"] as RegimeTab[]).map((t) => (
+        <button
+          key={t}
+          type="button"
+          role="tab"
+          aria-selected={activeTab === t}
+          className={`m-chip${activeTab === t ? " m-chip--active" : ""}`}
+          onClick={() => goToTab(t)}
+        >
+          {t.toUpperCase()}
+        </button>
+      ))}
+    </div>
+  ) : (
     <div className="ticker-tabs" style={{ marginBottom: "16px" }}>
       <button className={`ticker-tab ${activeTab === "cri" ? "active" : ""}`} onClick={() => goToTab("cri")}>CRI</button>
       <button className={`ticker-tab ${activeTab === "vcg" ? "active" : ""}`} onClick={() => goToTab("vcg")}>VCG</button>
@@ -352,156 +371,297 @@ export default function RegimePanel({
     );
   }
 
+  /* ── Mobile: vix day-change tone helper ─── */
+  function vixDayChangeTone(last: number | null, close: number | null): "pos" | "neg" | "mut" {
+    if (last == null || close == null || close <= 0) return "mut";
+    const change = last - close;
+    // VIX rising = bearish (neg tone), falling = bullish (pos tone)
+    return change > 0 ? "neg" : change < 0 ? "pos" : "mut";
+  }
+
+  function spyDayChangeTone(last: number | null, close: number | null): "pos" | "neg" | "mut" {
+    if (last == null || close == null || close <= 0) return "mut";
+    const change = last - close;
+    return change >= 0 ? "pos" : "neg";
+  }
+
+  function fmtDayChg(last: number | null, close: number | null, prefix = ""): string {
+    if (last == null || close == null || close <= 0) return "---";
+    const change = last - close;
+    const sign = change >= 0 ? "+" : "";
+    return `${prefix}${sign}${change.toFixed(2)}`;
+  }
+
   return (
     <div className="regime-panel">
       {tabBar}
-      {/* ── Row 1: CRI Score Hero ──────────────────── */}
-      <div className="regime-hero">
-        <div className="regime-hero-score" style={{ color }}>
-          {cri.score.toFixed(0)}
-          <span className="regime-hero-max">/100</span>
-        </div>
-        <div className="regime-hero-meta">
-          <span className="regime-level-badge pill--solid" style={{ background: color, color: "var(--text-on-accent)" }}>
-            {cri.level}
-          </span>
-          <span className="regime-live-dot" style={{ background: effectiveHasLive ? "var(--positive)" : "var(--text-muted)" }} />
-          <span className="regime-hero-label">{effectiveHasLive ? "LIVE" : "CACHED"}</span>
-          {lastSync && (
-            <span className="regime-hero-timestamp">
-              Last scan: {new Date(lastSync).toLocaleTimeString()}
+
+      {compact ? (
+        /* ── MOBILE CRI layout ────────────────────────────── */
+        <>
+          {/* Headline: score inline with level badge */}
+          <div className="m-regime-headline" data-testid="regime-hero">
+            <span
+              className="m-regime-score"
+              style={{ color }}
+            >
+              {cri.score.toFixed(0)}
+              <span className="m-regime-score__max">/100</span>
             </span>
+            <span
+              className="regime-level-badge pill--solid m-regime-level"
+              style={{ background: color, color: "var(--text-on-accent)" }}
+            >
+              {cri.level}
+            </span>
+            <span className="regime-live-dot" style={{ background: effectiveHasLive ? "var(--positive)" : "var(--text-muted)" }} aria-hidden />
+            <span className="regime-hero-label">{effectiveHasLive ? "LIVE" : "CACHED"}</span>
+            <span style={{ marginLeft: "auto" }}>{shareModal}</span>
+          </div>
+
+          {/* Progress bar */}
+          <div className="regime-hero-bar" style={{ margin: "0 0 4px" }}>
+            <div className="regime-hero-bar-fill" style={{ width: `${cri.score}%`, background: color }} />
+          </div>
+          <div className="regime-hero-scale" style={{ marginBottom: "8px" }}>
+            <span>LOW</span><span>ELEVATED</span><span>HIGH</span><span>CRITICAL</span>
+          </div>
+
+          {/* Market closed banner */}
+          {!marketOpen && (
+            <div
+              data-testid="market-closed-indicator"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "6px 12px",
+                background: "color-mix(in srgb, var(--warning) 12%, transparent)",
+                color: "var(--warning)",
+                fontSize: "11px",
+                fontFamily: "var(--font-mono, monospace)",
+                letterSpacing: "0.08em",
+                fontWeight: 600,
+                borderLeft: "2px solid var(--warning)",
+                marginBottom: "8px",
+              }}
+            >
+              MARKET CLOSED - END OF DAY VALUES
+            </div>
           )}
-          {shareModal}
-        </div>
-        <div className="regime-hero-bar">
-          <div className="regime-hero-bar-fill" style={{ width: `${cri.score}%`, background: color }} />
-        </div>
-        <div className="regime-hero-scale">
-          <span>LOW</span><span>ELEVATED</span><span>HIGH</span><span>CRITICAL</span>
-        </div>
-      </div>
 
-      {/* ── Market Closed Indicator ───────────────── */}
-      {!marketOpen && (
-        <div
-          data-testid="market-closed-indicator"
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: "8px",
-            padding: "6px 12px",
-            background: "color-mix(in srgb, var(--warning) 12%, transparent)",
-            color: "var(--warning, #F5A623)",
-            fontSize: "11px",
-            fontFamily: "var(--font-mono, monospace)",
-            letterSpacing: "0.08em",
-            fontWeight: 600,
-            borderLeft: "2px solid var(--warning, #F5A623)",
-          }}
-        >
-          MARKET CLOSED — END OF DAY VALUES
-        </div>
-      )}
+          {/* 2x2 ticker grid */}
+          <div className="m-regime-grid2x2" data-testid="regime-strip">
+            <div data-testid="strip-vix">
+              <MetricCell
+                label="VIX"
+                value={fmt(vixVal)}
+                tone={vixDayChangeTone(liveVix, vixClose)}
+              />
+              <span className="m-regime-sub">{fmtDayChg(liveVix, vixClose)}</span>
+            </div>
+            <div data-testid="strip-vvix">
+              <MetricCell
+                label="VVIX"
+                value={fmt(vvixVal)}
+                tone={vixDayChangeTone(liveVvix, vvixClose)}
+              />
+              <span className="m-regime-sub">{fmtDayChg(liveVvix, vvixClose)}</span>
+            </div>
+            <div data-testid="strip-spy">
+              <MetricCell
+                label="SPY"
+                value={`$${fmt(spyVal)}`}
+                tone={spyDayChangeTone(liveSpy, spyClose)}
+              />
+              <span className="m-regime-sub">{fmtDayChg(liveSpy, spyClose, "$")}</span>
+            </div>
+            <div data-testid="strip-cor1m">
+              <MetricCell
+                label="COR1M"
+                value={fmt(activeCorr, 2)}
+                tone={(activeCorr ?? 0) > 60 ? "neg" : (activeCorr ?? 0) > 40 ? "warn" : "pos"}
+              />
+              <span className="m-regime-sub">{corr5dChange != null ? `${fmtSigned(corr5dChange)} 5d` : "---"}</span>
+            </div>
+          </div>
 
-      {/* ── Row 2: Live Tickers Strip ─────────────── */}
-      <RegimeStrip>
-        <RegimeStripCell
-          testId="strip-vix"
-          label={<>VIX <LiveBadge live={effectiveHasLiveVix} /></>}
-          value={fmt(vixVal)}
-          change={<DayChange last={liveVix} close={vixClose} />}
-          sub={<>5d RoC: {fmtPct(data?.vix_5d_roc, 1)}</>}
-          timestamp={vixLastTs ?? "---"}
-        />
-        <RegimeStripCell
-          testId="strip-vvix"
-          label={<>VVIX <LiveBadge live={effectiveHasLiveVvix} /></>}
-          value={fmt(vvixVal)}
-          change={<DayChange last={liveVvix} close={vvixClose} />}
-          sub={<>VVIX/VIX: {fmt(vvixVixRatio)}</>}
-          timestamp={vvixLastTs ?? "---"}
-        />
-        <RegimeStripCell
-          testId="strip-spy"
-          label={<>SPY <LiveBadge live={effectiveHasLiveSpy} /></>}
-          value={`$${fmt(spyVal)}`}
-          change={<DayChange last={liveSpy} close={spyClose} prefix="$" />}
-          sub={<>vs 100d MA: {fmtPct(spxDistPct)}</>}
-        />
-        <RegimeStripCell
-          testId="strip-rvol"
-          label={(
-            <>
-              <span className="regime-strip-label-text-full">REALIZED VOL</span>
-              <span className="regime-strip-label-text-short">RVOL</span>
-              <LiveBadge live={hasIntradayRvol} />
-            </>
+          {/* Component scores 2x2 grid */}
+          <div className="m-regime-components-grid">
+            <MetricCell
+              label="VIX"
+              value={`${cri.components.vix.toFixed(1)}/25`}
+              tone={cri.components.vix < 8 ? "pos" : cri.components.vix > 16 ? "neg" : "warn"}
+            />
+            <MetricCell
+              label="VVIX"
+              value={`${cri.components.vvix.toFixed(1)}/25`}
+              tone={cri.components.vvix < 8 ? "pos" : cri.components.vvix > 16 ? "neg" : "warn"}
+            />
+            <MetricCell
+              label="CORR"
+              value={`${cri.components.correlation.toFixed(1)}/25`}
+              tone={cri.components.correlation < 8 ? "pos" : cri.components.correlation > 16 ? "neg" : "warn"}
+            />
+            <MetricCell
+              label="MOM"
+              value={`${cri.components.momentum.toFixed(1)}/25`}
+              tone={cri.components.momentum < 8 ? "pos" : cri.components.momentum > 16 ? "neg" : "warn"}
+            />
+          </div>
+        </>
+      ) : (
+        /* ── DESKTOP CRI layout ───────────────────────────── */
+        <>
+          {/* ── Row 1: CRI Score Hero ──────────────────── */}
+          <div className="regime-hero">
+            <div className="regime-hero-score" style={{ color }}>
+              {cri.score.toFixed(0)}
+              <span className="regime-hero-max">/100</span>
+            </div>
+            <div className="regime-hero-meta">
+              <span className="regime-level-badge pill--solid" style={{ background: color, color: "var(--text-on-accent)" }}>
+                {cri.level}
+              </span>
+              <span className="regime-live-dot" style={{ background: effectiveHasLive ? "var(--positive)" : "var(--text-muted)" }} />
+              <span className="regime-hero-label">{effectiveHasLive ? "LIVE" : "CACHED"}</span>
+              {lastSync && (
+                <span className="regime-hero-timestamp">
+                  Last scan: {new Date(lastSync).toLocaleTimeString()}
+                </span>
+              )}
+              {shareModal}
+            </div>
+            <div className="regime-hero-bar">
+              <div className="regime-hero-bar-fill" style={{ width: `${cri.score}%`, background: color }} />
+            </div>
+            <div className="regime-hero-scale">
+              <span>LOW</span><span>ELEVATED</span><span>HIGH</span><span>CRITICAL</span>
+            </div>
+          </div>
+
+          {/* ── Market Closed Indicator ───────────────── */}
+          {!marketOpen && (
+            <div
+              data-testid="market-closed-indicator"
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                padding: "6px 12px",
+                background: "color-mix(in srgb, var(--warning) 12%, transparent)",
+                color: "var(--warning, #F5A623)",
+                fontSize: "11px",
+                fontFamily: "var(--font-mono, monospace)",
+                letterSpacing: "0.08em",
+                fontWeight: 600,
+                borderLeft: "2px solid var(--warning, #F5A623)",
+              }}
+            >
+              MARKET CLOSED — END OF DAY VALUES
+            </div>
           )}
-          value={activeRvol != null ? `${fmt(activeRvol)}%` : "---"}
-          change={<PointChange change={intradayRvol != null && data?.realized_vol != null ? intradayRvol - data.realized_vol : null} suffix="%" label="intraday" />}
-          sub={<>20d annualized</>}
-        />
-        <RegimeStripCell
-          testId="strip-cor1m"
-          label={<>COR1M <LiveBadge live={effectiveHasLiveCor1m} /></>}
-          value={fmt(activeCorr, 2)}
-          change={<DayChange last={liveCor1m} close={cor1mPreviousClose} />}
-          sub={<>{`5d chg: ${corr5dChange != null ? `${fmtSigned(corr5dChange)} pts` : "---"}`}</>}
-        />
-        {nqSkew != null ? (
-          <RegimeStripCell
-            testId="strip-nq-skew"
-            label={<>NQ SKEW <LiveBadge live={false} /></>}
-            value={`${formattedNqSkew}`}
-            change={null}
-            sub={<>NQ - SPX</>}
-          />
-        ) : null}
-      </RegimeStrip>
 
-      {/* ── Row 3+4: Components + Crash Trigger side by side ── */}
-      <div className="regime-detail-grid">
-        <div className="regime-components">
-          <div className="regime-panel-title">
-            <Zap size={12} />
-            CRI COMPONENTS
-            <InfoTooltip text={SECTION_TOOLTIPS["CRI COMPONENTS"]} />
-          </div>
-          <ComponentBar label="VIX" score={cri.components.vix} live={effectiveHasLiveVix} />
-          <ComponentBar label="VVIX" score={cri.components.vvix} live={effectiveHasLiveVvix} />
-          <ComponentBar label="CORRELATION" score={cri.components.correlation} live={effectiveHasLiveCor1m} />
-          <ComponentBar label="MOMENTUM" score={cri.components.momentum} live={effectiveHasLiveSpy} />
-        </div>
-        <div className="regime-triggers">
-          <div className="regime-panel-title">
-            <AlertTriangle size={12} />
-            CRASH TRIGGER CONDITIONS
-            <InfoTooltip text={SECTION_TOOLTIPS["CRASH TRIGGER CONDITIONS"]} />
-          </div>
-            <div className={`regime-trigger-status ${data?.crash_trigger?.triggered ? "regime-triggered" : ""}`}>
-            {data?.crash_trigger?.triggered ? "TRIGGERED" : "INACTIVE"}
-          </div>
-            <TriggerRow
-              label="SPX < 100d MA"
-              met={spxBelowMa}
-              value={`${fmtPct(spxDistPct)} (MA: $${fmt(ma)})`}
-              live={effectiveHasLiveSpy}
+          {/* ── Row 2: Live Tickers Strip ─────────────── */}
+          <RegimeStrip>
+            <RegimeStripCell
+              testId="strip-vix"
+              label={<>VIX <LiveBadge live={effectiveHasLiveVix} /></>}
+              value={fmt(vixVal)}
+              change={<DayChange last={liveVix} close={vixClose} />}
+              sub={<>5d RoC: {fmtPct(data?.vix_5d_roc, 1)}</>}
+              timestamp={vixLastTs ?? "---"}
             />
-            <TriggerRow
-              label="Realized Vol > 25%"
-              met={data?.crash_trigger?.conditions.realized_vol_gt_25 ?? false}
-              value={data?.realized_vol != null ? `${fmt(data.realized_vol)}%` : "---"}
-              live={false}
+            <RegimeStripCell
+              testId="strip-vvix"
+              label={<>VVIX <LiveBadge live={effectiveHasLiveVvix} /></>}
+              value={fmt(vvixVal)}
+              change={<DayChange last={liveVvix} close={vvixClose} />}
+              sub={<>VVIX/VIX: {fmt(vvixVixRatio)}</>}
+              timestamp={vvixLastTs ?? "---"}
             />
-            <TriggerRow
-              label="COR1M > 60"
-              met={correlationTriggerMet}
+            <RegimeStripCell
+              testId="strip-spy"
+              label={<>SPY <LiveBadge live={effectiveHasLiveSpy} /></>}
+              value={`$${fmt(spyVal)}`}
+              change={<DayChange last={liveSpy} close={spyClose} prefix="$" />}
+              sub={<>vs 100d MA: {fmtPct(spxDistPct)}</>}
+            />
+            <RegimeStripCell
+              testId="strip-rvol"
+              label={(
+                <>
+                  <span className="regime-strip-label-text-full">REALIZED VOL</span>
+                  <span className="regime-strip-label-text-short">RVOL</span>
+                  <LiveBadge live={hasIntradayRvol} />
+                </>
+              )}
+              value={activeRvol != null ? `${fmt(activeRvol)}%` : "---"}
+              change={<PointChange change={intradayRvol != null && data?.realized_vol != null ? intradayRvol - data.realized_vol : null} suffix="%" label="intraday" />}
+              sub={<>20d annualized</>}
+            />
+            <RegimeStripCell
+              testId="strip-cor1m"
+              label={<>COR1M <LiveBadge live={effectiveHasLiveCor1m} /></>}
               value={fmt(activeCorr, 2)}
-              live={effectiveHasLiveCor1m}
+              change={<DayChange last={liveCor1m} close={cor1mPreviousClose} />}
+              sub={<>{`5d chg: ${corr5dChange != null ? `${fmtSigned(corr5dChange)} pts` : "---"}`}</>}
             />
-        </div>
-      </div>
+            {nqSkew != null ? (
+              <RegimeStripCell
+                testId="strip-nq-skew"
+                label={<>NQ SKEW <LiveBadge live={false} /></>}
+                value={`${formattedNqSkew}`}
+                change={null}
+                sub={<>NQ - SPX</>}
+              />
+            ) : null}
+          </RegimeStrip>
+
+          {/* ── Row 3+4: Components + Crash Trigger side by side ── */}
+          <div className="regime-detail-grid">
+            <div className="regime-components">
+              <div className="regime-panel-title">
+                <Zap size={12} />
+                CRI COMPONENTS
+                <InfoTooltip text={SECTION_TOOLTIPS["CRI COMPONENTS"]} />
+              </div>
+              <ComponentBar label="VIX" score={cri.components.vix} live={effectiveHasLiveVix} />
+              <ComponentBar label="VVIX" score={cri.components.vvix} live={effectiveHasLiveVvix} />
+              <ComponentBar label="CORRELATION" score={cri.components.correlation} live={effectiveHasLiveCor1m} />
+              <ComponentBar label="MOMENTUM" score={cri.components.momentum} live={effectiveHasLiveSpy} />
+            </div>
+            <div className="regime-triggers">
+              <div className="regime-panel-title">
+                <AlertTriangle size={12} />
+                CRASH TRIGGER CONDITIONS
+                <InfoTooltip text={SECTION_TOOLTIPS["CRASH TRIGGER CONDITIONS"]} />
+              </div>
+              <div className={`regime-trigger-status ${data?.crash_trigger?.triggered ? "regime-triggered" : ""}`}>
+                {data?.crash_trigger?.triggered ? "TRIGGERED" : "INACTIVE"}
+              </div>
+              <TriggerRow
+                label="SPX < 100d MA"
+                met={spxBelowMa}
+                value={`${fmtPct(spxDistPct)} (MA: $${fmt(ma)})`}
+                live={effectiveHasLiveSpy}
+              />
+              <TriggerRow
+                label="Realized Vol > 25%"
+                met={data?.crash_trigger?.conditions.realized_vol_gt_25 ?? false}
+                value={data?.realized_vol != null ? `${fmt(data.realized_vol)}%` : "---"}
+                live={false}
+              />
+              <TriggerRow
+                label="COR1M > 60"
+                met={correlationTriggerMet}
+                value={fmt(activeCorr, 2)}
+                live={effectiveHasLiveCor1m}
+              />
+            </div>
+          </div>
+        </>
+      )}
 
       {/* ── Row 5: 20-Session History Charts (side by side) ── */}
 

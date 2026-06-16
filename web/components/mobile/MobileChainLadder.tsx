@@ -4,7 +4,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { PortfolioData } from "@/lib/types";
 import { fmtPrice } from "@/lib/positionUtils";
-import { formatExpiry, daysToExpiry, type OrderLeg } from "@/lib/optionsChainUtils";
+import {
+  formatExpiry,
+  daysToExpiry,
+  type OrderLeg,
+  normalizeComboOrder,
+  computeNetOptionQuote,
+} from "@/lib/optionsChainUtils";
 import BottomSheet from "./BottomSheet";
 import MobileOrderTicket from "./MobileOrderTicket";
 import SpectralLoader from "@/components/SpectralLoader";
@@ -61,6 +67,12 @@ function fmtLast(last: number | null | undefined): string {
   return fmtPrice(last);
 }
 
+function fmtBidAsk(bid: number | null | undefined, ask: number | null | undefined): string {
+  const b = bid != null && Number.isFinite(bid) ? fmtPrice(bid) : "—";
+  const a = ask != null && Number.isFinite(ask) ? fmtPrice(ask) : "—";
+  return `${b} x ${a}`;
+}
+
 function fmtGreek(value: number | null | undefined, digits = 3): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return value.toFixed(digits);
@@ -88,14 +100,33 @@ export default function MobileChainLadder({
   const ladderRef = useRef<HTMLDivElement>(null);
   const atmRowRef = useRef<HTMLDivElement>(null);
 
-  // Center on ATM when expiry/strikes change.
+  // Auto-scroll to ATM strike on mount and when expiry/strikes change.
+  // scrollIntoView is used for the initial snap; on subsequent expiry
+  // changes the manual offsetTop path centers the row within the scroller.
   useEffect(() => {
     if (!atmRowRef.current || !ladderRef.current) return;
-    const wrapper = ladderRef.current;
     const atm = atmRowRef.current;
+    const wrapper = ladderRef.current;
+    // Use scrollIntoView on first render (wrapper hasn't scrolled yet);
+    // manual offset centering for subsequent changes so the row lands in
+    // the middle of the visible window instead of flush to the edge.
     const target = atm.offsetTop - wrapper.clientHeight / 2 + atm.clientHeight / 2;
-    wrapper.scrollTop = Math.max(0, target);
+    if (wrapper.scrollTop === 0) {
+      atm.scrollIntoView({ block: "center", behavior: "instant" });
+    } else {
+      wrapper.scrollTop = Math.max(0, target);
+    }
   }, [selectedExpiry, visibleStrikes.length, atmStrike]);
+
+  // Compute live net mid for the pending strip so the operator can see the
+  // current market mid without opening the ticket.
+  const pendingNetMid = useMemo(() => {
+    if (orderLegs.length === 0) return null;
+    const normalized = normalizeComboOrder(orderLegs);
+    const quote = computeNetOptionQuote(normalized.legs, prices, ticker);
+    if (quote.mid == null) return null;
+    return quote.mid;
+  }, [orderLegs, prices, ticker]);
 
   const expiryChips = useMemo(() => expirations.slice(0, 24), [expirations]);
 
@@ -164,6 +195,7 @@ export default function MobileChainLadder({
                   aria-label={`Call ${strike}`}
                 >
                   <span className="mobile-chain__last">{fmtLast(call?.last)}</span>
+                  <span className="mobile-chain__bid-ask">{fmtBidAsk(call?.bid, call?.ask)}</span>
                   <span className="mobile-chain__meta">
                     <span>{fmtIv(call?.impliedVol)}</span>
                     <span>OI {fmtOi(call?.avgVolume)}</span>
@@ -180,6 +212,7 @@ export default function MobileChainLadder({
                   aria-label={`Put ${strike}`}
                 >
                   <span className="mobile-chain__last">{fmtLast(put?.last)}</span>
+                  <span className="mobile-chain__bid-ask">{fmtBidAsk(put?.bid, put?.ask)}</span>
                   <span className="mobile-chain__meta">
                     <span>{fmtIv(put?.impliedVol)}</span>
                     <span>OI {fmtOi(put?.avgVolume)}</span>
@@ -201,7 +234,12 @@ export default function MobileChainLadder({
           <span className="mobile-chain__pending-count">
             {orderLegs.length} {orderLegs.length === 1 ? "LEG" : "LEGS"}
           </span>
-          <span className="mobile-chain__pending-action">Build order →</span>
+          {pendingNetMid != null ? (
+            <span className="mobile-chain__pending-mid">
+              Mid {fmtPrice(Math.abs(pendingNetMid))}
+            </span>
+          ) : null}
+          <span className="mobile-chain__pending-action">Build order &rarr;</span>
         </button>
       ) : null}
 

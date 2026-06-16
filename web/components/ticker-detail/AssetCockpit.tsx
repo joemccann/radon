@@ -5,6 +5,9 @@ import type { PriceData, FundamentalsData, DepthBook, Trade } from "@/lib/prices
 import type { QuoteFallback } from "@/lib/quoteTelemetry";
 import { useViewport } from "@/lib/useViewport";
 import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailContext";
+import { MetricCell } from "@/components/mobile/MetricCell";
+import { resolveMarketValue, resolveEntryCost, fmtPrice } from "@/lib/positionUtils";
+import { fmtMoneySigned } from "@/lib/format/money";
 import BookTab from "./BookTab";
 import OrderTab from "./OrderTab";
 import ActHeldSummary from "./ActHeldSummary";
@@ -40,6 +43,31 @@ export type AssetCockpitProps = {
   activeDeck: DeckKey | null;
   onDeckChange: (deck: DeckKey | null) => void;
 };
+
+/** Condensed 2x2 position summary shown on mobile above the tab strip. */
+function MobilePositionSummary({ position }: { position: PortfolioPosition }) {
+  const mv = resolveMarketValue(position);
+  const ec = resolveEntryCost(position);
+  const pnl = mv != null ? mv - ec : null;
+  const pnlTone = pnl == null ? "mut" : pnl > 0 ? "pos" : pnl < 0 ? "neg" : "mut";
+  const avgEntry = position.contracts > 0
+    ? fmtPrice(Math.abs(ec) / (position.contracts * (position.structure_type === "Stock" ? 1 : 100)))
+    : "---";
+
+  return (
+    <div className="ckp-pos-summary">
+      <MetricCell label="Structure" value={position.structure} size="secondary" />
+      <MetricCell label="Qty" value={`${position.direction} ${position.contracts}x`} size="secondary" />
+      <MetricCell label="Avg Entry" value={avgEntry} size="secondary" />
+      <MetricCell
+        label="P&L"
+        value={pnl != null ? fmtMoneySigned(pnl) : "---"}
+        size="secondary"
+        tone={pnlTone}
+      />
+    </div>
+  );
+}
 
 export default function AssetCockpit({
   ticker,
@@ -91,6 +119,10 @@ export default function AssetCockpit({
         live={Boolean(live)}
         onDeckChange={onDeckChange}
       />
+
+      {/* Mobile: condensed 2x2 position summary just below the header strip,
+          visible at a glance before the trader dives into the book. */}
+      {mobile && position && <MobilePositionSummary position={position} />}
 
       {/* BOOK — montage/ladder + tape, full height; sole home of bid/ask depth. */}
       <div className="book-region">

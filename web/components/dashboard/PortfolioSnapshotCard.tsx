@@ -2,6 +2,8 @@
 
 import type { PortfolioData } from "@/lib/types";
 import { fmtMoney, fmtMoneySigned } from "@/lib/format/money";
+import { useViewport } from "@/lib/useViewport";
+import { MetricCell } from "@/components/mobile/MetricCell";
 
 type Props = {
   portfolio: PortfolioData | null;
@@ -13,12 +15,20 @@ function pnlTone(value: number | null | undefined): "core" | "fault" | "neutral"
   return value > 0 ? "core" : "fault";
 }
 
+function metricTone(value: number | null | undefined): "pos" | "neg" | "mut" {
+  if (value == null || value === 0) return "mut";
+  return value > 0 ? "pos" : "neg";
+}
+
 /**
  * PortfolioSnapshotCard — the top-of-dashboard portfolio summary. Net Liq,
  * Today P&L, Open Risk (deployed capital), and free cash. Reads from the
  * existing portfolio prop wired by WorkspaceShell — no new data plumbing.
  */
 export function PortfolioSnapshotCard({ portfolio, realizedPnl = 0 }: Props) {
+  const { isMobile, hasMounted } = useViewport();
+  const mobile = isMobile && hasMounted;
+
   const acct = portfolio?.account_summary;
   const netLiq = acct?.net_liquidation ?? null;
   const ibDaily = acct?.daily_pnl ?? null;
@@ -27,6 +37,24 @@ export function PortfolioSnapshotCard({ portfolio, realizedPnl = 0 }: Props) {
   const cash = acct?.cash ?? acct?.settled_cash ?? null;
   const openRisk = portfolio?.total_deployed_dollars ?? null;
   const todayTone = pnlTone(todayPnl);
+
+  if (mobile) {
+    // Mobile: 2x2 MetricCell grid. Drop the panel-eyebrow/title header overhead —
+    // the section toggle above already labels this block.
+    return (
+      <div className="snap-mobile-grid">
+        <MetricCell label="Net Liq" value={fmtMoney(netLiq)} size="primary" />
+        <MetricCell
+          label="Today P&L"
+          value={fmtMoneySigned(todayPnl)}
+          size="primary"
+          tone={metricTone(todayPnl)}
+        />
+        <MetricCell label="Open Risk" value={fmtMoney(openRisk)} size="secondary" />
+        <MetricCell label="Cash" value={fmtMoney(cash)} size="secondary" />
+      </div>
+    );
+  }
 
   return (
     <section className="snapshot-card">

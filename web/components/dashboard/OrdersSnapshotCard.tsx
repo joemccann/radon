@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import type { OrdersData, OpenOrder, ExecutedOrder } from "@/lib/types";
+import { useViewport } from "@/lib/useViewport";
 
 type Props = {
   orders: OrdersData | null;
@@ -49,9 +50,52 @@ function describeFill(f: ExecutedOrder): string {
  * Top 3 open orders + top 3 of today's fills, with click-through to /orders.
  */
 export function OrdersSnapshotCard({ orders }: Props) {
+  const { isMobile, hasMounted } = useViewport();
+  const mobile = isMobile && hasMounted;
+
   const open = (orders?.open_orders ?? []).slice(0, 3);
   const recent = (orders?.executed_orders ?? []).slice(0, 3);
   const hasAny = open.length > 0 || recent.length > 0;
+
+  if (mobile) {
+    // Mobile: drop the panel-eyebrow/title header; section toggle already labels
+    // this block. Flatten into a single-column stacked list with a see-all link.
+    return (
+      <div className="snap-mobile-orders">
+        {!hasAny ? (
+          <div className="snapshot-card__empty">No open or filled orders today.</div>
+        ) : (
+          <>
+            {open.length > 0 && (
+              <ul className="snapshot-list__items">
+                {open.map((o) => (
+                  <li key={`o-${o.permId || o.orderId}`} className="snapshot-list__row snap-mobile-row">
+                    <span className="snapshot-list__row-desc">{describeOrder(o)}</span>
+                    <span className="snapshot-list__row-meta snap-mobile-badge snap-mobile-badge--working">
+                      {o.status ?? "Working"}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {recent.length > 0 && (
+              <ul className="snapshot-list__items">
+                {recent.map((f, i) => (
+                  <li key={`f-${f.execId || i}`} className="snapshot-list__row snap-mobile-row">
+                    <span className="snapshot-list__row-desc">{describeFill(f)}</span>
+                    <span className="snapshot-list__row-meta">{fmtTime(f.time)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </>
+        )}
+        <Link className="snap-mobile-see-all tap-target" href="/orders">
+          All orders
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <section className="snapshot-card">
