@@ -38,7 +38,7 @@ Three production bugs in eight days (AAOI risk reversal, WULF bull call spread, 
 2. **`<OrderConfirmSummary>` only accepts `AugmentedOrderSummary`** — a branded type that can be produced ONLY by `useOrderRisk`. Plain literals fail typecheck; `as` casts trip a dev-mode runtime assertion.
 3. **`computeOrderRisk` and `augmentOrderLegsWithPortfolioCoverage` are module-private** under `web/lib/order/risk/internal/`. ESLint blocks direct imports (`no-restricted-imports`). Tests reach them through `web/lib/order/risk/__test_only__.ts`, which is exempt via the global `tests/**` + `e2e/**` ignore.
 4. **Pending UX is mandatory.** `portfolio === undefined` → `coverageStatus: "pending"` → skeleton "Coverage indeterminate — portfolio resolving". `portfolio === null` → `coverageStatus: "no-portfolio"` → skeleton "Coverage indeterminate — portfolio not in scope". Parent surface MUST disable submit when `state.okToSubmit !== true`.
-5. **Close-out branch.** Pass `closeOut: { entryCostDollars }` on the input to short-circuit max-loss/max-gain (both 0 by construction; the order adds no new exposure) and surface proceeds + realized P&L instead. The hook owns the cost-basis convention (`avg_cost` is per-contract for options, per-share for stocks); surfaces just hand the dollar number.
+5. **Close-out branch.** Pass `closeOut: { entryCostDollars }` on the input to short-circuit max-loss/max-gain (both 0 by construction; the order adds no new exposure) and surface proceeds + realized P&L instead. The hook owns the cost-basis convention (`avg_cost` is per-contract for options, per-share for stocks); surfaces just hand the dollar number. **A close is BOTH directions:** SELL-closes-a-LONG (proceeds positive, `entryCostDollars` positive) AND BUY-closes-a-SHORT (proceeds negative = a debit, `entryCostDollars` negative = the original credit, so `pnl = proceeds − entryCost = credit − debit`). `lib/order/positionTrade.ts` is the canonical single-leg/combo implementation of both. `OrderTab` re-invents single-leg detection inline (`isClosingLong` + `isClosingShort`) — keep both branches; a missing short branch makes a buy-to-close show OPENING risk (commit d0c8122 fixed exactly that for a VIX/short-put close).
 
 **Surfaces wired (2026-05-26):** `OptionsChainTab`, `OrderTab` (single + combo), `InstrumentDetailModal`, `BookTab`, `MobileOrderTicket`, `IndexOptionOrderForm`, `ModifyOrderModal`, `FuturesOrderForm`. Every order-entry surface in the app now routes through `<OrderRiskGate>`. Telemetry: writes per-render traces to `sessionStorage` under `radon:order-risk-traces` (ring-buffered to 50). Inspect via `dumpOrderRiskTraces()` from `@/lib/order/risk` in DevTools.
 
@@ -130,8 +130,11 @@ IB recomputes `pos.avgCost` server-side on every fill including partial closes, 
 | Multi-leg spread | Net from each leg's `prices[legPriceKey(...)]` |
 | BAG order | `resolveOrderLastPrice()` / `resolveOrderPriceData()` |
 | PriceBar | `resolvePriceBar()` — option for single-leg, underlying for multi-leg |
+| Underlying (option position) | `resolveUnderlyingSpot(ticker, expiry, prices)` |
 
 **Never show underlying where user expects option/spread. Show "---" if unavailable.**
+
+**Forward-priced indices (VIX) underlying.** VIX options settle against the VIX FUTURE for their OWN expiry, not cash spot — so an underlying/spot for a VIX option position must come from `resolveUnderlyingSpot()` (`lib/impliedValue.ts`): `prices[ticker].fwdCurve[YYYYMMDD]` → front-month `fwd` → cash `.last`, gated on `isForwardPricedIndex()` (only `VIX`; SPX/NDX/RUT are cash-settled). NEVER resolve a VIX option's underlying as plain `prices[ticker].last` — that shows spot (~15) for an August spread whose real underlying is the August future. The relay publishes the per-held-expiry curve in `prices[ticker].fwdCurve`; `resolveSpot()` already prices BS legs off it. Commit e02f4bd.
 
 ### Exposure Delta Sign
 `rawDelta = sign × lp.delta` where `sign = -1` for SHORT. LONG Call →+, SHORT Call →−, LONG Put →−, SHORT Put →+. Impl: `web/lib/exposureBreakdown.ts`.
