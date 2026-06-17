@@ -358,6 +358,10 @@ function NewOrderForm({
       legAction === "SELL" &&
       onlyLeg.direction === "LONG" &&
       onlyLeg.contracts >= parsedQty;
+    const isClosingShort =
+      action === "BUY" &&
+      onlyLeg.direction === "SHORT" &&
+      onlyLeg.contracts >= parsedQty;
 
     if (isClosingLong) {
       // Pure close (or partial close) of a held LONG. The gate's `closeOut`
@@ -373,6 +377,27 @@ function NewOrderForm({
         totalCost: proceeds,
         totalLabel: "Proceeds:",
         closeOut: { entryCostDollars },
+      };
+    }
+
+    if (isClosingShort) {
+      // Buy-to-close (or partial close) of a held SHORT. Mirrors the
+      // `closingShort` branch in lib/order/positionTrade.ts so the gate's
+      // `pnl = proceeds - entryCostDollars` resolves to credit − debit:
+      //   proceeds = −debit (we PAY to buy back), basis = −credit (the
+      //   original entry credit), so pnl = (−debit) − (−credit) = credit − debit.
+      // avg_cost is per-contract for options, per-share for stocks; use it
+      // directly (NEVER × multiplier — the d420c16 double-count bug).
+      const closeDebit = parsedQty * parsedPrice * multiplier;
+      const basisMagnitude = parsedQty * Math.abs(onlyLeg.avg_cost);
+      return {
+        ticker,
+        chainLegs: [],
+        netPremium: parsedPrice,
+        description,
+        totalCost: -closeDebit,
+        totalLabel: "Close Debit:",
+        closeOut: { entryCostDollars: -basisMagnitude },
       };
     }
 
