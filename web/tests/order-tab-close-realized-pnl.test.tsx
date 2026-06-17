@@ -108,6 +108,42 @@ const LONG_USAX_CALL_PROD_REPRO: PortfolioPosition = {
   ],
 };
 
+/** SHORT 10× MU Put $965.0 at avg_cost $5,000 per-contract (= $50.00/share).
+ *  Entry CREDIT = 10 × $5,000 = $50,000. Buy-to-close @ $3.00 → close debit
+ *  = 10 × $3.00 × 100 = $3,000. Est. Realized P&L = $50,000 − $3,000 = +$47,000.
+ *  Screenshot repro: the open-fresh path wrongly showed "Max Gain $962,000 /
+ *  Max Loss $3,000" — the risk of OPENING a LONG put, not a buy-to-close. */
+const SHORT_MU_PUT: PortfolioPosition = {
+  id: 21,
+  ticker: "MU",
+  structure: "Short Put $965.0",
+  structure_type: "Short Put",
+  risk_profile: "undefined",
+  expiry: "2026-09-18",
+  contracts: 10,
+  direction: "SHORT",
+  entry_cost: -50000,
+  max_risk: 965000,
+  market_value: -3000,
+  kelly_optimal: null,
+  target: null,
+  stop: null,
+  entry_date: "2026-03-01",
+  legs: [
+    {
+      direction: "SHORT",
+      contracts: 10,
+      type: "Put",
+      strike: 965,
+      entry_cost: -50000,
+      avg_cost: 5000,
+      market_price: 3.0,
+      market_value: -3000,
+      market_price_is_calculated: false,
+    },
+  ],
+};
+
 const PORTFOLIO: PortfolioData = {
   bankroll: 250_000,
   peak_value: 250_000,
@@ -163,6 +199,15 @@ function makePrice(symbol: string): PriceData {
 const PRICES: Record<string, PriceData> = {
   USAX_20270115_45_C: makePrice("USAX_20270115_45_C"),
   USAX: makePrice("USAX"),
+};
+
+function makePutPrice(symbol: string): PriceData {
+  return { ...makePrice(symbol), last: 3.0, bid: 2.9, ask: 3.1, close: 3.2 };
+}
+
+const MU_PRICES: Record<string, PriceData> = {
+  MU_20260918_965_P: makePutPrice("MU_20260918_965_P"),
+  MU: makePutPrice("MU"),
 };
 
 function readSummaryMetrics(container: HTMLElement): Record<string, string> {
@@ -258,5 +303,51 @@ describe("OrderTab — SELL-to-close on LONG single-leg surfaces realized P&L", 
     expect(metrics["Est. Realized P&L"]).toMatch(/\$19,370/);
     // Guardrail: bug surfaced as −$635,055; ensure we're not there.
     expect(metrics["Est. Realized P&L"]).not.toMatch(/635,055/);
+  });
+});
+
+describe("OrderTab — BUY-to-close on SHORT single-leg surfaces realized P&L", () => {
+  afterEach(cleanup);
+
+  it("short-circuits a buy-to-close-short to a close-out (NOT open-fresh long-put risk)", () => {
+    const portfolio: PortfolioData = { ...PORTFOLIO, positions: [SHORT_MU_PUT] };
+
+    const { container, getByText } = render(
+      React.createElement(OrderTab, {
+        ticker: "MU",
+        position: SHORT_MU_PUT,
+        portfolio,
+        prices: MU_PRICES,
+        openOrders: [],
+      }),
+    );
+
+    // Closing a SHORT is a BUY; the form defaults action="SELL", so flip it.
+    fireEvent.click(getByText("BUY"));
+
+    const qtyInput = container.querySelector<HTMLInputElement>(".order-input");
+    fireEvent.change(qtyInput!, { target: { value: "10" } });
+
+    const limitInput = container.querySelector<HTMLInputElement>(".modify-price-input");
+    fireEvent.change(limitInput!, { target: { value: "3.00" } });
+
+    fireEvent.click(getByText("Place Order"));
+
+    const metrics = readSummaryMetrics(container);
+
+    // Screenshot bug repro: open-fresh path rendered "Max Gain $962,000 /
+    // Max Loss $3,000". A buy-to-close must surface a close-out instead.
+    expect(metrics).not.toHaveProperty("Max Gain");
+    expect(metrics).not.toHaveProperty("Max Loss");
+
+    // Close debit = 10 × $3.00 × 100 = $3,000 (positive magnitude on display).
+    expect(metrics).toHaveProperty("Close Debit");
+    expect(metrics["Close Debit"]).toMatch(/\$3,000/);
+
+    // Est. Realized P&L = entry credit ($50,000) − close debit ($3,000) = +$47,000.
+    expect(metrics).toHaveProperty("Est. Realized P&L");
+    expect(metrics["Est. Realized P&L"]).toMatch(/\$47,000/);
+    // Guardrail: the open-fresh bug surfaced $962,000; ensure we're not there.
+    expect(metrics["Est. Realized P&L"]).not.toMatch(/962,000/);
   });
 });
