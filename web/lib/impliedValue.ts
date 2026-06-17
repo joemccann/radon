@@ -117,6 +117,32 @@ function resolveSpot(
   return null;
 }
 
+/**
+ * Underlying spot for DISPLAY (position/blotter "underlying" columns).
+ *
+ * Forward-priced indices (VIX) settle against the future for the option's OWN
+ * expiry, not the cash spot — so an August VIX spread must show the August VIX
+ * future, not spot VIX. Prefers `prices[ticker].fwdCurve[expiry]`, then the
+ * front-month `fwd`, then cash `.last`. Returns null when nothing is usable.
+ * Shares the term-structure logic with `resolveSpot()` so the displayed
+ * underlying matches the spot the Black-Scholes layer prices against.
+ */
+export function resolveUnderlyingSpot(
+  ticker: string,
+  expiry: string | null | undefined,
+  prices: Record<string, PriceData> | undefined,
+): number | null {
+  const tickerPd = prices?.[ticker.toUpperCase()];
+  if (isForwardPricedIndex(ticker)) {
+    const key = expiryKey(expiry);
+    const curveVal = key ? tickerPd?.fwdCurve?.[key] : undefined;
+    if (isPositive(curveVal)) return curveVal;
+    if (isPositive(tickerPd?.fwd)) return tickerPd!.fwd!;
+  }
+  if (isPositive(tickerPd?.last)) return tickerPd!.last!;
+  return null;
+}
+
 /* ─── sigma resolution ───────────────────────────────── */
 
 type SigmaResolution = { sigma: number; source: "stream" | "backsolve" } | null;

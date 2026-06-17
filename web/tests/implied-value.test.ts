@@ -4,6 +4,7 @@ import {
   computeLegImpliedValue,
   computeOrderImpliedValue,
   computePositionImpliedValue,
+  resolveUnderlyingSpot,
   yearsToExpiry,
   type LegImpliedInput,
 } from "../lib/impliedValue";
@@ -588,5 +589,41 @@ describe("computeLegImpliedValue — σ back-solver fallback", () => {
     expect(result.perContract).not.toBeNull();
     const expected = bsPut(280, 295, T_today, r, sigmaTrue);
     expect(result.perContract!).toBeCloseTo(expected, 1);
+  });
+});
+
+describe("resolveUnderlyingSpot — VIX forward-by-expiry underlying", () => {
+  const AUG = "2026-08-18";
+  // Repro of the live bug: an August VIX call spread showed spot VIX 15.90 as
+  // its underlying. It must show the August VIX FUTURE (fwdCurve[expiry]).
+  const vixPrices = (over: Partial<PriceData> = {}): Record<string, PriceData> => ({
+    VIX: pd({ symbol: "VIX", last: 15.9, fwd: 17.0, fwdCurve: { "20260818": 20.5 }, ...over }),
+  });
+
+  it("uses the per-expiry forward (fwdCurve[expiry]) for a VIX option, NOT spot", () => {
+    expect(resolveUnderlyingSpot("VIX", AUG, vixPrices())).toBe(20.5);
+    expect(resolveUnderlyingSpot("VIX", AUG, vixPrices())).not.toBe(15.9);
+  });
+
+  it("matches the expiry regardless of dash formatting", () => {
+    expect(resolveUnderlyingSpot("VIX", "20260818", vixPrices())).toBe(20.5);
+  });
+
+  it("falls back to front-month fwd when the expiry is absent from the curve", () => {
+    expect(resolveUnderlyingSpot("VIX", "2026-09-16", vixPrices())).toBe(17.0);
+  });
+
+  it("falls back to cash last when no forward data is available", () => {
+    expect(resolveUnderlyingSpot("VIX", AUG, { VIX: pd({ symbol: "VIX", last: 15.9 }) })).toBe(15.9);
+  });
+
+  it("uses cash last for non-forward-priced tickers even if a fwdCurve exists", () => {
+    const prices = { AAPL: pd({ symbol: "AAPL", last: 230, fwdCurve: { "20260818": 999 } }) };
+    expect(resolveUnderlyingSpot("AAPL", AUG, prices)).toBe(230);
+  });
+
+  it("returns null when nothing usable is present", () => {
+    expect(resolveUnderlyingSpot("VIX", AUG, {})).toBeNull();
+    expect(resolveUnderlyingSpot("VIX", AUG, undefined)).toBeNull();
   });
 });
