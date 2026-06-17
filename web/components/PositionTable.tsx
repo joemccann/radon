@@ -24,7 +24,7 @@ import {
   getTodayPnlDollars,
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
-import { computeLegImpliedValue, computePositionImpliedValue } from "@/lib/impliedValue";
+import { computeLegImpliedValue, computePositionImpliedValue, resolveUnderlyingSpot } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
@@ -366,8 +366,11 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   // Structure already includes strike from ib_sync format_structure_description()
   const structureDisplay = pos.structure;
 
-  // Underlying price (for options positions)
-  const underlyingPrice = realtimePrice?.last != null && realtimePrice.last !== 0 ? realtimePrice.last : null;
+  // Underlying price (for options positions). Forward-priced indices (VIX)
+  // settle against the future for the position's OWN expiry, not cash spot —
+  // resolveUnderlyingSpot prefers prices[ticker].fwdCurve[expiry] so an August
+  // VIX spread shows the August VIX future, not spot VIX.
+  const underlyingPrice = resolveUnderlyingSpot(pos.ticker, pos.expiry, prices);
   const { direction: underlyingDirection, flashDirection: underlyingFlash } = usePriceDirection(underlyingPrice);
 
   return (
