@@ -134,6 +134,59 @@ async def _ib_recovery_heartbeat_loop(interval: float = IB_HEARTBEAT_INTERVAL_SE
         await _ib_recovery_heartbeat_tick()
 
 
+ORDERS_SYNC_INTERVAL_SECS = 5 * 60  # 5 min — comfortably under the 10-min watchdog window
+
+
+async def _orders_sync_tick() -> None:
+    """Refresh open orders from IB during market hours.
+
+    Keeps the orders-sync service_health row fresh so the watchdog's
+    intraday bucket (10-min window) does not fire stale alerts during the
+    trading day. The actual work mirrors what POST /orders/refresh does:
+    run ib_orders.py --sync via the recovery-aware subprocess helper,
+    which writes orders.json + heartbeats the orders-sync service_health
+    row via service_cycle.
+
+    Guards (all must pass):
+    - not test_mode          — never run subprocess syncs in unit tests
+    - market hours open      — the watchdog window is intraday-only; no
+                               need to run outside 09:30–16:00 ET weekdays
+    - pool has a connection  — proxy for "IB Gateway authenticated"; if
+                               the pool is fully disconnected we would
+                               just burn the IB cooldown and log an error
+    """
+    if test_mode:
+        return
+    if not _is_market_open_now_et():
+        return
+    if not _pool_has_any_connection():
+        logger.debug("orders-sync loop: pool disconnected — skipping tick")
+        return
+    logger.info("orders-sync loop: running ib_orders.py --sync")
+    result = await _run_ib_script_with_recovery(
+        "ib_orders.py", ["--sync", "--port", str(DEFAULT_GATEWAY_PORT)], timeout=30, raw=True
+    )
+    if result.ok:
+        logger.info("orders-sync loop: sync complete")
+    else:
+        logger.warning("orders-sync loop: sync failed: %s", result.error)
+
+
+async def _orders_sync_loop(interval: float = ORDERS_SYNC_INTERVAL_SECS) -> None:
+    """Autonomous market-hours orders refresh loop.
+
+    Sleeps first so the initial page-load /orders/refresh call (fired
+    by the Next.js /orders route a few seconds after startup) has
+    already run before we kick off the first autonomous sync.
+    """
+    while True:
+        await asyncio.sleep(interval)
+        try:
+            await _orders_sync_tick()
+        except Exception:
+            logger.exception("orders-sync loop: unhandled exception — continuing")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Start IB pool and UW client on startup, tear down on shutdown."""
@@ -174,6 +227,11 @@ async def lifespan(app: FastAPI):
     # /edge-health surface, so the mutating recovery path can no longer ride a
     # browser /health poll — drive it here on a fixed cadence instead.
     asyncio.create_task(_ib_recovery_heartbeat_loop())
+
+    # Autonomous orders-sync loop — keeps the orders-sync service_health row
+    # fresh during market hours so the watchdog's intraday bucket (10-min
+    # window) does not fire stale alerts when no browser has visited /orders.
+    asyncio.create_task(_orders_sync_loop())
 
     # UW client — just verify token exists
     uw_available = bool(os.environ.get("UW_TOKEN"))

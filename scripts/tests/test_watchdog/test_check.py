@@ -5,7 +5,7 @@ Each tested path:
  - happy: ok + fresh → no failure recorded.
  - stale: ok + past window → records stale failure (severity ~ market state).
  - error: state == 'error' → records error failure regardless of timestamp.
- - missing row: never-seen service → treated as stale.
+ - dormant: never-seen service (no row) → status="dormant", never fires.
  - active ack: returns SKIPPED without writing cooldown rows.
 """
 from __future__ import annotations
@@ -99,20 +99,71 @@ class TestCheckOutcomes:
         assert outcome.fired is True
         assert "Flex rate limit" in outcome.message
 
-    def test_missing_service_health_row_is_stale(self, db_conn):
+    def test_never_activated_service_returns_dormant_not_stale(self, db_conn):
+        """A service with NO service_health row has never been activated.
+        It must NOT fire a page — the operator knows it is dormant.
+        Calling it twice confirms hysteresis is never incremented either.
+        """
         from watchdog import check
 
         now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
         # No row seeded for newsfeed-scraper.
-        check.check_service(service="newsfeed-scraper", kind="stale", now=now, market_state="open")
-        outcome = check.check_service(
+        outcome1 = check.check_service(
+            service="newsfeed-scraper", kind="stale", now=now, market_state="open"
+        )
+        outcome2 = check.check_service(
             service="newsfeed-scraper",
+            kind="stale",
+            now=now + timedelta(minutes=5),
+            market_state="open",
+        )
+        assert outcome1.status == "dormant"
+        assert outcome1.fired is False
+        assert outcome2.status == "dormant"
+        assert outcome2.fired is False
+
+    def test_previously_healthy_service_past_window_still_fires(self, db_conn):
+        """A service that wrote a healthy row and then went past its window
+        MUST still fire — this is a genuine staleness incident.
+        """
+        from watchdog import check
+
+        now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
+        # Seed a row 30 minutes old; vcg-scan open window is 15 min.
+        _seed_service_health(db_conn, "vcg-scan", "ok", now - timedelta(minutes=30))
+        check.check_service(service="vcg-scan", kind="stale", now=now, market_state="open")
+        outcome = check.check_service(
+            service="vcg-scan",
             kind="stale",
             now=now + timedelta(minutes=5),
             market_state="open",
         )
         assert outcome.status == "stale"
         assert outcome.fired is True
+
+    def test_dormant_services_llm_token_index_and_preset_rebalance(self, db_conn):
+        """llm-token-index and preset-rebalance have never written a row
+        in production (no ARTIFICIAL_ANALYSIS_API_KEY; monitor daemon
+        handler not activated). They must never fire a page.
+        """
+        from watchdog import check
+
+        now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
+        for service in ("llm-token-index", "preset-rebalance"):
+            # Run twice to confirm hysteresis cannot accumulate either.
+            o1 = check.check_service(
+                service=service, kind="stale", now=now, market_state="closed"
+            )
+            o2 = check.check_service(
+                service=service,
+                kind="stale",
+                now=now + timedelta(hours=1),
+                market_state="closed",
+            )
+            assert o1.status == "dormant", f"{service}: expected dormant, got {o1.status}"
+            assert o1.fired is False, f"{service}: fired on first check"
+            assert o2.status == "dormant", f"{service}: expected dormant on 2nd check"
+            assert o2.fired is False, f"{service}: fired on 2nd check"
 
     def test_active_ack_silences_and_skips_cooldown(self, db_conn):
         from watchdog import ack, check

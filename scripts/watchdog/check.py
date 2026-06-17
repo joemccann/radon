@@ -219,12 +219,39 @@ def _check_error(*, service: str, health: Optional[dict], now: datetime, market_
 
 
 def _check_stale(*, service: str, health: Optional[dict], now: datetime, market_state: str) -> CheckOutcome:
-    """`stale` bucket — fire iff the row is missing or past its window."""
+    """`stale` bucket — fire iff the row exists and is past its window.
+
+    A service with NO row has never been activated (not deployed or deliberately
+    dormant). That is an operator-known state, NOT an incident. Suppress it
+    rather than paging — this stops llm-token-index and preset-rebalance (and
+    any future never-activated services) from flooding on-call.
+
+    Edge case: a newly-deployed writer that is broken and never writes its first
+    row is also suppressed until it writes once. That window is acceptable — the
+    deployment itself is verifiable, and the error bucket (which already returns
+    healthy for no-row services) catches state=error rows once the writer starts.
+    The alternative — paging on every never-seen service — was causing the live
+    flood this guard fixes.
+    """
+    if not health:
+        # No row ever written → dormant / not yet activated. Not an incident.
+        cooldown_mod.record_success(service=service, kind="stale")
+        return CheckOutcome(
+            service=service,
+            kind="stale",
+            status="dormant",
+            severity=None,
+            fired=False,
+            message="no service_health row — not yet activated",
+            consecutive_failures=0,
+            now=now,
+        )
+
     window_s = services_mod.freshness_window_for(service, market_state)
 
     is_stale = False
     age_s = None
-    if not health or not health.get("updated_at"):
+    if not health.get("updated_at"):
         is_stale = True
     else:
         try:

@@ -397,11 +397,14 @@ class TestServiceHealthRowsAlwaysWrite:
     def test_grouped_dispatch_does_not_leak_into_meta_row(self, db_conn, monkeypatch, fresh_now):
         from watchdog import check, grouping
 
-        # Only vcg + cri seeded as stale ``ok`` rows; orders-sync /
-        # portfolio-sync have no row at all (missing = stale, but no
-        # ``state=error`` row written by check itself).
-        for svc in ("vcg-scan", "cri-scan"):
-            _seed(db_conn, svc, "ok", fresh_now - timedelta(minutes=30))
+        # All four intraday IB services seeded as stale ok rows so the
+        # grouped-dispatch path trips (threshold >= 2 IB services). Use
+        # 60m so cri-scan (35m window) is already past-window at tick 0.
+        # Previously this seeded only vcg+cri and relied on orders-sync/
+        # portfolio-sync having no row (treated as stale). Services with
+        # no row are now dormant (suppressed) — explicit rows are required.
+        for svc in ("vcg-scan", "cri-scan", "orders-sync", "portfolio-sync"):
+            _seed(db_conn, svc, "ok", fresh_now - timedelta(minutes=60))
 
         for tick in (fresh_now, fresh_now + timedelta(minutes=5)):
             check.check_bucket(bucket="intraday", now=tick)
@@ -452,8 +455,13 @@ class TestCooldownAppliesToGroupedKey:
         monkeypatch.setenv("PUSHOVER_USER", "u")
         monkeypatch.setenv("PUSHOVER_TOKEN", "t")
 
-        for svc in ("vcg-scan", "cri-scan"):
-            _seed(db_conn, svc, "ok", fresh_now - timedelta(minutes=30))
+        # All four intraday IB services seeded with 60m-old rows (cri-scan
+        # has a 35m window, so 60m is safely stale at tick 0 for all four).
+        # Previously this relied on orders-sync/portfolio-sync having no row
+        # (treated as stale). Services with no row are now dormant — explicit
+        # stale rows are required to trip the grouping threshold.
+        for svc in ("vcg-scan", "cri-scan", "orders-sync", "portfolio-sync"):
+            _seed(db_conn, svc, "ok", fresh_now - timedelta(minutes=60))
 
         for tick in (fresh_now, fresh_now + timedelta(minutes=5)):
             check.check_bucket(bucket="intraday", now=tick)
