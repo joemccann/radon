@@ -1,6 +1,7 @@
 """Tests for scenario_analysis.py — portfolio stress testing."""
 import pytest
 import math
+from datetime import datetime, timedelta
 
 from scenario_analysis import (
     approx_delta,
@@ -9,6 +10,14 @@ from scenario_analysis import (
     scenario_price_shock,
     scenario_delta_decay,
 )
+
+# Date-relative expiry for the delta tests, which need a real positive DTE.
+# A hardcoded date is a time bomb: `_option_dte` truncates `(expiry - now).days`
+# to 0 once the date is <1 day out, so `approx_delta` falls back to a flat ±0.5
+# and a bull call spread's two call legs cancel to exactly 0.0 — the 2026-06-19
+# breakage that detonated on 2026-06-18. ~90 days keeps DTE comfortably positive
+# regardless of run date so the BS approximation (not the floor) is exercised.
+_FAR_EXPIRY = (datetime.now() + timedelta(days=90)).strftime("%Y-%m-%d")
 
 
 # ── Fixtures ────────────────────────────────────────────
@@ -153,20 +162,20 @@ class TestComputePositionDelta:
 
     def test_long_call(self):
         """Long call → positive delta."""
-        pos = _make_long_call(strike=250, contracts=10, expiry="2026-06-19")
+        pos = _make_long_call(strike=250, contracts=10, expiry=_FAR_EXPIRY)
         d = compute_position_delta(pos, spot=260)
         assert d > 0
 
     def test_long_put(self):
         """Long put → negative delta."""
-        pos = _make_long_put(strike=250, contracts=5, expiry="2026-06-19")
+        pos = _make_long_put(strike=250, contracts=5, expiry=_FAR_EXPIRY)
         d = compute_position_delta(pos, spot=240)
         assert d < 0
 
     def test_bull_call_spread(self):
         """Spread → net of long and short leg deltas (positive but less than naked call)."""
-        spread = _make_bull_call_spread(long_strike=250, short_strike=270, contracts=10)
-        naked = _make_long_call(strike=250, contracts=10, expiry="2026-06-19")
+        spread = _make_bull_call_spread(long_strike=250, short_strike=270, contracts=10, expiry=_FAR_EXPIRY)
+        naked = _make_long_call(strike=250, contracts=10, expiry=_FAR_EXPIRY)
         d_spread = compute_position_delta(spread, spot=260)
         d_naked = compute_position_delta(naked, spot=260)
         assert d_spread > 0
