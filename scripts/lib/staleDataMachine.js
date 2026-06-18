@@ -153,3 +153,44 @@ export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHear
   if (inError) return false;
   return now - lastHeartbeatAt >= TICK_HEARTBEAT_INTERVAL_MS;
 }
+
+/**
+ * Decide BOTH the recovery action and whether to write the ok tick-heartbeat
+ * from a single snapshot, so the two can never race.
+ *
+ * The relay fires every service_health write void (fire-and-forget) into a
+ * last-write-wins upsert. If an "ok" heartbeat and an "error" escalation are
+ * emitted in the SAME stale-check cycle, the heartbeat can land last and
+ * clobber the escalation's error row — hiding a dead data plane behind a green
+ * row whose own payload says ``tick_age_secs: 195`` (the 2026-06-18 incident).
+ *
+ * The fix: the ladder owns the health row whenever it is acting. Only a fully
+ * healthy cycle (action ``none``) may write the heartbeat. Off-hours and
+ * latched-error suppression stay in {@link shouldWriteTickHeartbeat} (the
+ * latter still matters during the post-escalation cooldown, when
+ * decideStaleAction returns ``none`` but the error row is still latched).
+ *
+ * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number}} input
+ * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean}}
+ */
+export function decideHealthWrite(input) {
+  const action = decideStaleAction(input);
+  const heartbeat = action === "none" && shouldWriteTickHeartbeat(input);
+  return { action, heartbeat };
+}
+
+/**
+ * Gateway modes from which the relay may drive a Gateway restart on escalation.
+ *
+ * docker/cloud: the Gateway runs as a container the radon stack owns; the relay
+ * hands off to the lock-holding ``POST /ib/restart`` (which owns the 2FA push
+ * lock + backoff) so a dead market-data farm self-heals. launchd/local: the
+ * Gateway is the operator's laptop IBC session — repeated relay-driven restarts
+ * thrash the auth session and stack 2FA prompts, so the relay stays alert-only.
+ *
+ * @param {string|undefined} gatewayMode
+ * @returns {boolean}
+ */
+export function shouldRequestGatewayRestart(gatewayMode) {
+  return gatewayMode === "docker" || gatewayMode === "cloud";
+}
