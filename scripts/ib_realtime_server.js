@@ -35,9 +35,9 @@ import {
 import { LRUCache } from "./lib/lru-cache.js";
 import { RateLimiter } from "./lib/rate-limiter.js";
 import {
-  decideStaleAction,
+  decideHealthWrite,
   isFarmStateCode,
-  shouldWriteTickHeartbeat,
+  shouldRequestGatewayRestart,
   STALE_DATA_THRESHOLD_MS,
   STALE_CHECK_INTERVAL_MS,
 } from "./lib/staleDataMachine.js";
@@ -547,6 +547,13 @@ let lastTickHeartbeatAt = 0;
 
 const RELAY_HEALTH_SERVICE = "ib-realtime-relay";
 
+// FastAPI's lock-holding Gateway restart. Co-located on the VPS (same host as
+// the relay), so loopback. Overridable for tests / non-standard layouts.
+const IB_RESTART_URL = process.env.IB_RESTART_URL || "http://127.0.0.1:8321/ib/restart";
+// The restart waits on the container coming back; keep the relay's fetch
+// generous but bounded so a wedged API can't leak a hung request.
+const IB_RESTART_TIMEOUT_MS = 90_000;
+
 function isUSMarketHours() {
   // Convert to ET and check if within 9:30-16:00 Mon-Fri
   const now = new Date();
@@ -571,6 +578,31 @@ async function writeRelayHealth(state, error) {
     await recordServiceHealth(RELAY_HEALTH_SERVICE, state, error ? { error } : {});
   } catch (err) {
     console.warn(`\x1b[33m[stale-data] relay health write failed: ${String(err?.message ?? err)}\x1b[0m`);
+  }
+}
+
+// Hand off to FastAPI's lock-holding Gateway restart. The market-data farm is
+// dead while the IB API stays responsive (upstream alive), so the api-hang
+// watchdog never sees this — the relay is the only detector. POST /ib/restart
+// owns the 2FA push lock + restart backoff, so if a push is already in flight
+// (e.g. a concurrent watchdog restart) or we're inside the backoff window the
+// call no-ops rather than stacking a second 2FA push. Best-effort: never throw
+// into the stale-check timer; fire-and-forget so the relay doesn't block.
+async function requestGatewayRestart() {
+  try {
+    const res = await fetch(IB_RESTART_URL, {
+      method: "POST",
+      signal: AbortSignal.timeout(IB_RESTART_TIMEOUT_MS),
+    });
+    const body = await res.json().catch(() => ({}));
+    console.log(
+      `[stale-data] requested lock-held Gateway restart (HTTP ${res.status}): ` +
+        `restarted=${body?.restarted ?? "?"} auth_state=${body?.auth_state ?? "?"}`,
+    );
+  } catch (err) {
+    console.warn(
+      `\x1b[33m[stale-data] Gateway restart request failed: ${String(err?.message ?? err)}\x1b[0m`,
+    );
   }
 }
 
@@ -602,10 +634,14 @@ function reconnectIBSocket() {
   scheduleReconnect();
 }
 
-// K reconnect cycles failed during RTH. Write the relay's service_health row
-// to error (the watchdog turns this into a single alert) and let the
-// operator / ib-watchdog drive the 2FA-locked Gateway restart. Alert-only:
-// the relay never restarts the Gateway itself.
+// K reconnect cycles failed during RTH: the market-data farm is dead while the
+// IB API stays responsive. Write the relay's service_health error row (so the
+// outage is finally VISIBLE on the status surface) AND, for container-owned
+// gateways, hand off to the lock-holding /ib/restart — the only path that can
+// re-establish a dead farm, and the only actor that detects this case at all
+// (the api-hang watchdog sees the API as healthy here). escalation is
+// rate-limited to once per ESCALATION_COOLDOWN_MS and the restart endpoint
+// self-gates on the 2FA lock + backoff, so this never stacks a push.
 function escalateStaleData(elapsedMs, activeSubscriptions) {
   if (ibGatewayRestarting) return;
   ibGatewayRestarting = true;
@@ -616,6 +652,9 @@ function escalateStaleData(elapsedMs, activeSubscriptions) {
     message: `No ticks for ${Math.round(elapsedMs / 1000)}s with ${activeSubscriptions} active subscriptions after ${staleReconnectCycles} reconnect cycles during market hours`,
     farm_state: lastFarmStateCode,
   });
+  if (shouldRequestGatewayRestart(GATEWAY_MODE)) {
+    void requestGatewayRestart();
+  }
   // Allow another reconnect ladder after the cooldown; the escalation itself
   // is independently rate-limited by lastEscalationAt in the decision core.
   setTimeout(() => { ibGatewayRestarting = false; }, 120_000);
@@ -2341,21 +2380,13 @@ staleCheckTimer = setInterval(() => {
   const activeSubscriptions = symbolSubscribers.size;
   const elapsed = now - lastTickTimestamp;
 
-  // DUR-16: RTH tick heartbeat for /api/probe/freshness. Refreshes the
-  // relay's service_health row with the last-tick timestamp so the probe
-  // computes true tick age. ok->ok upserts are suppressed by the 0011
-  // events trigger; the error<->ok edges stay owned by the ladder below.
-  if (shouldWriteTickHeartbeat({ now, isMarketHours: marketHours, inError: relayHealthInError, lastHeartbeatAt: lastTickHeartbeatAt })) {
-    lastTickHeartbeatAt = now;
-    void writeRelayHealth("ok", {
-      heartbeat: "tick",
-      last_tick_at: new Date(lastTickTimestamp).toISOString(),
-      tick_age_secs: Math.round(elapsed / 1000),
-      active_subscriptions: activeSubscriptions,
-    });
-  }
-
-  const action = decideStaleAction({
+  // DUR-16: RTH tick heartbeat for /api/probe/freshness + the recovery action
+  // are decided together (decideHealthWrite) so they can never race. The
+  // heartbeat fires ONLY on a healthy cycle (action "none"); whenever the
+  // ladder is acting it owns the service_health row, so an "ok" heartbeat can
+  // no longer land last and clobber the escalation's "error" row — the
+  // 2026-06-18 invisibility bug where a dead relay still read state=ok.
+  const { action, heartbeat } = decideHealthWrite({
     now,
     lastTickAt: lastTickTimestamp,
     ibConnected,
@@ -2364,7 +2395,19 @@ staleCheckTimer = setInterval(() => {
     reconnectCycles: staleReconnectCycles,
     farmState: lastFarmStateCode,
     lastEscalationAt,
+    inError: relayHealthInError,
+    lastHeartbeatAt: lastTickHeartbeatAt,
   });
+
+  if (heartbeat) {
+    lastTickHeartbeatAt = now;
+    void writeRelayHealth("ok", {
+      heartbeat: "tick",
+      last_tick_at: new Date(lastTickTimestamp).toISOString(),
+      tick_age_secs: Math.round(elapsed / 1000),
+      active_subscriptions: activeSubscriptions,
+    });
+  }
 
   if (action === "none") return;
 

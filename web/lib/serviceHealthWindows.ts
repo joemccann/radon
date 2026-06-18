@@ -208,15 +208,21 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // WS relay records error when its bounded stale-tick recovery ladder
   // escalates and ok when ticks resume. Since DUR-16 it ALSO refreshes
   // the row every 60s during RTH with last-tick detail (the freshness
-  // probe reads it), but off-hours a healthy relay still writes nothing,
-  // so a tight window would flip it stale overnight even though "silent"
-  // is the desired healthy state — keep the 24h window so we still
-  // notice a dead relay process for a day.
+  // probe reads it). OPEN window = 5 * MIN: during RTH the relay writes a
+  // heartbeat every 60s, so 5 missed writes means a DEAD relay PROCESS —
+  // coerce it to stale within minutes instead of a full day (the 24h open
+  // window let the 2026-06-18 outage hide as "nominal" for hours). The
+  // escalation error row lands well before 5 min (45s threshold + K=3
+  // reconnect cycles ≈ 2.25 min), so a normal ladder episode reddens via
+  // its own error state, never via this staleness floor.
+  // EXTENDED + CLOSED stay 24h: off-hours a healthy relay writes nothing
+  // (the heartbeat is RTH-only, matching isUSMarketHours), so a tight
+  // off-hours window would flip "silent = healthy" to stale every night.
   // requires_ib MUST be false: the relay alert is precisely the signal
   // that the IB data plane is dead, so grouping it under the IB-outage
   // umbrella (which requires_ib=true does) would suppress the very alert
-  // we want. Alert-only — the relay never restarts the Gateway itself.
-  "ib-realtime-relay": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
+  // we want.
+  "ib-realtime-relay": { open: 5 * MIN, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``deploy`` is NOT a writer — it's the deploy MARKER row upserted by
   // radon-cloud deploy.sh after each green post-deploy gate (DUR-11). The

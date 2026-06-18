@@ -10,6 +10,8 @@ import {
   FARM_DOWN_CODES,
   shouldWriteTickHeartbeat,
   TICK_HEARTBEAT_INTERVAL_MS,
+  decideHealthWrite,
+  shouldRequestGatewayRestart,
 } from "./staleDataMachine.js";
 
 const NOW = 1_700_000_000_000;
@@ -199,5 +201,91 @@ describe("shouldWriteTickHeartbeat (DUR-16 freshness-probe heartbeat)", () => {
 
   it("fires immediately on the first RTH cycle of a fresh process (lastHeartbeatAt=0)", () => {
     expect(shouldWriteTickHeartbeat(hbInput({ lastHeartbeatAt: 0 }))).toBe(true);
+  });
+});
+
+describe("decideHealthWrite (heartbeat must never clobber the escalation row)", () => {
+  // A healthy baseline that WOULD write a heartbeat (interval elapsed, RTH, no error).
+  function hw(overrides = {}) {
+    return {
+      now: NOW,
+      lastTickAt: NOW, // fresh
+      ibConnected: true,
+      isMarketHours: true,
+      activeSubscriptions: 35,
+      reconnectCycles: 0,
+      farmState: null,
+      lastEscalationAt: null,
+      inError: false,
+      lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS,
+      ...overrides,
+    };
+  }
+
+  it("healthy cycle → heartbeat ok, no recovery action", () => {
+    expect(decideHealthWrite(hw())).toEqual({ action: "none", heartbeat: true });
+  });
+
+  it("ESCALATION cycle → NO heartbeat (the 2026-06-18 clobber bug)", () => {
+    // Stale + K cycles burned + no cooldown + heartbeat interval elapsed +
+    // error not yet latched (escalateStaleData latches it AFTER this decision).
+    // Pre-fix the heartbeat ok would race the escalation error; it must not.
+    expect(
+      decideHealthWrite(
+        hw({
+          lastTickAt: STALE_TICK_AT,
+          reconnectCycles: MAX_RECONNECT_CYCLES,
+          inError: false,
+          lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 10_000,
+        }),
+      ),
+    ).toEqual({ action: "escalate", heartbeat: false });
+  });
+
+  it("reconnect cycle → no heartbeat (ladder owns the row)", () => {
+    expect(
+      decideHealthWrite(hw({ lastTickAt: STALE_TICK_AT, reconnectCycles: 0 })),
+    ).toEqual({ action: "reconnect", heartbeat: false });
+  });
+
+  it("resubscribe cycle → no heartbeat", () => {
+    expect(
+      decideHealthWrite(hw({ lastTickAt: STALE_TICK_AT, farmState: 2104 })),
+    ).toEqual({ action: "resubscribe", heartbeat: false });
+  });
+
+  it("post-escalation cooldown (still stale, error latched) → action none but NO heartbeat", () => {
+    // decideStaleAction returns 'none' inside the cooldown even though ticks
+    // are still stale; the inError guard must keep the heartbeat from
+    // resurrecting the row to ok.
+    expect(
+      decideHealthWrite(
+        hw({
+          lastTickAt: STALE_TICK_AT,
+          reconnectCycles: MAX_RECONNECT_CYCLES,
+          lastEscalationAt: NOW - (ESCALATION_COOLDOWN_MS - 1),
+          inError: true,
+        }),
+      ),
+    ).toEqual({ action: "none", heartbeat: false });
+  });
+
+  it("healthy but inside the heartbeat interval → no write, no action", () => {
+    expect(
+      decideHealthWrite(hw({ lastHeartbeatAt: NOW - 1_000 })),
+    ).toEqual({ action: "none", heartbeat: false });
+  });
+});
+
+describe("shouldRequestGatewayRestart (relay may only restart container-owned gateways)", () => {
+  it("docker + cloud → relay drives the lock-held restart", () => {
+    expect(shouldRequestGatewayRestart("docker")).toBe(true);
+    expect(shouldRequestGatewayRestart("cloud")).toBe(true);
+  });
+
+  it("launchd / local / unset → alert-only, never restart from the relay", () => {
+    expect(shouldRequestGatewayRestart("launchd")).toBe(false);
+    expect(shouldRequestGatewayRestart("local")).toBe(false);
+    expect(shouldRequestGatewayRestart(undefined)).toBe(false);
   });
 });
