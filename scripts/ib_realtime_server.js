@@ -41,6 +41,7 @@ import {
   STALE_DATA_THRESHOLD_MS,
   STALE_CHECK_INTERVAL_MS,
 } from "./lib/staleDataMachine.js";
+import { isMarketOpen } from "./lib/marketCalendar.js";
 
 const DEFAULT_WS_PORT = 8765;
 const DEFAULT_IB_HOST = process.env.IB_GATEWAY_HOST || "127.0.0.1";
@@ -555,16 +556,11 @@ const IB_RESTART_URL = process.env.IB_RESTART_URL || "http://127.0.0.1:8321/ib/r
 const IB_RESTART_TIMEOUT_MS = 90_000;
 
 function isUSMarketHours() {
-  // Convert to ET and check if within 9:30-16:00 Mon-Fri
-  const now = new Date();
-  const etStr = now.toLocaleString("en-US", { timeZone: "America/New_York" });
-  const et = new Date(etStr);
-  const day = et.getDay(); // 0=Sun, 6=Sat
-  if (day === 0 || day === 6) return false;
-  const hours = et.getHours();
-  const minutes = et.getMinutes();
-  const timeMinutes = hours * 60 + minutes;
-  return timeMinutes >= 9 * 60 + 30 && timeMinutes <= 16 * 60;
+  // Holiday + early-close aware via lib/marketCalendar.js (IBKR cache → static
+  // holiday table → weekday/time). A mid-week holiday like Juneteenth is no
+  // longer treated as a trading day, so the stale-tick ladder stays idle
+  // instead of churning reconnect/resubscribe (and escalating) all day.
+  return isMarketOpen();
 }
 
 const GATEWAY_MODE = process.env.IB_GATEWAY_MODE || "docker";

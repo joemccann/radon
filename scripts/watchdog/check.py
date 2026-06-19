@@ -119,6 +119,18 @@ def _market_state_for(now: datetime) -> str:
     day = et.weekday()  # 0=Mon, 6=Sun
     if day >= 5:
         return "closed"
+    # A US market holiday on a weekday is "closed", NOT "open" — otherwise
+    # market-hours-only writers (vcg/cri/portfolio-sync) get the tight open-state
+    # freshness window while legitimately dormant, are flagged stale, and the
+    # intraday bucket escalates them to P1 EMERGENCY Pushover pages (the
+    # Juneteenth false-page incident). Guarded so a calendar hiccup can never
+    # break the watchdog cycle. Same class as feedback_extended_market_state_window.
+    try:
+        from utils import market_calendar
+        if et.strftime("%Y-%m-%d") in market_calendar.load_holidays(et.year):
+            return "closed"
+    except Exception:
+        pass
     minutes = et.hour * 60 + et.minute
     if 9 * 60 + 30 <= minutes <= 16 * 60:
         return "open"

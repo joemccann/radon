@@ -407,15 +407,23 @@ def _today_et_str() -> str:
 
 
 def _is_market_open_now_et() -> bool:
+    # Holiday-aware (market_calendar.is_market_open_et consults
+    # scripts/config/market_holidays.json), so the orders-sync / portfolio loop
+    # no longer treats mid-week holidays like Juneteenth as open. Falls back to
+    # weekday + 09:30-16:00 ET only if the calendar import/file is unavailable.
     try:
-        from zoneinfo import ZoneInfo
-        et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
+        from utils.market_calendar import is_market_open_et
+        return is_market_open_et()
     except Exception:
-        et = datetime.now()
-    if et.weekday() >= 5:
-        return False
-    minutes = et.hour * 60 + et.minute
-    return 9 * 60 + 30 <= minutes <= 16 * 60
+        from zoneinfo import ZoneInfo
+        try:
+            et = datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York"))
+        except Exception:
+            et = datetime.now()
+        if et.weekday() >= 5:
+            return False
+        minutes = et.hour * 60 + et.minute
+        return 9 * 60 + 30 <= minutes <= 16 * 60
 
 
 def _scan_time_to_et_date(scan_time: str) -> Optional[str]:
