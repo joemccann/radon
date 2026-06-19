@@ -1662,6 +1662,34 @@ async def leap_scan(preset: str = "mag7", min_gap: float = 10.0):
         return cached or {"scan_time": "", "min_gap": min_gap, "results": []}
 
 
+# ── Market calendar (IBKR-sourced trading schedule) ─────────────────
+
+
+@app.post("/market-calendar/refresh")
+async def market_calendar_refresh():
+    """Pull the IBKR trading calendar (SPY liquidHours) and refresh the cache.
+
+    fetch_market_calendar.py merges the rolling window into
+    data/market_calendar.json (the SoT the relay + market_state() resolver read)
+    and emits the summary JSON we return. The daily radon-market-calendar timer
+    targets this route.
+    """
+    result = await run_script("fetch_market_calendar.py", [], timeout=60)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data
+
+
+@app.get("/market-calendar")
+async def market_calendar_get():
+    """Return the cached IBKR-sourced calendar. 200 + ``missing`` flag when the
+    cache hasn't been written yet (never 4xx for a legitimate empty state)."""
+    cached = _read_cache(DATA_DIR / "market_calendar.json")
+    if not cached:
+        return {"missing": True, "source": None, "days": {}}
+    return cached
+
+
 # ── Index options chain (Phase 3 — VIX et al.) ──────────────────────
 
 _INDEX_OPTIONS_CHAIN_TIMEOUT_S = 45.0  # patched in tests

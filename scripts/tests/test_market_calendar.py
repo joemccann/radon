@@ -7,7 +7,12 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-from utils.market_calendar import is_market_open_et
+from utils.market_calendar import (
+    is_market_open_et,
+    market_state,
+    parse_liquid_hours,
+    _resolve_market_state,
+)
 
 
 def _utc(y, m, d, h, mi=0):
@@ -33,3 +38,50 @@ def test_before_open_and_after_close_closed():
     # 09:00 ET (13:00 UTC) and 16:30 ET (20:30 UTC) on a normal Thursday.
     assert is_market_open_et(_utc(2026, 6, 18, 13)) is False
     assert is_market_open_et(_utc(2026, 6, 18, 20, 30)) is False
+
+
+# ── parse_liquid_hours (IBKR liquidHours → per-date status) ──────────────
+
+def test_parse_liquid_hours_live_sample():
+    # Real SPY liquidHours pulled live on 2026-06-19 (Juneteenth).
+    s = (
+        "20260619:CLOSED;20260620:CLOSED;20260621:CLOSED;"
+        "20260622:0930-20260622:1600;20260623:0930-20260623:1600;"
+        "20260624:0930-20260624:1600"
+    )
+    parsed = parse_liquid_hours(s)
+    assert parsed["2026-06-19"] == {"status": "closed", "open_et": None, "close_et": None}
+    assert parsed["2026-06-22"] == {"status": "open", "open_et": "09:30", "close_et": "16:00"}
+
+
+def test_parse_liquid_hours_early_close():
+    # Half-day: shortened close (13:00) → early_close, no special token.
+    parsed = parse_liquid_hours("20261127:0930-20261127:1300")
+    assert parsed["2026-11-27"] == {"status": "early_close", "open_et": "09:30", "close_et": "13:00"}
+
+
+def test_parse_liquid_hours_ignores_garbage():
+    assert parse_liquid_hours("") == {}
+    assert parse_liquid_hours("not-a-segment;;BADDATE:CLOSED") == {}
+
+
+# ── _resolve_market_state (pure) + IBKR-cache authority ──────────────────
+
+def test_resolve_ibkr_closed_overrides_weekday():
+    # Even a weekday in RTH is closed when the IBKR row says so (ad-hoc closure).
+    assert _resolve_market_state(12 * 60, 2, {"status": "closed"}, False) == {
+        "state": "closed", "is_open": False, "reason": "ibkr:closed",
+    }
+
+
+def test_resolve_ibkr_early_close():
+    day = {"status": "early_close", "open_et": "09:30", "close_et": "13:00"}
+    assert _resolve_market_state(12 * 60, 2, day, False)["state"] == "early_close"
+    assert _resolve_market_state(13 * 60 + 30, 2, day, False)["is_open"] is False
+
+
+def test_market_state_juneteenth_closed_via_static():
+    # No IBKR cache in the test env → falls to the static holiday table.
+    st = market_state(_utc(2026, 6, 19, 17))
+    assert st["is_open"] is False
+    assert st["reason"] == "static:holiday"
