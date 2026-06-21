@@ -1214,6 +1214,23 @@ async def forecast_chronos(request: Request):
     return result.data
 
 
+@app.post("/flow-surprise")
+async def flow_surprise(request: Request):
+    """Flow-surprise residual: ranked watchlist, or one ticker if provided."""
+    body = await request.json()
+    metric = str(body.get("metric", "flow_strength"))
+    top = int(body.get("top", 20))
+    lookback = int(body.get("lookback", 250))
+    args = ["--metric", metric, "--top", str(top), "--lookback", str(lookback)]
+    ticker = body.get("ticker")
+    if ticker:
+        args += ["--ticker", str(ticker).upper()]
+    result = await run_script("flow_surprise.py", args, timeout=240)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data
+
+
 @app.post("/flow-analysis")
 async def flow_analysis():
     """Run portfolio flow analysis (flow_analysis.py)."""
