@@ -181,30 +181,61 @@ def _raw_quantile_forecast(
 ):
     """Call the chronos-2 pipeline and return a (len(quantile_levels), horizon) array.
 
-    VERIFY against the installed chronos-2 package version; the exact predict API
-    may differ. Covered only by integration-marked tests.
+    Verified live against chronos-forecasting 2.3.0 / ``amazon/chronos-2`` on
+    2026-06-20 (CPU). Two paths:
+
+      - Univariate (no covariates): ``predict_quantiles([series], ...)`` returns
+        ``(quantiles, mean)`` where ``quantiles[0]`` has shape
+        ``(n_variates, prediction_length, len(quantile_levels))``. We take
+        variate 0 and transpose to ``(len(levels), horizon)``.
+      - Covariate path: ``predict_df`` (long format) — its quantile columns are
+        named ``str(level)`` (e.g. ``"0.5"``) and the id column defaults to
+        ``item_id`` (NOT ``id``).
     """
     import numpy as np
+
+    levels = list(quantile_levels)
+
+    if future_covariates is None and past_covariates is None:
+        quantiles, _mean = pipeline.predict_quantiles(
+            [np.asarray(series, dtype="float32")],
+            prediction_length=horizon,
+            quantile_levels=levels,
+        )
+        # quantiles[0]: (n_variates, horizon, len(levels)); univariate -> variate 0.
+        per_step = np.asarray(quantiles[0])[0]  # (horizon, len(levels))
+        return per_step.T  # (len(levels), horizon)
+
     import pandas as pd
 
+    n = len(series)
     context = pd.DataFrame(
         {
-            "id": ["series"] * len(series),
-            "timestamp": range(len(series)),
+            "item_id": ["series"] * n,
+            "timestamp": pd.RangeIndex(n),
             "target": list(series),
         }
     )
+    if past_covariates is not None:
+        past = pd.DataFrame(past_covariates)
+        for col in past.columns:
+            if col not in ("item_id", "timestamp"):
+                context[col] = list(past[col])[:n]
 
-    predict_kwargs = {
-        "prediction_length": horizon,
-        "quantile_levels": list(quantile_levels),
-    }
+    future_df = None
+    if future_covariates is not None:
+        future_df = pd.DataFrame(future_covariates)
+        if "item_id" not in future_df.columns:
+            future_df.insert(0, "item_id", "series")
 
-    if future_covariates is not None or past_covariates is not None:
-        future_df = pd.DataFrame(future_covariates) if future_covariates is not None else None
-        predict_kwargs["future_df"] = future_df
-
-    result = pipeline.predict_df(context, **predict_kwargs)
-
-    columns = [str(level) for level in quantile_levels]
-    return np.asarray(result[columns].to_numpy().T, dtype=float)
+    out = pipeline.predict_df(
+        context,
+        future_df=future_df,
+        id_column="item_id",
+        timestamp_column="timestamp",
+        target="target",
+        prediction_length=horizon,
+        quantile_levels=levels,
+    )
+    columns = [str(level) for level in levels]
+    return np.asarray(out[columns].to_numpy().T, dtype=float)
