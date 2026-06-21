@@ -45,6 +45,13 @@ def _redirect_2fa_lock_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "ib-2fa-push-lock.json"))
 
 
+@pytest.fixture(autouse=True)
+def _assume_market_open(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Restart-loop-prevention tests; pin the market-hours gate open so a
+    # weekend/off-hours run can't freeze restarts and mask the loop assertions.
+    monkeypatch.setattr("ib_watchdog.data_plane_window_active", lambda *a, **k: True)
+
+
 @pytest.fixture
 def state_path(tmp_path: Path) -> Path:
     return tmp_path / "watchdog-state.json"
