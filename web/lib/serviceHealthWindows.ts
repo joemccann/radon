@@ -179,6 +179,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // asked for a forecast, so it must not fire the degraded banner. Closed
   // window bridges a full weekend like its UW-scan siblings.
   "chronos-forecast": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``flow-surprise`` only writes when a user POSTs /flow-surprise (Feature 2
+  // residual scan, scripts/flow_surprise.py). DB-only like its UW-scan siblings.
+  "flow-surprise": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
   // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
   // Mon morning) without flipping stale; the on-demand button can
