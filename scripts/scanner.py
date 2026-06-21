@@ -155,11 +155,19 @@ def _process_ticker(item: dict, client=None) -> dict:
         # without needing to know the internal fetch_flow import path.
         flow = fetch_flow_data(ticker, days=5)
         analysis = analyze_signal(flow)
-        return {
+        result = {
             "ticker": ticker,
             "sector": item.get("sector", "Unknown"),
             **analysis
         }
+        try:
+            from forecasting.flow_history import record_daily_flow
+
+            today = datetime.now(timezone.utc).date().isoformat()
+            record_daily_flow(ticker, today, result)
+        except Exception as exc:  # best-effort accrual, never break the scan
+            print(f"  {ticker} - flow-history accrual skipped ({exc})", file=sys.stderr)
+        return result
     except UWRateLimitError:
         logger.warning("Rate limited on %s — skipping", ticker)
         print(f"  {ticker} - SKIP (rate limited)", file=sys.stderr)

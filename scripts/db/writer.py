@@ -586,3 +586,93 @@ def prune_service_health_events(
     db.commit()
     deleted = getattr(cursor, "rowcount", None)
     return deleted if isinstance(deleted, int) and deleted >= 0 else 0
+
+
+def upsert_ticker_flow_history(
+    ticker: str,
+    date: str,
+    *,
+    flow_strength: Optional[float] = None,
+    dp_direction: Optional[str] = None,
+    buy_ratio: Optional[float] = None,
+    num_prints: Optional[int] = None,
+    total_premium: Optional[float] = None,
+    total_volume: Optional[int] = None,
+) -> None:
+    """Chronos-2 — accrue one (ticker, date) daily flow row.
+
+    Idempotent on (ticker, date); re-running the scanner on the same UTC
+    day overwrites the row and refreshes recorded_at.
+    """
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO ticker_flow_history
+          (ticker, date, flow_strength, dp_direction, buy_ratio,
+           num_prints, total_premium, total_volume, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ticker.upper(),
+            date,
+            float(flow_strength) if flow_strength is not None else None,
+            dp_direction,
+            float(buy_ratio) if buy_ratio is not None else None,
+            int(num_prints) if num_prints is not None else None,
+            float(total_premium) if total_premium is not None else None,
+            int(total_volume) if total_volume is not None else None,
+            _now_iso(),
+        ),
+    )
+    db.commit()
+
+
+def upsert_forecast_snapshot(
+    ticker: str,
+    metric: str,
+    scan_time: str,
+    horizon: int,
+    model_id: str,
+    payload: dict[str, Any],
+) -> None:
+    """Chronos-2 — persist one quantile forecast snapshot.
+
+    Keyed on (ticker, metric, scan_time); payload is the serialised
+    QuantileForecast.to_dict() output.
+    """
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO forecast_snapshots
+          (ticker, metric, scan_time, horizon, model_id, payload)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ticker.upper(),
+            metric,
+            scan_time,
+            int(horizon),
+            model_id,
+            json.dumps(payload),
+        ),
+    )
+    db.commit()
+
+
+def get_ticker_flow_history(ticker: str, *, lookback_days: int = 120) -> list[dict[str, Any]]:
+    """Chronos-2 — read the daily flow series for a ticker, ascending by date.
+
+    Returns up to ``lookback_days`` rows as dicts keyed by column name.
+    """
+    db = get_db()
+    cursor = db.execute(
+        """
+        SELECT * FROM ticker_flow_history
+        WHERE ticker = ?
+        ORDER BY date ASC
+        LIMIT ?
+        """,
+        (ticker.upper(), int(lookback_days)),
+    )
+    columns = [d[0] for d in cursor.description]
+    return [dict(zip(columns, row)) for row in cursor.fetchall()]

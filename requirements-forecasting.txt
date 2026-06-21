@@ -1,0 +1,5 @@
+# Optional forecasting-host-only dependencies.
+# These keep torch OUT of the core fleet — install only on the dedicated
+# Chronos-2 forecasting host (never on the standard radon-* fleet units).
+chronos-forecasting>=1.5.0
+torch>=2.2.0
