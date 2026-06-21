@@ -1195,6 +1195,25 @@ async def discover():
     return result.data
 
 
+@app.post("/forecast/chronos")
+async def forecast_chronos(request: Request):
+    """Chronos-2 quantile forecast for a ticker flow-history metric."""
+    body = await request.json()
+    ticker = str(body.get("ticker", "")).upper()
+    metric = str(body.get("metric", "flow_strength"))
+    horizon = int(body.get("horizon", 10))
+    lookback = int(body.get("lookback", 120))
+    result = await run_script(
+        "chronos_forecast.py",
+        ["--ticker", ticker, "--metric", metric, "--horizon", str(horizon),
+         "--lookback", str(lookback), "--json"],
+        timeout=180,
+    )
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data
+
+
 @app.post("/flow-analysis")
 async def flow_analysis():
     """Run portfolio flow analysis (flow_analysis.py)."""

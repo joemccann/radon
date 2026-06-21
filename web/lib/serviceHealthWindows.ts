@@ -172,6 +172,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "discover": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "flow-analysis": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``chronos-forecast`` only writes when a user POSTs /forecast/chronos
+  // (Chronos-2 time-series engine, scripts/chronos_forecast.py). Reads
+  // ticker_flow_history from Turso + runs the model locally — UW/DB-only,
+  // no IB dependency. On-demand: past-window silence just means nobody
+  // asked for a forecast, so it must not fire the degraded banner. Closed
+  // window bridges a full weekend like its UW-scan siblings.
+  "chronos-forecast": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
   // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
   // Mon morning) without flipping stale; the on-demand button can
