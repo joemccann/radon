@@ -418,6 +418,46 @@ def quiet_window_active(now: Optional[datetime] = None) -> bool:
     return False
 
 
+# Watchdog only fires 2FA-chasing gateway restarts when the data plane is
+# actually needed: a trading day (holiday/weekend aware via market_calendar),
+# within this ET window (pre-open warmup → close). Off-hours / weekends /
+# holidays → restarts freeze (alert-only). Without this, IBKR's weekend session
+# expiry triggers a 2FA-push storm the operator can't use until Monday — the
+# 2026-06-21 Sunday incident fired ~51 restarts, each a fresh push.
+TWOFA_CHASE_WINDOW_ENV = "RADON_GW_2FA_CHASE_WINDOW_ET"
+DEFAULT_2FA_CHASE_WINDOW_ET = "07:30-16:00"
+
+
+def data_plane_window_active(now: Optional[datetime] = None) -> bool:
+    """True when the IB data plane is needed → the watchdog may restart the
+    gateway to chase 2FA.
+
+    Fail-OPEN (returns True) on any error so a calendar/parse hiccup preserves
+    2FA recovery rather than silently leaving the gateway un-recovered at the
+    open. Restarts are only SUPPRESSED when we positively determine the market
+    is closed (weekend / holiday / outside the pre-open→close window).
+    """
+    try:
+        import zoneinfo
+
+        from utils import market_calendar
+
+        now = now if now is not None else datetime.now(timezone.utc)
+        et = zoneinfo.ZoneInfo("America/New_York")
+        et_now = now.astimezone(et) if now.tzinfo else now
+        if not market_calendar._is_trading_day(et_now):
+            return False  # weekend or US market holiday
+        spec = os.environ.get(TWOFA_CHASE_WINDOW_ENV, DEFAULT_2FA_CHASE_WINDOW_ET)
+        start_text, end_text = spec.split("-")
+        sh, sm = (int(p) for p in start_text.strip().split(":"))
+        eh, em = (int(p) for p in end_text.strip().split(":"))
+        minute = et_now.hour * 60 + et_now.minute
+        return (sh * 60 + sm) <= minute <= (eh * 60 + em)
+    except Exception:
+        LOG.warning("data_plane_window_active: failing open (could not resolve market state)")
+        return True
+
+
 # --- Degradation classification ---------------------------------------------
 
 
@@ -741,8 +781,8 @@ def _handle_stuck_awaiting_2fa(
         # NO push here — freeze the counter (don't reset: post-window the
         # next cycle resumes from where we were).
         LOG.warning(
-            "stuck-2FA signature during scheduled-restart quiet window — "
-            "freezing counter at %s, no push",
+            "stuck-2FA signature while gateway restarts are frozen (scheduled "
+            "quiet window or market closed) — freezing counter at %s, no push",
             state.stuck_2fa_count,
         )
         state.last_outcome = "quiet_window:stuck_2fa_frozen"
@@ -1207,7 +1247,15 @@ def _run_cycle_steps(
     utcnow: Optional[Callable[[], datetime]],
 ) -> WatchdogState:
     state = load_state(state_path)
-    quiet = quiet_window_active((utcnow or (lambda: datetime.now(timezone.utc)))())
+    _now_dt = (utcnow or (lambda: datetime.now(timezone.utc)))()
+    quiet = quiet_window_active(_now_dt)
+    # The stuck-2FA self-heal (NOT api-hang) additionally freezes when the data
+    # plane isn't needed (weekend / holiday / off-hours): IBKR's weekend session
+    # expiry parks the gateway at awaiting_2fa, and chasing it with restarts just
+    # storms 2FA pushes nobody can use until the open (the 2026-06-21 incident).
+    # api-hang stays 24/7 — a wedged JVM acceptor needs a restart whenever it
+    # happens, and that's a different failure than a session that simply expired.
+    stuck_2fa_quiet = quiet or not data_plane_window_active(_now_dt)
 
     with _timed("probe"):
         health = fetch_health(health_url, health_timeout)
@@ -1247,7 +1295,7 @@ def _run_cycle_steps(
                 dry_run=dry_run,
                 clock=clock,
                 threshold=threshold,
-                quiet=quiet,
+                quiet=stuck_2fa_quiet,
             )
 
         # If we're still in awaiting_2fa but a push lock holder OR a
