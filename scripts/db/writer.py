@@ -659,6 +659,47 @@ def upsert_forecast_snapshot(
     db.commit()
 
 
+def upsert_forecast_calibration(
+    ticker: str,
+    metric: str,
+    scan_time: str,
+    *,
+    engine: Optional[str] = None,
+    series_len: Optional[int] = None,
+    mean_pinball_chronos: Optional[float] = None,
+    mean_pinball_baseline: Optional[float] = None,
+    verdict: Optional[str] = None,
+    payload: dict[str, Any],
+) -> None:
+    """Chronos-2 — persist one per-ticker calibration report row.
+
+    Keyed on (ticker, metric, scan_time); payload is the full serialised
+    run_backtest() output. The scalar columns are the headline numbers
+    lifted out for indexed queries.
+    """
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO forecast_calibration
+          (ticker, metric, scan_time, engine, series_len,
+           mean_pinball_chronos, mean_pinball_baseline, verdict, payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            ticker.upper(),
+            metric,
+            scan_time,
+            engine,
+            int(series_len) if series_len is not None else None,
+            float(mean_pinball_chronos) if mean_pinball_chronos is not None else None,
+            float(mean_pinball_baseline) if mean_pinball_baseline is not None else None,
+            verdict,
+            json.dumps(payload),
+        ),
+    )
+    db.commit()
+
+
 def get_ticker_flow_history(ticker: str, *, lookback_days: int = 120) -> list[dict[str, Any]]:
     """Chronos-2 — read the daily flow series for a ticker, ascending by date.
 
