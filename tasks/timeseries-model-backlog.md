@@ -204,3 +204,54 @@ OPEN ITEMS before this can gate a trade:
 - [ ] Backtest quantile CALIBRATION on real flow series before wiring into Gate 1 / Gate 3.
 - [ ] Build the flow_surprise residual (actual vs forecast 0.9-quantile) on scan/discover — Feature 2 proper.
 - [ ] Decide where the engine runs (Hetzner CPU vs GPU) + add a nightly forecast scheduler.
+
+---
+
+## SHIPPED — Calibration backtest + flow_surprise (2026-06-21, commit 2c4262d, NOT pushed)
+
+(1) DONE — calibration backtest harness:
+- scripts/forecasting/backtest.py — pure scoring (pinball_loss, pit_of_actual,
+  empirical_coverage, calibration_table), baseline_forecaster (flat empirical
+  quantiles = the bar to beat), walk_forward (expanding window), run_backtest
+  (chronos vs baseline + verdict). No torch deps.
+- scripts/forecast_backtest.py — CLI (offline tool, no service-health writer).
+
+(2) DONE — flow_surprise residual (Feature 2 proper):
+- scripts/forecasting/flow_surprise.py — compute_flow_surprise (1-step-ahead PIT
+  of today's actual vs forecast; EXCESS>=0.9 / DEFICIT<=0.1 / NORMAL) +
+  rank_watchlist_surprise (by abs(PIT-0.5)). Degrades to baseline when engine off.
+- scripts/flow_surprise.py CLI + POST /flow-surprise + flow-surprise registered.
+
+Tests: 21 new, green without torch. Full suite 3229 passed.
+
+STILL OPEN before this gates a trade:
+- [ ] Accrue real ticker_flow_history (>=10 sessions per ticker).
+- [ ] Run forecast_backtest.py on real flow series; confirm chronos BEATS baseline
+      and calibration_error is small per level. If it ties baseline -> not worth it.
+- [ ] UI surfacing of /flow-surprise on the dashboard (frontend, separate).
+- [ ] Managed forecasting venv + nightly scheduler (separate deploy step).
+
+---
+
+## SHIPPED — remaining items (2026-06-21, branch feat/chronos2-forecasting, NOT pushed)
+
+- DONE history backfill: scripts/forecasting/backfill_flow_history.py — reuses
+  fetch_flow.analyze_darkpool over the 15-day darkpool cache -> ticker_flow_history.
+  Run: python scripts/forecasting/backfill_flow_history.py --days 20
+- DONE calibration report: scripts/forecasting/calibration_report.py +
+  forecast_calibration.py CLI + migration 0016_forecast_calibration + writer.
+  Runs run_backtest over the watchlist, persists per-ticker verdict + max calibration error.
+- DONE nightly runner + deploy: scripts/forecasting/nightly_forecast.py (backfill ->
+  flow_surprise -> calibration) + provision_venv.sh + docs/forecasting-deploy.md
+  (systemd templates; units belong in radon-cloud).
+- DONE UI: /api/flow-surprise route + useFlowSurprise hook + FlowSurpriseCard on the
+  dashboard (brand tokens, force-dynamic/no-store). flow_surprise.py CLI now mirrors
+  data/flow_surprise.json for the GET route.
+
+Tests: 21 new Python + 8 vitest, full suite 3258 passed. Fixed an order-dependent
+test-isolation bug in test_nightly_forecast.py (setattr on real modules, not sys.modules swap).
+
+STILL PENDING (operational, not code):
+- [ ] Browser E2E (chrome-cdp/Playwright) of FlowSurpriseCard — web/e2e/flow-surprise.spec.ts authored, NOT run.
+- [ ] Provision venv on Hetzner + run backfill + forecast_calibration --persist on REAL data -> read the verdict.
+- [ ] Wire radon-forecast-nightly.{service,timer} in radon-cloud + deploy.
