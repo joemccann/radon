@@ -3588,7 +3588,15 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   display: block;
   width: 100%;
   height: auto;
-  max-height: 100%;
+  /* Cap BOTH dimensions so portrait images (e.g. tall research charts whose real
+     aspect ratio differs from the declared 16:9) scale to fit instead of
+     overflowing the panel and getting clipped top/bottom. The previous
+     `max-height: 100%` was a no-op: it resolves against the flex parent's
+     INDEFINITE height. Viewport-relative cap holds regardless; object-fit keeps
+     the aspect ratio (letterboxed within the media column when narrower). 780px
+     stays under the 820px frame minus the media's 16px padding. */
+  max-width: 100%;
+  max-height: min(82vh, 780px);
   object-fit: contain;
 }
 
