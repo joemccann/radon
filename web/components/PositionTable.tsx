@@ -15,6 +15,7 @@ import {
   fmtPriceOrCalculated,
   resolveMarketValue,
   resolveEntryCost,
+  positionDirectionSign,
   getAvgEntry,
   getMultiplier,
   getLastPrice,
@@ -133,7 +134,14 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
     const _stockLast = prices?.[pos.ticker]?.last;
     const rtStockLast = _stockLast != null && _stockLast > 0 ? _stockLast : null;
     const optRtMv = getOptionRtMv(pos, prices);
-    const mv = isStock && rtStockLast != null ? rtStockLast * pos.contracts : optRtMv ?? resolveMarketValue(pos);
+    // Sign-aware market value for a real-time stock quote: `pos.contracts` is a
+    // positive magnitude, so a SHORT must carry the direction sign or its MV
+    // reads positive and `mv - entryCost` (signed) becomes a SUM — a short with
+    // a risen price then shows a huge phantom GAIN. resolveEntryCost / the
+    // resolveMarketValue fallback are already signed; this aligns the live path.
+    const mv = isStock && rtStockLast != null
+      ? positionDirectionSign(pos) * rtStockLast * Math.abs(pos.contracts)
+      : optRtMv ?? resolveMarketValue(pos);
     switch (key) {
       case "ticker": return pos.ticker;
       case "structure": return pos.structure;
@@ -318,7 +326,12 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
     };
   }, [isStock, prices, pos.legs, pos.ticker, pos.expiry]);
 
-  const mv = rtLast != null ? rtLast * pos.contracts : optionsRt?.mv ?? resolveMarketValue(pos);
+  // Sign-aware: `rtLast` is stock-only (line ~294) and `pos.contracts` is a
+  // positive magnitude, so a SHORT must carry the direction sign — else MV reads
+  // positive and `mv - entryCost` (signed) becomes a SUM, showing a short with a
+  // risen price as a huge phantom GAIN (the +$2.3M/+202% MU bug). The option /
+  // resolveMarketValue fallback paths are already signed.
+  const mv = rtLast != null ? positionDirectionSign(pos) * rtLast * Math.abs(pos.contracts) : optionsRt?.mv ?? resolveMarketValue(pos);
   const entryCost = resolveEntryCost(pos);
   const pnl = mv != null ? mv - entryCost : null;
   const pnlPct = pnl != null && entryCost !== 0 ? (pnl / Math.abs(entryCost)) * 100 : null;
@@ -359,7 +372,8 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   // Today's P&L in dollars
   const todayPnl = isStock
     ? (realtimePrice?.last != null && realtimePrice.last > 0 && realtimePrice?.close != null && realtimePrice.close > 0
-        ? (realtimePrice.last - realtimePrice.close) * pos.contracts
+        // Sign-aware: a SHORT loses on an up day; pos.contracts is a magnitude.
+        ? positionDirectionSign(pos) * (realtimePrice.last - realtimePrice.close) * Math.abs(pos.contracts)
         : null)
     : getTodayPnlDollars(pos, prices);
 
