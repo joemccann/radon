@@ -19,6 +19,7 @@ import { useGlobexOpen, HEADER_FUTURES } from "@/lib/futuresSession";
 import FuturesStrip, { type FuturesQuote } from "@/components/FuturesStrip";
 import { type OptionContract, type IndexContract, optionKey, portfolioLegToContract, uniqueOptionContracts } from "@/lib/pricesProtocol";
 import { isIndexSymbol, indexExchangeFor } from "@/lib/indexSymbols";
+import { useWatchlist } from "@/lib/useWatchlist";
 import Sidebar from "@/components/Sidebar";
 import Header from "@/components/Header";
 import MetricCards from "@/components/MetricCards";
@@ -156,9 +157,29 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     return exchange ? [{ symbol: tickerParam.toUpperCase(), exchange }] : [];
   }, [tickerParam]);
 
+  // Watchlist symbols stream live quotes too (the profile WATCHLIST tab). A
+  // watched symbol that is NOT also a portfolio/order ticker (e.g. SPCX) was
+  // never subscribed, so it rendered "---". Like the focused ticker, split index
+  // symbols (VIX/SPX/…) onto the `indexes` channel — subscribing those as plain
+  // `symbols` returns no data (IBKR exposes them via secType=IND).
+  const { watchlist } = useWatchlist();
+  const watchlistSymbols = useMemo(
+    () => watchlist.map((e) => e.symbol).filter((s) => !isIndexSymbol(s)),
+    [watchlist],
+  );
+  const watchlistIndexes = useMemo<IndexContract[]>(() => {
+    const out: IndexContract[] = [];
+    for (const entry of watchlist) {
+      if (!isIndexSymbol(entry.symbol)) continue;
+      const exchange = indexExchangeFor(entry.symbol);
+      if (exchange) out.push({ symbol: entry.symbol.toUpperCase(), exchange });
+    }
+    return out;
+  }, [watchlist]);
+
   const allSymbols = useMemo(
     () => {
-      const base = [...portfolioSymbols, ...orderSymbols, ...regimeStocks, ...tickerSymbols];
+      const base = [...portfolioSymbols, ...orderSymbols, ...regimeStocks, ...tickerSymbols, ...watchlistSymbols];
       // Subscribe ES/NQ/RTY front-month L1 only while Globex is open (the relay
       // resolves these roots to the active future; off-session there's nothing
       // to stream). The relay returns the equity ticker of the same name unless
@@ -166,7 +187,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       if (globexOpen) base.push(...HEADER_FUTURES.map((f) => f.symbol));
       return [...new Set(base)];
     },
-    [portfolioSymbols, orderSymbols, regimeStocks, tickerSymbols, globexOpen],
+    [portfolioSymbols, orderSymbols, regimeStocks, tickerSymbols, watchlistSymbols, globexOpen],
   );
 
   const tickerDetail = useTickerDetail();
@@ -192,7 +213,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     // doesn't double-subscribe.
     const seen = new Set<string>();
     const out: IndexContract[] = [];
-    for (const idx of [...regimeIndexes, ...tickerIndexes]) {
+    for (const idx of [...regimeIndexes, ...tickerIndexes, ...watchlistIndexes]) {
       const key = `${idx.symbol}@${idx.exchange}`;
       if (!seen.has(key)) {
         seen.add(key);
@@ -200,7 +221,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       }
     }
     return out;
-  }, [regimeIndexes, tickerIndexes]);
+  }, [regimeIndexes, tickerIndexes, watchlistIndexes]);
 
   const {
     prices: rawPrices,
