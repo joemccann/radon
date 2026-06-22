@@ -255,3 +255,32 @@ STILL PENDING (operational, not code):
 - [ ] Browser E2E (chrome-cdp/Playwright) of FlowSurpriseCard — web/e2e/flow-surprise.spec.ts authored, NOT run.
 - [ ] Provision venv on Hetzner + run backfill + forecast_calibration --persist on REAL data -> read the verdict.
 - [ ] Wire radon-forecast-nightly.{service,timer} in radon-cloud + deploy.
+
+---
+
+## OPERATIONAL — live on Hetzner (2026-06-21/22, deployed to main)
+
+ALL forecasting code deployed to main (CI green). Live on the Hetzner forecasting host:
+
+- Provisioned /home/radon/forecasting-venv (python3.13, CPU torch 2.12.1, chronos 2.3.0,
+  + full app deps). provision_venv.sh fixed (app deps + CPU torch index + py3.13 + venv-capable check).
+- Backfill: 656 dark-pool cache files -> ticker_flow_history (682 rows, ~130 tickers, ~12 sessions each).
+- systemd radon-forecast-nightly.{service,timer} installed + enabled (next 07:00 UTC daily,
+  Persistent). Units tracked in radon-cloud/services/. Service verified: runs end-to-end,
+  writes data/flow_surprise.json + persists forecast_calibration.
+- Fixed a live-exposed gap: write_cache was on the CLI not the library, so the nightly skipped
+  the dashboard cache. Moved into forecasting/flow_surprise.py; both paths share it.
+
+### CALIBRATION VERDICT (flow_strength, horizon=1, ~12 sessions/ticker)  ==> NO-GO at this depth
+- chronos beats baseline on only 11/29 tickers (38%) — the dumb empirical-quantile baseline wins 18/29.
+- median max_calibration_error 0.4 — quantiles badly miscalibrated (nominal 0.9 != 0.9 coverage).
+- Series are only 10-12 points (15-day cache ceiling); calibration runs on ~4 origins -> noisy.
+- DECISION: do NOT wire Chronos-2 into Gate 1 / Gate 3. flow_surprise stays advisory; prefer the
+  baseline forecaster for the residual until history is deep enough.
+
+### Next (let it run, then re-judge)
+- [ ] Let nightly accrue + re-backfill daily. Re-read forecast_calibration once ticker_flow_history
+      has 60-90+ sessions/ticker. Only then reconsider Chronos for gating.
+- [ ] Watch the all-DEFICIT degenerate case (a market-wide quiet day reads as 29 deficits); consider
+      a market-wide-quiet guard in flow_surprise.
+- [ ] Dashboard card live on app.radon.run (verified empty-state + populated render via chrome-cdp).
