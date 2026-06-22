@@ -63,8 +63,15 @@ export function buildPositionTradeOrder(params: {
   quantity: number;
   limitPrice: number;
   tif: "DAY" | "GTC";
+  /**
+   * FU7: optional live entry quote (net combo or single-leg, per-unit positive
+   * magnitudes). Threaded into the OPENING branches only so the F1 cost model
+   * renders net-of-cost max-loss/max-gain. Close-out branches surface realised
+   * P&L and have no risk math to adjust, so the quote is ignored there.
+   */
+  quote?: { bid: number | null; ask: number | null } | null;
 }): PositionTradeOrder | null {
-  const { position, target, action, quantity, limitPrice, tif } = params;
+  const { position, target, action, quantity, limitPrice, tif, quote } = params;
   const ticker = position.ticker;
 
   if (target.kind === "combo") {
@@ -126,6 +133,7 @@ export function buildPositionTradeOrder(params: {
         netPremium: limitPrice,
         description,
         totalCost,
+        quote: quote ?? null,
       },
     };
   }
@@ -212,6 +220,7 @@ export function buildPositionTradeOrder(params: {
       netPremium: action === "SELL" ? -limitPrice : limitPrice,
       description,
       totalCost: action === "SELL" ? -grossCash : grossCash,
+      quote: quote ?? null,
     },
   };
 }

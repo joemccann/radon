@@ -163,8 +163,11 @@ export default function MobileOrderTicket({
       netPremium,
       description,
       totalCost: isCredit ? -totalCost : totalCost,
+      // FU7: net entry quote for net-of-cost risk. `netQuote` is the unsigned
+      // per-unit combo quote; null bid/ask falls back to the F1 estimate.
+      quote: { bid: netQuote.bid, ask: netQuote.ask },
     };
-  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, isCombo, legs, normalizedOrder, ticker]);
+  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, isCombo, legs, normalizedOrder, ticker, netQuote.bid, netQuote.ask]);
 
   const adjustPrice = (delta: number) => {
     const next = (parseFloat(limitPriceText) || signedQuote.mid || 0) + delta;
