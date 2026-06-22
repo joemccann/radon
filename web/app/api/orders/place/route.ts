@@ -13,6 +13,7 @@ import {
   firstPlaceOrderSchemaErrorMessage,
   normalizeOptionRight,
 } from "@/lib/placeOrderBodySchema";
+import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,9 @@ type PlaceBody = {
   quantity: number;
   limitPrice: number;
   tif?: "DAY" | "GTC";
+  /** Allow the order to fill OUTSIDE regular trading hours. Omitted → the route
+   *  auto-enables it when the market is not in RTH so after-hours orders work. */
+  outsideRth?: boolean;
   expiry?: string;
   strike?: number;
   right?: "C" | "P";
@@ -194,6 +198,11 @@ export async function POST(request: Request): Promise<Response> {
       quantity: body.quantity,
       limitPrice: body.limitPrice,
       tif: body.tif || "DAY",
+      // Auto-enable extended-hours (outsideRth) when the market is NOT in RTH so
+      // after-hours orders actually work instead of IB holding them to the next
+      // open. An explicit caller value wins. Applies the same to extended/closed
+      // (a closed-session order becomes eligible for the next extended session).
+      outsideRth: body.outsideRth ?? getMarketStateFromDate() !== "open",
       ...(body.type === "option"
         ? {
             expiry: body.expiry,

@@ -31,6 +31,16 @@ from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWA
 CLIENT_ID = CLIENT_IDS.get("ib_place_order", 26)
 PORT = DEFAULT_GATEWAY_PORT
 
+# IB error codes that must NOT block order placement. Connection/data-farm
+# informational codes (2104/2106/2108/2158/10358) PLUS benign ORDER WARNINGS
+# (NOT rejections — rejections use 201/202/etc.):
+#   399  "Your order will not be placed at the exchange until <next open>" — a
+#        DAY order accepted outside RTH; it still receives a permId. Treating
+#        this as an error is exactly why after-hours orders couldn't be placed.
+#   2109 "Attribute 'Outside Regular Trading Hours' is ignored …" — surfaced for
+#        instruments/destinations with no extended session; harmless.
+NON_BLOCKING_IB_CODES = frozenset({2104, 2106, 2108, 2158, 10358, 399, 2109})
+
 # Grace-wait constants for SPX-01: async 201-class errors arrive after the
 # confirm-poll loop breaks on a terminal-failed state.
 _GRACE_WAIT_POLLS = 5
@@ -118,6 +128,12 @@ def place_order(params: dict, _clock=time.time) -> dict:
     quantity = int(params["quantity"])
     limit_price = float(params["limitPrice"])
     tif = params.get("tif", "DAY").upper()
+    # Allow the order to fill OUTSIDE regular trading hours (extended/after-hours
+    # session). Required to actually trade a stock limit order after hours —
+    # without it IB holds the order until the next open. Defaults False (RTH
+    # only) to preserve existing behavior; the place route sets it True when the
+    # market is closed.
+    outside_rth = bool(params.get("outsideRth", False))
 
     client = IBClient()
 
@@ -237,8 +253,10 @@ def place_order(params: dict, _clock=time.time) -> dict:
         ib_errors: list = []
 
         def _on_error(reqId, errorCode, errorString, contract=None):
-            # Ignore informational codes
-            if errorCode not in (2104, 2106, 2108, 2158, 10358):
+            # Benign informational + order-warning codes must not block placement
+            # (see NON_BLOCKING_IB_CODES — 399 is the after-hours "held until next
+            # open" warning that previously made placement fail).
+            if errorCode not in NON_BLOCKING_IB_CODES:
                 ib_errors.append((errorCode, errorString))
 
         client._ib.errorEvent += _on_error
@@ -249,7 +267,7 @@ def place_order(params: dict, _clock=time.time) -> dict:
             totalQuantity=quantity,
             lmtPrice=limit_price,
             tif=tif,
-            outsideRth=False,
+            outsideRth=outside_rth,
         )
 
         if order_type == "combo":
