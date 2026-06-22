@@ -1,0 +1,194 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>RADON — Time-Series Model Scout</title>
+<style>
+:root{--bg:#0a0c10;--panel:#11151c;--panel-2:#161b24;--ink:#e6edf3;--ink-dim:#9aa7b4;--ink-faint:#647082;--line:#222b36;--accent:#4fd1c5;--warn:#f0a35e;--danger:#e5707e;--good:#6fcf8b;--radius:4px;--mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;--sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;}
+*{box-sizing:border-box;}html,body{margin:0;padding:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;}
+.wrap{max-width:920px;margin:0 auto;padding:56px 28px 96px;}
+.eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.22em;text-transform:uppercase;color:var(--accent);margin:0 0 14px;}
+h1{font-size:30px;line-height:1.2;margin:0 0 10px;letter-spacing:-.01em;}
+.sub{color:var(--ink-dim);font-size:15px;margin:0 0 8px;}
+.meta{font-family:var(--mono);font-size:11.5px;color:var(--ink-faint);margin-top:18px;}
+h2{font-size:13px;font-family:var(--mono);letter-spacing:.12em;text-transform:uppercase;color:var(--ink);border-bottom:1px solid var(--line);padding-bottom:10px;margin:52px 0 22px;}
+h3{font-size:18px;margin:0 0 4px;letter-spacing:-.005em;}
+h3 .org{font-size:12px;color:var(--ink-faint);font-weight:400;font-family:var(--mono);}
+p{margin:0 0 14px;}strong{color:#fff;font-weight:600;}
+.lede{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:20px 22px;margin:28px 0;}
+.lede.bottomline{border-left:3px solid var(--good);}
+.lede.verdict{border-left:3px solid var(--warn);}
+.lede.warning{border-left:3px solid var(--danger);}
+.lede .tag{font-family:var(--mono);font-size:10.5px;letter-spacing:.18em;text-transform:uppercase;display:block;margin-bottom:10px;}
+.lede.bottomline .tag{color:var(--good);}.lede.verdict .tag{color:var(--warn);}.lede.warning .tag{color:var(--danger);}
+.lede p:last-child{margin-bottom:0;color:var(--ink);}
+.feat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:24px 26px;margin:16px 0;position:relative;}
+.feat .rank{position:absolute;top:22px;right:24px;font-family:var(--mono);font-size:15px;color:var(--accent);font-weight:600;}
+.feat h3{padding-right:54px;}
+.one-liner{color:var(--accent);font-size:13px;font-family:var(--mono);margin:0 0 4px;line-height:1.5;}
+.srcurl{margin:0 0 4px;}.srcurl a{color:var(--ink-faint);font-family:var(--mono);font-size:11.5px;text-decoration:none;}.srcurl a:hover{color:var(--accent);}
+.row{display:grid;grid-template-columns:120px 1fr;gap:14px;padding:9px 0;border-top:1px solid var(--line);}
+.row .k{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint);padding-top:2px;}
+.row .v{color:var(--ink);font-size:14px;}
+.conf{display:inline-flex;align-items:center;gap:7px;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;padding:3px 9px;border-radius:var(--radius);border:1px solid var(--line);}
+.conf::before{content:"";width:8px;height:8px;border-radius:50%;}
+.conf.high::before{background:var(--good);}.conf.high{color:var(--good);}
+.conf.mod::before{background:var(--warn);}.conf.mod{color:var(--warn);}
+.conf.low::before{background:var(--danger);}.conf.low{color:var(--danger);}
+footer{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:11px;color:var(--ink-faint);line-height:1.8;}
+@media(max-width:620px){.row{grid-template-columns:1fr;gap:4px;}}
+</style></head><body><div class="wrap">
+<p class="eyebrow">Radon · Time-Series Model Scout</p>
+<h1>Best forecasting models for Radon — ranked vs. TimesFM</h1>
+<p class="sub">Research conducted via the Exa Agent API across HuggingFace, GitHub, and arXiv. Ranked against Radon's actual needs: probabilistic flow / vol / regime forecasting, covariate support, self-hostable, robust to low signal-to-noise.</p>
+<p class="meta">Exa Agent API (effort: high) · 3 research angles · 10 candidates · 2026-06-20</p>
+
+<div class="lede bottomline"><span class="tag">Bottom line</span><p>Replace zero-shot TimesFM with Chronos-2 as Radon&#x27;s primary forecaster (Apache-2.0, native covariates, calibrated 0.01-0.99 quantiles), back it with Datadog Toto for heavy-tailed vol/Kelly and IBM TTM for cheap nightly fleet baselines -- but treat ALL of them as needing finance fine-tuning before they gate real trades.</p></div>
+<div class="lede verdict"><span class="tag">TimesFM verdict</span><p>REPLACE as the primary, but keep a fine-tuned TimesFM only as an optional ensemble baseline -- do not rely on its zero-shot quantiles for live gating. TimesFM&#x27;s quantile heads are explicitly uncalibrated and it has no real covariate interface, so it cannot honestly feed Gate 1 (convexity) or Gate 3 (Kelly), and two finance papers show its zero-shot is weak on low-SNR markets. Concrete plan: make Chronos-2 the default engine (covariate-conditioned flow residuals + regime bands + tail quantiles for the vol cone), add Toto (Toto-Open-Base-1.0, Apache-safe) as a heavy-tailed second opinion for the vol cone and Kelly, and use IBM TTM as the cheap CPU baseline for nightly fleet-wide expected-value flow residuals. An ensemble of Chronos-2 + Toto (median of quantiles) is the strongest defensible setup; TimesFM only earns a slot if you continual-pretrain it on financial data, which the research shows is what makes it usable at all.</p></div>
+<div class="lede warning"><span class="tag">Honest warning — read before wiring any of these to a gate</span><p>EVERY model here is a general-purpose forecaster: finance is under ~1% of all their pretraining corpora (TimesFM &lt;0.01%), and multiple finance papers (VaR arXiv:2410.11773, fine-tuning arXiv:2412.09880, Marconi arXiv:2507.07296) show zero-shot generic TSFMs do NOT consistently beat naive baselines on low-SNR, heavy-tailed, regime-switching market data -- and none was validated specifically on dark-pool/OTC flow series at all. Do not let any model&#x27;s quantile output size a position (Gate 3) or define a convexity cone (Gate 1) until you have backtested its calibration on YOUR flow/vol series out-of-sample; benchmark leaderboards (GIFT-Eval) are general-domain and will mislead you here. The finance-native option (Kronos) models price bars, which Radon declares out of scope, and its license is unverified. Plan for fine-tuning or residual-only use, verify every license against the actual HF checkpoint before commercial deployment, and never ship a forecast straight into the gates without an empirical calibration check.</p></div>
+
+<h2>Ranked candidates — best fit for Radon first</h2>
+
+    <div class="feat">
+      <span class="rank">#1</span>
+      <h3>Amazon Chronos-2 <span class="org">Amazon Science</span></h3>
+      <p class="one-liner">120M Apache-2.0 universal forecaster with native known-future + multivariate covariates and 21 quantiles incl. 0.01/0.99 tails.</p>
+      <p class="srcurl"><a href="https://huggingface.co/amazon/chronos-2" target="_blank">https://huggingface.co/amazon/chronos-2</a></p>
+      <div class="conf high" style="margin:6px 0 14px;">confidence: high</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Beats TimesFM on the three things Radon actually needs: (1) native covariate/known-future support (condition flow on VIX, day-type, regime) vs TimesFM&#x27;s frequency-indicator-only; (2) real calibrated 21-quantile output incl. 0.01/0.99 tails vs TimesFM&#x27;s uncalibrated quantile heads (research explicitly flags TimesFM quantiles as NOT calibrated); (3) multivariate so cross-asset flow panels work in one pass. Same Apache-2.0, smaller (120M vs 500M), longer 8192 context.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">All four surfaces: flow residual (covariate-conditioned baseline -&gt; actual minus expected quantile = edge), regime band (CRI/VCG/GEX/VIX-term forecast bands), vol cone (0.01/0.99 quantiles feed Gate 1 convexity), Kelly (full distribution feeds Gate 3 fractional sizing).</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes, native: 21 quantiles per step including 0.01 and 0.99 tail quantiles -- directly usable for tail-risk and Kelly.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Yes, native: univariate, multivariate, AND known-future covariates (calendar/VIX/day-type regressors).</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Apache-2.0, 120M -&gt; runs on a single modest GPU or even CPU on Hetzner; weights on HF (amazon/chronos-2); pip-installable. Easiest fully-permissive self-host of any top-tier covariate model.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Zero-shot SOTA claims are vendor-stated; on low-SNR flow series expect to validate calibration empirically and likely fine-tune. CRPS-rank trails Toto 2.0 on GIFT-Eval (23.5 vs 20.3) but GIFT-Eval is general, not finance, and Chronos-2 wins on covariates+license which matter more for Radon.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#2</span>
+      <h3>Datadog Toto (Toto-Open-Base-1.0 / Toto 2.0) <span class="org">Datadog AI Research</span></h3>
+      <p class="one-liner">Observability-native, heavy-tailed multivariate forecaster -- current GIFT-Eval foundation-model leader; Student-T mixture (1.0) / quantile head (2.0).</p>
+      <p class="srcurl"><a href="https://huggingface.co/Datadog/Toto-Open-Base-1.0" target="_blank">https://huggingface.co/Datadog/Toto-Open-Base-1.0</a></p>
+      <div class="conf high" style="margin:6px 0 14px;">confidence: high</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Designed for sparse, non-stationary, outlier-heavy, heavy-tailed telemetry -- the closest generic analog to dark-pool flow and vol spikes. Student-T mixture head is explicitly motivated by heavy-tailed financial-TS literature, so it handles fat tails far better than TimesFM&#x27;s Gaussian-ish uncalibrated heads. Top reproducible GIFT-Eval FM (CRPS-rank 20.3 for 2.5B). Multivariate + probabilistic out of the box.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Vol cone + Kelly (heavy-tailed distribution is ideal for fat-tailed realized-vol), regime band (multivariate handles CRI/VCG/GEX jointly), flow residual (built for spiky high-cardinality series like print volume/sweeps).</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes, strong: Toto 1.0 Student-T mixture (excellent for fat tails), Toto 2.0 quantile/pinball head. Full distribution sampling.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Multivariate native; exogenous/covariate fine-tuning added in 2026 tooling (Toto-2). Not as clean a known-future API as Chronos-2.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Toto-Open-Base-1.0 (151M) is clearly Apache-2.0, single-GPU. WARNING: Toto-2.0 (up to 2.5B) license clarity is weaker per the research -- prefer Toto-Open-Base-1.0 for commercial trading unless you confirm 2.0 terms.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">License caveat on 2.0 weights -- verify before production; pin to Toto-Open-Base-1.0 if unsure. No finance benchmark in-paper (observability transfer is a hypothesis, not proven on flow). Known-future covariate ergonomics lag Chronos-2.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#3</span>
+      <h3>The Forecasting Company t0-alpha <span class="org">The Forecasting Company</span></h3>
+      <p class="one-liner">~102M Apache-2.0 newcomer with native past + known-future covariates and 0.1-0.9 quantiles -- covariate-native at small scale.</p>
+      <p class="srcurl"><a href="https://huggingface.co/theforecastingcompany/t0-alpha" target="_blank">https://huggingface.co/theforecastingcompany/t0-alpha</a></p>
+      <div class="conf mod" style="margin:6px 0 14px;">confidence: moderate</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">True known-future covariate interface (vs TimesFM&#x27;s none) plus native quantiles under a clean Apache-2.0 license at one-fifth the params of TimesFM-2.0. Published GIFT-Eval/fev numbers (CRPS 0.4941, MASE 0.7240) are competitive. For covariate-conditioned flow baselines it does exactly what Radon needs.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Flow residual (condition DPI/print-vol on VIX/day-type) and regime band; vol cone via 0.1-0.9 quantiles (no 0.01/0.99 tails, so weaker for extreme-tail Kelly than Chronos-2/Toto).</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes: native quantiles 0.1/0.25/0.5/0.75/0.9. No extreme tail quantiles (0.01/0.99), which limits tail-risk precision.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Yes, native historical AND known-future covariates -- a core design feature.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Apache-2.0, open weights, ~102M -&gt; trivial single-GPU/CPU self-host on Hetzner.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Very new, ~2,266 monthly downloads -&gt; unproven maintenance and small community. Quantile range stops at 0.1/0.9 so tail convexity gating needs interpolation/extrapolation. Treat as a strong covariate-native challenger, not yet a production default.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#4</span>
+      <h3>THUML Sundial (base-128m) <span class="org">THUML (Tsinghua)</span></h3>
+      <p class="one-liner">128M Apache-2.0 generative (TimeFlow) model producing sample paths -&gt; arbitrary quantiles incl. custom tails; top GIFT-Eval MASE at release.</p>
+      <p class="srcurl"><a href="https://huggingface.co/thuml/sundial-base-128m" target="_blank">https://huggingface.co/thuml/sundial-base-128m</a></p>
+      <div class="conf mod" style="margin:6px 0 14px;">confidence: moderate</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Generative sample paths let you derive ANY quantile (including 0.01/0.99 tails) and run Monte-Carlo scenario fans for the expected-move cone -- more flexible than TimesFM&#x27;s fixed uncalibrated heads. Apache-2.0, lightweight, strong benchmark standing. Also has the highest incidental finance-corpus share (~1.02%) among generic TSFMs per Kronos&#x27;s analysis.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Vol cone + Kelly via Monte-Carlo sample paths (scenario fans feed convexity directly); regime band per index. Weaker for flow residual because covariate conditioning is not described.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes, excellent shape: generative sample paths -&gt; derive any statistic/quantile, ideal for scenario/Kelly Monte-Carlo.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">No / not described -- univariate-centric. This is the main gap vs Chronos-2/Toto for conditioning flow on VIX/day-type.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Apache-2.0, 128M, single-GPU; HF weights (thuml/sundial-base-128m).</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">No covariate support kills the flow-residual use case (its strongest Radon need). Use it specifically for the vol cone / scenario sampling, not for conditioned flow baselines. Benchmark lead since surpassed by Timer-S1.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#5</span>
+      <h3>IBM Granite TinyTimeMixer (TTM R2) <span class="org">IBM Granite</span></h3>
+      <p class="one-liner">~1-5M Apache-2.0 CPU-only model with exogenous + static categorical infusion -- the cheap nightly-watchlist workhorse.</p>
+      <p class="srcurl"><a href="https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2" target="_blank">https://huggingface.co/ibm-granite/granite-timeseries-ttm-r2</a></p>
+      <div class="conf mod" style="margin:6px 0 14px;">confidence: moderate</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Runs the entire watchlist nightly on CPU at near-zero cost with covariate (exogenous + static categorical) support TimesFM lacks. Card claims it beats TimesFM/Moirai/Chronos/Lag-Llama in zero/few-shot at a fraction of the size. NOT better on probabilistic output, which is its disqualifier for the gates.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Flow residual baseline at fleet scale (point expected-value of DPI/print-vol with exog conditioning). Does NOT serve vol cone or Kelly well because it is point-focused.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Weak / point-focused. No confirmed calibrated quantiles -&gt; cannot directly feed Gate 1 convexity or Gate 3 Kelly. This caps it at the residual-baseline role.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Yes: exogenous infusion + static categorical infusion.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Apache-2.0, ~1-5M params, true CPU-only on Hetzner; HF (ibm-granite/granite-timeseries-ttm-r2). Best cost/latency profile in the survey.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Point forecasts only -- it is a baseline/expected-value engine, not a distribution engine. Use it as the cheap covariate-aware mean for flow residuals and pair with a probabilistic model (Chronos-2/Toto) for vol/Kelly.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#6</span>
+      <h3>Kronos <span class="org">shiyu-coder / academic (arXiv:2508.02739)</span></h3>
+      <p class="one-liner">The only finance-NATIVE foundation model with real traction -- trained on 12B OHLCV K-lines, tokenized candlestick sampling.</p>
+      <p class="srcurl"><a href="https://github.com/shiyu-coder/Kronos" target="_blank">https://github.com/shiyu-coder/Kronos</a></p>
+      <div class="conf low" style="margin:6px 0 14px;">confidence: low</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Finance-native: directly addresses the core thesis that generic TSFMs (TimesFM &lt;0.01% finance corpus) fail on low-SNR, heavy-tailed market data. Reports +93% RankIC and 9% lower vol-MAE vs the best generic TSFM (Time-MoE). On its own terms it is the right kind of model for markets. BUT it forecasts OHLCV price bars -- which Radon explicitly puts OUT OF SCOPE (near-martingale) -- not dark-pool flow series, so the domain match is to the wrong target.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Vol cone only, plausibly (vol-MAE evidence). Poor fit for flow-residual/regime because it is built around price candlesticks, not flow/DPI/sweep series or Radon&#x27;s computed regime indices.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes via autoregressive sampling of future bars (distributional sample paths).</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Partial -- designed around OHLCV bars, not generic exogenous regressors like VIX/day-type.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">License UNKNOWN/unverified across both research angles -- hard blocker until confirmed. Weights on HF (NeoQuasar/Kronos-mini). Self-hostable size-wise.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Two blockers: (1) license unverified -- do not deploy commercially until confirmed; (2) it models price bars, the one thing Radon declares out of scope. Its vol output could feed the cone, but it does not serve Radon&#x27;s flow-signal-first mandate. Interesting, not a primary.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#7</span>
+      <h3>Salesforce Moirai 2.0 / Moirai-MoE (uni2ts) <span class="org">Salesforce AI Research</span></h3>
+      <p class="one-liner">Any-variate multivariate forecaster with strong covariate support; Moirai 2.0 small (11.4M) is Apache-2.0, but classic 1.x checkpoints are research-only.</p>
+      <p class="srcurl"><a href="https://github.com/SalesforceAIResearch/uni2ts" target="_blank">https://github.com/SalesforceAIResearch/uni2ts</a></p>
+      <div class="conf mod" style="margin:6px 0 14px;">confidence: moderate</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Best any-variate/multivariate covariate handling among open universal models -- natively ingests cross-asset panels + covariates, which TimesFM cannot. Quantile output in 2.0. Better than TimesFM for conditioned multivariate flow.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Regime band (multivariate CRI/VCG/GEX/VIX jointly) and flow residual with covariates; vol cone via quantiles.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes: Moirai 1.x mixture distributions; Moirai 2.0 quantile loss (9 quantiles, 0.1-0.9, no extreme tails).</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Yes, native any-variate -- the strongest multivariate design in the survey alongside Chronos-2.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">MIXED LICENSE -- this is the catch. Moirai 1.x large/MoE are RESEARCH-ONLY (non-commercial) -&gt; disqualified for a trading app. Only Moirai 2.0 small (Salesforce/moirai-2.0-R-small, Apache-2.0) is commercially safe; verify the exact checkpoint license before use.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">License is the dealbreaker for the high-performing 1.x/MoE checkpoints (research-only). Only the Apache-2.0 Moirai-2.0 variants are usable, and those trail Chronos-2/Toto. Ranked here mainly because most of its standout checkpoints are off-limits commercially.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#8</span>
+      <h3>Google TimesFM 2.0 / 2.5 (incumbent baseline) <span class="org">Google Research</span></h3>
+      <p class="one-liner">The current Radon baseline -- 500M (2.0) / 200M (2.5) decoder-only, Apache-2.0, but uncalibrated quantiles, no real covariates, weak zero-shot on markets.</p>
+      <p class="srcurl"><a href="https://github.com/google-research/timesfm" target="_blank">https://github.com/google-research/timesfm</a></p>
+      <div class="conf high" style="margin:6px 0 14px;">confidence: high</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">N/A -- this IS TimesFM. Listed for reference. It is NOT better than the models above for Radon: research explicitly flags its quantile heads as uncalibrated, it has no general covariate interface (frequency indicator only), and two finance papers (VaR arXiv:2410.11773; fine-tuning arXiv:2412.09880) show zero-shot TimesFM is weak on low-SNR markets and needs fine-tuning.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Currently used; nominally serves all four but poorly -- uncalibrated quantiles undermine Gate 1 convexity and Gate 3 Kelly, and no covariates undermines flow-residual conditioning.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Quantile heads exist but are explicitly UNCALIBRATED per research -&gt; unreliable for sizing/convexity gates without recalibration.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">No general covariates -- frequency indicator only. Major gap for Radon. (Note: the timesfm GitHub xreg_lib offers limited external regressor support, but it is not a first-class covariate interface like Chronos-2&#x27;s.)</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Apache-2.0 (code + checkpoints); 200M/500M single-GPU. Self-host is fine; that was never the problem.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Trained on traffic/weather/demand; price/markets are its worst case and finance corpus is &lt;0.01%. Keep only as a sanity baseline or fine-tune it on financial data (proven to help) -- do not rely on zero-shot quantiles for live gating.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#9</span>
+      <h3>Lag-Llama <span class="org">ServiceNow / Morgan Stanley / Mila</span></h3>
+      <p class="one-liner">Tiny 2.45M Apache-2.0 Student-t probabilistic model -- heavy-tailed by design but dated and benchmark-trailing.</p>
+      <p class="srcurl"><a href="https://github.com/time-series-foundation-models/lag-llama" target="_blank">https://github.com/time-series-foundation-models/lag-llama</a></p>
+      <div class="conf mod" style="margin:6px 0 14px;">confidence: moderate</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">Native Student-t (heavy-tailed) per-step distribution is conceptually better suited to fat-tailed financial returns than TimesFM&#x27;s uncalibrated heads, and a Morgan Stanley co-author signals finance intent. But it is univariate (no covariates), tiny, and outperformed by every model above.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Single-series vol cone / probabilistic baseline only. No covariates -&gt; no flow-residual conditioning; not for cross-asset regime.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes, native Student-t distribution (good fat-tail shape).</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">No -- univariate, lag-feature based.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">Apache-2.0, 2.45M, trivially self-hostable (CPU).</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Maintenance has slowed (low 2025-26 activity); benchmark-trailing; univariate-only. Reasonable cheap probabilistic baseline, not a primary. Best used fine-tuned.</div></div>
+    </div>
+
+    <div class="feat">
+      <span class="rank">#10</span>
+      <h3>Nixtla TimeGPT-2.1 <span class="org">Nixtla</span></h3>
+      <p class="one-liner">Strong exogenous + conformal-interval forecaster -- but a CLOSED paid hosted API, not self-hostable.</p>
+      <p class="srcurl"><a href="https://nixtla.io/docs/forecasting/timegpt_2_family" target="_blank">https://nixtla.io/docs/forecasting/timegpt_2_family</a></p>
+      <div class="conf high" style="margin:6px 0 14px;">confidence: high</div>
+      <div class="row"><div class="k">vs TimesFM</div><div class="v">On features (conformal prediction intervals, exogenous + multivariate) it is attractive, but this is irrelevant for Radon: it is a closed proprietary API with NO open weights (Nixtla HF org has 0 public models). Sending dark-pool/flow signals to a third-party API and paying per-call violates Radon&#x27;s self-host + edge requirements. Disqualified on architecture, not accuracy.</div></div>
+<div class="row"><div class="k">Radon fit</div><div class="v">Would fit feature-wise (covariates + intervals), but disqualified -- cannot self-host on Hetzner, and routing proprietary edge signals off-box is a non-starter.</div></div>
+<div class="row"><div class="k">Probabilistic</div><div class="v">Yes, conformal prediction intervals.</div></div>
+<div class="row"><div class="k">Covariates</div><div class="v">Yes, historical + future exogenous.</div></div>
+<div class="row"><div class="k">Self-host</div><div class="v">NO -- closed hosted API only, paid per-call, no public weights. Hard disqualifier for Radon&#x27;s self-host + &#x27;flow signal or nothing&#x27; edge-secrecy posture.</div></div>
+<div class="row"><div class="k">Caveats</div><div class="v">Ranked last among serious candidates purely because it cannot be self-hosted and leaks edge signals to a vendor. Do not use for a proprietary trading app regardless of benchmark claims.</div></div>
+    </div>
+
+<footer>
+Method: each angle ran as an independent Exa Agent run (HuggingFace foundation models · arXiv benchmarks + financial-vol · GitHub maintenance/self-hosting), distilled to structured records, then ranked by a synthesis pass against Radon's requirements and the TimesFM baseline. Claims are Exa-sourced; verify exact HF checkpoint licenses and quantile calibration before production.<br/>
+TimesFM feature backlog preserved at tasks/timeseries-model-backlog.md · RADON — flow signal or nothing.
+</footer>
+</div></body></html>

@@ -1,0 +1,160 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>RADON × TimesFM — Feature Assessment</title>
+<style>
+  :root {
+    --bg:        #0a0c10;
+    --panel:     #11151c;
+    --panel-2:   #161b24;
+    --ink:       #e6edf3;
+    --ink-dim:   #9aa7b4;
+    --ink-faint: #647082;
+    --line:      #222b36;
+    --accent:    #4fd1c5;   /* signal teal */
+    --warn:      #f0a35e;   /* caution amber */
+    --danger:    #e5707e;   /* negative / refute */
+    --good:      #6fcf8b;   /* confirm */
+    --radius:    4px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin:0; padding:0; background:var(--bg); color:var(--ink); font-family:var(--sans); line-height:1.6; }
+  .wrap { max-width: 900px; margin: 0 auto; padding: 56px 28px 96px; }
+
+  .eyebrow { font-family:var(--mono); font-size:11px; letter-spacing:.22em; text-transform:uppercase; color:var(--accent); margin:0 0 14px; }
+  h1 { font-size: 30px; line-height:1.2; margin:0 0 10px; letter-spacing:-.01em; }
+  .sub { color:var(--ink-dim); font-size:15px; margin:0 0 8px; }
+  .meta { font-family:var(--mono); font-size:11.5px; color:var(--ink-faint); margin-top:18px; }
+
+  h2 { font-size:13px; font-family:var(--mono); letter-spacing:.12em; text-transform:uppercase; color:var(--ink); border-bottom:1px solid var(--line); padding-bottom:10px; margin:52px 0 22px; }
+  h3 { font-size:18px; margin:0 0 4px; letter-spacing:-.005em; }
+  p { margin: 0 0 14px; color: var(--ink); }
+  strong { color:#fff; font-weight:600; }
+  em { color:var(--ink-dim); font-style: italic; }
+
+  .lede { background:var(--panel); border:1px solid var(--line); border-left:3px solid var(--danger); border-radius:var(--radius); padding:20px 22px; margin: 28px 0; }
+  .lede p:last-child { margin-bottom:0; }
+  .lede .tag { font-family:var(--mono); font-size:10.5px; letter-spacing:.18em; text-transform:uppercase; color:var(--danger); display:block; margin-bottom:10px; }
+
+  .facts { display:grid; grid-template-columns: 1fr 1fr; gap:12px; margin: 22px 0; }
+  .fact { background:var(--panel-2); border:1px solid var(--line); border-radius:var(--radius); padding:14px 16px; }
+  .fact b { display:block; font-family:var(--mono); font-size:10.5px; letter-spacing:.1em; text-transform:uppercase; color:var(--accent); margin-bottom:6px; }
+  .fact span { color:var(--ink-dim); font-size:13.5px; }
+
+  .feat { background:var(--panel); border:1px solid var(--line); border-radius:var(--radius); padding:24px 26px; margin: 20px 0; position:relative; }
+  .feat .rank { position:absolute; top:22px; right:24px; font-family:var(--mono); font-size:11px; color:var(--ink-faint); }
+  .feat h3 { padding-right:64px; }
+  .feat .one-liner { color:var(--accent); font-size:13px; font-family:var(--mono); margin:0 0 16px; }
+  .row { display:grid; grid-template-columns: 130px 1fr; gap:14px; padding:9px 0; border-top:1px solid var(--line); }
+  .row:first-of-type { border-top:none; }
+  .row .k { font-family:var(--mono); font-size:11px; letter-spacing:.08em; text-transform:uppercase; color:var(--ink-faint); padding-top:2px; }
+  .row .v { color:var(--ink); font-size:14.5px; }
+  .row .v p { margin:0; }
+
+  .conf { display:inline-flex; align-items:center; gap:7px; font-family:var(--mono); font-size:11px; letter-spacing:.06em; text-transform:uppercase; padding:3px 9px; border-radius:var(--radius); border:1px solid var(--line); }
+  .conf::before { content:""; width:8px; height:8px; border-radius:50%; }
+  .conf.high::before { background:var(--good); }
+  .conf.high { color:var(--good); }
+  .conf.mod::before { background:var(--warn); }
+  .conf.mod { color:var(--warn); }
+  .conf.low::before { background:var(--danger); }
+  .conf.low { color:var(--danger); }
+
+  ol.ranking { counter-reset:r; list-style:none; padding:0; margin:18px 0; }
+  ol.ranking li { counter-increment:r; background:var(--panel-2); border:1px solid var(--line); border-radius:var(--radius); padding:14px 18px 14px 52px; margin-bottom:10px; position:relative; }
+  ol.ranking li::before { content:counter(r); position:absolute; left:16px; top:13px; font-family:var(--mono); font-size:16px; color:var(--accent); font-weight:600; }
+  ol.ranking b { color:#fff; }
+
+  code { font-family:var(--mono); font-size:.88em; background:var(--panel-2); border:1px solid var(--line); border-radius:3px; padding:1px 5px; color:var(--accent); }
+
+  .gate { font-family:var(--mono); font-size:11px; color:var(--warn); }
+  footer { margin-top:60px; padding-top:20px; border-top:1px solid var(--line); font-family:var(--mono); font-size:11px; color:var(--ink-faint); line-height:1.8; }
+
+  @media (max-width:620px){ .facts{grid-template-columns:1fr;} .row{grid-template-columns:1fr;gap:4px;} }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <p class="eyebrow">Radon · Feature Assessment</p>
+  <h1>Leveraging a decoder-only time-series foundation model</h1>
+  <p class="sub">Three candidate features built on Google Research's TimesFM, with the honest case against naïve use first.</p>
+  <p class="meta">Source: research.google/blog/a-decoder-only-foundation-model-for-time-series-forecasting · Assessment date 2026-06-20</p>
+
+  <div class="lede">
+    <span class="tag">Read this before building anything</span>
+    <p>TimesFM is a strong model trained on <strong>traffic, weather, energy demand, Wikipedia pageviews, Google Trends</strong> — series with heavy autocorrelation, stable seasonality, high signal-to-noise. <strong>Financial price/return series are the adversarial worst case for exactly this class of model.</strong> Returns are near-martingale, non-stationary, regime-switching, fat-tailed. Point a foundation forecaster at SPY prices and trade the point forecast, and you lose money slowly then quickly.</p>
+    <p>The rule for every feature below: <strong>never forecast price or direction.</strong> Forecast the structured, mean-reverting, autocorrelated series radon already computes — vol, flow volumes, breadth, regime indices — and treat the <em>forecast residual</em> (actual minus expected) as the edge, or the <em>quantile spread</em> as the risk input. That is where the model earns its keep and maps cleanly onto the Four Gates.</p>
+  </div>
+
+  <h2>Why the architecture matters here</h2>
+  <div class="facts">
+    <div class="fact"><b>Asymmetric patching</b><span>Input patch 32 → output patch 128. One forward pass yields a long horizon from short context. Cheap intraday→EOD / day→week, no autoregressive drift.</span></div>
+    <div class="fact"><b>Zero-shot</b><span>No per-ticker training. Run across the entire watchlist nightly on a modest budget.</span></div>
+    <div class="fact"><b>Quantile heads</b><span>Shipped checkpoint emits quantiles (0.1–0.9), not just the point MAE the blog highlights. This is the single most useful output for Gates 1 &amp; 3 — it gives a distribution.</span></div>
+    <div class="fact"><b>200M params · 100B time-points</b><span>Small, fast, broadly pre-trained. TimesFM 2.0 extends context to ~2048 and adds covariate support (condition flow on VIX / day-type).</span></div>
+  </div>
+
+  <h2>Feature 1 — Regime-index forecast layer</h2>
+  <div class="feat">
+    <span class="rank">build #2</span>
+    <h3>Forecast bands on CRI / VCG / GEX / VIX-term</h3>
+    <p class="one-liner">// forecast your own structural state variables, not price</p>
+    <div class="row"><div class="k">Forecasts</div><div class="v"><p>The regime indices radon already persists to Turso and charts (<code>/regime/*</code>). Smooth, autocorrelated, mean-reverting — TimesFM's home turf.</p></div></div>
+    <div class="row"><div class="k">Ships</div><div class="v"><p>A forecast band (median + 0.1/0.9 quantiles) extending each regime chart 5–20 sessions forward, using the established regime-chart convention (BrushMinimap + presets). A nightly systemd unit runs zero-shot inference and writes a <code>regime_forecast</code> table.</p></div></div>
+    <div class="row"><div class="k">Serves</div><div class="v"><p>Timing for <span class="gate">Gate 2 — Edge.</span> "CRI forecast to cross the top decile within 4 sessions, 0.9 band already there" is actionable and falsifiable. Predicts structural state, not price.</p></div></div>
+    <div class="row"><div class="k">Risk</div><div class="v"><p>Abrupt jumps (gaps, holidays) get smoothed over and missed. Display as conditional-on-no-shock; overlay the residual so a violent miss is itself the signal.</p></div></div>
+    <div class="row"><div class="k">Confidence</div><div class="v"><span class="conf high">High — works as a feature</span> &nbsp; <span class="conf mod">Moderate — beats a damped-trend baseline</span></div></div>
+  </div>
+
+  <h2>Feature 2 — Flow-volume nowcast + residual anomaly detector</h2>
+  <div class="feat">
+    <span class="rank">build #1</span>
+    <h3>Expected vs. actual flow ("flow surprise")</h3>
+    <p class="one-liner">// the edge is the residual, not the forecast</p>
+    <div class="row"><div class="k">Forecasts</div><div class="v"><p>The <em>expected</em> baseline for each ticker's dark-pool / OTC metrics — DPI, print volume, sweep counts, premium — conditioned on day-of-week, level, seasonality. Count-like seasonal series, structurally identical to the "demand forecasting" TimesFM was benchmarked on.</p></div></div>
+    <div class="row"><div class="k">The edge</div><div class="v"><p>Replace hand-tuned z-score thresholds with: <strong>flag tickers where today's flow exceeds the TimesFM 0.9-quantile expectation.</strong> "Unusual" becomes "in excess of a 100B-point-trained seasonal baseline." Calendar-seasonal spikes stop false-firing; genuine anomalies on quiet names surface louder.</p></div></div>
+    <div class="row"><div class="k">Ships</div><div class="v"><p>Augment <code>scan</code>/<code>discover</code> and the VCG/GEX caches with <code>expected_flow</code> and a <code>flow_surprise</code> score (actual ÷ forecast-quantile). Re-rank the watchlist by surprise. A re-ranking of existing surfaces, not a new page.</p></div></div>
+    <div class="row"><div class="k">Serves</div><div class="v"><p>Directly sharpens <span class="gate">Gate 2</span> — a specific dark-pool signal <strong>that hasn't moved price.</strong> Excess flow vs. seasonal baseline, before price reacts, is precisely that. Defensive: kills absolute-threshold false positives.</p></div></div>
+    <div class="row"><div class="k">Risk</div><div class="v"><p>Flow is spiky and event-driven; TimesFM under-forecasts tails — helps here (bigger residuals) but means nominal quantile calibration is off. You must recalibrate the surprise threshold on your own data; don't trust the nominal 0.9.</p></div></div>
+    <div class="row"><div class="k">Confidence</div><div class="v"><span class="conf mod">Moderate-to-high — mechanism sound, calibration is the work</span></div></div>
+  </div>
+
+  <h2>Feature 3 — Probabilistic expected-move cone</h2>
+  <div class="feat">
+    <span class="rank">build #3</span>
+    <h3>Quantile vol distribution feeding convexity + Kelly</h3>
+    <p class="one-liner">// distribution in, not direction</p>
+    <div class="row"><div class="k">Forecasts</div><div class="v"><p>The <em>distribution</em> of near-term realized volatility (secondarily, the underlying's quantile cone). NOT a directional point forecast.</p></div></div>
+    <div class="row"><div class="k">Why quantiles</div><div class="v"><p><span class="gate">Gate 1</span> (convexity, gain ≥ 2× loss) and <span class="gate">Gate 3</span> (fractional Kelly, 2.5% cap) both need a distribution over outcomes. TimesFM's quantile output over realized vol gives a forward expected-move cone in one forward pass — a zero-shot, no-fit alternative / ensemble partner to <code>garch-convergence</code>.</p></div></div>
+    <div class="row"><div class="k">Ships</div><div class="v"><p>A <code>forecast_cone</code> in the <code>evaluate [TICKER]</code> pipeline and the order-builder risk surface. The existing <code>OrderRiskGate</code> chokepoint consumes the distribution → P(max gain), P(max loss), Kelly-implied size. Render the cone on the eval chart.</p></div></div>
+    <div class="row"><div class="k">Serves</div><div class="v"><p>Turns Gates 1 &amp; 3 from heuristics into distributional math, plus a GARCH cross-check — agreement raises conviction, divergence flags.</p></div></div>
+    <div class="row"><div class="k">Sharpest risk</div><div class="v"><p><strong>Do not let this become a directional price forecaster in disguise.</strong> Vol forecasting is defensible (mean-reverting). The price cone is a <em>width</em> estimate only; its center is noise and must be treated as zero, or it silently violates "never rationalize a bad trade." Intraday microstructure is out-of-distribution — prefer daily bars, longer horizons.</p></div></div>
+    <div class="row"><div class="k">Confidence</div><div class="v"><span class="conf mod">Moderate — vol width</span> &nbsp; <span class="conf low">Low — any price-center signal (treat center as zero)</span></div></div>
+  </div>
+
+  <h2>Build order</h2>
+  <ol class="ranking">
+    <li><b>Feature 2 (flow residual)</b> — most aligned with "flow signal or nothing," reuses existing scan surfaces, residual framing is robust even when the model is mediocre.</li>
+    <li><b>Feature 1 (regime forecast band)</b> — cleanest fit to the model's strengths, lowest risk, mostly a charting addition.</li>
+    <li><b>Feature 3 (expected-move cone)</b> — highest payoff if it works, highest risk of misuse; gate it behind a backtest vs. GARCH.</li>
+  </ol>
+
+  <div class="lede" style="border-left-color:var(--warn);">
+    <span class="tag" style="color:var(--warn);">Cross-cutting demand</span>
+    <p><strong>Backtest before shipping any of them.</strong> The <code>quant-backtest</code> skill exists for this. For each feature the bar is beating a dumb baseline — seasonal-naïve for flow, AR / damped-trend for regime, GARCH for vol. A 200M zero-shot model that <em>ties</em> a one-line baseline is not worth a systemd unit.</p>
+    <p><span class="conf high">High</span> at least one of the three clears that bar. &nbsp; <span class="conf low">Low</span> that all three do. Build Feature 2, prove it, then expand.</p>
+  </div>
+
+  <footer>
+    Correction to the blog's framing: it implies point-estimates only — the shipped TimesFM checkpoint does emit quantiles, and 2.0 extends context to ~2048 with covariate support. Verify the current checkpoint's quantile calibration yourself; do not take nominal levels on faith.<br/>
+    RADON — market-structure reconstruction · flow signal or nothing.
+  </footer>
+
+</div>
+</body>
+</html>
