@@ -1,10 +1,10 @@
-import WorkflowComposer from "./WorkflowComposer";
+import WorkspaceShell from "@/components/WorkspaceShell";
 
 export const dynamic = "force-dynamic";
 
-// F14 — Visual flow-pipeline node-graph composer. Minimal working canvas:
-// loads/saves a graph and runs it server-side. Full WorkspaceShell nav-section
-// integration is a follow-up (see manifest completeness note).
+// F14 — Visual flow-pipeline node-graph composer, reachable from the nav and
+// wrapped in WorkspaceShell so it carries the standard header + status chrome.
+// WorkspaceSections renders <WorkflowComposer/> for the "workflow" section.
 export default function WorkflowPage() {
-  return <WorkflowComposer />;
+  return <WorkspaceShell section="workflow" />;
 }
