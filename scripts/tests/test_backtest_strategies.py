@@ -20,19 +20,22 @@ from backtest.strategies import (
 )
 
 
-def test_registry_lists_six_strategies_with_one_wired():
+def test_registry_lists_six_strategies_all_wired():
+    # FU5 wired the remaining 5 strategies; every entry is now wired.
     listed = list_strategies()
     keys = {s["key"] for s in listed}
     assert "cri" in keys
     assert len(listed) == 6
-    wired = [s for s in listed if s["wired"]]
-    assert [s["key"] for s in wired] == ["cri"]
+    assert all(s["wired"] for s in listed)
 
 
-def test_stubbed_strategy_raises_not_implemented():
-    assert STRATEGIES["vcg"].wired is False
-    with pytest.raises(NotImplementedError):
-        run_strategy("vcg")
+def test_no_feed_strategy_reports_insufficient_data():
+    # vcg IS wired, but with no replayable history (or an absent snapshot feed)
+    # the result is honest insufficient_data rather than a fake/empty success.
+    assert STRATEGIES["vcg"].wired is True
+    result = run_strategy("leap_iv")
+    assert result["status"] == "insufficient_data"
+    assert result["trades"] == []
 
 
 def test_unknown_strategy_raises_keyerror():
