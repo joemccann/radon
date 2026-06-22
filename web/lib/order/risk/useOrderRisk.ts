@@ -45,6 +45,7 @@ import {
   type CoveringPortfolioLeg,
 } from "./internal/computeOrderRisk";
 import { computeLinearRisk } from "./internal/computeLinearRisk";
+import { estimateRoundTripCost } from "../costs";
 
 export type { ChainOrderLeg, CoveringPortfolioLeg };
 
@@ -103,6 +104,20 @@ export interface OptionOrderRiskInput {
    * options). Not computed by the risk model.
    */
   breakeven?: number | null;
+  /**
+   * Optional live entry quote for the order as a whole (the NET combo quote
+   * for multi-leg, or the single option's quote for single-leg). Both fields
+   * are per-share positive magnitudes — the same `netPrices.bid` / `.ask` the
+   * chain already computes. When supplied, `useOrderRisk` runs the F1 cost
+   * model (`estimateRoundTripCost`) and folds the round-trip cost into the
+   * risk verdict: bounded max-loss grows by the cost, bounded max-gain shrinks
+   * by it (clamped at 0). Unbounded legs stay unbounded.
+   *
+   * Absent (the historical default) → no cost adjustment; behavior is
+   * byte-for-byte identical to before FU7. A null bid/ask falls back to the
+   * estimated half-spread inside the cost model rather than disabling cost.
+   */
+  quote?: { bid: number | null; ask: number | null } | null;
 }
 
 /**
@@ -368,10 +383,30 @@ export function useOrderRisk(
     );
 
     const adjustedNetPremium = opt.netPremium + augmented.netPremiumAdjustment;
+
+    // F1 net-of-cost (FU7): when the surface threads a live entry quote, run
+    // the shared cost model and fold the round-trip cost into the verdict.
+    // `comboQuantity` is the per-combo contract count; `chainLegs.length` is
+    // the structural leg count (NOT the augmented riskLegs, which include
+    // injected virtual coverage legs that aren't separately ticketed). Absent
+    // a quote, `costs` is undefined and `computeOrderRisk` is a pure no-op.
+    const costs =
+      opt.quote != null
+        ? {
+            roundTripCost: estimateRoundTripCost({
+              contracts: augmented.comboQuantity,
+              numLegs: opt.chainLegs.length,
+              entryBid: opt.quote.bid,
+              entryAsk: opt.quote.ask,
+            }),
+          }
+        : undefined;
+
     const risk = computeOrderRisk(
       augmented.riskLegs,
       adjustedNetPremium,
       augmented.comboQuantity,
+      costs,
     );
 
     const resolved: OrderPresentationSummary = {

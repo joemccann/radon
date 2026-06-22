@@ -18,6 +18,7 @@
 import type { PortfolioData } from "@/lib/types";
 import { OrderConfirmSummary } from "../components/OrderConfirmSummary";
 import { LocateFeeChip } from "../components/LocateFeeChip";
+import { PaperModeToggle } from "../components/PaperModeToggle";
 import { useOrderRisk, type OrderRiskInput, type OrderRiskState } from "./useOrderRisk";
 import { useRecordOrderRiskTrace } from "./telemetry";
 import { useShortAvailability } from "../hooks/useShortAvailability";
@@ -51,6 +52,14 @@ export interface OrderRiskGateProps {
    * call. Equivalent to `useOrderRisk` directly but no extra render.
    */
   onState?: (state: OrderRiskState | null) => void;
+  /**
+   * Paper-mode flag (F13). When `onPaperModeChange` is supplied the gate
+   * renders a Live/Paper toggle; the parent owns the mode and routes the
+   * order via `resolvePlacementTarget(paperMode)`. When the handler is
+   * omitted the toggle is hidden and the surface is live-only.
+   */
+  paperMode?: boolean;
+  onPaperModeChange?: (next: boolean) => void;
 }
 
 export function OrderRiskGate({
@@ -60,6 +69,8 @@ export function OrderRiskGate({
   variant = "info",
   className,
   onState,
+  paperMode = false,
+  onPaperModeChange,
 }: OrderRiskGateProps) {
   const state = useOrderRisk(input, portfolio);
 
@@ -112,6 +123,11 @@ export function OrderRiskGate({
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+      {onPaperModeChange != null && (
+        <div style={{ display: "flex", justifyContent: "flex-end" }}>
+          <PaperModeToggle paperMode={paperMode} onChange={onPaperModeChange} />
+        </div>
+      )}
       <OrderConfirmSummary
         summary={state.summary}
         variant={variant}

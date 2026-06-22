@@ -3,3 +3,6 @@
 # Chronos-2 forecasting host (never on the standard radon-* fleet units).
 chronos-forecasting>=1.5.0
 torch>=2.2.0
+# scipy backs the SVI vol-surface fit (scripts/vol_surface.py: scipy.optimize.least_squares).
+# Pinned to match the local .venv so the forecasting host resolves the same wheel.
+scipy==1.17.1

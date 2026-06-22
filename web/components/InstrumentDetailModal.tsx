@@ -190,8 +190,10 @@ function LegOrderForm({
       netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
       description,
       totalCost: action === "SELL" ? -totalCost : totalCost,
+      // FU7: thread the single-leg live quote for net-of-cost risk.
+      quote: { bid, ask },
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, strikeStr, right, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry]);
+  }, [isValid, parsedQty, parsedPrice, action, ticker, strikeStr, right, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);
 
   return (
     <SingleLegOrderTicket

@@ -717,3 +717,63 @@ def get_ticker_flow_history(ticker: str, *, lookback_days: int = 120) -> list[di
     )
     columns = [d[0] for d in cursor.description]
     return [dict(zip(columns, row)) for row in cursor.fetchall()]
+
+
+def upsert_backtest_run(
+    strategy: str,
+    run_at: str,
+    *,
+    horizon: int,
+    payload: dict[str, Any],
+) -> None:
+    """F12 — persist one strategy backtest run keyed on (strategy, run_at).
+
+    The headline metrics are lifted into indexed columns for cheap listing;
+    ``payload`` is the full serialised run (trades + equity curve + metrics).
+    """
+    metrics = payload.get("metrics", {})
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO backtest_runs
+          (strategy, run_at, horizon, n_trades, sharpe, sortino, calmar,
+           max_drawdown, hit_rate, expectancy, payload)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            strategy,
+            run_at,
+            int(horizon),
+            int(metrics.get("n_trades", 0)),
+            _as_float(metrics.get("sharpe")),
+            _as_float(metrics.get("sortino")),
+            _as_float(metrics.get("calmar")),
+            _as_float(metrics.get("max_drawdown")),
+            _as_float(metrics.get("hit_rate")),
+            _as_float(metrics.get("expectancy")),
+            json.dumps(payload),
+        ),
+    )
+    db.commit()
+
+
+def get_latest_backtest_run(strategy: str) -> Optional[dict[str, Any]]:
+    """F12 — most recent backtest run payload for a strategy, or None."""
+    db = get_db()
+    cursor = db.execute(
+        """
+        SELECT payload FROM backtest_runs
+        WHERE strategy = ?
+        ORDER BY run_at DESC
+        LIMIT 1
+        """,
+        (strategy,),
+    )
+    row = cursor.fetchone()
+    if not row:
+        return None
+    return json.loads(row[0])
+
+
+def _as_float(value: Any) -> Optional[float]:
+    return float(value) if value is not None else None

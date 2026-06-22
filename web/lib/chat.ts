@@ -1,5 +1,12 @@
 import type { Dispatch, SetStateAction } from "react";
-import type { ApiMessage, AssistantResponse, Message, PiResponse, WorkspaceSection } from "./types";
+import type {
+  ApiMessage,
+  AssistantOrderProposal,
+  AssistantResponse,
+  Message,
+  PiResponse,
+  WorkspaceSection,
+} from "./types";
 import { PI_COMMAND_ALIASES, PI_COMMAND_SET } from "./data";
 import {
   createTimestamp,
@@ -126,6 +133,81 @@ export async function requestAssistantReply(history: ApiMessage[], latestMessage
   return fallbackReply(latestMessage);
 }
 
+export type AssistantTurn = {
+  content: string;
+  proposal: AssistantOrderProposal | null;
+};
+
+/**
+ * Like {@link requestAssistantReply} but preserves the structured order
+ * proposal (F7). The agentic loop returns a `place_order` proposal instead of
+ * executing it; ChatPanel renders the proposal as a confirm card. The order is
+ * NEVER executed here.
+ */
+export async function requestAssistantTurn(
+  history: ApiMessage[],
+  latestMessage: string,
+): Promise<AssistantTurn> {
+  const response = await fetch("/api/assistant", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messages: [...history, { role: "user", content: latestMessage }],
+    }),
+  });
+
+  const payload = (await response.json()) as AssistantResponse;
+
+  if (!response.ok) {
+    const message = payload.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
+    return { content: message, proposal: null };
+  }
+
+  const content =
+    typeof payload.content === "string" && payload.content.trim()
+      ? formatAssistantPayload(payload.content)
+      : fallbackReply(latestMessage);
+
+  return { content, proposal: payload.proposal ?? null };
+}
+
+/**
+ * Executes a confirmed order proposal through the live placement path. Maps the
+ * proposal's `place_order` input to the `/api/orders/place` body shape. Called
+ * ONLY from the ChatPanel confirm card's Confirm action — never automatically.
+ */
+export async function placeProposedOrder(
+  proposal: AssistantOrderProposal,
+): Promise<{ ok: boolean; message: string }> {
+  const input = proposal.input;
+  const symbol = typeof input.ticker === "string" ? input.ticker.toUpperCase() : "";
+  const action = typeof input.action === "string" ? input.action.toUpperCase() : "";
+  const quantity = typeof input.quantity === "number" ? input.quantity : Number(input.quantity);
+  const limitPrice = typeof input.limit_price === "number" ? input.limit_price : Number(input.limit_price);
+
+  const body: Record<string, unknown> = {
+    type: "stock",
+    symbol,
+    action,
+    quantity,
+    tif: "DAY",
+  };
+  if (Number.isFinite(limitPrice) && limitPrice > 0) {
+    body.limitPrice = limitPrice;
+  }
+
+  const response = await fetch("/api/orders/place", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  const json = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    return { ok: false, message: (json as { error?: string }).error || "Order placement failed." };
+  }
+  return { ok: true, message: (json as { message?: string }).message || `Order placed: ${proposal.summary}` };
+}
+
 export async function requestPiReply(command: string): Promise<string> {
   const response = await fetch("/api/pi", {
     method: "POST",
@@ -217,6 +299,14 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
 
   if (pathname.startsWith("/regime")) {
     return "regime";
+  }
+
+  if (pathname.startsWith("/alerts")) {
+    return "alerts";
+  }
+
+  if (pathname.startsWith("/workflow")) {
+    return "workflow";
   }
 
   if (pathname.startsWith("/admin")) {

@@ -170,6 +170,8 @@ describe("navItems", () => {
       "journal",
       "regime",
       "cta",
+      "alerts",
+      "workflow",
       "admin",
       "profile", // hidden: true, reached via the sidebar user card
     ]);
@@ -192,6 +194,8 @@ describe("quickPromptsBySection", () => {
     "journal",
     "regime",
     "cta",
+    "alerts",
+    "workflow",
     "admin",
     "ticker-detail",
     "profile",
@@ -243,6 +247,8 @@ describe("sectionDescription", () => {
     "journal",
     "regime",
     "cta",
+    "alerts",
+    "workflow",
     "admin",
     "ticker-detail",
     "profile",

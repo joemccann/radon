@@ -447,7 +447,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
             />
           ) : null}
 
-          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "admin" && activeSection !== "profile" ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
+          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "admin" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
 
           {activeSection !== "dashboard" ? (
             <WorkspaceSections
