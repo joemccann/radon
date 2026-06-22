@@ -140,6 +140,10 @@ function baseProps(overrides: Partial<AssetCockpitProps> = {}): AssetCockpitProp
     theme: "dark",
     activeDeck: null,
     onDeckChange: vi.fn(),
+    instrumentView: "position",
+    canSwitchInstrument: false,
+    onInstrumentViewChange: vi.fn(),
+    viewUnderlying: false,
     ...overrides,
   };
 }
@@ -332,5 +336,37 @@ describe("AssetCockpit — held combo fixture", () => {
     const h = header(container)!;
     expect((h.textContent ?? "").toUpperCase()).toContain("NET");
     expect(h.textContent ?? "").not.toMatch(/\$\d{1,3},\d{3}/);
+  });
+});
+
+describe("instrument switch (held option ⟷ underlying stock)", () => {
+  it("shows the static kind chip and no switcher when not switchable", () => {
+    const { container } = renderCockpit({ canSwitchInstrument: false, bookKind: "option" });
+    expect(container.querySelector(".ckh-instr")).toBeNull();
+    expect(container.querySelector(".ckh-kind")?.textContent).toBe("OPTION");
+  });
+
+  it("renders a STOCK|OPTION toggle when switchable, with the held view active", () => {
+    const { container } = renderCockpit({
+      canSwitchInstrument: true,
+      instrumentView: "position",
+      bookKind: "option",
+    });
+    const segs = [...container.querySelectorAll(".ckh-instr-seg")];
+    expect(segs.map((s) => s.textContent?.trim())).toEqual(["STOCK", "OPTION"]);
+    expect(container.querySelector(".ckh-instr-seg.on")?.textContent?.trim()).toBe("OPTION");
+  });
+
+  it("clicking STOCK requests the underlying view", () => {
+    const onInstrumentViewChange = vi.fn();
+    const { container } = renderCockpit({
+      canSwitchInstrument: true,
+      instrumentView: "position",
+      bookKind: "option",
+      onInstrumentViewChange,
+    });
+    const stockSeg = container.querySelector(".ckh-instr-seg") as HTMLElement; // first = STOCK
+    fireEvent.click(stockSeg);
+    expect(onInstrumentViewChange).toHaveBeenCalledWith("underlying");
   });
 });
