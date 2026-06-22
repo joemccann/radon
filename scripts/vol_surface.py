@@ -23,7 +23,6 @@ from dataclasses import dataclass
 from typing import Dict, Iterable, Optional, Tuple
 
 import numpy as np
-from scipy.optimize import least_squares
 
 
 SVI_PARAM_COUNT = 5
@@ -151,6 +150,15 @@ def fit_svi_slice(
         raise InsufficientStrikesError(
             f"need >= {MIN_STRIKES_TO_FIT} strikes to fit SVI, got {strikes.size}"
         )
+
+    # scipy is an optional analytics dependency. Import lazily so core scanners
+    # that pull in this module (leap_iv_scanner, risk_reversal) still import when
+    # scipy is absent; the missing fit degrades to raw IV upstream because
+    # VolSurface.fit drops slices that raise InsufficientStrikesError/ValueError.
+    try:
+        from scipy.optimize import least_squares
+    except ImportError as exc:
+        raise InsufficientStrikesError("scipy unavailable for SVI fit") from exc
 
     k = np.log(strikes / spot)
     w = (ivs ** 2) * t

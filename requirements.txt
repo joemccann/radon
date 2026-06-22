@@ -17,6 +17,10 @@ requests>=2.28.0
 # Data analysis
 pandas>=1.5.0
 numpy>=1.26.0
+# scipy.optimize.least_squares powers the SVI vol-surface fit (scripts/vol_surface.py),
+# which core scanners leap_iv_scanner.py + risk_reversal.py import. It must be a MAIN
+# dependency, not forecasting-host-only, or those scanners fail to import on the fleet.
+scipy>=1.11.0
 
 # Environment and utilities
 python-dotenv>=1.0.0
