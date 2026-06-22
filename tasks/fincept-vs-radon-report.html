@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fincept Terminal -&gt; Radon: Opportunity Analysis</title>
+<style>
+  :root{
+    --canvas:#0a0f14; --panel:#0f1519; --panel-raised:#151c22; --grid:#1e293b;
+    --text:#e2e8f0; --text-2:#94a3b8; --text-muted:#475569;
+    --core:#05AD98; --strong:#0FCFB5; --deep:#048A7A;
+    --warn:#F5A623; --fault:#E85D6C; --extreme:#8B5CF6; --dislocation:#D946A8;
+    --radius:4px;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--text);font-family:var(--sans);
+    -webkit-font-smoothing:antialiased;line-height:1.5}
+  a{color:var(--strong);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+
+  header.masthead{border-bottom:1px solid var(--grid);padding-bottom:24px;margin-bottom:32px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;
+    color:var(--core);margin:0 0 10px}
+  h1{font-size:30px;line-height:1.15;margin:0 0 12px;font-weight:650;letter-spacing:-.01em}
+  h1 .arrow{color:var(--text-muted);font-weight:400}
+  .sub{color:var(--text-2);font-size:15px;max-width:760px;margin:0}
+  .meta{font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-top:16px;
+    display:flex;gap:18px;flex-wrap:wrap}
+  .meta b{color:var(--text-2);font-weight:500}
+
+  .grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px;margin:0 0 36px}
+  .stat{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:16px 18px}
+  .stat .n{font-family:var(--mono);font-size:26px;font-weight:600;color:var(--strong);line-height:1}
+  .stat .l{font-size:11px;color:var(--text-2);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
+
+  h2.section{font-size:13px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.14em;
+    color:var(--text-2);border-bottom:1px solid var(--grid);padding-bottom:8px;margin:44px 0 6px}
+  .section-note{color:var(--text-muted);font-size:13px;margin:0 0 22px}
+
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 24px;font-family:var(--mono);font-size:11px;color:var(--text-2)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+
+  .card{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);
+    padding:20px 22px;margin-bottom:14px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,var(--text-muted))}
+  .card.p-P0{--accent:var(--fault)} .card.p-P1{--accent:var(--core)}
+  .card.p-P2{--accent:var(--warn)} .card.p-P3{--accent:var(--text-muted)}
+
+  .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:10px}
+  .card-title{font-size:17px;font-weight:600;letter-spacing:-.005em;margin:0}
+  .tags{display:flex;gap:7px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+  .tag{font-family:var(--mono);font-size:10px;letter-spacing:.05em;padding:3px 8px;border-radius:var(--radius);
+    border:1px solid var(--grid);color:var(--text-2);white-space:nowrap;text-transform:uppercase}
+  .tag.prio{font-weight:600}
+  .tag.p-P0{color:var(--fault);border-color:color-mix(in srgb,var(--fault) 45%,transparent)}
+  .tag.p-P1{color:var(--strong);border-color:color-mix(in srgb,var(--core) 45%,transparent)}
+  .tag.p-P2{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .tag.p-P3{color:var(--text-2)}
+  .tag.cat-feature{color:var(--strong)}
+  .tag.cat-enhancement{color:var(--extreme)}
+  .tag.cat-replacement{color:var(--dislocation)}
+  .tag.eff{color:var(--text-2)}
+
+  .row{margin:11px 0;font-size:13.5px}
+  .row .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;
+    color:var(--text-muted);display:block;margin-bottom:3px}
+  .row .v{color:var(--text);}
+  .row.value .v{color:var(--text)}
+  .from{color:var(--text-2);font-style:normal}
+  .sketch{background:var(--panel-raised);border:1px solid var(--grid);border-radius:var(--radius);
+    padding:12px 14px;font-family:var(--mono);font-size:12px;line-height:1.65;color:var(--text-2);margin-top:6px}
+  .sketch code{color:var(--strong)}
+  details.verdict{margin-top:12px;border-top:1px dashed var(--grid);padding-top:10px}
+  details.verdict summary{font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;
+    color:var(--text-muted);cursor:pointer;outline:none}
+  details.verdict summary:hover{color:var(--text-2)}
+  details.verdict p{font-size:12.5px;color:var(--text-2);margin:10px 0 0;line-height:1.6}
+
+  .dropped{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:16px 18px;margin-top:8px}
+  .dropped h4{margin:0 0 6px;font-size:14px;color:var(--text-2)}
+  .dropped p{margin:6px 0 0;font-size:12.5px;color:var(--text-muted);line-height:1.6}
+  .dropped code{font-family:var(--mono);color:var(--text-2)}
+
+  .gaps{columns:2;column-gap:28px}
+  @media(max-width:720px){.gaps{columns:1}}
+  .gaps li{break-inside:avoid;margin-bottom:10px;font-size:13px;color:var(--text-2);line-height:1.5}
+  .stack{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);
+    padding:16px 18px;font-size:13px;color:var(--text-2);line-height:1.7}
+  .stack b{color:var(--text)}
+
+  footer{margin-top:54px;padding-top:18px;border-top:1px solid var(--grid);
+    font-family:var(--mono);font-size:11px;color:var(--text-muted);line-height:1.7}
+  code{font-family:var(--mono);font-size:.92em}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Radon &middot; Competitive Capability Scan</p>
+    <h1>Fincept Terminal <span class="arrow">&rarr;</span> Radon</h1>
+    <p class="sub">What the open-source <a href="https://github.com/Fincept-Corporation/FinceptTerminal" target="_blank" rel="noopener">Fincept Terminal</a> (C++20 / Qt single-binary quant platform) does that Radon could adopt, improve on, or replace. Every candidate was adversarially filtered against Radon's existing code and its defined-risk, flow-signal thesis. Items Radon already covers were dropped.</p>
+    <div class="meta">
+      <span><b>Source</b> Fincept-Corporation/FinceptTerminal</span>
+      <span><b>Target</b> radon (flow-signal options platform)</span>
+      <span><b>Method</b> 23-agent workflow: explore &rarr; map &rarr; synthesize &rarr; adversarial filter</span>
+      <span><b>Generated</b> 2026-06-21</span>
+    </div>
+  </header>
+
+  <div class="grid-stats">
+    <div class="stat"><div class="n">14</div><div class="l">Kept opportunities</div></div>
+    <div class="stat"><div class="n">5</div><div class="l">P1 (high value)</div></div>
+    <div class="stat"><div class="n">8</div><div class="l">New features</div></div>
+    <div class="stat"><div class="n">68</div><div class="l">Fincept caps reviewed</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">Dropped as redundant</div></div>
+  </div>
+
+  <h2 class="section">Reading the cards</h2>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--core)"></span> P1 high value</span>
+    <span><span class="dot" style="background:var(--warn)"></span> P2 worthwhile</span>
+    <span><span class="dot" style="background:var(--text-muted)"></span> P3 later</span>
+    <span><span class="dot" style="background:var(--strong)"></span> feature</span>
+    <span><span class="dot" style="background:var(--extreme)"></span> enhancement</span>
+    <span><span class="dot" style="background:var(--dislocation)"></span> replacement</span>
+    <span>S/M/L/XL = effort</span>
+  </div>
+
+  <div id="cards"></div>
+
+  <h2 class="section">Dropped &mdash; Radon already does this</h2>
+  <p class="section-note">Surfaced by Fincept but rejected by the filter pass because Radon already implements it.</p>
+  <div id="dropped"></div>
+
+  <h2 class="section">Radon gaps the scan confirmed</h2>
+  <p class="section-note">Capability areas Radon lacks today, grounded in files actually read. The opportunities above target these.</p>
+  <ul class="gaps" id="gaps"></ul>
+
+  <h2 class="section">Radon stack (as mapped)</h2>
+  <div class="stack" id="stack"></div>
+
+  <footer>
+    Adversarial filter discipline: each opportunity was independently re-checked against Radon source for redundancy, thesis-fit (Four Gates: convexity, edge, risk), and feasibility. Priorities reflect the filter's adjusted verdicts, not the initial proposal.<br>
+    Generated by a Claude Code multi-agent workflow &middot; tasks/fincept-vs-radon-report.html
+  </footer>
+
+</div>
+
+<script>
+const DATA = {
+  "opportunities": [
+    {"title":"Strategy backtester + walk-forward harness for the six documented edges","category":"feature","fromFincept":"Quant Lab model_backtest / QuantModulePanel_Backtesting + factor IC significance testing","radonValue":"Radon's single biggest gap: docs/strategies.md specifies six edges (Dark Pool, LEAP, GARCH, Risk Reversal, VCG, CRI) but none are empirically validated. Gate 2 (edge that hasn't moved price) is asserted, never measured. A backtester turns 'we believe this is edge' into a measured hit-rate / Sharpe / expectancy, which is the whole thesis.","effort":"L","priority":"P1","sketch":"New <code>scripts/backtest/</code> mirroring <code>scripts/forecasting/</code>: <code>signal_replay.py</code> reads historical scan rows from Turso (vcg/gex/cri snapshots + ticker_flow_history), <code>engine.py</code> runs a vectorized walk-forward per documented entry rule, <code>costs.py</code> models commission+slippage+spread, <code>metrics.py</code> computes Sharpe/Sortino/Calmar/max-drawdown/hit-rate/expectancy. Expose <code>GET /backtest/{strategy}</code>; surface at <code>web/app/regime/backtest/</code> with BrushMinimap + equity curve. Persist to a <code>backtest_runs</code> table.","verdict":"Genuine, thesis-central gap. The two adjacent assets are distinct: forecasting/backtest.py is forecast-calibration (pinball/PIT/coverage, no entry/exit, no cost model, no Sharpe), and portfolio_performance.py reconstructs realized equity from actual fills. Neither validates the six edges. Downgraded P0->P1: the snapshot tables store opaque JSON blobs and the flow-history tables are brand-new on the in-flight branch with little history; a walk-forward over thin data risks a confidently-wrong hit-rate. Sequence after Chronos-2 lands and snapshots accrue depth."},
+    {"title":"Portfolio-level correlation-aware risk-budget guard on top of per-position Kelly","category":"enhancement","fromFincept":"Portfolio optimization module (risk-parity, min-variance) + component/incremental VaR risk metrics","radonValue":"Radon sizes each position with fractional Kelly (kelly.py, 2.5% cap) but has no portfolio-level view of correlated risk. Stacking three correlated risk-reversals each at 2.5% silently breaches the intended budget. A correlation-aware overlay enforces Gate 3 (risk) at the book level, not just per-trade.","effort":"M","priority":"P1","sketch":"New <code>scripts/portfolio_risk.py</code> computing a return-correlation matrix from <code>data/price_history_cache/</code> + betas from <code>scenario_analysis.py</code>, then a clustered-exposure check that warns when correlated positions exceed an aggregate budget. Feed into <code>AttributionPanel.tsx</code> / <code>exposureBreakdown.ts</code> and add a portfolio-level Gate-3 banner. A guardrail, not a full optimizer.","verdict":"Verified scripts/portfolio_risk.py does not exist; no correlation/risk-budget code anywhere. scenario_analysis.py uses hardcoded single-factor SPX betas; exposureBreakdown.ts is a category split with no risk aggregation; Kelly caps per position only. This is the canonical Gate 3 failure mode, so it strengthens a mandatory gate. Lifted P2->P1 because it closes a silent breach of a hard risk cap. Caveat: needs care on thin/short overlapping price series and option-to-underlying mapping."},
+    {"title":"Agentic tool-calling loop for the Claude assistant over Radon's own data","category":"replacement","fromFincept":"LLM tool-calling loop with multi-round/parallel dispatch (LlmToolLoop, ToolDispatcher) + MCP tool registry with destructive-action gating","radonValue":"web/app/api/assistant/route.ts is single-shot with a static prompt and a hardcoded fallback switch. It cannot fetch flow, run a scan, or read the portfolio. An Anthropic tool-use loop with an explicit-confirm tier for mutating tools (orders) is the right pattern for a flow-signal cockpit.","effort":"M","priority":"P1","sketch":"Add <code>web/lib/assistant/tools.ts</code> declaring each tool with a JSON schema + destructive flag (read: get_flow, run_scan, get_gex, get_portfolio via radonFetch; mutate: place_order requires explicit confirm via OrderRiskGate). Rewrite route.ts into a multi-round loop: call Anthropic with tools, execute tool_use blocks via radonFetch, feed tool_result back, repeat to stop. Reuse the ANTHROPIC_ENV_KEYS resolver.","verdict":"Verified single-shot: static SYSTEM_PROMPT, one Anthropic call with no tools param, plus a hardcoded keyword fallback. No tool_use/input_schema anywhere. The enabling layers exist: ~51 FastAPI routes (read + mutate), radonFetch, the key resolver. The destructive-confirm tier maps onto the existing OrderRiskGate chokepoint, reinforcing the defined-risk thesis. Concrete and feasible."},
+    {"title":"User-configurable signal alert rules engine (flow / GEX / price thresholds)","category":"feature","fromFincept":"Webhook listener + TriggerNodes/NotificationNodes + Adanos buzz-vs-price divergence alerting","radonValue":"Discord/Pushover are wired ONLY for ops/watchdog health. There is zero user-facing alerting on product signals: a darkpool print spike, a GEX flip, an IV-rank cross, a CRI band change. For a flow-signal platform, 'tell me when un-priced flow appears' IS the product.","effort":"M","priority":"P1","sketch":"New Turso <code>alert_rules</code> table (user_id, ticker, metric, op, threshold, channel). <code>scripts/alerts/evaluate.py</code> runs at the tail of scanner.py/discover.py, diffs the fresh scan row against each rule, dispatches via the existing watchdog Discord/Pushover helpers + optional web push (PwaRegister present). CRUD at <code>web/app/api/alerts/</code> + a rules panel reusing the bookmarks pattern (migration 0010).","verdict":"Verified gap: no alert_rules, no scripts/alerts/, no web/app/api/alerts/. Squarely on-thesis. Every dependency already ships: notification transport, the exact thresholdable metrics (ticker_flow_history + gex/cri/vcg caches), a per-cycle scanner to hook into, and a reusable user-scoped CRUD pattern. Only rule storage + diff/evaluate + dispatch is new. Surfaces signals; does not place trades."},
+    {"title":"Earnings / FDA / economic catalyst calendar as a first-class signal feed","category":"feature","fromFincept":"News feed categorization + economic-calendar dashboard widget + scenario analysis","radonValue":"Radon already CALLS get_earnings_by_ticker, get_fda_calendar, get_economic_calendar in uw_client.py but surfaces NONE of them. Catalysts are precisely when un-priced flow concentrates and defined-risk convex structures have the best payoff. Low effort because the data plumbing exists.","effort":"S","priority":"P1","sketch":"New <code>scripts/fetch_catalysts.py</code> aggregating uw_client get_earnings_premarket/afterhours + get_fda_calendar + get_economic_calendar into normalized rows, cached to a Turso <code>catalysts</code> table + data/ fallback. <code>GET /catalysts</code>. Dashboard card + a days-to-catalyst badge on scanner rows. Wire a catalyst-proximity filter so 'flow + imminent catalyst' becomes rankable.","verdict":"Verified: those UW methods exist (uw_client.py:670-692) but are called nowhere. Not redundant; thesis-aligned (sharpens Gate 1 timing and Gate 2 edge). The continuous regime models and Chronos-2 don't provide a forward discrete-event calendar. Pattern mirrors existing scans. Caveat: the catalyst-proximity filter (the actual edge-leverage piece) is more than trivial wiring, nudging effort toward S/M."},
+    {"title":"Toxic-flow / order-book-imbalance microstructure scan from existing L2 depth","category":"feature","fromFincept":"HFT/microstructure toolkit (order-book imbalance, weighted mid, PIN/VPIN toxic-flow, Avellaneda-Stoikov)","radonValue":"Radon already has full L2 depth (BookTab, @stoqey/ib montage + futures ladder + tape) but uses it only for display. PIN-style toxic-flow + book imbalance turn raw depth into a leading microstructure signal that hasn't hit price yet, which is the literal Gate 2 definition.","effort":"M","priority":"P2","sketch":"Extend <code>scripts/ib_realtime_server.js</code> or a sidecar <code>scripts/microstructure.py</code> consuming relay book state to compute order-book imbalance, volume-weighted microprice, and a PIN/VPIN bucket-volume toxicity score per symbol; publish via the relay WS, persist rolling values to Turso. Render an imbalance/toxicity strip in BookTab via web/lib/book/. Skip the market-making quote side (out-of-thesis).","verdict":"Genuinely additive: depth pipeline is confirmed display-only (depthDerivations.ts derives only size/ratios/geometry/tape and a plain mid; zero matches for imbalance/microprice/PIN/VPIN). Book imbalance + microprice are exactly Gate-2 'hasn't moved price yet.' Dropped to P2: the VPIN half depends on trade-direction-classified volume but the tape feed is still Phase 3 (empty Trade[] today); depth is capped at ~3 tickets, default-OFF flag, RTH-only with no history. Static imbalance + microprice are cheap wins; toxicity is gated on unbuilt tape infra."},
+    {"title":"Congress + insider transaction flow surface (integrated UW endpoints, unsurfaced)","category":"feature","fromFincept":"Alternative-data philosophy (non-traditional informed-flow sources) + per-ticker signal breakdown","radonValue":"uw_client.py already has get_congress_recent_trades, get_congress_trader, get_insider_by_ticker, get_insider_transactions, get_institutional_ownership but none are surfaced. Insider/congress buying is classic un-priced informed flow that fits the thesis, and the data is already paid for.","effort":"S","priority":"P2","sketch":"New <code>scripts/fetch_informed_flow.py</code> wrapping the existing uw_client congress/insider/institutional methods, cached to Turso + data/ fallback. <code>GET /informed-flow/{ticker}</code>. Render as a panel reusing the flow-analysis component pattern (web/lib/flowSignal.ts) and add an insider/congress-activity badge to scanner rows.","verdict":"Verified: those methods exist (uw_client.py:569-632) but are referenced only by the client and its test. Zero surfacing anywhere. Data already paid for via $UW_TOKEN. Strong thesis fit: named insider/congress trades are un-priced informed-flow signals that complement anonymized dark-pool prints and feed the eval->structure->Kelly pipeline. High feasibility (S). Honest caveat: signal enrichment, not a convexity engine."},
+    {"title":"Polymarket / prediction-market odds as an event-flow edge overlay","category":"feature","fromFincept":"Polymarket integration (Gamma/CLOB: midpoint, order book, price history) + buzz-vs-price divergence","radonValue":"Prediction-market odds on catalysts (Fed, FDA, elections) are un-priced-elsewhere signal that pairs with the catalyst feed: when Polymarket odds diverge from where options skew prices the same event, that's a Gate-2 edge for a defined-risk structure.","effort":"S","priority":"P2","sketch":"New <code>scripts/clients/polymarket_client.py</code> hitting Gamma/CLOB (markets, midpoint, price history). <code>scripts/fetch_event_odds.py</code> maps markets to tickers/catalysts, caches to Turso. Surface alongside the catalyst card; compute an odds-vs-options-implied divergence via fetch_options.py. <code>GET /event-odds/{ticker}</code>.","verdict":"Not redundant: zero prediction-market integration today. Thesis-compatible when framed as the divergence between Polymarket-implied and options-skew-implied probability (a Gate-2 signal that hasn't moved price). Connector is a known shape. Caveat: 'S' undersells it; mapping free-text markets to tickers/expiries and the binary-odds-vs-skew math are M, cleanest for macro/index catalysts (FOMC->SPX/ES), noisier for single-name FDA."},
+    {"title":"Forecast-driven signal scoring: wire Chronos-2 quantiles into scan ranking","category":"enhancement","fromFincept":"Probabilistic/quantile forecasting with interval coverage (MASE, direction accuracy, PIT) feeding strategy construction","radonValue":"Radon just built Chronos-2 quantile forecasting + a calibration backtest but it's a standalone engine. Rank flow opportunities by forecast-implied convexity: a darkpool signal whose Chronos band is wide and skewed up is a better convex bet than a tight symmetric one.","effort":"M","priority":"P2","sketch":"In <code>scripts/scanner.py</code>/<code>discover.py</code>, after recording flow to ticker_flow_history, call <code>forecasting.chronos_engine.forecast_quantiles</code> on the flow_strength series and attach a forecast-skew + interval-width score to each opportunity. Surface the band on the dashboard OpportunitiesCard and gate-check against convexity (wide upside band reinforces Gate 1). Run only on tickers with MIN_CONTEXT_LEN history; degrade gracefully.","verdict":"Genuine gap: scanner.py:164 records history but never forecasts; zero forecast/quantile wiring into ranking or the convexity gate. Thesis-aligned (forecast-implied convexity feeds the order-risk chokepoint). Concrete and feasible. Kept at P2 not P1: chronos is only installed on a dedicated forecasting host, so this is sequencing-gated on the branch landing + model availability on the fleet."},
+    {"title":"Paper-trading / shadow-fill engine so order logic is testable off the live account","category":"feature","fromFincept":"Asset-agnostic paper-trading engine + touch-based OrderMatcher SL/TP trigger engine + paper-vs-live router","radonValue":"Per scripts/CLAUDE.md every order test today hits the live IBKR account. There is no safe dry-run for combos/BAG orders, exactly where Radon has had silent-drop bugs. A shadow engine validates the combo router and order-risk chokepoint with real L2 prices but no capital at risk.","effort":"L","priority":"P2","sketch":"New <code>scripts/paper/</code>: <code>matcher.py</code> subscribes to the @stoqey/ib relay tick stream (:8765) and evaluates resting limit/stop fills, <code>fills.py</code> applies spread/slippage, writing simulated fills into a paper-namespaced journal. Route orders through a mode flag in web/lib/order/risk so OrderRiskGate gets a 'Paper' toggle. Verifies via the same fromJournal.ts blotter pipeline.","verdict":"Genuine, self-documented gap: ib_execute.py --dry-run only previews; no fill simulation, no resting-order matching, no scripts/paper/. CLAUDE.md states 'no paper-trading available.' Two caveats lowering priority: the bearish-RR silent drop is an IB server-side combo-router limit a homegrown matcher CANNOT reproduce; and the sketch ignores IBKR's native paper account (port 7497, DU-accounts) which gives real fill sim AND exercises the real combo router with far less code. It's dev tooling, not a capital-at-risk fix."},
+    {"title":"SABR / SVI vol-surface fit to replace the Black-Scholes-only Greeks path","category":"enhancement","fromFincept":"Volatility surfaces & calibration (SABR, SVI, local vol, smile dynamics) + surface_analytics screen","radonValue":"Radon's options math is web/lib/blackScholes.ts plus UW point greeks. For an IV-skew / risk-reversal / LEAP-mispricing platform, a fitted skew surface is core: it makes risk_reversal.py and leap_iv_scanner.py measure deviation from a calibrated smile rather than raw points.","effort":"M","priority":"P3","sketch":"New <code>scripts/vol_surface.py</code> fitting SVI per expiry over fetch_options.py chains (UW get_option_chain/get_greeks inputs), exposing fitted vol(K,T) + residuals. Feed into risk_reversal.py and leap_iv_scanner.py so mispricing is residual-vs-fitted. Surface a contour at web/app/regime/ reusing GexLaplaceContour.tsx. Pure-Python, no torch.","verdict":"Verified no SVI/SABR/local-vol exists; risk_reversal.py measures raw delta-matched IV differences with no fitted smile. Genuinely additive and on-thesis (converts raw spreads into arbitrage residuals strengthening Gate 2). Downgraded to P3: M is optimistic; a correct fit needs total-variance parameterization plus no-butterfly/no-calendar arbitrage constraints (raw SVI without them manufactures fake mispricing, a Gate-2 hazard). Refines working scanners rather than filling a broken capability, and competes for the same quant-validation bandwidth as Chronos-2."},
+    {"title":"Provider-agnostic LLM layer so assistant/vision/tagging aren't single-vendor","category":"enhancement","fromFincept":"Provider-agnostic LLM service (ProviderCatalog: OpenAI/Anthropic/Gemini/Groq/DeepSeek/Ollama, OpenAI-compatible routing)","radonValue":"Radon hardcodes Anthropic across assistant, EquityClock vision OCR, ticker-info, and newsfeed tagging. A thin abstraction adds resilience (fallback when Anthropic is rate-limited) and lets cheap/local models handle high-volume tagging while Claude handles reasoning.","effort":"M","priority":"P3","sketch":"Add <code>web/lib/llm/provider.ts</code>: a single chat() targeting OpenAI-compatible base URLs + Anthropic/Gemini natively, keyed off env. Route assistant, the seasonality vision route, and scripts/newsfeed taggers through it with Anthropic default + configurable fallback. No UI change.","verdict":"Verified three vendor-locked Anthropic call sites with no shared abstraction (assistant route, seasonality vision, newsfeed vision_tagger.js). Not redundant; neutral infra. Stays low: cost case is thin (~$4.40/mo at 50 posts/day per the tagger's own comment); /regime/llm tracks an EXTERNAL market index, not Radon spend, so it can't observe savings; resilience angle is speculative. Effort understated -- a single TS file doesn't cover the Node scraper, so it's really two abstractions (TS + JS). A legitimate dedup/cost lever at the bottom of the queue."},
+    {"title":"Shared transaction-cost + slippage model across backtest, paper, and Kelly","category":"enhancement","fromFincept":"Paper-trading realism (slippage/fees migration) + OrderMatcher fill-price computation","radonValue":"Kelly sizing and any future backtest are only honest if entry/exit assume real costs: options spread, commission, slippage on combos. Given the combo-routing pathologies, a cost model that reflects fill reality keeps Gate 1 (gain >= 2x loss) from being computed on fantasy mid prices.","effort":"S","priority":"P3","sketch":"New <code>web/lib/order/costs.ts</code> + <code>scripts/costs.py</code> (one source of truth, mirrored) modeling per-leg commission, half-spread slippage, and combo fill penalty. Consume in computeOrderRisk so max-loss/max-gain are net-of-cost, in the paper matcher, and in the backtester. Derive parameters from journal_basis.py realized fills where possible.","verdict":"Genuinely novel: zero hits for slippage/commission/transaction-cost across the codebase. computeOrderRisk's Gate-1 check runs on mid/premium with no half-spread or combo penalty, so the 'fantasy mid prices' claim is accurate. Downgraded P2->P3: the justification leans on a P0 backtester and paper engine that don't exist yet; the only real current consumer is computeOrderRisk. Also the empirical-derivation claim is partly infeasible -- Radon records executed price but not the contemporaneous quoted mid at submit, so it falls back to estimated half-spread. The shippable slice (IB commission + half-spread into computeOrderRisk) is small and worth doing."},
+    {"title":"Visual flow-pipeline composer (scan -> filter -> structure -> alert) as a node graph","category":"feature","fromFincept":"Visual node editor + workflow execution engine (NodeRegistry, WorkflowExecutor, ExpressionEngine) with SafetyNodes/RiskManager","radonValue":"Radon's scans are hardcoded Python. A node graph lets the operator compose new flow screens ('darkpool surprise > X AND IV rank < Y AND catalyst < 5d -> propose risk reversal -> alert') without code, with SafetyNodes enforcing the Four Gates inline.","effort":"XL","priority":"P3","sketch":"Backend <code>scripts/workflow/</code> with a node registry (data-source nodes wrapping scanner/UW fetchers, filter/expression nodes, a Gate node enforcing convexity 2x + Kelly cap, notify nodes reusing the alerts dispatcher). Persist graphs to Turso. Frontend node canvas at <code>web/app/workflow/</code> (React Flow). Reuse OrderRiskGate as the mandatory ConfirmationService before any order-emitting node fires.","verdict":"Not redundant (no node graph / workflow engine exists). Thesis-consistent in framing. But weak on ROI and feasibility: single-operator tool where the only user already authors the Python scans directly; re-encoding the Four Gates as nodes risks a second drifting copy, against the order-risk chokepoint contract and say-it-once. Self-concedes it's only worth it AFTER a backtester and alerts engine land -- so XL, speculative, second-order. Keep as a long-horizon idea, do not elevate."}
+  ],
+  "dropped": [
+    {"title":"In-process pub/sub data layer to dedupe per-route Python/IB fetches","redundantWith":"scripts/utils/uw_cache.py (TTL dedup cache) + server.py per-scan asyncio.Lock single-flight (vcg/leap/garch/gex/gamma_rotation) + Turso/JSON durable cache with validity gating","reason":"Radon already implements the core: an in-memory TTL cache keyed by endpoint+params (uw_cache.py, 60s) wired into uw_client.py to dedupe within a session; server-side single-flight via asyncio.Lock + double-checked cache reads for the heavy scans; and a durable Turso+JSON tier with structural validity gating. The only absent sliver is true in-flight single-flight on the lighter per-ticker proxy reads, which does not justify M effort or a generic datahub facade (an abstraction-over-single-use refactor CLAUDE.md discourages)."}
+  ],
+  "gaps": [
+    "No vectorized strategy backtester / walk-forward over historical trades or signals (the only backtest is Chronos forecast-calibration, not P&L with costs/Sharpe/drawdown)",
+    "No paper-trading / simulation sandbox -- order testing hits the live IBKR account; no safe dry-run with fill simulation",
+    "No user-facing signal alert rules engine (Discord/Pushover exist only for ops/watchdog health, not flow/GEX/IV thresholds)",
+    "No portfolio-level correlation-aware risk budget -- sizing is per-position Kelly only, no clustered-exposure cap",
+    "No structured earnings / FDA / economic catalyst feed (UW endpoints integrated but unsurfaced)",
+    "No agentic LLM tool-use -- the assistant is single-shot, cannot fetch flow / run scans / read the portfolio",
+    "No microstructure signal from L2 depth (order-book imbalance, microprice, PIN/VPIN) -- depth is display-only",
+    "No prediction-market / Polymarket event-odds overlay vs options-implied probability",
+    "No congress / insider informed-flow surface (UW endpoints integrated but unsurfaced)",
+    "No fitted vol surface (SABR/SVI/local vol) -- only Black-Scholes + UW point greeks",
+    "No transaction-cost / slippage model -- Gate-1 convexity computed on mid prices",
+    "No multi-broker support (IB-only); no crypto / FX-spot / fixed-income coverage",
+    "No in-house ML signal models / feature store / training pipeline (Chronos is a pretrained wrapper)",
+    "No provider-agnostic LLM layer -- Anthropic hardcoded across assistant, vision OCR, and tagging"
+  ],
+  "stack": "Two-process monorepo. FRONTEND: Next.js (App Router) + React + TypeScript, Clerk auth (middleware as perimeter), SWR hooks, brand-token theming (no raw hex), next/og share-card PNGs. Routes never spawn Python -- they call FastAPI via radonFetch. BACKEND: FastAPI (scripts/api/server.py, :8321) over a large Python tree (Py 3.13), a Node IB WebSocket relay (:8765, @stoqey/ib for L2 depth), and a headless-Playwright newsfeed scraper. DATA (priority): Interactive Brokers (real-time quotes, L2 depth, orders, positions, Flex blotter); Unusual Whales (~40 endpoints: darkpool flow, sweeps, greeks/GEX, IV rank, seasonality, ratings); MenthorQ (CTA/dashboard/screener); Yahoo fallback. PERSISTENCE: Turso (libsql) canonical, direct-to-cloud, dual-writer, data/*.json fallback. DEPLOY: two-mode (Hetzner systemd / laptop launchd), auto-deploy on push to main via CI->SSH, media.radon.run host, admin panel + ib-watchdog + health daemon for ops resilience. AI/LLM: Anthropic Claude server-side (assistant chat, seasonality vision OCR, ticker-info), a context-engineering pipeline, newsfeed vision+text tagging. New on a feature branch: Chronos-2 quantile time-series forecasting."
+};
+
+const CAT_LABEL = {feature:"feature", enhancement:"enhancement", replacement:"replacement"};
+
+function card(o){
+  return `<div class="card p-${o.priority}">
+    <div class="card-head">
+      <h3 class="card-title">${o.title}</h3>
+      <div class="tags">
+        <span class="tag prio p-${o.priority}">${o.priority}</span>
+        <span class="tag cat-${o.category}">${CAT_LABEL[o.category]}</span>
+        <span class="tag eff">${o.effort}</span>
+      </div>
+    </div>
+    <div class="row value"><span class="k">Why it matters for Radon</span><span class="v">${o.radonValue}</span></div>
+    <div class="row"><span class="k">From Fincept</span><span class="v from">${o.fromFincept}</span></div>
+    <div class="row"><span class="k">Implementation sketch</span><div class="sketch">${o.sketch}</div></div>
+    <details class="verdict"><summary>Adversarial filter verdict</summary><p>${o.verdict}</p></details>
+  </div>`;
+}
+
+// sort: priority then effort
+const PR={P0:0,P1:1,P2:2,P3:3}, EF={S:0,M:1,L:2,XL:3};
+const ops=[...DATA.opportunities].sort((a,b)=> PR[a.priority]-PR[b.priority] || EF[a.effort]-EF[b.effort]);
+document.getElementById('cards').innerHTML = ops.map(card).join('');
+
+document.getElementById('dropped').innerHTML = DATA.dropped.map(d=>
+  `<div class="dropped"><h4>${d.title}</h4>
+   <p><b style="color:var(--text-2)">Already covered by:</b> <code>${d.redundantWith}</code></p>
+   <p>${d.reason}</p></div>`).join('');
+
+document.getElementById('gaps').innerHTML = DATA.gaps.map(g=>`<li>${g}</li>`).join('');
+document.getElementById('stack').innerHTML = DATA.stack;
+</script>
+</body>
+</html>
