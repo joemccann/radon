@@ -90,6 +90,84 @@ describe("assessMargin — threshold matrix", () => {
   });
 });
 
+describe("assessMargin — cashToClear deposit suggestion", () => {
+  it("IBKR-rule binding: screenshot scenario suggests ~$32,728 to clear", () => {
+    // equity 1,338,997 within 10% of maint 1,247,023 (maint×1.10 = 1,371,725.30).
+    // Healthy cushion + positive excess so the IBKR 110% rule is the binding constraint.
+    const r = assessMargin(
+      acct({
+        equity_with_loan: 1_338_997,
+        maintenance_margin: 1_247_023,
+        net_liquidation: 1_500_000,
+        excess_liquidity: 200_000, // 13.3% cushion
+      }),
+    );
+    expect(r.level).toBe("warning");
+    expect(r.message).toMatch(/within 10% of maintenance margin/i);
+    // maint×1.10 − equity = 1,371,725.30 − 1,338,997 = 32,728.30; round UP to strictly clear.
+    expect(r.cashToClear).toBe(32_729);
+    expect(r.cashToClear!).toBeGreaterThanOrEqual(32_728.3);
+    expect(r.message).toMatch(/Deposit ~\$32,729 in cash to clear this warning/);
+  });
+
+  it("a deposit of cashToClear actually clears the warning to none (IBKR-rule case)", () => {
+    const input = {
+      equity_with_loan: 1_338_997,
+      maintenance_margin: 1_247_023,
+      net_liquidation: 1_500_000,
+      excess_liquidity: 200_000,
+    };
+    const D = assessMargin(acct(input)).cashToClear!;
+    const after = assessMargin(
+      acct({
+        ...input,
+        equity_with_loan: input.equity_with_loan + D,
+        net_liquidation: input.net_liquidation + D,
+        excess_liquidity: input.excess_liquidity + D,
+      }),
+    );
+    expect(after.level).toBe("none");
+    expect(after.cashToClear).toBeNull();
+  });
+
+  it("cushion binding: 4% cushion case picks the cushion constraint, not the IBKR rule", () => {
+    // cushion = 40,000 / 1,000,000 = 4% (warning). EWL well above MMR×1.10, so EWL rule slack.
+    const r = assessMargin(
+      acct({
+        excess_liquidity: 40_000,
+        net_liquidation: 1_000_000,
+        maintenance_margin: 100_000,
+        equity_with_loan: 900_000,
+      }),
+    );
+    expect(r.level).toBe("warning");
+    // cushion: (0.05×1,000,000 − 40,000)/0.95 = 10,000/0.95 = 10,526.32 → ceil 10,527
+    // excess: −40,000 (slack). EWL: 110,000 − 900,000 = −790,000 (slack). Max = cushion.
+    expect(r.cashToClear).toBe(10_527);
+    const D = r.cashToClear!;
+    const after = assessMargin(
+      acct({
+        excess_liquidity: 40_000 + D,
+        net_liquidation: 1_000_000 + D,
+        maintenance_margin: 100_000,
+        equity_with_loan: 900_000 + D,
+      }),
+    );
+    expect(after.level).toBe("none");
+  });
+
+  it("none: healthy account has cashToClear null", () => {
+    const r = assessMargin(acct({ excess_liquidity: 200_000, net_liquidation: 1_000_000, equity_with_loan: 500_000 }));
+    expect(r.level).toBe("none");
+    expect(r.cashToClear).toBeNull();
+  });
+
+  it("none: missing inputs has cashToClear null", () => {
+    expect(assessMargin(null).cashToClear).toBeNull();
+    expect(assessMargin(acct({ net_liquidation: 0 })).cashToClear).toBeNull();
+  });
+});
+
 describe("rankOf — used by transition logic in WorkspaceShell", () => {
   it("orders levels none < warning < critical", () => {
     expect(rankOf("none")).toBeLessThan(rankOf("warning"));
