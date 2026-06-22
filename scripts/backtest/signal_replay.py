@@ -82,6 +82,133 @@ def load_cri_series(
     return points, underlying
 
 
+# --------------------------------------------------------------------------- #
+# VCG-R (Strategy 5) — vol/credit divergence                                   #
+# --------------------------------------------------------------------------- #
+def _latest_vcg_history() -> list[dict[str, Any]]:
+    """Backfilled VCG daily history from every persisted ``vcg_snapshots`` row.
+
+    Each VCG snapshot embeds a trailing daily ``history`` (date, vcg, vix,
+    vvix, credit, beta1, beta2, ro). Backfilling across ALL snapshots gives the
+    engine real data depth instead of the ~10 days a single snapshot carries.
+    """
+    from db.client import get_db
+
+    db = get_db()
+    cursor = db.execute("SELECT payload FROM vcg_snapshots ORDER BY scan_time ASC")
+    payloads = [json.loads(row[0]) for row in cursor.fetchall()]
+    return backfill_vcg_history(payloads)
+
+
+def backfill_vcg_history(
+    payloads: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge the embedded ``history`` of many VCG snapshots into one series.
+
+    Snapshots overlap (each carries a trailing window), so the same date can
+    appear in several payloads. We keep the LAST occurrence per date — payloads
+    arrive oldest-first, so a fresher snapshot's read of a day wins — and return
+    the merged rows ascending by date. This is the aggregation that gives the
+    hit-rate metrics real depth from sparse rolling snapshots.
+    """
+    by_date: dict[str, dict[str, Any]] = {}
+    for payload in payloads:
+        for row in payload.get("history") or []:
+            date = row.get("date")
+            if date is None:
+                continue
+            by_date[date] = row
+    return [by_date[date] for date in sorted(by_date)]
+
+
+def load_vcg_series(
+    history: Optional[list[dict[str, Any]]] = None,
+) -> tuple[list[SignalPoint], list[tuple[str, float]]]:
+    """VCG daily signal series + (date, credit_close) underlying series.
+
+    The credit proxy (HYG by default) close is the underlying the RO hedge
+    shorts. Pass ``history`` to replay an explicit list (tests); omit it to
+    backfill from every persisted ``vcg_snapshots`` row.
+    """
+    rows = history if history is not None else _latest_vcg_history()
+
+    points: list[SignalPoint] = []
+    underlying: list[tuple[str, float]] = []
+    for row in rows:
+        date = row.get("date")
+        credit = row.get("credit")
+        if date is None or credit is None:
+            continue
+        points.append(
+            SignalPoint(
+                date=date,
+                signal={
+                    "vcg": row.get("vcg"),
+                    "vix": row.get("vix"),
+                    "vvix": row.get("vvix"),
+                    "beta1": row.get("beta1"),
+                    "beta2": row.get("beta2"),
+                    "credit": float(credit),
+                },
+            )
+        )
+        underlying.append((date, float(credit)))
+    return points, underlying
+
+
+# --------------------------------------------------------------------------- #
+# Dark Pool Flow (Strategy 1) — sustained directional institutional flow       #
+# --------------------------------------------------------------------------- #
+def _latest_dark_pool_series(ticker: str) -> list[dict[str, Any]]:
+    """Daily ``ticker_flow_history`` rows for ``ticker``, ascending by date.
+
+    NOTE: ``ticker_flow_history`` stores the flow signal but NOT an underlying
+    close, so it cannot mark a directional trade to market on its own. The
+    backtest reports ``insufficient_data`` until a price-bearing series is fed
+    in (the loader accepts ``close`` per row for synthetic / future use).
+    """
+    from db.writer import get_ticker_flow_history
+
+    return get_ticker_flow_history(ticker)
+
+
+def load_dark_pool_series(
+    history: Optional[list[dict[str, Any]]] = None,
+    *,
+    ticker: str = "SPY",
+) -> tuple[list[SignalPoint], list[tuple[str, float]]]:
+    """Dark-pool flow signal series + aligned underlying close series.
+
+    Each row carries ``flow_strength`` and ``dp_direction`` (the documented
+    Strategy 1 inputs). A row only contributes to the underlying series if it
+    also carries a ``close`` — the flow history table has no price column, so
+    the production read yields a flow series with NO underlying, which the
+    strategy layer surfaces as ``insufficient_data``.
+    """
+    rows = history if history is not None else _latest_dark_pool_series(ticker)
+
+    points: list[SignalPoint] = []
+    underlying: list[tuple[str, float]] = []
+    for row in rows:
+        date = row.get("date")
+        if date is None:
+            continue
+        points.append(
+            SignalPoint(
+                date=date,
+                signal={
+                    "flow_strength": row.get("flow_strength"),
+                    "dp_direction": row.get("dp_direction"),
+                    "close": row.get("close"),
+                },
+            )
+        )
+        close = row.get("close")
+        if close is not None:
+            underlying.append((date, float(close)))
+    return points, underlying
+
+
 def forward_returns_from_underlying(
     underlying: list[tuple[str, float]],
     *,

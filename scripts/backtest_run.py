@@ -5,8 +5,9 @@ Offline analysis tool: NO service_cycle / service-health writer (operator- or
 cron-invoked, not a scheduled service). stdout is reserved for the result JSON;
 all progress goes to stderr.
 
-Only the CRI strategy is wired in this first increment; stubbed strategies
-return a clear ``status: "not_wired"`` payload rather than a fake result.
+All six strategies are wired (FU5). A wired strategy whose snapshot table has
+no replayable daily series returns ``status: "insufficient_data"`` with zero
+trades rather than a fabricated result; only ``ok`` runs are persisted.
 
 Usage:
     python3 scripts/backtest_run.py --strategy cri --horizon 1 --persist
@@ -63,10 +64,12 @@ def run_and_maybe_persist(
         }
 
     result = run_strategy(strategy, horizon=horizon, cost_fraction=cost_fraction)
-    result["status"] = "ok"
+    # run_strategy already sets status ("ok" | "insufficient_data"); preserve it
+    # so a wired-but-no-data strategy surfaces honestly through the CLI/API.
+    result.setdefault("status", "ok")
     result["run_at"] = _iso_now()
 
-    if persist:
+    if persist and result.get("status") == "ok":
         _persist(strategy, horizon, result)
     return result
 
