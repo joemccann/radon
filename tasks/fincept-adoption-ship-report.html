@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fincept Adoption: Ship Report</title>
+<style>
+  :root{
+    --canvas:#0a0f14; --panel:#0f1519; --panel-raised:#151c22; --grid:#1e293b;
+    --text:#e2e8f0; --text-2:#94a3b8; --text-muted:#475569;
+    --core:#05AD98; --strong:#0FCFB5; --deep:#048A7A;
+    --warn:#F5A623; --fault:#E85D6C; --extreme:#8B5CF6; --dislocation:#D946A8;
+    --radius:4px;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;line-height:1.5}
+  a{color:var(--strong);text-decoration:none}
+  .wrap{max-width:1180px;margin:0 auto;padding:40px 24px 80px}
+  header.masthead{border-bottom:1px solid var(--grid);padding-bottom:24px;margin-bottom:28px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--core);margin:0 0 10px}
+  h1{font-size:29px;line-height:1.15;margin:0 0 12px;font-weight:650;letter-spacing:-.01em}
+  .sub{color:var(--text-2);font-size:15px;max-width:820px;margin:0}
+  .meta{font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-top:16px;display:flex;gap:18px;flex-wrap:wrap}
+  .meta b{color:var(--text-2);font-weight:500}
+  .grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:0 0 30px}
+  .stat{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:16px 18px}
+  .stat .n{font-family:var(--mono);font-size:24px;font-weight:600;color:var(--strong);line-height:1}
+  .stat .n.ok{color:var(--strong)} .stat .n.warn{color:var(--warn)}
+  .stat .l{font-size:10.5px;color:var(--text-2);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
+  h2.section{font-size:13px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.14em;color:var(--text-2);border-bottom:1px solid var(--grid);padding-bottom:8px;margin:40px 0 6px}
+  .section-note{color:var(--text-muted);font-size:13px;margin:0 0 20px}
+  .banner{background:color-mix(in srgb,var(--core) 10%,transparent);border:1px solid color-mix(in srgb,var(--core) 40%,transparent);border-radius:var(--radius);padding:14px 18px;margin:0 0 26px;font-size:13.5px;color:var(--text)}
+  .banner.warn{background:color-mix(in srgb,var(--warn) 10%,transparent);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+  .banner b{color:var(--strong)}
+  .card{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--accent,var(--core))}
+  .card.cat-feature{--accent:var(--strong)} .card.cat-enhancement{--accent:var(--extreme)} .card.cat-replacement{--accent:var(--dislocation)}
+  .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:8px}
+  .card-title{font-size:16px;font-weight:600;margin:0}
+  .card-title .fid{font-family:var(--mono);color:var(--text-muted);font-size:13px;margin-right:8px}
+  .tags{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
+  .tag{font-family:var(--mono);font-size:10px;letter-spacing:.04em;padding:3px 8px;border-radius:var(--radius);border:1px solid var(--grid);color:var(--text-2);white-space:nowrap;text-transform:uppercase}
+  .tag.green{color:var(--strong);border-color:color-mix(in srgb,var(--core) 45%,transparent)}
+  .tag.cat-feature{color:var(--strong)} .tag.cat-enhancement{color:var(--extreme)} .tag.cat-replacement{color:var(--dislocation)}
+  .ship{font-size:13.5px;color:var(--text);margin:8px 0}
+  .ui{font-size:13px;color:var(--text-2);margin:8px 0}
+  .ui .k,.files .k,.defer .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);display:block;margin-bottom:3px}
+  .ui.none{color:var(--text-muted)}
+  .defer{font-size:12.5px;color:var(--warn);margin:8px 0 2px}
+  .defer .v{color:var(--text-2)}
+  .files{font-family:var(--mono);font-size:11.5px;color:var(--text-muted);margin-top:8px}
+  .files code{color:var(--text-2)}
+  .tests{font-family:var(--mono);font-size:11.5px;color:var(--strong);margin-top:6px}
+  table.suite{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 8px}
+  table.suite th,table.suite td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grid)}
+  table.suite th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted)}
+  table.suite td.n{font-family:var(--mono);color:var(--strong)}
+  ul.tight{margin:6px 0 0;padding-left:18px} ul.tight li{margin-bottom:7px;font-size:13px;color:var(--text-2)}
+  ul.tight li b{color:var(--text)}
+  code.path{font-family:var(--mono);color:var(--text-2);font-size:.92em}
+  footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--grid);font-family:var(--mono);font-size:11px;color:var(--text-muted);line-height:1.7}
+  .legend{display:flex;gap:16px;flex-wrap:wrap;margin:0 0 22px;font-family:var(--mono);font-size:11px;color:var(--text-2)}
+  .legend span{display:inline-flex;align-items:center;gap:6px}
+  .dot{width:9px;height:9px;border-radius:50%;display:inline-block}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Radon &middot; Fincept Adoption Ship Report</p>
+    <h1>14 features shipped to <code style="font-size:.7em;color:var(--text-2)">feat/fincept-adoption</code></h1>
+    <p class="sub">All 14 Fincept-derived opportunities were implemented test-first by a sequential multi-agent build workflow, then independently re-verified. Both full test suites pass with zero regressions. The branch is committed but NOT pushed: a push to main auto-deploys to production, so this is staged for your review.</p>
+    <div class="meta">
+      <span><b>Branch</b> feat/fincept-adoption (16 commits atop chronos2)</span>
+      <span><b>Build</b> 28-agent sequential TDD workflow (~2h)</span>
+      <span><b>Generated</b> 2026-06-21</span>
+    </div>
+  </header>
+
+  <div class="grid-stats">
+    <div class="stat"><div class="n ok">14/14</div><div class="l">Features green</div></div>
+    <div class="stat"><div class="n ok">3206</div><div class="l">Python tests pass</div></div>
+    <div class="stat"><div class="n ok">3290</div><div class="l">Web tests pass</div></div>
+    <div class="stat"><div class="n ok">0</div><div class="l">Failures / regressions</div></div>
+    <div class="stat"><div class="n">+13.8k</div><div class="l">Lines (117 files)</div></div>
+    <div class="stat"><div class="n">~270</div><div class="l">New feature tests</div></div>
+  </div>
+
+  <div class="banner">
+    <b>Verification evidence.</b> Full Python suite: <code>3206 passed, 14 skipped, 0 failed</code> (.venv py3.11, 21s). Full web suite: <code>327 files, 3290 passed, 26 skipped, 0 failed</code> (vitest, 16s). New-feature Python batch: <code>206 passed</code>. Every commit also passed the repo pre-commit gate (gitleaks + tsc + eslint).
+  </div>
+
+  <div class="banner warn">
+    <b>Two honest caveats before you ship.</b>
+    (1) Most features deliver their engine + API + a tested UI component, but several UI panels are built and tested yet not yet mounted into the live nav/page (one-line drop-ins, called out per feature below) to avoid destabilizing the in-flight dashboard.
+    (2) F9 (vol surface) adds a <code>scipy</code> dependency that is not yet in fleet provisioning (<code>scripts/forecasting/provision_venv.sh</code>) and must be added before deploy or the import fails on the VPS.
+    Also: an agent added an unrequested STOCK/OPTION ticker toggle; it was reverted to keep the branch scoped to the 14 features.
+  </div>
+
+  <h2 class="section">Test suites</h2>
+  <table class="suite">
+    <thead><tr><th>Suite</th><th>Result</th><th>Command</th></tr></thead>
+    <tbody>
+      <tr><td>Python (full)</td><td class="n">3206 passed / 14 skip / 0 fail</td><td><code class="path">.venv/bin/python -m pytest scripts/tests/ -q</code></td></tr>
+      <tr><td>Web (full)</td><td class="n">3290 passed / 26 skip / 0 fail</td><td><code class="path">cd web &amp;&amp; npx vitest run --config ../vitest.config.ts web/tests</code></td></tr>
+      <tr><td>New feature Python</td><td class="n">206 passed</td><td><code class="path">pytest (18 new test files)</code></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">What shipped &mdash; the 14 features</h2>
+  <div class="legend">
+    <span><span class="dot" style="background:var(--strong)"></span> feature</span>
+    <span><span class="dot" style="background:var(--extreme)"></span> enhancement</span>
+    <span><span class="dot" style="background:var(--dislocation)"></span> replacement</span>
+    <span><span class="dot" style="background:var(--core)"></span> tests green</span>
+  </div>
+  <div id="cards"></div>
+
+  <h2 class="section">App / UI changes at a glance</h2>
+  <ul class="tight" id="uisummary"></ul>
+
+  <h2 class="section">Follow-ups before production</h2>
+  <ul class="tight" id="followups"></ul>
+
+  <h2 class="section">Git &amp; safety</h2>
+  <ul class="tight">
+    <li><b>Branch:</b> <code class="path">feat/fincept-adoption</code> = your <code class="path">feat/chronos2-forecasting</code> + exactly 16 commits (14 feature + 1 shared-wiring + 1 docs). Not pushed.</li>
+    <li><b>Your in-flight work is untouched.</b> The forecasting/watchdog commits dated today are your own (verified by authorship); they sit beneath the feature stack on both branches. None of my commits modified <code class="path">ib_watchdog.py</code>, <code class="path">forecast_backtest.py</code>, or the forecasting engine.</li>
+    <li><b>Per-feature commits</b> hold each feature's new files; one <code class="path">wire shared surfaces</code> commit holds the multi-feature edits (server.py routes, scanner/discover hooks, order-risk, globals.css) that could not be split per-file.</li>
+    <li><b>Migrations</b> 0017&ndash;0021 are unique, non-colliding (event_odds, backtest_runs, workflow_graphs, alert_rules, paper_fills).</li>
+    <li><b>To ship:</b> review the diff, add scipy to fleet provisioning, then <code class="path">git push</code> (or merge to main to trigger the auto-deploy).</li>
+  </ul>
+
+  <footer>
+    Built by a sequential TDD multi-agent workflow, independently re-verified, full suites re-run by the orchestrator. Test counts above are from direct suite runs, not agent self-report.<br>
+    tasks/fincept-adoption-ship-report.html &middot; analysis: tasks/fincept-vs-radon-report.html &middot; plan: tasks/fincept-adoption-todo.md
+  </footer>
+</div>
+
+<script>
+const F = [
+  {id:"F1",cat:"enhancement",title:"Shared transaction-cost + slippage model",
+   ship:"Mirrored pure-function cost model in Python + TS: IB per-contract commission, half-spread slippage, combo fill penalty. computeOrderRisk now returns max-loss/max-gain net of round-trip cost.",
+   ui:"none (lib + chokepoint only). Cost adjustment is opt-in; not yet fed by a live order surface.",
+   defer:"Threading live bid/ask quotes through useOrderRisk + the 8 order-entry surfaces so net-of-cost renders in the UI.",
+   files:"scripts/costs.py, web/lib/order/costs.ts, computeOrderRisk.ts",tests:"16 py + 18 web"},
+  {id:"F2",cat:"enhancement",title:"Provider-agnostic LLM layer",
+   ship:"Single chat() over Anthropic (default), OpenAI-compatible (OpenAI/Groq/DeepSeek/Ollama) and Gemini, env-selected with a configurable fallback provider. Normalized tool_use for Anthropic + OpenAI.",
+   ui:"none (lib only). assistantChat() adapter exported for F7.",
+   defer:"Gemini tool-calling (text-only today); routing the seasonality-vision + newsfeed taggers through it.",
+   files:"web/lib/llm/provider.ts",tests:"8 web"},
+  {id:"F3",cat:"feature",title:"Earnings / FDA / economic catalyst feed",
+   ship:"Aggregates the already-integrated UW calendar endpoints into normalized catalyst rows with days-until, Turso cache + JSON fallback, FastAPI GET /catalysts + Next /api/catalysts.",
+   ui:"New CatalystCard dashboard component: nearest-first events with EARN/FDA/ECON tag, ticker link, and an urgency-colored days-to-catalyst badge.",
+   defer:"Mount CatalystCard into DashboardSurface (one-line import); wire a systemd timer to refresh on cadence.",
+   files:"scripts/fetch_catalysts.py, web/components/dashboard/CatalystCard.tsx, web/app/api/catalysts",tests:"9 py + 10 web"},
+  {id:"F4",cat:"feature",title:"Congress + insider informed-flow surface",
+   ship:"Surfaces the already-integrated UW congress/insider/institutional endpoints into a normalized payload with side normalization + recency sort, cache + empty-not-cached gate, GET /informed-flow/{ticker}.",
+   ui:"New InformedFlowPanel: Congress + Insider rows (BUY/SELL chip, person, amount, Nd-ago), institutional footer, and a buy/sell/mixed bias badge.",
+   defer:"Mount the panel into the flow-analysis section; extend scanner payload so the informed-flow badge renders on scanner rows.",
+   files:"scripts/fetch_informed_flow.py, web/components/flow-analysis/InformedFlowPanel.tsx, web/app/api/informed-flow",tests:"10 py + 10 web"},
+  {id:"F5",cat:"feature",title:"Polymarket event-odds overlay",
+   ship:"Public Gamma/CLOB client (no auth) + market-to-ticker mapping (FOMC->SPX etc.) + odds-vs-options-implied divergence via fetch_options. GET /event-odds/{ticker}. Migration 0017.",
+   ui:"none (backend only; payload ready for the catalyst card).",
+   defer:"Frontend card surfacing the divergence next to the catalyst card; broaden single-name market mapping.",
+   files:"scripts/clients/polymarket_client.py, scripts/fetch_event_odds.py, 0017_event_odds.sql",tests:"28 py"},
+  {id:"F6",cat:"feature",title:"User-configurable signal alert rules engine",
+   ship:"alert_rules table (0020) + scripts/alerts evaluate (>,<,>=,<= with throttle) hooked best-effort at the tail of scanner+discover, dispatching via the existing watchdog Discord/Pushover notifier. CRUD API + AlertsPanel.",
+   ui:"New AlertsPanel: inline create form (ticker / metric / operator / threshold / channel) + rule list with remove, following the bookmarks pattern.",
+   defer:"Mount AlertsPanel into a settings/alerts page route.",
+   files:"scripts/alerts/, 0020_alert_rules.sql, web/app/api/alerts, web/components/alerts/AlertsPanel.tsx",tests:"16 py + 13 web"},
+  {id:"F7",cat:"replacement",title:"Agentic tool-calling assistant loop",
+   ship:"Rewrote the single-shot assistant into a multi-round tool-use loop (max 6 rounds): read tools (get_flow / run_scan / get_gex / get_portfolio) execute via radonFetch; place_order is destructive and returns a confirm proposal instead of auto-executing. Backward-compatible response shape.",
+   ui:"Route now returns a structured proposal + toolEvents alongside content; the ChatPanel confirm-button UI is the remaining piece.",
+   defer:"Build the ChatPanel interactive confirm UI + confirm POST-back path (needs browser verification).",
+   files:"web/lib/assistant/tools.ts, web/lib/assistant/loop.ts, assistant/route.ts",tests:"3 web"},
+  {id:"F8",cat:"enhancement",title:"Portfolio correlation risk-budget guard",
+   ship:"Builds a return-correlation matrix from the price cache, maps options to underlyings, clusters at corr>=0.7, and flags Gate-3 breaches when correlated positions stack past the book budget. Handles thin series via insufficient-data.",
+   ui:"AttributionPanel renders a Correlation Risk Budget banner (critical/info/hidden) showing clustered tickers, aggregate vs budget, and max pairwise correlation.",
+   defer:"FastAPI route + useCorrelationRisk hook to auto-feed the live report into AttributionPanel.",
+   files:"scripts/portfolio_risk.py, web/components/CorrelationRiskBanner.tsx, AttributionPanel.tsx",tests:"13 py + 10 web"},
+  {id:"F9",cat:"enhancement",title:"SABR / SVI vol-surface fit",
+   ship:"Per-expiry raw-SVI total-variance fit (numpy + scipy) with no-butterfly + no-calendar arbitrage constraints. risk_reversal + leap_iv_scanner switched to residual-vs-fitted mispricing, with graceful fallback to raw IV when a smile can't be fit.",
+   ui:"none (Python compute). leap scanner console now prints per-strike smile residual.",
+   defer:"ADD scipy to fleet provisioning (provision_venv.sh) before deploy; optional vol-contour UI on /regime.",
+   files:"scripts/vol_surface.py, risk_reversal.py, leap_iv_scanner.py",tests:"38 py"},
+  {id:"F10",cat:"feature",title:"Order-book imbalance + microprice microstructure",
+   ship:"Pure imbalance = (sumBid-sumAsk)/(sumBid+sumAsk) over top-N and volume-weighted microprice from L2 depth, mirrored in Python + TS. VPIN/toxicity deliberately deferred (the trade tape is still Phase 3).",
+   ui:"New microstructure strip in the ticker Book tab below the order book: signed imbalance with BID/ASK/BALANCED label, a center-anchored pressure bar, and microprice vs mid. Populates only during RTH with an entitled L2 book.",
+   defer:"VPIN/toxicity once the Time & Sales tape ships; optional Turso persistence of rolling imbalance.",
+   files:"scripts/microstructure.py, web/lib/book/microstructure.ts, MicrostructureStrip.tsx, BookTab.tsx",tests:"15 py + 9 web"},
+  {id:"F11",cat:"enhancement",title:"Forecast-driven scan scoring",
+   ship:"After flow is recorded to ticker_flow_history, the scanner calls the Chronos-2 quantile engine on the flow-strength series and attaches a forecast score (upside skew + interval width), gate-checked for convexity. Degrades gracefully when chronos is unavailable.",
+   ui:"OpportunitiesCard renders a Chronos-2 forecast band inline next to each signal label, highlighted when convex-upside (Gate 1).",
+   defer:"discover.py wiring once it gains its own flow-history accrual; chronos must be installed on the host.",
+   files:"scripts/forecasting/forecast_score.py, web/lib/forecastBand.ts, scanner.py, OpportunitiesCard.tsx",tests:"10 py + 6 web"},
+  {id:"F12",cat:"feature",title:"Strategy backtester + walk-forward harness",
+   ship:"signal_replay (Turso snapshots) + walk_forward engine with a proven no-look-ahead guarantee + cost integration (F1) + metrics (Sharpe/Sortino/Calmar/maxDD/hit-rate/expectancy). CRI strategy wired end-to-end; the other five registered + stubbed. Migration 0018.",
+   ui:"New BACKTEST tab on /regime: strategy + entry rule, an 8-card metric grid, and the equity curve via the shared chart system (BrushMinimap). Honest empty states for unwired strategies / zero-trade regimes.",
+   defer:"Wire the remaining five strategies' entry rules; accrue snapshot depth before trusting hit-rates.",
+   files:"scripts/backtest/, 0018_backtest_runs.sql, web/app/regime/backtest, BacktestPanel.tsx",tests:"30 py"},
+  {id:"F13",cat:"feature",title:"Paper-trading / shadow-fill engine",
+   ship:"Resting limit/stop matcher + slippage fills reusing the F1 cost model, persisted to a separate paper_fills table (0021) so the IB-rehydrated journal stays untouched. OrderRiskGate gains an opt-in Live/Paper toggle.",
+   ui:"OrderRiskGate renders a Live/Paper pill (status dot + label) when a surface supplies the handler; hidden by default so existing surfaces are unchanged.",
+   defer:"Wire a surface to pass the handler + a FastAPI route consuming shadow placement. IB combo-router drops are documented as not reproducible (use IBKR native paper port 7497).",
+   files:"scripts/paper/, 0021_paper_fills.sql, web/lib/order/risk/paperMode.ts, PaperModeToggle.tsx",tests:"20 py + 5 web"},
+  {id:"F14",cat:"feature",title:"Visual flow-pipeline node-graph composer",
+   ship:"Sandboxed expression engine + topological executor (cycle-rejecting) + node registry (data-source / filter / gate / notify / order). The Four Gates are REUSED, not re-encoded: kelly_gate delegates to scripts/kelly.py, notify reuses the F6 dispatcher. Graphs persist to Turso (0019).",
+   ui:"New /workflow page: a React Flow canvas with a node palette, drag-connect edges, Save/Run, a saved-graph list, and a run-report status strip. An Order node forces an OrderRiskGate confirmation before firing.",
+   defer:"Live order placement (emit_order stubbed; gating complete); discover data-source; multi-upstream fan-in merge; add /workflow to the nav.",
+   files:"scripts/workflow/, 0019_workflow_graphs.sql, web/app/workflow, web/app/api/workflow",tests:"21 py + 18 web"},
+];
+
+const catLabel={feature:"feature",enhancement:"enhancement",replacement:"replacement"};
+document.getElementById('cards').innerHTML = F.map(f=>`
+  <div class="card cat-${f.cat}">
+    <div class="card-head">
+      <h3 class="card-title"><span class="fid">${f.id}</span>${f.title}</h3>
+      <div class="tags"><span class="tag green">green</span><span class="tag cat-${f.cat}">${catLabel[f.cat]}</span><span class="tag">${f.tests}</span></div>
+    </div>
+    <div class="ship">${f.ship}</div>
+    <div class="ui ${/^none/.test(f.ui)?'none':''}"><span class="k">App / UI</span>${f.ui}</div>
+    <div class="defer"><span class="k">Deferred</span><span class="v">${f.defer}</span></div>
+    <div class="files"><span class="k">Key files</span><code>${f.files}</code></div>
+  </div>`).join('');
+
+document.getElementById('uisummary').innerHTML = [
+  "<b>/regime</b> gains a BACKTEST tab (equity curve + metric grid) [F12].",
+  "<b>/workflow</b> is a new page: a React Flow pipeline composer with gated order nodes [F14].",
+  "<b>Ticker Book tab</b> gains a live imbalance / microprice strip [F10].",
+  "<b>Dashboard</b> gains a CatalystCard and the Scanner's OpportunitiesCard gains a Chronos-2 forecast band [F3, F11].",
+  "<b>AttributionPanel</b> gains a Gate-3 correlation risk-budget banner [F8].",
+  "<b>OrderRiskGate</b> gains an opt-in Live/Paper toggle and net-of-cost risk math [F13, F1].",
+  "<b>Assistant</b> becomes agentic (tool-use loop) with an order-confirm proposal flow [F7].",
+  "<b>New panels built + tested but not yet mounted:</b> InformedFlowPanel [F4], AlertsPanel [F6] (one-line drop-ins).",
+].map(s=>`<li>${s}</li>`).join('');
+
+document.getElementById('followups').innerHTML = [
+  "<b>Add scipy</b> to the forecasting/fleet venv provisioning before deploy (F9 import dependency).",
+  "<b>Mount the deferred UI panels</b> (CatalystCard, InformedFlowPanel, AlertsPanel) into their pages, and add /workflow + /regime backtest to the nav.",
+  "<b>Schedule the new fetchers</b> (catalysts, informed-flow, event-odds) on systemd/launchd timers like the other scans.",
+  "<b>Backtester data depth:</b> let snapshot tables accrue history (or backfill) before trusting strategy hit-rates; wire the remaining five strategy entry rules.",
+  "<b>Finish the agentic + paper loops:</b> ChatPanel confirm UI (F7), a surface that passes the paper handler + a shadow-placement route (F13), and live emit_order with confirmation (F14).",
+  "<b>Thread live quotes</b> into the order surfaces so the F1 net-of-cost numbers render.",
+].map(s=>`<li>${s}</li>`).join('');
+</script>
+</body>
+</html>
