@@ -143,14 +143,34 @@ export default function TickerDetailContent({
     return portfolio.positions.find((p) => p.ticker === ticker) ?? null;
   }, [ticker, positionId, portfolio]);
 
+  // Instrument switch: a single-leg equity option position otherwise LOCKS the
+  // whole page (book/header/ticket) to the option, hiding the underlying stock.
+  // Offer a STOCK ⟷ OPTION toggle so the trader can view the underlying's order
+  // book without giving up the held position (still one tap away in the POSN
+  // deck). Only meaningful for a single-leg equity option — multi-leg already
+  // books the underlying, and an index/futures option's "underlying" is not a
+  // stock. Resets to the held view on every ticker change.
+  const [instrumentView, setInstrumentView] = useState<"position" | "underlying">("position");
+  useEffect(() => setInstrumentView("position"), [ticker]);
+  const canSwitchInstrument =
+    position != null &&
+    position.structure_type !== "Stock" &&
+    position.legs.length === 1 &&
+    !isFuturesRoot(ticker) &&
+    !(isIndexSymbol(ticker) && hasFuturesSupport(ticker));
+  const viewUnderlying = instrumentView === "underlying" && canSwitchInstrument;
+
   const tickerOrders: OpenOrder[] = useMemo(() => {
     if (!orders) return [];
     return orders.open_orders.filter((o) => o.contract.symbol === ticker);
   }, [ticker, orders]);
 
   const { priceData, priceKey: chartPriceKey, isSpreadNet } = useMemo(
-    () => resolveTickerQuoteTelemetry(ticker, position, prices),
-    [ticker, position, prices],
+    () =>
+      viewUnderlying
+        ? { priceData: prices[ticker] ?? null, priceKey: undefined, isSpreadNet: false }
+        : resolveTickerQuoteTelemetry(ticker, position, prices),
+    [ticker, position, prices, viewUnderlying],
   );
 
   // The focused subject's depth book key: a user-pinned leg (e.g. a combo leg's
@@ -158,7 +178,9 @@ export default function TickerDetailContent({
   // key; else the ticker. Published upstream so `usePrices` opens the one scarce
   // depth ticket for exactly this subject.
   const focusedBookKey = useTickerDetailOptional()?.focusedBookKey ?? null;
-  const bookKey = focusedBookKey ?? chartPriceKey ?? ticker;
+  // Viewing the underlying forces the stock subject, overriding the held
+  // option's leg key (and any pinned combo leg).
+  const bookKey = viewUnderlying ? ticker : focusedBookKey ?? chartPriceKey ?? ticker;
   const bookDepth = depths?.[bookKey] ?? null;
 
   // Prefer the depth book's NBBO for the quote bar when an entitled book is
@@ -193,7 +215,7 @@ export default function TickerDetailContent({
   const bookKind: "stock" | "option" | "future" = bookDepth?.kind
     ?? (isFuturesRoot(ticker) || (isIndexSymbol(ticker) && hasFuturesSupport(ticker))
       ? "future"
-      : position && position.structure_type !== "Stock" && position.legs.length === 1
+      : !viewUnderlying && position && position.structure_type !== "Stock" && position.legs.length === 1
         ? "option"
         : "stock");
 
@@ -206,7 +228,7 @@ export default function TickerDetailContent({
   // (no position, or a stock position) and the live WS feed is dark, source
   // OHLV/close from the UW stock-state instead of rendering "No real-time data".
   // Never applied to option/spread quotes — stock-state is the stock's own OHLV.
-  const showsUnderlying = !position || position.structure_type === "Stock";
+  const showsUnderlying = viewUnderlying || !position || position.structure_type === "Stock";
   const { fallback: stockFallback } = useStockState(ticker, showsUnderlying);
 
   // Deck-key contract (shared with TickerWorkspace via `@/lib/legacyTabToDeck`).
@@ -260,6 +282,10 @@ export default function TickerDetailContent({
       theme={theme}
       activeDeck={activeDeck}
       onDeckChange={onDeckChange}
+      instrumentView={instrumentView}
+      canSwitchInstrument={canSwitchInstrument}
+      onInstrumentViewChange={setInstrumentView}
+      viewUnderlying={viewUnderlying}
     />
   );
 }

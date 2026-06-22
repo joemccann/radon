@@ -5652,6 +5652,35 @@ tr.leg-row td {
 .cockpit-head .neutral { color: var(--text-primary); }
 .ckh-sym { font-weight: 700; font-size: 15px; letter-spacing: 0.05em; }
 .ckh-kind { font-size: 9px; color: var(--text-muted); letter-spacing: 0.16em; }
+
+/* Instrument switch (held single-leg option ⟷ underlying stock). Sits where the
+   static kind chip was; mirrors the cockpit's 9px mono-caps language with a
+   signal-core active fill. */
+.ckh-instr {
+  display: inline-flex;
+  align-items: stretch;
+  height: 18px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ckh-instr-seg {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.ckh-instr-seg:hover { color: var(--text-secondary); }
+.ckh-instr-seg + .ckh-instr-seg { border-left: 1px solid var(--line-grid); }
+.ckh-instr-seg.on {
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 12%, transparent);
+}
 .ckh-sep { width: 1px; height: 16px; background: var(--line-grid); }
 .ckh-last { font-weight: 600; font-variant-numeric: tabular-nums; }
 .ckh-lastlabel { font-size: 8px; color: var(--text-muted); letter-spacing: 0.1em; margin-left: 4px; }

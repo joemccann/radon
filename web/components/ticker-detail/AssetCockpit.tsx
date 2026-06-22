@@ -42,6 +42,12 @@ export type AssetCockpitProps = {
   theme: "dark" | "light";
   activeDeck: DeckKey | null;
   onDeckChange: (deck: DeckKey | null) => void;
+  /** Instrument switch (held single-leg option ⟷ underlying stock). */
+  instrumentView: "position" | "underlying";
+  canSwitchInstrument: boolean;
+  onInstrumentViewChange: (view: "position" | "underlying") => void;
+  /** True while the underlying stock is in focus instead of the held option. */
+  viewUnderlying: boolean;
 };
 
 /** Condensed 2x2 position summary shown on mobile above the tab strip. */
@@ -85,8 +91,18 @@ export default function AssetCockpit({
   tickerOrders,
   activeDeck,
   onDeckChange,
+  instrumentView,
+  canSwitchInstrument,
+  onInstrumentViewChange,
+  viewUnderlying,
 }: AssetCockpitProps) {
   const live = (quotePriceData?.bid != null && quotePriceData?.ask != null) || quotePriceData?.last != null;
+
+  // When the underlying is in focus, the order ticket acts on the STOCK (a
+  // fresh order), not the held option — OrderTab renders its linear stock form
+  // for a null position. The held option stays available everywhere else
+  // (header chip, ACT summary, POSN deck).
+  const ticketPosition = viewUnderlying ? null : position;
 
   // Mobile folds the act column into the deck system: there is no room for a
   // permanent ticket beside the book on a phone, so the book fills the screen,
@@ -118,6 +134,9 @@ export default function AssetCockpit({
         position={position}
         live={Boolean(live)}
         onDeckChange={onDeckChange}
+        instrumentView={instrumentView}
+        canSwitchInstrument={canSwitchInstrument}
+        onInstrumentViewChange={onInstrumentViewChange}
       />
 
       {/* Mobile: condensed 2x2 position summary just below the header strip,
@@ -153,7 +172,7 @@ export default function AssetCockpit({
           <div className="act-ticket">
             <OrderTab
               ticker={ticker}
-              position={position}
+              position={ticketPosition}
               portfolio={portfolio}
               prices={prices}
               openOrders={tickerOrders}
