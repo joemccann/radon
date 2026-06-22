@@ -2,10 +2,17 @@
 
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { Bot, Send } from "lucide-react";
-import type { ApiMessage, Message, WorkspaceSection } from "@/lib/types";
+import type { ApiMessage, AssistantOrderProposal, Message, WorkspaceSection } from "@/lib/types";
 import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
-import { fallbackReply, requestAssistantReply, requestPiReply, routeToPiPrompt, streamMessage } from "@/lib/chat";
+import {
+  fallbackReply,
+  placeProposedOrder,
+  requestAssistantTurn,
+  requestPiReply,
+  routeToPiPrompt,
+  streamMessage,
+} from "@/lib/chat";
 import MarkdownRenderer from "./MarkdownRenderer";
 
 type ChatPanelProps = {
@@ -17,6 +24,8 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isBusy, setBusy] = useState(false);
   const [lastError, setLastError] = useState("");
+  const [proposal, setProposal] = useState<AssistantOrderProposal | null>(null);
+  const [isPlacing, setPlacing] = useState(false);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const sectionPrompts = quickPromptsBySection[activeSection];
 
@@ -70,14 +79,19 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
         const assistantContent = await requestPiReply(piCommand || cleaned);
         await streamMessage(assistantId, assistantContent, setMessages);
       } else {
-        const assistantContent = await requestAssistantReply(conversation, cleaned);
+        const turn = await requestAssistantTurn(conversation, cleaned);
         const assistantMessage: Message = {
           id: `a-${Date.now()}`,
           role: "assistant",
           timestamp: createTimestamp(),
-          content: assistantContent,
+          content: turn.content,
         };
         setMessages((current) => [...current, assistantMessage]);
+        // F7: never auto-execute. A destructive order proposal is surfaced as
+        // a confirm card the operator must explicitly accept.
+        if (turn.proposal) {
+          setProposal(turn.proposal);
+        }
       }
     } catch (error) {
       const isPiCommand = Boolean(routeToPiPrompt(cleaned));
@@ -102,6 +116,36 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const confirmProposal = async () => {
+    if (!proposal || isPlacing) return;
+    setPlacing(true);
+    setLastError("");
+    try {
+      const result = await placeProposedOrder(proposal);
+      setMessages((current) => [
+        ...current,
+        {
+          id: `a-${Date.now()}-order`,
+          role: "assistant",
+          timestamp: createTimestamp(),
+          content: result.ok ? `Order placed: ${proposal.summary}` : `Order failed: ${result.message}`,
+        },
+      ]);
+      if (!result.ok) setLastError(result.message);
+      setProposal(null);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Order placement failed.";
+      setLastError(message);
+    } finally {
+      setPlacing(false);
+    }
+  };
+
+  const cancelProposal = () => {
+    if (isPlacing) return;
+    setProposal(null);
   };
 
   return (
@@ -158,6 +202,34 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
           </div>
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}
+
+          {proposal ? (
+            <div className="chat-order-confirm" role="group" aria-label="Order confirmation">
+              <div className="chat-order-confirm-header">CONFIRM ORDER</div>
+              <div className="chat-order-confirm-summary">{proposal.summary}</div>
+              <div className="chat-order-confirm-note">
+                This order is not sent until you confirm.
+              </div>
+              <div className="chat-order-confirm-actions">
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={cancelProposal}
+                  disabled={isPlacing}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={confirmProposal}
+                  disabled={isPlacing}
+                >
+                  {isPlacing ? "Placing..." : "Confirm"}
+                </button>
+              </div>
+            </div>
+          ) : null}
 
           {messages.length ? (
             <div ref={messagesRef} className="chat-messages" aria-live="polite">

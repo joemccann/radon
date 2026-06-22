@@ -28,9 +28,16 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 # self-sufficient (no Hetzner dependency). Idempotent — load is a no-op
 # if the plist is already loaded.
 if command -v launchctl >/dev/null 2>&1; then
+  # FU4 — F3/F4/F5 fetcher timers (catalysts / informed-flow sweep / event-odds).
+  # systemd equivalents on radon-cloud (separate repo) mirror these cadences:
+  #   radon-catalysts.timer       OnCalendar=Mon..Fri 06:30  -> run_catalysts.sh
+  #   radon-informed-flow.timer   OnCalendar=Mon..Fri 07:00  -> run_informed_flow.sh (watchlist sweep)
+  #   radon-event-odds.timer      OnCalendar=Mon..Fri 07,11,15:00 -> run_event_odds.sh
+  # Each wrapper is holiday-aware (skips non-trading days via market_calendar).
   for plist in com.radon.cri-scan com.radon.cta-sync com.radon.data-refresh \
                com.radon.exit-order-service com.radon.monitor-daemon \
-               com.radon.vcg-refresh; do
+               com.radon.vcg-refresh com.radon.catalysts \
+               com.radon.informed-flow com.radon.event-odds; do
     f="$HOME/Library/LaunchAgents/$plist.plist"
     if [[ -f "$f" ]]; then
       launchctl load "$f" 2>/dev/null || true

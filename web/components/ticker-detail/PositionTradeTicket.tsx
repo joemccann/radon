@@ -110,9 +110,9 @@ export default function PositionTradeTicket({
   const built = useMemo(
     () =>
       isValid
-        ? buildPositionTradeOrder({ position, target, action, quantity: parsedQty, limitPrice: parsedPrice, tif })
+        ? buildPositionTradeOrder({ position, target, action, quantity: parsedQty, limitPrice: parsedPrice, tif, quote: { bid, ask } })
         : null,
-    [isValid, position, target, action, parsedQty, parsedPrice, tif],
+    [isValid, position, target, action, parsedQty, parsedPrice, tif, bid, ask],
   );
 
   const nakedShortWarning = useMemo(() => {

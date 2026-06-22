@@ -2,6 +2,8 @@
 
 import { BarChart3, Target, Crosshair, Shield } from "lucide-react";
 import { useAttribution } from "@/lib/useAttribution";
+import CorrelationRiskBanner from "@/components/CorrelationRiskBanner";
+import type { RiskBudgetReport } from "@/lib/correlationRiskBanner";
 import type {
   AttributionData,
   StrategyAttribution,
@@ -176,7 +178,11 @@ function KellyCalibration({ data }: { data: AttributionData }) {
   );
 }
 
-export default function AttributionPanel() {
+export default function AttributionPanel({
+  riskBudget,
+}: {
+  riskBudget?: RiskBudgetReport | null;
+} = {}) {
   const { data, loading, error } = useAttribution();
 
   if (loading && !data) {
@@ -218,6 +224,9 @@ export default function AttributionPanel() {
 
   return (
     <div data-testid="attribution-panel">
+      {/* Gate-3 correlation risk-budget guard */}
+      <CorrelationRiskBanner report={riskBudget} />
+
       {/* Strategy Attribution */}
       <div className="sx">
         <div className="s-hd">

@@ -77,6 +77,9 @@ import TickerLink from "./TickerLink";
 import TickerWorkspace from "./TickerWorkspace";
 import TickerFlowReport from "./flow-analysis/TickerFlowReport";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
+import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
+import { AlertsPanel } from "./alerts/AlertsPanel";
+import WorkflowComposer from "@/app/workflow/WorkflowComposer";
 import { MarketState } from "@/lib/useMarketHours";
 
 /* ─── Re-exports for backward compat ──────────────────── */
@@ -941,6 +944,7 @@ function FlowSections({ tickerParam }: { tickerParam?: string }) {
       <>
         <FlowAnalysisTickerInput initialTicker={tickerParam} />
         <TickerFlowReport ticker={tickerParam} />
+        <InformedFlowPanel ticker={tickerParam} />
       </>
     );
   }
@@ -3185,6 +3189,10 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
       return <RegimePanel prices={prices ?? {}} marketState={marketState} />;
     case "cta":
       return <CtaPage />;
+    case "alerts":
+      return <AlertsPanel />;
+    case "workflow":
+      return <WorkflowComposer />;
     case "admin":
       return <AdminWorkspace />;
     case "profile":

@@ -6,6 +6,7 @@ import { useScanner } from "@/lib/useScanner";
 import { useDiscover } from "@/lib/useDiscover";
 import { useLeap } from "@/lib/useLeap";
 import { useGarchConvergence } from "@/lib/useGarchConvergence";
+import { formatForecastBand, forecastBandTone } from "@/lib/forecastBand";
 
 type Tab = "scanner" | "discover" | "leap" | "garch";
 
@@ -212,7 +213,17 @@ export function OpportunitiesCard() {
                 <Link href={`/${encodeURIComponent(s.ticker)}`} className="snapshot-row__ticker">
                   {s.ticker}
                 </Link>
-                <span className="snapshot-row__signal">{s.signal}</span>
+                <span className="snapshot-row__signal">
+                  {s.signal}
+                  {s.forecast ? (
+                    <span
+                      className={`snapshot-row__forecast snapshot-row__forecast--${forecastBandTone(s.forecast)}`}
+                      title={`Chronos-2 ${s.forecast.horizon}d flow band${s.forecast.convex_reinforced ? " · convex upside (Gate 1)" : ""}`}
+                    >
+                      {" "}fc {formatForecastBand(s.forecast)}
+                    </span>
+                  ) : null}
+                </span>
                 <span className={`snapshot-row__direction snapshot-row__direction--${s.direction.toLowerCase()}`}>
                   {s.direction}
                 </span>

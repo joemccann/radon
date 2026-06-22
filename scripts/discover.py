@@ -44,6 +44,12 @@ except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
 
+try:
+    from alerts import run_alerts_for_results  # type: ignore
+except Exception:  # pragma: no cover — alerts layer optional
+    def run_alerts_for_results(*args, **kwargs):  # type: ignore
+        return 0
+
 WATCHLIST = Path(__file__).parent.parent / "data" / "watchlist.json"
 PORTFOLIO = Path(__file__).parent.parent / "data" / "portfolio.json"
 
@@ -613,6 +619,10 @@ def main():
 
     if not result.get("error"):
         mirror_scan_snapshot("discover", result)
+        try:
+            run_alerts_for_results(result.get("candidates", []))
+        except Exception:  # pragma: no cover — alerts never break discovery
+            pass
     print(json.dumps(result, indent=2))
 
 

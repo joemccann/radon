@@ -8,6 +8,7 @@ import { PortfolioSnapshotCard } from "./PortfolioSnapshotCard";
 import { OrdersSnapshotCard } from "./OrdersSnapshotCard";
 import { OpportunitiesCard } from "./OpportunitiesCard";
 import { FlowSurpriseCard } from "./FlowSurpriseCard";
+import { CatalystCard } from "./CatalystCard";
 import type { OrdersData, PortfolioData } from "@/lib/types";
 
 type DashboardSurfaceProps = {
@@ -95,6 +96,9 @@ export default function DashboardSurface({
         </DashboardSection>
         <DashboardSection id="flow-surprise" label="Flow Surprise" count="05">
           <FlowSurpriseCard />
+        </DashboardSection>
+        <DashboardSection id="catalysts" label="Upcoming Catalysts" count="06">
+          <CatalystCard />
         </DashboardSection>
       </div>
       <aside className="dashboard-surface__rail" aria-label="Newsfeed">

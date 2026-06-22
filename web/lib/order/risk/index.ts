@@ -19,6 +19,9 @@ export type {
 } from "./useOrderRisk";
 export { OrderRiskGate } from "./OrderRiskGate";
 export type { OrderRiskGateProps } from "./OrderRiskGate";
+// Paper-mode routing (F13): single source of truth for IB vs shadow engine.
+export { resolvePlacementTarget } from "./paperMode";
+export type { PlacementTarget } from "./paperMode";
 export type { AugmentedOrderSummary, CoverageStatus, OrderPresentationSummary } from "../types";
 // Telemetry: per-session ring buffer for bug-report correlation. Operators /
 // devs can paste `dumpOrderRiskTraces()` into the console to inspect.

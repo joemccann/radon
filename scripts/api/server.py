@@ -1214,6 +1214,138 @@ async def forecast_chronos(request: Request):
     return result.data
 
 
+@app.get("/backtest")
+async def backtest_registry():
+    """F12 — list the backtester strategy registry (which are wired)."""
+    from backtest.strategies import list_strategies
+
+    return {"strategies": list_strategies()}
+
+
+def _execute_workflow_graph(graph: dict, confirm_order: bool) -> dict:
+    """Run a workflow graph off the event loop and serialize the report.
+
+    The executor is pure for the tested node paths; any external effect lives
+    behind the patchable seams in ``workflow.nodes``. Order-emitting nodes block
+    unless ``confirm_order`` is set — the OrderRiskGate confirmation seam.
+    """
+    from workflow.executor import WorkflowError, execute_graph
+
+    try:
+        report = execute_graph(graph, confirm_order=confirm_order)
+    except WorkflowError as exc:
+        return {"ok": False, "error": str(exc), "invalid": True}
+    return {
+        "ok": report.ok,
+        "blocked_by": report.blocked_by,
+        "blocked_gate": report.blocked_gate,
+        "requires_confirmation": report.requires_confirmation,
+        "steps": [
+            {
+                "node_id": step.node_id,
+                "node_type": step.node_type,
+                "rows_in": step.rows_in,
+                "rows_out": step.rows_out,
+                "blocked": step.blocked,
+                "info": step.info,
+            }
+            for step in report.steps
+        ],
+        "final_rows": report.final_rows,
+    }
+
+
+@app.post("/workflow/run")
+async def workflow_run(request: Request):
+    """F14 — execute an operator-authored flow-pipeline graph server-side.
+
+    Body: ``{"graph": {nodes, edges}, "confirm_order": bool}``. Returns the
+    serialized execution report. Order-emitting nodes require ``confirm_order``;
+    a failing gate names the blocking node + gate.
+    """
+    body = await request.json()
+    graph = body.get("graph")
+    if not isinstance(graph, dict) or "nodes" not in graph:
+        raise HTTPException(status_code=400, detail="body.graph {nodes, edges} required")
+    confirm_order = bool(body.get("confirm_order", False))
+    report = await asyncio.to_thread(_execute_workflow_graph, graph, confirm_order)
+    if report.get("invalid"):
+        raise HTTPException(status_code=400, detail=report.get("error", "invalid graph"))
+    return report
+
+
+_PAPER_PLACE_REQUIRED = ("ticker", "side", "order_type", "quantity")
+
+
+@app.post("/paper/place")
+async def paper_place(request: Request):
+    """FU6 (B) — shadow-placement against current quotes.
+
+    Body mirrors a single-leg order plus a market observation:
+    ``{ticker, side, order_type, quantity, limit_price?, stop_price?,
+    bid?, ask?, last?, fill_id?, account?}``. Runs the paper matcher + fills
+    engine in a subprocess (``paper_place.py``) so the synchronous libsql write
+    in ``paper.store`` never touches the uvicorn event loop. Returns the
+    simulated fill (``status: filled|working``)."""
+    body = await request.json()
+    missing = [field for field in _PAPER_PLACE_REQUIRED if body.get(field) in (None, "")]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"paper/place requires: {', '.join(missing)}",
+        )
+
+    result = await run_script("paper_place.py", ["--spec", json.dumps(body)], timeout=30)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error or "paper placement failed")
+    return result.data
+
+
+@app.get("/backtest/{strategy}")
+async def backtest_strategy(strategy: str, refresh: bool = False):
+    """F12 — latest walk-forward backtest run for a strategy.
+
+    Returns the most recent persisted run from ``backtest_runs`` (bounded hrana
+    read, off-loop). When none exists or ``refresh=true``, runs the subprocess
+    (which persists the fresh run) and returns its result.
+    """
+    if not refresh:
+        cached = await asyncio.to_thread(_load_latest_backtest_run, strategy)
+        if cached is not None:
+            return cached
+
+    result = await run_script(
+        "backtest_run.py",
+        ["--strategy", strategy, "--persist"],
+        timeout=180,
+    )
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return result.data
+
+
+def _load_latest_backtest_run(strategy: str):
+    """Bounded hrana read of the freshest backtest_runs payload, or None."""
+    try:
+        rows = db_http.hrana_execute(
+            """
+            SELECT payload FROM backtest_runs
+            WHERE strategy = ?
+            ORDER BY run_at DESC
+            LIMIT 1
+            """,
+            (strategy,),
+        )
+    except Exception:
+        return None
+    if not rows:
+        return None
+    try:
+        return json.loads(rows[0][0])
+    except (TypeError, ValueError, IndexError):
+        return None
+
+
 @app.post("/flow-surprise")
 async def flow_surprise(request: Request):
     """Flow-surprise residual: ranked watchlist, or one ticker if provided."""
@@ -1724,6 +1856,100 @@ async def market_calendar_get():
     if not cached:
         return {"missing": True, "source": None, "days": {}}
     return cached
+
+
+# ── Catalysts (F3 — earnings / FDA / economic) ──────────────────────
+
+
+@app.get("/catalysts")
+async def catalysts_get(limit: int = 50):
+    """Return the cached catalyst feed (earnings / FDA / economic).
+
+    Written by ``scripts/fetch_catalysts.py`` to ``data/catalysts.json``.
+    200 + ``missing`` flag when the cache hasn't been written yet (never 4xx
+    for a legitimate empty state). ``limit`` caps the returned row count;
+    rows are already sorted nearest-first by the scan.
+    """
+    cached = _read_cache(DATA_DIR / "catalysts.json")
+    if not cached:
+        return {"missing": True, "scan_time": None, "count": 0, "catalysts": []}
+    rows = cached.get("catalysts", [])
+    if isinstance(limit, int) and limit > 0:
+        rows = rows[:limit]
+    return {
+        "scan_time": cached.get("scan_time"),
+        "count": len(rows),
+        "catalysts": rows,
+    }
+
+
+# ── Informed flow (F4 — congress / insider / institutional) ─────────
+
+_INFORMED_FLOW_DIR = DATA_DIR / "informed_flow"
+
+
+@app.get("/informed-flow/{ticker}")
+async def informed_flow_get(ticker: str):
+    """Return the congress + insider + institutional surface for a ticker.
+
+    Runs ``scripts/fetch_informed_flow.py`` via the subprocess bridge (live UW
+    fetch with per-source failure tolerance), persists the per-ticker cache,
+    and returns the normalised payload. 200 + ``missing`` flag for a
+    structurally empty surface (never 4xx for a legitimate empty state); the
+    on-disk cache stays the fallback when the live fetch fails.
+    """
+    upper = ticker.upper()
+    if not _TICKER_RE.match(upper):
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    result = await run_script("fetch_informed_flow.py", [upper, "--json"], timeout=60)
+    if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
+        return result.data
+
+    cached = _read_cache(_INFORMED_FLOW_DIR / f"{upper}.json")
+    if cached:
+        return cached
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return {
+        "ticker": upper,
+        "missing": True,
+        "congress_trades": [],
+        "insider_trades": [],
+        "institutional_summary": None,
+    }
+
+
+# ── Event odds (F5 — Polymarket overlay) ────────────────────────────
+
+_EVENT_ODDS_DIR = DATA_DIR / "event_odds"
+
+
+@app.get("/event-odds/{ticker}")
+async def event_odds_get(ticker: str):
+    """Return the Polymarket event-odds overlay for a ticker.
+
+    Runs ``scripts/fetch_event_odds.py`` via the subprocess bridge (live
+    Polymarket fetch + options-skew compare with per-source failure tolerance),
+    persists the per-ticker cache, and returns the overlay payload. 200 +
+    ``missing`` flag for a ticker with no mapped markets (never 4xx for a
+    legitimate empty state); the on-disk cache stays the fallback when the live
+    fetch fails.
+    """
+    upper = ticker.upper()
+    if not _TICKER_RE.match(upper):
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    result = await run_script("fetch_event_odds.py", [upper, "--json"], timeout=60)
+    if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
+        return result.data
+
+    cached = _read_cache(_EVENT_ODDS_DIR / f"{upper}.json")
+    if cached:
+        return cached
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return {"ticker": upper, "missing": True, "overlays": []}
 
 
 # ── Index options chain (Phase 3 — VIX et al.) ──────────────────────

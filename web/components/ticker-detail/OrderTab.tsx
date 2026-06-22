@@ -419,8 +419,11 @@ function NewOrderForm({
       netPremium: legAction === "SELL" ? -parsedPrice : parsedPrice,
       description,
       totalCost: action === "SELL" ? -totalCost : totalCost,
+      // FU7: thread the single-leg live quote so net-of-cost renders. Off-hours
+      // null bid/ask falls back to the F1 estimated half-spread inside the hook.
+      quote: { bid, ask },
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, position]);
+  }, [isValid, parsedQty, parsedPrice, action, ticker, position, bid, ask]);
 
   // Naked short guard — reactive warning when action is SELL
   const nakedShortWarning = useMemo(() => {
