@@ -25,6 +25,12 @@ except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
 
+try:
+    from alerts import run_alerts_for_results  # type: ignore
+except Exception:  # pragma: no cover — alerts layer optional
+    def run_alerts_for_results(*args, **kwargs):  # type: ignore
+        return 0
+
 logger = logging.getLogger(__name__)
 
 SCRIPT_DIR = Path(__file__).parent
@@ -167,6 +173,12 @@ def _process_ticker(item: dict, client=None) -> dict:
             record_daily_flow(ticker, today, result)
         except Exception as exc:  # best-effort accrual, never break the scan
             print(f"  {ticker} - flow-history accrual skipped ({exc})", file=sys.stderr)
+        try:
+            from forecasting import forecast_score as fs
+
+            fs.attach_forecast_score(ticker, result)
+        except Exception as exc:  # forecasting must never break the scan
+            print(f"  {ticker} - forecast scoring skipped ({exc})", file=sys.stderr)
         return result
     except UWRateLimitError:
         logger.warning("Rate limited on %s — skipping", ticker)
@@ -241,6 +253,11 @@ def scan(top_n: int = 20, min_score: float = 0, max_workers: int = 5):
     }
 
     mirror_scan_snapshot("scanner", output)
+
+    try:
+        run_alerts_for_results(filtered)
+    except Exception as exc:  # pragma: no cover — alerts never break the scan
+        logger.warning("alert evaluation failed: %s", exc)
     print(json.dumps(output, indent=2))
 
 if __name__ == "__main__":

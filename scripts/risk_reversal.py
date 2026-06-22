@@ -30,6 +30,7 @@ sys.path.insert(0, str(SCRIPT_DIR))
 
 from clients.ib_client import IBClient
 from ib_insync import Option, Stock
+from vol_surface import surface_from_contracts, smile_residual
 
 
 # ---------------------------------------------------------------------------
@@ -233,6 +234,22 @@ def build_matrix(
     long_right = chain_data["long_right"]
     max_risk = bankroll * max_pct
 
+    # Calibrate the SVI smile once for the whole chain. Mispricing below is
+    # measured as deviation from this fitted smile (residual), not the raw
+    # point-IV difference between legs.
+    surface = surface_from_contracts(options, spot)
+
+    def leg_skew(s_opt: Dict, l_opt: Dict) -> float:
+        """Smile-deviation skew (in vol points x100): how rich the short leg
+        trades vs the long leg relative to the calibrated SVI smile. Falls back
+        to the raw IV difference when the smile cannot be fit for either leg.
+        """
+        short_resid = smile_residual(surface, s_opt["strike"], s_opt["dte"], s_opt["iv"])
+        long_resid = smile_residual(surface, l_opt["strike"], l_opt["dte"], l_opt["iv"])
+        if short_resid is None or long_resid is None:
+            return (s_opt["iv"] - l_opt["iv"]) * 100
+        return (short_resid - long_resid) * 100
+
     # Group options by expiry and right
     by_exp: Dict[str, Dict[str, List]] = {}
     for o in options:
@@ -257,7 +274,7 @@ def build_matrix(
                         "delta": delta_target,
                         "short_iv": s_opt["iv"] * 100,
                         "long_iv": l_opt["iv"] * 100,
-                        "skew": (s_opt["iv"] - l_opt["iv"]) * 100,
+                        "skew": leg_skew(s_opt, l_opt),
                     }
                 )
         skew_by_exp[exp] = skew_rows
@@ -278,7 +295,7 @@ def build_matrix(
                 max_qty = int(max_risk / margin_per_contract) if margin_per_contract > 0 else 0
                 total_margin = max_qty * margin_per_contract
 
-                skew = (s["iv"] - l["iv"]) * 100
+                skew = leg_skew(s, l)
                 net_delta = l["delta"] + s["delta"]  # s["delta"] is negative for puts
 
                 all_combos.append(

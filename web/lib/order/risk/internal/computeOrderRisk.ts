@@ -232,7 +232,53 @@ export function legRisk(
  * (max-loss-of-long-call + max-loss-of-short-put) correctly produces
  * the assignment bound plus the small debit.
  */
+/**
+ * Optional transaction-cost adjustment. `roundTripCost` is the total dollar
+ * cost of getting in AND out (commission + slippage + combo penalty for both
+ * the entry and the exit). Compute it with `estimateRoundTripCost` from
+ * `web/lib/order/costs.ts` — the shared source of truth mirrored in
+ * `scripts/costs.py`.
+ *
+ * When supplied, bounded max-loss grows by the cost (you pay it on top of the
+ * structural loss) and bounded max-gain shrinks by the cost (clamped at 0).
+ * Unbounded legs stay unbounded — cost never bounds an infinite tail.
+ */
+export interface OrderCostAdjustment {
+  roundTripCost: number;
+}
+
 export function computeOrderRisk(
+  legs: OrderRiskLeg[],
+  netPremium: number,
+  comboQuantity: number,
+  costs?: OrderCostAdjustment,
+): OrderRisk {
+  return applyCostAdjustment(
+    computeGrossOrderRisk(legs, netPremium, comboQuantity),
+    costs,
+  );
+}
+
+/**
+ * Adjust a gross (cost-free) risk verdict to be NET of transaction cost.
+ * Pure; a no-op when `costs` is absent so existing callers are unchanged.
+ */
+function applyCostAdjustment(
+  gross: OrderRisk,
+  costs: OrderCostAdjustment | undefined,
+): OrderRisk {
+  if (!costs || !Number.isFinite(costs.roundTripCost) || costs.roundTripCost <= 0) {
+    return gross;
+  }
+  const cost = costs.roundTripCost;
+  return {
+    ...gross,
+    maxLoss: gross.maxLoss == null ? null : gross.maxLoss + cost,
+    maxGain: gross.maxGain == null ? null : Math.max(0, gross.maxGain - cost),
+  };
+}
+
+function computeGrossOrderRisk(
   legs: OrderRiskLeg[],
   netPremium: number,
   comboQuantity: number,

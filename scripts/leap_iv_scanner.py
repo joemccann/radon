@@ -41,6 +41,7 @@ except ImportError as e:
     sys.exit(1)
 
 from clients.ib_client import IBClient, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from vol_surface import VolSurface, smile_residual
 
 
 # Preset ticker groups
@@ -173,6 +174,9 @@ class OptionData:
     hv_20_gap: float = 0.0
     hv_60_gap: float = 0.0
     hv_avg_gap: float = 0.0
+    # Deviation from the calibrated SVI smile, in IV points (percent).
+    # Negative => this strike trades CHEAP vs its own smile (vol-buy edge).
+    smile_residual: Optional[float] = None
     is_mispriced: bool = False
     mispricing_score: float = 0.0
 
@@ -431,28 +435,81 @@ def fetch_option_chain(client: IBClient, ticker: str, expiry: str, current_price
     return options
 
 
-def analyze_mispricing(option: dict, vol_data: VolatilityData, min_gap: float) -> OptionData:
-    """Analyze IV vs HV gap for mispricing"""
-    
+def fit_chain_surface(chain: list, current_price: float) -> VolSurface:
+    """Calibrate an SVI surface from a raw LEAP option chain.
+
+    ``chain`` rows carry ``iv`` in percent; SVI works in decimal vol, so divide
+    by 100. Grouping is by expiry-string converted to a year-fraction.
+    """
+    by_t: dict = {}
+    today = datetime.now()
+    for opt in chain:
+        iv = opt.get('iv')
+        strike = opt.get('strike')
+        expiry = opt.get('expiry')
+        if not iv or not strike or not expiry or iv <= 0:
+            continue
+        try:
+            dte = (datetime.strptime(expiry, "%Y%m%d") - today).days
+        except ValueError:
+            continue
+        if dte <= 0:
+            continue
+        t = dte / 365.0
+        strikes, ivs = by_t.setdefault(t, ([], []))
+        strikes.append(strike)
+        ivs.append(iv / 100.0)
+    return VolSurface.fit({t: (s, v) for t, (s, v) in by_t.items()}, current_price)
+
+
+def analyze_mispricing(
+    option: dict,
+    vol_data: VolatilityData,
+    min_gap: float,
+    surface: Optional[VolSurface] = None,
+) -> OptionData:
+    """Score LEAP IV mispricing as deviation from the calibrated SVI smile.
+
+    The mispricing signal is the smile residual (market IV minus the fitted-smile
+    IV at the same strike). A strike trading CHEAP versus its own smile
+    (negative residual) on top of HV running above IV is the volatility-buy edge.
+    When the smile cannot be fit (too few strikes), the function degrades to the
+    raw HV-IV gap so the scanner keeps working.
+    """
+
     iv = option['iv']
-    
-    # Calculate gaps (positive = HV > IV = potentially underpriced vol)
+
+    # HV context (kept for reporting + as a corroborating term-structure signal).
     hv_20_gap = vol_data.hv_20 - iv
     hv_60_gap = vol_data.hv_60 - iv
     hv_avg_gap = vol_data.avg_hv - iv
-    
-    # Determine if mispriced
-    # Primary signal: recent HV significantly above LEAP IV
-    is_mispriced = (hv_20_gap >= min_gap or hv_60_gap >= min_gap) and hv_avg_gap > 0
-    
-    # Score the opportunity (higher = better)
-    # Weight recent vol more heavily
-    mispricing_score = (hv_20_gap * 0.4 + hv_60_gap * 0.35 + hv_avg_gap * 0.25)
-    
-    # Boost score for high vega (more leverage on IV expansion)
+
+    # Primary smile-deviation signal (IV points). surface works in decimal vol,
+    # the chain stores percent, so convert back to percent points.
+    resid_decimal = None
+    if surface is not None:
+        try:
+            dte = (datetime.strptime(option['expiry'], "%Y%m%d") - datetime.now()).days
+        except ValueError:
+            dte = 0
+        resid_decimal = smile_residual(surface, option['strike'], dte, iv / 100.0)
+    resid_points = round(resid_decimal * 100, 2) if resid_decimal is not None else None
+
     vega_boost = min(option['vega'] / 0.30, 1.5)  # Cap at 1.5x
+
+    if resid_points is not None:
+        # Smile-relative path (replaces the old raw point-IV comparison).
+        # CHEAP vs smile (negative residual) is the opportunity; magnitude in IV
+        # points drives the score. HV-above-IV corroborates persistence.
+        is_mispriced = (-resid_points >= min_gap) and hv_avg_gap > 0
+        mispricing_score = (-resid_points) * 0.6 + hv_avg_gap * 0.4
+    else:
+        # Fallback: original HV-IV gap when the smile is unfittable.
+        is_mispriced = (hv_20_gap >= min_gap or hv_60_gap >= min_gap) and hv_avg_gap > 0
+        mispricing_score = (hv_20_gap * 0.4 + hv_60_gap * 0.35 + hv_avg_gap * 0.25)
+
     mispricing_score *= vega_boost
-    
+
     return OptionData(
         ticker=vol_data.ticker,
         expiry=option['expiry'],
@@ -470,6 +527,7 @@ def analyze_mispricing(option: dict, vol_data: VolatilityData, min_gap: float) -
         hv_20_gap=round(hv_20_gap, 2),
         hv_60_gap=round(hv_60_gap, 2),
         hv_avg_gap=round(hv_avg_gap, 2),
+        smile_residual=resid_points,
         is_mispriced=is_mispriced,
         mispricing_score=round(mispricing_score, 2)
     )
@@ -512,18 +570,23 @@ def scan_etf(client: IBClient, ticker: str, sector: str, target_years: list,
         if not chain:
             print(f"    ⚠ No options data for {expiry}")
             continue
-        
+
+        # Calibrate the SVI smile from the FULL chain (all strikes) before
+        # delta-filtering, so the residual is measured against the whole smile.
+        surface = fit_chain_surface(chain, vol_data.current_price)
+
         # Find options at target deltas
         delta_matches = find_strikes_by_delta(chain, target_deltas, vol_data.current_price)
-        
+
         for target_delta, opt in delta_matches.items():
-            analyzed = analyze_mispricing(opt, vol_data, min_gap)
+            analyzed = analyze_mispricing(opt, vol_data, min_gap, surface=surface)
             all_options.append(analyzed)
-            
+
             delta_label = f"{int(target_delta*100)}Δ"
             status = "🔥 MISPRICED" if analyzed.is_mispriced else "  "
+            resid_label = f"resid={analyzed.smile_residual:+.1f}" if analyzed.smile_residual is not None else "resid=n/a"
             print(f"    {delta_label} ${opt['strike']}: IV={opt['iv']:.1f}% | "
-                  f"Gap: HV20={analyzed.hv_20_gap:+.1f}, HV60={analyzed.hv_60_gap:+.1f} {status}")
+                  f"{resid_label} | Gap: HV20={analyzed.hv_20_gap:+.1f}, HV60={analyzed.hv_60_gap:+.1f} {status}")
     
     # 4. Compile results
     mispriced = [o for o in all_options if o.is_mispriced]
