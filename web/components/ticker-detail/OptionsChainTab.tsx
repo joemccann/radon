@@ -363,8 +363,15 @@ function OrderBuilder({
       netPremium,
       description,
       totalCost: isCredit ? -totalCost : totalCost,
+      // FU7: thread the live net entry quote so `useOrderRisk` renders
+      // net-of-cost max-loss/max-gain via the F1 cost model. `netPrices` are
+      // per-combo-unit positive magnitudes (computed from each leg's WS quote)
+      // — exactly the entry-quote shape the cost model expects. When bid/ask
+      // are null (off-hours), the cost model falls back to its estimated
+      // half-spread; the risk verdict is unchanged shape, just cost-aware.
+      quote: { bid: netPrices.bid, ask: netPrices.ask },
     };
-  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, legs, ticker]);
+  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, legs, ticker, netPrices.bid, netPrices.ask]);
 
   // Pull the resolved state for the coverage chip + (later) submit gating.
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate

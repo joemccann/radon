@@ -316,6 +316,8 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
         netPremium: isCredit ? -Math.abs(parsedNewLocal) : Math.abs(parsedNewLocal),
         description: `${action} ${parsedQtyLocal}x ${symbol} combo @ ${fmtPrice(parsedNewLocal)}`,
         totalCost: isCredit ? -totalCost : totalCost,
+        // FU7: net combo quote for net-of-cost risk on the post-modify shape.
+        quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
       };
     }
 
@@ -333,8 +335,10 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
       netPremium: action === "SELL" ? -parsedNewLocal : parsedNewLocal,
       description: `${action} ${parsedQtyLocal}x ${symbol} ${right} @ ${fmtPrice(parsedNewLocal)}`,
       totalCost: action === "SELL" ? -totalCost : totalCost,
+      // FU7: single-leg quote for net-of-cost risk on the post-modify shape.
+      quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
     };
-  }, [order, editableLegs, newPrice, newQuantity]);
+  }, [order, editableLegs, newPrice, newQuantity, priceData]);
 
   if (!order) return null;
 
