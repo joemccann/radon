@@ -1274,6 +1274,33 @@ async def workflow_run(request: Request):
     return report
 
 
+_PAPER_PLACE_REQUIRED = ("ticker", "side", "order_type", "quantity")
+
+
+@app.post("/paper/place")
+async def paper_place(request: Request):
+    """FU6 (B) — shadow-placement against current quotes.
+
+    Body mirrors a single-leg order plus a market observation:
+    ``{ticker, side, order_type, quantity, limit_price?, stop_price?,
+    bid?, ask?, last?, fill_id?, account?}``. Runs the paper matcher + fills
+    engine in a subprocess (``paper_place.py``) so the synchronous libsql write
+    in ``paper.store`` never touches the uvicorn event loop. Returns the
+    simulated fill (``status: filled|working``)."""
+    body = await request.json()
+    missing = [field for field in _PAPER_PLACE_REQUIRED if body.get(field) in (None, "")]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"paper/place requires: {', '.join(missing)}",
+        )
+
+    result = await run_script("paper_place.py", ["--spec", json.dumps(body)], timeout=30)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error or "paper placement failed")
+    return result.data
+
+
 @app.get("/backtest/{strategy}")
 async def backtest_strategy(strategy: str, refresh: bool = False):
     """F12 — latest walk-forward backtest run for a strategy.

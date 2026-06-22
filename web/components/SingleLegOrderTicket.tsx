@@ -49,7 +49,13 @@ export type SingleLegOrderTicketProps = {
   riskGate: ReactNode;
   /** Optional header rendered above the Action field (e.g. "STOCK ORDER"). */
   header?: ReactNode;
-  /** Builds the `/api/orders/place` body from the resolved ticket state. */
+  /**
+   * Placement endpoint. Defaults to the live IB path `/api/orders/place`.
+   * Paper-mode surfaces pass `/api/paper/place` (resolved from the
+   * OrderRiskGate Paper toggle via `resolvePlacementTarget`).
+   */
+  placeUrl?: string;
+  /** Builds the placement body from the resolved ticket state. */
   buildPayload: (state: {
     action: SingleLegOrderAction;
     quantity: number;
@@ -95,6 +101,7 @@ export default function SingleLegOrderTicket({
   onLimitPriceChange,
   riskGate,
   header,
+  placeUrl = "/api/orders/place",
   buildPayload,
   buildSuccessMessage,
   onActionChange,
@@ -151,7 +158,7 @@ export default function SingleLegOrderTicket({
     setSuccess(null);
 
     try {
-      const res = await fetch("/api/orders/place", {
+      const res = await fetch(placeUrl, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
@@ -182,6 +189,7 @@ export default function SingleLegOrderTicket({
     parsedQty,
     parsedPrice,
     tif,
+    placeUrl,
     buildPayload,
     buildSuccessMessage,
     onSuccessToast,

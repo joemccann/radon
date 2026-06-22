@@ -98,12 +98,59 @@ def dispatch_notification(rows: list, channel: str) -> None:
     run_alerts_for_results(rows)
 
 
+def run_order_placement(payload: dict) -> dict:
+    """Place ONE order through the existing IB placement path.
+
+    Thin seam over ``ib_place_order.place_order`` so the dependency on the heavy
+    IB import stays lazy and tests patch this single function instead of the
+    whole order-placement import graph. The payload mirrors the ``/orders/place``
+    body shape (``symbol`` / ``action`` / ``quantity`` / ``limitPrice``)."""
+    from ib_place_order import place_order as _place_order
+
+    return _place_order(payload)
+
+
+def place_order_via_bridge(row: dict, params: dict) -> dict:
+    """Map ONE candidate row to an order payload and place it.
+
+    Translates a scanner/flow row into the ``/orders/place`` body shape and hands
+    it to ``run_order_placement``. A row that lacks the actionable fields
+    (``action`` + ``quantity``) is rejected rather than placing a malformed
+    order."""
+    payload = _order_payload_from_row(row, params)
+    return run_order_placement(payload)
+
+
+def _order_payload_from_row(row: dict, params: dict) -> dict:
+    symbol = row.get("ticker") or row.get("symbol")
+    action = row.get("action")
+    quantity = row.get("quantity")
+    if not symbol or not action or not quantity:
+        raise ValueError(
+            "order row needs ticker/symbol, action, and quantity to place an order"
+        )
+    payload = {
+        "type": params.get("type", "option"),
+        "symbol": symbol,
+        "action": action,
+        "quantity": quantity,
+        "tif": params.get("tif", "DAY"),
+    }
+    if row.get("limit_price") is not None:
+        payload["limitPrice"] = row["limit_price"]
+    if params.get("structure"):
+        payload["structure"] = params["structure"]
+    return payload
+
+
 def emit_order(rows: list, params: dict) -> None:
-    """Emit an order-emitting effect for each row. SCAFFOLDING: the real
-    implementation hands each row to the order placement bridge behind the
-    OrderRiskGate confirmation. Kept as a seam so the executor's
-    confirmation-gating is fully tested without placing live orders."""
-    raise NotImplementedError("live order emission is scaffolding — wire to /orders/place")
+    """Place an order for EACH row through the placement bridge.
+
+    Only reached once the run is confirmed (``_order_node`` blocks otherwise),
+    so this is the post-confirmation analogue of OrderRiskGate's Confirm: every
+    row becomes a live order via ``place_order_via_bridge``."""
+    for row in rows:
+        place_order_via_bridge(row, params)
 
 
 # ── node implementations ────────────────────────────────────────────

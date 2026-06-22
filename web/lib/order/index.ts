@@ -31,6 +31,9 @@ export type {
 
 // Risk chokepoint — the only public way to compute order risk math.
 export { useOrderRisk, OrderRiskGate } from "./risk";
+// Paper-mode routing (F13): single source of truth for live vs paper target.
+export { resolvePlacementTarget } from "./risk";
+export type { PlacementTarget } from "./risk";
 export type {
   OrderRiskInput,
   OptionOrderRiskInput,
