@@ -13,6 +13,7 @@ import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
 import { IndexOptionOrderForm } from "@/components/ticker-detail/IndexOptionOrderForm";
 import { OrderBook } from "@/components/ticker-detail/OrderBook";
+import { MicrostructureStrip } from "@/components/ticker-detail/MicrostructureStrip";
 
 /* ─── Types ─── */
 
@@ -463,18 +464,23 @@ export default function BookTab({
   );
 
   const orderBook = (
-    <OrderBook
-      symbolLabel={ticker}
-      kind={kind}
-      depth={depth}
-      trades={trades}
-      last={last}
-      lastLabel={lastLabel}
-      bid={bid}
-      ask={ask}
-      l1Fallback={l1Fallback}
-      onPriceClick={onPriceClick}
-    />
+    <>
+      <OrderBook
+        symbolLabel={ticker}
+        kind={kind}
+        depth={depth}
+        trades={trades}
+        last={last}
+        lastLabel={lastLabel}
+        bid={bid}
+        ask={ask}
+        l1Fallback={l1Fallback}
+        onPriceClick={onPriceClick}
+      />
+      {/* Microstructure imbalance / microprice (F10). Renders only when an
+          entitled depth book is present; null off-hours / unentitled. */}
+      <MicrostructureStrip depth={depth} />
+    </>
   );
 
   // Cockpit: just the depth montage + tape, filling the Book region. The ticket,

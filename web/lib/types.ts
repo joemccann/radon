@@ -32,10 +32,28 @@ export type ApiMessage = {
   content: string;
 };
 
+export type AssistantToolEvent = {
+  name: string;
+  input: Record<string, unknown>;
+  ok: boolean;
+  error?: string;
+};
+
+export type AssistantOrderProposal = {
+  tool: string;
+  destructive: true;
+  input: Record<string, unknown>;
+  summary: string;
+  toolUseId: string;
+};
+
 export type AssistantResponse = {
   content?: string;
   model?: string;
   error?: string;
+  toolEvents?: AssistantToolEvent[];
+  proposal?: AssistantOrderProposal | null;
+  rounds?: number;
 };
 
 export type PiResponse = {
@@ -414,6 +432,16 @@ export type ScannerSignal = {
   sustained_days: number;
   recent_direction: string;
   recent_strength: number;
+  // F11 — Chronos-2 forecast band over recent flow_strength, attached by
+  // the scanner when chronos is available. Absent on the lean fleet.
+  forecast?: {
+    score: number;
+    band: { lo: number; median: number; hi: number };
+    interval_width: number;
+    upside_skew: number;
+    convex_reinforced: boolean;
+    horizon: number;
+  };
 };
 
 export type ScannerData = {

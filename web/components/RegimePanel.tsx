@@ -11,6 +11,7 @@ import VcgPanel from "./VcgPanel";
 import GexPanel from "./GexPanel";
 import GammaRotationPanel from "./GammaRotationPanel";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
+import BacktestPanel from "./BacktestPanel";
 import SpectralLoader from "./SpectralLoader";
 import SectionEmptyState from "./SectionEmptyState";
 import { DayChange, LiveBadge, PointChange, RegimeStrip, RegimeStripCell } from "./RegimeStrip";
@@ -25,14 +26,14 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
-type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "llm";
+type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "llm" | "backtest";
 
-const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "llm"] as const;
+const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "llm", "backtest"] as const;
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|llm)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -286,7 +287,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "llm"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -306,8 +307,18 @@ export default function RegimePanel({
       <button className={`ticker-tab ${activeTab === "gex" ? "active" : ""}`} onClick={() => goToTab("gex")}>GEX</button>
       <button className={`ticker-tab ${activeTab === "grg" ? "active" : ""}`} onClick={() => goToTab("grg")}>GRG</button>
       <button className={`ticker-tab ${activeTab === "llm" ? "active" : ""}`} onClick={() => goToTab("llm")}>LLM</button>
+      <button className={`ticker-tab ${activeTab === "backtest" ? "active" : ""}`} onClick={() => goToTab("backtest")}>BACKTEST</button>
     </div>
   );
+
+  if (activeTab === "backtest") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <BacktestPanel />
+      </div>
+    );
+  }
 
   if (activeTab === "vcg") {
     return (

@@ -1473,6 +1473,20 @@ body {
 .snapshot-row__direction--bearish,
 .snapshot-row__direction--distribution { color: var(--fault); }
 
+.snapshot-row__forecast {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.snapshot-row__forecast--bull {
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 12%, transparent);
+  border-radius: 3px;
+  padding: 0 4px;
+}
+
 .snapshot-row__score {
   font-family: var(--font-mono);
   font-size: 12px;
@@ -5652,6 +5666,35 @@ tr.leg-row td {
 .cockpit-head .neutral { color: var(--text-primary); }
 .ckh-sym { font-weight: 700; font-size: 15px; letter-spacing: 0.05em; }
 .ckh-kind { font-size: 9px; color: var(--text-muted); letter-spacing: 0.16em; }
+
+/* Instrument switch (held single-leg option ⟷ underlying stock). Sits where the
+   static kind chip was; mirrors the cockpit's 9px mono-caps language with a
+   signal-core active fill. */
+.ckh-instr {
+  display: inline-flex;
+  align-items: stretch;
+  height: 18px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.ckh-instr-seg {
+  appearance: none;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.16em;
+  padding: 0 8px;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+.ckh-instr-seg:hover { color: var(--text-secondary); }
+.ckh-instr-seg + .ckh-instr-seg { border-left: 1px solid var(--line-grid); }
+.ckh-instr-seg.on {
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 12%, transparent);
+}
 .ckh-sep { width: 1px; height: 16px; background: var(--line-grid); }
 .ckh-last { font-weight: 600; font-variant-numeric: tabular-nums; }
 .ckh-lastlabel { font-size: 8px; color: var(--text-muted); letter-spacing: 0.1em; margin-left: 4px; }
@@ -7506,6 +7549,85 @@ tr {
   flex-direction: column;
   gap: 16px;
   padding: 0;
+}
+
+/* ─── Strategy Backtest panel (F12) ─────────────────────── */
+.backtest-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 16px;
+  background: var(--bg-panel);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+}
+
+.backtest-title {
+  font-size: 14px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-dim);
+  padding-bottom: 8px;
+  margin: 0;
+}
+
+.backtest-entry-doc {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin: 8px 0 0;
+}
+
+.backtest-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.backtest-metric-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+}
+
+.backtest-metric-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+
+.backtest-metric-value {
+  font-size: 18px;
+  font-weight: 600;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.backtest-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backtest-empty {
+  padding: 16px;
+  font-size: 12px;
+  color: var(--text-muted);
+  background: color-mix(in srgb, var(--bg-panel-raised) 60%, transparent);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+}
+
+@media (max-width: 768px) {
+  .backtest-metric-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 
 .regime-empty {
