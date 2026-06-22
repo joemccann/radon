@@ -114,7 +114,7 @@ export function resolveEntryCost(pos: PortfolioPosition): number {
 
 export function getAvgEntry(pos: PortfolioPosition): number {
   const mult = getMultiplier(pos);
-  return resolveEntryCost(pos) / (pos.contracts * mult);
+  return Math.abs(resolveEntryCost(pos)) / (Math.abs(pos.contracts) * mult);
 }
 
 export function getLastPrice(pos: PortfolioPosition): number | null {
