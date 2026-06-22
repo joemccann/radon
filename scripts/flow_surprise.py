@@ -17,30 +17,8 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
-from pathlib import Path
 from typing import Optional
-
-PROJECT_DIR = Path(__file__).resolve().parents[1]
-CACHE_PATH = PROJECT_DIR / "data" / "flow_surprise.json"
-
-
-def write_cache(payload: dict) -> None:
-    """Persist the ranked payload to ``data/flow_surprise.json`` atomically.
-
-    json.dump to a sibling temp file then os.replace so a reader never sees a
-    half-written file. Best-effort: any failure logs to stderr and is swallowed
-    so the CLI still emits its result JSON on stdout.
-    """
-    try:
-        CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        tmp_path = CACHE_PATH.with_suffix(".json.tmp")
-        with open(tmp_path, "w") as handle:
-            json.dump(payload, handle)
-        os.replace(tmp_path, CACHE_PATH)
-    except Exception as exc:  # noqa: BLE001 — cache write must not affect the payload
-        print(f"[flow-surprise] cache write failed: {exc}", file=sys.stderr)
 
 
 def _dual_write() -> None:
@@ -79,7 +57,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             top=args.top,
             lookback_days=args.lookback,
         )
-        write_cache(out)
+        flow_surprise.write_cache(out)
 
     _dual_write()
 
