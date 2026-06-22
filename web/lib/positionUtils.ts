@@ -303,13 +303,26 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
   return (effectivePnl / Math.abs(closeValue)) * 100;
 }
 
+/** Direction sign for a position: +1 long, -1 short. A stock's direction lives
+ *  on the position/leg, NOT in `pos.contracts` (which is a positive magnitude),
+ *  so any `price × contracts` value MUST be multiplied by this to be
+ *  sign-correct. Without it a short reads with long's sign — e.g. a short whose
+ *  price ROSE shows a gain instead of a loss. Defaults to +1 (long) unless the
+ *  direction explicitly reads SHORT, so a long is never mis-signed. */
+export function positionDirectionSign(pos: PortfolioPosition): number {
+  const dir = (pos.legs[0]?.direction ?? pos.direction ?? "").toUpperCase();
+  return dir === "SHORT" ? -1 : 1;
+}
+
 /* ─── Today's P&L (dollars) ──────────────────────────────── */
 
 export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock") {
     const p = prices?.[pos.ticker];
     if (!p || p.last == null || p.last <= 0 || p.close == null || p.close <= 0) return null;
-    return (p.last - p.close) * pos.contracts;
+    // Sign-aware: a SHORT loses when price rises. `pos.contracts` is a positive
+    // magnitude, so apply the direction sign (long stays +; short flips).
+    return positionDirectionSign(pos) * (p.last - p.close) * Math.abs(pos.contracts);
   }
 
   // Same-day position: Today's P&L = Total P&L (position didn't exist yesterday)
