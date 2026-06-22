@@ -4281,6 +4281,42 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   text-transform: none;
 }
 
+.chat-order-confirm {
+  margin-top: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 45%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-order-confirm-header {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--signal-core);
+}
+
+.chat-order-confirm-summary {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.chat-order-confirm-note {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.chat-order-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .chat-input-row {
   display: grid;
   grid-template-columns: 1fr auto;
