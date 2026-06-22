@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fincept Follow-ups: Ship Report</title>
+<style>
+  :root{
+    --canvas:#0a0f14; --panel:#0f1519; --panel-raised:#151c22; --grid:#1e293b;
+    --text:#e2e8f0; --text-2:#94a3b8; --text-muted:#475569;
+    --core:#05AD98; --strong:#0FCFB5; --deep:#048A7A;
+    --warn:#F5A623; --fault:#E85D6C; --extreme:#8B5CF6; --dislocation:#D946A8;
+    --radius:4px;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;line-height:1.5}
+  a{color:var(--strong);text-decoration:none}
+  .wrap{max-width:1120px;margin:0 auto;padding:40px 24px 80px}
+  header.masthead{border-bottom:1px solid var(--grid);padding-bottom:24px;margin-bottom:26px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--core);margin:0 0 10px}
+  h1{font-size:28px;line-height:1.15;margin:0 0 12px;font-weight:650;letter-spacing:-.01em}
+  .sub{color:var(--text-2);font-size:15px;max-width:820px;margin:0}
+  .meta{font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-top:16px;display:flex;gap:18px;flex-wrap:wrap}
+  .meta b{color:var(--text-2);font-weight:500}
+  .grid-stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px;margin:0 0 28px}
+  .stat{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:16px 18px}
+  .stat .n{font-family:var(--mono);font-size:24px;font-weight:600;color:var(--strong);line-height:1}
+  .stat .l{font-size:10.5px;color:var(--text-2);margin-top:8px;text-transform:uppercase;letter-spacing:.08em}
+  h2.section{font-size:13px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.14em;color:var(--text-2);border-bottom:1px solid var(--grid);padding-bottom:8px;margin:38px 0 16px}
+  .banner{background:color-mix(in srgb,var(--core) 10%,transparent);border:1px solid color-mix(in srgb,var(--core) 40%,transparent);border-radius:var(--radius);padding:14px 18px;margin:0 0 22px;font-size:13.5px;color:var(--text)}
+  .banner.warn{background:color-mix(in srgb,var(--warn) 10%,transparent);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+  .banner b{color:var(--strong)} .banner.warn b{color:var(--warn)}
+  .banner code{font-family:var(--mono);font-size:.92em}
+  .card{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:18px 20px;margin-bottom:12px;position:relative;overflow:hidden}
+  .card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--core)}
+  .card.fix::before{background:var(--warn)}
+  .card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:8px}
+  .card-title{font-size:16px;font-weight:600;margin:0}
+  .card-title .fid{font-family:var(--mono);color:var(--text-muted);font-size:13px;margin-right:8px}
+  .tags{display:flex;gap:6px;flex-shrink:0}
+  .tag{font-family:var(--mono);font-size:10px;letter-spacing:.04em;padding:3px 8px;border-radius:var(--radius);border:1px solid var(--grid);color:var(--text-2);white-space:nowrap;text-transform:uppercase}
+  .tag.green{color:var(--strong);border-color:color-mix(in srgb,var(--core) 45%,transparent)}
+  .ship{font-size:13.5px;color:var(--text);margin:8px 0}
+  .ui{font-size:13px;color:var(--text-2);margin:8px 0}
+  .ui.none{color:var(--text-muted)}
+  .ui .k{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted);display:block;margin-bottom:3px}
+  .tests{font-family:var(--mono);font-size:11.5px;color:var(--strong);margin-top:6px}
+  table.suite{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 8px}
+  table.suite th,table.suite td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--grid)}
+  table.suite th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted)}
+  table.suite td.n{font-family:var(--mono);color:var(--strong)}
+  ul.tight{margin:6px 0 0;padding-left:18px} ul.tight li{margin-bottom:8px;font-size:13px;color:var(--text-2)}
+  ul.tight li b{color:var(--text)}
+  code.path{font-family:var(--mono);color:var(--text-2);font-size:.92em}
+  footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--grid);font-family:var(--mono);font-size:11px;color:var(--text-muted);line-height:1.7}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="masthead">
+    <p class="eyebrow">Radon &middot; Fincept Follow-ups Ship Report</p>
+    <h1>7 follow-ups shipped &mdash; the deferred work is done</h1>
+    <p class="sub">The follow-up batch from the 14-feature ship report: scipy provisioning, the re-added instrument toggle, panel/nav mounts, fetcher timers, the remaining backtest strategies, the agentic + paper loops, and order-quote plumbing. All implemented test-first, independently verified, both full suites re-run by the orchestrator. Two real bug fixes were surfaced and fixed along the way.</p>
+    <div class="meta">
+      <span><b>Branch</b> feat/fincept-adoption (+9 commits)</span>
+      <span><b>Build</b> sequential TDD workflow (resumed past a transient server rate-limit)</span>
+      <span><b>Generated</b> 2026-06-22</span>
+    </div>
+  </header>
+
+  <div class="grid-stats">
+    <div class="stat"><div class="n">7/7</div><div class="l">Follow-ups green</div></div>
+    <div class="stat"><div class="n">3263</div><div class="l">Python tests pass</div></div>
+    <div class="stat"><div class="n">3318</div><div class="l">Web tests pass</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">Failures / regressions</div></div>
+    <div class="stat"><div class="n">2</div><div class="l">Bugs fixed en route</div></div>
+  </div>
+
+  <div class="banner">
+    <b>Verification evidence.</b> Full Python: <code>3263 passed, 14 skipped, 0 failed</code> (.venv py3.11). Full web: <code>332 files, 3318 passed, 26 skipped, 0 failed</code> (vitest). Both run by the orchestrator after the build, not agent self-report. Every commit passed the repo gate (gitleaks + tsc + eslint).
+  </div>
+
+  <div class="banner warn">
+    <b>Before production:</b> the new order-side behavior (instrument toggle, chat order-confirm card, Paper toggle routing, net-of-cost rendering) is covered by vitest but not yet by a live browser pass. Per radon's UI rule, run a chrome-cdp / RTH check on the chain order builder + ticker page before calling it operator-verified. The <code>/paper/place</code> and workflow <code>emit_order</code> placement paths are wired + gated but have not placed a real order.
+  </div>
+
+  <h2 class="section">Test suites</h2>
+  <table class="suite">
+    <thead><tr><th>Suite</th><th>Result</th><th>Delta vs 14-feature ship</th></tr></thead>
+    <tbody>
+      <tr><td>Python (full)</td><td class="n">3263 passed / 0 fail</td><td>+57 tests</td></tr>
+      <tr><td>Web (full)</td><td class="n">3318 passed / 0 fail</td><td>+28 tests</td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">What shipped</h2>
+  <div id="cards"></div>
+
+  <h2 class="section">Bugs fixed en route</h2>
+  <div id="fixes"></div>
+
+  <h2 class="section">Still honestly open</h2>
+  <ul class="tight" id="open"></ul>
+
+  <h2 class="section">Git</h2>
+  <ul class="tight">
+    <li><b>9 commits</b> on <code class="path">feat/fincept-adoption</code> (7 follow-ups + 1 position-sign fix + 1 shared tokens/types). Not pushed.</li>
+    <li><b>Your in-flight work stays untouched</b> &mdash; no commit modified <code class="path">ib_watchdog.py</code>, <code class="path">forecast_backtest.py</code>, or <code class="path">forecasting/backtest.py</code> (verified).</li>
+    <li><b>Resumed cleanly:</b> the first run hit a transient server rate-limit after FU1/FU4; the resume re-ran the other 5 from cache with zero rework.</li>
+    <li><b>To ship:</b> review the diff, then push (or merge to main to trigger auto-deploy). scipy is now in fleet provisioning, so the F9 deploy blocker is cleared.</li>
+  </ul>
+
+  <footer>
+    tasks/fincept-followups-ship-report.html &middot; prior: tasks/fincept-adoption-ship-report.html &middot; analysis: tasks/fincept-vs-radon-report.html
+  </footer>
+</div>
+
+<script>
+const F=[
+  {id:"FU1",title:"scipy in forecasting venv provisioning",tests:"4 py",
+   ship:"scipy==1.17.1 pinned in requirements-forecasting.txt (read by provision_venv.sh) so the F9 SVI vol-surface fit imports on the fleet. Clears the deploy blocker.",ui:"none (deps only)."},
+  {id:"FU4",title:"launchd timers for the new fetchers",tests:"19 py",
+   ship:"Holiday-aware run wrappers + plists for catalysts (06:30), informed-flow watchlist sweep (07:00), and event-odds (07:00/11:00/15:00), mirroring cri-scan; wired into local.sh with documented systemd equivalents for radon-cloud. Added sweep_informed_flow.py (per-ticker fetcher -> watchlist sweep, 85 tickers).",ui:"none (scheduling/ops)."},
+  {id:"FU2",title:"STOCK/OPTION ticker instrument toggle",tests:"15 web",
+   ship:"Re-added the reverted feature, properly. A single-leg equity option position can switch the ticker page between the held OPTION and the underlying STOCK (book, quote, ticket) without giving up the position.",ui:"CockpitHeader renders a 2-segment STOCK/OPTION control (gated by canSwitchInstrument: single-leg equity option, not futures/index-with-futures). STOCK -> underlying view, OPTION -> held view. Brand tokens, 4px radius."},
+  {id:"FU3",title:"Mount deferred panels + nav",tests:"panel-mounts + data + watchlist",
+   ship:"CatalystCard mounted into DashboardSurface; InformedFlowPanel, AlertsPanel, and the WorkflowComposer mounted via WorkspaceSections; Alerts + Workflow nav entries added. /regime backtest tab confirmed reachable.",ui:"New Alerts and Workflow sections reachable from the nav; the dashboard shows the catalyst card; the ticker flow surface shows informed-flow."},
+  {id:"FU5",title:"Wire remaining backtest strategies + backfill",tests:"py strategies+engine+metrics",
+   ship:"VCG-R (vcg_snapshots) and Dark Pool Flow (ticker_flow_history) now run end-to-end with the same no-look-ahead + cost-model guarantee as CRI. leap_iv / garch_convergence / risk_reversal are registered but honestly report insufficient_data until a daily snapshot feed exists for them. Snapshot backfill aggregation added.",ui:"none (Python engine). Surfaces in the existing /regime BACKTEST tab."},
+  {id:"FU7",title:"Live quotes -> order surfaces (F1 net-of-cost)",tests:"web order-cost-quotes + chokepoint",
+   ship:"useOrderRisk now computes the F1 round-trip cost when a surface supplies a live bid/ask, so OrderConfirmSummary max-loss/max-gain render net-of-cost (loss up, gain down, unbounded stays unbounded). Byte-for-byte back-compat when no quote. Wired the chain, single-leg, modify, mobile, and position option surfaces.",ui:"No new elements; existing max-loss/max-gain numbers now reflect commission + half-spread + combo penalty when a live quote is present (RTH)."},
+  {id:"FU6",title:"Finish agentic + paper loops",tests:"3 py + web chat-confirm",
+   ship:"(A) ChatPanel renders the assistant's place_order proposal as a Confirm/Cancel card; Confirm posts to /api/orders/place, never auto-executes. (B) POST /paper/place runs the paper matcher+fills off-loop and persists to paper_fills; the BookTab stock order form Paper toggle routes there. (C) workflow emit_order places an order only when confirm_order is set, with the executor gate preserved.",ui:"Assistant chat shows an order-confirm card; the stock order form gains a working Live/Paper toggle that routes Paper orders to the shadow engine."},
+];
+const FIX=[
+  {id:"short-pnl",title:"Sign-correct SHORT stock live P&L",
+   ship:"Surfaced by FU2's view-underlying: the live stock path computed market value as price x contracts (always positive), so a short whose price rose showed a phantom GAIN. Example caught: a MU short read +$2.29M (+202%) instead of the true ~-$56k loss. Fixed via positionDirectionSign() on the realtime MV path, with a red/green test."},
+  {id:"watchlist-sub",title:"Watchlist-only symbols never subscribed to the live feed",
+   ship:"A watched symbol that was not also a portfolio/order ticker (e.g. SPCX) was never in the live-quote subscription set, so its WATCHLIST row rendered '---'. WorkspaceShell now subscribes watchlist symbols (index entries via the indexes channel). Source-inspection test added."},
+];
+document.getElementById('cards').innerHTML=F.map(f=>`
+  <div class="card">
+    <div class="card-head"><h3 class="card-title"><span class="fid">${f.id}</span>${f.title}</h3>
+      <div class="tags"><span class="tag green">green</span><span class="tag">${f.tests}</span></div></div>
+    <div class="ship">${f.ship}</div>
+    <div class="ui ${/^none/.test(f.ui)?'none':''}"><span class="k">App / UI</span>${f.ui}</div>
+  </div>`).join('');
+document.getElementById('fixes').innerHTML=FIX.map(f=>`
+  <div class="card fix"><div class="card-head"><h3 class="card-title">${f.title}</h3><div class="tags"><span class="tag green">tested</span></div></div>
+    <div class="ship">${f.ship}</div></div>`).join('');
+document.getElementById('open').innerHTML=[
+  "<b>Live browser verification</b> (chrome-cdp / RTH) of the order-side UI: instrument toggle, chat order-confirm, Paper toggle routing, net-of-cost numbers.",
+  "<b>Three backtest strategies</b> (leap_iv, garch_convergence, risk_reversal) need a daily snapshot feed before they report real hit-rates; they correctly say insufficient_data today.",
+  "<b>Paper + workflow placement</b> paths are wired and gated but have not placed a real (paper or live) order end-to-end.",
+  "<b>systemd timers</b> for the new fetchers are documented but live in the radon-cloud repo (out of this tree); add them there to schedule on Hetzner.",
+  "<b>Close-out / non-option order surfaces</b> intentionally not wired for net-of-cost (no quote or not applicable); documented in the FU7 commit.",
+].map(s=>`<li>${s}</li>`).join('');
+</script>
+</body>
+</html>
