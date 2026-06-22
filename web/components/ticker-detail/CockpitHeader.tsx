@@ -21,6 +21,10 @@ type CockpitHeaderProps = {
   /** Live WS feed is delivering ticks (depth/quote present). */
   live: boolean;
   onDeckChange: (deck: DeckKey | null) => void;
+  /** Instrument switch (held single-leg option ⟷ underlying stock). */
+  instrumentView: "position" | "underlying";
+  canSwitchInstrument: boolean;
+  onInstrumentViewChange: (view: "position" | "underlying") => void;
 };
 
 const KIND_LABEL: Record<CockpitHeaderProps["kind"], string> = {
@@ -37,6 +41,9 @@ export default function CockpitHeader({
   position,
   live,
   onDeckChange,
+  instrumentView,
+  canSwitchInstrument,
+  onInstrumentViewChange,
 }: CockpitHeaderProps) {
   const { isMobile, hasMounted } = useViewport();
   const mobile = isMobile && hasMounted;
@@ -124,7 +131,28 @@ export default function CockpitHeader({
         onToggle={handleToggleWatch}
         size="sm"
       />
-      <span className="ckh-kind">{KIND_LABEL[kind]}</span>
+      {canSwitchInstrument ? (
+        <div className="ckh-instr" role="group" aria-label="Instrument view">
+          <button
+            type="button"
+            className={`ckh-instr-seg mono ${instrumentView === "underlying" ? "on" : ""}`}
+            aria-pressed={instrumentView === "underlying"}
+            onClick={() => onInstrumentViewChange("underlying")}
+          >
+            STOCK
+          </button>
+          <button
+            type="button"
+            className={`ckh-instr-seg mono ${instrumentView === "position" ? "on" : ""}`}
+            aria-pressed={instrumentView === "position"}
+            onClick={() => onInstrumentViewChange("position")}
+          >
+            OPTION
+          </button>
+        </div>
+      ) : (
+        <span className="ckh-kind">{KIND_LABEL[kind]}</span>
+      )}
       <span className="ckh-sep" />
       <span className={`ckh-last mono ${deltaTone}`}>
         {last != null ? fmtPrice(last) : "---"}

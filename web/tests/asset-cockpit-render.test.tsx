@@ -140,9 +140,77 @@ function baseProps(overrides: Partial<AssetCockpitProps> = {}): AssetCockpitProp
     theme: "dark",
     activeDeck: null,
     onDeckChange: vi.fn(),
+    instrumentView: "position",
+    canSwitchInstrument: false,
+    onInstrumentViewChange: vi.fn(),
+    viewUnderlying: false,
     ...overrides,
   };
 }
+
+// A held single-leg equity option (one short call on MU). The page would lock to
+// the option without the instrument switch; canSwitchInstrument is true for this.
+const SINGLE_LEG_OPTION: PortfolioPosition = {
+  id: 7,
+  ticker: "MU",
+  structure: "SHORT CALL",
+  structure_type: "Naked Call",
+  risk_profile: "undefined",
+  expiry: "20260620",
+  contracts: 1,
+  direction: "short",
+  entry_cost: -1240,
+  max_risk: null,
+  market_value: -1240,
+  legs: [
+    {
+      direction: "SHORT",
+      type: "Call",
+      strike: 150,
+      contracts: 1,
+      entry_cost: 1240,
+      avg_cost: 12.4,
+      market_price: 12.4,
+      market_value: 1240,
+    },
+  ] as unknown as PortfolioPosition["legs"],
+  ib_daily_pnl: 0,
+  kelly_optimal: 0.025,
+  target: null,
+  stop: null,
+  entry_date: "2026-05-01",
+};
+
+const STOCK_POSITION: PortfolioPosition = {
+  id: 8,
+  ticker: "MU",
+  structure: "100 SHARES",
+  structure_type: "Stock",
+  risk_profile: "defined",
+  expiry: "",
+  contracts: 100,
+  direction: "long",
+  entry_cost: 14000,
+  max_risk: null,
+  market_value: 14218,
+  legs: [
+    {
+      direction: "LONG",
+      type: "Stock",
+      strike: 0,
+      contracts: 100,
+      entry_cost: 14000,
+      avg_cost: 140,
+      market_price: 142.18,
+      market_value: 14218,
+    },
+  ] as unknown as PortfolioPosition["legs"],
+  ib_daily_pnl: 0,
+  kelly_optimal: 0.025,
+  target: null,
+  stop: null,
+  entry_date: "2026-05-01",
+};
 
 function renderCockpit(overrides: Partial<AssetCockpitProps> = {}) {
   const onDeckChange = vi.fn(overrides.onDeckChange);
@@ -332,5 +400,78 @@ describe("AssetCockpit — held combo fixture", () => {
     const h = header(container)!;
     expect((h.textContent ?? "").toUpperCase()).toContain("NET");
     expect(h.textContent ?? "").not.toMatch(/\$\d{1,3},\d{3}/);
+  });
+});
+
+describe("AssetCockpit — STOCK ⟷ OPTION instrument switch", () => {
+  const instrSeg = (c: HTMLElement) => c.querySelector(".ckh-instr");
+
+  it("hides the switcher for a stock position (static kind chip only)", () => {
+    const { container } = renderCockpit({
+      position: STOCK_POSITION,
+      canSwitchInstrument: false,
+      bookKind: "stock",
+    });
+    expect(instrSeg(container)).toBeNull();
+    expect(container.querySelector(".ckh-kind")?.textContent).toBe("STOCK");
+  });
+
+  it("hides the switcher for a multi-leg combo position", () => {
+    const { container } = renderCockpit({
+      position: COMBO_POSITION,
+      canSwitchInstrument: false,
+      bookKind: "option",
+      isSpreadNet: true,
+    });
+    expect(instrSeg(container)).toBeNull();
+    expect(container.querySelector(".ckh-kind")).toBeTruthy();
+  });
+
+  it("shows the STOCK|OPTION switcher for a single-leg equity option, OPTION default-active", () => {
+    const { container } = renderCockpit({
+      position: SINGLE_LEG_OPTION,
+      canSwitchInstrument: true,
+      instrumentView: "position",
+      bookKind: "option",
+    });
+    expect(instrSeg(container)).toBeTruthy();
+    const segs = [...container.querySelectorAll(".ckh-instr-seg")];
+    expect(segs.map((s) => s.textContent?.trim())).toEqual(["STOCK", "OPTION"]);
+    // A held option starts on the OPTION view.
+    expect(container.querySelector(".ckh-instr-seg.on")?.textContent?.trim()).toBe("OPTION");
+    // The static kind chip is replaced by the switcher.
+    expect(container.querySelector(".ckh-kind")).toBeNull();
+  });
+
+  it("clicking STOCK requests the underlying view", () => {
+    const onInstrumentViewChange = vi.fn();
+    const { container } = renderCockpit({
+      position: SINGLE_LEG_OPTION,
+      canSwitchInstrument: true,
+      instrumentView: "position",
+      bookKind: "option",
+      onInstrumentViewChange,
+    });
+    const stockSeg = container.querySelector(".ckh-instr-seg") as HTMLElement; // first = STOCK
+    fireEvent.click(stockSeg);
+    expect(onInstrumentViewChange).toHaveBeenCalledWith("underlying");
+  });
+
+  it("with STOCK active the STOCK segment is on and clicking OPTION restores the held view", () => {
+    const onInstrumentViewChange = vi.fn();
+    const { container } = renderCockpit({
+      position: SINGLE_LEG_OPTION,
+      canSwitchInstrument: true,
+      instrumentView: "underlying",
+      viewUnderlying: true,
+      bookKind: "stock",
+      onInstrumentViewChange,
+    });
+    expect(container.querySelector(".ckh-instr-seg.on")?.textContent?.trim()).toBe("STOCK");
+    const optionSeg = [...container.querySelectorAll(".ckh-instr-seg")].find(
+      (s) => s.textContent?.trim() === "OPTION",
+    ) as HTMLElement;
+    fireEvent.click(optionSeg);
+    expect(onInstrumentViewChange).toHaveBeenCalledWith("position");
   });
 });
