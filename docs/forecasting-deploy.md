@@ -34,8 +34,12 @@ bash scripts/forecasting/provision_venv.sh --upgrade
 RADON_FC_VENV=/opt/radon/fc-venv bash scripts/forecasting/provision_venv.sh
 ```
 
-Requires `python3.12` or `python3.13` on PATH. Installs
-`requirements-forecasting.txt` (`torch`, `chronos-forecasting`).
+Requires `python3.13` on PATH (or `python3.12` with its venv module installed).
+Installs the **full app deps** (`requirements.txt` — libsql, python-dotenv,
+pandas, ...) **plus** `requirements-forecasting.txt` (`torch`,
+`chronos-forecasting`). The forecasting code imports `db.writer` / `flow_history`,
+so app deps are required, not just torch. torch is pulled from the CPU wheel
+index (the host has no GPU); the default PyPI wheel drags in multi-GB CUDA libs.
 
 ---
 
@@ -47,8 +51,10 @@ Requires `python3.12` or `python3.13` on PATH. Installs
 > from there.
 
 Replace `<venv>` with the path printed by `provision_venv.sh`
-(default `/home/radon/forecasting-venv`) and `<radon-cloud-checkout>` with the
-deploy checkout (e.g. `/home/radon/radon-cloud`).
+(default `/home/radon/forecasting-venv`). `WorkingDirectory` is the **app**
+checkout (`/home/radon/radon`, where `scripts/` lives), NOT the radon-cloud
+deploy repo. `EnvironmentFile` supplies the Turso credentials the pipeline needs
+to read history and persist the verdict.
 
 ### `/etc/systemd/system/radon-forecast-nightly.service`
 
@@ -61,8 +67,12 @@ Wants=network-online.target
 [Service]
 Type=oneshot
 User=radon
-WorkingDirectory=<radon-cloud-checkout>
-ExecStart=<venv>/bin/python scripts/nightly_forecast.py --metric flow_strength --top 25 --lookback 250 --backfill-days 20
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Direct-to-cloud DB only; the radon-*.service.d/common.conf drop-in also sets
+# this, repeated here so the unit is correct even if the glob ever misses.
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/forecasting-venv/bin/python scripts/nightly_forecast.py --metric flow_strength --top 25 --lookback 250 --backfill-days 20
 # stdout is the summary JSON; progress + tracebacks go to the journal via stderr
 StandardOutput=journal
 StandardError=journal
@@ -113,12 +123,14 @@ Do this once after provisioning and after any model/dependency change:
 
 ```bash
 VENV=/home/radon/forecasting-venv
+cd /home/radon/radon                     # app checkout (scripts/ lives here)
+set -a; . /home/radon/radon-cloud/.env; set +a   # Turso creds for the manual run
 
 # 1. Provision (idempotent) and confirm the python path
 bash scripts/forecasting/provision_venv.sh
 
 # 2. Backfill flow history from the dark-pool cache
-$VENV/bin/python scripts/backfill_flow_history.py --days 20
+$VENV/bin/python scripts/forecasting/backfill_flow_history.py --days 20
 
 # 3. Build + PERSIST the calibration verdict
 $VENV/bin/python scripts/forecast_calibration.py --metric flow_strength \
