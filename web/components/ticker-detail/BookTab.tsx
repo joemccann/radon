@@ -7,7 +7,7 @@ import type { OrderPrefill } from "@/lib/TickerDetailContext";
 import { fmtPrice } from "@/lib/positionUtils";
 import { useViewport } from "@/lib/useViewport";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "@/components/SingleLegOrderTicket";
-import { OrderRiskGate, type LinearOrderRiskInput } from "@/lib/order";
+import { OrderRiskGate, resolvePlacementTarget, type LinearOrderRiskInput } from "@/lib/order";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
 import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/indexSymbols";
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
@@ -281,6 +281,7 @@ function StockOrderForm({
     return "";
   });
   const [limitPrice, setLimitPrice] = useState("");
+  const [paperMode, setPaperMode] = useState(false);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
@@ -377,25 +378,45 @@ function StockOrderForm({
       onActionChange={setAction}
       style={{ marginTop: "16px" }}
       header={<div className="book-section-header">STOCK ORDER</div>}
+      placeUrl={
+        resolvePlacementTarget(paperMode) === "paper-shadow"
+          ? "/api/paper/place"
+          : "/api/orders/place"
+      }
       riskGate={
         /* Order Summary (shown in confirm step). Linear-branch
            chokepoint surfaces UNBOUNDED for naked short stock, close-out
-           P&L for SELL-against-held-LONG / BUY-against-held-SHORT. */
+           P&L for SELL-against-held-LONG / BUY-against-held-SHORT. The Paper
+           toggle (F13) routes a simulated order to the shadow engine. */
         <OrderRiskGate
           input={riskInput}
           portfolio={portfolio}
           surface="book-tab-stock"
           variant="info"
+          paperMode={paperMode}
+          onPaperModeChange={setPaperMode}
         />
       }
-      buildPayload={({ action, quantity, limitPrice, tif }) => ({
-        type: "stock",
-        symbol: ticker,
-        action,
-        quantity,
-        limitPrice,
-        tif,
-      })}
+      buildPayload={({ action, quantity, limitPrice, tif }) =>
+        resolvePlacementTarget(paperMode) === "paper-shadow"
+          ? {
+              ticker,
+              side: action,
+              order_type: "LIMIT",
+              quantity,
+              limit_price: limitPrice,
+              bid,
+              ask,
+            }
+          : {
+              type: "stock",
+              symbol: ticker,
+              action,
+              quantity,
+              limitPrice,
+              tif,
+            }
+      }
       buildSuccessMessage={({ action, quantity, limitPrice }) =>
         `Order placed: ${action} ${quantity} ${ticker} @ ${fmtPrice(limitPrice)}`
       }
