@@ -195,3 +195,55 @@ def test_pi_exec_surfaces_subprocess_failure(client):
     body = response.json()
     assert body["ok"] is False
     assert "KeyError" in body["stderr"]
+
+
+# ---------------------------------------------------------------------------
+# /pi/exec — READ vs MUTATE tiers (least-privilege)
+# ---------------------------------------------------------------------------
+
+def test_pi_exec_read_tier_runs_without_privileged_flag(client):
+    """READ-tier scripts (pure scans/analysis) run on the default path —
+    no privileged flag required."""
+    fake = _fake_raw_result(stdout="Discover: 12 candidates\n", exit_code=0)
+
+    async def _stub(*args, **kwargs):
+        return fake
+
+    with patch("scripts.api.server.run_script_raw", side_effect=_stub):
+        response = client.post(
+            "/pi/exec", json={"script": "discover.py", "args": []}
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+
+
+def test_pi_exec_mutate_tier_rejected_without_flag(client):
+    """MUTATE-tier scripts (live-account / portfolio-state mutators) are
+    refused on the default read-only path."""
+    response = client.post(
+        "/pi/exec", json={"script": "ib_sync.py", "args": ["--sync"]}
+    )
+    assert response.status_code == 400
+    assert "mutat" in response.json()["detail"].lower()
+
+
+def test_pi_exec_mutate_tier_allowed_with_flag(client):
+    """A MUTATE-tier script runs when the caller passes the explicit
+    privileged authorization flag."""
+    fake = _fake_raw_result(stdout='{"ok": true}\n', exit_code=0)
+
+    async def _stub(*args, **kwargs):
+        return fake
+
+    with patch("scripts.api.server.run_script_raw", side_effect=_stub) as run_mock:
+        response = client.post(
+            "/pi/exec",
+            json={"script": "ib_sync.py", "args": ["--sync"], "allow_mutating": True},
+        )
+
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    args, _ = run_mock.call_args
+    assert args[0] == "ib_sync.py"
+    assert args[1] == ["--sync"]

@@ -134,6 +134,10 @@ const runPythonScript = async (
   args: string[],
   _cwd: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
+  // MUTATE-tier scripts (e.g. ib_sync.py — pulls live IB positions and
+  // rewrites portfolio.json) are refused by /pi/exec unless this explicit
+  // privileged authorization is passed. Only the `sync` chat command opts in.
+  allowMutating = false,
 ): Promise<ScriptResult> => {
   const script = scriptPath.replace(/^scripts\//, "");
   try {
@@ -144,6 +148,7 @@ const runPythonScript = async (
         script,
         args,
         timeout: Math.ceil(timeoutMs / 1000),
+        ...(allowMutating ? { allow_mutating: true } : {}),
       }),
       // Add a small grace window so the route surfaces the upstream timeout
       // as a structured failure rather than collapsing it into RadonApiError.
@@ -440,7 +445,14 @@ const executeSync = (args: string[], paths: Paths): Promise<ScriptResult> => {
   if (booleanParsed.parsed.has("--sync")) commandArgs.push("--sync");
   if (booleanParsed.parsed.has("--no-prices")) commandArgs.push("--no-prices");
 
-  return runPythonScript(commandArgs[0], commandArgs.slice(1), paths.cwd);
+  // ib_sync.py is MUTATE-tier: explicitly authorize the privileged path.
+  return runPythonScript(
+    commandArgs[0],
+    commandArgs.slice(1),
+    paths.cwd,
+    DEFAULT_TIMEOUT_MS,
+    true,
+  );
 };
 
 const executeLeapScan = (args: string[], paths: Paths): Promise<ScriptResult> => {

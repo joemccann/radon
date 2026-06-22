@@ -2215,17 +2215,30 @@ async def futures_chain(symbol: str):
 
 
 # ── PI command surface ──────────────────────────────────────────────
-# Allowlist of scripts the embedded /api/pi chat command surface is
-# permitted to spawn. The Next.js layer does the argument parsing /
-# normalisation (preserving the existing helpers + tests); FastAPI just
-# enforces the allowlist + executes. Anything not in this set returns 400.
-_PI_SCRIPT_ALLOWLIST = frozenset({
+# Scripts the embedded /api/pi chat command surface is permitted to spawn,
+# split into two privilege tiers. The Next.js layer does the argument
+# parsing / normalisation (preserving the existing helpers + tests);
+# FastAPI enforces the tier + executes.
+#
+# READ-tier: pure analysis / scans. They write scan *caches* under data/
+# but never touch live-account or canonical portfolio/journal/order state.
+_PI_READ_SCRIPTS = frozenset({
     "scanner.py",
     "discover.py",
     "evaluate.py",
-    "ib_sync.py",
     "leap_scanner_uw.py",
 })
+
+# MUTATE-tier: connects to the live IB account and/or rewrites canonical
+# portfolio/journal/order state. `ib_sync.py` pulls positions from IB and
+# atomically rewrites data/portfolio.json. Running one requires explicit
+# privileged authorization the chat surface does NOT pass by default.
+_PI_MUTATE_SCRIPTS = frozenset({
+    "ib_sync.py",
+})
+
+# Outer defence-in-depth allowlist: anything outside both tiers → 400.
+_PI_SCRIPT_ALLOWLIST = _PI_READ_SCRIPTS | _PI_MUTATE_SCRIPTS
 
 
 @app.post("/pi/exec")
@@ -2239,12 +2252,24 @@ async def pi_exec(payload: dict):
 
     The Next.js /api/pi route owns parsing + allowlisting upstream; this
     enforces the same allowlist as a defence-in-depth measure.
+
+    Least-privilege: READ-tier scripts run on the default path. A MUTATE-tier
+    script (live-account / portfolio-state mutator) requires an explicit
+    `allow_mutating: true` in the body; without it the request is refused 400.
     """
     script = payload.get("script") if isinstance(payload, dict) else None
     if not isinstance(script, str) or not script:
         raise HTTPException(status_code=400, detail="script is required")
     if script not in _PI_SCRIPT_ALLOWLIST:
         raise HTTPException(status_code=400, detail=f"Script not allowed: {script}")
+    if script in _PI_MUTATE_SCRIPTS and payload.get("allow_mutating") is not True:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Script is MUTATE-tier and requires explicit "
+                f"allow_mutating: true — {script}"
+            ),
+        )
 
     args = payload.get("args") or []
     if not isinstance(args, list) or any(not isinstance(a, str) for a in args):
