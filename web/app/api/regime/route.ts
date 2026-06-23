@@ -17,6 +17,10 @@ export const runtime = "nodejs";
 const DATA_DIR = join(process.cwd(), "..", "data");
 const CACHE_PATH = join(DATA_DIR, "cri.json");
 const SCHEDULED_DIR = join(DATA_DIR, "cri_scheduled");
+// Upper bound on the Turso/libsql snapshot read before we fall back to disk.
+// The libsql client can hang for minutes on a reachable endpoint; this keeps
+// the route responsive (disk fallback) instead of pinning the loader.
+const DB_READ_TIMEOUT_MS = 2500;
 
 /** Today's date in ET (YYYY-MM-DD) — the trading calendar reference */
 function todayET(): string {
@@ -211,10 +215,21 @@ async function readLatestCri(): Promise<{ data: object; path: string } | null> {
   async function readLatestDbCri(): Promise<CriCacheCandidate | null> {
     try {
       const db = getDb();
-      const result = await db.execute({
-        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
-        args: [],
-      });
+      // Bound the libsql read: the @libsql/client query can stall for MINUTES
+      // even when the Turso endpoint is reachable (raw HTTPS 200 in ~190ms while
+      // a `SELECT 1` hangs past 40s). The route awaits this FIRST, and a hang is
+      // not a rejection, so without a timeout the disk fallback (data/cri.json)
+      // is never reached and /regime/cri spins on the loader forever. Race a
+      // timeout that rejects → the catch returns null → disk fallback runs.
+      const result = await Promise.race([
+        db.execute({
+          sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
+          args: [],
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("cri_snapshots read timed out")), DB_READ_TIMEOUT_MS),
+        ),
+      ]);
       if (result.rows.length === 0) return null;
       const row = result.rows[0] as unknown as { taken_at: string; payload: string };
       const mtimeMs = Date.parse(row.taken_at);
