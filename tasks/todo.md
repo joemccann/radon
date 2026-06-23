@@ -1,3 +1,73 @@
+# Task: Merge Dirty Worktree And Push
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot branch/status, upstream delta, and dirty files before any merge operation.
+- T2 depends_on: [T1] — Classify dirty changes as already on origin/main, new local work, or unrelated/untracked artifacts.
+- T3 depends_on: [T2] — Merge/rebase origin/main into the working tree without losing local changes, resolve conflicts, and stage only intended code/docs/tests.
+- T4 depends_on: [T3] — Run focused verification plus required broader suites where feasible; document remaining unrelated baseline failures.
+- T5 depends_on: [T4] — Commit atomically and push main to origin.
+
+## Checklist
+
+- [x] T1 — Snapshot branch/status and upstream delta.
+- [x] T2 — Classify dirty changes.
+- [x] T3 — Merge/rebase and resolve conflicts.
+- [x] T4 — Verify.
+- [x] T5 — Commit and push.
+
+## Review
+
+- Started on `main` behind `origin/main` by 6 commits with a dirty worktree. Saved the dirty tree to stash `pre-merge dirty worktree dashboard fix 2026-06-23`, fast-forwarded to `origin/main`, then reapplied the stash.
+- Resolved conflicts in `web/components/dashboard/DashboardSurface.tsx` and `web/tests/dashboard-mobile-newsfeed.test.tsx`.
+- Preserved intended local work: dashboard all-hidden fail-open handling, authless mobile app bar rendering, mobile dashboard E2E selector hardening, and regression coverage for dashboard visibility, authless mobile app bar, mobile instrument switcher, and GEX freshness.
+- Left unrelated/unreviewed local artifacts uncommitted: `.serena/`, `data/backtest/`, `deploy/`, and `tasks/tradingview-chart-eval-report.html`.
+- Verification:
+  - `npx vitest run web/tests/use-dashboard-section-visibility.test.ts web/tests/dashboard-mobile-newsfeed.test.tsx web/tests/mobile-app-bar-authless.test.tsx web/tests/cockpit-header-mobile-switcher.test.tsx web/tests/gex-route-prefer-newer.test.ts --config vitest.config.ts` passed: 5 files, 18 tests.
+  - `git diff --check`, `git diff --cached --check`, and exact conflict-marker scan passed.
+  - `PLAYWRIGHT_PORT=3037 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/mobile-shell.spec.ts --grep "renders top app bar|dashboard shows Live Market Feed" --config playwright.no-server.config.ts --project=mobile --timeout=30000` passed: 2 tests.
+  - `npm run typecheck` remains red on existing unrelated E2E/test fixture typing errors, including dynamic fixture indexing and missing JS declaration files.
+  - Full `npm test -- --reporter=dot` remains red: 326 files passed, 10 failed; failures are the existing `window.localStorage.* is not a function` pollution pattern in unrelated tests.
+
+---
+
+# Task: Fix Dashboard Blank Load
+
+## Dependency Graph
+
+- T1 depends_on: [] — Reproduce live `/dashboard`, capture browser/API errors, and inspect current git state without touching unrelated dirty files.
+- T2 depends_on: [T1] — Trace dashboard data dependencies, routes, and deployment assumptions to isolate the blank-load root cause.
+- T3 depends_on: [T2] — Add focused regression coverage that fails for the blank dashboard/load failure where practical.
+- T4 depends_on: [T3] — Apply the smallest code/config fix and keep it scoped to the dashboard path.
+- T5 depends_on: [T4] — Run focused checks, browser verification, and available full suites; document results.
+
+## Checklist
+
+- [x] T1 — Reproduce live `/dashboard` and capture errors.
+- [x] T2 — Trace dashboard data dependencies and isolate root cause.
+- [x] T3 — Add focused regression coverage.
+- [x] T4 — Apply scoped fix.
+- [x] T5 — Verify, run suites, and document review.
+
+## Review
+
+- Live unauthenticated browser path reaches `/sign-in`; raw non-browser GET returns Clerk protect-rewrite 404, matching existing health-probe notes and not the dashboard render bug.
+- Local mobile browser verification reproduced a runtime-error blank state in authless mode: `MobileAppBar` called Clerk `useUser()` while `ClerkThemeBridge` intentionally skipped `ClerkProvider`.
+- Added `useDashboardSectionVisibility` with a fail-open invariant: persisted/corrupt state that hides every known dashboard section resets to `[]`, and the last visible section cannot be hidden.
+- Wired `DashboardSurface` to the persisted visibility hook, preserving collapsed-section persistence without allowing an all-hidden dashboard.
+- Split `MobileAppBar` into authless and authenticated paths so authless mobile never calls Clerk hooks.
+- Restored mobile dashboard section ordering for Flow Surprise/Catalysts and updated E2E selectors to use mobile accessible labels and the mobile portfolio grid.
+- Verification:
+  - `npx vitest run web/tests/use-dashboard-section-visibility.test.ts web/tests/dashboard-mobile-newsfeed.test.tsx web/tests/mobile-app-bar-authless.test.tsx --config vitest.config.ts` passed: 3 files, 12 tests.
+  - Manual Playwright at 393x852 with all dashboard sections pre-hidden in `localStorage` passed: storage reset to `[]`, every section body visible, no runtime error; screenshot `/tmp/radon-dashboard-all-hidden-recovery.png`.
+  - `PLAYWRIGHT_PORT=3037 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/mobile-shell.spec.ts --grep "renders top app bar|dashboard shows Live Market Feed" --config playwright.no-server.config.ts --project=mobile --timeout=30000` passed: 2 tests.
+  - `npx eslint ...` passed with 0 errors; repo config emitted expected ignored-file warnings for CSS/test/e2e files.
+  - `git diff --check` passed.
+  - `npm run typecheck` remains red on existing e2e/test fixture typing errors outside touched files.
+  - Full `npm test -- --reporter=dot` remains red: 326 files passed, 10 failed; remaining failures are existing `window.localStorage.* is not a function` pollution in unrelated test files. New dashboard/mobile focused tests are not in the final failure list.
+
+---
+
 # Task: Unusual Whales Indicator Expansion Roadmap
 
 ## Goal

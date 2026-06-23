@@ -44,15 +44,54 @@ function mobileStatusChip(status: IBDisplayStatus): {
 }
 
 export default function MobileAppBar({ title, onOpenSearch }: MobileAppBarProps) {
+  if (
+    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
+    process.env.RADON_AUTHLESS_TEST === "1"
+  ) {
+    return (
+      <MobileAppBarView
+        title={title}
+        onOpenSearch={onOpenSearch}
+        username="Operator"
+        email="test@radon.local"
+        avatarUrl={null}
+      />
+    );
+  }
+
+  return <AuthenticatedMobileAppBar title={title} onOpenSearch={onOpenSearch} />;
+}
+
+function AuthenticatedMobileAppBar({ title, onOpenSearch }: MobileAppBarProps) {
+  const { profile } = useProfile();
+  const { user } = useUser();
+  return (
+    <MobileAppBarView
+      title={title}
+      onOpenSearch={onOpenSearch}
+      username={profile?.username ?? null}
+      email={user?.primaryEmailAddress?.emailAddress ?? null}
+      avatarUrl={profile?.avatar_url ?? user?.imageUrl ?? null}
+    />
+  );
+}
+
+function MobileAppBarView({
+  title,
+  onOpenSearch,
+  username,
+  email,
+  avatarUrl,
+}: MobileAppBarProps & {
+  username: string | null;
+  email: string | null;
+  avatarUrl: string | null;
+}) {
   const { displayStatus } = useIBStatusContext();
   const chip = mobileStatusChip(displayStatus);
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname() ?? "";
-  const { profile } = useProfile();
-  const { user } = useUser();
-  const email = user?.primaryEmailAddress?.emailAddress ?? null;
-  const avatarUrl = profile?.avatar_url ?? user?.imageUrl ?? null;
-  const monogram = monogramFor(profile?.username ?? null, email);
+  const monogram = monogramFor(username, email);
   const profileActive = pathname === "/profile" || pathname.startsWith("/profile/");
 
   useEffect(() => {

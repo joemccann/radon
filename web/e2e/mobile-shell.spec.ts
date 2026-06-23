@@ -105,7 +105,8 @@ test.describe("MobileShell — phase 1 foundation", () => {
         .map((section) => ({
           id: section.getAttribute("data-testid"),
           label: [
-            section.querySelector(".dashboard-section__title")?.textContent?.trim(),
+            section.querySelector(".dashboard-section__title")?.textContent?.trim() ??
+              section.querySelector(".dashboard-section__toggle")?.getAttribute("aria-label")?.trim(),
             section.querySelector(".dashboard-section__meta span")?.textContent?.trim(),
           ].filter(Boolean).join(" "),
           top: section.getBoundingClientRect().top,
@@ -128,7 +129,7 @@ test.describe("MobileShell — phase 1 foundation", () => {
     await expect(refresh).toBeVisible();
     const geometry = await page.evaluate(() => {
       const panel = document.querySelector('[data-testid="dashboard-section-news"] .dashboard-news');
-      const portfolioPanel = document.querySelector('[data-testid="dashboard-section-portfolio"] .snapshot-card');
+      const portfolioPanel = document.querySelector('[data-testid="dashboard-section-portfolio"] .snapshot-card, [data-testid="dashboard-section-portfolio"] .snap-mobile-grid');
       const headerEl = panel?.querySelector(".section-header");
       const refreshEl = panel?.querySelector(".news-feed-refresh");
       const panelRect = panel?.getBoundingClientRect();
