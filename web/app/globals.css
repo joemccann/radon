@@ -1541,6 +1541,8 @@ body {
   .dashboard-section--news { order: 2; }
   .dashboard-section--orders { order: 3; }
   .dashboard-section--opportunities { order: 4; }
+  .dashboard-section--flow-surprise { order: 5; }
+  .dashboard-section--catalysts { order: 6; }
   .dashboard-section__toggle {
     padding: 0 4px;
   }

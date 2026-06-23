@@ -83,6 +83,31 @@ describe("dashboard mobile newsfeed layout", () => {
     expect(ruleBlock(mobile, ".dashboard-section--news")).toMatch(/order:\s*2/);
     expect(ruleBlock(mobile, ".dashboard-section--orders")).toMatch(/order:\s*3/);
     expect(ruleBlock(mobile, ".dashboard-section--opportunities")).toMatch(/order:\s*4/);
+    expect(ruleBlock(mobile, ".dashboard-section--flow-surprise")).toMatch(/order:\s*5/);
+    expect(ruleBlock(mobile, ".dashboard-section--catalysts")).toMatch(/order:\s*6/);
+  });
+
+  it("never leads the mobile dashboard with Flow Surprise", () => {
+    const mobile = mediaBlock("(max-width: 720px)");
+
+    // `.dashboard-surface__main` is `display: contents`, so every section becomes
+    // a flex child of `.dashboard-surface`. A section without an explicit order
+    // defaults to flex order 0 and sorts ABOVE the portfolio snapshot (order 1) —
+    // which is exactly how Flow Surprise once floated to the top on mobile.
+    const orderOf = (modifier: string): number => {
+      const match = ruleBlock(mobile, `.dashboard-section--${modifier}`).match(/order:\s*(\d+)/);
+      expect(match, `order missing for ${modifier}`).not.toBeNull();
+      return Number(match![1]);
+    };
+
+    const portfolioOrder = orderOf("portfolio");
+    const flowSurpriseOrder = orderOf("flow-surprise");
+
+    expect(portfolioOrder).toBe(1);
+    expect(flowSurpriseOrder).toBeGreaterThan(portfolioOrder);
+    // Flow Surprise sits below the primary actionable surfaces, matching desktop intent.
+    expect(flowSurpriseOrder).toBeGreaterThan(orderOf("orders"));
+    expect(flowSurpriseOrder).toBeGreaterThan(orderOf("opportunities"));
   });
 
   it("stacks the mobile news header actions so Refresh stays inside the panel border", () => {
