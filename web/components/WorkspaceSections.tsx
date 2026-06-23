@@ -3190,7 +3190,11 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
     case "cta":
       return <CtaPage />;
     case "alerts":
-      return <AlertsPanel />;
+      return (
+        <div className="alerts-shell">
+          <AlertsPanel />
+        </div>
+      );
     case "workflow":
       return <WorkflowComposer />;
     case "admin":

@@ -13839,3 +13839,114 @@ body[data-mobile="true"] button {
   padding-right: 12px;
   flex-shrink: 0;
 }
+
+/* ── Alerts (signal alert rules) ─────────────────────────────────────────────
+   Appended at end so `.alerts-rule` wins source-order over `.snapshot-row`
+   (it extends it to 5 columns) and the mobile overrides win over the base form.
+   All color via brand tokens + color-mix; no raw hex. */
+.alerts-shell {
+  max-width: 880px; /* matches .profile-surface — the app's content width */
+}
+.alerts-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto auto auto;
+  align-items: end;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+}
+.alerts-form__field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.alerts-form__label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.alerts-form__submit {
+  align-self: end;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 40%, transparent);
+  border-radius: 4px;
+  white-space: nowrap;
+}
+.alerts-form__submit:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--signal-core) 12%, transparent);
+  text-decoration: none;
+}
+.alerts-error__retry {
+  margin-left: 10px;
+}
+/* Rule row: extend the 4-col snapshot-row to 5 (chip / predicate / fired / channel / action). */
+.alerts-rule {
+  grid-template-columns: minmax(64px, max-content) minmax(0, 1fr) auto auto auto;
+}
+.alerts-rule__chip {
+  justify-self: start;
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 14%, transparent);
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+}
+.alerts-rule__fired {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.alerts-rule__fired--recent {
+  color: var(--positive);
+}
+.alerts-rule__channel {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.snapshot-row__action {
+  margin-left: auto;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  transition: color 120ms ease;
+}
+.snapshot-row__action:hover {
+  color: var(--negative);
+}
+/* Mobile: stack the form, full-width 44px tap targets. */
+body[data-mobile="true"] .alerts-form {
+  grid-template-columns: 1fr;
+}
+body[data-mobile="true"] .alerts-form .order-input,
+body[data-mobile="true"] .alerts-form .filter-select,
+body[data-mobile="true"] .alerts-form .alerts-form__submit {
+  min-height: 44px;
+  width: 100%;
+}
+body[data-mobile="true"] .alerts-rule {
+  grid-template-columns: minmax(56px, max-content) minmax(0, 1fr) auto;
+}
+/* On mobile, fold the fired/channel cells under the predicate to avoid overflow. */
+body[data-mobile="true"] .alerts-rule__fired {
+  grid-column: 2;
+}
+body[data-mobile="true"] .alerts-rule__channel {
+  display: none;
+}

@@ -50,9 +50,9 @@ describe("AlertsPanel", () => {
     mockFetchSequence([() => new Response(JSON.stringify({ rules: [SAMPLE_RULE] }), { status: 200 })]);
     render(<AlertsPanel />);
     await waitFor(() => expect(screen.getByText("AAPL")).toBeTruthy());
-    // the rule row renders the predicate "flow_strength > 70" (a <select>
-    // option also contains "flow_strength", so scope to the combined text)
-    expect(screen.getByText(/flow_strength\s*>\s*70/)).toBeTruthy();
+    // the rule row renders the HUMAN-READABLE predicate "Flow Strength > 70"
+    // (not the raw snake_case metric key)
+    expect(screen.getByText(/Flow Strength\s*>\s*70/)).toBeTruthy();
   });
 
   it("renders the empty state when there are no rules", async () => {
@@ -114,7 +114,70 @@ describe("AlertsPanel", () => {
     render(<AlertsPanel />);
     await waitFor(() => expect(screen.getByText("AAPL")).toBeTruthy());
 
-    fireEvent.click(screen.getByRole("button", { name: /delete alert rule/i }));
+    // delete button now carries a rule-specific label
+    fireEvent.click(screen.getByRole("button", { name: /remove alert aapl/i }));
+    await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+  });
+
+  it("recovers from a load error via the Retry button", async () => {
+    mockFetchSequence([
+      () => new Response("boom", { status: 500 }),
+      () => new Response(JSON.stringify({ rules: [SAMPLE_RULE] }), { status: 200 }),
+    ]);
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByText(/failed/i)).toBeTruthy());
+    fireEvent.click(screen.getByRole("button", { name: /retry/i }));
+    await waitFor(() => expect(screen.getByText("AAPL")).toBeTruthy());
+  });
+
+  it("surfaces last_fired_at as a relative time, or 'Never fired'", async () => {
+    const fired = { ...SAMPLE_RULE, id: "rule-2", last_fired_at: new Date(Date.now() - 3600_000).toISOString() };
+    mockFetchSequence([() => new Response(JSON.stringify({ rules: [SAMPLE_RULE, fired] }), { status: 200 })]);
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getAllByText("AAPL").length).toBe(2));
+    expect(screen.getByText(/never fired/i)).toBeTruthy();
+    expect(screen.getByText(/^fired /i)).toBeTruthy();
+  });
+
+  it("rejects a threshold outside the metric's range before POSTing", async () => {
+    const post = vi.fn();
+    mockFetchSequence([
+      () => new Response(JSON.stringify({ rules: [] }), { status: 200 }),
+      (_url, init) => {
+        post(init);
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+    ]);
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/ticker/i), { target: { value: "AAPL" } });
+    fireEvent.change(screen.getByLabelText(/^metric$/i), { target: { value: "buy_ratio" } });
+    fireEvent.change(screen.getByLabelText(/threshold/i), { target: { value: "70" } });
+    fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
+
+    // buy_ratio range is 0-1, so 70 is rejected client-side with no POST
+    await waitFor(() => expect(screen.getByText(/between 0 and 1/i)).toBeTruthy());
+    expect(post).not.toHaveBeenCalled();
+  });
+
+  it("offers a channel selector and sends the chosen channel", async () => {
+    mockFetchSequence([
+      () => new Response(JSON.stringify({ rules: [] }), { status: 200 }),
+      (_url, init) => {
+        const body = JSON.parse(String(init?.body));
+        expect(body.channel).toBe("service_health");
+        return new Response(JSON.stringify({ ok: true }), { status: 200 });
+      },
+      () => new Response(JSON.stringify({ rules: [] }), { status: 200 }),
+    ]);
+    render(<AlertsPanel />);
+    await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
+
+    fireEvent.change(screen.getByLabelText(/ticker/i), { target: { value: "AAPL" } });
+    fireEvent.change(screen.getByLabelText(/threshold/i), { target: { value: "70" } });
+    fireEvent.change(screen.getByLabelText(/channel/i), { target: { value: "service_health" } });
+    fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
     await waitFor(() => expect(screen.getByText(/no alert rules/i)).toBeTruthy());
   });
 
