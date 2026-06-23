@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type ReactNode } from "react";
+import { type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useViewport } from "@/lib/useViewport";
+import { useDashboardSectionVisibility } from "@/lib/useDashboardSectionVisibility";
 import DashboardNewsFeed from "@/components/DashboardNewsFeed";
 import { PortfolioSnapshotCard } from "./PortfolioSnapshotCard";
 import { OrdersSnapshotCard } from "./OrdersSnapshotCard";
@@ -21,14 +22,17 @@ function DashboardSection({
   id,
   label,
   count,
+  open,
+  onToggle,
   children,
 }: {
   id: string;
   label: string;
   count?: string;
+  open: boolean;
+  onToggle: (id: string) => void;
   children: ReactNode;
 }) {
-  const [open, setOpen] = useState(true);
   const { isMobile, hasMounted } = useViewport();
   const mobile = isMobile && hasMounted;
 
@@ -42,7 +46,7 @@ function DashboardSection({
         aria-expanded={open}
         aria-controls={`dashboard-section-body-${id}`}
         aria-label={mobile ? label : undefined}
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={() => onToggle(id)}
       >
         {!mobile && <span className="dashboard-section__title">{label}</span>}
         <span className="dashboard-section__meta">
@@ -82,27 +86,29 @@ export default function DashboardSurface({
   orders,
   realizedPnl = 0,
 }: DashboardSurfaceProps) {
+  const { isHidden, toggle } = useDashboardSectionVisibility();
+
   return (
     <div className="dashboard-surface">
       <div className="dashboard-surface__main">
-        <DashboardSection id="portfolio" label="Portfolio" count="01">
+        <DashboardSection id="portfolio" label="Portfolio" count="01" open={!isHidden("portfolio")} onToggle={toggle}>
         <PortfolioSnapshotCard portfolio={portfolio} realizedPnl={realizedPnl} />
         </DashboardSection>
-        <DashboardSection id="orders" label="Working & Filled" count="03">
+        <DashboardSection id="orders" label="Working & Filled" count="03" open={!isHidden("orders")} onToggle={toggle}>
           <OrdersSnapshotCard orders={orders} />
         </DashboardSection>
-        <DashboardSection id="opportunities" label="Trading Candidates" count="04">
+        <DashboardSection id="opportunities" label="Trading Candidates" count="04" open={!isHidden("opportunities")} onToggle={toggle}>
           <OpportunitiesCard />
         </DashboardSection>
-        <DashboardSection id="flow-surprise" label="Flow Surprise" count="05">
+        <DashboardSection id="flow-surprise" label="Flow Surprise" count="05" open={!isHidden("flow-surprise")} onToggle={toggle}>
           <FlowSurpriseCard />
         </DashboardSection>
-        <DashboardSection id="catalysts" label="Upcoming Catalysts" count="06">
+        <DashboardSection id="catalysts" label="Upcoming Catalysts" count="06" open={!isHidden("catalysts")} onToggle={toggle}>
           <CatalystCard />
         </DashboardSection>
       </div>
       <aside className="dashboard-surface__rail" aria-label="Newsfeed">
-        <DashboardSection id="news" label="Live Market Feed" count="02">
+        <DashboardSection id="news" label="Live Market Feed" count="02" open={!isHidden("news")} onToggle={toggle}>
           <DashboardNewsFeed />
         </DashboardSection>
       </aside>
