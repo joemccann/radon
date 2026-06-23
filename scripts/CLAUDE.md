@@ -54,7 +54,7 @@ Quick reference; full methodology in `docs/evaluation.md`.
 4. **Edge decision — PASS/FAIL** (FAIL = stop)
 5. Structure — convex (R:R < 2:1 = stop)
 6. Kelly sizing — enforce 2.5% cap
-7. Log → `trade_log.json` (executed) or `docs/status.md` (NO_TRADE)
+7. Log → Turso `journal` table (executed) or `docs/status.md` (NO_TRADE)
 
 Reports at milestone 5 are mandatory — see `docs/reports.md` for templates.
 

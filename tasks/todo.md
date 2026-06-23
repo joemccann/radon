@@ -4465,3 +4465,26 @@ verify search returns results on app.radon.run.
 - Post-merge root tool tests passed: `npx vitest run lib/tools/__tests__ --config vitest.config.ts` — 8 files, 65 tests.
 - Post-merge web typecheck passed: `cd web && npm run typecheck`.
 - Post-merge web test suite passed: `cd web && npm test -- --reporter=dot` — 340 files, 3369 passed, 26 skipped.
+
+### Second Merge Repair
+
+#### Dependency Graph
+- T40 (Inspect the upstream revert and identify which `ib_sync.py` changes must be preserved or restored) depends_on: []
+- T41 (Repair `scripts/ib_sync.py` and scoped docs so Turso remains the runtime source while respecting the upstream partial-cover revert) depends_on: [T40]
+- T42 (Rerun source-contract scans and focused `ib_sync.py` / Python tests) depends_on: [T41]
+- T43 (Rerun full verification gates after the repair) depends_on: [T42]
+- T44 (Commit repair/docs and push `main`) depends_on: [T43]
+
+#### Checklist
+- [x] T40 Inspect the upstream revert and identify preserved/restored changes
+- [x] T41 Repair `scripts/ib_sync.py` and scoped docs
+- [x] T42 Rerun source-contract scans and focused tests
+- [x] T43 Rerun full verification gates after repair
+- [ ] T44 Commit repair/docs and push `main`
+
+#### Review
+- A second upstream merge brought in `16493e8` (`Revert "fix(positions): a partial close must not change the remaining per-unit basis"`). The merge removed the partial-cover regression as intended by upstream, but also reintroduced flat-file source-of-truth reads in `scripts/ib_sync.py`.
+- Repaired `scripts/ib_sync.py` to keep `read_journal_entry_date_maps()`, `read_latest_portfolio_snapshot()`, `read_open_orders()`, and canonical `portfolio_snapshots` writes while leaving the reverted basis-carry helper/test out.
+- Updated `scripts/CLAUDE.md` so the evaluation pipeline points executed trades at the Turso `journal` table instead of `trade_log.json`.
+- Focused repair verification passed: no `portfolio.json` / `trade_log.json` / `orders.json` / `blotter.json` source hits in `scripts/ib_sync.py` or `scripts/CLAUDE.md`; `python3.13 -m py_compile scripts/ib_sync.py`; `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_flat_json_source_truth_contract.py scripts/tests/test_combo_entry_date.py scripts/tests/test_db_readers.py -q` — 15 passed, 1 warning.
+- Full post-repair verification passed: `git diff --check`; `PYTHONPATH=scripts python3.13 -m pytest scripts/tests -q` — 3273 passed, 13 skipped, 90 deselected, 13 warnings; `npx vitest run lib/tools/__tests__ --config vitest.config.ts` — 8 files, 65 tests; `cd web && npm run typecheck`; `cd web && npm test -- --reporter=dot` — 340 files, 3369 passed, 26 skipped.
