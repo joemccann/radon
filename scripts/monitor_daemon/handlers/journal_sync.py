@@ -21,8 +21,10 @@ Failure mode:
 
 from __future__ import annotations
 
+import json
 import logging
-from datetime import datetime, timedelta
+import shutil
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -109,14 +111,27 @@ class JournalSyncHandler(BaseHandler):
 
         result["fills_seen"] = len(fills)
 
+        db = self._open_db()
+
         try:
-            existing = self._load_existing()
+            existing, recovery = self._load_existing_with_recovery(db)
         except Exception as exc:  # noqa: BLE001
             logger.warning("journal_sync: failed to load trade_log: %s", exc)
             result["error"] = f"trade_log read failed: {exc}"
             return result
 
-        db = self._open_db()
+        if recovery:
+            result["recovered_trade_log_from_journal"] = recovery["journal_rows"]
+            result["salvaged_trade_log_rows"] = recovery["salvaged_rows"]
+            backup = self._backup_corrupt_trade_log()
+            if backup is not None:
+                result["trade_log_recovery_backup"] = backup.name
+            try:
+                atomic_save(str(self.trade_log_path), existing)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("journal_sync: failed to repair trade_log mirror: %s", exc)
+                result["error"] = f"trade_log repair failed: {exc}"
+                return result
 
         # Phase 1: reconcile disk rows whose DB upsert previously failed.
         # This re-attempts any exec_id on disk that is absent from the journal
@@ -247,9 +262,9 @@ class JournalSyncHandler(BaseHandler):
     def _dual_write(self, candidates: List[Dict[str, Any]]) -> None:
         """Mirror new rows to the Turso ``journal`` table.
 
-        Failures are logged and swallowed — the canonical source remains
-        ``trade_log.json``; the next execute() cycle's reconcile step will
-        retry any failed upsert automatically.
+        Failures are logged and swallowed. The Turso ``journal`` table is the
+        canonical app store; ``trade_log.json`` remains a local mirror and the
+        next execute() cycle's reconcile step retries any failed upsert.
         """
         if upsert_journal_entry is None:
             return
@@ -265,14 +280,172 @@ class JournalSyncHandler(BaseHandler):
 
     # -- internals ---------------------------------------------------------
 
+    def _load_existing_with_recovery(self, db: Any) -> tuple[Dict[str, Any], Optional[Dict[str, int]]]:
+        try:
+            return self._load_existing(), None
+        except Exception as exc:  # noqa: BLE001
+            if not self._is_recoverable_trade_log_error(exc):
+                raise
+
+            journal_data = self._load_existing_from_journal(db)
+            if not journal_data.get("trades"):
+                raise
+
+            salvaged_data = self._load_unverified_trade_log()
+            recovered = self._merge_trade_logs(journal_data, salvaged_data)
+            if not recovered.get("trades"):
+                raise
+
+            logger.warning(
+                "journal_sync: recovered trade_log mirror after %s "
+                "(journal_rows=%s, salvaged_rows=%s)",
+                exc,
+                len(journal_data.get("trades", [])),
+                len(salvaged_data.get("trades", [])),
+            )
+            return recovered, {
+                "journal_rows": len(journal_data.get("trades", [])),
+                "salvaged_rows": len(salvaged_data.get("trades", [])),
+            }
+
     def _load_existing(self) -> Dict[str, Any]:
         try:
             data = verified_load(str(self.trade_log_path))
         except FileNotFoundError:
             data = {"trades": []}
-        if "trades" not in data or not isinstance(data["trades"], list):
-            data["trades"] = []
-        return data
+        return self._normalize_trade_log(data)
+
+    @staticmethod
+    def _is_recoverable_trade_log_error(exc: Exception) -> bool:
+        if isinstance(exc, json.JSONDecodeError):
+            return True
+        return isinstance(exc, ValueError) and "Checksum mismatch" in str(exc)
+
+    def _load_existing_from_journal(self, db: Any) -> Dict[str, Any]:
+        if db is None:
+            raise RuntimeError("journal DB unavailable for trade_log recovery")
+        try:
+            rows = db.execute(
+                """
+                SELECT trade_id, payload, filled_at, written_at
+                FROM journal
+                ORDER BY COALESCE(filled_at, written_at), written_at
+                """
+            ).fetchall()
+        except Exception as exc:  # noqa: BLE001
+            raise RuntimeError(f"journal DB recovery query failed: {exc}") from exc
+
+        trades: List[Dict[str, Any]] = []
+        for row in rows:
+            trade_id = self._row_value(row, 0, "trade_id")
+            payload_raw = self._row_value(row, 1, "payload")
+            filled_at = self._row_value(row, 2, "filled_at")
+            written_at = self._row_value(row, 3, "written_at")
+            try:
+                payload = self._decode_journal_payload(payload_raw)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("journal_sync: skipped invalid journal payload %s: %s", trade_id, exc)
+                continue
+            if not isinstance(payload, dict):
+                continue
+
+            trade = dict(payload)
+            if trade_id and not trade.get("ib_exec_id"):
+                trade["ib_exec_id"] = str(trade_id)
+            if filled_at and not trade.get("filled_at"):
+                trade["filled_at"] = str(filled_at)
+            if not trade.get("date"):
+                timestamp = filled_at or written_at
+                if timestamp:
+                    trade["date"] = str(timestamp)[:10]
+            trades.append(trade)
+
+        if not trades:
+            raise RuntimeError("journal table is empty; cannot recover trade_log mirror")
+        return self._normalize_trade_log({"trades": trades})
+
+    def _load_unverified_trade_log(self) -> Dict[str, Any]:
+        """Best-effort salvage for valid JSON whose checksum no longer matches."""
+        try:
+            with self.trade_log_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("journal_sync: unverified trade_log salvage failed: %s", exc)
+            return {"trades": []}
+        return self._normalize_trade_log(data if isinstance(data, dict) else {"trades": []})
+
+    @staticmethod
+    def _decode_journal_payload(payload_raw: Any) -> Dict[str, Any]:
+        if isinstance(payload_raw, dict):
+            return payload_raw
+        if isinstance(payload_raw, bytes):
+            payload_raw = payload_raw.decode("utf-8")
+        if isinstance(payload_raw, str):
+            parsed = json.loads(payload_raw)
+            if isinstance(parsed, dict):
+                return parsed
+        raise ValueError("journal payload is not an object")
+
+    @staticmethod
+    def _row_value(row: Any, index: int, attr: str) -> Any:
+        if isinstance(row, (tuple, list)):
+            return row[index] if len(row) > index else None
+        return getattr(row, attr, None)
+
+    def _merge_trade_logs(self, primary: Dict[str, Any], secondary: Dict[str, Any]) -> Dict[str, Any]:
+        merged: List[Dict[str, Any]] = []
+        seen_exec_ids: set[str] = set()
+        for source in (primary, secondary):
+            for trade in source.get("trades", []):
+                if not isinstance(trade, dict):
+                    continue
+                exec_id = str(trade.get("ib_exec_id") or "").strip()
+                parts = [exec_id] + [part.strip() for part in exec_id.split("+") if part.strip()]
+                if exec_id and any(part in seen_exec_ids for part in parts):
+                    continue
+                merged.append(dict(trade))
+                for part in parts:
+                    if part:
+                        seen_exec_ids.add(part)
+        return self._normalize_trade_log({"trades": merged})
+
+    @staticmethod
+    def _normalize_trade_log(data: Dict[str, Any]) -> Dict[str, Any]:
+        trades_raw = data.get("trades") if isinstance(data, dict) else []
+        trades = [dict(trade) for trade in trades_raw if isinstance(trade, dict)] if isinstance(trades_raw, list) else []
+
+        used_ids: set[int] = set()
+        next_id = 1
+        for trade in trades:
+            raw_id = trade.get("id")
+            try:
+                trade_id = int(raw_id)
+            except (TypeError, ValueError):
+                trade_id = 0
+            if trade_id <= 0 or trade_id in used_ids:
+                while next_id in used_ids:
+                    next_id += 1
+                trade_id = next_id
+            trade["id"] = trade_id
+            used_ids.add(trade_id)
+            next_id = max(next_id, trade_id + 1)
+        return {"trades": trades}
+
+    def _backup_corrupt_trade_log(self) -> Optional[Path]:
+        if not self.trade_log_path.exists():
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        backup = self.trade_log_path.with_name(f"{self.trade_log_path.name}.corrupt.{stamp}")
+        suffix = 1
+        while backup.exists():
+            backup = self.trade_log_path.with_name(f"{self.trade_log_path.name}.corrupt.{stamp}.{suffix}")
+            suffix += 1
+        try:
+            shutil.copy2(self.trade_log_path, backup)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("journal_sync: failed to back up corrupt trade_log: %s", exc)
+            return None
+        return backup
 
     def _existing_exec_ids(self, trades: List[Dict[str, Any]]) -> set[str]:
         ids: set[str] = set()
