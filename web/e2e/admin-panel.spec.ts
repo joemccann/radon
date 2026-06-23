@@ -131,6 +131,38 @@ test.describe("admin panel", () => {
     await expect.poll(() => restartHits).toBe(1);
   });
 
+  test("Stop-gateway confirm dialog copies the unit token to the clipboard", async ({
+    page,
+    context,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+    await page.route("**/api/admin/health", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HEALTH_OK) }),
+    );
+    await page.route("**/api/admin/services", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SERVICES) }),
+    );
+
+    await page.goto("/admin");
+
+    // Open the destructive Stop dialog for the gateway unit (gated by type-to-confirm).
+    await page.getByTestId("service-stop-radon-ib-gateway.service").click();
+    await expect(page.getByTestId("admin-confirm")).toBeVisible();
+
+    const copy = page.getByTestId("admin-confirm-copy");
+    await expect(copy).toHaveText("Copy");
+    await expect(copy).toHaveAttribute(
+      "aria-label",
+      "Copy radon-ib-gateway.service to clipboard",
+    );
+
+    await copy.click();
+    await expect(copy).toHaveText("Copied");
+
+    const clip = await page.evaluate(() => navigator.clipboard.readText());
+    expect(clip).toBe("radon-ib-gateway.service");
+  });
+
   test("Force 2FA button is disabled when push lock is held", async ({ page }) => {
     await page.route("**/api/admin/health", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HEALTH_PUSH_LOCKED) }),

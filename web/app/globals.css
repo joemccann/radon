@@ -12959,6 +12959,24 @@ body[data-mobile="true"] td.right {
   font-family: var(--font-mono, ui-monospace, monospace);
   color: var(--negative);
 }
+.admin-confirm-copy {
+  margin: 0 4px;
+  padding: 1px 7px;
+  border-radius: 4px;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 40%, transparent);
+  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
+  color: var(--signal-core);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 11px;
+  cursor: pointer;
+}
+.admin-confirm-copy:hover {
+  background: color-mix(in srgb, var(--signal-core) 16%, transparent);
+}
+.admin-confirm-copy:focus-visible {
+  outline: 1px solid var(--signal-core);
+  outline-offset: 1px;
+}
 .admin-confirm-typed-input {
   display: block;
   width: 100%;
