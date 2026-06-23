@@ -2,32 +2,40 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-/**
- * Persists which dashboard sections (01-05 etc.) the user has hidden.
- *
- * Sections default to shown. A hidden section id is stored in a Set persisted
- * to localStorage so the collapsed state survives a page reload.
- *
- * SSR safety: the first render (server + client hydration) MUST return the
- * default "nothing hidden" state, never reading localStorage, or React #418
- * hydration mismatch fires. Stored hidden ids are rehydrated in a mount effect
- * and written back on every toggle.
- */
+export const DASHBOARD_SECTION_IDS = [
+  "portfolio",
+  "news",
+  "orders",
+  "opportunities",
+  "flow-surprise",
+  "catalysts",
+] as const;
+
 const STORAGE_KEY = "radon:mobile-dashboard:hidden-sections";
+const SECTION_ID_SET = new Set<string>(DASHBOARD_SECTION_IDS);
 
 export type DashboardSectionVisibility = {
   isHidden: (id: string) => boolean;
   toggle: (id: string) => void;
 };
 
+function normalizeHiddenIds(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+
+  const ids = [
+    ...new Set(value.filter((item): item is string => SECTION_ID_SET.has(item))),
+  ];
+
+  // Fail open. A legacy/corrupt state with every section hidden makes the
+  // dashboard look blank and survives reloads.
+  return ids.length >= DASHBOARD_SECTION_IDS.length ? [] : ids;
+}
+
 function readHiddenIds(): string[] {
   if (typeof window === "undefined") return [];
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((value): value is string => typeof value === "string");
+    return raw ? normalizeHiddenIds(JSON.parse(raw)) : [];
   } catch {
     return [];
   }
@@ -47,17 +55,26 @@ export function useDashboardSectionVisibility(): DashboardSectionVisibility {
     try {
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify([...hidden]));
     } catch {
-      // ignore quota / private-mode errors
+      // Ignore quota / private-mode errors.
     }
   }, [hasMounted, hidden]);
 
   const isHidden = useCallback((id: string) => hidden.has(id), [hidden]);
 
   const toggle = useCallback((id: string) => {
+    if (!SECTION_ID_SET.has(id)) return;
+
     setHidden((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+        return next;
+      }
+
+      // Keep at least one section visible. This preserves the collapse
+      // affordance without allowing a persistent all-blank dashboard.
+      if (next.size >= DASHBOARD_SECTION_IDS.length - 1) return next;
+      next.add(id);
       return next;
     });
   }, []);

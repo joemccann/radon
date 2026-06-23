@@ -92,7 +92,7 @@ export default function DashboardSurface({
     <div className="dashboard-surface">
       <div className="dashboard-surface__main">
         <DashboardSection id="portfolio" label="Portfolio" count="01" open={!isHidden("portfolio")} onToggle={toggle}>
-        <PortfolioSnapshotCard portfolio={portfolio} realizedPnl={realizedPnl} />
+          <PortfolioSnapshotCard portfolio={portfolio} realizedPnl={realizedPnl} />
         </DashboardSection>
         <DashboardSection id="orders" label="Working & Filled" count="03" open={!isHidden("orders")} onToggle={toggle}>
           <OrdersSnapshotCard orders={orders} />

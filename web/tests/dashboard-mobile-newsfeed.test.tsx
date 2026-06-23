@@ -5,10 +5,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import React from "react";
-import { cleanup, render, within } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, waitFor, within } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import DashboardSurface from "../components/dashboard/DashboardSurface";
+import { DASHBOARD_SECTION_IDS } from "../lib/useDashboardSectionVisibility";
 
 vi.mock("@/components/DashboardNewsFeed", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-news-feed" }),
@@ -27,6 +28,29 @@ vi.mock("../components/dashboard/OpportunitiesCard", () => ({
 }));
 
 const css = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
+const STORAGE_KEY = "radon:mobile-dashboard:hidden-sections";
+
+function resetLocalStorage(): void {
+  if (
+    typeof window.localStorage?.clear === "function" &&
+    typeof window.localStorage?.getItem === "function" &&
+    typeof window.localStorage?.setItem === "function"
+  ) {
+    window.localStorage.clear();
+    return;
+  }
+
+  const store = new Map<string, string>();
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, String(value)),
+      removeItem: (key: string) => store.delete(key),
+      clear: () => store.clear(),
+    },
+  });
+}
 
 function mediaBlock(query: string): string {
   const start = css.indexOf(`@media ${query}`);
@@ -51,6 +75,10 @@ function ruleBlock(source: string, selector: string): string {
   return match![1];
 }
 
+beforeEach(() => {
+  resetLocalStorage();
+});
+
 afterEach(() => {
   cleanup();
 });
@@ -70,6 +98,20 @@ describe("dashboard mobile newsfeed layout", () => {
     expect(
       within(getByTestId("dashboard-section-orders")).getByRole("button").textContent,
     ).toMatch(/Working & Filled\s*03/);
+  });
+
+  it("fails open when persisted state hides every dashboard section", async () => {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(DASHBOARD_SECTION_IDS));
+
+    render(
+      <DashboardSurface portfolio={null} orders={null} realizedPnl={0} />,
+    );
+
+    await waitFor(() => {
+      expect(document.getElementById("dashboard-section-body-portfolio")?.hasAttribute("hidden")).toBe(false);
+      expect(document.getElementById("dashboard-section-body-news")?.hasAttribute("hidden")).toBe(false);
+      expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual([]);
+    });
   });
 
   it("keeps the mobile visual order aligned with the section numbers", () => {
@@ -92,7 +134,7 @@ describe("dashboard mobile newsfeed layout", () => {
 
     // `.dashboard-surface__main` is `display: contents`, so every section becomes
     // a flex child of `.dashboard-surface`. A section without an explicit order
-    // defaults to flex order 0 and sorts ABOVE the portfolio snapshot (order 1) —
+    // defaults to flex order 0 and sorts above the portfolio snapshot (order 1),
     // which is exactly how Flow Surprise once floated to the top on mobile.
     const orderOf = (modifier: string): number => {
       const match = ruleBlock(mobile, `.dashboard-section--${modifier}`).match(/order:\s*(\d+)/);
