@@ -29,6 +29,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from clients.uw_client import UWClient, UWAPIError, UWRateLimitError
+from db.readers import read_portfolio_positions, read_watchlist_tickers
 
 logger = logging.getLogger(__name__)
 from utils.market_calendar import (
@@ -49,9 +50,6 @@ try:
 except Exception:  # pragma: no cover — alerts layer optional
     def run_alerts_for_results(*args, **kwargs):  # type: ignore
         return 0
-
-WATCHLIST = Path(__file__).parent.parent / "data" / "watchlist.json"
-PORTFOLIO = Path(__file__).parent.parent / "data" / "portfolio.json"
 
 # Keep for backward compatibility with existing tests
 MARKET_HOLIDAYS_2026 = load_holidays(2026)
@@ -76,17 +74,14 @@ WEIGHTS = {
 
 
 def get_existing_tickers() -> set:
-    """Get tickers already in watchlist or portfolio."""
-    tickers = set()
-    if WATCHLIST.exists():
-        with open(WATCHLIST) as f:
-            data = json.load(f)
-            tickers.update(t.get("ticker") or t.get("symbol", "") for t in data.get("tickers", []) if isinstance(t, dict))
-    if PORTFOLIO.exists():
-        with open(PORTFOLIO) as f:
-            data = json.load(f)
-            tickers.update(p["ticker"] for p in data.get("positions", []))
-    return tickers
+    """Get tickers already in Turso watchlist or latest portfolio snapshot."""
+    tickers = {t.upper() for t in read_watchlist_tickers()}
+    tickers.update(
+        str(p.get("ticker") or "").upper()
+        for p in read_portfolio_positions()
+        if p.get("ticker")
+    )
+    return {t for t in tickers if t}
 
 
 def fetch_options_flow(min_premium: int = 500000, limit: int = 100, _client: UWClient = None) -> list:

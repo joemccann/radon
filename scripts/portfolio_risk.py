@@ -12,18 +12,19 @@ can decide. It never resizes or proposes trades.
 
 Pure-function core (``build_correlation_matrix`` / ``build_risk_budget_report``)
 takes in-memory price-series dicts so it is fully testable offline. The
-``load_price_series_for_portfolio`` / ``run`` helpers wire it to the on-disk
-``data/price_history_cache/``; they are the only network/disk-touching paths and
-are never exercised by the unit tests.
+``load_price_series_for_portfolio`` / ``run`` helpers wire positions from Turso
+to the generated ``data/price_history_cache/`` cache; they are the only
+disk-touching paths and are never exercised by the unit tests.
 """
 
 from __future__ import annotations
 
 import json
 import math
-import os
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
+
+from db.readers import read_latest_portfolio_snapshot
 
 # ── Constants ────────────────────────────────────────────────────────────────
 
@@ -357,10 +358,9 @@ def _read_cache_record(path: Path) -> Optional[dict]:
         return None
 
 
-def run(portfolio_path: str = "data/portfolio.json") -> dict:
-    """Build the report from the on-disk portfolio + price cache."""
-    with open(portfolio_path) as handle:
-        portfolio = json.load(handle)
+def run() -> dict:
+    """Build the report from the latest Turso portfolio snapshot + price cache."""
+    portfolio = read_latest_portfolio_snapshot() or {"positions": []}
     series = load_price_series_for_portfolio(portfolio)
     return build_risk_budget_report(portfolio, series)
 

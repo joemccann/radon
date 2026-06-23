@@ -3,10 +3,10 @@
 Tests for free_trade_analyzer.py
 """
 
-import json
 import pytest
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -272,21 +272,12 @@ class TestPortfolioLoading:
     """Test live-vs-cache portfolio loading."""
 
     def test_load_portfolio_syncs_from_ib_before_reading_cache(self, monkeypatch, tmp_path):
-        """Default portfolio loading must refresh from IB so startup cannot show stale holdings."""
-        portfolio_path = tmp_path / "portfolio.json"
-        portfolio_path.write_text(json.dumps({
-            "positions": [{"ticker": "TSLA"}],
-        }))
-
-        monkeypatch.setattr(free_trade_module, "PORTFOLIO_FILE", portfolio_path)
+        """Default portfolio loading must refresh from IB before reading DB snapshot."""
 
         calls = []
 
         def fake_run(cmd, cwd=None, capture_output=None, text=None, timeout=None):
             calls.append(cmd)
-            portfolio_path.write_text(json.dumps({
-                "positions": [{"ticker": "MSFT"}],
-            }))
 
             class Result:
                 returncode = 0
@@ -296,7 +287,9 @@ class TestPortfolioLoading:
 
         monkeypatch.setattr(free_trade_module.subprocess, "run", fake_run)
 
-        positions = load_portfolio()
+        with patch("db.readers.read_latest_portfolio_snapshot", return_value={"positions": [{"ticker": "MSFT"}]}):
+            with patch("db.readers.read_portfolio_positions", return_value=[{"ticker": "MSFT"}]):
+                positions = load_portfolio()
 
         assert [p["ticker"] for p in positions] == ["MSFT"]
         assert calls == [[
@@ -308,13 +301,6 @@ class TestPortfolioLoading:
 
     def test_load_portfolio_ib_failure_fails_closed_instead_of_using_stale_cache(self, monkeypatch, tmp_path):
         """If IB sync fails, do not keep showing stale cached positions as if they were current."""
-        portfolio_path = tmp_path / "portfolio.json"
-        portfolio_path.write_text(json.dumps({
-            "positions": [{"ticker": "GOOGL"}],
-        }))
-
-        monkeypatch.setattr(free_trade_module, "PORTFOLIO_FILE", portfolio_path)
-
         def fake_run(cmd, cwd=None, capture_output=None, text=None, timeout=None):
             class Result:
                 returncode = 1
@@ -329,21 +315,30 @@ class TestPortfolioLoading:
 
     def test_load_portfolio_cache_mode_skips_ib_sync(self, monkeypatch, tmp_path):
         """Explicit cache mode keeps the old offline behavior for manual use."""
-        portfolio_path = tmp_path / "portfolio.json"
-        portfolio_path.write_text(json.dumps({
-            "positions": [{"ticker": "AAOI"}],
-        }))
-
-        monkeypatch.setattr(free_trade_module, "PORTFOLIO_FILE", portfolio_path)
-
         def fake_run(*args, **kwargs):
             raise AssertionError("IB sync should not run in cache mode")
 
         monkeypatch.setattr(free_trade_module.subprocess, "run", fake_run)
 
-        positions = load_portfolio(source="cache")
+        with patch("db.readers.read_portfolio_positions", return_value=[{"ticker": "AAOI"}]) as reader:
+            positions = load_portfolio(source="cache")
 
+        reader.assert_called_once_with()
         assert [p["ticker"] for p in positions] == ["AAOI"]
+
+    def test_load_portfolio_ib_sync_requires_db_snapshot(self, monkeypatch):
+        def fake_run(cmd, cwd=None, capture_output=None, text=None, timeout=None):
+            class Result:
+                returncode = 0
+                stderr = ""
+
+            return Result()
+
+        monkeypatch.setattr(free_trade_module.subprocess, "run", fake_run)
+
+        with patch("db.readers.read_latest_portfolio_snapshot", return_value=None):
+            with pytest.raises(RuntimeError, match="sync produced no DB snapshot"):
+                load_portfolio()
 
 
 class TestStartupSummary:

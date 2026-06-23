@@ -1,12 +1,12 @@
 -- 0004_orders_and_ephemeral.sql
 -- Phase 3 (orders) + Phase 4 (ephemeral) of the Turso source-of-truth
 -- migration. Adds per-row tables for the highest-cadence + per-host
--- state currently sitting in non-atomic JSON files.
+-- state previously held in non-atomic snapshots.
 --
 -- Why per-row instead of single-snapshot blobs:
 --   - open_orders / executed_orders are written sub-second on busy days;
 --     a per-row INSERT OR REPLACE keyed by permId / execId scales without
---     read-during-write torn-blob risk that data/orders.json had.
+--     read-during-write torn-blob risk from monolithic order snapshots.
 --   - daemon_state, app_config, watchlist, ticker_lookup_cache are
 --     queried per-key from many call sites; tables let us index + filter
 --     instead of parsing the whole blob each time.
@@ -49,8 +49,8 @@ CREATE TABLE IF NOT EXISTS app_config (
   updated_at  TEXT NOT NULL
 );
 
--- watchlist — one row per ticker. The previous data/watchlist.json was
--- ~590KB blob; per-row lets per-sector / per-source filtering happen in SQL.
+-- watchlist — one row per ticker. The previous monolithic snapshot was ~590KB;
+-- per-row lets per-sector / per-source filtering happen in SQL.
 CREATE TABLE IF NOT EXISTS watchlist (
   ticker      TEXT PRIMARY KEY,
   sector      TEXT,

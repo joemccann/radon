@@ -510,7 +510,7 @@ class IBClient:
         immediately but ``pos.avgCost`` lags by a tick or two while TWS
         recomputes the running VWAP server-side. ``ib.positions()`` alone
         returns the cache, so without the refresh the sync writes a
-        mismatched (size_new / avg_old) pair into ``portfolio.json``. See
+        mismatched (size_new / avg_old) pair into the portfolio snapshot. See
         feedback_ib_position_cache_stale_avgcost.md (forthcoming).
 
         Set ``refresh=False`` for tight read loops where you've already

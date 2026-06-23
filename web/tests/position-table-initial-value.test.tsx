@@ -3,14 +3,16 @@
  *
  * "Initial Value" column on PositionTable.
  *
- * Initial Value = the unsigned notional that was put on at entry.
- *   stock         : qty × avg_entry              (multiplier 1)
- *   single option : contracts × avg_entry × 100
- *   combo         : contracts × net_avg_entry × 100  (= |entry_cost|)
+ * Initial Value = the notional put on at entry.
+ *   stock         : qty × avg_entry              (multiplier 1, positive)
+ *   single option : contracts × avg_entry × 100  (positive notional)
+ *   combo         : net entry cost, SIGNED — a net credit shows NEGATIVE
+ *                   (credits negative, debits positive)
  *
- * Default ON. Toggleable in the Columns popover. Always non-negative —
- * Entry Cost may be negative for credit positions; Initial Value is the
- * absolute notional the user put on.
+ * Default ON. Toggleable in the Columns popover. Single-leg stock/option keep
+ * the unsigned notional; a multi-leg COMBO carries the net credit/debit sign
+ * (a credit was received, so it reads negative). Per-leg LegRow stays
+ * |leg.entry_cost| (positive).
  */
 
 import React from "react";
@@ -129,8 +131,8 @@ const VERTICAL_SPREAD: PortfolioPosition = {
   ],
 };
 
-// Risk reversal opened for net credit. Entry Cost is negative, Initial
-// Value is its absolute magnitude.
+// Risk reversal opened for net credit. Entry Cost is negative, and (combo)
+// Initial Value carries that credit sign → negative.
 const SHORT_RISK_REVERSAL: PortfolioPosition = {
   id: 3,
   ticker: "AAOI",
@@ -218,21 +220,20 @@ describe("PositionTable — Initial Value renders by default", () => {
     expect(tr.textContent ?? "").toContain("$5,000");
   });
 
-  it("never renders a negative Initial Value — credit positions show |entry_cost|", () => {
-    // Risk Reversal opened for $2,500 credit. Initial Value should display
-    // $2,500 (positive), not -$2,500.
+  it("renders a NEGATIVE Initial Value for a net-credit combo (credits are negative)", () => {
+    // Risk Reversal opened for a $2,500 credit. A combo's Initial Value carries
+    // the net credit/debit sign — a credit was RECEIVED, so it must show
+    // -$2,500, not +$2,500 (the EWY ratio-reverse-RR bug, 2026-06-23).
     render(<PositionTable positions={[SHORT_RISK_REVERSAL]} prices={{}} />);
     const tr = screen.getByText("AAOI").closest("tr")!;
-    const text = tr.textContent ?? "";
-    expect(text).toContain("$2,500");
-    // The Initial Value column itself must not show a negative.
-    // (Entry Cost — a different column — may still show -$2,500.)
     const cells = Array.from(tr.querySelectorAll("td")).map((td) => td.textContent?.trim() ?? "");
     const headers = getThTexts();
     const ivIdx = headers.findIndex((h) => h === "Initial Value");
     expect(ivIdx).toBeGreaterThan(-1);
-    expect(cells[ivIdx]).not.toMatch(/^-/);
-    expect(cells[ivIdx]).toBe("$2,500");
+    // Negative (credit). Format-agnostic about "-$" vs "$-".
+    expect(cells[ivIdx]).toContain("-");
+    expect(cells[ivIdx]).toContain("2,500");
+    expect(cells[ivIdx]).not.toBe("$2,500");
   });
 });
 

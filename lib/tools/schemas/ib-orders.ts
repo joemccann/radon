@@ -6,12 +6,12 @@ export const IBOrdersInput = Type.Object({
   host: Type.Optional(Type.String({ description: "TWS/Gateway host" })),
   port: Type.Optional(Type.Number({ description: "TWS/Gateway port" })),
   clientId: Type.Optional(Type.Number({ description: "Client ID" })),
-  sync: Type.Optional(Type.Boolean({ description: "Sync to orders.json" })),
+  sync: Type.Optional(Type.Boolean({ description: "Sync orders into Turso" })),
 });
 
 export type IBOrdersInput = Static<typeof IBOrdersInput>;
 
-// ── Output (matches data/orders.json shape) ───────────────────────────
+// ── Output (matches Turso orders snapshot shape) ──────────────────────
 
 const OrderComboLeg = Type.Object({
   conId: Type.Number(),

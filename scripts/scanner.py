@@ -14,9 +14,9 @@ import logging
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
-from pathlib import Path
 
 from clients.uw_client import UWRateLimitError
+from db.readers import read_portfolio_positions, read_watchlist_items
 from fetch_flow import fetch_flow as fetch_flow_module
 
 try:
@@ -33,18 +33,18 @@ except Exception:  # pragma: no cover — alerts layer optional
 
 logger = logging.getLogger(__name__)
 
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_DIR = SCRIPT_DIR.parent
-WATCHLIST = PROJECT_DIR / "data" / "watchlist.json"
-PORTFOLIO = PROJECT_DIR / "data" / "portfolio.json"
-
 def get_open_positions():
     """Get list of tickers with open positions."""
-    if not PORTFOLIO.exists():
-        return set()
-    with open(PORTFOLIO) as f:
-        portfolio = json.load(f)
-    return {p["ticker"] for p in portfolio.get("positions", [])}
+    return {
+        str(p.get("ticker") or "").upper()
+        for p in read_portfolio_positions()
+        if p.get("ticker")
+    }
+
+
+def get_watchlist_items() -> list[dict]:
+    """Get watchlist rows from Turso."""
+    return read_watchlist_items()
 
 def fetch_flow_data(ticker: str, days: int = 5) -> dict:
     """Fetch flow data for a single ticker via the shared wrapper seam."""
@@ -200,15 +200,8 @@ def scan(top_n: int = 20, min_score: float = 0, max_workers: int = 5):
         min_score: Minimum score threshold.
         max_workers: Maximum concurrent workers (default 15).
     """
-    if not WATCHLIST.exists():
-        print(json.dumps({"error": "No watchlist.json found"}))
-        return
-
-    with open(WATCHLIST) as f:
-        watchlist = json.load(f)
-
     open_positions = get_open_positions()
-    tickers = watchlist.get("tickers", [])
+    tickers = get_watchlist_items()
 
     # Filter out open positions before dispatching to workers
     items_to_scan = [

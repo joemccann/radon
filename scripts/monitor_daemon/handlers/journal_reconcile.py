@@ -3,10 +3,10 @@
 Journal Reconcile Handler — Daily cross-check of executed_orders vs journal.
 
 The JRN-01 root cause: journal_sync._dual_write caught Hrana/libsql
-``stream-not-found`` exceptions, logged them, and returned — so the disk
-(trade_log.json) write succeeded while the Turso journal row was silently
-dropped. On every subsequent pass _fills_to_entries deduped against the
-seen_ids from disk, so the gap became permanent.
+``stream-not-found`` exceptions, logged them, and returned while the
+local mirror made the cycle look successful. On every subsequent pass
+_fills_to_entries deduped against already-seen executions, so the gap
+became permanent.
 
 This handler runs once daily, compares executed_orders with the journal
 table over a bounded look-back window, and alerts when exec_ids exist in

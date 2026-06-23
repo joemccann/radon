@@ -51,10 +51,26 @@ vi.mock("@tools/wrappers/ib-orders", () => ({
   ibOrders: mockIbOrders,
 }));
 
-// Mock @tools/data-reader for reading orders.json after refresh
+// Mock @tools/data-reader for routes that still read cached files
 const mockReadDataFile = vi.fn().mockResolvedValue({ ok: false, error: "not found" });
 vi.mock("@tools/data-reader", () => ({
   readDataFile: mockReadDataFile,
+}));
+
+const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+
+const emptyOrdersSnapshot = {
+  last_sync: "2026-03-14T15:00:00Z",
+  open_orders: [],
+  executed_orders: [],
+  open_count: 0,
+  executed_count: 0,
+};
+
+const mockReadOrdersSnapshotFromDb = vi.fn().mockResolvedValue(emptyOrdersSnapshot);
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
 }));
 
 // Mock @tools/schemas/ib-orders (TypeBox schema import)
@@ -646,6 +662,8 @@ describe("POST /api/orders/cancel — extended", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -735,6 +753,8 @@ describe("POST /api/orders/modify — extended", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -742,16 +762,14 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns success when modify succeeds", async () => {
-    mockReadDataFile.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        open_orders: [
-          { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.5 },
-        ],
-        executed_orders: [],
-        open_count: 1,
-        executed_count: 0,
-      },
+    mockReadOrdersSnapshotFromDb.mockResolvedValueOnce({
+      last_sync: "2026-03-14T15:00:00Z",
+      open_orders: [
+        { orderId: 101, permId: 0, totalQuantity: 25, limitPrice: 5.5 },
+      ],
+      executed_orders: [],
+      open_count: 1,
+      executed_count: 0,
     });
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Order 101 modified to 5.50" })
@@ -806,16 +824,14 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns success when quantity-only modify succeeds", async () => {
-    mockReadDataFile.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        open_orders: [
-          { orderId: 101, permId: 0, totalQuantity: 75, limitPrice: 5.0 },
-        ],
-        executed_orders: [],
-        open_count: 1,
-        executed_count: 0,
-      },
+    mockReadOrdersSnapshotFromDb.mockResolvedValueOnce({
+      last_sync: "2026-03-14T15:00:00Z",
+      open_orders: [
+        { orderId: 101, permId: 0, totalQuantity: 75, limitPrice: 5.0 },
+      ],
+      executed_orders: [],
+      open_count: 1,
+      executed_count: 0,
     });
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Order 101 quantity modified to 75" })
@@ -837,16 +853,14 @@ describe("POST /api/orders/modify — extended", () => {
   });
 
   it("returns 502 when refreshed orders do not confirm the modified price", async () => {
-    mockReadDataFile.mockResolvedValueOnce({
-      ok: true,
-      data: {
-        open_orders: [
-          { orderId: 95, permId: 653624857, totalQuantity: 50, limitPrice: 5.7 },
-        ],
-        executed_orders: [],
-        open_count: 1,
-        executed_count: 0,
-      },
+    mockReadOrdersSnapshotFromDb.mockResolvedValueOnce({
+      last_sync: "2026-03-14T15:00:00Z",
+      open_orders: [
+        { orderId: 95, permId: 653624857, totalQuantity: 50, limitPrice: 5.7 },
+      ],
+      executed_orders: [],
+      open_count: 1,
+      executed_count: 0,
     });
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Order modified: $5.7 → $5.55" })
@@ -952,6 +966,8 @@ describe("POST /api/orders/place — extended", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -1092,6 +1108,8 @@ describe("POST /api/orders/place — silent IB rejection states", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
     mockReadDataFile.mockResolvedValue({
       ok: true,
       data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
@@ -1499,30 +1517,42 @@ describe("GET /api/blotter — extended", () => {
   beforeEach(() => {
     vi.resetModules();
     mockReadFile.mockReset();
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
   });
 
-  it("returns cached blotter data when file exists", async () => {
-    const blotterData = {
-      as_of: "2026-03-05",
-      summary: { closed_trades: 5, open_trades: 2, total_commissions: 45.50, realized_pnl: 1200 },
-      closed_trades: [{ symbol: "AAPL", realized_pnl: 500 }],
-      open_trades: [],
-    };
-    mockReadFile.mockResolvedValue(JSON.stringify(blotterData));
+  it("returns journal-derived blotter data when Turso rows exist", async () => {
+    mockExecute.mockResolvedValue({
+      rows: [
+        {
+          payload: JSON.stringify({
+            id: 1,
+            date: "2026-03-05",
+            ticker: "AAPL",
+            action: "SELL_OPTION",
+            fill_price: 5,
+            total_cost: 500,
+            contracts: 1,
+            commission: 2.5,
+            realized_pnl: 500,
+            ib_exec_id: "AAPL-1",
+          }),
+          filled_at: "2026-03-05T15:00:00Z",
+        },
+      ],
+    });
 
     const { GET } = await import("../app/api/blotter/route");
     const res = await GET();
     expect(res.status).toBe(200);
 
     const body = await res.json();
-    expect(body.as_of).toBe("2026-03-05");
-    expect(body.summary.closed_trades).toBe(5);
+    expect(body.as_of).toBe("2026-03-05T15:00:00Z");
+    expect(body.summary.closed_trades).toBe(1);
     expect(body.closed_trades).toHaveLength(1);
   });
 
-  it("returns empty structure when file not found", async () => {
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
-
+  it("returns empty structure when journal is empty", async () => {
     const { GET } = await import("../app/api/blotter/route");
     const res = await GET();
     expect(res.status).toBe(200);

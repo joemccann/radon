@@ -1,88 +1,17 @@
 import { NextResponse } from "next/server";
-import { readDataFile } from "@tools/data-reader";
-import { OrdersData } from "@tools/schemas/ib-orders";
 import { radonFetch } from "@/lib/radonApi";
-import { readOrdersFromDb } from "@/lib/orders/readOrdersFromDb";
-import { compareOrders } from "@/lib/orders/compareOrders";
-import { recordServiceHealth } from "@/lib/serviceHealth";
+import { readOrdersSnapshotFromDb } from "@/lib/orders/readOrdersFromDb";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import type { Static } from "@sinclair/typebox";
 
-// Phase 3.2 — disk read remains canonical; DB read is logged-only so we
-// can validate dual-write integrity for ≥24h before flipping in 3.3.
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-
-const EMPTY_ORDERS: Static<typeof OrdersData> = {
-  last_sync: "",
-  open_orders: [],
-  executed_orders: [],
-  open_count: 0,
-  executed_count: 0,
-};
-
-const readOrdersFromDisk = async (): Promise<Static<typeof OrdersData>> => {
-  const result = await readDataFile("data/orders.json", OrdersData);
-  return result.ok ? result.data : EMPTY_ORDERS;
-};
-
-const readOrdersFromDbSafe = async (): Promise<Static<typeof OrdersData> | null> => {
-  try {
-    return await readOrdersFromDb();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[orders] DB read failed: ${message}`);
-    return null;
-  }
-};
-
-async function compareAndLog(
-  disk: Static<typeof OrdersData>,
-  db: Static<typeof OrdersData> | null,
-): Promise<void> {
-  if (!db) return; // dual-write hasn't populated yet — not a divergence
-  const diff = compareOrders(disk, db);
-  const finishedAt = new Date().toISOString();
-  try {
-    if (diff.diverged) {
-      console.warn(`[orders] DB↔disk divergence: ${diff.reason}`);
-      await recordServiceHealth({
-        service: "orders-read-compare",
-        state: "warn",
-        finishedAt,
-        error: { reason: diff.reason, details: diff.details },
-      });
-    } else {
-      // Record "ok" so a stale warn row from a transient drift (e.g. the
-      // 60s embedded-replica sync lag during a status transition) clears
-      // on the next converged read instead of persisting until manual
-      // reset.
-      await recordServiceHealth({
-        service: "orders-read-compare",
-        state: "ok",
-        finishedAt,
-        error: null,
-      });
-    }
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[orders] failed to record service_health: ${message}`);
-  }
-}
-
-const readOrders = async (): Promise<Static<typeof OrdersData>> => {
-  const [disk, db] = await Promise.all([readOrdersFromDisk(), readOrdersFromDbSafe()]);
-  // Fire-and-forget — comparison logging must not block the response.
-  void compareAndLog(disk, db);
-  return disk;
-};
 
 let syncInFlight: Promise<void> | null = null;
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
-    const data = await readOrders();
+    const data = await readOrdersSnapshotFromDb();
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to read orders";
@@ -103,24 +32,42 @@ export async function POST(): Promise<Response> {
         .finally(() => { syncInFlight = null; });
     }
     await syncInFlight;
-
-    const data = await readOrders();
-    return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch {
-    // Sync failed — fall back to cached data file
-    const cached = await readOrders();
+    let cached;
+    try {
+      cached = await readOrdersSnapshotFromDb();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync failed and Turso orders read failed";
+      return setNoStoreResponseHeaders(
+        NextResponse.json(
+          { error: message },
+          { status: 502 },
+        ),
+        requestId,
+      );
+    }
     if (cached.last_sync) {
-      console.warn("[Orders] Sync failed, serving cached data");
+      console.warn("[Orders] Sync failed, serving latest Turso snapshot");
       const res = NextResponse.json(cached);
-      res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
+      res.headers.set("X-Sync-Warning", "IB sync failed - serving latest Turso snapshot");
       return setNoStoreResponseHeaders(res, requestId);
     }
-    // No cached data (empty last_sync) — genuine failure
     return setNoStoreResponseHeaders(
       NextResponse.json(
         { error: "Sync failed" },
         { status: 502 },
       ),
+      requestId,
+    );
+  }
+
+  try {
+    const data = await readOrdersSnapshotFromDb();
+    return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to read orders";
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ error: message }, { status: 500 }),
       requestId,
     );
   }

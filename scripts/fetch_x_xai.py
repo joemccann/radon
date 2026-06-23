@@ -16,7 +16,6 @@ import os
 import re
 import sys
 from datetime import datetime, timedelta
-from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 try:
@@ -26,8 +25,6 @@ except ImportError:
     import urllib.request
     import urllib.error
     HAS_REQUESTS = False
-
-PROJECT_ROOT = Path(__file__).parent.parent
 
 XAI_API_KEY = os.environ.get("XAI_API_KEY")
 XAI_BASE_URL = "https://api.x.ai/v1"
@@ -292,30 +289,20 @@ def parse_xai_response(response: Dict) -> List[Dict]:
     return unique_tweets
 
 
-def update_watchlist(account: str, tweets: List[Dict], watchlist_path: str = "data/watchlist.json") -> Tuple[List[str], List[str]]:
-    """Update the watchlist with tickers from the scan."""
-    watchlist_file = PROJECT_ROOT / watchlist_path
-    
-    if watchlist_file.exists():
-        with open(watchlist_file, 'r') as f:
-            watchlist = json.load(f)
-    else:
-        watchlist = {"last_updated": "", "tickers": [], "subcategories": {}}
-    
-    if "subcategories" not in watchlist:
-        watchlist["subcategories"] = {}
-    
+def update_watchlist(account: str, tweets: List[Dict]) -> Tuple[List[str], List[str]]:
+    """Update Turso watchlist rows with tickers from the xAI scan."""
+    from db.readers import read_watchlist_items
+    from db.writer import upsert_watchlist_ticker
+
     account_key = f"@{account}"
-    if account_key not in watchlist["subcategories"]:
-        watchlist["subcategories"][account_key] = {
-            "source": f"https://x.com/{account}",
-            "added": datetime.now().strftime("%Y-%m-%d"),
-            "description": f"Tickers from X account @{account}",
-            "tickers": []
-        }
-    
-    subcategory = watchlist["subcategories"][account_key]
-    existing_tickers = {t["ticker"]: t for t in subcategory.get("tickers", [])}
+    existing_items = [dict(item) for item in read_watchlist_items()]
+    subcategory = {
+        "source": f"https://x.com/{account}",
+        "added": datetime.now().strftime("%Y-%m-%d"),
+        "description": f"Tickers from X account @{account}",
+        "tickers": existing_items,
+    }
+    existing_tickers = {t["ticker"]: t for t in subcategory.get("tickers", []) if t.get("ticker")}
     
     new_tickers = []
     updated_tickers = []
@@ -373,10 +360,16 @@ def update_watchlist(account: str, tweets: List[Dict], watchlist_path: str = "da
     subcategory["last_scan_method"] = "xai_api"
     subcategory["last_scan_tweets"] = len(tweets)
     
-    watchlist["last_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M")
-    
-    with open(watchlist_file, 'w') as f:
-        json.dump(watchlist, f, indent=2)
+    for entry in subcategory.get("tickers", []):
+        ticker = entry.get("ticker")
+        if not ticker or ticker not in set(new_tickers + updated_tickers):
+            continue
+        upsert_watchlist_ticker(
+            ticker,
+            sector=entry.get("sector") or subcategory.get("sector"),
+            source=account_key,
+            payload=entry,
+        )
     
     return new_tickers, updated_tickers
 
@@ -487,7 +480,7 @@ def main():
             new_tickers, updated_tickers = update_watchlist(args.account, tweets)
             
             print(f"\n{'='*60}")
-            print("WATCHLIST UPDATED")
+            print("TURSO TICKERS UPDATED")
             print(f"{'='*60}")
             if new_tickers:
                 print(f"✓ New tickers added: {', '.join(new_tickers)}")

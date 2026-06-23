@@ -65,6 +65,15 @@ async function stubApis(page: import("@playwright/test").Page) {
       return;
     }
 
+    if (path === "/api/index-quote") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ price: VXN_PRICE, source: "yahoo" }),
+      });
+      return;
+    }
+
     if (path === "/api/watchlist") {
       await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ symbols: [] }) });
       return;
@@ -89,8 +98,8 @@ async function stubApis(page: import("@playwright/test").Page) {
   });
 }
 
-async function stubWebSocket(page: import("@playwright/test").Page) {
-  await page.addInitScript((vxnPrice) => {
+async function stubWebSocket(page: import("@playwright/test").Page, options: { emitVxnPrice?: boolean } = {}) {
+  await page.addInitScript(({ vxnPrice, emitVxnPrice }) => {
     window.__radonWsMessages = [];
 
     class MockWebSocket {
@@ -123,7 +132,7 @@ async function stubWebSocket(page: import("@playwright/test").Page) {
             idx.symbol === "VXN" && idx.exchange === "CBOE",
           );
 
-        if (parsed.action === "subscribe" && hasVxnIndex) {
+        if (emitVxnPrice && parsed.action === "subscribe" && hasVxnIndex) {
           window.setTimeout(() => {
             this.emit({ type: "price", symbol: "VXN", data: vxnPrice });
           }, 0);
@@ -145,7 +154,7 @@ async function stubWebSocket(page: import("@playwright/test").Page) {
       writable: true,
       value: MockWebSocket,
     });
-  }, VXN_PRICE);
+  }, { vxnPrice: VXN_PRICE, emitVxnPrice: options.emitVxnPrice ?? true });
 }
 
 test.describe("/VXN index routing", () => {
@@ -158,6 +167,27 @@ test.describe("/VXN index routing", () => {
     await expect(page.locator(".ckh-sym")).toHaveText("VXN");
     await expect(page.locator(".ckh-last")).toContainText("31.12");
     await expect(page.locator(".index-notice")).toContainText("VXN is an index");
+
+    const subscribe = await page.waitForFunction(() =>
+      window.__radonWsMessages.find((msg: { action?: string }) => msg.action === "subscribe"),
+    );
+    const subscribeMessage = await subscribe.jsonValue() as {
+      symbols?: string[];
+      indexes?: Array<{ symbol: string; exchange: string }>;
+    };
+
+    expect(subscribeMessage.symbols ?? []).not.toContain("VXN");
+    expect(subscribeMessage.indexes).toEqual([{ symbol: "VXN", exchange: "CBOE" }]);
+  });
+
+  test("fills VXN from the index fallback when the IB websocket is hollow", async ({ page }) => {
+    await stubApis(page);
+    await stubWebSocket(page, { emitVxnPrice: false });
+
+    await page.goto("/VXN");
+
+    await expect(page.locator(".ckh-sym")).toHaveText("VXN");
+    await expect(page.locator(".ckh-last")).toContainText("31.12");
 
     const subscribe = await page.waitForFunction(() =>
       window.__radonWsMessages.find((msg: { action?: string }) => msg.action === "subscribe"),

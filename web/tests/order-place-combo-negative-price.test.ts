@@ -10,6 +10,11 @@ vi.mock("@tools/data-reader", () => ({
   readDataFile: mockReadDataFile,
 }));
 
+const mockReadOrdersSnapshotFromDb = vi.fn();
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
+}));
+
 vi.mock("@tools/schemas/ib-orders", () => ({
   OrdersData: {},
 }));
@@ -19,15 +24,18 @@ describe("POST /api/orders/place — signed combo prices", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue({
+      last_sync: "2026-06-22T20:00:00Z",
+      open_orders: [],
+      executed_orders: [],
+      open_count: 0,
+      executed_count: 0,
+    });
   });
 
   it("allows a negative combo limit price and forwards the sign unchanged", async () => {
-    mockReadDataFile
-      .mockResolvedValueOnce({ ok: false, error: "skip naked-short fixture" })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
-      });
+    mockReadDataFile.mockResolvedValueOnce({ ok: false, error: "skip naked-short fixture" });
 
     mockRadonFetch
       .mockResolvedValueOnce({

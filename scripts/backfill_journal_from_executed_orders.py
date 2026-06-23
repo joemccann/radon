@@ -3,14 +3,14 @@
 
 JRN-01 root-cause: the real-time journal_sync handler's Turso dual-write
 threw a transient Hrana stream-not-found on 2026-06-08 15:04:13 UTC and
-swallowed the exception.  The disk write (trade_log.json) succeeded, but
-the libsql dedup saw the exec_ids as already-processed on every subsequent
-pass, so the gap is permanent without manual repair.
+swallowed the exception. The legacy disk mirror succeeded, but libsql dedup
+then saw the exec_ids as already-processed on every subsequent pass, so the
+gap is permanent without manual repair.
 
-JRN-02 adds the --from-executed-orders flag for fills that have NO disk row
-(trade_log.json) at all.  These are reconstructed from the executed_orders
-payload using journal_sync's labeling logic (same action/structure/total_cost
-formulas as live ingest) — not hand-fabricated fields.
+This repair path treats Turso as canonical. Missing journal rows are rebuilt
+from the `executed_orders` payload using journal_sync's labeling logic (same
+action/structure/total_cost formulas as live ingest), with prior position
+state read from `journal`.
 
 This script is the surgical repair path.  It:
   1. Reads executed_orders rows over a bounded window (default 7 days,
@@ -18,9 +18,8 @@ This script is the surgical repair path.  It:
      exec_ids on the command line.
   2. Checks journal for each exec_id (exact-match on ib_exec_id embedded
      in the payload, same key the live ingest path writes).
-  3. Sources the canonical payload from trade_log.json (disk) when present.
-     With --from-executed-orders, reconstructs from the EO payload when the
-     disk row is absent.
+  3. Reconstructs the payload from the executed order row using the live ingest
+     conversion logic.
   4. Calls upsert_journal_entry() from db.writer — the identical writer the
      live ingest uses — so the row is byte-for-byte what organic ingest
      would have produced.
@@ -34,9 +33,6 @@ Safety guards
   already present.
 - --execute mode requires explicit flag; dry-run never opens a write
   transaction.
-- --from-executed-orders is an explicit opt-in; without it, no_disk_row gaps
-  still refuse exactly as before.
-
 Usage
 ─────
 Dry-run (default — reads prod, writes nothing):
@@ -50,9 +46,8 @@ Execute (writes to prod — operator must review dry-run first):
   python3 scripts/backfill_journal_from_executed_orders.py --execute \\
       0002920b.6a26c483.01.01 000205d2.6a26a327.01.01
 
-Repair no_disk_row gaps (JRN-02 — VIX P10 / MU P800 / MU C1050@108):
+Repair specific gaps:
   python3 scripts/backfill_journal_from_executed_orders.py \\
-      --from-executed-orders \\
       0000fb35.6a10834c.01.01 0001108f.6a19b7e9.01.01 0002920b.6a2b2035.01.01
 
   Add --execute to write for real after reviewing the dry-run output.
@@ -97,7 +92,6 @@ log = logging.getLogger("backfill_journal")
 
 # ── constants ─────────────────────────────────────────────────────────────────
 RECONCILE_WINDOW_DAYS = 7
-DEFAULT_TRADE_LOG = _SCRIPTS_DIR.parent / "data" / "trade_log.json"
 
 
 # ── pytest guard ──────────────────────────────────────────────────────────────
@@ -196,49 +190,7 @@ def _fetch_executed_orders(
     return result
 
 
-# ── disk fallback for canonical payload ───────────────────────────────────────
-
-def _load_trade_log(trade_log_path: Path) -> List[Dict[str, Any]]:
-    """Return the list of trade rows from trade_log.json, or [] if missing."""
-    if not trade_log_path.exists():
-        return []
-    try:
-        data = json.loads(trade_log_path.read_text(encoding="utf-8"))
-        return data.get("trades", [])
-    except Exception as exc:
-        log.warning("trade_log.json read failed: %s", exc)
-        return []
-
-
-def _find_disk_row(trades: List[Dict[str, Any]], exec_id: str) -> Optional[Dict[str, Any]]:
-    """Find the trade_log.json row whose ib_exec_id matches exec_id."""
-    for trade in trades:
-        stored = str(trade.get("ib_exec_id", ""))
-        if stored == exec_id:
-            return trade
-        for part in stored.split("+"):
-            if part.strip() == exec_id:
-                return trade
-    return None
-
-
 # ── journal row construction ───────────────────────────────────────────────────
-
-def _build_journal_row(
-    disk_row: Dict[str, Any],
-) -> tuple[str, Dict[str, Any], str]:
-    """Return (trade_id, journal_payload, filled_at) from a disk trade row.
-
-    The live journal_sync._dual_write path calls:
-        upsert_journal_entry(str(entry.get("ib_exec_id")), entry, filled_at=entry.get("filled_at") or entry.get("date"))
-
-    We replicate that exactly: trade_id = ib_exec_id, payload = the disk row
-    verbatim (it IS what _dual_write would have passed), filled_at = disk
-    row's date field.
-    """
-    trade_id = str(disk_row["ib_exec_id"])
-    filled_at = disk_row.get("filled_at") or disk_row.get("date")
-    return trade_id, disk_row, filled_at
 
 
 class _EOFillShim:
@@ -333,13 +285,13 @@ def _build_journal_row_from_executed_order(
 
     shim = _EOFillShim(eo_row)
 
-    # _fill_to_entry is an instance method; instantiate with a no-op trade_log_path.
+    # _fill_to_entry is an instance method; instantiate without running __init__.
     handler = JournalSyncHandler.__new__(JournalSyncHandler)
 
     # Use a dummy next_id; the journal table key is trade_id not id.
     entry = handler._fill_to_entry(shim, next_id=0, prior_qty=prior_qty)
-    if entry is None:
-        raise ValueError(f"_fill_to_entry returned None for EO row: {eo_row.get('exec_id')}")
+    if entry is None or not entry.get("ib_exec_id"):
+        raise ValueError("Missing reconstructed trade id")
 
     trade_id = str(entry["ib_exec_id"])
     filled_at = entry.get("filled_at") or entry.get("date")
@@ -354,19 +306,17 @@ def backfill(
     exec_ids: Optional[List[str]] = None,
     window_days: int = RECONCILE_WINDOW_DAYS,
     dry_run: bool = True,
-    trade_log_path: Path = DEFAULT_TRADE_LOG,
-    from_executed_orders: bool = False,
 ) -> List[Dict[str, Any]]:
     """Find and (optionally) insert missing journal rows.
 
     Returns a list of action records:
-        {"exec_id": ..., "status": "inserted"|"skipped"|"no_disk_row"|"dry_run"
-                          |"inserted_from_eo"|"dry_run_from_eo", ...}
+        {"exec_id": ..., "status": "inserted_from_eo"|"skipped"|
+                          "dry_run_from_eo"|"reconstruction_failed", ...}
 
-    When from_executed_orders=True, fills with no trade_log.json disk row are
-    reconstructed from the executed_orders payload using journal_sync's labeling
-    logic (same action/structure/total_cost as live ingest).  prior_qty is
-    accumulated in fill_time ASC order within this run so labels are correct.
+    Fills are reconstructed from the executed_orders payload using
+    journal_sync's labeling logic (same action/structure/total_cost as live
+    ingest). prior_qty is accumulated in fill_time ASC order within this run
+    so labels are correct.
     """
     from db.writer import upsert_journal_entry  # noqa: WPS433
 
@@ -378,8 +328,6 @@ def backfill(
     executed = sorted(executed, key=lambda r: r.get("fill_time") or "")
 
     covered = _journal_covered_exec_ids(db)
-    disk_trades = _load_trade_log(trade_log_path)
-    log.info("trade_log.json rows loaded: %d", len(disk_trades))
 
     # Accumulate prior_qty per contract as we insert rows within this run,
     # mirroring _fills_to_entries' in-cycle prior_state mutation.
@@ -395,30 +343,17 @@ def backfill(
             actions.append({"exec_id": exec_id, "status": "skipped"})
             continue
 
-        disk_row = _find_disk_row(disk_trades, exec_id)
-
-        if disk_row is None and not from_executed_orders:
-            log.warning("  GAP   %s — not in trade_log.json (use --from-executed-orders to reconstruct)", exec_id)
-            actions.append({"exec_id": exec_id, "status": "no_disk_row"})
+        prior_qty = _get_prior_qty_for_eo_row(db, row, prior_state, prior_net_qty_for_contract)
+        try:
+            trade_id, journal_payload, filled_at = _build_journal_row_from_executed_order(
+                row,
+                db,
+                prior_qty=prior_qty,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.warning("  ERR   %s — failed to reconstruct from executed_orders: %s", exec_id, exc)
+            actions.append({"exec_id": exec_id, "status": "reconstruction_failed", "error": str(exc)})
             continue
-
-        if disk_row is None:
-            # Reconstruct from EO payload using journal_sync labeling.
-            prior_qty = _get_prior_qty_for_eo_row(db, row, prior_state, prior_net_qty_for_contract)
-            try:
-                trade_id, journal_payload, filled_at = _build_journal_row_from_executed_order(row, db, prior_qty=prior_qty)
-            except Exception as exc:  # noqa: BLE001
-                log.warning("  ERR   %s — failed to reconstruct from EO: %s", exec_id, exc)
-                actions.append({"exec_id": exec_id, "status": "no_disk_row", "error": str(exc)})
-                continue
-            from_eo = True
-        else:
-            trade_id, journal_payload, filled_at = _build_journal_row(disk_row)
-            prior_qty = None
-            from_eo = False
-
-        dry_run_status = "dry_run_from_eo" if from_eo else "dry_run"
-        insert_status = "inserted_from_eo" if from_eo else "inserted"
 
         if dry_run:
             log.info(
@@ -427,12 +362,12 @@ def backfill(
                 exec_id,
                 trade_id,
                 filled_at,
-                from_eo,
+                True,
                 json.dumps(journal_payload),
             )
             action = {
                 "exec_id": exec_id,
-                "status": dry_run_status,
+                "status": "dry_run_from_eo",
                 "trade_id": trade_id,
                 "filled_at": filled_at,
                 "payload": journal_payload,
@@ -454,11 +389,11 @@ def backfill(
                 journal_payload.get("ticker"),
                 journal_payload.get("action"),
                 journal_payload.get("contracts"),
-                from_eo,
+                True,
             )
             action = {
                 "exec_id": exec_id,
-                "status": insert_status,
+                "status": "inserted_from_eo",
                 "trade_id": trade_id,
                 "filled_at": filled_at,
                 "payload": journal_payload,
@@ -467,8 +402,7 @@ def backfill(
 
         # Update in-run prior_state so subsequent fills for the same contract
         # see the updated position (mirrors _fills_to_entries' mutation).
-        if from_eo:
-            _update_prior_state_for_eo_row(prior_state, row, journal_payload)
+        _update_prior_state_for_eo_row(prior_state, row, journal_payload)
 
     return actions
 
@@ -545,7 +479,7 @@ def _update_prior_state_for_eo_row(
 
 def _parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Backfill missing journal rows from executed_orders (JRN-01/JRN-02)."
+        description="Backfill missing journal rows from executed_orders."
     )
     parser.add_argument(
         "exec_ids",
@@ -563,31 +497,11 @@ def _parse_args() -> argparse.Namespace:
         help="Actually write to Turso.  Default is dry-run (read-only).",
     )
     parser.add_argument(
-        "--from-executed-orders",
-        action="store_true",
-        default=False,
-        dest="from_executed_orders",
-        help=(
-            "When a gap has no trade_log.json row, reconstruct the journal payload "
-            "from the executed_orders payload instead of refusing (no_disk_row). "
-            "EO-built rows are reconstructions using journal_sync's labeling logic, "
-            "not the original disk truth.  Required for JRN-02 no_disk_row gaps "
-            "(VIX P10, MU P800, MU C1050@108)."
-        ),
-    )
-    parser.add_argument(
         "--window-days",
         type=int,
         default=RECONCILE_WINDOW_DAYS,
         metavar="N",
         help=f"Look-back window when no exec_ids given (default {RECONCILE_WINDOW_DAYS}).",
-    )
-    parser.add_argument(
-        "--trade-log",
-        type=Path,
-        default=DEFAULT_TRADE_LOG,
-        metavar="PATH",
-        help="Path to trade_log.json (default: data/trade_log.json).",
     )
     return parser.parse_args()
 
@@ -603,29 +517,27 @@ def main() -> None:
     db = get_db()
 
     mode = "DRY-RUN (read-only)" if dry_run else "EXECUTE (will write to Turso)"
-    log.info("backfill_journal  mode=%s  from_executed_orders=%s", mode, args.from_executed_orders)
+    log.info("backfill_journal  mode=%s  source=executed_orders", mode)
 
     actions = backfill(
         db,
         exec_ids=args.exec_ids or None,
         window_days=args.window_days,
         dry_run=dry_run,
-        trade_log_path=args.trade_log,
-        from_executed_orders=args.from_executed_orders,
     )
 
-    inserted = [a for a in actions if a["status"] in ("inserted", "inserted_from_eo")]
-    dry_run_rows = [a for a in actions if a["status"] in ("dry_run", "dry_run_from_eo")]
+    inserted = [a for a in actions if a["status"] == "inserted_from_eo"]
+    dry_run_rows = [a for a in actions if a["status"] == "dry_run_from_eo"]
     skipped = [a for a in actions if a["status"] == "skipped"]
-    no_disk = [a for a in actions if a["status"] == "no_disk_row"]
+    failed = [a for a in actions if a["status"] == "reconstruction_failed"]
 
     log.info(
-        "Done — dry_run=%s inserted=%d would_insert=%d skipped=%d no_disk_row=%d",
+        "Done — dry_run=%s inserted=%d would_insert=%d skipped=%d reconstruction_failed=%d",
         dry_run,
         len(inserted),
         len(dry_run_rows),
         len(skipped),
-        len(no_disk),
+        len(failed),
     )
 
     # JRN-03: a real backfill may have closed the gap the daily journal-reconcile
@@ -647,9 +559,8 @@ def main() -> None:
     if dry_run and dry_run_rows:
         print("\n=== ROWS THAT WOULD BE INSERTED ===")
         for a in dry_run_rows:
-            from_eo_marker = " [reconstructed from EO]" if a["status"] == "dry_run_from_eo" else ""
             print(
-                f"\nexec_id   : {a['exec_id']}{from_eo_marker}\n"
+                f"\nexec_id   : {a['exec_id']} [reconstructed from executed_orders]\n"
                 f"trade_id  : {a['trade_id']}\n"
                 f"filled_at : {a['filled_at']}\n"
                 f"payload   : {json.dumps(a['payload'], indent=2)}"

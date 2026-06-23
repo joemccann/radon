@@ -36,9 +36,10 @@ function fillDateET(time: string): string {
  * occurred **today in ET**.
  *
  * Why filter by date?
- * orders.json persists between trading days.  IB Gateway's session (and thus
- * ib_insync's fills() cache) spans multiple calendar days between the nightly
- * auto-restart.  When the user opens the dashboard on a new day, stale fills
+ * IB Gateway's session and ib_insync's fills() cache can span multiple
+ * calendar days between the nightly auto-restart. Turso's executed-order rows
+ * intentionally persist across sessions. When the user opens the dashboard on
+ * a new day, stale fills
  * from previous sessions are still present and produce a large, incorrect
  * realized P&L (e.g. -$6,835) even when no trades have been made today.
  *

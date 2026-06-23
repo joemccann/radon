@@ -46,7 +46,6 @@ PROJECT_DIR = SCRIPT_DIR.parent
 sys.path.insert(0, str(SCRIPT_DIR))
 from clients.ib_client import DEFAULT_HOST
 TEMPLATE_PATH = PROJECT_DIR / ".pi/skills/html-report/portfolio-template.html"
-TRADE_LOG_PATH = PROJECT_DIR / "data/trade_log.json"
 REPORTS_DIR = PROJECT_DIR / "reports"
 
 TODAY = date.today()
@@ -395,12 +394,10 @@ def _multi_leg(sym, exp, legs):
 # ═══════════════════════════════════════════════════════════════════════════
 
 def load_trade_log() -> Dict[str, Dict]:
-    if not TRADE_LOG_PATH.exists():
-        return {}
-    with open(TRADE_LOG_PATH) as f:
-        data = json.load(f)
+    from db.readers import read_journal_trades
+
     return {
-        t['ticker']: t for t in data.get('trades', [])
+        t['ticker']: t for t in read_journal_trades()
         if t.get('decision') == 'EXECUTED' and 'close_date' not in t
     }
 
@@ -763,7 +760,7 @@ def generate_report(grouped, account, flow_data, trade_log, timestamp, market_op
 def main():
     parser = argparse.ArgumentParser(description="Generate portfolio HTML report with live IB data")
     parser.add_argument("--no-open", action="store_true", help="Don't open in browser")
-    parser.add_argument("--sync", action="store_true", help="Also sync portfolio.json from IB")
+    parser.add_argument("--sync", action="store_true", help="Also sync portfolio from IB into Turso")
     parser.add_argument("--port", type=int, default=4001, help="IB port (default: 4001)")
     parser.add_argument("--output", type=str, help="Custom output path")
     args = parser.parse_args()
@@ -819,7 +816,7 @@ def main():
     print(f"  ✓ {out}")
 
     if args.sync:
-        print("\n  Syncing portfolio.json...")
+        print("\n  Syncing portfolio into Turso...")
         subprocess.run(["python3", str(SCRIPT_DIR / "ib_sync.py"), "--sync"],
                        capture_output=True, text=True)
 

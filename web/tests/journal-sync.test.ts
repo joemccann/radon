@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { syncNewTrades, type ReconciliationTrade } from "@/lib/journalSync";
+import { syncNewTrades, type ReconciliationTrade } from "@/lib/journalImport";
 
 const MOCK_EXISTING = [
   {

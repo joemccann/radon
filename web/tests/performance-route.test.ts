@@ -11,6 +11,40 @@ vi.mock("fs/promises", () => ({
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
+const mockGetDb = vi.fn();
+vi.mock("@/lib/db", () => ({ getDb: mockGetDb }));
+
+function mockDbSnapshots({
+  performance = null,
+  portfolio = null,
+}: {
+  performance?: Record<string, unknown> | null;
+  portfolio?: Record<string, unknown> | null;
+} = {}) {
+  mockGetDb.mockReturnValue({
+    execute: vi.fn(async ({ sql }: { sql: string }) => {
+      if (/FROM\s+performance_snapshots/i.test(sql)) {
+        return {
+          rows: performance
+            ? [
+                {
+                  taken_at: String(performance.last_sync ?? performance.as_of ?? "2026-03-13T12:00:00Z"),
+                  payload: JSON.stringify(performance),
+                },
+              ]
+            : [],
+        };
+      }
+      if (/FROM\s+portfolio_snapshots/i.test(sql)) {
+        return {
+          rows: portfolio ? [{ payload: JSON.stringify(portfolio) }] : [],
+        };
+      }
+      return { rows: [] };
+    }),
+  });
+}
+
 describe("/api/performance route", () => {
   beforeEach(() => {
     vi.resetModules();
@@ -20,9 +54,17 @@ describe("/api/performance route", () => {
     mockReadFile.mockReset();
     mockStat.mockReset();
     mockRadonFetch.mockReset();
+    mockGetDb.mockReset();
+    mockDbSnapshots();
   });
 
   it("GET returns cached performance data when cache is fresh and aligned with portfolio", async () => {
+    mockDbSnapshots({
+      portfolio: {
+        last_sync: "2026-03-13T12:00:00Z",
+        account_summary: { net_liquidation: 1_313_112.03 },
+      },
+    });
     mockStat.mockResolvedValue({ mtimeMs: Date.now() });
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.includes("performance.json")) {
@@ -31,12 +73,6 @@ describe("/api/performance route", () => {
           last_sync: "2026-03-13T12:00:00Z",
           summary: { sharpe_ratio: 1.2 },
           series: [],
-        });
-      }
-      if (path.includes("portfolio.json")) {
-        return JSON.stringify({
-          last_sync: "2026-03-13T12:00:00Z",
-          account_summary: { net_liquidation: 1_313_112.03 },
         });
       }
       throw new Error(`unexpected read: ${path}`);
@@ -50,9 +86,15 @@ describe("/api/performance route", () => {
     expect(body.as_of).toBe("2026-03-13");
         expect(body.summary.sharpe_ratio).toBe(1.2);
         expect(mockRadonFetch).not.toHaveBeenCalled();
-      });
+  });
 
   it("GET returns stale cache + triggers background rebuild when cached performance lags the current portfolio snapshot (SWR)", async () => {
+    mockDbSnapshots({
+      portfolio: {
+        last_sync: "2026-03-11T13:37:14Z",
+        account_summary: { net_liquidation: 1_313_112.03 },
+      },
+    });
     mockStat.mockResolvedValue({ mtimeMs: Date.now() });
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.includes("performance.json")) {
@@ -61,12 +103,6 @@ describe("/api/performance route", () => {
           last_sync: "2026-03-10T18:55:00Z",
           summary: { ending_equity: 1_063_031.86 },
           series: [],
-        });
-      }
-      if (path.includes("portfolio.json")) {
-        return JSON.stringify({
-          last_sync: "2026-03-11T13:37:14Z",
-          account_summary: { net_liquidation: 1_313_112.03 },
         });
       }
       throw new Error(`unexpected read: ${path}`);
@@ -100,6 +136,12 @@ describe("/api/performance route", () => {
   });
 
   it("GET returns stale cache + triggers background rebuild when perf is behind current ET session (SWR)", async () => {
+    mockDbSnapshots({
+      portfolio: {
+        last_sync: "2026-03-12T13:23:21Z",
+        account_summary: { net_liquidation: 1_218_410.03 },
+      },
+    });
     mockStat.mockResolvedValue({ mtimeMs: Date.now() });
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.includes("performance.json")) {
@@ -108,12 +150,6 @@ describe("/api/performance route", () => {
           last_sync: "2026-03-12T13:23:21Z",
           summary: { ending_equity: 1_218_410.03 },
           series: [],
-        });
-      }
-      if (path.includes("portfolio.json")) {
-        return JSON.stringify({
-          last_sync: "2026-03-12T13:23:21Z",
-          account_summary: { net_liquidation: 1_218_410.03 },
         });
       }
       throw new Error(`unexpected read: ${path}`);
@@ -146,6 +182,12 @@ describe("/api/performance route", () => {
   });
 
   it("GET returns cached performance when portfolio refresh fails and cache is current", async () => {
+    mockDbSnapshots({
+      portfolio: {
+        last_sync: "2026-03-12T13:23:21Z",
+        account_summary: { net_liquidation: 1_218_410.03 },
+      },
+    });
     mockStat.mockResolvedValue({ mtimeMs: Date.now() });
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.includes("performance.json")) {
@@ -154,12 +196,6 @@ describe("/api/performance route", () => {
           last_sync: "2026-03-12T13:23:21Z",
           summary: { ending_equity: 1_218_410.03 },
           series: [],
-        });
-      }
-      if (path.includes("portfolio.json")) {
-        return JSON.stringify({
-          last_sync: "2026-03-12T13:23:21Z",
-          account_summary: { net_liquidation: 1_218_410.03 },
         });
       }
       throw new Error(`unexpected read: ${path}`);
@@ -198,6 +234,7 @@ describe("/api/performance route", () => {
   // ---- SWR-specific tests ----
 
   it("GET SWR: returns stale cache immediately and triggers background rebuild", async () => {
+    mockDbSnapshots({ portfolio: { last_sync: "2026-03-13T12:00:00Z" } });
     // Stale: mtime is 20 minutes ago
     mockStat.mockResolvedValue({ mtimeMs: Date.now() - 20 * 60_000 });
     mockReadFile.mockImplementation(async (path: string) => {
@@ -207,11 +244,6 @@ describe("/api/performance route", () => {
           last_sync: "2026-03-13T12:00:00Z",
           summary: { sharpe_ratio: 1.2 },
           series: [],
-        });
-      }
-      if (path.includes("portfolio.json")) {
-        return JSON.stringify({
-          last_sync: "2026-03-13T12:00:00Z",
         });
       }
       throw new Error(`unexpected read: ${path}`);
@@ -268,6 +300,7 @@ describe("/api/performance route", () => {
   });
 
   it("GET SWR: background trigger failure is swallowed — stale cache still returned", async () => {
+    mockDbSnapshots({ portfolio: { last_sync: "2026-03-13T12:00:00Z" } });
     mockStat.mockResolvedValue({ mtimeMs: Date.now() - 20 * 60_000 });
     mockReadFile.mockImplementation(async (path: string) => {
       if (path.includes("performance.json")) {
@@ -277,9 +310,6 @@ describe("/api/performance route", () => {
           summary: { ending_equity: 100_000 },
           series: [],
         });
-      }
-      if (path.includes("portfolio.json")) {
-        return JSON.stringify({ last_sync: "2026-03-13T12:00:00Z" });
       }
       throw new Error("not found");
     });

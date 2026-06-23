@@ -211,10 +211,9 @@ def _quantile_at(fc, level: float, *, fallback: str) -> float:
 
 
 def _load_watchlist_tickers() -> list:
-    watchlist_path = PROJECT_DIR / "data" / "watchlist.json"
-    with open(watchlist_path) as handle:
-        watchlist = json.load(handle)
-    return [entry["ticker"] for entry in watchlist.get("tickers", [])]
+    from db.readers import read_watchlist_tickers
+
+    return read_watchlist_tickers()
 
 
 def _iso_now() -> str:

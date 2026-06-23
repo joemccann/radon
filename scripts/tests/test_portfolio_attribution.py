@@ -2,6 +2,7 @@
 
 import sys
 from pathlib import Path
+from unittest.mock import patch
 
 # Ensure scripts/ is on path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
@@ -13,6 +14,7 @@ from portfolio_attribution import (
     _is_closed,
     _get_pnl,
     _get_risk_type,
+    load_and_build,
 )
 
 
@@ -494,27 +496,24 @@ class TestRiskProfile:
         assert abs(defined["win_rate"] - 2/3) < 0.001
 
 
-# ── Integration with real trade_log ─────────────────────────────────────
+# ── Integration with journal reader ─────────────────────────────────────
 
 
 class TestRealData:
-    """Integration test using actual trade_log.json."""
+    """Integration test using journal-shaped rows."""
 
-    def test_real_trade_log(self):
-        """Verify attribution works with the real trade log."""
-        import json
-        trade_log_path = Path(__file__).resolve().parent.parent.parent / "data" / "trade_log.json"
-        if not trade_log_path.exists():
-            return  # Skip if no real data
+    def test_load_and_build_reads_journal_rows(self):
+        """Verify attribution works with journal rows from the DB reader."""
+        trades = [
+            _make_trade(id=1, ticker="AAPL", realized_pnl=1000.0, decision="CLOSED"),
+            _make_trade(id=2, ticker="MSFT", realized_pnl=-250.0, decision="CLOSED"),
+        ]
+        with patch("db.readers.read_journal_trades", return_value=trades) as reader:
+            result = load_and_build()
 
-        trade_data = json.loads(trade_log_path.read_text())
-        trades = trade_data.get("trades", [])
-        result = build_attribution(trades, STRATEGY_NAMES)
-
-        # Basic structure checks
-        assert result["total_trades"] == len(trades)
-        assert result["total_trades"] > 0
-        assert result["closed_trades"] > 0
+        reader.assert_called_once_with()
+        assert result["total_trades"] == 2
+        assert result["closed_trades"] == 2
         assert isinstance(result["by_strategy"], list)
         assert isinstance(result["by_ticker"], list)
         assert isinstance(result["by_edge"], list)

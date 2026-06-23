@@ -144,8 +144,8 @@ async def _orders_sync_tick() -> None:
     intraday bucket (10-min window) does not fire stale alerts during the
     trading day. The actual work mirrors what POST /orders/refresh does:
     run ib_orders.py --sync via the recovery-aware subprocess helper,
-    which writes orders.json + heartbeats the orders-sync service_health
-    row via service_cycle.
+    which persists open_orders / executed_orders and heartbeats the
+    orders-sync service_health row via service_cycle.
 
     Guards (all must pass):
     - not test_mode          — never run subprocess syncs in unit tests
@@ -396,6 +396,94 @@ def _write_cache(path: Path, data: dict) -> None:
         except OSError:
             pass
         raise
+
+
+ORDERS_EXECUTED_LOOKBACK_HOURS = 36
+
+
+def _safe_db_json_object(raw: Any) -> Optional[dict[str, Any]]:
+    if not isinstance(raw, str) or not raw:
+        return None
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+async def _read_latest_portfolio_snapshot_from_db() -> dict[str, Any]:
+    rows = await asyncio.to_thread(
+        db_http.hrana_execute,
+        """
+        SELECT payload
+        FROM portfolio_snapshots
+        ORDER BY taken_at DESC
+        LIMIT 1
+        """,
+        (),
+    )
+    if not rows:
+        raise RuntimeError("Portfolio snapshot unavailable")
+    payload = _safe_db_json_object(rows[0][0] if rows[0] else None)
+    if payload is None:
+        raise RuntimeError("Portfolio snapshot payload unavailable")
+    return payload
+
+
+async def _read_orders_snapshot_from_db() -> dict[str, Any]:
+    cutoff = (
+        datetime.now(timezone.utc) - timedelta(hours=ORDERS_EXECUTED_LOOKBACK_HOURS)
+    ).isoformat().replace("+00:00", "Z")
+    open_rows_task = asyncio.to_thread(
+        db_http.hrana_execute,
+        """
+        SELECT payload, updated_at
+        FROM open_orders
+        ORDER BY updated_at DESC
+        """,
+        (),
+    )
+    executed_rows_task = asyncio.to_thread(
+        db_http.hrana_execute,
+        """
+        SELECT payload, fill_time
+        FROM executed_orders
+        WHERE fill_time >= ?
+        ORDER BY fill_time DESC
+        """,
+        (cutoff,),
+    )
+    open_rows, executed_rows = await asyncio.gather(open_rows_task, executed_rows_task)
+
+    open_orders: list[dict[str, Any]] = []
+    latest_open_sync = ""
+    for row in open_rows:
+        payload = _safe_db_json_object(row[0] if row else None)
+        if payload is None:
+            continue
+        open_orders.append(payload)
+        updated_at = str(row[1] or "") if len(row) > 1 else ""
+        if updated_at > latest_open_sync:
+            latest_open_sync = updated_at
+
+    executed_orders: list[dict[str, Any]] = []
+    latest_exec_sync = ""
+    for row in executed_rows:
+        payload = _safe_db_json_object(row[0] if row else None)
+        if payload is None:
+            continue
+        executed_orders.append(payload)
+        fill_time = str(row[1] or "") if len(row) > 1 else ""
+        if fill_time > latest_exec_sync:
+            latest_exec_sync = fill_time
+
+    return {
+        "last_sync": latest_open_sync or latest_exec_sync,
+        "open_orders": open_orders,
+        "executed_orders": executed_orders,
+        "open_count": len(open_orders),
+        "executed_count": len(executed_orders),
+    }
 
 
 def _today_et_str() -> str:
@@ -1492,12 +1580,12 @@ async def attribution():
 
 @app.post("/portfolio/sync")
 async def portfolio_sync():
-    """Sync portfolio from IB via subprocess.
+    """Sync portfolio from IB, then return the latest Turso snapshot.
 
     Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
-    # raw=True: ib_sync.py --sync writes data/portfolio.json + emits
+    # raw=True: ib_sync.py --sync persists portfolio_snapshots and emits
     # human-readable status text on stdout. The default JSON-parsing
     # runner crashes on the first '{' it finds in the status report —
     # broken since the script grew its summary banner. See
@@ -1508,13 +1596,10 @@ async def portfolio_sync():
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    # ib_sync.py writes to data/portfolio.json; read it back
-    from utils.atomic_io import verified_load
     try:
-        data = verified_load(str(DATA_DIR / "portfolio.json"))
-        return data
+        return await _read_latest_portfolio_snapshot_from_db()
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to read synced portfolio: {e}")
+        raise HTTPException(status_code=502, detail=f"Failed to read synced portfolio from Turso: {e}")
 
 
 @app.post("/portfolio/background-sync", status_code=202)
@@ -1537,7 +1622,7 @@ async def _bg_sync_via_subprocess():
 
 @app.post("/orders/refresh")
 async def orders_refresh():
-    """Sync orders from IB via subprocess.
+    """Sync orders from IB, then return the Turso orders snapshot.
 
     Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
@@ -1550,11 +1635,10 @@ async def orders_refresh():
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    # ib_orders.py writes to data/orders.json; read it back
-    cache = _read_cache(DATA_DIR / "orders.json")
-    if cache:
-        return cache
-    raise HTTPException(status_code=502, detail="Failed to read synced orders")
+    try:
+        return await _read_orders_snapshot_from_db()
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to read synced orders from Turso: {e}")
 
 
 # ---------------------------------------------------------------------------
@@ -1710,8 +1794,8 @@ async def cta_share():
 
 @app.post("/journal/reconcile")
 async def journal_reconcile():
-    """Run IB reconciliation to refresh reconciliation.json for journal auto-import."""
-    # ib_reconcile.py writes a file and emits human-readable status on
+    """Run IB reconciliation and persist the latest reconciliation log."""
+    # ib_reconcile.py emits human-readable status on
     # stdout — use raw runner to avoid the JSON-parse crash.
     result = await run_script_raw("ib_reconcile.py", [], timeout=120)
     if not result.ok:
@@ -1721,7 +1805,7 @@ async def journal_reconcile():
 
 @app.post("/journal/rehydrate")
 async def journal_rehydrate(days: int = 365):
-    """Backfill trade_log.json from IB Flex Query (up to 365 days).
+    """Backfill the Turso journal from IB Flex Query (up to 365 days).
 
     Idempotent: each row carries an ib_exec_id and existing rows are
     skipped on re-run. Use this after multi-day reconcile gaps where
@@ -2269,7 +2353,6 @@ async def blotter_sync():
     result = await run_module("trade_blotter.flex_query", ["--json"], timeout=120)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
-    _write_cache(DATA_DIR / "blotter.json", result.data)
     return result.data
 
 
@@ -2456,8 +2539,8 @@ _PI_READ_SCRIPTS = frozenset({
 })
 
 # MUTATE-tier: connects to the live IB account and/or rewrites canonical
-# portfolio/journal/order state. `ib_sync.py` pulls positions from IB and
-# atomically rewrites data/portfolio.json. Running one requires explicit
+# portfolio/journal/order state. `ib_sync.py` pulls positions from IB.
+# Running one requires explicit
 # privileged authorization the chat surface does NOT pass by default.
 _PI_MUTATE_SCRIPTS = frozenset({
     "ib_sync.py",

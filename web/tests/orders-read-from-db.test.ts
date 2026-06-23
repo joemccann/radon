@@ -66,6 +66,19 @@ describe("readOrdersFromDb", () => {
     expect(result).toBeNull();
   });
 
+  it("returns EMPTY_ORDERS from the snapshot helper when both tables are empty", async () => {
+    mockGetDb([], []);
+    const { readOrdersSnapshotFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersSnapshotFromDb();
+    expect(result).toEqual({
+      last_sync: "",
+      open_orders: [],
+      executed_orders: [],
+      open_count: 0,
+      executed_count: 0,
+    });
+  });
+
   it("returns OrdersData shape when rows exist", async () => {
     mockGetDb(
       [{ payload: JSON.stringify(openPayload(1)), updated_at: "2026-05-07T13:30:00Z" }],

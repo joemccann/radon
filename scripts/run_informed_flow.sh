@@ -3,7 +3,7 @@
 # FU4 — Informed-flow watchlist sweep wrapper for launchd (F4).
 #
 # fetch_informed_flow.py is per-ticker; this drives the sweep entrypoint
-# (sweep_informed_flow.py) which iterates data/watchlist.json. Holiday-aware:
+# (sweep_informed_flow.py) which iterates the Turso watchlist. Holiday-aware:
 # congress / insider / institutional data only changes on filing (business)
 # days, so a non-trading-day run is wasted UW budget.
 #

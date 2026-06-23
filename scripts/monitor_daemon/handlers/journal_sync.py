@@ -15,8 +15,8 @@ Each row appended carries an ``ib_exec_id`` so we dedupe against the
 journal_rehydrate path on the next pass.
 
 Failure mode:
-    Any exception is captured into the handler result; ``trade_log.json``
-    stays untouched. The next interval will retry.
+    Any exception is captured into the handler result. The next interval
+    will retry.
 """
 
 from __future__ import annotations
@@ -51,7 +51,6 @@ except ImportError:  # pragma: no cover — DB layer optional in unit tests
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_TRADE_LOG = Path(__file__).parent.parent.parent.parent / "data" / "trade_log.json"
 DEFAULT_IB_PORT = 4001
 # "auto" rotates across SUBPROCESS_ID_RANGE on each cycle. See
 # fill_monitor.py for the rationale.
@@ -62,7 +61,7 @@ RECONCILE_WINDOW_DAYS = 14
 
 
 class JournalSyncHandler(BaseHandler):
-    """Append fresh IB executions to ``trade_log.json``."""
+    """Append fresh IB executions to the Turso journal."""
 
     name = "journal_sync"
     interval_seconds = 300
@@ -76,7 +75,7 @@ class JournalSyncHandler(BaseHandler):
         client_id: "int | str" = DEFAULT_CLIENT_ID,
     ):
         super().__init__()
-        self.trade_log_path = trade_log_path or DEFAULT_TRADE_LOG
+        self.trade_log_path = trade_log_path
         self.ib_port = ib_port
         self.client_id = client_id
 
@@ -114,10 +113,15 @@ class JournalSyncHandler(BaseHandler):
         db = self._open_db()
 
         try:
-            existing, recovery = self._load_existing_with_recovery(db)
+            if self.trade_log_path is None:
+                existing = self._load_existing_from_journal(db)
+                recovery = None
+            else:
+                existing, recovery = self._load_existing_with_recovery(db)
         except Exception as exc:  # noqa: BLE001
-            logger.warning("journal_sync: failed to load trade_log: %s", exc)
-            result["error"] = f"trade_log read failed: {exc}"
+            logger.warning("journal_sync: failed to load journal state: %s", exc)
+            prefix = "trade_log read failed" if self.trade_log_path is not None else "journal read failed"
+            result["error"] = f"{prefix}: {exc}"
             return result
 
         if recovery:
@@ -136,7 +140,11 @@ class JournalSyncHandler(BaseHandler):
         # Phase 1: reconcile disk rows whose DB upsert previously failed.
         # This re-attempts any exec_id on disk that is absent from the journal
         # table, so a single transient Turso failure cannot permanently drop a fill.
-        result["reconciled"] = self._reconcile_db_missing(existing, db)
+        result["reconciled"] = (
+            self._reconcile_db_missing(existing, db)
+            if self.trade_log_path is not None
+            else 0
+        )
         if result["reconciled"]:
             self._maybe_heal_reconcile(db)
 
@@ -148,9 +156,10 @@ class JournalSyncHandler(BaseHandler):
         result["skipped"] = result["fills_seen"] - len(candidates)
 
         if candidates:
-            existing["trades"].extend(candidates)
-            atomic_save(str(self.trade_log_path), existing)
             self._dual_write(candidates)
+            if self.trade_log_path is not None:
+                existing["trades"].extend(candidates)
+                atomic_save(str(self.trade_log_path), existing)
             # A live fill that filled a previously-missing exec_id may have
             # closed the gap the daily journal-reconcile flagged.
             self._maybe_heal_reconcile(db)
@@ -263,7 +272,7 @@ class JournalSyncHandler(BaseHandler):
         """Mirror new rows to the Turso ``journal`` table.
 
         Failures are logged and swallowed. The Turso ``journal`` table is the
-        canonical app store; ``trade_log.json`` remains a local mirror and the
+        canonical app store. If a local mirror was explicitly configured, the
         next execute() cycle's reconcile step retries any failed upsert.
         """
         if upsert_journal_entry is None:

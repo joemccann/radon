@@ -56,10 +56,8 @@ try:
 except Exception:
     pass
 
-# File paths
+# Cache path
 DATA_DIR = Path(__file__).parent.parent / "data"
-WATCHLIST_FILE = DATA_DIR / "watchlist.json"
-PORTFOLIO_FILE = DATA_DIR / "portfolio.json"
 RATINGS_CACHE_FILE = DATA_DIR / "analyst_ratings_cache.json"
 
 
@@ -79,27 +77,17 @@ def save_json(path: Path, data: dict) -> None:
 
 def get_watchlist_tickers() -> list:
     """Extract all tickers from watchlist."""
-    data = load_json(WATCHLIST_FILE)
-    tickers = set()
-    
-    # Main tickers
-    for item in data.get("tickers", []):
-        tickers.add(item.get("ticker", "").upper())
-    
-    # Subcategory tickers
-    for subcat in data.get("subcategories", {}).values():
-        for item in subcat.get("tickers", []):
-            tickers.add(item.get("ticker", "").upper())
-    
-    return sorted([t for t in tickers if t])
+    from db.readers import read_watchlist_tickers
+
+    return read_watchlist_tickers()
 
 
 def get_portfolio_tickers() -> list:
     """Extract all tickers from portfolio."""
-    data = load_json(PORTFOLIO_FILE)
+    from db.readers import read_portfolio_positions
+
     tickers = set()
-    
-    for pos in data.get("positions", []):
+    for pos in read_portfolio_positions():
         ticker = pos.get("ticker", "").upper()
         if ticker:
             tickers.add(ticker)
@@ -669,26 +657,34 @@ def format_ratings_table(results: list, changes_only: bool = False) -> str:
 
 
 def update_watchlist_with_ratings(tickers: list, ratings_data: dict) -> None:
-    """Update watchlist.json with analyst ratings data."""
-    watchlist = load_json(WATCHLIST_FILE)
-    
-    for item in watchlist.get("tickers", []):
+    """Update Turso watchlist rows with analyst ratings data."""
+    from db.readers import read_watchlist_items
+    from db.writer import upsert_watchlist_ticker
+
+    requested = {ticker.upper() for ticker in tickers}
+    for item in read_watchlist_items():
         ticker = item.get("ticker", "").upper()
-        if ticker in ratings_data:
-            r = ratings_data[ticker]
-            signal = calculate_rating_signal(r)
-            item["analyst_ratings"] = {
-                "source": r.get("source", "unknown"),
-                "recommendation": r.get("recommendation"),
-                "buy_pct": r.get("ratings", {}).get("buy_pct"),
-                "analyst_count": r.get("ratings", {}).get("total", 0),
-                "target_upside_pct": r.get("target_upside_pct"),
-                "signal": signal["direction"],
-                "changes_signal": signal.get("changes_signal"),
-                "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M")
-            }
-    
-    save_json(WATCHLIST_FILE, watchlist)
+        if ticker not in requested or ticker not in ratings_data:
+            continue
+        r = ratings_data[ticker]
+        signal = calculate_rating_signal(r)
+        payload = dict(item)
+        payload["analyst_ratings"] = {
+            "source": r.get("source", "unknown"),
+            "recommendation": r.get("recommendation"),
+            "buy_pct": r.get("ratings", {}).get("buy_pct"),
+            "analyst_count": r.get("ratings", {}).get("total", 0),
+            "target_upside_pct": r.get("target_upside_pct"),
+            "signal": signal["direction"],
+            "changes_signal": signal.get("changes_signal"),
+            "last_updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+        }
+        upsert_watchlist_ticker(
+            ticker,
+            sector=payload.get("sector"),
+            source=payload.get("source"),
+            payload=payload,
+        )
 
 
 def main():
@@ -698,7 +694,7 @@ def main():
     parser.add_argument("--portfolio", action="store_true", help="Check all portfolio tickers")
     parser.add_argument("--all", action="store_true", help="Check both watchlist and portfolio")
     parser.add_argument("--changes-only", action="store_true", help="Only show tickers with recent changes")
-    parser.add_argument("--update-watchlist", action="store_true", help="Update watchlist.json with ratings")
+    parser.add_argument("--update-watchlist", action="store_true", help="Update Turso watchlist with ratings")
     parser.add_argument("--json", action="store_true", help="Output raw JSON")
     parser.add_argument("--no-cache", action="store_true", help="Bypass cache and fetch fresh data")
     parser.add_argument("--source", choices=["ib", "uw"], help="Force specific data source (IB or UW)")

@@ -721,13 +721,21 @@ def analyze_position(pos, scenario='base'):
 
 def run_full_analysis():
     """Run scenario analysis across all positions for all three scenarios."""
-    with open('data/portfolio.json') as f:
-        pf = json.load(f)
+    from db.readers import read_latest_portfolio_snapshot
+
+    pf = read_latest_portfolio_snapshot() or {"positions": [], "bankroll": 0}
+    positions = pf.get("positions") if isinstance(pf.get("positions"), list) else []
+    bankroll = float(
+        pf.get("bankroll")
+        or pf.get("net_liquidation")
+        or pf.get("netLiquidation")
+        or 0
+    )
     
     results = {'bear': [], 'base': [], 'bull': []}
     
     for scenario in ['bear', 'base', 'bull']:
-        for pos in pf['positions']:
+        for pos in positions:
             r = analyze_position(pos, scenario)
             results[scenario].append(r)
     
@@ -736,9 +744,9 @@ def run_full_analysis():
         total_pnl = sum(r['pnl'] for r in results[scenario])
         totals[scenario] = {
             'total_pnl': round(total_pnl, 0),
-            'total_pnl_pct': round((total_pnl / pf['bankroll']) * 100, 1),
-            'net_liq_after': round(pf['bankroll'] + total_pnl, 0),
-            'bankroll': pf['bankroll'],
+            'total_pnl_pct': round((total_pnl / bankroll) * 100, 1) if bankroll else 0,
+            'net_liq_after': round(bankroll + total_pnl, 0),
+            'bankroll': bankroll,
         }
     
     return results, totals, pf

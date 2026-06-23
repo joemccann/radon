@@ -33,8 +33,6 @@ from typing import Optional, Tuple
 # Project paths
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_ROOT = SCRIPT_DIR.parent
-DATA_DIR = PROJECT_ROOT / "data"
-PORTFOLIO_FILE = DATA_DIR / "portfolio.json"
 
 # Add utils to path
 sys.path.insert(0, str(SCRIPT_DIR))
@@ -324,7 +322,7 @@ class PortfolioVerificationError(RuntimeError):
 
 
 def refresh_portfolio_from_ib() -> None:
-    """Sync portfolio.json from IB so analysis uses current holdings, not stale cache."""
+    """Sync portfolio from IB so analysis uses current holdings."""
     sync_cmd = [
         sys.executable,
         str(SCRIPT_DIR / "ib_sync.py"),
@@ -338,25 +336,21 @@ def refresh_portfolio_from_ib() -> None:
     if result.returncode != 0:
         detail = (result.stderr or result.stdout or "IB sync failed").strip()
         raise PortfolioVerificationError(f"Cannot verify current portfolio via IB: {detail}")
-    if not PORTFOLIO_FILE.exists():
-        raise PortfolioVerificationError("Cannot verify current portfolio via IB: portfolio sync produced no portfolio file")
+    from db.readers import read_latest_portfolio_snapshot
+
+    if read_latest_portfolio_snapshot() is None:
+        raise PortfolioVerificationError("Cannot verify current portfolio via IB: sync produced no DB snapshot")
 
 
 def load_portfolio(source: str = "ib") -> list:
     """Load portfolio positions, syncing from IB by default."""
-    if source not in {"ib", "cache"}:
+    if source not in {"ib", "db", "cache"}:
         raise ValueError(f"Unsupported portfolio source: {source}")
     if source == "ib":
         refresh_portfolio_from_ib()
-    if not PORTFOLIO_FILE.exists():
-        return []
-    try:
-        from utils.atomic_io import verified_load
-        data = verified_load(str(PORTFOLIO_FILE))
-    except (ValueError, ImportError):
-        with open(PORTFOLIO_FILE) as f:
-            data = json.load(f)
-    return data.get("positions", [])
+    from db.readers import read_portfolio_positions
+
+    return read_portfolio_positions()
 
 
 def analyze_portfolio(ticker_filter: Optional[str] = None, source: str = "ib") -> list[PositionAnalysis]:
@@ -654,9 +648,9 @@ def main():
     parser.add_argument("--table", action="store_true", help="Compact table format (for startup)")
     parser.add_argument(
         "--source",
-        choices=["ib", "cache"],
+        choices=["ib", "db", "cache"],
         default="ib",
-        help="Portfolio source: sync from IB (default) or use cached portfolio.json",
+        help="Portfolio source: sync from IB (default) or use latest DB snapshot",
     )
     args = parser.parse_args()
 

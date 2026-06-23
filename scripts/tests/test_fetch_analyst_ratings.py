@@ -9,6 +9,7 @@ from fetch_analyst_ratings import (
     get_watchlist_tickers,
     get_portfolio_tickers,
     get_cached_rating,
+    update_watchlist_with_ratings,
     format_ratings_table,
     CACHE_TTL_HOURS,
 )
@@ -101,45 +102,54 @@ class TestCalculateRatingSignal:
 # ── get_watchlist_tickers ───────────────────────────────────────────
 
 class TestGetWatchlistTickers:
-    def test_extracts_tickers(self, tmp_path):
-        wl = tmp_path / "watchlist.json"
-        wl.write_text(json.dumps({
-            "tickers": [
-                {"ticker": "AAPL"},
-                {"ticker": "MSFT"},
-            ],
-            "subcategories": {
-                "@someone": {"tickers": [{"ticker": "NVDA"}]}
-            }
-        }))
-        with patch("fetch_analyst_ratings.WATCHLIST_FILE", wl):
-            tickers = get_watchlist_tickers()
-            assert "AAPL" in tickers
-            assert "MSFT" in tickers
-            assert "NVDA" in tickers
+    def test_extracts_tickers_from_db_reader(self):
+        with patch("db.readers.read_watchlist_tickers", return_value=["AAPL", "MSFT", "NVDA"]) as reader:
+            assert get_watchlist_tickers() == ["AAPL", "MSFT", "NVDA"]
+        reader.assert_called_once_with()
 
-    def test_empty_watchlist(self, tmp_path):
-        wl = tmp_path / "watchlist.json"
-        wl.write_text(json.dumps({}))
-        with patch("fetch_analyst_ratings.WATCHLIST_FILE", wl):
+    def test_empty_watchlist(self):
+        with patch("db.readers.read_watchlist_tickers", return_value=[]):
             assert get_watchlist_tickers() == []
 
 
 # ── get_portfolio_tickers ───────────────────────────────────────────
 
 class TestGetPortfolioTickers:
-    def test_extracts_tickers(self, tmp_path):
-        pf = tmp_path / "portfolio.json"
-        pf.write_text(json.dumps({
-            "positions": [
-                {"ticker": "AAPL"},
-                {"ticker": "NVDA"},
-            ]
-        }))
-        with patch("fetch_analyst_ratings.PORTFOLIO_FILE", pf):
+    def test_extracts_tickers_from_latest_snapshot_reader(self):
+        with patch("db.readers.read_portfolio_positions", return_value=[
+            {"ticker": "AAPL"},
+            {"ticker": "NVDA"},
+            {"ticker": "AAPL"},
+        ]) as reader:
             tickers = get_portfolio_tickers()
-            assert "AAPL" in tickers
-            assert "NVDA" in tickers
+        reader.assert_called_once_with()
+        assert tickers == ["AAPL", "NVDA"]
+
+
+class TestUpdateWatchlistWithRatings:
+    def test_updates_matching_watchlist_rows_in_db(self):
+        with patch("db.readers.read_watchlist_items", return_value=[
+            {"ticker": "AAPL", "sector": "Technology", "source": "manual"},
+            {"ticker": "MSFT", "sector": "Technology", "source": "manual"},
+        ]) as reader:
+            with patch("db.writer.upsert_watchlist_ticker") as writer:
+                update_watchlist_with_ratings(["AAPL"], {
+                    "AAPL": {
+                        "source": "uw",
+                        "recommendation": "buy",
+                        "ratings": {"buy_pct": 70, "total": 20},
+                        "target_upside_pct": 18.5,
+                    }
+                })
+
+        reader.assert_called_once_with()
+        writer.assert_called_once()
+        args, kwargs = writer.call_args
+        assert args == ("AAPL",)
+        assert kwargs["sector"] == "Technology"
+        assert kwargs["source"] == "manual"
+        assert kwargs["payload"]["analyst_ratings"]["source"] == "uw"
+        assert kwargs["payload"]["analyst_ratings"]["recommendation"] == "buy"
 
 
 # ── get_cached_rating ───────────────────────────────────────────────

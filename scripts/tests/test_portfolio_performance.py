@@ -17,6 +17,9 @@ with patch("os.makedirs"):
         build_option_id,
         build_payload,
         compute_performance_metrics,
+        extract_fill_marks,
+        load_blotter_fallback,
+        load_portfolio_snapshot,
         parse_flex_trade_rows,
         reconstruct_equity_curve,
         select_option_mark,
@@ -31,6 +34,71 @@ with patch("os.makedirs"):
 def test_build_option_id_formats_occ_style_identifier():
     assert build_option_id("BRZE", "20260320", "C", 25.0) == "BRZE260320C00025000"
     assert build_option_id("SPY", "2026-03-20", "p", 572.5) == "SPY260320P00572500"
+
+
+def test_load_portfolio_snapshot_reads_latest_db_snapshot():
+    with patch("db.readers.read_latest_portfolio_snapshot", return_value={"positions": [{"ticker": "AAPL"}]}) as reader:
+        assert load_portfolio_snapshot() == {"positions": [{"ticker": "AAPL"}]}
+    reader.assert_called_once_with()
+
+
+def test_load_blotter_fallback_reconstructs_from_executed_orders():
+    rows = [
+        {
+            "exec_id": "exec-1",
+            "fill_time": "2026-06-01T14:30:00Z",
+            "payload": {
+                "execId": "exec-1",
+                "side": "BOT",
+                "quantity": 2,
+                "avgPrice": 1.25,
+                "commission": 1.0,
+                "time": "2026-06-01T14:30:00Z",
+                "contract": {
+                    "symbol": "AAPL",
+                    "secType": "OPT",
+                    "strike": 200,
+                    "right": "C",
+                    "lastTradeDateOrContractMonth": "20260717",
+                },
+            },
+        }
+    ]
+    with patch("db.readers.read_executed_orders", return_value=rows):
+        fills = load_blotter_fallback()
+
+    assert len(fills) == 1
+    assert fills[0].trade_date == "2026-06-01"
+    assert fills[0].contract_key == "AAPL260717C00200000"
+    assert fills[0].quantity == 2
+    assert fills[0].net_cash == pytest.approx(-251.0)
+
+
+def test_extract_fill_marks_reads_executed_order_prices():
+    rows = [
+        {
+            "exec_id": "exec-1",
+            "fill_time": "2026-06-01T14:30:00Z",
+            "payload": {
+                "execId": "exec-1",
+                "side": "SLD",
+                "quantity": 1,
+                "avgPrice": 2.5,
+                "time": "2026-06-01T14:30:00Z",
+                "contract": {
+                    "symbol": "MSFT",
+                    "secType": "OPT",
+                    "strike": 400,
+                    "right": "P",
+                    "lastTradeDateOrContractMonth": "20260821",
+                },
+            },
+        }
+    ]
+    with patch("db.readers.read_executed_orders", return_value=rows):
+        marks = extract_fill_marks()
+
+    assert marks == {"MSFT260821P00400000": {"2026-06-01": 2.5}}
 
 
 def test_select_option_mark_prefers_nbbo_mid_then_avg_then_last():

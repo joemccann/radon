@@ -2,20 +2,19 @@
 """
 Interactive Brokers Portfolio Sync
 
-Connects to TWS/IB Gateway and syncs live positions to portfolio.json
+Connects to TWS/IB Gateway and syncs live positions to Turso.
 
 Requirements:
   pip install ib_insync
 
 Usage:
   python3 scripts/ib_sync.py              # Display portfolio
-  python3 scripts/ib_sync.py --sync       # Sync to portfolio.json
+  python3 scripts/ib_sync.py --sync       # Sync to Turso portfolio_snapshots
   python3 scripts/ib_sync.py --port 7497  # Custom port (7497=TWS paper, 7496=TWS live, 4001=Gateway)
 """
 
 import argparse
 import json
-import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -52,12 +51,17 @@ from clients.journal_basis import (
     prior_net_qty_for_contract,
 )
 from db.client import get_db
+from db.readers import (
+    read_journal_entry_date_maps,
+    read_latest_portfolio_snapshot,
+    read_open_orders,
+)
 
 # Default connection settings
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS["ib_sync"]
 
-PORTFOLIO_PATH = Path(__file__).parent.parent / "data" / "portfolio.json"
+DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 def connect_ib(host: str, port: int, client_id="auto") -> IBClient:
@@ -1030,8 +1034,20 @@ def build_fill_dates(client) -> dict:
     return fill_dates
 
 
+def _basis_carry_key(ticker, structure, expiry) -> str:
+    """Size-independent key for same-side basis carry-forward. A stock's
+    `structure` embeds the share count ("Stock (-1000.0 shares)"), which changes
+    on a partial close, so collapse it to "Stock" — otherwise the pre/post-cover
+    snapshots never share a key. Option structures are strike-based and already
+    count-independent."""
+    s = structure or ""
+    if s.startswith("Stock"):
+        s = "Stock"
+    return f"{ticker}|{s}|{expiry}"
+
+
 def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_data: Optional[dict] = None, fill_dates: Optional[dict] = None) -> dict:
-    """Convert IB data to portfolio.json format using collapsed positions"""
+    """Convert IB data to the portfolio snapshot payload."""
 
     bankroll = account.get('NetLiquidation', account.get('TotalCashValue', 0))
 
@@ -1039,88 +1055,52 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     total_deployed = sum(p['entry_cost'] for p in collapsed_positions)
     deployed_pct = (total_deployed / bankroll * 100) if bankroll > 0 else 0
 
-    # Derive entry_date from trade_log and previous portfolio.
-    # Priority: trade_log (most recent BUY/TRADE for matching ticker+structure) →
-    # previous portfolio → today (truly new position).
+    # Derive entry_date from journal rows and the previous portfolio snapshot.
+    # Priority: journal per-contract date → journal ticker+structure date →
+    # IB fills → previous portfolio → today (truly new position).
     #
     # `today` MUST be the ET trading day, not the host's local day. On Hetzner
     # (UTC host) `datetime.now()` after 20:00 ET is already the next calendar
     # day in UTC, so a brand-new position opened at 21:00 ET would get stamped
     # with tomorrow's ET date and the same-day P&L branch on the frontend
     # (web/lib/positionUtils.ts:isSameDay) would miss it. Always use ET.
-    import json as _json
     today = datetime.now(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
 
-    # Build date lookup from trade_log (latest trade per ticker+structure key)
-    trade_log_dates: dict[str, str] = {}
-    trade_log_path = PORTFOLIO_PATH.parent / "trade_log.json"
-    if trade_log_path.exists():
-        try:
-            raw_log = _json.loads(trade_log_path.read_text())
-            log_entries = raw_log if isinstance(raw_log, list) else raw_log.get("trades", [])
-            if isinstance(log_entries, list):
-                for entry in log_entries:
-                    t = entry.get("ticker", "")
-                    d = entry.get("date", "")
-                    s = entry.get("structure", "")
-                    if t and d:
-                        trade_log_dates[t] = d
-                        if s:
-                            trade_log_dates[f"{t}|{s}"] = d
-        except Exception:
-            pass
+    try:
+        trade_log_dates, blotter_dates = read_journal_entry_date_maps()
+    except Exception:
+        trade_log_dates, blotter_dates = {}, {}
 
-    # Blotter dates (from IB Flex Query — most reliable source)
-    blotter_dates: dict[str, str] = {}  # keyed by "ticker" and "ticker|expiry|right|strike"
-    blotter_path = PORTFOLIO_PATH.parent / "blotter.json"
-    if blotter_path.exists():
-        try:
-            blotter = _json.loads(blotter_path.read_text())
-            for trade in blotter.get("open_trades", []):
-                sym_raw = trade.get("symbol", "")
-                ticker_b = sym_raw.split()[0].strip()
-                execs = trade.get("executions", [])
-                # Find earliest execution date
-                earliest = None
-                for ex in execs:
-                    t_str = ex.get("time", "")
-                    if t_str:
-                        d = t_str[:10]
-                        if earliest is None or d < earliest:
-                            earliest = d
-                if not earliest or not ticker_b:
-                    continue
-                # Per-ticker fallback (earliest across all legs)
-                if ticker_b not in blotter_dates or earliest < blotter_dates[ticker_b]:
-                    blotter_dates[ticker_b] = earliest
-                # Per-contract key for options (parse OCC symbol: AAOI  260417P00085000)
-                parts = sym_raw.strip().split()
-                if len(parts) >= 2 and trade.get("sec_type") == "OPT":
-                    occ = parts[-1]  # e.g. "260417P00085000"
-                    if len(occ) >= 15:
-                        exp = f"20{occ[:6]}"  # 260417 → 20260417
-                        exp_fmt = f"{exp[:4]}-{exp[4:6]}-{exp[6:8]}"  # → 2026-04-17
-                        right = occ[6]  # P or C
-                        strike_raw = int(occ[7:]) / 1000  # 00085000 → 85.0
-                        contract_key = f"{ticker_b}|{exp_fmt}|{right}|{strike_raw}"
-                        blotter_dates[contract_key] = earliest
-        except Exception:
-            pass
-
-    # Previous portfolio dates (fallback)
+    # Previous portfolio dates + per-unit basis (fallback)
     prev_dates: dict[str, str] = {}
-    if PORTFOLIO_PATH.exists():
-        try:
-            prev = _json.loads(PORTFOLIO_PATH.read_text())
-            for p in prev.get("positions", []):
-                key = f"{p.get('ticker')}|{p.get('structure')}|{p.get('expiry')}"
-                ed = p.get("entry_date", "")
-                # Only carry forward dates that aren't today (avoids inheriting
-                # the old bug where every sync set entry_date = today)
-                if ed and ed != today:
-                    prev_dates[key] = ed
-        except Exception:
-            pass
+    prev_basis: dict[str, dict] = {}
+    try:
+        prev = read_latest_portfolio_snapshot() or {}
+        for p in prev.get("positions", []):
+            key = f"{p.get('ticker')}|{p.get('structure')}|{p.get('expiry')}"
+            ed = p.get("entry_date", "")
+            # Only carry forward dates that aren't today (avoids inheriting
+            # the old bug where every sync set entry_date = today)
+            if ed and ed != today:
+                prev_dates[key] = ed
+            # Per-unit basis of the prior position, for same-side basis
+            # carry-forward (a partial close must NOT change per-unit basis). IB
+            # drifts pos.avgCost on a reduce — folding the closed units' realised
+            # P&L into the residual VWAP — and assignment-originated stock has no
+            # journal opener to correct it. entry_cost / contracts is
+            # unit-agnostic (per-share for stock, per-contract for options).
+            try:
+                pc = abs(float(p.get("contracts") or 0))
+                pec = abs(float(p.get("entry_cost") or 0))
+                pdir = (p.get("direction") or "").upper()
+                if pc > 0 and pec > 0 and pdir in ("LONG", "SHORT"):
+                    prev_basis[_basis_carry_key(p.get("ticker"), p.get("structure"), p.get("expiry"))] = {
+                        "direction": pdir, "contracts": pc, "per_unit": pec / pc
+                    }
+            except (TypeError, ValueError):
+                pass
+    except Exception:
+        pass
 
     for pos in collapsed_positions:
         key = f"{pos.get('ticker')}|{pos.get('structure')}|{pos.get('expiry')}"
@@ -1171,8 +1151,8 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         # Reversal P$320/C$330 was assigned 2026-04-22 because an unrelated
         # AMD 295P existed in the blotter — see test_combo_entry_date.py).
         #
-        #   1. blotter (per-contract: ticker|expiry|right|strike)
-        #   2. trade_log (ticker|structure)
+        #   1. journal (per-contract: ticker|expiry|right|strike)
+        #   2. journal (ticker|structure)
         #   3. IB fills (per-contract, same-session)
         #   4. prev portfolio (ticker|structure|expiry, excluding today)
         #   5. today  ← brand-new positions default here so the frontend's
@@ -1185,6 +1165,42 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             or prev_dates.get(key)
             or today
         )
+
+        # Same-side basis carry-forward. A partial close (buy-to-close a SHORT /
+        # sell-to-close a LONG) must NOT change the remaining per-unit basis, but
+        # IB drifts pos.avgCost on a reduce and assignment-originated stock (e.g.
+        # MU short from an assigned call) has no journal opener to correct it. So
+        # when this position is NOT larger than the prior snapshot on the SAME
+        # side, and the prior per-unit basis still differs from IB's (drifted)
+        # avgCost, carry the prior basis forward. The size-not-increased + basis-
+        # differs pair makes it sticky: it corrects the reduce AND holds the pin
+        # on later unchanged syncs, while never freezing an add/grow (size up),
+        # a direction flip, or a position IB and the snapshot already agree on.
+        # A journal open_basis (when present) already corrected the leg — detect
+        # that via avg_cost != ib_avg_cost and leave it (journal wins). Single-leg
+        # only; multi-leg combos are handled by the journal lot-matcher.
+        pb = prev_basis.get(_basis_carry_key(ticker, structure, expiry))
+        if pb is not None and len(legs) == 1:
+            leg0 = legs[0]
+            cur_contracts = abs(float(pos.get("contracts") or 0))
+            cur_dir = (pos.get("direction") or "").upper()
+            ac = leg0.get("avg_cost")
+            ibc = leg0.get("ib_avg_cost")
+            journal_corrected = (
+                ac is not None and ibc is not None and abs(float(ac) - float(ibc)) > 1e-6
+            )
+            drifted = ibc is not None and abs(pb["per_unit"] - float(ibc)) > 1e-6
+            if (
+                not journal_corrected
+                and drifted
+                and cur_dir == pb["direction"]
+                and 0 < cur_contracts <= pb["contracts"]
+            ):
+                per_unit = pb["per_unit"]
+                sign = -1 if cur_dir == "SHORT" else 1
+                pos["entry_cost"] = round(sign * per_unit * cur_contracts, 2)
+                leg0["avg_cost"] = round(per_unit, 6)
+                leg0["entry_cost"] = round(per_unit * cur_contracts, 2)
 
     result = {
         "bankroll": round(bankroll, 2),
@@ -1207,7 +1223,7 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     return result
 
 
-NAV_HISTORY_PATH = PORTFOLIO_PATH.parent / "nav_history.jsonl"
+NAV_HISTORY_PATH = DATA_DIR / "nav_history.jsonl"
 
 
 def _append_nav_snapshot(net_liq: float, daily_pnl=None) -> None:
@@ -1247,32 +1263,15 @@ def _append_nav_snapshot(net_liq: float, daily_pnl=None) -> None:
 
 
 def save_portfolio(portfolio: dict):
-    """Save portfolio to JSON file (atomic write with SHA-256 checksum)."""
-    from utils.atomic_io import atomic_save
+    """Save portfolio to the canonical Turso portfolio_snapshots table."""
+    from db.service_cycle import service_cycle
+    from db.writer import upsert_portfolio_snapshot
 
-    # Backup existing
-    if PORTFOLIO_PATH.exists():
-        backup_path = PORTFOLIO_PATH.with_suffix('.json.bak')
-        backup_path.write_text(PORTFOLIO_PATH.read_text())
-        print(f"✓ Backed up existing portfolio to {backup_path.name}")
-
-    checksum = atomic_save(str(PORTFOLIO_PATH), portfolio)
-    print(f"✓ Saved portfolio to {PORTFOLIO_PATH} (checksum: {checksum[:12]}…)")
-
-    # Phase 3 dual-write — best-effort, non-fatal. The writer streams
-    # directly to Turso cloud (embedded replica is opt-in only).
-    try:
-        import sys as _sys
-        from datetime import datetime as _datetime, timezone as _tz
-        _sys.path.insert(0, str(Path(__file__).parent))
-        from db.service_cycle import service_cycle
-        from db.writer import upsert_portfolio_snapshot
-        taken_at = _datetime.now(_tz.utc).isoformat().replace("+00:00", "Z")
-        with service_cycle("portfolio-sync", market_hours_class="intraday") as cycle:
-            cycle.finished_at = taken_at
-            upsert_portfolio_snapshot(taken_at, portfolio)
-    except Exception as exc:  # noqa: BLE001
-        print(f"  Warning: portfolio db dual-write failed: {exc}")
+    taken_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    with service_cycle("portfolio-sync", market_hours_class="intraday") as cycle:
+        cycle.finished_at = taken_at
+        upsert_portfolio_snapshot(taken_at, portfolio)
+    print(f"✓ Saved portfolio snapshot to Turso at {taken_at}")
 
     # Track daily NAV for performance history
     acct = portfolio.get("account_summary", {})
@@ -1290,7 +1289,7 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, 
                         help="TWS/Gateway port (7497=paper, 7496=live, 4001=gateway)")
     parser.add_argument("--client-id", type=int, default=None, help="Client ID (omit for auto-allocation)")
-    parser.add_argument("--sync", action="store_true", help="Sync to portfolio.json")
+    parser.add_argument("--sync", action="store_true", help="Sync to Turso portfolio_snapshots")
     parser.add_argument("--no-prices", action="store_true", help="Skip market price fetch")
     parser.add_argument("--skip-audit", action="store_true", help="Skip naked short audit after sync")
 
@@ -1445,13 +1444,8 @@ def main():
                     import logging
                     log = logging.getLogger("ib_sync.audit")
 
-                    data_dir = str(PORTFOLIO_PATH.parent)
-                    orders_path = os.path.join(data_dir, "orders.json")
-                    if os.path.exists(orders_path):
-                        with open(orders_path) as f:
-                            orders_data = json.load(f)
-                        orders = orders_data if isinstance(orders_data, list) else orders_data.get("orders", orders_data.get("open_orders", []))
-
+                    orders = read_open_orders()
+                    if orders:
                         violations = find_naked_short_violations(orders, portfolio["positions"])
                         if violations:
                             log.warning("NAKED SHORT AUDIT: %d violation(s) detected", len(violations))
@@ -1468,7 +1462,7 @@ def main():
                         else:
                             print("✓ Naked short audit: no violations")
                     else:
-                        print("  Naked short audit: orders.json not found, skipping")
+                        print("  Naked short audit: no open orders in Turso, skipping")
                 except ImportError:
                     import logging
                     logging.getLogger("ib_sync.audit").warning(
@@ -1483,7 +1477,7 @@ def main():
 
             print("\n⚠️  Note: kelly_optimal, target, and stop fields need manual evaluation")
         else:
-            print("\nRun with --sync to save to portfolio.json")
+            print("\nRun with --sync to save to Turso")
 
     finally:
         client.disconnect()

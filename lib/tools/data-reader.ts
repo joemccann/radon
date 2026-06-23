@@ -14,7 +14,7 @@ export type ReadResult<T> = { ok: true; data: T } | { ok: false; error: string }
 /**
  * Read and parse a JSON data file, optionally validating against a TypeBox schema.
  *
- * @param relativePath  Path relative to project root (e.g. "data/portfolio.json").
+ * @param relativePath  Path relative to project root.
  * @param schema        Optional TypeBox schema for validation.
  */
 export async function readDataFile<S extends TSchema>(

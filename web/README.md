@@ -43,7 +43,7 @@ The `npm run dev` command starts four services:
 
 ```
 IB Gateway (4001)
-  ├──▶ ib_sync.py ──▶ portfolio.json (positions, P&L, account)
+  ├──▶ ib_sync.py ──▶ Turso portfolio_snapshots (positions, P&L, account)
   │
   └──▶ ib_realtime_server.js (port 8765)
          │

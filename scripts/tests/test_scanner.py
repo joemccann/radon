@@ -170,16 +170,9 @@ class TestAnalyzeSignal:
 # host this rolls the trading day forward for users west of UTC.
 
 class TestScanTimeTimezoneAware:
-    def test_scan_time_has_utc_offset_when_no_watchlist(self, tmp_path, monkeypatch):
-        """scan() emits scan_time even when the watchlist is empty.
-
-        Easiest path that exercises the writer: point WATCHLIST at an
-        empty (no `tickers`) JSON file so no UW lookups happen.
-        """
-        watchlist_file = tmp_path / "watchlist.json"
-        watchlist_file.write_text(json.dumps({"tickers": []}))
-        monkeypatch.setattr("scanner.WATCHLIST", watchlist_file)
-        # Avoid touching real portfolio.json
+    def test_scan_time_has_utc_offset_when_watchlist_empty(self, monkeypatch):
+        """scan() emits scan_time even when the Turso watchlist is empty."""
+        monkeypatch.setattr("scanner.get_watchlist_items", lambda: [])
         monkeypatch.setattr("scanner.get_open_positions", lambda: set())
 
         buf = io.StringIO()

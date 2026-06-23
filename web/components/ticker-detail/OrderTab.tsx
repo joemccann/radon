@@ -337,10 +337,38 @@ function NewOrderForm({
     const typeLabel = isOption ? position?.structure ?? "Option" : "Stock";
     const description = `${action} ${parsedQty}${isOption ? "x" : ""} ${ticker} ${typeLabel} @ ${fmtPrice(parsedPrice)}`;
 
-    // Stock or no-position cases: pass through with no chainLegs payload
-    // (the gate will run augmentation with an empty leg list, yielding a
-    // pure description + totalCost summary, no risk fields).
-    if (!isOption || position == null) {
+    // Stock (linear) path. A close against the held stock must surface realised
+    // P&L, mirroring the option close-out branches below — previously every
+    // stock order fell through as an OPEN ("Total:" with no P&L), so a
+    // buy-to-close-short (cover) showed no P&L at all.
+    if (!isOption) {
+      if (position != null && position.structure_type === "Stock") {
+        const stockLeg = position.legs[0];
+        const held = Math.abs(position.contracts ?? 0);
+        // avg_cost is per-share for stocks (multiplier 1) — never × multiplier.
+        const basis = parsedQty * Math.abs(Number.isFinite(stockLeg?.avg_cost) ? stockLeg.avg_cost : 0);
+        const isClosingLong = action === "SELL" && position.direction === "LONG" && held >= parsedQty;
+        const isClosingShort = action === "BUY" && position.direction === "SHORT" && held >= parsedQty;
+        if (isClosingLong) {
+          // Sell-to-close: proceeds − basis.
+          return { ticker, chainLegs: [], netPremium: -parsedPrice, description, totalCost, totalLabel: "Proceeds:", closeOut: { entryCostDollars: basis } };
+        }
+        if (isClosingShort) {
+          // Buy-to-close-short: pnl = proceeds(−closeDebit) − basis(−credit) =
+          // credit − debit (cover below entry → gain).
+          return { ticker, chainLegs: [], netPremium: parsedPrice, description, totalCost: -totalCost, totalLabel: "Close Debit:", closeOut: { entryCostDollars: -basis } };
+        }
+      }
+      // Fresh stock open (or adding on the same side beyond the holding).
+      return {
+        ticker,
+        chainLegs: [],
+        netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
+        description,
+        totalCost: action === "SELL" ? -totalCost : totalCost,
+      };
+    }
+    if (position == null) {
       return {
         ticker,
         chainLegs: [],

@@ -8,7 +8,7 @@ Decomposes trade P&L into actionable dimensions:
 - By risk profile (defined vs undefined)
 - Kelly calibration accuracy (predicted vs actual win rates)
 
-Reads: data/trade_log.json, data/strategies.json
+Reads: Turso journal rows, data/strategies.json
 Outputs: JSON attribution payload
 """
 
@@ -22,7 +22,6 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
-TRADE_LOG_PATH = ROOT / "data" / "trade_log.json"
 STRATEGIES_PATH = ROOT / "data" / "strategies.json"
 
 
@@ -419,9 +418,10 @@ def build_attribution(
 
 
 def load_and_build() -> Dict[str, Any]:
-    """Load trade log and build attribution from real data."""
-    trade_data = json.loads(TRADE_LOG_PATH.read_text())
-    trades = trade_data.get("trades", [])
+    """Load journal trades and build attribution from real data."""
+    from db.readers import read_journal_trades
+
+    trades = read_journal_trades()
     strategy_names = load_strategy_names()
     return build_attribution(trades, strategy_names)
 

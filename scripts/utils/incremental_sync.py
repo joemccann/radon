@@ -1,16 +1,16 @@
 """Incremental portfolio sync — skip full sync when no position changes detected.
 
-Compares current portfolio.json positions against live IB positions by
+Compares latest Turso portfolio snapshot positions against live IB positions by
 (ticker, expiry) key and contract count. If no changes, returns existing
 portfolio data without triggering a full sync.
 """
 
 from __future__ import annotations
 
-import json
 import logging
-from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
+
+from db.readers import read_latest_portfolio_snapshot
 
 logger = logging.getLogger("incremental_sync")
 
@@ -18,7 +18,7 @@ logger = logging.getLogger("incremental_sync")
 def _normalize_expiry(raw_expiry: str) -> str:
     """Normalize expiry strings to YYYY-MM-DD format for comparison.
 
-    IB returns YYYYMMDD, portfolio.json stores YYYY-MM-DD or N/A.
+    IB returns YYYYMMDD; portfolio snapshots store YYYY-MM-DD or N/A.
     """
     if not raw_expiry or raw_expiry == "N/A":
         return "N/A"
@@ -50,7 +50,7 @@ def _build_ib_position_map(ib_positions: list) -> Dict[tuple, int]:
 
 
 def _build_portfolio_position_map(positions: List[Dict]) -> Dict[tuple, int]:
-    """Build a (ticker, expiry) -> contracts map from portfolio.json positions."""
+    """Build a (ticker, expiry) -> contracts map from portfolio snapshot positions."""
     pos_map: Dict[tuple, int] = {}
     for p in positions:
         ticker = p.get("ticker", p.get("symbol", ""))
@@ -62,7 +62,7 @@ def _build_portfolio_position_map(positions: List[Dict]) -> Dict[tuple, int]:
 
 
 def positions_changed(portfolio_positions: List[Dict], ib_positions: list) -> bool:
-    """Compare portfolio.json positions against live IB positions.
+    """Compare portfolio snapshot positions against live IB positions.
 
     Returns True if any differences detected (position added, removed,
     or contract count changed).
@@ -89,12 +89,14 @@ def positions_changed(portfolio_positions: List[Dict], ib_positions: list) -> bo
     return False
 
 
-def incremental_sync(client: Any, portfolio_path: Path) -> Dict[str, Any]:
+def incremental_sync(client: Any, portfolio: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Compare current portfolio against IB and decide if full sync is needed.
 
     Args:
         client: IBClient instance (must be connected).
-        portfolio_path: Path to portfolio.json.
+        portfolio: Optional preloaded portfolio snapshot for tests or callers
+            that already fetched it. If omitted, the latest Turso snapshot is
+            read.
 
     Returns:
         dict with keys:
@@ -104,23 +106,16 @@ def incremental_sync(client: Any, portfolio_path: Path) -> Dict[str, Any]:
     # Fetch live IB positions
     ib_positions = client.get_positions()
 
-    # Load existing portfolio
-    if not portfolio_path.exists():
-        logger.info("No portfolio.json found at %s — full sync needed", portfolio_path)
+    snapshot = portfolio if portfolio is not None else read_latest_portfolio_snapshot()
+    if not snapshot:
+        logger.info("No portfolio snapshot found — full sync needed")
         return {"changed": True, "portfolio": None}
 
-    try:
-        with open(portfolio_path) as f:
-            portfolio = json.load(f)
-    except (json.JSONDecodeError, IOError) as exc:
-        logger.warning("Failed to read portfolio.json: %s — full sync needed", exc)
-        return {"changed": True, "portfolio": None}
-
-    existing_positions = portfolio.get("positions", [])
+    existing_positions = snapshot.get("positions", [])
 
     if positions_changed(existing_positions, ib_positions):
         logger.info("Position changes detected — full sync needed")
-        return {"changed": True, "portfolio": portfolio}
+        return {"changed": True, "portfolio": snapshot}
 
     logger.info("No position changes detected — skipping full sync")
-    return {"changed": False, "portfolio": portfolio}
+    return {"changed": False, "portfolio": snapshot}

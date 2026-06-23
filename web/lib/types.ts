@@ -212,7 +212,7 @@ export type PortfolioData = {
   undefined_risk_count: number;
   avg_kelly_optimal: number | null;
   account_summary?: AccountSummary;
-  /** Ticker → earliest trade date from trade_log.json (for entry time on share cards). */
+  /** Ticker -> earliest journal trade date for entry time on share cards. */
   trade_log_dates?: Record<string, string>;
 };
 

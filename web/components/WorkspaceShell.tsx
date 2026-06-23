@@ -13,6 +13,7 @@ import { useMarketHours, MarketState } from "@/lib/useMarketHours";
 import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
+import { hasUsableIndexPrice, mergeIndexFallbackPrices, useIndexQuoteFallback } from "@/lib/useIndexQuoteFallback";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
 import { usePreviousClose } from "@/lib/usePreviousClose";
 import { useGlobexOpen, HEADER_FUTURES } from "@/lib/futuresSession";
@@ -88,7 +89,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const { data: orders, syncing: ordersSyncing, error: ordersError, lastSync: ordersLastSync, syncNow: ordersSyncNow, updateData: updateOrdersData } = useOrders(shouldAutoSyncOrders);
 
   // Trigger a fresh IB sync every time the user navigates TO the orders page.
-  // place/modify/cancel all sync orders.json immediately after the action, so
+  // place/modify/cancel all refresh the DB order snapshot immediately, so
   // this primarily catches IB-side changes (partial fills, status updates, etc.)
   // that happened while the user was on another page.
   useEffect(() => {
@@ -157,7 +158,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     return exchange ? [{ symbol: tickerParam.toUpperCase(), exchange }] : [];
   }, [tickerParam]);
 
-  // Watchlist symbols stream live quotes too (the profile WATCHLIST tab). A
+  // Watchlist symbols stream live quotes too (the profile tracked-symbols tab). A
   // watched symbol that is NOT also a portfolio/order ticker (e.g. SPCX) was
   // never subscribed, so it rendered "---". Like the focused ticker, split index
   // symbols (VIX/SPX/…) onto the `indexes` channel — subscribing those as plain
@@ -247,6 +248,18 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     depthExpiry: tickerDetail.depthFutureExpiry,
   });
 
+  const missingIndexFallbackSymbols = useMemo(
+    () => allIndexes
+      .map((idx) => idx.symbol)
+      .filter((symbol) => !hasUsableIndexPrice(rawPrices[symbol])),
+    [allIndexes, rawPrices],
+  );
+  const indexFallbackPrices = useIndexQuoteFallback(missingIndexFallbackSymbols);
+  const rawPricesWithIndexFallback = useMemo(
+    () => mergeIndexFallbackPrices(rawPrices, indexFallbackPrices),
+    [rawPrices, indexFallbackPrices],
+  );
+
   // Debounce ibConnected: disconnections must persist >2s before surfacing to UI.
   // IB farm connectivity checks fire brief disconnected→connected sequences that
   // would otherwise flash the banner/toast every few seconds.
@@ -265,7 +278,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   }, [rawIbConnected]);
 
   // Backfill missing previous-close from Yahoo Finance / UW for day-change calc
-  const prices = usePreviousClose(rawPrices);
+  const prices = usePreviousClose(rawPricesWithIndexFallback);
 
   // Header index-futures strip: ES/NQ/RTY last + prior-close, gated on Globex.
   const futuresQuotes = useMemo<FuturesQuote[]>(() => {

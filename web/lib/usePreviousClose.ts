@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { isIndexSymbol } from "./indexSymbols";
 import type { PriceData } from "./pricesProtocol";
 
 /**
@@ -64,11 +65,9 @@ export function usePreviousClose(
   }, [prices, closePrices]);
 }
 
-const REGIME_INDEX_SYMBOLS = new Set(["VIX", "VVIX", "COR1M"]);
-
 export function shouldBackfillPreviousClose(symbol: string, price: PriceData): boolean {
   return !symbol.includes("_") &&
-    !REGIME_INDEX_SYMBOLS.has(symbol) &&
+    !isIndexSymbol(symbol) &&
     price.last != null &&
     price.last !== 0 &&
     (price.close == null || price.close === 0);

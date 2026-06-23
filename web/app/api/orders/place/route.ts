@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
-import { readDataFile } from "@tools/data-reader";
-import { OrdersData } from "@tools/schemas/ib-orders";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
-import { checkNakedShortRisk } from "@/lib/nakedShortGuard";
-import type { NakedShortPortfolio } from "@/lib/nakedShortGuard";
+import {
+  EMPTY_ORDERS,
+  readOrdersSnapshotFromDb,
+} from "@/lib/orders/readOrdersFromDb";
 import {
   getRequestId,
   jsonApiError,
@@ -44,6 +44,14 @@ type PlaceBody = {
   conId?: number;
   exchange?: string;
 };
+
+async function readOrdersSnapshotBestEffort() {
+  try {
+    return await readOrdersSnapshotFromDb();
+  } catch {
+    return EMPTY_ORDERS;
+  }
+}
 
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId();
@@ -172,25 +180,6 @@ export async function POST(request: Request): Promise<Response> {
       );
     }
 
-    // Naked short guard — block orders that would create naked short exposure
-    const portfolioResult = await readDataFile("data/portfolio.json");
-    if (portfolioResult?.ok) {
-      const guard = checkNakedShortRisk(body, portfolioResult.data as NakedShortPortfolio);
-      if (!guard.allowed) {
-        return setNoStoreResponseHeaders(
-          jsonApiError({
-            message: `Naked short blocked: ${guard.reason}`,
-            status: 403,
-            code: "VALIDATION_ERROR",
-            requestId,
-          }),
-          requestId,
-        );
-      }
-    } else {
-      console.warn("[orders/place] Could not load portfolio for naked short guard:", portfolioResult?.error ?? "unknown error");
-    }
-
     const orderPayload = {
       type: body.type || "stock",
       symbol: body.symbol.toUpperCase(),
@@ -275,7 +264,7 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       // Non-fatal — order was placed, refresh failed
     }
-    const ordersResult = await readDataFile("data/orders.json", OrdersData);
+    const orders = await readOrdersSnapshotBestEffort();
 
     const response = NextResponse.json({
       status: "ok",
@@ -283,7 +272,7 @@ export async function POST(request: Request): Promise<Response> {
       permId: orderResult.permId,
       initialStatus: orderResult.initialStatus,
       message: orderResult.message,
-      orders: ordersResult.ok ? ordersResult.data : null,
+      orders,
       requestId,
     });
     return setNoStoreResponseHeaders(response, requestId);

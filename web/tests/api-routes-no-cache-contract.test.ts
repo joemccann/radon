@@ -96,6 +96,7 @@ describe("client hooks/components — every fetch must use cache: 'no-store'", (
 // source-of-truth migration). Each must invoke a DB read function from
 // inside its GET handler — the DB-first contract.
 const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
+  { path: "app/api/orders/route.ts", dbHelperPattern: /readOrdersSnapshotFromDb\s*\(/ },
   { path: "app/api/vcg/route.ts", dbHelperPattern: /readVcgFromDb\b/ },
   { path: "app/api/gex/route.ts", dbHelperPattern: /readCachedGexFromDb\s*\(/ },
   { path: "app/api/gamma-rotation/route.ts", dbHelperPattern: /readCachedGammaRotationFromDb\s*\(/ },
@@ -106,6 +107,7 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/flow-analysis/route.ts", dbHelperPattern: /readFlowAnalysisFromDb\s*\(/ },
   { path: "app/api/performance/route.ts", dbHelperPattern: /readPerformanceFromDb\s*\(/ },
   { path: "app/api/portfolio/route.ts", dbHelperPattern: /readPortfolioFromDb\s*\(/ },
+  { path: "app/api/journal/route.ts", dbHelperPattern: /readJournalFromDb\s*\(/ },
   // cash-flows reads via FastAPI proxy which queries Turso server-side
   { path: "app/api/cash-flows/route.ts", dbHelperPattern: /radonFetch\s*\(\s*[`"']\/cash-flows/ },
   { path: "app/api/service-health/route.ts", dbHelperPattern: /\bgetDb\s*\(/ },
@@ -121,6 +123,86 @@ describe("Turso source-of-truth — routes must invoke a DB read", () => {
       expect(withoutImports).toMatch(dbHelperPattern);
     },
   );
+});
+
+const ORDER_DB_ONLY_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
+  { path: "app/api/orders/route.ts", dbHelperPattern: /readOrdersSnapshotFromDb\s*\(/ },
+  { path: "app/api/orders/cancel/route.ts", dbHelperPattern: /readOrdersSnapshotFromDb\s*\(/ },
+  { path: "app/api/orders/modify/route.ts", dbHelperPattern: /readOrdersSnapshotFromDb\s*\(/ },
+  { path: "app/api/orders/place/route.ts", dbHelperPattern: /readOrdersSnapshotFromDb\s*\(/ },
+];
+
+describe("Turso source-of-truth — orders routes must not read data/orders.json", () => {
+  it.each(ORDER_DB_ONLY_ROUTES)(
+    "$path reads orders from Turso and never from the flat orders file",
+    async ({ path, dbHelperPattern }) => {
+      const src = await readFile(join(REPO_ROOT, path), "utf8");
+      const stripped = src
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+      expect(stripped).toMatch(dbHelperPattern);
+      expect(stripped).not.toContain("data/orders.json");
+      expect(stripped).not.toMatch(/\breadDataFile\b/);
+      expect(stripped).not.toMatch(/\bOrdersData\b/);
+    },
+  );
+});
+
+describe("Turso source-of-truth — portfolio route must not read flat JSON", () => {
+  it("app/api/portfolio/route.ts reads portfolio and trade dates from Turso only", async () => {
+    const src = await readFile(join(REPO_ROOT, "app/api/portfolio/route.ts"), "utf8");
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+    expect(stripped).toMatch(/readPortfolioFromDb\s*\(/);
+    expect(stripped).toMatch(/FROM\s+journal/i);
+    expect(stripped).not.toContain("data/portfolio.json");
+    expect(stripped).not.toContain("data/trade_log.json");
+    expect(stripped).not.toMatch(/\breadDataFile\b/);
+    expect(stripped).not.toMatch(/\bPortfolioData\b/);
+  });
+});
+
+const JOURNAL_DB_ONLY_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
+  { path: "app/api/journal/route.ts", dbHelperPattern: /readJournalFromDb\s*\(/ },
+  { path: "app/api/journal/sync/route.ts", dbHelperPattern: /importLatestReconciliationToJournal\s*\(/ },
+];
+
+describe("Turso source-of-truth — journal routes must not read flat JSON", () => {
+  it.each(JOURNAL_DB_ONLY_ROUTES)(
+    "$path reads/writes journal state through Turso helpers",
+    async ({ path, dbHelperPattern }) => {
+      const src = await readFile(join(REPO_ROOT, path), "utf8");
+      const stripped = src
+        .replace(/\/\*[\s\S]*?\*\//g, "")
+        .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+      expect(stripped).toMatch(dbHelperPattern);
+      expect(stripped).not.toContain("trade_log.json");
+      expect(stripped).not.toContain("reconciliation.json");
+      expect(stripped).not.toMatch(/\breadFile\b/);
+      expect(stripped).not.toMatch(/\bwriteFile\b/);
+      expect(stripped).not.toMatch(/\brunJournalSync\b/);
+    },
+  );
+});
+
+describe("Turso source-of-truth — PI route must not read portfolio/journal flat JSON", () => {
+  it("app/api/pi/route.ts serves portfolio and journal commands from Turso", async () => {
+    const src = await readFile(join(REPO_ROOT, "app/api/pi/route.ts"), "utf8");
+    const stripped = src
+      .replace(/\/\*[\s\S]*?\*\//g, "")
+      .replace(/(^|[^:])\/\/[^\n]*/g, "$1");
+
+    expect(stripped).toMatch(/FROM\s+portfolio_snapshots/i);
+    expect(stripped).toMatch(/readJournalFromDb\s*\(/);
+    expect(stripped).not.toContain("portfolio.json");
+    expect(stripped).not.toContain("trade_log.json");
+    expect(stripped).not.toMatch(/\breadLocalJsonFile\b/);
+    expect(stripped).not.toMatch(/\breadFile\b/);
+  });
 });
 
 // `dynamic = "force-dynamic"` only opts the route OUT of Next.js's static

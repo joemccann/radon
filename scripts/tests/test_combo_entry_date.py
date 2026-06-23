@@ -10,6 +10,19 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import ib_sync
 
 
+def _patch_turso_sources(
+    *,
+    structure_dates=None,
+    contract_dates=None,
+    previous_portfolio=None,
+):
+    return patch.multiple(
+        ib_sync,
+        read_journal_entry_date_maps=lambda: (structure_dates or {}, contract_dates or {}),
+        read_latest_portfolio_snapshot=lambda: previous_portfolio,
+    )
+
+
 class TestComboEntryDateResolution(unittest.TestCase):
     def test_multi_leg_option_position_uses_contract_specific_blotter_dates(self):
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -86,7 +99,13 @@ class TestComboEntryDateResolution(unittest.TestCase):
                 }
             ]
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+            with _patch_turso_sources(
+                contract_dates={
+                    "PLTR|2026-03-27|C|155.0": "2026-03-24",
+                    "PLTR|2026-03-27|P|152.5": "2026-03-24",
+                    "PLTR|2026-03-27|C|145.0": "2026-03-19",
+                }
+            ):
                 result = ib_sync.convert_to_portfolio_format(
                     {"NetLiquidation": 1_000_000},
                     collapsed_positions,
@@ -142,7 +161,7 @@ class TestComboEntryDateResolution(unittest.TestCase):
 
             fill_dates = {"AAOI|2026-04-02|P|110.0": "2026-03-25"}
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+            with _patch_turso_sources():
                 result = ib_sync.convert_to_portfolio_format(
                     {"NetLiquidation": 1_000_000},
                     collapsed_positions,
@@ -210,7 +229,9 @@ class TestComboEntryDateResolution(unittest.TestCase):
             # fill_dates says today, but blotter says yesterday — blotter wins
             fill_dates = {"AAOI|2026-04-02|P|110.0": "2026-03-25"}
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+            with _patch_turso_sources(
+                contract_dates={"AAOI|2026-04-02|P|110.0": "2026-03-24"}
+            ):
                 result = ib_sync.convert_to_portfolio_format(
                     {"NetLiquidation": 1_000_000},
                     collapsed_positions,
@@ -294,7 +315,12 @@ class TestComboEntryDateResolution(unittest.TestCase):
                 }
             ]
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+            with _patch_turso_sources(
+                contract_dates={
+                    "AMD|2026-05-01|P|295.0": "2026-04-22",
+                    "AMD|2026-06-18|P|270.0": "2026-04-24",
+                }
+            ):
                 result = ib_sync.convert_to_portfolio_format(
                     {"NetLiquidation": 1_000_000},
                     collapsed_positions,
@@ -351,7 +377,7 @@ class TestComboEntryDateResolution(unittest.TestCase):
                 }
             ]
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+            with _patch_turso_sources():
                 result = ib_sync.convert_to_portfolio_format(
                     {"NetLiquidation": 1_000_000},
                     collapsed_positions,
@@ -404,7 +430,7 @@ class TestComboEntryDateResolution(unittest.TestCase):
                 }
             ]
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+            with _patch_turso_sources():
                 result = ib_sync.convert_to_portfolio_format(
                     {"NetLiquidation": 1_000_000},
                     collapsed_positions,

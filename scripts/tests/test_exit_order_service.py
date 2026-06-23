@@ -1,8 +1,31 @@
 """Tests for exit_order_service.py — expiry extraction from order data."""
+import json
 import pytest
-import re
+import sqlite3
+from unittest.mock import patch
 
-from exit_order_service import extract_expiry
+from exit_order_service import extract_expiry, load_pending_exits, update_trade_log
+
+
+def _journal_db(*payloads: dict) -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.execute(
+        """
+        CREATE TABLE journal (
+            trade_id TEXT PRIMARY KEY,
+            payload TEXT,
+            filled_at TEXT,
+            written_at TEXT
+        )
+        """
+    )
+    for idx, payload in enumerate(payloads, start=1):
+        conn.execute(
+            "INSERT INTO journal (trade_id, payload, filled_at, written_at) VALUES (?, ?, ?, ?)",
+            (f"trade-{idx}", json.dumps(payload), "2026-06-01", f"2026-06-01T00:00:0{idx}Z"),
+        )
+    conn.commit()
+    return conn
 
 
 class TestExtractExpiry:
@@ -97,3 +120,50 @@ class TestExtractExpiry:
             ],
         }
         assert extract_expiry(order) == "20260417"
+
+
+class TestJournalBackedExitOrders:
+    def test_load_pending_exits_reads_journal_rows(self):
+        db = _journal_db(
+            {
+                "id": 42,
+                "ticker": "GOOG",
+                "structure": "Call Spread",
+                "contract": "GOOG Apr 17, 2026 $315/$340 Call Spread",
+                "contracts": 1,
+                "fill_price": 2.5,
+                "legs": [{"type": "Long Call", "expiry": "2026-04-17"}],
+                "exit_orders": {"target": {"status": "PENDING_MANUAL", "target_price": 4.0}},
+            },
+            {
+                "id": 43,
+                "ticker": "AAPL",
+                "exit_orders": {"target": {"status": "ACTIVE", "target_price": 2.0}},
+            },
+        )
+
+        with patch("db.client.get_db", return_value=db):
+            pending = load_pending_exits()
+
+        assert len(pending) == 1
+        assert pending[0]["trade_id"] == 42
+        assert pending[0]["journal_trade_id"] == "trade-1"
+        assert pending[0]["target_price"] == 4.0
+
+    def test_update_trade_log_updates_journal_payload(self):
+        db = _journal_db(
+            {
+                "id": 42,
+                "ticker": "GOOG",
+                "exit_orders": {"target": {"status": "PENDING_MANUAL", "target_price": 4.0}},
+            }
+        )
+
+        with patch("db.client.get_db", return_value=db):
+            assert update_trade_log(42, 99, "ACTIVE") is True
+
+        raw = db.execute("SELECT payload FROM journal WHERE trade_id = ?", ("trade-1",)).fetchone()[0]
+        payload = json.loads(raw)
+        assert payload["exit_orders"]["target"]["status"] == "ACTIVE"
+        assert payload["exit_orders"]["target"]["order_id"] == 99
+        assert payload["exit_orders"]["target"]["target_price"] == 4.0

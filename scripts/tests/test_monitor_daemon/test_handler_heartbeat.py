@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import sys
 import types
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -82,6 +83,27 @@ def _called_with_state(spy: MagicMock, expected_service: str, expected_state: st
     return False
 
 
+class _Cursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeJournalDb:
+    def __init__(self, trades):
+        self.trades = {f"trade-{trade['id']}": trade for trade in trades}
+
+    def execute(self, sql, args=()):
+        if sql.strip().upper().startswith("SELECT"):
+            return _Cursor([
+                (trade_id, json.dumps(trade))
+                for trade_id, trade in self.trades.items()
+            ])
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+
 # --------------------------------------------------------------------- fill_monitor
 
 class TestFillMonitorHeartbeat:
@@ -123,29 +145,23 @@ class TestFillMonitorHeartbeat:
 class TestExitOrdersHeartbeat:
     """Service name: ``exit-orders``."""
 
-    def test_records_ok_on_successful_run(self, tmp_path, fake_db_writer):
-        import json as _json
+    def test_records_ok_on_successful_run(self, fake_db_writer):
         from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
-
-        trade_log = tmp_path / "trade_log.json"
-        trade_log.write_text(_json.dumps({"trades": []}))
 
         with patch("monitor_daemon.handlers.exit_orders.IBClient") as mock_cls:
             mock_client = MagicMock()
             mock_cls.return_value = mock_client
 
-            handler = ExitOrdersHandler(trade_log_path=trade_log)
+            handler = ExitOrdersHandler(db=_FakeJournalDb([]))
             handler.run()
 
         assert _called_with_state(fake_db_writer, "exit-orders", "ok")
 
-    def test_records_error_when_ib_fetch_fails(self, tmp_path, fake_db_writer):
-        import json as _json
+    def test_records_error_when_ib_fetch_fails(self, fake_db_writer):
         from monitor_daemon.handlers.exit_orders import ExitOrdersHandler
 
-        trade_log = tmp_path / "trade_log.json"
-        trade_log.write_text(_json.dumps({
-            "trades": [{
+        db = _FakeJournalDb([
+            {
                 "id": 1,
                 "ticker": "GOOG",
                 "exit_orders": {
@@ -160,15 +176,15 @@ class TestExitOrdersHeartbeat:
                         },
                     },
                 },
-            }],
-        }))
+            }
+        ])
 
         with patch("monitor_daemon.handlers.exit_orders.IBClient") as mock_cls:
             mock_client = MagicMock()
             mock_client.connect.side_effect = ConnectionError("Gateway down")
             mock_cls.return_value = mock_client
 
-            handler = ExitOrdersHandler(trade_log_path=trade_log)
+            handler = ExitOrdersHandler(db=db)
             handler.run()
 
         assert _called_with_state(fake_db_writer, "exit-orders", "error")

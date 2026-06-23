@@ -8,8 +8,8 @@ Output: JSON to stdout with supports/against/watch/neutral arrays.
 import json
 import sys
 from datetime import datetime, timezone
-from pathlib import Path
 
+from db.readers import read_portfolio_positions
 from fetch_flow import fetch_flow as fetch_flow_module
 from scanner import analyze_signal
 
@@ -19,22 +19,9 @@ except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
 
-SCRIPT_DIR = Path(__file__).parent
-PROJECT_DIR = SCRIPT_DIR.parent
-PORTFOLIO = PROJECT_DIR / "data" / "portfolio.json"
-
-
 def load_portfolio() -> list:
-    """Load open positions from portfolio.json (with checksum verification)."""
-    if not PORTFOLIO.exists():
-        return []
-    try:
-        from utils.atomic_io import verified_load
-        data = verified_load(str(PORTFOLIO))
-    except (ValueError, ImportError):
-        with open(PORTFOLIO) as f:
-            data = json.load(f)
-    return data.get("positions", [])
+    """Load open positions from the latest Turso portfolio snapshot."""
+    return read_portfolio_positions()
 
 
 def classify_position(pos: dict, flow_data: dict, analysis: dict) -> dict:

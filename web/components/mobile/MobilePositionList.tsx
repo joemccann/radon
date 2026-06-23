@@ -10,6 +10,7 @@ import {
   fmtPrice,
   resolveMarketValue,
   resolveEntryCost,
+  positionDirectionSign,
   getOptionDailyChg,
   getTodayPnlDollars,
   resolveRealtimePrice,
@@ -79,7 +80,13 @@ function PositionCard({ pos, prices, showExpiry }: { pos: PortfolioPosition; pri
   const stockLast = prices?.[pos.ticker.toUpperCase()]?.last;
   const rtStockLast = stockLast != null && stockLast > 0 ? stockLast : null;
   const optRtMv = getOptionRtMv(pos, prices);
-  const mv = isStock && rtStockLast != null ? rtStockLast * pos.contracts : optRtMv ?? resolveMarketValue(pos);
+  // Sign-aware: `pos.contracts` is a positive magnitude, so a SHORT must carry
+  // the direction sign or its MV reads positive and `mv - ec` (signed) becomes
+  // a SUM — the MU short showed +$2.19M instead of its true ~+$80k. Mirrors the
+  // desktop PositionTable fix; the option / resolveMarketValue paths are signed.
+  const mv = isStock && rtStockLast != null
+    ? positionDirectionSign(pos) * rtStockLast * Math.abs(pos.contracts)
+    : optRtMv ?? resolveMarketValue(pos);
   const ec = resolveEntryCost(pos);
   const pnl = mv != null ? mv - ec : null;
   const pnlPct = mv != null && ec !== 0 ? (pnl! / Math.abs(ec)) * 100 : null;

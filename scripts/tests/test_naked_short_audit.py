@@ -1,5 +1,4 @@
 """Tests for naked_short_audit.py — naked short violation detection and cancellation."""
-import json
 import pytest
 from unittest.mock import MagicMock, patch
 
@@ -234,30 +233,19 @@ class TestCancelViolations:
 # Test: dry-run mode (main)
 # ===========================================================================
 
-@pytest.mark.skip(reason="naked short guard disabled at module entry point")
 class TestDryRun:
-    def test_dry_run_does_not_cancel(self, tmp_path):
-        """Dry-run prints violations but does not connect to IB or cancel."""
-        portfolio = {"positions": []}
-        orders = {
-            "open_orders": [
-                make_order(1, 100, "AAPL", "STK", "SELL", 100),
-            ]
-        }
-        pf = tmp_path / "portfolio.json"
-        of = tmp_path / "orders.json"
-        pf.write_text(json.dumps(portfolio))
-        of.write_text(json.dumps(orders))
-
+    def test_dry_run_reads_db_sources_and_does_not_cancel(self):
         from naked_short_audit import main as audit_main
-        import sys
 
-        with patch.object(sys, "argv", [
-            "naked_short_audit.py", "--dry-run",
-            "--portfolio", str(pf), "--orders", str(of),
-        ]):
-            with patch("naked_short_audit.IBClient") as mock_ib:
-                result = audit_main()
-                mock_ib.assert_not_called()
-                assert result["violations_found"] == 1
-                assert result["cancelled"] == 0
+        with patch("db.readers.read_portfolio_positions", return_value=[]) as positions_reader:
+            with patch("db.readers.read_open_orders", return_value=[
+                make_order(1, 100, "AAPL", "STK", "SELL", 100),
+            ]) as orders_reader:
+                with patch("naked_short_audit.IBClient") as mock_ib:
+                    result = audit_main(["--dry-run"])
+
+        positions_reader.assert_called_once_with()
+        orders_reader.assert_called_once_with()
+        mock_ib.assert_not_called()
+        assert result["violations_found"] == 0
+        assert result["cancelled"] == 0

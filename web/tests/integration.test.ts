@@ -1,9 +1,48 @@
-import { test, expect } from "vitest";
+import { test, expect, vi, beforeEach } from "vitest";
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { NextRequest } from "next/server";
 import { buildEvaluateCommand, __resolvePiInput, __normalizeScanArgs } from "../app/api/pi/route";
+
+const mockExecute = vi.fn();
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+
+function mockPiDb() {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (/FROM\s+portfolio_snapshots/i.test(sql)) {
+      return {
+        rows: [
+          {
+            payload: JSON.stringify({
+              bankroll: 100_000,
+              position_count: 0,
+              defined_risk_count: 0,
+              undefined_risk_count: 0,
+              last_sync: "2026-05-07T12:00:00Z",
+              positions: [],
+            }),
+          },
+        ],
+      };
+    }
+    if (/FROM\s+journal/i.test(sql)) {
+      return {
+        rows: [
+          { payload: JSON.stringify({ id: 1, ticker: "AAPL", date: "2026-05-07", structure: "Stock" }) },
+          { payload: JSON.stringify({ id: 2, ticker: "MSFT", date: "2026-05-08", structure: "Stock" }) },
+          { payload: JSON.stringify({ id: 3, ticker: "NVDA", date: "2026-05-09", structure: "Stock" }) },
+        ],
+      };
+    }
+    return { rows: [] };
+  });
+}
+
+beforeEach(() => {
+  mockExecute.mockReset();
+  mockPiDb();
+});
 
 type CommandResult = {
   status: number;
@@ -75,7 +114,7 @@ test("buildEvaluateCommand builds single evaluate command with default and expli
   expect(buildEvaluateCommand(["AAPL", "--days", "10"])).toEqual(["scripts/evaluate.py", "AAPL", "--days", "10"]);
 });
 
-test("pi API returns local portfolio payload", async () => {
+test("pi API returns Turso portfolio payload", async () => {
   const { response, body } = await runPiRequest("/portfolio");
 
   expect(response.status).toBe(200);

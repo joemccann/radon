@@ -14,7 +14,6 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const PERFORMANCE_PATH = join(process.cwd(), "..", "data", "performance.json");
-const PORTFOLIO_PATH = join(process.cwd(), "..", "data", "portfolio.json");
 const CACHE_TTL_MS = 15 * 60_000;
 
 async function isPerformanceStale(): Promise<boolean> {
@@ -79,6 +78,22 @@ async function readPerformanceFromDb(): Promise<TimestampedRead<Record<string, u
   };
 }
 
+async function readPortfolioFromDb(): Promise<Record<string, unknown> | null> {
+  try {
+    const db = getDb();
+    const result = await db.execute({
+      sql: `SELECT payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
+      args: [],
+    });
+    if (result.rows.length === 0) return null;
+    const row = result.rows[0] as unknown as { payload?: unknown };
+    if (typeof row.payload !== "string") return null;
+    return JSON.parse(row.payload) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
 async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const data = await readJsonFile(PERFORMANCE_PATH);
   if (!data) return null;
@@ -97,7 +112,7 @@ export async function GET(): Promise<Response> {
       maxAgeMs: CACHE_TTL_MS,
       label: "performance",
     }),
-    readJsonFile(PORTFOLIO_PATH),
+    readPortfolioFromDb(),
   ]);
   const cachedPerformance = perfRead.ok ? perfRead.data : null;
 

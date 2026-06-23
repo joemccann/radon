@@ -34,8 +34,10 @@ function makePriceData(symbol: string, overrides: Partial<PriceData> = {}): Pric
 describe("shouldBackfillPreviousClose", () => {
   it("skips websocket-backed regime indexes even when close is missing", () => {
     expect(shouldBackfillPreviousClose("VIX", makePriceData("VIX", { last: 25.5 }))).toBe(false);
+    expect(shouldBackfillPreviousClose("VXN", makePriceData("VXN", { last: 32.29 }))).toBe(false);
     expect(shouldBackfillPreviousClose("VVIX", makePriceData("VVIX", { last: 118.2 }))).toBe(false);
     expect(shouldBackfillPreviousClose("COR1M", makePriceData("COR1M", { last: 31.44 }))).toBe(false);
+    expect(shouldBackfillPreviousClose("SPX", makePriceData("SPX", { last: 7438.1 }))).toBe(false);
   });
 
   it("still backfills regular symbols when last exists and close is missing", () => {

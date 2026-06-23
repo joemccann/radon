@@ -3,17 +3,16 @@
 Exit Orders Handler - Places pending exit orders when IB will accept them.
 
 IB rejects limit orders >40% from current market price. This handler:
-- Monitors pending exit orders in trade_log.json
+- Monitors pending exit orders in the Turso journal
 - Checks current market prices
 - Places orders when they're within the 40% threshold
-- Updates trade_log.json with order IDs
+- Updates the Turso journal with order IDs
 """
 
 import json
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from ib_insync import Option, LimitOrder
 
@@ -22,13 +21,16 @@ from clients.ib_client import IBClient, DEFAULT_HOST
 
 logger = logging.getLogger(__name__)
 
-# Default paths
-DEFAULT_TRADE_LOG = Path(__file__).parent.parent.parent.parent / "data" / "trade_log.json"
 DEFAULT_IB_PORT = 4001
 # "auto" rotates across SUBPROCESS_ID_RANGE on connect. See
 # fill_monitor.py for the rationale (CLOSE_WAIT survival on prev cycle's
 # socket, feedback_ib_client_id_ranges.md).
 DEFAULT_CLIENT_ID: int | str = "auto"
+
+try:
+    from db.client import get_db  # type: ignore
+except ImportError:  # pragma: no cover - DB layer optional in unit tests
+    get_db = None  # type: ignore[assignment]
 
 
 class ExitOrdersHandler(BaseHandler):
@@ -40,28 +42,58 @@ class ExitOrdersHandler(BaseHandler):
 
     def __init__(
         self,
-        trade_log_path: Optional[Path] = None,
+        db: Any = None,
         ib_port: int = DEFAULT_IB_PORT,
         client_id: "int | str" = DEFAULT_CLIENT_ID,
         max_gap_pct: float = 0.40
     ):
         super().__init__()
-        self.trade_log_path = trade_log_path or DEFAULT_TRADE_LOG
+        self.db = db
         self.ib_port = ib_port
         self.client_id = client_id
         self.max_gap_pct = max_gap_pct
+
+    def _open_db(self) -> Any:
+        if self.db is not None:
+            return self.db
+        if get_db is None:
+            raise RuntimeError("journal DB unavailable")
+        return get_db()
+
+    @staticmethod
+    def _row_value(row: Any, index: int, name: str) -> Any:
+        if isinstance(row, (tuple, list)):
+            return row[index] if len(row) > index else None
+        return getattr(row, name, None)
+
+    @staticmethod
+    def _decode_payload(raw: Any) -> Optional[Dict[str, Any]]:
+        if not isinstance(raw, str) or not raw:
+            return None
+        try:
+            parsed = json.loads(raw)
+        except (TypeError, ValueError):
+            return None
+        return parsed if isinstance(parsed, dict) else None
     
     def _load_pending_orders(self) -> List[Dict]:
-        """Load pending exit orders from trade_log.json."""
+        """Load pending exit orders from the Turso journal."""
         pending = []
-        
-        if not self.trade_log_path.exists():
-            return pending
-        
+
         try:
-            trade_log = json.loads(self.trade_log_path.read_text())
-            
-            for trade in trade_log.get("trades", []):
+            rows = self._open_db().execute(
+                """
+                SELECT trade_id, payload
+                FROM journal
+                ORDER BY COALESCE(filled_at, written_at) DESC
+                """
+            ).fetchall()
+
+            for row in rows:
+                journal_trade_id = self._row_value(row, 0, "trade_id")
+                trade = self._decode_payload(self._row_value(row, 1, "payload"))
+                if not trade:
+                    continue
                 exit_orders = trade.get("exit_orders", {})
                 
                 # Check target orders
@@ -75,7 +107,8 @@ class ExitOrdersHandler(BaseHandler):
                         "target_price": target.get("price"),
                         "contracts": target.get("contracts"),
                         "contract_spec": target.get("contract_spec"),
-                        "action": "SELL"  # Exit orders are sells
+                        "action": "SELL",  # Exit orders are sells
+                        "journal_trade_id": journal_trade_id,
                     })
                 
                 # Check stop orders
@@ -89,11 +122,12 @@ class ExitOrdersHandler(BaseHandler):
                         "target_price": stop.get("price"),
                         "contracts": stop.get("contracts"),
                         "contract_spec": stop.get("contract_spec"),
-                        "action": "SELL"
+                        "action": "SELL",
+                        "journal_trade_id": journal_trade_id,
                     })
                     
         except Exception as e:
-            logger.error(f"Failed to load trade log: {e}")
+            logger.error(f"Failed to load journal exit orders: {e}")
         
         return pending
     
@@ -105,26 +139,64 @@ class ExitOrdersHandler(BaseHandler):
         gap_pct = abs(target_price - current_price) / current_price
         return gap_pct <= self.max_gap_pct
     
-    def _update_trade_log(self, trade_id: int, order_type: str, order_id: int) -> None:
-        """Update trade_log.json with placed order ID."""
+    def _update_journal_trade(
+        self,
+        trade_id: int,
+        order_type: str,
+        order_id: int,
+        journal_trade_id: Optional[str] = None,
+    ) -> None:
+        """Update the Turso journal row with a placed order ID."""
         try:
-            trade_log = json.loads(self.trade_log_path.read_text())
-            
-            for trade in trade_log.get("trades", []):
-                if trade.get("id") == trade_id:
-                    exit_orders = trade.get("exit_orders", {})
-                    if order_type in exit_orders:
-                        exit_orders[order_type]["status"] = "PLACED"
-                        exit_orders[order_type]["order_id"] = order_id
-                        exit_orders[order_type]["placed_at"] = datetime.now().isoformat()
-                    trade["exit_orders"] = exit_orders
+            db = self._open_db()
+            rows = []
+            if journal_trade_id:
+                rows = db.execute(
+                    "SELECT trade_id, payload FROM journal WHERE trade_id = ?",
+                    (journal_trade_id,),
+                ).fetchall()
+            if not rows:
+                rows = db.execute("SELECT trade_id, payload FROM journal").fetchall()
+
+            target_trade_id = None
+            target_trade = None
+            for row in rows:
+                candidate_id = self._row_value(row, 0, "trade_id")
+                candidate = self._decode_payload(self._row_value(row, 1, "payload"))
+                if not candidate:
+                    continue
+                if candidate_id == journal_trade_id or candidate.get("id") == trade_id:
+                    target_trade_id = candidate_id
+                    target_trade = candidate
                     break
-            
-            self.trade_log_path.write_text(json.dumps(trade_log, indent=2))
-            logger.info(f"Updated trade log: trade {trade_id} {order_type} -> order #{order_id}")
-            
+
+            if target_trade_id is None or target_trade is None:
+                raise RuntimeError(f"journal trade not found for id {trade_id}")
+
+            exit_orders = target_trade.get("exit_orders", {})
+            if order_type in exit_orders:
+                exit_orders[order_type]["status"] = "PLACED"
+                exit_orders[order_type]["order_id"] = order_id
+                exit_orders[order_type]["placed_at"] = datetime.now().isoformat()
+            target_trade["exit_orders"] = exit_orders
+
+            db.execute(
+                """
+                UPDATE journal
+                SET payload = ?, written_at = ?
+                WHERE trade_id = ?
+                """,
+                (
+                    json.dumps(target_trade),
+                    datetime.now().isoformat(),
+                    target_trade_id,
+                ),
+            )
+            if hasattr(db, "commit"):
+                db.commit()
+            logger.info(f"Updated journal: trade {trade_id} {order_type} -> order #{order_id}")
         except Exception as e:
-            logger.error(f"Failed to update trade log: {e}")
+            logger.error(f"Failed to update journal trade: {e}")
     
     def execute(self) -> Dict[str, Any]:
         """
@@ -234,11 +306,12 @@ class ExitOrdersHandler(BaseHandler):
                             "current_mid": mid
                         })
 
-                        # Update trade log
-                        self._update_trade_log(
+                        # Update journal
+                        self._update_journal_trade(
                             order_info["trade_id"],
                             order_info["order_type"],
-                            order_id
+                            order_id,
+                            order_info.get("journal_trade_id"),
                         )
                     else:
                         gap_pct = abs(target_price - mid) / mid * 100
