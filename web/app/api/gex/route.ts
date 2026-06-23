@@ -96,8 +96,19 @@ async function readCachedGexFromDisk(): Promise<Record<string, unknown> | null> 
   }
 }
 
+/** Parsed scan_time epoch ms, or 0 when absent/unparseable. */
+function scanTimeMs(payload: Record<string, unknown> | null): number {
+  const t = payload && typeof payload.scan_time === "string" ? Date.parse(payload.scan_time) : NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
 async function readCachedGex(): Promise<Record<string, unknown> | null> {
-  return (await readCachedGexFromDb()) ?? (await readCachedGexFromDisk());
+  // Prefer whichever store has the NEWER scan_time. Reading the DB
+  // unconditionally first hid fresh disk data behind a stale Turso row — GEX
+  // served a week-old 06-16 snapshot while data/gex.json was current.
+  const [db, disk] = await Promise.all([readCachedGexFromDb(), readCachedGexFromDisk()]);
+  if (db && disk) return scanTimeMs(disk) > scanTimeMs(db) ? disk : db;
+  return db ?? disk;
 }
 
 function normalizeGexPayload(raw: Record<string, unknown>): Record<string, unknown> {
