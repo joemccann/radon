@@ -43,7 +43,6 @@ CHECK_INTERVAL = 300  # 5 minutes in seconds
 # Paths
 SCRIPT_DIR = Path(__file__).parent
 PROJECT_DIR = SCRIPT_DIR.parent
-TRADE_LOG_PATH = PROJECT_DIR / "data" / "trade_log.json"
 SERVICE_LOG_PATH = PROJECT_DIR / "data" / "exit_order_service.log"
 
 # IB will accept limit orders within this percentage of current price
@@ -100,20 +99,32 @@ def get_next_market_open() -> datetime:
 
 
 def load_pending_exits() -> List[Dict[str, Any]]:
-    """Load trades with pending manual exit orders from trade log"""
-    if not TRADE_LOG_PATH.exists():
-        log("Trade log not found", "ERROR")
-        return []
-    
+    """Load trades with pending manual exit orders from the Turso journal."""
     try:
-        with open(TRADE_LOG_PATH) as f:
-            data = json.load(f)
-    except json.JSONDecodeError as e:
-        log(f"Failed to parse trade log: {e}", "ERROR")
+        from db.client import get_db
+
+        rows = get_db().execute(
+            """
+            SELECT trade_id, payload
+            FROM journal
+            ORDER BY COALESCE(filled_at, written_at) DESC
+            """
+        ).fetchall()
+    except Exception as e:
+        log(f"Failed to load journal exit orders: {e}", "ERROR")
         return []
-    
+
     pending = []
-    for trade in data.get("trades", []):
+    for row in rows:
+        journal_trade_id = row[0] if isinstance(row, (tuple, list)) else getattr(row, "trade_id", None)
+        raw_payload = row[1] if isinstance(row, (tuple, list)) else getattr(row, "payload", None)
+        try:
+            trade = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+        except (TypeError, json.JSONDecodeError):
+            continue
+        if not isinstance(trade, dict):
+            continue
+
         exit_orders = trade.get("exit_orders", {})
         target = exit_orders.get("target", {})
         
@@ -127,37 +138,64 @@ def load_pending_exits() -> List[Dict[str, Any]]:
                 "contracts": trade.get("contracts"),
                 "entry_price": trade.get("fill_price"),
                 "target_price": target.get("target_price"),
-                "legs": trade.get("legs", [])
+                "legs": trade.get("legs", []),
+                "journal_trade_id": journal_trade_id,
             })
     
     return pending
 
 
 def update_trade_log(trade_id: int, order_id: int, status: str) -> bool:
-    """Update the trade log with new exit order status"""
+    """Update the Turso journal with new exit order status."""
     try:
-        with open(TRADE_LOG_PATH) as f:
-            data = json.load(f)
-        
-        for trade in data.get("trades", []):
+        from db.client import get_db
+
+        db = get_db()
+        rows = db.execute("SELECT trade_id, payload FROM journal").fetchall()
+
+        target_journal_id = None
+        target_trade = None
+        for row in rows:
+            journal_trade_id = row[0] if isinstance(row, (tuple, list)) else getattr(row, "trade_id", None)
+            raw_payload = row[1] if isinstance(row, (tuple, list)) else getattr(row, "payload", None)
+            try:
+                trade = json.loads(raw_payload) if isinstance(raw_payload, str) else raw_payload
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if not isinstance(trade, dict):
+                continue
             if trade.get("id") == trade_id:
-                if "exit_orders" not in trade:
-                    trade["exit_orders"] = {}
-                
-                trade["exit_orders"]["target"] = {
-                    "order_id": order_id,
-                    "target_price": trade["exit_orders"].get("target", {}).get("target_price"),
-                    "status": status,
-                    "placed": datetime.now().isoformat()
-                }
+                target_journal_id = journal_trade_id
+                target_trade = trade
                 break
-        
-        with open(TRADE_LOG_PATH, "w") as f:
-            json.dump(data, f, indent=2)
-        
+
+        if target_journal_id is None or target_trade is None:
+            raise RuntimeError(f"journal trade not found for id {trade_id}")
+
+        if "exit_orders" not in target_trade:
+            target_trade["exit_orders"] = {}
+
+        target_trade["exit_orders"]["target"] = {
+            "order_id": order_id,
+            "target_price": target_trade["exit_orders"].get("target", {}).get("target_price"),
+            "status": status,
+            "placed": datetime.now().isoformat(),
+        }
+
+        db.execute(
+            """
+            UPDATE journal
+            SET payload = ?, written_at = ?
+            WHERE trade_id = ?
+            """,
+            (json.dumps(target_trade), datetime.now().isoformat(), target_journal_id),
+        )
+        if hasattr(db, "commit"):
+            db.commit()
+
         return True
     except Exception as e:
-        log(f"Failed to update trade log: {e}", "ERROR")
+        log(f"Failed to update journal trade: {e}", "ERROR")
         return False
 
 

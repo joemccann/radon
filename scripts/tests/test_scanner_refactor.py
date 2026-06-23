@@ -1,33 +1,22 @@
-"""Tests for scanner.py refactor — path resolution and direct imports."""
-import json
-import os
-import pytest
+"""Tests for scanner.py refactor — DB-sourced inputs and direct imports."""
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
-from scanner import WATCHLIST, PORTFOLIO, fetch_flow_data
+import scanner
+from scanner import fetch_flow_data
 
 
-class TestWatchlistPathResolution:
-    """Verify watchlist path is absolute and works from any CWD."""
+class TestScannerSourceInputs:
+    """Scanner should not rely on flat JSON source files."""
 
-    def test_watchlist_is_absolute(self):
-        """WATCHLIST path should be absolute, not relative."""
-        assert WATCHLIST.is_absolute(), f"WATCHLIST path is relative: {WATCHLIST}"
+    def test_no_legacy_source_file_constants(self):
+        assert not hasattr(scanner, "WATCHLIST")
+        assert not hasattr(scanner, "PORTFOLIO")
 
-    def test_portfolio_is_absolute(self):
-        """PORTFOLIO path should be absolute, not relative."""
-        assert PORTFOLIO.is_absolute(), f"PORTFOLIO path is relative: {PORTFOLIO}"
-
-    def test_watchlist_under_data_dir(self):
-        """WATCHLIST should be under the project data/ directory."""
-        assert WATCHLIST.name == "watchlist.json"
-        assert WATCHLIST.parent.name == "data"
-
-    def test_portfolio_under_data_dir(self):
-        """PORTFOLIO should be under the project data/ directory."""
-        assert PORTFOLIO.name == "portfolio.json"
-        assert PORTFOLIO.parent.name == "data"
+    def test_source_mentions_no_legacy_flat_files(self):
+        source = (Path(__file__).resolve().parent.parent / "scanner.py").read_text()
+        assert "watchlist.json" not in source
+        assert "portfolio.json" not in source
 
 
 class TestFetchFlowDataDirect:

@@ -8,17 +8,17 @@ Verifies:
 - atomic_save is invoked when new rows arrive
 - Append-only — pre-existing rows are preserved untouched
 - Legacy (ticker, date, structure) fingerprint catches rows lacking ib_exec_id
-- Failure surfaces in the response without mutating trade_log.json
+- Failure surfaces in the response without mutating the journal
 """
 
 from __future__ import annotations
 
-import json
 import sys
+import types
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -28,8 +28,8 @@ sys.path.insert(0, str(SCRIPTS_DIR))
 sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 
 from journal_rehydrate import (  # noqa: E402
-    rehydrate,
     rehydrate_from_executions,
+    rehydrate,
     _structure_label,
 )
 from trade_blotter.models import Execution, SecurityType, Side  # noqa: E402
@@ -117,8 +117,8 @@ def opt_sell_short_call() -> Execution:
 
 @pytest.fixture
 def trade_log_path(tmp_path: Path) -> Path:
-    """Disposable trade_log.json with a single legacy row (no ib_exec_id)."""
-    path = tmp_path / "trade_log.json"
+    """Disposable legacy-shaped payload with a single row lacking ib_exec_id."""
+    path = tmp_path / "legacy_journal_payload.json"
     atomic_save(
         str(path),
         {
@@ -359,67 +359,99 @@ class TestRehydrateFromExecutions:
 
 
 class TestRehydrateEntryPoint:
-    """rehydrate() — atomic file write, idempotency, error handling."""
+    """rehydrate() — journal upsert, idempotency, error handling."""
 
-    def test_writes_atomically_when_new_rows_arrive(self, tmp_path, trade_log_path, stock_buy):
+    def _fake_writer(self, monkeypatch):
+        calls = []
+        fake = types.ModuleType("db.writer")
+
+        def upsert_journal_entry(trade_id, payload, filled_at=None):
+            calls.append({"trade_id": trade_id, "payload": payload, "filled_at": filled_at})
+
+        fake.upsert_journal_entry = upsert_journal_entry  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "db.writer", fake)
+        return calls
+
+    def _fake_reader(self, monkeypatch, trades):
+        fake = types.ModuleType("db.readers")
+        fake.read_journal_trades = lambda: trades  # type: ignore[attr-defined]
+        monkeypatch.setitem(sys.modules, "db.readers", fake)
+
+    def test_upserts_new_rows_to_journal(self, monkeypatch, trade_log_path, stock_buy):
         fetcher = MagicMock()
         fetcher.fetch_executions.return_value = [stock_buy]
+        calls = self._fake_writer(monkeypatch)
+        existing = verified_load(str(trade_log_path))
 
-        with patch("journal_rehydrate.atomic_save", wraps=atomic_save) as spy:
-            result = rehydrate(days=365, trade_log_path=trade_log_path, fetcher=fetcher)
+        result = rehydrate(days=365, fetcher=fetcher, existing=existing)
 
         assert result["ok"] is True
         assert result["imported"] == 1
-        assert spy.called
+        assert len(calls) == 1
+        assert calls[0]["trade_id"] == "EX-001"
+        assert calls[0]["payload"]["ticker"] == "URTY"
+        assert calls[0]["filled_at"] == "2026-04-10"
 
-        loaded = verified_load(str(trade_log_path))
-        tickers = [t["ticker"] for t in loaded["trades"]]
-        assert "ALAB" in tickers  # legacy row preserved
-        assert "URTY" in tickers  # new row appended
-
-    def test_does_not_rewrite_when_nothing_new(self, trade_log_path, stock_buy):
+    def test_does_not_write_when_nothing_new(self, monkeypatch, stock_buy):
         fetcher = MagicMock()
         fetcher.fetch_executions.return_value = [stock_buy]
+        calls = self._fake_writer(monkeypatch)
 
-        # First pass writes.
-        rehydrate(days=365, trade_log_path=trade_log_path, fetcher=fetcher)
+        existing = {
+            "trades": [
+                {
+                    "id": 1,
+                    "date": "2026-04-10",
+                    "ticker": "URTY",
+                    "structure": "Long Stock (STK)",
+                    "decision": "IB_AUTO_IMPORT",
+                    "action": "BUY",
+                    "ib_exec_id": "EX-001",
+                    "shares": 2000,
+                }
+            ]
+        }
 
-        # Second pass should be a no-op write: imported=0, skipped=1.
-        with patch("journal_rehydrate.atomic_save") as spy:
-            result = rehydrate(days=365, trade_log_path=trade_log_path, fetcher=fetcher)
+        result = rehydrate(days=365, fetcher=fetcher, existing=existing)
 
         assert result["imported"] == 0
         assert result["skipped"] == 1
-        assert not spy.called
+        assert calls == []
 
-    def test_flex_failure_does_not_touch_trade_log(self, trade_log_path):
-        before = verified_load(str(trade_log_path))
-
+    def test_flex_failure_does_not_write_journal(self, monkeypatch):
         fetcher = MagicMock()
         fetcher.fetch_executions.side_effect = RuntimeError("Flex Query timed out")
+        calls = self._fake_writer(monkeypatch)
 
-        result = rehydrate(days=365, trade_log_path=trade_log_path, fetcher=fetcher)
+        result = rehydrate(days=365, fetcher=fetcher, existing={"trades": []})
 
         assert result["ok"] is False
         assert "Flex" in result["error"]
+        assert calls == []
 
-        after = verified_load(str(trade_log_path))
-        assert before == after
-
-    def test_creates_file_when_missing(self, tmp_path, stock_buy):
-        target = tmp_path / "fresh_trade_log.json"
-        assert not target.exists()
-
+    def test_reads_existing_rows_from_journal_table(self, monkeypatch, stock_buy):
         fetcher = MagicMock()
         fetcher.fetch_executions.return_value = [stock_buy]
+        calls = self._fake_writer(monkeypatch)
+        self._fake_reader(monkeypatch, [
+            {
+                "id": 1,
+                "date": "2026-04-10",
+                "ticker": "URTY",
+                "structure": "Long Stock (STK)",
+                "decision": "IB_AUTO_IMPORT",
+                "action": "BUY",
+                "ib_exec_id": "EX-001",
+                "shares": 2000,
+            }
+        ])
 
-        result = rehydrate(days=365, trade_log_path=target, fetcher=fetcher)
+        result = rehydrate(days=365, fetcher=fetcher)
 
         assert result["ok"] is True
-        assert result["imported"] == 1
-        assert target.exists()
-        loaded = verified_load(str(target))
-        assert len(loaded["trades"]) == 1
+        assert result["imported"] == 0
+        assert result["skipped"] == 1
+        assert calls == []
 
 
 class TestStockRoundTripPnl:

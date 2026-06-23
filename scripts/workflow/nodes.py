@@ -67,19 +67,15 @@ def _run_scanner(scanner_mod, *, top_n: int, min_score: float) -> list:
     """Adapter around ``scanner.scan`` that returns rows rather than printing.
 
     ``scanner.scan`` prints JSON to stdout; for the executor we want the rows
-    in hand. We replicate only the watchlist read + per-ticker processing it
+    in hand. We replicate only the watchlist fetch + per-ticker processing it
     already exposes, reusing ``_process_ticker`` so the signal math is the same.
     """
-    import json
-    from pathlib import Path
-
-    watchlist_path = Path(scanner_mod.WATCHLIST)
-    if not watchlist_path.exists():
-        return []
-    with open(watchlist_path) as handle:
-        watchlist = json.load(handle)
     open_positions = scanner_mod.get_open_positions()
-    items = [i for i in watchlist.get("tickers", []) if i["ticker"] not in open_positions]
+    items = [
+        item
+        for item in scanner_mod.get_watchlist_items()
+        if item.get("ticker") not in open_positions
+    ]
     rows = []
     for item in items:
         result = scanner_mod._process_ticker(item)

@@ -10,6 +10,11 @@ vi.mock("@tools/data-reader", () => ({
   readDataFile: mockReadDataFile,
 }));
 
+const mockReadOrdersSnapshotFromDb = vi.fn();
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
+}));
+
 vi.mock("@tools/schemas/ib-orders", () => ({
   OrdersData: {},
 }));
@@ -19,31 +24,34 @@ describe("POST /api/orders/place — closing a held long option", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue({
+      last_sync: "2026-06-22T20:00:00Z",
+      open_orders: [],
+      executed_orders: [],
+      open_count: 0,
+      executed_count: 0,
+    });
   });
 
   it("allows SELL option payloads that match a held long call contract", async () => {
-    mockReadDataFile
-      .mockResolvedValueOnce({
-        ok: true,
-        data: {
-          positions: [
-            {
-              ticker: "WULF",
-              expiry: "2027-01-15",
-              structure_type: "Long Call",
-              contracts: 77,
-              direction: "LONG",
-              legs: [
-                { direction: "LONG", type: "Call", contracts: 77, strike: 17 },
-              ],
-            },
-          ],
-        },
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        data: { open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
-      });
+    mockReadDataFile.mockResolvedValueOnce({
+      ok: true,
+      data: {
+        positions: [
+          {
+            ticker: "WULF",
+            expiry: "2027-01-15",
+            structure_type: "Long Call",
+            contracts: 77,
+            direction: "LONG",
+            legs: [
+              { direction: "LONG", type: "Call", contracts: 77, strike: 17 },
+            ],
+          },
+        ],
+      },
+    });
 
     mockRadonFetch
       .mockResolvedValueOnce({

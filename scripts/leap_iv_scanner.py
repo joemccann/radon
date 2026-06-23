@@ -1042,21 +1042,11 @@ def generate_report(results: list, min_gap: float, target_years: list = None) ->
 
 
 def load_portfolio_tickers() -> Dict[str, str]:
-    """Load tickers from portfolio.json"""
-    portfolio_path = Path(__file__).parent.parent / "data" / "portfolio.json"
-    if not portfolio_path.exists():
-        print("⚠ No portfolio.json found")
-        return {}
-    
-    try:
-        from utils.atomic_io import verified_load
-        portfolio = verified_load(str(portfolio_path))
-    except (ValueError, ImportError):
-        with open(portfolio_path) as f:
-            portfolio = json.load(f)
-    
+    """Load tickers from the latest Turso portfolio snapshot."""
+    from db.readers import read_portfolio_positions
+
     tickers = {}
-    for pos in portfolio.get("positions", []):
+    for pos in read_portfolio_positions():
         ticker = pos.get("ticker")
         if ticker and ticker not in tickers:
             tickers[ticker] = pos.get("structure_type", "Portfolio")
@@ -1064,24 +1054,14 @@ def load_portfolio_tickers() -> Dict[str, str]:
     return tickers
 
 
-def load_watchlist_tickers(path: str) -> Dict[str, str]:
-    """Load tickers from watchlist file"""
-    watchlist_path = Path(path)
-    if not watchlist_path.exists():
-        print(f"⚠ Watchlist not found: {path}")
-        return {}
-    
-    with open(watchlist_path) as f:
-        watchlist = json.load(f)
-    
+def load_watchlist_tickers() -> Dict[str, str]:
+    """Load tickers from the Turso watchlist."""
+    from db.readers import read_watchlist_items
+
     tickers = {}
-    for item in watchlist:
-        if isinstance(item, dict):
-            ticker = item.get("ticker")
-            sector = item.get("sector", "Watchlist")
-        else:
-            ticker = item
-            sector = "Watchlist"
+    for item in read_watchlist_items():
+        ticker = item.get("ticker")
+        sector = item.get("sector", "Watchlist")
         if ticker:
             tickers[ticker] = sector
     
@@ -1098,7 +1078,7 @@ Examples:
   %(prog)s --preset sectors            Scan State Street sector ETFs
   %(prog)s --preset mag7               Scan Magnificent 7
   %(prog)s --portfolio                 Scan current portfolio holdings
-  %(prog)s --watchlist data/watch.json Scan from watchlist file
+  %(prog)s --watchlist                 Scan Turso watchlist
   %(prog)s TSLA --min-gap 20           Custom mispricing threshold
   %(prog)s --years 2026 2027           Custom expiration years
 
@@ -1111,9 +1091,9 @@ Available presets: sectors, mag7, semis, financials, energy, china, emerging
     parser.add_argument("--preset", type=str, choices=list(PRESETS.keys()),
                         help="Use a preset ticker group")
     parser.add_argument("--portfolio", action="store_true",
-                        help="Scan tickers from portfolio.json")
-    parser.add_argument("--watchlist", type=str,
-                        help="Path to watchlist JSON file")
+                        help="Scan tickers from latest Turso portfolio snapshot")
+    parser.add_argument("--watchlist", nargs="?", const="watchlist", default=None,
+                        help="Scan tickers from Turso watchlist")
     
     # Scan parameters
     parser.add_argument("--years", type=int, nargs="+", default=DEFAULT_YEARS,
@@ -1147,8 +1127,8 @@ Available presets: sectors, mag7, semis, financials, energy, china, emerging
         tickers_to_scan = load_portfolio_tickers()
         source = "portfolio"
     elif args.watchlist:
-        tickers_to_scan = load_watchlist_tickers(args.watchlist)
-        source = f"watchlist '{args.watchlist}'"
+        tickers_to_scan = load_watchlist_tickers()
+        source = "watchlist"
     else:
         # Default: show help
         parser.print_help()

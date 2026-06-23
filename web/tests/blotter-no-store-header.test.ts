@@ -5,13 +5,10 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
-vi.mock("fs/promises", () => ({
-  readFile: vi.fn(),
-}));
-
+const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
 vi.mock("@/lib/db", () => ({
   getDb: () => ({
-    execute: vi.fn().mockResolvedValue({ rows: [] }),
+    execute: mockExecute,
   }),
 }));
 
@@ -24,15 +21,6 @@ vi.mock("@/lib/radonApi", () => ({
   }),
 }));
 
-import { readFile } from "fs/promises";
-
-const validCachePayload = JSON.stringify({
-  as_of: "2026-05-09",
-  summary: { closed_trades: 0, open_trades: 0, total_commissions: 0, realized_pnl: 0 },
-  closed_trades: [],
-  open_trades: [],
-});
-
 function expectNoStore(res: Response): void {
   const cc = res.headers.get("Cache-Control") ?? "";
   expect(cc.toLowerCase()).toContain("no-store");
@@ -41,21 +29,40 @@ function expectNoStore(res: Response): void {
 describe("/api/blotter — Cache-Control: no-store", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.mocked(readFile).mockResolvedValue(validCachePayload as unknown as string);
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("GET sets no-store when serving the disk-fallback cache file", async () => {
+  it("GET sets no-store when serving the Turso-derived journal payload", async () => {
+    mockExecute.mockResolvedValue({
+      rows: [
+        {
+          payload: JSON.stringify({
+            id: 1,
+            date: "2026-05-09",
+            ticker: "AAPL",
+            action: "SELL_OPTION",
+            fill_price: 5,
+            total_cost: 500,
+            contracts: 1,
+            commission: 2.5,
+            realized_pnl: 500,
+            ib_exec_id: "AAPL-1",
+          }),
+          filled_at: "2026-05-09T15:00:00Z",
+        },
+      ],
+    });
     const { GET } = await import("../app/api/blotter/route");
     const res = await GET();
     expectNoStore(res);
   });
 
-  it("GET sets no-store on the empty-payload envelope when DB and disk are both empty", async () => {
-    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
+  it("GET sets no-store on the empty-payload envelope when the journal is empty", async () => {
     const { GET } = await import("../app/api/blotter/route");
     const res = await GET();
     expectNoStore(res);

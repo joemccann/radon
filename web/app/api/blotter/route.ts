@@ -1,6 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile } from "fs/promises";
-import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
 import {
@@ -9,14 +7,10 @@ import {
   type JournalRow,
 } from "@/lib/blotter/fromJournal";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live journal state.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
-
-const BLOTTER_CACHE_PATH = join(process.cwd(), "..", "data", "blotter.json");
 
 async function readJournalRows(): Promise<JournalRow[] | null> {
   try {
@@ -38,60 +32,43 @@ async function readJournalRows(): Promise<JournalRow[] | null> {
   }
 }
 
-async function readBlotterFromDisk(): Promise<BlotterPayload | null> {
-  try {
-    const raw = await readFile(BLOTTER_CACHE_PATH, "utf-8");
-    return JSON.parse(raw) as BlotterPayload;
-  } catch {
-    return null;
-  }
+function emptyBlotter(): BlotterPayload {
+  return {
+    as_of: "",
+    summary: { closed_trades: 0, open_trades: 0, total_commissions: 0, realized_pnl: 0 },
+    closed_trades: [],
+    open_trades: [],
+  };
 }
 
-async function buildUnion(): Promise<BlotterPayload | null> {
-  // Read both sources unconditionally so the deriver can perform its
-  // union + preference fallback. Order doesn't matter — both are awaited
-  // in parallel.
-  const [rows, legacy] = await Promise.all([
-    readJournalRows(),
-    readBlotterFromDisk(),
-  ]);
-  if (rows && rows.length > 0) return journalRowsToBlotter(rows, legacy);
-  if (legacy) return legacy;
+async function buildFromJournal(): Promise<BlotterPayload | null> {
+  const rows = await readJournalRows();
+  if (rows && rows.length > 0) return journalRowsToBlotter(rows);
   return null;
 }
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const union = await buildUnion();
-  if (union) return setNoStoreResponseHeaders(NextResponse.json(union), requestId);
+  const blotter = await buildFromJournal();
+  if (blotter) return setNoStoreResponseHeaders(NextResponse.json(blotter), requestId);
 
-  return setNoStoreResponseHeaders(
-    NextResponse.json({
-      as_of: "",
-      summary: { closed_trades: 0, open_trades: 0, total_commissions: 0, realized_pnl: 0 },
-      closed_trades: [],
-      open_trades: [],
-    }),
-    requestId,
-  );
+  return setNoStoreResponseHeaders(NextResponse.json(emptyBlotter()), requestId);
 }
 
 export async function POST(): Promise<Response> {
   const requestId = getRequestId();
-  // POST still kicks the legacy Flex Query path so the on-disk mirror
-  // and the blotter_service cache stay current. Once the journal table
-  // is the only consumer this can be retired.
   try {
-    const data = await radonFetch("/blotter", { method: "POST", timeout: 130_000 });
-    return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
+    await radonFetch("/journal/rehydrate", { method: "POST", timeout: 300_000 });
+    const blotter = await buildFromJournal();
+    return setNoStoreResponseHeaders(NextResponse.json(blotter ?? emptyBlotter()), requestId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Blotter sync failed";
-    const union = await buildUnion();
-    if (union) {
-      const res = NextResponse.json(union);
+    const blotter = await buildFromJournal();
+    if (blotter) {
+      const res = NextResponse.json(blotter);
       res.headers.set(
         "X-Sync-Warning",
-        `Blotter sync failed - serving union of journal + cached data (${message})`,
+        `Blotter sync failed - serving Turso journal (${message})`,
       );
       return setNoStoreResponseHeaders(res, requestId);
     }

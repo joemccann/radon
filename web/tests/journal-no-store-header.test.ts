@@ -1,35 +1,20 @@
 /**
  * Bug guard: /api/journal must return Cache-Control: no-store on every
  * response so browsers and intermediaries never serve a stale snapshot.
- *
- * Same class of bug as flow-analysis (commit ee8c401): `dynamic = "force-dynamic"`
- * only opts out of Next.js's static-page cache; the response itself was
- * heuristically cached by Caddy/the browser. The fix is to wrap every
- * NextResponse.json(...) in setNoStoreResponseHeaders(...).
  */
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
-vi.mock("fs/promises", () => ({
-  readFile: vi.fn(),
-  stat: vi.fn(),
-}));
-
-vi.mock("@/lib/db", () => ({
-  getDb: () => ({
-    execute: vi.fn().mockResolvedValue({ rows: [] }),
-  }),
+const mockReadJournalFromDb = vi.fn();
+const mockImportLatestReconciliationToJournal = vi.fn();
+vi.mock("@/lib/journalDb", () => ({
+  readJournalFromDb: mockReadJournalFromDb,
+  importLatestReconciliationToJournal: mockImportLatestReconciliationToJournal,
 }));
 
 vi.mock("@/lib/radonApi", () => ({
-  radonFetch: vi.fn().mockResolvedValue({ trades: [] }),
+  radonFetch: vi.fn().mockResolvedValue({ ok: true }),
 }));
-
-vi.mock("@/lib/journalSync", () => ({
-  runJournalSync: vi.fn().mockResolvedValue(undefined),
-}));
-
-import { readFile, stat } from "fs/promises";
 
 function expectNoStore(res: Response): void {
   const cc = res.headers.get("Cache-Control") ?? "";
@@ -39,33 +24,30 @@ function expectNoStore(res: Response): void {
 describe("/api/journal — Cache-Control: no-store", () => {
   beforeEach(() => {
     vi.resetModules();
-    vi.mocked(readFile).mockResolvedValue(
-      JSON.stringify({ trades: [{ ticker: "AAPL", filled_at: "2026-05-08", date: "2026-05-08" }] }) as unknown as string,
-    );
-    vi.mocked(stat).mockResolvedValue({
-      mtimeMs: Date.now(),
-    } as unknown as Awaited<ReturnType<typeof stat>>);
+    mockReadJournalFromDb.mockResolvedValue({
+      trades: [{ ticker: "AAPL", filled_at: "2026-05-08", date: "2026-05-08" }],
+    });
+    mockImportLatestReconciliationToJournal.mockResolvedValue({ imported: 0, skipped: 0, trades: [] });
   });
 
   afterEach(() => {
     vi.clearAllMocks();
   });
 
-  it("GET sets no-store when serving the disk fallback", async () => {
+  it("GET sets no-store on the success path", async () => {
     const { GET } = await import("../app/api/journal/route");
     const res = await GET();
     expectNoStore(res);
   });
 
-  it("GET sets no-store on the 500 error envelope when both reads fail", async () => {
-    vi.mocked(readFile).mockRejectedValue(new Error("ENOENT"));
-    vi.mocked(stat).mockRejectedValue(new Error("ENOENT"));
+  it("GET sets no-store on the 500 error envelope", async () => {
+    mockReadJournalFromDb.mockRejectedValue(new Error("DB unavailable"));
     const { GET } = await import("../app/api/journal/route");
     const res = await GET();
     expectNoStore(res);
   });
 
-  it("POST sets no-store on the FastAPI-passthrough success path", async () => {
+  it("POST sets no-store on the reconcile/import success path", async () => {
     const { POST } = await import("../app/api/journal/route");
     const res = await POST();
     expectNoStore(res);

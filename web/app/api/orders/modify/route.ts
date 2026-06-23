@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
-import { readDataFile } from "@tools/data-reader";
-import { OrdersData } from "@tools/schemas/ib-orders";
 import { radonFetch } from "@/lib/radonApi";
 import type { ModifyCancelTarget, ReplaceComboOrder } from "@/lib/orderModify";
+import {
+  EMPTY_ORDERS,
+  readOrdersSnapshotFromDb,
+  type OrdersSnapshot,
+} from "@/lib/orders/readOrdersFromDb";
 
 export const runtime = "nodejs";
 
@@ -16,8 +19,16 @@ type ModifyBody = {
   replaceOrder?: ReplaceComboOrder;
 };
 
+async function readOrdersSnapshotBestEffort() {
+  try {
+    return await readOrdersSnapshotFromDb();
+  } catch {
+    return EMPTY_ORDERS;
+  }
+}
+
 function findOpenOrder(
-  orders: OrdersData,
+  orders: OrdersSnapshot,
   orderId: number,
   permId: number,
 ) {
@@ -28,7 +39,7 @@ function findOpenOrder(
 }
 
 function isModifyConfirmed(
-  orders: OrdersData,
+  orders: OrdersSnapshot,
   orderId: number,
   permId: number,
   newPrice?: number,
@@ -135,14 +146,14 @@ export async function POST(request: Request): Promise<Response> {
       } catch {
         // Non-fatal
       }
-      const ordersResult = await readDataFile("data/orders.json", OrdersData);
+      const orders = await readOrdersSnapshotBestEffort();
 
       return NextResponse.json({
         status: "ok",
         message: result.message,
         orderId: result.orderId,
         permId: result.permId,
-        orders: ordersResult.ok ? ordersResult.data : null,
+        orders,
       });
     }
 
@@ -186,20 +197,13 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       // Non-fatal
     }
-    const ordersResult = await readDataFile("data/orders.json", OrdersData);
+    const orders = await readOrdersSnapshotFromDb();
 
-    if (!ordersResult.ok) {
-      return NextResponse.json(
-        { error: "Modify completed but refreshed orders were unavailable" },
-        { status: 502 },
-      );
-    }
-
-    if (!isModifyConfirmed(ordersResult.data, orderId, permId, newPrice, newQuantity)) {
+    if (!isModifyConfirmed(orders, orderId, permId, newPrice, newQuantity)) {
       return NextResponse.json(
         {
           error: "Modify not confirmed by refreshed orders",
-          orders: ordersResult.data,
+          orders,
         },
         { status: 502 },
       );
@@ -208,7 +212,7 @@ export async function POST(request: Request): Promise<Response> {
     return NextResponse.json({
       status: "ok",
       message: result.message,
-      orders: ordersResult.data,
+      orders,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Modify failed";

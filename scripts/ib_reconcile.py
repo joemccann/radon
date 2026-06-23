@@ -2,7 +2,8 @@
 """
 IB Trade Reconciliation Script
 
-Fetches trading history from IB and reconciles with local trade_log.json and portfolio.json.
+Fetches trading history from IB and reconciles with the Turso journal and
+latest portfolio snapshot.
 Designed to run asynchronously at startup without blocking the UI.
 
 Actions detected:
@@ -10,11 +11,10 @@ Actions detected:
 - SELL: Closing long position (realized P&L)
 - SHORT: Opening short stock position
 - COVER: Closing short position (realized P&L)
-- New positions not in portfolio.json
-- Closed positions still in portfolio.json
+- New positions not in the latest portfolio snapshot
+- Closed positions still in the latest portfolio snapshot
 """
 
-import json
 import os
 import sys
 from datetime import datetime, timedelta
@@ -26,6 +26,7 @@ from typing import Optional
 sys.path.insert(0, str(Path(__file__).parent))
 
 from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
+from db.readers import read_journal_trades, read_latest_portfolio_snapshot
 
 
 def log(msg: str, level: str = "info"):
@@ -45,26 +46,18 @@ def connect_ib(port: int = DEFAULT_GATEWAY_PORT, client_id: int = CLIENT_IDS["ib
         log(f"IB connection failed: {e}", "error")
         return None
 
-def load_json(filepath: str) -> dict:
-    """Load JSON file, return empty dict if not found."""
-    try:
-        with open(filepath, 'r') as f:
-            return json.load(f)
-    except (FileNotFoundError, json.JSONDecodeError):
-        return {}
-
-def save_json(filepath: str, data: dict):
-    """Save data to JSON file + dual-write reconciliation to Turso (Phase 4)."""
-    with open(filepath, 'w') as f:
-        json.dump(data, f, indent=2, default=str)
-    # Phase 4: only the reconciliation.json output is mirrored to Turso.
-    # Other callers of save_json (if any) write to other paths and are
-    # untouched.
-    if str(filepath).endswith("reconciliation.json"):
-        _dual_write_reconciliation_to_db(data)
+def load_trade_log() -> dict:
+    """Return journal trades in the legacy dict shape used by reconciliation."""
+    return {"trades": read_journal_trades()}
 
 
-def _dual_write_reconciliation_to_db(data: dict) -> None:
+def load_portfolio_snapshot() -> dict:
+    """Return the latest portfolio snapshot in legacy portfolio shape."""
+    return read_latest_portfolio_snapshot() or {"positions": []}
+
+
+def save_reconciliation_report(data: dict) -> None:
+    """Persist reconciliation output to Turso."""
     try:
         from db.writer import upsert_reconciliation_log
     except ImportError:
@@ -256,10 +249,10 @@ def find_new_trades(executions: list, trade_log: dict) -> list:
     return new_trades
 
 def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
-    """Find positions that differ between IB and local portfolio."""
+    """Find positions that differ between IB and the latest portfolio snapshot."""
     discrepancies = {
-        "missing_locally": [],  # In IB but not in portfolio.json
-        "missing_in_ib": [],    # In portfolio.json but not in IB (closed)
+        "missing_locally": [],  # In IB but not in local snapshot
+        "missing_in_ib": [],    # In local snapshot but not in IB (closed)
         "quantity_mismatch": [],
     }
     
@@ -311,13 +304,7 @@ def generate_reconciliation_report(new_trades: list, discrepancies: dict) -> dic
 def main():
     """Main reconciliation routine."""
     log("Starting IB trade reconciliation...")
-    
-    # Paths
-    project_root = Path(__file__).parent.parent
-    trade_log_path = project_root / "data" / "trade_log.json"
-    portfolio_path = project_root / "data" / "portfolio.json"
-    reconcile_path = project_root / "data" / "reconciliation.json"
-    
+
     # Connect to IB
     client = connect_ib()
     if not client:
@@ -325,17 +312,9 @@ def main():
         return
 
     try:
-        # Load local data
-        trade_log = load_json(str(trade_log_path))
-        # Use verified_load for portfolio (checksum integrity check)
-        try:
-            from utils.atomic_io import verified_load
-            portfolio = verified_load(str(portfolio_path))
-        except (FileNotFoundError, json.JSONDecodeError):
-            portfolio = {}
-        except ValueError as e:
-            log(f"Portfolio checksum verification failed: {e}", "warn")
-            portfolio = load_json(str(portfolio_path))
+        # Load canonical local state
+        trade_log = load_trade_log()
+        portfolio = load_portfolio_snapshot()
 
         # Fetch IB data
         log("Fetching executions from IB...")
@@ -357,7 +336,7 @@ def main():
         report = generate_reconciliation_report(new_trades, discrepancies)
         
         # Save reconciliation report
-        save_json(str(reconcile_path), report)
+        save_reconciliation_report(report)
         
         # Log summary
         if report["needs_attention"]:

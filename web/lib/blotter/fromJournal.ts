@@ -4,7 +4,7 @@
  *
  * Why this exists:
  *   The legacy blotter pipeline (Flex Query 1422766 → blotter_service.py
- *   → data/blotter.json) is broken IB-side ("1001 — Statement could
+ *   → historical trade grouping payload) is broken IB-side ("1001 — Statement could
  *   not be generated") and frozen at 2026-03-26. The `journal` table
  *   already holds every execution we know about — the same data, just
  *   shaped per-row instead of per-trade-grouping. This function
@@ -539,7 +539,7 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
   return out;
 }
 
-/* ─── Legacy blotter.json integration ──────────────────────────────────── */
+/* ─── Legacy blotter payload integration ───────────────────────────────── */
 
 /**
  * Match an exec_id against a legacy blotter index. Journal-side ids may be
@@ -607,7 +607,7 @@ function collectClaimedLegacyExecIds(
  * Project a list of journal rows into the BlotterPayload shape the
  * /orders historical-trades panel expects.
  *
- * When `legacyBlotter` is supplied (data/blotter.json), the deriver
+ * When `legacyBlotter` is supplied, the deriver
  * performs a UNION + PREFERENCE FALLBACK:
  *   1. Journal rows lacking explicit cost_basis / proceeds / realized_pnl
  *      adopt those numbers from the matching legacy trade (matched by
@@ -645,7 +645,7 @@ export function journalRowsToBlotter(
       || typeof payload.realized_pnl === "number";
 
     // Legacy fallback: when the journal row lacks explicit P&L AND there's
-    // a matching exec_id in legacy blotter.json, prefer the legacy values
+    // a matching exec_id in the legacy blotter payload, prefer the legacy values
     // for cost_basis / proceeds / realized_pnl. Everything else (symbol,
     // qty, dates, contract metadata) keeps using the journal — it's the
     // fresher source.

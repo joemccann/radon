@@ -34,9 +34,6 @@ try:
 except Exception:
     pass
 
-# Add project root to path
-PROJECT_ROOT = Path(__file__).parent.parent
-
 # Known ticker patterns
 COMMON_TICKERS = {
     # Semiconductors
@@ -266,33 +263,19 @@ def fetch_tweets_agent_browser(account: str, hours: int = 24) -> List[Dict]:
     return unique_tweets
 
 
-def update_watchlist(account: str, tweets: List[Dict], watchlist_path: str = "data/watchlist.json") -> Tuple[List[str], List[str]]:
-    """Update the watchlist with tickers from the scan."""
-    watchlist_file = PROJECT_ROOT / watchlist_path
-    
-    # Load existing watchlist
-    if watchlist_file.exists():
-        with open(watchlist_file, 'r') as f:
-            watchlist = json.load(f)
-    else:
-        watchlist = {"last_updated": "", "tickers": [], "subcategories": {}}
-    
-    # Ensure subcategories exists
-    if "subcategories" not in watchlist:
-        watchlist["subcategories"] = {}
-    
-    # Get or create the account subcategory
+def update_watchlist(account: str, tweets: List[Dict]) -> Tuple[List[str], List[str]]:
+    """Update Turso watchlist rows with tickers from the scan."""
+    from db.readers import read_watchlist_items
+
     account_key = f"@{account}"
-    if account_key not in watchlist["subcategories"]:
-        watchlist["subcategories"][account_key] = {
-            "source": f"https://x.com/{account}",
-            "added": datetime.now().strftime("%Y-%m-%d"),
-            "description": f"Tickers from X account @{account}",
-            "tickers": []
-        }
-    
-    subcategory = watchlist["subcategories"][account_key]
-    existing_tickers = {t["ticker"]: t for t in subcategory["tickers"]}
+    existing_items = [dict(item) for item in read_watchlist_items()]
+    subcategory = {
+        "source": f"https://x.com/{account}",
+        "added": datetime.now().strftime("%Y-%m-%d"),
+        "description": f"Tickers from X account @{account}",
+        "tickers": existing_items,
+    }
+    existing_tickers = {t["ticker"]: t for t in subcategory["tickers"] if t.get("ticker")}
     
     new_tickers = []
     updated_tickers = []
@@ -341,20 +324,9 @@ def update_watchlist(account: str, tweets: List[Dict], watchlist_path: str = "da
                 existing_tickers[ticker] = new_entry
                 new_tickers.append(ticker)
     
-    # Update last scan time
     subcategory["last_scan"] = datetime.now().strftime("%Y-%m-%d %H:%M")
     subcategory["last_scan_tweets"] = len(tweets)
-    
-    # Update main watchlist timestamp
-    watchlist["last_updated"] = datetime.now().strftime("%Y-%m-%dT%H:%M")
-    
-    # Save watchlist
-    with open(watchlist_file, 'w') as f:
-        json.dump(watchlist, f, indent=2)
 
-    # Phase 4 dual-write — mirror per-ticker rows into the watchlist table.
-    # The disk JSON remains the canonical blob; the table lets per-row
-    # queries on /scanner et al. work without parsing the 590KB file.
     _dual_write_watchlist_to_db(account, subcategory, new_tickers + updated_tickers)
 
     return new_tickers, updated_tickers
@@ -364,9 +336,8 @@ def _dual_write_watchlist_to_db(account: str, subcategory: Dict, touched_tickers
     """Best-effort upsert of per-ticker rows into the watchlist table.
 
     Only writes the tickers that changed in this scan (touched_tickers)
-    to keep the cloud chatter minimal — the disk JSON is the full
-    snapshot of record. Errors are logged + swallowed so a Turso outage
-    doesn't break the scan loop.
+    to keep the cloud chatter minimal. Errors are logged + swallowed so
+    a Turso outage doesn't break the scan loop.
     """
     if not touched_tickers:
         return
@@ -477,7 +448,7 @@ def main():
         new_tickers, updated_tickers = update_watchlist(args.account, tweets)
         
         print(f"\n{'='*60}")
-        print("WATCHLIST UPDATED")
+        print("TURSO TICKERS UPDATED")
         print(f"{'='*60}")
         if new_tickers:
             print(f"✓ New tickers added: {', '.join(new_tickers)}")

@@ -8,8 +8,7 @@ RED/GREEN TDD
 import pytest
 import json
 from pathlib import Path
-from datetime import datetime
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 
 import sys
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -21,6 +20,39 @@ def make_mock_client():
     """Create a mock IBClient for exit orders tests."""
     mock_client = MagicMock()
     return mock_client
+
+
+class _Cursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class FakeJournalDb:
+    def __init__(self, trades):
+        self.trades = {f"trade-{trade['id']}": trade for trade in trades}
+        self.commits = 0
+
+    def execute(self, sql, args=()):
+        if sql.strip().upper().startswith("SELECT"):
+            if "WHERE trade_id = ?" in sql:
+                trade = self.trades.get(args[0])
+                rows = [(args[0], json.dumps(trade))] if trade else []
+                return _Cursor(rows)
+            return _Cursor([
+                (trade_id, json.dumps(trade))
+                for trade_id, trade in self.trades.items()
+            ])
+        if sql.strip().upper().startswith("UPDATE"):
+            payload, _written_at, trade_id = args
+            self.trades[trade_id] = json.loads(payload)
+            return _Cursor([])
+        raise AssertionError(f"unexpected SQL: {sql}")
+
+    def commit(self):
+        self.commits += 1
 
 
 class TestExitOrdersInit:
@@ -45,11 +77,10 @@ class TestExitOrdersInit:
 class TestExitOrdersLoadPending:
     """Test loading pending orders from trade log."""
 
-    def test_loads_pending_orders_from_trade_log(self, tmp_path):
-        """Handler loads PENDING orders from trade_log.json."""
-        trade_log = tmp_path / "trade_log.json"
-        trade_log.write_text(json.dumps({
-            "trades": [{
+    def test_loads_pending_orders_from_journal(self):
+        """Handler loads PENDING orders from the Turso journal."""
+        db = FakeJournalDb([
+            {
                 "id": 8,
                 "ticker": "GOOG",
                 "exit_orders": {
@@ -58,22 +89,22 @@ class TestExitOrdersLoadPending:
                         "status": "PENDING",
                         "order_id": None
                     }
-                }
-            }]
-        }))
+                },
+            }
+        ])
 
-        handler = ExitOrdersHandler(trade_log_path=trade_log)
+        handler = ExitOrdersHandler(db=db)
         pending = handler._load_pending_orders()
 
         assert len(pending) == 1
         assert pending[0]["ticker"] == "GOOG"
         assert pending[0]["target_price"] == 15.00
+        assert pending[0]["journal_trade_id"] == "trade-8"
 
-    def test_skips_already_placed_orders(self, tmp_path):
+    def test_skips_already_placed_orders(self):
         """Handler skips orders that are already placed."""
-        trade_log = tmp_path / "trade_log.json"
-        trade_log.write_text(json.dumps({
-            "trades": [{
+        db = FakeJournalDb([
+            {
                 "id": 8,
                 "ticker": "GOOG",
                 "exit_orders": {
@@ -82,11 +113,11 @@ class TestExitOrdersLoadPending:
                         "status": "PLACED",
                         "order_id": 99
                     }
-                }
-            }]
-        }))
+                },
+            }
+        ])
 
-        handler = ExitOrdersHandler(trade_log_path=trade_log)
+        handler = ExitOrdersHandler(db=db)
         pending = handler._load_pending_orders()
 
         assert len(pending) == 0
@@ -126,7 +157,7 @@ class TestExitOrdersGapCheck:
 class TestExitOrdersExecute:
     """Test execute method."""
 
-    def test_places_order_when_gap_acceptable(self, tmp_path):
+    def test_places_order_when_gap_acceptable(self):
         """Places order when within 40% gap."""
         with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
              patch('monitor_daemon.handlers.exit_orders.Option') as mock_option, \
@@ -151,9 +182,8 @@ class TestExitOrdersExecute:
             mock_trade.orderStatus.status = "Submitted"
             mock_client.place_order.return_value = mock_trade
 
-            trade_log = tmp_path / "trade_log.json"
-            trade_log.write_text(json.dumps({
-                "trades": [{
+            db = FakeJournalDb([
+                {
                     "id": 8,
                     "ticker": "GOOG",
                     "contract": "GOOG  260417C00315000",
@@ -171,16 +201,16 @@ class TestExitOrdersExecute:
                                 "right": "C"
                             }
                         }
-                    }
-                }]
-            }))
+                    },
+                }
+            ])
 
-            handler = ExitOrdersHandler(trade_log_path=trade_log)
+            handler = ExitOrdersHandler(db=db)
             result = handler.execute()
 
             assert result["orders_checked"] >= 1
 
-    def test_skips_order_when_gap_too_large(self, tmp_path):
+    def test_skips_order_when_gap_too_large(self):
         """Skips order when gap exceeds 40%."""
         with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
              patch('monitor_daemon.handlers.exit_orders.Option') as mock_option:
@@ -198,9 +228,8 @@ class TestExitOrdersExecute:
             mock_ticker.ask = 6.10
             mock_client.get_quote.return_value = mock_ticker
 
-            trade_log = tmp_path / "trade_log.json"
-            trade_log.write_text(json.dumps({
-                "trades": [{
+            db = FakeJournalDb([
+                {
                     "id": 8,
                     "ticker": "GOOG",
                     "structure": "Bull Call Spread",
@@ -217,11 +246,11 @@ class TestExitOrdersExecute:
                                 "right": "C"
                             }
                         }
-                    }
-                }]
-            }))
+                    },
+                }
+            ])
 
-            handler = ExitOrdersHandler(trade_log_path=trade_log)
+            handler = ExitOrdersHandler(db=db)
             result = handler.execute()
 
             # Should not place order
@@ -232,8 +261,8 @@ class TestExitOrdersExecute:
 class TestExitOrdersTradeLogUpdate:
     """Test trade log updates after placing orders."""
 
-    def test_updates_trade_log_on_placement(self, tmp_path):
-        """Updates trade_log.json when order is placed."""
+    def test_updates_journal_on_placement(self):
+        """Updates the Turso journal when order is placed."""
         with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
              patch('monitor_daemon.handlers.exit_orders.Option') as mock_option, \
              patch('monitor_daemon.handlers.exit_orders.LimitOrder') as mock_limit_order:
@@ -254,9 +283,8 @@ class TestExitOrdersTradeLogUpdate:
             mock_trade.orderStatus.status = "Submitted"
             mock_client.place_order.return_value = mock_trade
 
-            trade_log = tmp_path / "trade_log.json"
-            trade_log.write_text(json.dumps({
-                "trades": [{
+            db = FakeJournalDb([
+                {
                     "id": 8,
                     "ticker": "GOOG",
                     "structure": "Bull Call Spread",
@@ -273,18 +301,19 @@ class TestExitOrdersTradeLogUpdate:
                                 "right": "C"
                             }
                         }
-                    }
-                }]
-            }))
+                    },
+                }
+            ])
 
-            handler = ExitOrdersHandler(trade_log_path=trade_log)
+            handler = ExitOrdersHandler(db=db)
             handler.execute()
 
-            # Reload and check - order should be placed so status updated
-            updated = json.loads(trade_log.read_text())
-            target_status = updated["trades"][0]["exit_orders"]["target"]["status"]
+            updated = db.trades["trade-8"]
+            target_status = updated["exit_orders"]["target"]["status"]
             # When order is within range and placed, status should be PLACED
             assert target_status == "PLACED"
+            assert updated["exit_orders"]["target"]["order_id"] == 99
+            assert db.commits == 1
 
 
 if __name__ == "__main__":

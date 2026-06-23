@@ -63,13 +63,11 @@ def test_vcg_scan_time_is_timezone_aware():
 
 # ── flow_analysis.run_analysis ───────────────────────────────────
 
-def test_flow_analysis_time_is_timezone_aware(tmp_path, monkeypatch):
+def test_flow_analysis_time_is_timezone_aware(monkeypatch):
     """Empty-portfolio path emits an analysis_time."""
     from flow_analysis import run_analysis
 
-    portfolio_path = tmp_path / "portfolio.json"
-    portfolio_path.write_text(json.dumps({"positions": []}))
-    monkeypatch.setattr("flow_analysis.PORTFOLIO", portfolio_path)
+    monkeypatch.setattr("flow_analysis.load_portfolio", lambda: [])
 
     buf = io.StringIO()
     with redirect_stdout(buf):

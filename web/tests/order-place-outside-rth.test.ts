@@ -8,6 +8,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
  */
 const mockRadonFetch = vi.fn();
 const mockReadDataFile = vi.fn();
+const mockReadOrdersSnapshotFromDb = vi.fn();
 const mockMarketState = vi.fn();
 
 vi.mock("@/lib/radonApi", () => ({
@@ -24,6 +25,9 @@ vi.mock("@/lib/radonApi", () => ({
 }));
 vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
 vi.mock("@tools/schemas/ib-orders", () => ({ OrdersData: {} }));
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
+}));
 vi.mock("@/lib/serviceHealthWindows", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/serviceHealthWindows")>()),
   getMarketStateFromDate: mockMarketState,
@@ -52,6 +56,13 @@ describe("POST /api/orders/place — outsideRth (after-hours)", () => {
     vi.resetModules();
     mockRadonFetch.mockReset().mockResolvedValue({ status: "ok", permId: 1, orderId: 1 });
     mockReadDataFile.mockReset().mockResolvedValue({ ok: true, data: { positions: [] } });
+    mockReadOrdersSnapshotFromDb.mockReset().mockResolvedValue({
+      last_sync: "2026-06-22T20:00:00Z",
+      open_orders: [],
+      executed_orders: [],
+      open_count: 0,
+      executed_count: 0,
+    });
     mockMarketState.mockReset();
   });
 

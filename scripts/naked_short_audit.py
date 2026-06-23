@@ -29,7 +29,6 @@ from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWA
 logger = logging.getLogger(__name__)
 
 ACTIVE_STATUSES = {"Submitted", "PreSubmitted"}
-DATA_DIR = Path(__file__).parent.parent / "data"
 
 
 def _get_stock_shares(positions: list, ticker: str) -> int:
@@ -203,25 +202,15 @@ def main(argv=None):
     parser = argparse.ArgumentParser(description="Naked short audit — detect and cancel violations")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print violations without cancelling")
-    parser.add_argument("--portfolio", type=str,
-                        default=str(DATA_DIR / "portfolio.json"),
-                        help="Path to portfolio.json")
-    parser.add_argument("--orders", type=str,
-                        default=str(DATA_DIR / "orders.json"),
-                        help="Path to orders.json")
     parser.add_argument("--host", default=DEFAULT_HOST)
     parser.add_argument("--port", type=int, default=DEFAULT_GATEWAY_PORT)
 
     args = parser.parse_args(argv)
 
-    # Load data
-    with open(args.portfolio) as f:
-        portfolio_data = json.load(f)
-    with open(args.orders) as f:
-        orders_data = json.load(f)
+    from db.readers import read_open_orders, read_portfolio_positions
 
-    positions = portfolio_data.get("positions", [])
-    orders = orders_data.get("open_orders", [])
+    positions = read_portfolio_positions()
+    orders = read_open_orders()
 
     # Detect violations
     violations = find_naked_short_violations(orders, positions)

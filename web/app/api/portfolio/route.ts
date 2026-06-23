@@ -1,8 +1,4 @@
 import { NextResponse } from "next/server";
-import { readFile, stat } from "fs/promises";
-import { join } from "path";
-import { readDataFile } from "@tools/data-reader";
-import { PortfolioData } from "@tools/schemas/ib-sync";
 import { radonFetch } from "@/lib/radonApi";
 import {
   getRequestId,
@@ -11,40 +7,59 @@ import {
 } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 
-// Disable Next.js static caching: this handler reads live disk state
-// (data/*.json, cache files). Without this, the framework freezes the
-// first response and serves stale data until the dev server restarts.
+// Disable Next.js static caching: this handler reads live Turso state.
+// Without this, the framework freezes the first response and serves stale
+// data until the dev server restarts.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const PORTFOLIO_PATH = join(process.cwd(), "..", "data", "portfolio.json");
 const CACHE_TTL_MS = 60_000; // 1 minute
 
-const TRADE_LOG_PATH = join(process.cwd(), "..", "data", "trade_log.json");
+type PortfolioSnapshot = {
+  data: Record<string, unknown>;
+  takenAt: string;
+  timestampMs: number | null;
+};
 
-/** Read the latest portfolio snapshot from Turso, falling back to disk. */
-async function readPortfolioFromDb(): Promise<Record<string, unknown> | null> {
-  try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
-      args: [],
-    });
-    if (result.rows.length === 0) return null;
-    const row = result.rows[0] as unknown as { payload: string };
-    return JSON.parse(row.payload) as Record<string, unknown>;
-  } catch {
-    return null;
+function parseTimestampMs(value: unknown): number | null {
+  if (typeof value !== "string" || value.length === 0) return null;
+  const ms = Date.parse(value);
+  return Number.isFinite(ms) ? ms : null;
+}
+
+/** Read the latest portfolio snapshot from Turso. */
+async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT taken_at, payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
+    args: [],
+  });
+  if (result.rows.length === 0) return null;
+  const row = result.rows[0] as unknown as { taken_at?: string; payload?: string };
+  if (typeof row.payload !== "string") return null;
+  const data = JSON.parse(row.payload) as Record<string, unknown>;
+  const takenAt = typeof row.taken_at === "string" ? row.taken_at : "";
+  return {
+    data,
+    takenAt,
+    timestampMs: parseTimestampMs(data.last_sync) ?? parseTimestampMs(takenAt),
+  };
+}
+
+function isPortfolioSnapshotStale(snapshot: PortfolioSnapshot | null): boolean {
+  if (!snapshot?.timestampMs) {
+    return true;
   }
+  return Date.now() - snapshot.timestampMs > CACHE_TTL_MS;
 }
 
 /** Load ticker → latest trade date.
  *
- * Phase 4-followup: prefer the canonical `journal` table; fall back to
- * `data/trade_log.json` only when the DB is empty (cold replica) or
- * unreachable. Aggregates per-ticker in SQL so we don't pull every row
- * back to the Node side just to take a max. */
+ * The canonical source is the `journal` table. Missing rows or query
+ * failures return an empty map; this route never falls back to
+ * the old flat trade-log mirror.
+ */
 async function loadTradeLogDates(): Promise<Record<string, string>> {
   try {
     const db = getDb();
@@ -69,44 +84,14 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
       }
       return dates;
     }
-  } catch {
-    // Fall through to disk on any DB error.
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[Portfolio] trade_log_dates journal query failed: ${message}`);
   }
-  return loadTradeLogDatesFromDisk();
-}
-
-async function loadTradeLogDatesFromDisk(): Promise<Record<string, string>> {
-  try {
-    const raw = JSON.parse(await readFile(TRADE_LOG_PATH, "utf-8"));
-    const trades = Array.isArray(raw) ? raw : (raw?.trades ?? []);
-    const dates: Record<string, string> = {};
-    for (const t of trades) {
-      const ticker = t?.ticker;
-      const date = t?.date;
-      if (typeof ticker === "string" && typeof date === "string") {
-        if (!dates[ticker] || date > dates[ticker]) {
-          dates[ticker] = date;
-        }
-      }
-    }
-    return dates;
-  } catch {
-    return {};
-  }
+  return {};
 }
 
 let bgSyncInFlight = false;
-
-/** Returns true when portfolio.json file mtime is older than TTL */
-async function isPortfolioStale(): Promise<boolean> {
-  try {
-    const s = await stat(PORTFOLIO_PATH);
-    return Date.now() - s.mtimeMs > CACHE_TTL_MS;
-  } catch {
-    // File missing or unreadable → treat as stale so we kick off a sync
-    return true;
-  }
-}
 
 /** Fire-and-forget: call FastAPI background sync endpoint */
 function triggerBackgroundSync(): void {
@@ -128,28 +113,15 @@ function triggerBackgroundSync(): void {
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  // Stale-while-revalidate: kick off background sync if data is >60 s old,
-  // but always return the current cached file immediately (non-blocking).
-  const stale = await isPortfolioStale();
-  if (stale) {
-    triggerBackgroundSync();
-  }
-
   try {
-    // Phase 3: prefer the Turso snapshot. Fall back to the JSON file
-    // when the DB is empty (cold replica) or unreachable.
-    const fromDb = await readPortfolioFromDb();
-    if (fromDb) {
-      const tradeLogDates = await loadTradeLogDates();
-      const response = NextResponse.json({ ...fromDb, trade_log_dates: tradeLogDates });
-      return setNoStoreResponseHeaders(response, requestId);
+    const snapshot = await readPortfolioFromDb();
+    if (isPortfolioSnapshotStale(snapshot)) {
+      triggerBackgroundSync();
     }
-
-    const result = await readDataFile("data/portfolio.json", PortfolioData);
-    if (!result.ok) {
+    if (!snapshot) {
       return setNoStoreResponseHeaders(
         jsonApiError({
-          message: result.error ?? "Portfolio data not found",
+          message: "Portfolio data not found",
           status: 404,
           code: "NOT_FOUND",
           requestId,
@@ -157,9 +129,9 @@ export async function GET(): Promise<Response> {
         requestId,
       );
     }
-    // Inject trade_log dates for share PnL entry timestamps
+
     const tradeLogDates = await loadTradeLogDates();
-    const response = NextResponse.json({ ...result.data, trade_log_dates: tradeLogDates });
+    const response = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to read portfolio";
@@ -183,19 +155,31 @@ export async function POST(): Promise<Response> {
     const response = NextResponse.json({ ...data, trade_log_dates: tradeLogDates });
     return setNoStoreResponseHeaders(response, requestId);
   } catch {
-    // Sync failed — fall back to cached data file
-    const cached = await readDataFile("data/portfolio.json", PortfolioData);
-    if (cached.ok) {
-      console.warn("[Portfolio] Sync failed, serving cached data");
+    let snapshot: PortfolioSnapshot | null = null;
+    try {
+      snapshot = await readPortfolioFromDb();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Sync failed and Turso portfolio read failed";
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message,
+          status: 502,
+          code: "UPSTREAM_ERROR",
+          requestId,
+        }),
+        requestId,
+      );
+    }
+    if (snapshot) {
+      console.warn("[Portfolio] Sync failed, serving latest Turso snapshot");
       const tradeLogDates = await loadTradeLogDates();
-      const res = NextResponse.json({ ...cached.data, trade_log_dates: tradeLogDates });
-      res.headers.set("X-Sync-Warning", "IB sync failed - serving cached data");
+      const res = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
+      res.headers.set("X-Sync-Warning", "IB sync failed - serving latest Turso snapshot");
       return setNoStoreResponseHeaders(res, requestId);
     }
-    // No cached data either — genuine failure
     return setNoStoreResponseHeaders(
       jsonApiError({
-        message: "Sync failed and no cached data available",
+        message: "Sync failed and no Turso portfolio snapshot available",
         status: 502,
         code: "UPSTREAM_ERROR",
         requestId,

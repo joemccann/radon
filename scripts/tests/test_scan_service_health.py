@@ -170,9 +170,7 @@ class TestScannerWiring:
     def _run(self, tmp_path, monkeypatch):
         import scanner
 
-        watchlist = tmp_path / "watchlist.json"
-        watchlist.write_text(json.dumps({"tickers": []}))
-        monkeypatch.setattr(scanner, "WATCHLIST", watchlist)
+        monkeypatch.setattr(scanner, "get_watchlist_items", lambda: [])
         monkeypatch.setattr(scanner, "get_open_positions", lambda: set())
         with redirect_stdout(io.StringIO()):
             scanner.scan(top_n=5)

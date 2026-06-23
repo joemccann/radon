@@ -242,7 +242,7 @@ class TestNoSecretLeakageFastAPI:
     @LEAKS_TODAY
     def test_portfolio_sync_read_back_str_exc(self, trusted_client, monkeypatch):
         """`POST /portfolio/sync` interpolates `str(e)` from the portfolio
-        read-back (server.py:1237)."""
+        Turso read-back."""
         from scripts.api import server
 
         async def _fake_run(*args, **kwargs):
@@ -250,12 +250,10 @@ class TestNoSecretLeakageFastAPI:
 
         monkeypatch.setattr(server, "_run_ib_script_with_recovery", _fake_run)
 
-        import utils.atomic_io as atomic_io
-
-        def _leaky_load(*args, **kwargs):
+        def _leaky_db_read(*args, **kwargs):
             raise RuntimeError(SECRET_BLOB)
 
-        monkeypatch.setattr(atomic_io, "verified_load", _leaky_load)
+        monkeypatch.setattr(server.db_http, "hrana_execute", _leaky_db_read)
 
         resp = trusted_client.post("/portfolio/sync")
         _assert_no_secret(resp, route="POST /portfolio/sync (read-back)")

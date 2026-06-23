@@ -1,15 +1,6 @@
-"""Tests for incremental_sync — skip full sync when no position changes detected.
+"""Tests for incremental_sync — skip full sync when no position changes detected."""
 
-Red/Green TDD: tests written FIRST (RED phase), then implementation follows.
-Uses tmp files for portfolio.json — no real IB connection needed.
-"""
-
-import json
-import tempfile
-from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import MagicMock
 
 from utils.incremental_sync import incremental_sync, positions_changed
 
@@ -18,17 +9,13 @@ from utils.incremental_sync import incremental_sync, positions_changed
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_portfolio_json(positions):
-    """Create a temporary portfolio.json with given positions."""
-    data = {
+def _make_portfolio_snapshot(positions):
+    """Create a portfolio snapshot with given positions."""
+    return {
         "bankroll": 100000,
         "positions": positions,
         "last_sync": "2026-03-10T10:00:00",
     }
-    tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
-    json.dump(data, tmp)
-    tmp.close()
-    return Path(tmp.name)
 
 
 def _make_ib_position(symbol, sec_type="OPT", position=5, expiry="20260417"):
@@ -123,7 +110,7 @@ class TestIncrementalSync:
         positions = [
             {"ticker": "AAPL", "expiry": "2026-04-17", "contracts": 5},
         ]
-        portfolio_path = _make_portfolio_json(positions)
+        portfolio = _make_portfolio_snapshot(positions)
 
         ib_positions = [
             _make_ib_position("AAPL", position=5, expiry="20260417"),
@@ -132,20 +119,17 @@ class TestIncrementalSync:
         mock_client = MagicMock()
         mock_client.get_positions.return_value = ib_positions
 
-        result = incremental_sync(mock_client, portfolio_path)
+        result = incremental_sync(mock_client, portfolio)
 
         assert result["changed"] is False
         assert result["portfolio"]["bankroll"] == 100000
-
-        # Clean up
-        portfolio_path.unlink()
 
     def test_changes_detected_triggers_full_sync(self):
         """When positions differ, should flag for full sync."""
         positions = [
             {"ticker": "AAPL", "expiry": "2026-04-17", "contracts": 5},
         ]
-        portfolio_path = _make_portfolio_json(positions)
+        portfolio = _make_portfolio_snapshot(positions)
 
         ib_positions = [
             _make_ib_position("AAPL", position=5, expiry="20260417"),
@@ -155,24 +139,19 @@ class TestIncrementalSync:
         mock_client = MagicMock()
         mock_client.get_positions.return_value = ib_positions
 
-        result = incremental_sync(mock_client, portfolio_path)
+        result = incremental_sync(mock_client, portfolio)
 
         assert result["changed"] is True
 
-        portfolio_path.unlink()
-
-    def test_missing_portfolio_file_triggers_full_sync(self):
-        """If portfolio.json doesn't exist, should trigger full sync."""
+    def test_missing_portfolio_snapshot_triggers_full_sync(self, monkeypatch):
+        """If no portfolio snapshot exists, should trigger full sync."""
         mock_client = MagicMock()
         mock_client.get_positions.return_value = [
             _make_ib_position("AAPL", position=5, expiry="20260417"),
         ]
+        monkeypatch.setattr("utils.incremental_sync.read_latest_portfolio_snapshot", lambda: None)
 
-        nonexistent = Path("/tmp/nonexistent_portfolio_test.json")
-        if nonexistent.exists():
-            nonexistent.unlink()
-
-        result = incremental_sync(mock_client, nonexistent)
+        result = incremental_sync(mock_client)
 
         assert result["changed"] is True
 
@@ -181,13 +160,26 @@ class TestIncrementalSync:
         positions = [
             {"ticker": "AAPL", "expiry": "2026-04-17", "contracts": 5},
         ]
-        portfolio_path = _make_portfolio_json(positions)
+        portfolio = _make_portfolio_snapshot(positions)
 
         mock_client = MagicMock()
         mock_client.get_positions.return_value = []
 
-        result = incremental_sync(mock_client, portfolio_path)
+        result = incremental_sync(mock_client, portfolio)
 
         assert result["changed"] is True
 
-        portfolio_path.unlink()
+    def test_default_loads_latest_portfolio_snapshot(self, monkeypatch):
+        portfolio = _make_portfolio_snapshot(
+            [{"ticker": "AAPL", "expiry": "2026-04-17", "contracts": 5}]
+        )
+        monkeypatch.setattr("utils.incremental_sync.read_latest_portfolio_snapshot", lambda: portfolio)
+
+        mock_client = MagicMock()
+        mock_client.get_positions.return_value = [
+            _make_ib_position("AAPL", position=5, expiry="20260417"),
+        ]
+
+        result = incremental_sync(mock_client)
+
+        assert result == {"changed": False, "portfolio": portfolio}

@@ -50,11 +50,27 @@ vi.mock("@/lib/radonApi", () => ({
   },
 }));
 
-// Mock @tools/data-reader for portfolio + orders routes
+// Mock @tools/data-reader for routes that still read cached files
 const mockReadDataFile = vi.fn().mockResolvedValue({ ok: false, error: "not found" });
 vi.mock("@tools/data-reader", () => ({
   readDataFile: mockReadDataFile,
 }));
+
+const emptyOrdersSnapshot = {
+  last_sync: "",
+  open_orders: [],
+  executed_orders: [],
+  open_count: 0,
+  executed_count: 0,
+};
+
+const mockReadOrdersSnapshotFromDb = vi.fn().mockResolvedValue(emptyOrdersSnapshot);
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
+}));
+
+const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
 
 // Mock @tools/schemas/ib-orders (TypeBox schema import)
 vi.mock("@tools/schemas/ib-orders", () => ({
@@ -126,6 +142,56 @@ vi.stubGlobal("fetch", mockFetch);
 
 function makeRequest(url: string, init?: RequestInit): Request {
   return new Request(url, init);
+}
+
+function mockPortfolioDb(portfolio: Record<string, unknown> | null, journalRows: Record<string, string>[] = []) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (/FROM\s+portfolio_snapshots/i.test(sql)) {
+      return {
+        rows: portfolio
+          ? [{ taken_at: portfolio.last_sync, payload: JSON.stringify(portfolio) }]
+          : [],
+      };
+    }
+    if (/FROM\s+journal/i.test(sql)) {
+      return { rows: journalRows };
+    }
+    return { rows: [] };
+  });
+}
+
+function mockJournalDb(trades: Record<string, unknown>[] = []) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (/FROM\s+journal/i.test(sql)) {
+      return { rows: trades.map((trade) => ({ payload: JSON.stringify(trade) })) };
+    }
+    if (/FROM\s+reconciliation_log/i.test(sql)) {
+      return { rows: [] };
+    }
+    if (/INSERT\s+INTO\s+journal/i.test(sql)) {
+      return { rows: [] };
+    }
+    return { rows: [] };
+  });
+}
+
+function mockJournalImportDb(reconciliation: Record<string, unknown>) {
+  const trades: Record<string, unknown>[] = [];
+  mockExecute.mockImplementation(async ({ sql, args }: { sql: string; args?: unknown[] }) => {
+    if (/FROM\s+reconciliation_log/i.test(sql)) {
+      return { rows: [{ payload: JSON.stringify(reconciliation) }] };
+    }
+    if (/FROM\s+journal/i.test(sql)) {
+      return { rows: trades.map((trade) => ({ payload: JSON.stringify(trade) })) };
+    }
+    if (/INSERT\s+INTO\s+journal/i.test(sql)) {
+      if (typeof args?.[1] === "string") {
+        trades.push(JSON.parse(args[1]) as Record<string, unknown>);
+      }
+      return { rows: [] };
+    }
+    return { rows: [] };
+  });
 }
 
 // =============================================================================
@@ -475,11 +541,13 @@ describe("GET /api/portfolio", () => {
   beforeEach(async () => {
     vi.resetModules();
     mockReadDataFile.mockReset();
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
     const mod = await import("../app/api/portfolio/route");
     GET = mod.GET;
   });
 
-  it("returns portfolio data when file exists", async () => {
+  it("returns portfolio data when a Turso snapshot exists", async () => {
     const mockPortfolio = {
       bankroll: 100000,
       peak_value: 105000,
@@ -493,7 +561,7 @@ describe("GET /api/portfolio", () => {
       undefined_risk_count: 0,
       avg_kelly_optimal: null,
     };
-    mockReadDataFile.mockResolvedValue({ ok: true, data: mockPortfolio });
+    mockPortfolioDb(mockPortfolio);
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -501,10 +569,11 @@ describe("GET /api/portfolio", () => {
     expect(body.bankroll).toBe(100000);
     expect(body.positions).toEqual([]);
     expect(body.position_count).toBe(0);
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when file not found", async () => {
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "File not found: data/portfolio.json" });
+  it("returns 404 when no Turso snapshot exists", async () => {
+    mockPortfolioDb(null);
 
     const res = await GET();
     expect(res.status).toBe(404);
@@ -524,6 +593,8 @@ describe("POST /api/portfolio", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
     const mod = await import("../app/api/portfolio/route");
     POST = mod.POST;
   });
@@ -553,7 +624,7 @@ describe("POST /api/portfolio", () => {
 
   it("returns 502 when sync fails and no cache", async () => {
     mockRadonFetch.mockRejectedValue(new Error("connection refused"));
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "not found" });
+    mockPortfolioDb(null);
 
     const res = await POST();
     expect(res.status).toBe(502);
@@ -570,13 +641,13 @@ describe("GET /api/orders", () => {
   beforeEach(async () => {
     vi.resetModules();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
     const mod = await import("../app/api/orders/route");
     GET = mod.GET;
   });
 
-  it("returns empty orders when no file exists", async () => {
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "not found" });
-
+  it("returns empty orders when Turso has no rows", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -586,7 +657,7 @@ describe("GET /api/orders", () => {
     expect(body.executed_count).toBe(0);
   });
 
-  it("returns order data when file exists", async () => {
+  it("returns order data when Turso has rows", async () => {
     const mockOrders = {
       last_sync: "2026-03-05T14:00:00",
       open_orders: [
@@ -611,7 +682,7 @@ describe("GET /api/orders", () => {
       open_count: 1,
       executed_count: 0,
     };
-    mockReadDataFile.mockResolvedValue({ ok: true, data: mockOrders });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(mockOrders);
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -633,16 +704,14 @@ describe("POST /api/orders", () => {
     vi.resetModules();
     mockRadonFetch.mockReset();
     mockReadDataFile.mockReset();
+    mockReadOrdersSnapshotFromDb.mockReset();
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
     const mod = await import("../app/api/orders/route");
     POST = mod.POST;
   });
 
-  it("returns 502 when sync fails and no cache", async () => {
+  it("returns 502 when sync fails and no synced Turso snapshot exists", async () => {
     mockRadonFetch.mockRejectedValue(new Error("IB gateway timeout"));
-    mockReadDataFile.mockResolvedValue({
-      ok: true,
-      data: { last_sync: "", open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 },
-    });
 
     const res = await POST();
     expect(res.status).toBe(502);
@@ -672,7 +741,7 @@ describe("POST /api/orders", () => {
       executed_count: 1,
     };
     mockRadonFetch.mockResolvedValue(refreshedOrders);
-    mockReadDataFile.mockResolvedValue({ ok: true, data: refreshedOrders });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(refreshedOrders);
 
     const res = await POST();
     expect(res.status).toBe(200);
@@ -845,44 +914,42 @@ describe("GET /api/blotter", () => {
   beforeEach(async () => {
     vi.resetModules();
     mockReadFile.mockReset();
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
     const mod = await import("../app/api/blotter/route");
     GET = mod.GET;
   });
 
-  it("returns cached data when file exists", async () => {
-    const blotterData = {
-      as_of: "2026-03-05",
-      summary: { closed_trades: 5, open_trades: 3, total_commissions: 12.50, realized_pnl: 2500 },
-      closed_trades: [
+  it("returns journal-derived data when Turso rows exist", async () => {
+    mockExecute.mockResolvedValue({
+      rows: [
         {
-          symbol: "AAPL",
-          contract_desc: "AAPL 220321C00200000",
-          sec_type: "OPT",
-          is_closed: true,
-          net_quantity: 0,
-          total_commission: 2.50,
-          realized_pnl: 500,
-          cost_basis: 1000,
-          proceeds: 1500,
-          total_cash_flow: 500,
-          executions: [],
+          payload: JSON.stringify({
+            id: 1,
+            date: "2026-03-05",
+            ticker: "AAPL",
+            action: "SELL_OPTION",
+            fill_price: 5,
+            total_cost: 500,
+            contracts: 1,
+            commission: 2.5,
+            realized_pnl: 500,
+            ib_exec_id: "AAPL-1",
+          }),
+          filled_at: "2026-03-05T15:00:00Z",
         },
       ],
-      open_trades: [],
-    };
-    mockReadFile.mockResolvedValue(JSON.stringify(blotterData));
+    });
 
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
-    expect(body.summary.closed_trades).toBe(5);
+    expect(body.summary.closed_trades).toBe(1);
     expect(body.closed_trades).toHaveLength(1);
     expect(body.closed_trades[0].symbol).toBe("AAPL");
   });
 
-  it("returns empty structure when file not found", async () => {
-    mockReadFile.mockRejectedValue(new Error("ENOENT: no such file or directory"));
-
+  it("returns empty structure when journal is empty", async () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -903,40 +970,32 @@ describe("GET /api/journal", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    mockReadFile.mockReset();
-    mockStat.mockReset();
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
     mockRadonFetch.mockReset();
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
     const mod = await import("../app/api/journal/route");
     GET = mod.GET;
   });
 
-  it("returns trade data when file exists", async () => {
-    const tradeLog = {
-      trades: [
-        {
-          id: 1,
-          date: "2026-03-04",
-          ticker: "GOOG",
-          structure: "Long Call",
-          decision: "ENTER",
-          entry_cost: 2500,
-        },
-        {
-          id: 2,
-          date: "2026-03-05",
-          ticker: "AMD",
-          structure: "Bull Call Spread",
-          decision: "ENTER",
-          entry_cost: 1200,
-        },
-      ],
-    };
-    mockReadFile.mockImplementation(async (filePath: string) => {
-      if (String(filePath).includes("trade_log.json")) return JSON.stringify(tradeLog);
-      if (String(filePath).includes("reconciliation.json")) return JSON.stringify({ needs_attention: false, new_trades: [], timestamp: "2026-04-23T12:00:00Z" });
-      throw new Error("unexpected path");
-    });
+  it("returns trade data from the Turso journal table", async () => {
+    mockJournalDb([
+      {
+        id: 1,
+        date: "2026-03-04",
+        ticker: "GOOG",
+        structure: "Long Call",
+        decision: "ENTER",
+        entry_cost: 2500,
+      },
+      {
+        id: 2,
+        date: "2026-03-05",
+        ticker: "AMD",
+        structure: "Bull Call Spread",
+        decision: "ENTER",
+        entry_cost: 1200,
+      },
+    ]);
 
     const res = await GET();
     expect(res.status).toBe(200);
@@ -946,13 +1005,21 @@ describe("GET /api/journal", () => {
     expect(body.trades[1].ticker).toBe("AMD");
   });
 
-  it("returns 500 with empty trades when file not found", async () => {
-    mockReadFile.mockRejectedValue(new Error("ENOENT: no such file or directory"));
+  it("returns empty trades when the Turso journal table is empty", async () => {
+    mockJournalDb([]);
+
+    const res = await GET();
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.trades).toEqual([]);
+  });
+
+  it("returns 500 with empty trades when the Turso read fails", async () => {
+    mockExecute.mockRejectedValue(new Error("DB unavailable"));
 
     const res = await GET();
     expect(res.status).toBe(500);
     const body = await res.json();
-    expect(body.trades).toEqual([]);
     expect(body.error).toBeDefined();
   });
 });
@@ -962,46 +1029,33 @@ describe("POST /api/journal", () => {
 
   beforeEach(async () => {
     vi.resetModules();
-    mockReadFile.mockReset();
-    mockWriteFile.mockReset();
-    mockWriteFile.mockResolvedValue(undefined);
     mockRadonFetch.mockReset();
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
     const mod = await import("../app/api/journal/route");
     POST = mod.POST;
   });
 
-  it("reconciles and returns fresh journal data", async () => {
+  it("reconciles, imports latest reconciliation rows to Turso, and returns fresh journal data", async () => {
     mockRadonFetch.mockResolvedValue({ ok: true });
-    let tradeLog = { trades: [] as Array<Record<string, unknown>> };
-    mockWriteFile.mockImplementation(async (_filePath: string, content: string | Buffer) => {
-      tradeLog = JSON.parse(String(content));
-    });
-    mockReadFile.mockImplementation(async (filePath: string) => {
-      if (String(filePath).includes("reconciliation.json")) {
-        return JSON.stringify({
-          needs_attention: true,
-          timestamp: "2026-04-23T12:00:00Z",
-          new_trades: [
-            {
-              symbol: "PLTR",
-              date: "2026-04-23",
-              action: "BUY_OPTION",
-              net_quantity: 5,
-              avg_price: 2.5,
-              commission: 1.25,
-              realized_pnl: 0,
-              sec_type: "OPT",
-              strike: 115,
-              expiry: "20260517",
-              right: "C",
-            },
-          ],
-        });
-      }
-      if (String(filePath).includes("trade_log.json")) {
-        return JSON.stringify(tradeLog);
-      }
-      throw new Error("unexpected path");
+    mockJournalImportDb({
+      needs_attention: true,
+      timestamp: "2026-04-23T12:00:00Z",
+      new_trades: [
+        {
+          symbol: "PLTR",
+          date: "2026-04-23",
+          action: "BUY_OPTION",
+          net_quantity: 5,
+          avg_price: 2.5,
+          commission: 1.25,
+          realized_pnl: 0,
+          sec_type: "OPT",
+          strike: 115,
+          expiry: "20260517",
+          right: "C",
+        },
+      ],
     });
 
     const res = await POST();
@@ -1011,17 +1065,11 @@ describe("POST /api/journal", () => {
     expect(body.trades[0].ticker).toBe("PLTR");
   });
 
-  it("falls back to cached journal when reconcile fails", async () => {
+  it("falls back to current Turso journal when reconcile fails", async () => {
     mockRadonFetch.mockRejectedValue(new Error("IB down"));
-    mockReadFile.mockImplementation(async (filePath: string) => {
-      if (String(filePath).includes("trade_log.json")) {
-        return JSON.stringify({ trades: [{ id: 9, date: "2026-04-23", ticker: "GOOG", structure: "Long Call", decision: "EXECUTED" }] });
-      }
-      if (String(filePath).includes("reconciliation.json")) {
-        return JSON.stringify({ needs_attention: false, new_trades: [], timestamp: "2026-04-23T12:00:00Z" });
-      }
-      throw new Error("unexpected path");
-    });
+    mockJournalDb([
+      { id: 9, date: "2026-04-23", ticker: "GOOG", structure: "Long Call", decision: "EXECUTED" },
+    ]);
 
     const res = await POST();
     expect(res.status).toBe(200);

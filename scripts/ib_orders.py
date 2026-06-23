@@ -2,19 +2,18 @@
 """
 Interactive Brokers Orders Sync
 
-Connects to TWS/IB Gateway and syncs open orders + executed trades to orders.json
+Connects to TWS/IB Gateway and syncs open orders + executed trades to Turso.
 
 Requirements:
   pip install ib_insync
 
 Usage:
   python3 scripts/ib_orders.py              # Display orders
-  python3 scripts/ib_orders.py --sync       # Sync to orders.json
+  python3 scripts/ib_orders.py --sync       # Sync to Turso open_orders/executed_orders
   python3 scripts/ib_orders.py --port 4001  # Custom port
 """
 
 import argparse
-import json
 import math
 import sys
 from datetime import datetime
@@ -37,8 +36,6 @@ from clients.ib_client import IBClient, CLIENT_IDS, DEFAULT_HOST, DEFAULT_GATEWA
 
 DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS["ib_orders"]
-
-ORDERS_PATH = Path(__file__).parent.parent / "data" / "orders.json"
 
 # IB uses this sentinel for "no value" on realizedPNL
 IB_SENTINEL = 1.7976931348623157e308
@@ -223,7 +220,7 @@ def fetch_executed_orders(client: IBClient) -> list:
 
 
 def build_orders_data(open_orders: list, executed_orders: list) -> dict:
-    """Build the orders.json structure"""
+    """Build the orders snapshot payload."""
     return {
         "last_sync": datetime.now().isoformat(),
         "open_orders": open_orders,
@@ -234,32 +231,13 @@ def build_orders_data(open_orders: list, executed_orders: list) -> dict:
 
 
 def save_orders(data: dict):
-    """Save orders to JSON file + dual-write to Turso (best-effort).
-
-    The disk write is the failure-safe path; the Turso dual-write is the
-    Phase 3 source-of-truth migration target. If Turso fails for any
-    reason, we record a non-OK service_health row (visible via the
-    <ServiceHealthBanner /> in WorkspaceShell) and keep going — disk
-    JSON remains the fallback the routes still read from.
-    """
-    ORDERS_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-    if ORDERS_PATH.exists():
-        backup = ORDERS_PATH.with_suffix(".json.bak")
-        backup.write_text(ORDERS_PATH.read_text())
-
-    with open(ORDERS_PATH, "w") as f:
-        json.dump(data, f, indent=2)
-
-    print(f"Saved orders to {ORDERS_PATH}")
-
+    """Save orders to the canonical Turso order tables."""
     _dual_write_orders_to_db(data)
+    print("Saved orders to Turso open_orders/executed_orders")
 
 
 def _dual_write_orders_to_db(data: dict) -> None:
-    """Phase 3 — mirror orders.json into the open_orders + executed_orders
-    tables. Per-row schema (one row per permId / execId) avoids the
-    torn-blob risk of orders.json fdopen writes."""
+    """Persist an IB order snapshot into open_orders + executed_orders."""
     try:
         from db.service_cycle import service_cycle
         from db.writer import (
@@ -337,7 +315,7 @@ def main():
     parser.add_argument("--host", default=DEFAULT_HOST, help="TWS/Gateway host")
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, help="TWS/Gateway port")
     parser.add_argument("--client-id", type=int, default=None, help="Client ID (omit for auto-allocation)")
-    parser.add_argument("--sync", action="store_true", help="Sync to orders.json")
+    parser.add_argument("--sync", action="store_true", help="Sync to Turso open_orders/executed_orders")
 
     args = parser.parse_args()
 
@@ -356,7 +334,7 @@ def main():
             data = build_orders_data(open_orders, executed_orders)
             save_orders(data)
         else:
-            print("\nRun with --sync to save to orders.json")
+            print("\nRun with --sync to save to Turso")
 
     finally:
         client.disconnect()

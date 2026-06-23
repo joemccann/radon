@@ -40,6 +40,22 @@ vi.mock("@tools/data-reader", () => ({
   readDataFile: mockReadDataFile,
 }));
 
+const emptyOrdersSnapshot = {
+  last_sync: "2026-03-14T15:00:00Z",
+  open_orders: [],
+  executed_orders: [],
+  open_count: 0,
+  executed_count: 0,
+};
+
+const mockReadOrdersSnapshotFromDb = vi.fn().mockResolvedValue(emptyOrdersSnapshot);
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
+}));
+
+const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+
 // Mock @tools/schemas/ib-orders and ib-sync (TypeBox schemas)
 vi.mock("@tools/schemas/ib-orders", () => ({ OrdersData: {} }));
 vi.mock("@tools/schemas/ib-sync", () => ({ PortfolioData: {} }));
@@ -83,10 +99,31 @@ function makeRequest(url: string, init?: RequestInit): Request {
   return new Request(url, init);
 }
 
+function mockPortfolioDb(portfolio: Record<string, unknown> | null, journalRows: Record<string, string>[] = []) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (/FROM\s+portfolio_snapshots/i.test(sql)) {
+      return {
+        rows: portfolio
+          ? [{ taken_at: portfolio.last_sync, payload: JSON.stringify(portfolio) }]
+          : [],
+      };
+    }
+    if (/FROM\s+journal/i.test(sql)) {
+      return { rows: journalRows };
+    }
+    return { rows: [] };
+  });
+}
+
 beforeEach(() => {
   vi.resetModules();
   mockRadonFetch.mockReset();
+  mockRadonFetch.mockResolvedValue({ ok: true });
   mockReadDataFile.mockReset();
+  mockReadOrdersSnapshotFromDb.mockReset();
+  mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
+  mockExecute.mockReset();
+  mockExecute.mockResolvedValue({ rows: [] });
   mockReadFile.mockReset();
   mockWriteFile.mockReset();
   mockStat.mockReset();
@@ -234,7 +271,7 @@ describe("GET /api/attribution (via radonFetch)", () => {
 });
 
 // =============================================================================
-// POST /api/portfolio — via radonFetch + cache fallback
+// POST /api/portfolio — via radonFetch + Turso snapshot fallback
 // =============================================================================
 
 describe("POST /api/portfolio (via radonFetch)", () => {
@@ -249,22 +286,23 @@ describe("POST /api/portfolio (via radonFetch)", () => {
     expect(body.bankroll).toBe(100000);
   });
 
-  it("falls back to cached portfolio when radonFetch fails", async () => {
+  it("falls back to latest Turso portfolio when radonFetch fails", async () => {
     mockRadonFetch.mockRejectedValue(new Error("IB connection refused"));
-    const cached = { bankroll: 95000, last_sync: "2026-03-13T16:00:00", positions: [{ ticker: "AAPL" }] };
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    const snapshot = { bankroll: 95000, last_sync: "2026-03-13T16:00:00", positions: [{ ticker: "AAPL" }] };
+    mockPortfolioDb(snapshot);
 
     const { POST } = await import("../app/api/portfolio/route");
     const res = await POST();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.bankroll).toBe(95000);
-    expect(res.headers.get("X-Sync-Warning")).toContain("cached");
+    expect(res.headers.get("X-Sync-Warning")).toContain("Turso");
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("returns 502 when sync fails and no cache exists", async () => {
+  it("returns 502 when sync fails and no Turso snapshot exists", async () => {
     mockRadonFetch.mockRejectedValue(new Error("connection refused"));
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "not found" });
+    mockPortfolioDb(null);
 
     const { POST } = await import("../app/api/portfolio/route");
     const res = await POST();
@@ -277,22 +315,20 @@ describe("POST /api/portfolio (via radonFetch)", () => {
 // =============================================================================
 
 describe("GET /api/portfolio (stale-while-revalidate)", () => {
-  it("returns cached data immediately without blocking", async () => {
-    const cached = { bankroll: 100000, last_sync: "2026-03-14", positions: [] };
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
-    // Fresh stat — no background sync
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+  it("returns Turso snapshot data immediately without blocking", async () => {
+    const snapshot = { bankroll: 100000, last_sync: new Date().toISOString(), positions: [] };
+    mockPortfolioDb(snapshot);
 
     const { GET } = await import("../app/api/portfolio/route");
     const res = await GET();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.bankroll).toBe(100000);
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when no portfolio file exists", async () => {
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "File not found" });
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() - 5_000 });
+  it("returns 404 when no Turso portfolio snapshot exists", async () => {
+    mockPortfolioDb(null);
 
     const { GET } = await import("../app/api/portfolio/route");
     const res = await GET();
@@ -301,38 +337,40 @@ describe("GET /api/portfolio (stale-while-revalidate)", () => {
 });
 
 // =============================================================================
-// POST /api/orders — via radonFetch + cache fallback
+// POST /api/orders — via radonFetch + Turso snapshot fallback
 // =============================================================================
 
 describe("POST /api/orders (via radonFetch)", () => {
   it("returns refreshed orders on success", async () => {
     const orders = { last_sync: "2026-03-14", open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 };
     mockRadonFetch.mockResolvedValue(orders);
-    mockReadDataFile.mockResolvedValue({ ok: true, data: orders });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(orders);
 
     const { POST } = await import("../app/api/orders/route");
     const res = await POST();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.open_count).toBe(0);
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("falls back to cached orders when sync fails", async () => {
+  it("falls back to latest Turso orders when sync fails", async () => {
     mockRadonFetch.mockRejectedValue(new Error("timeout"));
-    const cached = { last_sync: "2026-03-13", open_orders: [{ orderId: 1 }], executed_orders: [], open_count: 1, executed_count: 0 };
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    const snapshot = { last_sync: "2026-03-13", open_orders: [{ orderId: 1 }], executed_orders: [], open_count: 1, executed_count: 0 };
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(snapshot);
 
     const { POST } = await import("../app/api/orders/route");
     const res = await POST();
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.open_count).toBe(1);
-    expect(res.headers.get("X-Sync-Warning")).toContain("cached");
+    expect(res.headers.get("X-Sync-Warning")).toContain("Turso");
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("returns 502 when sync fails and no cache", async () => {
+  it("returns 502 when sync fails and no synced Turso snapshot exists", async () => {
     mockRadonFetch.mockRejectedValue(new Error("timeout"));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: { last_sync: "", open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 } });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue({ last_sync: "", open_orders: [], executed_orders: [], open_count: 0, executed_count: 0 });
 
     const { POST } = await import("../app/api/orders/route");
     const res = await POST();
@@ -362,7 +400,7 @@ describe("POST /api/orders/cancel (via radonFetch)", () => {
     mockRadonFetch
       .mockResolvedValueOnce({ status: "ok", message: "Cancelled" })  // cancel
       .mockResolvedValueOnce({});  // refresh
-    mockReadDataFile.mockResolvedValue({ ok: true, data: { open_orders: [], executed_orders: [] } });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
 
     const { POST } = await import("../app/api/orders/cancel/route");
     const req = makeRequest("http://localhost/api/orders/cancel", {
@@ -496,7 +534,7 @@ describe("POST /api/orders/place (via radonFetch)", () => {
         message: "BUY 10 AAPL @ $150.00 — Submitted",
       })
       .mockResolvedValueOnce({});  // orders refresh
-    mockReadDataFile.mockResolvedValue({ ok: true, data: { open_orders: [], executed_orders: [] } });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
 
     const { POST } = await import("../app/api/orders/place/route");
     const req = makeRequest("http://localhost/api/orders/place", {
@@ -521,8 +559,8 @@ describe("POST /api/orders/place (via radonFetch)", () => {
       })
       .mockResolvedValueOnce({});
     mockReadDataFile
-      .mockResolvedValueOnce({ ok: true, data: { positions: [] } })
-      .mockResolvedValueOnce({ ok: true, data: { open_orders: [], executed_orders: [] } });
+      .mockResolvedValueOnce({ ok: true, data: { positions: [] } });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(emptyOrdersSnapshot);
 
     const { POST } = await import("../app/api/orders/place/route");
     const req = makeRequest("http://localhost/api/orders/place", {
@@ -575,52 +613,73 @@ describe("POST /api/orders/place (via radonFetch)", () => {
 // =============================================================================
 
 describe("POST /api/blotter (via radonFetch)", () => {
-  it("returns blotter data on success", async () => {
-    const data = { as_of: "2026-03-14", summary: { closed_trades: 5 }, closed_trades: [], open_trades: [] };
-    mockRadonFetch.mockResolvedValue(data);
-
-    const { POST } = await import("../app/api/blotter/route");
-    const res = await POST();
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.summary.closed_trades).toBe(5);
-  });
-
-  it("falls back to cached blotter on failure", async () => {
-    mockRadonFetch.mockRejectedValue(new Error("Flex query timed out"));
-    mockReadFile.mockResolvedValue(JSON.stringify({
-      as_of: "2026-03-13",
-      summary: { closed_trades: 2 },
-      closed_trades: [
+  it("rehydrates journal then returns Turso-derived blotter data", async () => {
+    mockRadonFetch.mockResolvedValue({ ok: true, imported: 0, skipped: 0 });
+    mockExecute.mockResolvedValue({
+      rows: [
         {
-          symbol: "AAPL",
-          contract_desc: "AAPL 240315C00200000",
-          sec_type: "OPT",
-          is_closed: true,
-          net_quantity: 0,
-          total_commission: 1,
-          realized_pnl: 200,
-          cost_basis: 1000,
-          proceeds: 1200,
-          total_cash_flow: 200,
-          executions: [],
+          payload: JSON.stringify({
+            id: 1,
+            date: "2026-03-14",
+            ticker: "AAPL",
+            action: "SELL_OPTION",
+            fill_price: 5,
+            total_cost: 500,
+            contracts: 1,
+            commission: 2.5,
+            realized_pnl: 500,
+            ib_exec_id: "AAPL-1",
+          }),
+          filled_at: "2026-03-14T15:00:00Z",
         },
       ],
-      open_trades: [],
-    }));
+    });
 
     const { POST } = await import("../app/api/blotter/route");
     const res = await POST();
     expect(res.status).toBe(200);
-    expect(res.headers.get("X-Sync-Warning")).toContain("cached data");
     const body = await res.json();
-    expect(body.summary.closed_trades).toBe(2);
+    expect(body.summary.closed_trades).toBe(1);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/journal/rehydrate",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("falls back to journal-derived blotter on failure", async () => {
+    mockRadonFetch.mockRejectedValue(new Error("Flex query timed out"));
+    mockExecute.mockResolvedValue({
+      rows: [
+        {
+          payload: JSON.stringify({
+            id: 1,
+            date: "2026-03-13",
+            ticker: "AAPL",
+            action: "SELL_OPTION",
+            fill_price: 12,
+            total_cost: 1200,
+            contracts: 1,
+            commission: 1,
+            realized_pnl: 200,
+            ib_exec_id: "AAPL-OLD",
+          }),
+          filled_at: "2026-03-13T15:00:00Z",
+        },
+      ],
+    });
+
+    const { POST } = await import("../app/api/blotter/route");
+    const res = await POST();
+    expect(res.status).toBe(200);
+    expect(res.headers.get("X-Sync-Warning")).toContain("Turso journal");
+    const body = await res.json();
+    expect(body.summary.closed_trades).toBe(1);
     expect(body.closed_trades[0].symbol).toBe("AAPL");
   });
 
-  it("returns 502 on failure when cache unavailable", async () => {
+  it("returns 502 on failure when journal is unavailable", async () => {
     mockRadonFetch.mockRejectedValue(new Error("Flex query timed out"));
-    mockReadFile.mockRejectedValue(new Error("ENOENT"));
+    mockExecute.mockResolvedValue({ rows: [] });
 
     const { POST } = await import("../app/api/blotter/route");
     const res = await POST();

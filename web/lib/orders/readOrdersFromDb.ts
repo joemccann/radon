@@ -1,20 +1,21 @@
-/**
- * Phase 3.2 — read orders from the open_orders / executed_orders Turso
- * tables and reshape them to match `data/orders.json` (OrdersData).
- *
- * Per CLAUDE.md "Trades canonical store": the disk JSON is still the
- * canonical surface today. This module exists so /api/orders can read
- * BOTH sources in parallel and log divergence — without that
- * comparison-logging step we'd be flipping the read to DB on faith.
- */
 import type { Static } from "@sinclair/typebox";
 import { getDb, syncDb } from "@/lib/db";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 
-type Open = Static<typeof OrdersData>["open_orders"][number];
-type Executed = Static<typeof OrdersData>["executed_orders"][number];
+export type OrdersSnapshot = Static<typeof OrdersData>;
+
+type Open = OrdersSnapshot["open_orders"][number];
+type Executed = OrdersSnapshot["executed_orders"][number];
 
 const EXECUTED_LOOKBACK_HOURS = 36;
+
+export const EMPTY_ORDERS: OrdersSnapshot = {
+  last_sync: "",
+  open_orders: [],
+  executed_orders: [],
+  open_count: 0,
+  executed_count: 0,
+};
 
 function safeParse<T>(text: unknown): T | null {
   if (typeof text !== "string" || !text) return null;
@@ -25,7 +26,7 @@ function safeParse<T>(text: unknown): T | null {
   }
 }
 
-export async function readOrdersFromDb(): Promise<Static<typeof OrdersData> | null> {
+export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   const db = getDb();
 
   // Pull the freshest cloud-DB state into the embedded replica before
@@ -82,4 +83,8 @@ export async function readOrdersFromDb(): Promise<Static<typeof OrdersData> | nu
     open_count: open.length,
     executed_count: executed.length,
   };
+}
+
+export async function readOrdersSnapshotFromDb(): Promise<OrdersSnapshot> {
+  return (await readOrdersFromDb()) ?? EMPTY_ORDERS;
 }

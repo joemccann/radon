@@ -3,7 +3,7 @@ import json
 import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
-from unittest.mock import MagicMock, patch, PropertyMock
+from unittest.mock import patch
 
 import pytest
 
@@ -38,12 +38,10 @@ class TestScannerParallelExecution:
     """Verify that scan() processes tickers concurrently via ThreadPoolExecutor."""
 
     @patch("scanner.get_open_positions", return_value=set())
-    @patch("scanner.WATCHLIST", new_callable=PropertyMock)
-    def test_multiple_tickers_processed_concurrently(self, mock_wl_path, mock_positions, tmp_path):
+    def test_multiple_tickers_processed_concurrently(self, mock_positions):
         """Multiple tickers should be processed in parallel, not sequentially."""
         tickers = [f"T{i}" for i in range(10)]
-        wl_file = tmp_path / "watchlist.json"
-        wl_file.write_text(json.dumps(_make_watchlist(tickers)))
+        watchlist_items = _make_watchlist(tickers)["tickers"]
 
         # Track which threads are used
         thread_ids = set()
@@ -53,10 +51,7 @@ class TestScannerParallelExecution:
             time.sleep(0.05)
             return _make_flow_data()
 
-        mock_wl_path.exists.return_value = True
-        mock_wl_path.__fspath__ = lambda self: str(wl_file)
-
-        with patch("scanner.WATCHLIST", wl_file), \
+        with patch("scanner.get_watchlist_items", return_value=watchlist_items), \
              patch("scanner.fetch_flow_data", side_effect=slow_fetch):
             scan(top_n=50)
 
@@ -67,13 +62,12 @@ class TestScannerParallelExecution:
         )
 
     @patch("scanner.get_open_positions", return_value=set())
-    def test_results_collected_from_all_tickers(self, mock_positions, tmp_path, capsys):
+    def test_results_collected_from_all_tickers(self, mock_positions, capsys):
         """All successful tickers should appear in results."""
         tickers = ["AAPL", "GOOG", "MSFT", "NVDA", "AMD"]
-        wl_file = tmp_path / "watchlist.json"
-        wl_file.write_text(json.dumps(_make_watchlist(tickers)))
+        watchlist_items = _make_watchlist(tickers)["tickers"]
 
-        with patch("scanner.WATCHLIST", wl_file), \
+        with patch("scanner.get_watchlist_items", return_value=watchlist_items), \
              patch("scanner.fetch_flow_data", return_value=_make_flow_data()):
             scan(top_n=50)
 
@@ -90,20 +84,19 @@ class TestScannerErrorHandling:
     """Verify per-ticker errors don't crash the batch."""
 
     @patch("scanner.get_open_positions", return_value=set())
-    def test_rate_limit_error_skips_ticker(self, mock_positions, tmp_path, capsys):
+    def test_rate_limit_error_skips_ticker(self, mock_positions, capsys):
         """UWRateLimitError on one ticker should not crash the batch."""
         from clients.uw_client import UWRateLimitError
 
         tickers = ["AAPL", "FAIL", "GOOG"]
-        wl_file = tmp_path / "watchlist.json"
-        wl_file.write_text(json.dumps(_make_watchlist(tickers)))
+        watchlist_items = _make_watchlist(tickers)["tickers"]
 
         def fetch_side_effect(ticker, days=5):
             if ticker == "FAIL":
                 raise UWRateLimitError("rate limited", status_code=429)
             return _make_flow_data()
 
-        with patch("scanner.WATCHLIST", wl_file), \
+        with patch("scanner.get_watchlist_items", return_value=watchlist_items), \
              patch("scanner.fetch_flow_data", side_effect=fetch_side_effect):
             scan(top_n=50)
 
@@ -113,18 +106,17 @@ class TestScannerErrorHandling:
         assert output["tickers_scanned"] >= 2
 
     @patch("scanner.get_open_positions", return_value=set())
-    def test_general_exception_caught_per_ticker(self, mock_positions, tmp_path, capsys):
+    def test_general_exception_caught_per_ticker(self, mock_positions, capsys):
         """A generic exception on one ticker should not crash the whole scan."""
         tickers = ["AAPL", "BOOM", "GOOG"]
-        wl_file = tmp_path / "watchlist.json"
-        wl_file.write_text(json.dumps(_make_watchlist(tickers)))
+        watchlist_items = _make_watchlist(tickers)["tickers"]
 
         def fetch_side_effect(ticker, days=5):
             if ticker == "BOOM":
                 raise RuntimeError("unexpected crash")
             return _make_flow_data()
 
-        with patch("scanner.WATCHLIST", wl_file), \
+        with patch("scanner.get_watchlist_items", return_value=watchlist_items), \
              patch("scanner.fetch_flow_data", side_effect=fetch_side_effect):
             scan(top_n=50)
 
@@ -139,13 +131,12 @@ class TestScannerMaxWorkers:
     """Verify max_workers parameter is respected."""
 
     @patch("scanner.get_open_positions", return_value=set())
-    def test_max_workers_parameter_passed_to_executor(self, mock_positions, tmp_path, capsys):
+    def test_max_workers_parameter_passed_to_executor(self, mock_positions, capsys):
         """scan() should accept and pass max_workers to ThreadPoolExecutor."""
         tickers = ["AAPL", "GOOG"]
-        wl_file = tmp_path / "watchlist.json"
-        wl_file.write_text(json.dumps(_make_watchlist(tickers)))
+        watchlist_items = _make_watchlist(tickers)["tickers"]
 
-        with patch("scanner.WATCHLIST", wl_file), \
+        with patch("scanner.get_watchlist_items", return_value=watchlist_items), \
              patch("scanner.fetch_flow_data", return_value=_make_flow_data()), \
              patch("scanner.ThreadPoolExecutor", wraps=ThreadPoolExecutor) as mock_executor:
             scan(top_n=50, max_workers=5)

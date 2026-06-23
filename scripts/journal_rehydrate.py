@@ -1,30 +1,29 @@
 #!/usr/bin/env python3
 """
-Journal Rehydrate — Backfill data/trade_log.json from the IB Flex Query.
+Journal Rehydrate — Backfill the Turso journal from the IB Flex Query.
 
 Why this exists:
     ``ib_reconcile.py`` calls ``client.get_fills()`` which only returns the
     *current* socket session's executions (and a ~24h server-side window).
     If the daily reconcile cron skips a day, the gap silently grows until
     we drop trades on the floor. Flex Query is the durable source of truth
-    (up to 365 days), so we use it to refill ``trade_log.json`` whenever the
-    journal looks stale.
+    (up to 365 days), so we use it to refill the Turso ``journal`` table
+    whenever the journal looks stale.
 
 Behavior:
     - Pulls executions via :class:`scripts.trade_blotter.flex_query.FlexQueryFetcher`.
     - Groups executions by contract (per-symbol for stock, per
       symbol/strike/expiry/right for options).
-    - Each appended trade carries a stable ``ib_exec_id`` that we dedupe
+    - Each imported trade carries a stable ``ib_exec_id`` that we dedupe
       against on the next run — append-only, idempotent.
-    - Writes via :func:`scripts.utils.atomic_io.atomic_save` so the file is
-      always crash-safe.
+    - Writes through :func:`scripts.db.writer.upsert_journal_entry`.
     - Emits a single JSON object on stdout — the FastAPI route forwards it
       back to the caller.
 
 Failure mode:
-    On Flex error / timeout, we abort BEFORE touching ``trade_log.json``
-    and surface the error message in the JSON payload. Better a loud
-    failure than a silent stale journal.
+    On Flex error / timeout, we abort BEFORE writing and surface the error
+    message in the JSON payload. Better a loud failure than a silent stale
+    journal.
 
 Usage:
     python3 journal_rehydrate.py [--days 365]
@@ -61,10 +60,6 @@ try:
     load_dotenv(PROJECT_ROOT / "web" / ".env")
 except ImportError:
     pass
-
-from utils.atomic_io import atomic_save, verified_load  # noqa: E402
-
-DEFAULT_TRADE_LOG = PROJECT_ROOT / "data" / "trade_log.json"
 
 
 # ---------------------------------------------------------------------------
@@ -381,7 +376,7 @@ def _bucket_to_entry(
     next_id: int,
     prior_qty: float = 0.0,
 ) -> Dict[str, Any]:
-    """Build the trade_log.json row for one grouped contract.
+    """Build the journal payload for one grouped contract.
 
     ``prior_qty`` is the contract's signed position before this bucket's
     fills — used by ``_resolve_action`` to distinguish closing-long from
@@ -515,11 +510,11 @@ def rehydrate_from_executions(
     executions: List[Any],
     existing: Dict[str, Any],
 ) -> Tuple[Dict[str, Any], int, int, Optional[str]]:
-    """Pure function: merge Flex executions into the existing trade log.
+    """Pure function: merge Flex executions into existing journal-shaped rows.
 
     Args:
         executions: List of ``Execution`` objects from Flex Query.
-        existing: Loaded ``trade_log.json`` payload (``{"trades": [...]}``).
+        existing: Loaded journal payloads (``{"trades": [...]}``).
 
     Returns:
         (updated payload, imported count, skipped count, latest date)
@@ -567,15 +562,15 @@ def rehydrate_from_executions(
 
 def rehydrate(
     days: int = 365,
-    trade_log_path: Path = DEFAULT_TRADE_LOG,
     fetcher: Optional[Any] = None,
+    existing: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
-    """Run the full rehydrate cycle and persist the result atomically.
+    """Run the full rehydrate cycle and persist new rows to Turso.
 
     Args:
         days: Lookback window for the Flex Query.
-        trade_log_path: Override path (used by tests).
         fetcher: Optional pre-built FlexQueryFetcher for tests/mocking.
+        existing: Optional existing journal-shaped payload for tests.
     """
     if fetcher is None:
         token = os.environ.get("IB_FLEX_TOKEN")
@@ -601,22 +596,16 @@ def rehydrate(
             "error": f"Flex Query failed: {exc}",
         }
 
-    try:
-        existing = verified_load(str(trade_log_path))
-    except FileNotFoundError:
-        existing = {"trades": []}
-    except (ValueError, json.JSONDecodeError) as exc:
-        # Fall back to non-verified read so a missing _checksum doesn't
-        # block rehydrate. Atomic save below will add one.
+    if existing is None:
         try:
-            with open(trade_log_path, "r") as fh:
-                existing = json.load(fh)
-        except Exception:
+            from db.readers import read_journal_trades
+            existing = {"trades": read_journal_trades()}
+        except Exception as exc:  # noqa: BLE001
             return {
                 "ok": False,
                 "imported": 0,
                 "skipped": 0,
-                "error": f"Failed to read trade_log.json: {exc}",
+                "error": f"Failed to read Turso journal: {exc}",
             }
 
     if "trades" not in existing or not isinstance(existing["trades"], list):
@@ -625,7 +614,18 @@ def rehydrate(
     updated, imported, skipped, latest_date = rehydrate_from_executions(executions, existing)
 
     if imported > 0:
-        atomic_save(str(trade_log_path), updated)
+        try:
+            from db.writer import upsert_journal_entry
+            for entry in updated["trades"][-imported:]:
+                trade_id = str(entry.get("ib_exec_id") or f"{entry.get('date')}#{entry.get('id')}")
+                upsert_journal_entry(trade_id, entry, filled_at=entry.get("date"))
+        except Exception as exc:  # noqa: BLE001
+            return {
+                "ok": False,
+                "imported": 0,
+                "skipped": skipped,
+                "error": f"Failed to write Turso journal: {exc}",
+            }
 
     return {
         "ok": True,
@@ -644,15 +644,9 @@ def rehydrate(
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--days", type=int, default=365, help="Flex Query lookback window")
-    parser.add_argument(
-        "--trade-log",
-        type=Path,
-        default=DEFAULT_TRADE_LOG,
-        help="Override trade_log.json path (testing)",
-    )
     args = parser.parse_args()
 
-    result = rehydrate(days=args.days, trade_log_path=args.trade_log)
+    result = rehydrate(days=args.days)
     print(json.dumps(result))
     return 0 if result.get("ok") else 1
 

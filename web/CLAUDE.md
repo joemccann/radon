@@ -68,6 +68,8 @@ IBKR rejection text embeds literal `<br>` tokens. `web/lib/orderError.ts:formatO
 ### Sign Convention
 Credits negative, debits positive. **Never `Math.abs()` on option prices without approval.** Preserve sign through entire display pipeline.
 
+**Avg Entry / Initial Value sign is scoped by leg count (`getAvgEntry`, PositionTable `initial_value`).** A multi-leg COMBO carries the net credit/debit sign — a credit combo (e.g. EWY ratio reverse risk reversal) reads NEGATIVE for both Avg Entry and Initial Value. A single-leg stock/option keeps `Math.abs` because its Avg Entry is a per-instrument PRICE (a short stock shows +$1,134.97, not −; commit daca786) and its Initial Value is a one-sided notional. Per-leg `LegRow` stays `|leg.entry_cost|` (positive). Don't re-add `Math.abs` on the `pos.legs.length > 1` path citing a "non-negative" rule — that's the EWY credit-combo bug (2026-06-23).
+
 ### Daily Change %
 ```
 Day Chg % = Daily P&L / |Yesterday's Close Value| × 100   (NEVER entry cost)

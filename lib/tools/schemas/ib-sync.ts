@@ -6,13 +6,13 @@ export const IBSyncInput = Type.Object({
   host: Type.Optional(Type.String({ description: "TWS/Gateway host" })),
   port: Type.Optional(Type.Number({ description: "TWS/Gateway port" })),
   clientId: Type.Optional(Type.Number({ description: "Client ID" })),
-  sync: Type.Optional(Type.Boolean({ description: "Sync to portfolio.json" })),
+  sync: Type.Optional(Type.Boolean({ description: "Sync portfolio into Turso" })),
   noPrices: Type.Optional(Type.Boolean({ description: "Skip market price fetch" })),
 });
 
 export type IBSyncInput = Static<typeof IBSyncInput>;
 
-// ── Output (matches data/portfolio.json shape) ────────────────────────
+// ── Output (matches portfolio snapshot payload shape) ─────────────────
 
 const PortfolioLeg = Type.Object({
   direction: Type.String(),

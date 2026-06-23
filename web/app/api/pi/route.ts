@@ -1,8 +1,9 @@
 import { existsSync } from "node:fs";
-import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { getDb } from "@/lib/db";
+import { readJournalFromDb } from "@/lib/journalDb";
 
 export const runtime = "nodejs";
 
@@ -21,7 +22,7 @@ type ScriptResult = {
   stderr: string;
   exitCode: number;
   timedOut: boolean;
-  source: "script" | "local";
+  source: "script" | "local" | "db";
 };
 
 type PiResponse = {
@@ -49,7 +50,6 @@ type ParsedCommand = {
 type Paths = {
   cwd: string;
   scriptsDir: string;
-  dataDir: string;
 };
 
 const trimOutput = (value: string) => {
@@ -70,16 +70,14 @@ const resolveProjectPaths = (): Paths => {
 
   for (const candidate of candidates) {
     const scriptsDir = path.join(candidate, "scripts");
-    const dataDir = path.join(candidate, "data");
-    if (existsSync(path.join(scriptsDir, "scanner.py")) && existsSync(path.join(dataDir, "portfolio.json"))) {
-      return { cwd: candidate, scriptsDir, dataDir };
+    if (existsSync(path.join(scriptsDir, "scanner.py"))) {
+      return { cwd: candidate, scriptsDir };
     }
   }
 
   return {
     cwd: process.cwd(),
     scriptsDir: path.join(process.cwd(), "scripts"),
-    dataDir: path.join(process.cwd(), "data"),
   };
 };
 
@@ -134,8 +132,8 @@ const runPythonScript = async (
   args: string[],
   _cwd: string,
   timeoutMs = DEFAULT_TIMEOUT_MS,
-  // MUTATE-tier scripts (e.g. ib_sync.py — pulls live IB positions and
-  // rewrites portfolio.json) are refused by /pi/exec unless this explicit
+  // MUTATE-tier scripts (e.g. ib_sync.py pulls live IB positions) are
+  // refused by /pi/exec unless this explicit
   // privileged authorization is passed. Only the `sync` chat command opts in.
   allowMutating = false,
 ): Promise<ScriptResult> => {
@@ -177,11 +175,6 @@ const runPythonScript = async (
   }
 };
 
-const readLocalJsonFile = async <T>(filePath: string): Promise<T> => {
-  const content = await readFile(filePath, "utf8");
-  return JSON.parse(content) as T;
-};
-
 const formatPortfolio = (raw: unknown) => {
   const portfolio = raw as {
     bankroll?: number;
@@ -219,6 +212,22 @@ const formatPortfolio = (raw: unknown) => {
   };
 
   return JSON.stringify(payload, null, 2);
+};
+
+const readPortfolioFromDb = async (): Promise<Record<string, unknown>> => {
+  const db = getDb();
+  const result = await db.execute({
+    sql: `SELECT payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
+    args: [],
+  });
+  if (result.rows.length === 0) {
+    throw new Error("Portfolio snapshot unavailable");
+  }
+  const payload = (result.rows[0] as unknown as { payload?: unknown }).payload;
+  if (typeof payload !== "string") {
+    throw new Error("Portfolio snapshot payload unavailable");
+  }
+  return JSON.parse(payload) as Record<string, unknown>;
 };
 
 const formatJournal = (raw: unknown, limit?: number) => {
@@ -314,7 +323,8 @@ const parseBooleanFlags = (args: string[], booleanSet: Set<string>) => {
 };
 
 const executePortfolio = async (paths: Paths): Promise<ScriptResult> => {
-  const data = await readLocalJsonFile(path.join(paths.dataDir, "portfolio.json"));
+  void paths;
+  const data = await readPortfolioFromDb();
   return {
     command: "portfolio",
     status: "ok",
@@ -322,11 +332,12 @@ const executePortfolio = async (paths: Paths): Promise<ScriptResult> => {
     stderr: "",
     exitCode: 0,
     timedOut: false,
-    source: "local",
+    source: "db",
   };
 };
 
-const executeJournal = (args: string[], paths: Paths): Promise<ScriptResult> => {
+const executeJournal = async (args: string[], paths: Paths): Promise<ScriptResult> => {
+  void paths;
   const parsed = parseGenericIntFlags(args, {
     "--limit": (value) => parseFlagInt(value, "limit"),
   });
@@ -336,15 +347,16 @@ const executeJournal = (args: string[], paths: Paths): Promise<ScriptResult> => 
     throw new Error("journal accepts only --limit");
   }
 
-  return readLocalJsonFile(path.join(paths.dataDir, "trade_log.json")).then((raw) => ({
+  const raw = await readJournalFromDb();
+  return {
     command: "journal",
     status: "ok",
     output: formatJournal(raw, limit),
     stderr: "",
     exitCode: 0,
     timedOut: false,
-    source: "local",
-  }));
+    source: "db",
+  };
 };
 
 const normalizeScanArgs = (args: string[]): string[] => {

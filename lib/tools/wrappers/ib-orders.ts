@@ -1,36 +1,28 @@
-import { runScript, type ScriptResult } from "../runner";
-import { readDataFile } from "../data-reader";
+import type { ScriptResult } from "../runner";
+import { postRadonJson } from "../api-client";
 import { OrdersData, type IBOrdersInput } from "../schemas/ib-orders";
 import type { Static } from "@sinclair/typebox";
+import { Value } from "@sinclair/typebox/value";
 
 /**
- * Run ib_orders.py to sync IB orders to data/orders.json.
- *
- * Like ib_sync.py, this writes to the file and prints human-readable stdout.
- * The typed data comes from reading the file afterwards.
+ * Sync IB orders through FastAPI, then return the Turso orders snapshot.
  */
 export async function ibOrders(
   input: IBOrdersInput = {},
 ): Promise<ScriptResult<Static<typeof OrdersData>>> {
-  const args: string[] = [];
-
-  if (input.sync !== false) args.push("--sync");
-  if (input.host) args.push("--host", input.host);
-  if (input.port != null) args.push("--port", String(input.port));
-  if (input.clientId != null) args.push("--client-id", String(input.clientId));
-
-  const result = await runScript("scripts/ib_orders.py", {
-    args,
-    timeout: 30_000,
-    rawOutput: true,
-  });
-
-  if (!result.ok) return result;
-
-  const fileResult = await readDataFile("data/orders.json", OrdersData);
-  if (!fileResult.ok) {
-    return { ok: false, exitCode: 0, stderr: fileResult.error };
+  void input;
+  try {
+    const data = await postRadonJson("/orders/refresh", 35_000);
+    if (!Value.Check(OrdersData, data)) {
+      const summary = [...Value.Errors(OrdersData, data)]
+        .slice(0, 5)
+        .map((e) => `${e.path}: ${e.message}`)
+        .join("; ");
+      return { ok: false, exitCode: 0, stderr: `Schema validation failed: ${summary}` };
+    }
+    return { ok: true, data: data as Static<typeof OrdersData> };
+  } catch (error) {
+    const stderr = error instanceof Error ? error.message : String(error);
+    return { ok: false, exitCode: null, stderr };
   }
-
-  return { ok: true, data: fileResult.data };
 }

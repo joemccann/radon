@@ -5,7 +5,7 @@
 
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
-const diskOrders = {
+const dbOrders = {
   last_sync: "2026-05-08T20:00:00Z",
   open_orders: [],
   executed_orders: [],
@@ -15,14 +15,8 @@ const diskOrders = {
 
 beforeEach(() => {
   vi.resetModules();
-  vi.doMock("@tools/data-reader", () => ({
-    readDataFile: vi.fn().mockResolvedValue({ ok: true, data: diskOrders }),
-  }));
   vi.doMock("@/lib/orders/readOrdersFromDb", () => ({
-    readOrdersFromDb: vi.fn().mockResolvedValue(null),
-  }));
-  vi.doMock("@/lib/serviceHealth", () => ({
-    recordServiceHealth: vi.fn().mockResolvedValue(undefined),
+    readOrdersSnapshotFromDb: vi.fn().mockResolvedValue(dbOrders),
   }));
   vi.doMock("@/lib/radonApi", () => ({
     radonFetch: vi.fn().mockResolvedValue(undefined),

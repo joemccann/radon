@@ -1,23 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
  * Verifies that GET /api/portfolio triggers background sync via FastAPI
- * when portfolio.json is stale, without blocking the response.
+ * when the latest Turso portfolio snapshot is stale, without blocking the
+ * response.
  */
 
-// Mock fs/stat so we can control staleness.
-const mockStat = vi.fn();
-vi.mock("fs/promises", () => ({ stat: mockStat }));
-
-// Mock read from cached data file.
-const mockReadDataFile = vi.fn();
-vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
-
-// Mock FastAPI client.
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
-/** A minimal valid PortfolioData object */
+const mockReadDataFile = vi.fn();
+vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
+
+const mockExecute = vi.fn();
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+
 function makePortfolio(lastSync: string) {
   return {
     bankroll: 100_000,
@@ -34,9 +31,24 @@ function makePortfolio(lastSync: string) {
   };
 }
 
-/** Returns an ISO timestamp that is `ageMs` milliseconds in the past */
 function ageAgo(ageMs: number): string {
   return new Date(Date.now() - ageMs).toISOString();
+}
+
+function mockDbPortfolio(portfolio: Record<string, unknown> | null) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (/FROM\s+portfolio_snapshots/i.test(sql)) {
+      return {
+        rows: portfolio
+          ? [{ taken_at: portfolio.last_sync, payload: JSON.stringify(portfolio) }]
+          : [],
+      };
+    }
+    if (/FROM\s+journal/i.test(sql)) {
+      return { rows: [] };
+    }
+    return { rows: [] };
+  });
 }
 
 describe("GET /api/portfolio — stale-while-revalidate background sync", () => {
@@ -44,14 +56,12 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
     vi.resetModules();
     vi.clearAllMocks();
     mockRadonFetch.mockResolvedValue({ ok: true });
+    mockDbPortfolio(makePortfolio(ageAgo(10_000)));
   });
 
-  it("triggers FastAPI background sync when portfolio.json mtime is >60 s old", async () => {
-    const staleMtime = new Date(Date.now() - 90_000);
-    mockStat.mockResolvedValue({ mtimeMs: staleMtime.getTime() });
-
+  it("triggers FastAPI background sync when the Turso snapshot is >60 s old", async () => {
     const portfolio = makePortfolio(ageAgo(90_000));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: portfolio });
+    mockDbPortfolio(portfolio);
 
     const { GET } = await import("../app/api/portfolio/route");
     const response = await GET();
@@ -63,23 +73,21 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
     const [path, options] = mockRadonFetch.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe("/portfolio/background-sync");
     expect(options).toMatchObject({ method: "POST" });
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("does NOT trigger FastAPI sync when portfolio.json mtime is <60 s old (fresh)", async () => {
-    const freshMtime = new Date(Date.now() - 10_000);
-    mockStat.mockResolvedValue({ mtimeMs: freshMtime.getTime() });
-    const portfolio = makePortfolio(ageAgo(10_000));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: portfolio });
+  it("does NOT trigger FastAPI sync when the Turso snapshot is <60 s old", async () => {
+    mockDbPortfolio(makePortfolio(ageAgo(10_000)));
 
     const { GET } = await import("../app/api/portfolio/route");
     await GET();
 
     expect(mockRadonFetch).not.toHaveBeenCalled();
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("triggers background sync when stat() throws (file missing counts as stale)", async () => {
-    mockStat.mockRejectedValue(new Error("ENOENT"));
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "not found" });
+  it("triggers background sync when no Turso snapshot exists", async () => {
+    mockDbPortfolio(null);
 
     const { GET } = await import("../app/api/portfolio/route");
     const response = await GET();
@@ -92,12 +100,8 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
   });
 
   it("does not trigger a second sync when one is already in-flight", async () => {
-    mockRadonFetch.mockReturnValue(new Promise(() => {})); // never-resolving in-flight request
-
-    const staleMtime = new Date(Date.now() - 90_000);
-    mockStat.mockResolvedValue({ mtimeMs: staleMtime.getTime() });
-    const portfolio = makePortfolio(ageAgo(90_000));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: portfolio });
+    mockRadonFetch.mockReturnValue(new Promise(() => {}));
+    mockDbPortfolio(makePortfolio(ageAgo(90_000)));
 
     const { GET } = await import("../app/api/portfolio/route");
 

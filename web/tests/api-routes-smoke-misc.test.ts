@@ -84,10 +84,9 @@ vi.mock("child_process", () => ({
   spawn: vi.fn().mockReturnValue(spawnStub),
 }));
 
-// runJournalSync — journal/sync route uses this lib
-const mockRunJournalSync = vi.fn();
-vi.mock("@/lib/journalSync", () => ({
-  runJournalSync: mockRunJournalSync,
+const mockImportLatestReconciliationToJournal = vi.fn();
+vi.mock("@/lib/journalDb", () => ({
+  importLatestReconciliationToJournal: mockImportLatestReconciliationToJournal,
 }));
 
 // Global fetch — used by ticker/info, etc.
@@ -107,7 +106,7 @@ beforeEach(() => {
   mockMkdir.mockResolvedValue(undefined);
   mockWriteFile.mockResolvedValue(undefined);
   mockGetDb.mockReset();
-  mockRunJournalSync.mockReset();
+  mockImportLatestReconciliationToJournal.mockReset();
   mockFetch.mockReset();
 });
 
@@ -317,7 +316,7 @@ describe("GET /api/vcg", () => {
 describe("POST /api/journal/sync", () => {
   it("returns 200 with import counts on success", async () => {
     mockRadonFetch.mockResolvedValueOnce({ ok: true });
-    mockRunJournalSync.mockResolvedValueOnce({ imported: 3, skipped: 0 });
+    mockImportLatestReconciliationToJournal.mockResolvedValueOnce({ imported: 3, skipped: 0 });
     const { POST } = await import("../app/api/journal/sync/route");
     const res = await POST();
     expect(res.status).toBe(200);

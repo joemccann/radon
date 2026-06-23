@@ -257,6 +257,50 @@ function OpenOrdersList({ orders }: { orders: OpenOrder[] }) {
 
 /* ─── Stock Order Form ─── */
 
+/** Held LONG / SHORT shares + per-share cost basis for `ticker`, used to detect
+ *  a stock close-out (sell-against-long / buy-against-short) and surface its
+ *  realised P&L. Prefers the FOCUSED position prop — it's the holding being
+ *  traded against and is always present when closing, so it survives a stale or
+ *  empty portfolio snapshot (e.g. while IB is awaiting 2FA). Falls back to
+ *  aggregating the portfolio's stock legs, accumulating basis for BOTH
+ *  directions (a short's avg_cost is its entry price too). */
+export function deriveStockHoldings(
+  position: PortfolioPosition | null,
+  portfolio: PortfolioData | null,
+  ticker: string,
+): { heldLong: number; heldShort: number; avgCost: number } {
+  if (position && position.structure_type === "Stock") {
+    const leg = position.legs?.[0];
+    const qty = Math.abs(position.contracts ?? 0);
+    const cost = leg && Number.isFinite(leg.avg_cost) ? Math.abs(leg.avg_cost) : 0;
+    const isLong = position.direction === "LONG";
+    return { heldLong: isLong ? qty : 0, heldShort: isLong ? 0 : qty, avgCost: cost };
+  }
+  if (!portfolio) return { heldLong: 0, heldShort: 0, avgCost: 0 };
+  let long = 0;
+  let short = 0;
+  let basisDollars = 0;
+  let totalSharesForBasis = 0;
+  for (const pos of portfolio.positions ?? []) {
+    if (pos.ticker !== ticker) continue;
+    for (const leg of pos.legs ?? []) {
+      if (leg.type !== "Stock") continue;
+      const c = leg.contracts ?? 0;
+      if (c <= 0) continue;
+      const cost = Number.isFinite(leg.avg_cost) ? Math.abs(leg.avg_cost) : 0;
+      if (leg.direction === "LONG") long += c;
+      else if (leg.direction === "SHORT") short += c;
+      basisDollars += c * cost;
+      totalSharesForBasis += c;
+    }
+  }
+  return {
+    heldLong: long,
+    heldShort: short,
+    avgCost: totalSharesForBasis > 0 ? basisDollars / totalSharesForBasis : 0,
+  };
+}
+
 function StockOrderForm({
   ticker,
   position,
@@ -296,34 +340,10 @@ function StockOrderForm({
   // against held shares short-circuits to a close-out (with realised P&L)
   // and a SELL without held shares surfaces UNBOUNDED (short-sell of
   // borrowed shares — no price ceiling).
-  const { heldLong, heldShort, avgCost } = useMemo(() => {
-    if (!portfolio) return { heldLong: 0, heldShort: 0, avgCost: 0 };
-    let long = 0;
-    let short = 0;
-    let basisDollars = 0;
-    let totalSharesForBasis = 0;
-    for (const pos of portfolio.positions ?? []) {
-      if (pos.ticker !== ticker) continue;
-      for (const leg of pos.legs ?? []) {
-        if (leg.type !== "Stock") continue;
-        const c = leg.contracts ?? 0;
-        if (c <= 0) continue;
-        const cost = Number.isFinite(leg.avg_cost) ? leg.avg_cost : 0;
-        if (leg.direction === "LONG") {
-          long += c;
-          basisDollars += c * cost;
-          totalSharesForBasis += c;
-        } else if (leg.direction === "SHORT") {
-          short += c;
-        }
-      }
-    }
-    return {
-      heldLong: long,
-      heldShort: short,
-      avgCost: totalSharesForBasis > 0 ? basisDollars / totalSharesForBasis : 0,
-    };
-  }, [portfolio, ticker]);
+  const { heldLong, heldShort, avgCost } = useMemo(
+    () => deriveStockHoldings(position, portfolio, ticker),
+    [position, portfolio, ticker],
+  );
 
   const riskInput: LinearOrderRiskInput | null = useMemo(() => {
     if (!isValid) return null;

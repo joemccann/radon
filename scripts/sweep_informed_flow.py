@@ -3,12 +3,8 @@
 
 ``fetch_informed_flow.py`` is per-ticker; a scheduler needs a single entrypoint
 that refreshes the whole surveillance set. This iterates every ticker in
-``data/watchlist.json`` and calls ``fetch_informed_flow.run(ticker)`` for each,
+the Turso watchlist and calls ``fetch_informed_flow.run(ticker)`` for each,
 sharing one ``UWClient`` so the sweep reuses connections / rate-limit state.
-
-The watchlist has two historical shapes; both are supported:
-  - top-level ``tickers: [{ticker: ...}]``
-  - ``subcategories: {<name>: {tickers: [{ticker: ...}]}}``
 
 Per-ticker failures are logged and skipped so one bad symbol never aborts the
 sweep. Scoped to the watchlist deliberately: a market-wide informed-flow sweep
@@ -24,45 +20,16 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any
 
 _SCRIPT_DIR = Path(__file__).resolve().parent
-_PROJECT_DIR = _SCRIPT_DIR.parent
 if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
-WATCHLIST = _PROJECT_DIR / "data" / "watchlist.json"
-
-
-def _collect_tickers(watchlist: dict[str, Any]) -> list[str]:
-    """Flatten both watchlist shapes into a de-duplicated, ordered ticker list."""
-    seen: dict[str, None] = {}
-
-    def _add(items: Any) -> None:
-        if not isinstance(items, list):
-            return
-        for item in items:
-            symbol = item.get("ticker") if isinstance(item, dict) else item
-            if isinstance(symbol, str) and symbol.strip():
-                seen.setdefault(symbol.strip().upper(), None)
-
-    _add(watchlist.get("tickers"))
-    subcategories = watchlist.get("subcategories")
-    if isinstance(subcategories, dict):
-        for entry in subcategories.values():
-            if isinstance(entry, dict):
-                _add(entry.get("tickers"))
-    return list(seen)
-
 
 def load_watchlist_tickers() -> list[str]:
-    if not WATCHLIST.exists():
-        return []
-    try:
-        watchlist = json.loads(WATCHLIST.read_text())
-    except (ValueError, OSError):
-        return []
-    return _collect_tickers(watchlist)
+    from db.readers import read_watchlist_tickers
+
+    return read_watchlist_tickers()
 
 
 def run() -> dict[str, Any]:

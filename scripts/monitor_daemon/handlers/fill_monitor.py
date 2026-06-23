@@ -7,15 +7,13 @@ Features:
 - Detects partial fills
 - Detects complete fills (order disappears from open orders)
 - Sends macOS notifications on fills
-- Updates trade_log.json with fill data
+- Upserts detected fills to the Turso journal
 """
 
-import json
 import subprocess
 import logging
 from datetime import datetime
-from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Any, Dict
 
 from .base import BaseHandler
 from clients.ib_client import IBClient, DEFAULT_HOST
@@ -30,8 +28,6 @@ except ImportError:  # pragma: no cover — DB layer optional in unit tests
 
 logger = logging.getLogger(__name__)
 
-# Default paths
-DEFAULT_TRADE_LOG = Path(__file__).parent.parent.parent.parent / "data" / "trade_log.json"
 DEFAULT_IB_PORT = 4001
 # "auto" rotates across SUBPROCESS_ID_RANGE (20-49) on each connect,
 # surviving the common failure mode where a previous cycle's socket
@@ -54,13 +50,11 @@ class FillMonitorHandler(BaseHandler):
 
     def __init__(
         self,
-        trade_log_path: Optional[Path] = None,
         ib_port: int = DEFAULT_IB_PORT,
         client_id: "int | str" = DEFAULT_CLIENT_ID,
         send_notifications: bool = True
     ):
         super().__init__()
-        self.trade_log_path = trade_log_path or DEFAULT_TRADE_LOG
         self.ib_port = ib_port
         self.client_id = client_id
         self.send_notifications = send_notifications

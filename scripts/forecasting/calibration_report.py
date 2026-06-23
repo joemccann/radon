@@ -35,7 +35,7 @@ def build_calibration_report(
 ) -> dict:
     """Run ``run_backtest`` over each ticker and aggregate per-ticker verdicts.
 
-    Tickers default to the watchlist (``data/watchlist.json``). Each ticker is
+    Tickers default to the Turso watchlist. Each ticker is
     independently scored; a too-short series yields an ``insufficient_history``
     row rather than sinking the scan. When ``persist`` is set each ``ok`` row's
     full backtest payload is written via ``upsert_forecast_calibration``
@@ -156,10 +156,9 @@ def _persist_row(ticker: str, metric: str, row: dict, payload: dict) -> None:
 
 
 def _load_watchlist_tickers() -> list[str]:
-    watchlist_path = PROJECT_DIR / "data" / "watchlist.json"
-    with open(watchlist_path) as handle:
-        watchlist = json.load(handle)
-    return [entry["ticker"] for entry in watchlist.get("tickers", [])]
+    from db.readers import read_watchlist_tickers
+
+    return read_watchlist_tickers()
 
 
 def _iso_now() -> str:

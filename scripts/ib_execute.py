@@ -2,7 +2,7 @@
 """
 Interactive Brokers Order Execution with Auto-Monitor and Auto-Log
 
-Places orders, monitors for fills, and automatically logs to trade_log.json.
+Places orders, monitors for fills, and automatically logs to Turso journal.
 
 This is the UNIFIED workflow script. Use this instead of separate
 ib_order.py + ib_fill_monitor.py calls.
@@ -31,9 +31,7 @@ Usage:
 """
 
 import argparse
-import json
 import sys
-import os
 from datetime import datetime
 from decimal import Decimal
 from pathlib import Path
@@ -59,8 +57,6 @@ DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS.get("ib_execute", 25)
 DEFAULT_TIMEOUT = 60  # 1 minute default monitor timeout
 DEFAULT_INTERVAL = 3  # Check every 3 seconds
-
-TRADE_LOG_PATH = PROJECT_ROOT / "data" / "trade_log.json"
 
 
 class OrderExecutor:
@@ -282,24 +278,19 @@ class OrderExecutor:
     def log_trade(self, result: Dict[str, Any], contract, side: str, limit_price: float, 
                   thesis: str = "", notes: str = "") -> bool:
         """
-        Log a filled trade to trade_log.json
+        Log a filled trade to the canonical Turso journal.
         
         Returns True if successfully logged.
         """
         if result.get('status') != 'filled':
             print(f"⚠️ Cannot log - order not filled (status: {result.get('status')})")
             return False
-        
-        # Load existing trade log
-        if TRADE_LOG_PATH.exists():
-            with open(TRADE_LOG_PATH) as f:
-                trade_log = json.load(f)
-        else:
-            trade_log = {"trades": []}
-        
-        # Get next ID
-        existing_ids = [t.get('id', 0) for t in trade_log.get('trades', [])]
-        next_id = max(existing_ids, default=0) + 1
+
+        try:
+            from db.readers import read_next_journal_numeric_id
+            next_id = read_next_journal_numeric_id()
+        except Exception:
+            next_id = 1
         
         # Determine contract type and structure
         if hasattr(contract, 'lastTradeDateOrContractMonth'):
@@ -338,24 +329,15 @@ class OrderExecutor:
             "fills": result.get('fills', []),
         }
         
-        # Add to log
-        trade_log['trades'].append(trade_entry)
-        
-        # Save
-        with open(TRADE_LOG_PATH, 'w') as f:
-            json.dump(trade_log, f, indent=2)
-
-        # Phase 3 dual-write — best-effort.
         try:
-            import sys as _sys
-            _sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
             from db.writer import upsert_journal_entry
             trade_id = f"{trade_entry['date']}T{trade_entry['time']}#{next_id}"
             upsert_journal_entry(trade_id, trade_entry, filled_at=trade_entry.get("date"))
         except Exception as exc:  # noqa: BLE001
-            print(f"  Warning: journal db dual-write failed: {exc}")
+            print(f"  Error: journal db write failed: {exc}")
+            return False
 
-        print(f"\n📝 Logged to trade_log.json (ID: {next_id})")
+        print(f"\n📝 Logged to Turso journal (ID: {next_id})")
         return True
 
 
@@ -388,7 +370,7 @@ def main():
     # Behavior
     parser.add_argument("--dry-run", action="store_true", help="Preview without submitting")
     parser.add_argument("--yes", "-y", action="store_true", help="Skip confirmation prompt")
-    parser.add_argument("--no-log", action="store_true", help="Don't log to trade_log.json")
+    parser.add_argument("--no-log", action="store_true", help="Don't log to Turso journal")
     
     # Logging metadata
     parser.add_argument("--thesis", default="", help="Trade thesis for logging")

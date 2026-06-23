@@ -144,6 +144,30 @@ const SHORT_MU_PUT: PortfolioPosition = {
   ],
 };
 
+// SHORT 1000 MU shares @ $1,134.97/sh. Covering 500 at $1,030 is a buy-to-close
+// that must surface realised P&L (+$52,485), not an open "Total". leg.type Stock
+// + strike null → OrderTab's linear/stock path.
+const SHORT_MU_STOCK: PortfolioPosition = {
+  id: 5,
+  ticker: "MU",
+  structure: "Stock (-1000.0 shares)",
+  structure_type: "Stock",
+  risk_profile: "equity",
+  expiry: "N/A",
+  contracts: 1000,
+  direction: "SHORT",
+  entry_cost: -1134970,
+  max_risk: null,
+  market_value: -1060600,
+  kelly_optimal: null,
+  target: null,
+  stop: null,
+  entry_date: "2026-06-01",
+  legs: [
+    { direction: "SHORT", contracts: 1000, type: "Stock", strike: null, entry_cost: -1134970, avg_cost: 1134.97, market_price: 1060.6, market_value: -1060600, market_price_is_calculated: false },
+  ],
+};
+
 const PORTFOLIO: PortfolioData = {
   bankroll: 250_000,
   peak_value: 250_000,
@@ -349,5 +373,43 @@ describe("OrderTab — BUY-to-close on SHORT single-leg surfaces realized P&L", 
     expect(metrics["Est. Realized P&L"]).toMatch(/\$47,000/);
     // Guardrail: the open-fresh bug surfaced $962,000; ensure we're not there.
     expect(metrics["Est. Realized P&L"]).not.toMatch(/962,000/);
+  });
+});
+
+describe("OrderTab — buy-to-close-short STOCK surfaces realized P&L", () => {
+  afterEach(cleanup);
+
+  it("covering 500 of a 1000-share short at $1,030 shows Est. Realized P&L, not an open Total", () => {
+    const { container, getByText } = render(
+      React.createElement(OrderTab, {
+        ticker: "MU",
+        position: SHORT_MU_STOCK,
+        portfolio: PORTFOLIO,
+        prices: { MU: makePrice("MU") },
+        openOrders: [],
+      }),
+    );
+
+    // Form defaults to SELL on a held position; covering a short is a BUY.
+    const actionBtns = Array.from(container.querySelectorAll(".order-action-btn"));
+    const buyBtn = actionBtns.find((b) => /buy/i.test(b.textContent ?? ""));
+    expect(buyBtn).toBeTruthy();
+    fireEvent.click(buyBtn!);
+
+    const qtyInput = container.querySelector<HTMLInputElement>(".order-input");
+    fireEvent.change(qtyInput!, { target: { value: "500" } });
+    const limitInput = container.querySelector<HTMLInputElement>(".modify-price-input");
+    fireEvent.change(limitInput!, { target: { value: "1030" } });
+
+    fireEvent.click(getByText("Place Order"));
+
+    const metrics = readSummaryMetrics(container);
+    // basis 500 × $1,134.97 = $567,485; cover 500 × $1,030 = $515,000 → +$52,485.
+    expect(metrics).toHaveProperty("Est. Realized P&L");
+    expect(metrics["Est. Realized P&L"]).toMatch(/\$52,485/);
+    // The bug: showed an open "Total" with no P&L. These must be gone.
+    expect(metrics).not.toHaveProperty("Total");
+    expect(metrics).not.toHaveProperty("Max Gain");
+    expect(metrics).not.toHaveProperty("Max Loss");
   });
 });

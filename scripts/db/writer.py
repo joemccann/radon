@@ -429,7 +429,7 @@ def upsert_watchlist_ticker(
     source: Optional[str] = None,
     payload: Optional[dict[str, Any]] = None,
 ) -> None:
-    """Phase 4 — replaces data/watchlist.json (one row per ticker)."""
+    """Phase 4 — writes one Turso watchlist row per ticker."""
     db = get_db()
     db.execute(
         """

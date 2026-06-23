@@ -1,9 +1,11 @@
 """Tests for fetch_x_watchlist.py — ticker extraction and sentiment analysis."""
 import pytest
+from unittest.mock import patch
 
 from fetch_x_watchlist import (
     extract_tickers,
     analyze_sentiment,
+    update_watchlist,
     COMMON_TICKERS,
     EXCLUDE_WORDS,
 )
@@ -117,3 +119,44 @@ class TestAnalyzeSentiment:
         )
         assert sentiment == "BEARISH"
         assert confidence in ("MEDIUM", "HIGH")
+
+
+class TestUpdateWatchlist:
+    def test_update_watchlist_upserts_turso_rows(self):
+        tweets = [
+            {"text": "Loading $NVDA calls here", "tickers": ["NVDA"]},
+            {"text": "Watching MSFT for support", "tickers": ["MSFT"]},
+        ]
+        with patch("db.readers.read_watchlist_items", return_value=[
+            {"ticker": "MSFT", "sector": "Technology", "source": "@old"},
+        ]):
+            with patch("db.writer.upsert_watchlist_ticker") as writer:
+                new_tickers, updated_tickers = update_watchlist("trader", tweets)
+
+        assert new_tickers == ["NVDA"]
+        assert updated_tickers == ["MSFT"]
+        written = {call.args[0]: call.kwargs for call in writer.call_args_list}
+        assert set(written) == {"NVDA", "MSFT"}
+        assert written["NVDA"]["source"] == "@trader"
+        assert written["MSFT"]["payload"]["sentiment_history"]
+
+    def test_xai_update_watchlist_upserts_turso_rows(self):
+        from fetch_x_xai import update_watchlist as update_xai_watchlist
+
+        tweets = [
+            {
+                "text": "Bullish $AAPL setup",
+                "tickers": ["AAPL"],
+                "sentiment_override": "BULLISH",
+            }
+        ]
+        with patch("db.readers.read_watchlist_items", return_value=[]):
+            with patch("db.writer.upsert_watchlist_ticker") as writer:
+                new_tickers, updated_tickers = update_xai_watchlist("xaiuser", tweets)
+
+        assert new_tickers == ["AAPL"]
+        assert updated_tickers == []
+        writer.assert_called_once()
+        assert writer.call_args.args == ("AAPL",)
+        assert writer.call_args.kwargs["source"] == "@xaiuser"
+        assert writer.call_args.kwargs["payload"]["sentiment"] == "BULLISH"

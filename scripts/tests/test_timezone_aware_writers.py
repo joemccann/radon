@@ -18,10 +18,8 @@ Covers two HIGH-severity correctness bugs:
    helper used here picks the ET calendar day explicitly.
 """
 
-import json
 import re
 import sys
-import tempfile
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -40,11 +38,9 @@ ISO_OFFSET_RE = re.compile(r"([+-]\d{2}:\d{2}|Z)$")
 class TestIbSyncLastSyncTimezone(unittest.TestCase):
     """`last_sync` must include a timezone offset so JS parses it correctly."""
 
-    def _build_portfolio(self, tmpdir: Path) -> dict:
-        portfolio_path = tmpdir / "portfolio.json"
-        portfolio_path.write_text(json.dumps({"positions": []}))
-        (tmpdir / "trade_log.json").write_text(json.dumps({"trades": []}))
-        with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path):
+    def _build_portfolio(self) -> dict:
+        with patch.object(ib_sync, "read_journal_entry_date_maps", return_value=({}, {})), \
+             patch.object(ib_sync, "read_latest_portfolio_snapshot", return_value=None):
             return ib_sync.convert_to_portfolio_format(
                 account={"NetLiquidation": 100000},
                 collapsed_positions=[],
@@ -53,8 +49,7 @@ class TestIbSyncLastSyncTimezone(unittest.TestCase):
             )
 
     def test_last_sync_carries_timezone_offset(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            result = self._build_portfolio(Path(tmp))
+        result = self._build_portfolio()
         last_sync = result["last_sync"]
         self.assertIsInstance(last_sync, str)
         self.assertRegex(
@@ -65,8 +60,7 @@ class TestIbSyncLastSyncTimezone(unittest.TestCase):
 
     def test_last_sync_is_utc_aware(self):
         """Producer writes UTC; the offset proves Hetzner's wall clock is preserved."""
-        with tempfile.TemporaryDirectory() as tmp:
-            result = self._build_portfolio(Path(tmp))
+        result = self._build_portfolio()
         parsed = datetime.fromisoformat(result["last_sync"])
         self.assertIsNotNone(parsed.tzinfo)
         # UTC offset == zero — equivalent forms `+00:00` from datetime.now(utc).
@@ -93,35 +87,30 @@ class TestIbSyncEntryDateInET(unittest.TestCase):
             def __getattr__(self, name):  # delegate to real datetime
                 return getattr(datetime, name)
 
-        with tempfile.TemporaryDirectory() as tmp:
-            tmpdir = Path(tmp)
-            portfolio_path = tmpdir / "portfolio.json"
-            portfolio_path.write_text(json.dumps({"positions": []}))
-            (tmpdir / "trade_log.json").write_text(json.dumps({"trades": []}))
+        collapsed = [{
+            "id": 1, "ticker": "FOO", "structure": "Long Call $50",
+            "structure_type": "Long Call", "risk_profile": "defined",
+            "expiry": "2026-12-19", "contracts": 1, "direction": "LONG",
+            "entry_cost": 100.0, "max_risk": 100.0, "market_value": 110.0,
+            "ib_daily_pnl": None,
+            "legs": [{
+                "direction": "LONG", "contracts": 1, "type": "Call",
+                "strike": 50.0, "entry_cost": 100.0, "avg_cost": 100.0,
+                "market_price": 1.10, "market_value": 110.0,
+            }],
+        }]
 
-            collapsed = [{
-                "id": 1, "ticker": "FOO", "structure": "Long Call $50",
-                "structure_type": "Long Call", "risk_profile": "defined",
-                "expiry": "2026-12-19", "contracts": 1, "direction": "LONG",
-                "entry_cost": 100.0, "max_risk": 100.0, "market_value": 110.0,
-                "ib_daily_pnl": None,
-                "legs": [{
-                    "direction": "LONG", "contracts": 1, "type": "Call",
-                    "strike": 50.0, "entry_cost": 100.0, "avg_cost": 100.0,
-                    "market_price": 1.10, "market_value": 110.0,
-                }],
-            }]
+        with patch.object(ib_sync, "read_journal_entry_date_maps", return_value=({}, {})), \
+             patch.object(ib_sync, "read_latest_portfolio_snapshot", return_value=None), \
+             patch.object(ib_sync, "datetime", _Now()):
+            result = ib_sync.convert_to_portfolio_format(
+                account={"NetLiquidation": 100000},
+                collapsed_positions=collapsed,
+                pnl_data=None,
+                fill_dates=None,
+            )
 
-            with patch.object(ib_sync, "PORTFOLIO_PATH", portfolio_path), \
-                 patch.object(ib_sync, "datetime", _Now()):
-                result = ib_sync.convert_to_portfolio_format(
-                    account={"NetLiquidation": 100000},
-                    collapsed_positions=collapsed,
-                    pnl_data=None,
-                    fill_dates=None,
-                )
-
-            self.assertEqual(result["positions"][0]["entry_date"], expected_et_date)
+        self.assertEqual(result["positions"][0]["entry_date"], expected_et_date)
 
     def test_entry_date_uses_et_when_utc_host_after_midnight(self):
         # 2026-05-09T01:58 UTC == 2026-05-08T21:58 ET — still the 8th in ET.

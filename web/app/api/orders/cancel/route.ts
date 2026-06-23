@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
-import { readDataFile } from "@tools/data-reader";
-import { OrdersData } from "@tools/schemas/ib-orders";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
+import {
+  EMPTY_ORDERS,
+  readOrdersSnapshotFromDb,
+} from "@/lib/orders/readOrdersFromDb";
 
 export const runtime = "nodejs";
 
@@ -9,6 +11,14 @@ type CancelBody = {
   orderId?: number;
   permId?: number;
 };
+
+async function readOrdersSnapshotBestEffort() {
+  try {
+    return await readOrdersSnapshotFromDb();
+  } catch {
+    return EMPTY_ORDERS;
+  }
+}
 
 export async function POST(request: Request): Promise<Response> {
   try {
@@ -36,12 +46,12 @@ export async function POST(request: Request): Promise<Response> {
     } catch {
       // Non-fatal
     }
-    const ordersResult = await readDataFile("data/orders.json", OrdersData);
+    const orders = await readOrdersSnapshotBestEffort();
 
     return NextResponse.json({
       status: "ok",
       message: result.message,
-      orders: ordersResult.ok ? ordersResult.data : null,
+      orders,
     });
   } catch (error) {
     if (error instanceof RadonApiError) {

@@ -63,8 +63,6 @@ _MAX_WORKERS = 20
 
 
 ROOT = Path(__file__).resolve().parent.parent
-PORTFOLIO_PATH = ROOT / "data" / "portfolio.json"
-BLOTTER_CACHE_PATH = ROOT / "data" / "blotter.json"
 TRADING_DAYS = 252
 OPTION_DESC_RE = re.compile(
     r"^(?P<symbol>[A-Z.]+)\s+(?P<day>\d{1,2})(?P<mon>[A-Z]{3})(?P<year>\d{2})\s+(?P<strike>[\d.]+)\s+(?P<right>[CP])$"
@@ -175,12 +173,10 @@ def select_option_mark(row: Mapping[str, Any]) -> Optional[float]:
     return None
 
 
-def load_portfolio_snapshot(path: Path = PORTFOLIO_PATH) -> dict:
-    try:
-        from utils.atomic_io import verified_load
-        return verified_load(str(path))
-    except (ValueError, ImportError):
-        return json.loads(path.read_text())
+def load_portfolio_snapshot() -> dict:
+    from db.readers import read_latest_portfolio_snapshot
+
+    return read_latest_portfolio_snapshot() or {}
 
 
 def parse_flex_trade_rows(df: pd.DataFrame) -> List[TradeFill]:
@@ -245,40 +241,77 @@ def _parse_blotter_contract_desc(desc: str) -> tuple[str, Optional[str], Optiona
     )
 
 
-def load_blotter_fallback(path: Path = BLOTTER_CACHE_PATH) -> List[TradeFill]:
-    if not path.exists():
-        return []
-    raw = json.loads(path.read_text())
-    fills: List[TradeFill] = []
-    for trade in raw.get("open_trades", []) + raw.get("closed_trades", []):
-        desc = str(trade.get("contract_desc") or trade.get("symbol") or "")
-        symbol, expiry, right, strike = _parse_blotter_contract_desc(desc)
-        contract_key = build_option_id(symbol, expiry, right, strike) if expiry and right and strike is not None else f"STK:{symbol}"
-        security_type = "OPT" if expiry and right else "STK"
-        multiplier = 100.0 if security_type == "OPT" else 1.0
+def _executed_order_contract(payload: Mapping[str, Any]) -> tuple[str, str, Optional[str], Optional[str], Optional[float]]:
+    contract = payload.get("contract") if isinstance(payload.get("contract"), Mapping) else {}
+    symbol = str(contract.get("symbol") or payload.get("symbol") or "").split(" ")[0].upper()
+    sec_type = str(contract.get("secType") or payload.get("secType") or "STK").upper()
+    expiry = contract.get("lastTradeDateOrContractMonth") or contract.get("expiry") or payload.get("expiry")
+    right = contract.get("right") or payload.get("right")
+    strike = contract.get("strike") if contract.get("strike") is not None else payload.get("strike")
+    strike_value = safe_float(strike, default=float("nan"))
+    return (
+        symbol,
+        sec_type,
+        normalize_expiry(str(expiry)) if expiry else None,
+        str(right).upper()[:1] if right else None,
+        strike_value if math.isfinite(strike_value) else None,
+    )
 
-        for execution in trade.get("executions", []):
-            side = str(execution.get("side") or "").upper()
-            qty = abs(safe_float(execution.get("quantity")))
-            signed_qty = qty if side == "BUY" else -qty
-            fills.append(
-                TradeFill(
-                    trade_date=normalize_trade_date(execution.get("time") or ""),
-                    contract_key=contract_key,
-                    quantity=signed_qty,
-                    net_cash=safe_float(execution.get("net_cash_flow")),
-                    multiplier=multiplier,
-                    security_type=security_type,
-                    symbol=symbol,
-                    option_id=contract_key if security_type == "OPT" else None,
-                    expiry=expiry,
-                )
-            )
+
+def _trade_fill_from_executed_order(row: Mapping[str, Any]) -> Optional[TradeFill]:
+    payload = row.get("payload")
+    if not isinstance(payload, Mapping):
+        return None
+    symbol, sec_type, expiry, right, strike = _executed_order_contract(payload)
+    if not symbol:
+        return None
+    fill_time = payload.get("time") or row.get("fill_time")
+    trade_date = normalize_trade_date(fill_time or "")
+    if not trade_date:
+        return None
+    qty = abs(safe_float(payload.get("quantity") or payload.get("shares")))
+    if qty == 0:
+        return None
+    side = str(payload.get("side") or payload.get("action") or "").upper()
+    signed_qty = qty if side in {"BOT", "BUY"} else -qty
+    multiplier = 100.0 if sec_type == "OPT" else 1.0
+    price = safe_float(payload.get("avgPrice") or payload.get("price"))
+    commission = safe_float(payload.get("commission"))
+    net_cash = (-signed_qty * price * multiplier) - commission
+    if sec_type == "OPT" and expiry and right and strike is not None:
+        contract_key = build_option_id(symbol, expiry, right, strike)
+        option_id = contract_key
+    else:
+        contract_key = f"STK:{symbol}"
+        option_id = None
+        expiry = None
+        sec_type = "STK"
+    return TradeFill(
+        trade_date=trade_date,
+        contract_key=contract_key,
+        quantity=signed_qty,
+        net_cash=net_cash,
+        multiplier=multiplier,
+        security_type=sec_type,
+        symbol=symbol,
+        option_id=option_id,
+        expiry=expiry,
+    )
+
+
+def load_blotter_fallback() -> List[TradeFill]:
+    from db.readers import read_executed_orders
+
+    fills: List[TradeFill] = []
+    for row in read_executed_orders():
+        fill = _trade_fill_from_executed_order(row)
+        if fill is not None:
+            fills.append(fill)
     fills.sort(key=lambda item: (item.trade_date, item.contract_key, item.quantity))
     return fills
 
 
-def extract_fill_marks(path: Path = BLOTTER_CACHE_PATH) -> Dict[str, Dict[str, float]]:
+def extract_fill_marks() -> Dict[str, Dict[str, float]]:
     """Extract known price marks from trade execution prices.
 
     When UW/IB historical data is unavailable for an option contract, the
@@ -287,25 +320,19 @@ def extract_fill_marks(path: Path = BLOTTER_CACHE_PATH) -> Dict[str, Dict[str, f
     giving a reasonable (though approximate) equity curve for contracts that
     would otherwise be valued at zero.
     """
-    if not path.exists():
-        return {}
-    raw = json.loads(path.read_text())
-    marks: Dict[str, Dict[str, float]] = {}
-    for trade in raw.get("open_trades", []) + raw.get("closed_trades", []):
-        desc = str(trade.get("contract_desc") or trade.get("symbol") or "")
-        symbol, expiry, right, strike = _parse_blotter_contract_desc(desc)
-        if expiry and right and strike is not None:
-            contract_key = build_option_id(symbol, expiry, right, strike)
-        else:
-            contract_key = f"STK:{symbol}"
+    from db.readers import read_executed_orders
 
-        for execution in trade.get("executions", []):
-            price = safe_float(execution.get("price"), default=0.0)
-            dt = normalize_trade_date(execution.get("time") or "")
-            if price > 0 and dt:
-                if contract_key not in marks:
-                    marks[contract_key] = {}
-                marks[contract_key][dt] = price
+    marks: Dict[str, Dict[str, float]] = {}
+    for row in read_executed_orders():
+        payload = row.get("payload")
+        if not isinstance(payload, Mapping):
+            continue
+        fill = _trade_fill_from_executed_order(row)
+        if fill is None:
+            continue
+        price = safe_float(payload.get("avgPrice") or payload.get("price"), default=0.0)
+        if price > 0:
+            marks.setdefault(fill.contract_key, {})[fill.trade_date] = price
     return marks
 
 
@@ -429,14 +456,13 @@ def _extract_acats_transfers(
     # Build fill count per day (real trades with nonzero cash)
     fill_counts: Dict[str, int] = {}
     try:
-        raw = json.loads(BLOTTER_CACHE_PATH.read_text())
-        for trade in raw.get("open_trades", []) + raw.get("closed_trades", []):
-            for execution in trade.get("executions", []):
-                dt = str(execution.get("time", ""))[:10]
-                ncf = abs(safe_float(execution.get("net_cash_flow"), default=0.0))
-                if dt and ncf > 1:
-                    fill_counts[dt] = fill_counts.get(dt, 0) + 1
-    except (OSError, json.JSONDecodeError):
+        from db.readers import read_executed_orders
+
+        for row in read_executed_orders():
+            fill = _trade_fill_from_executed_order(row)
+            if fill is not None and abs(fill.net_cash) > 1:
+                fill_counts[fill.trade_date] = fill_counts.get(fill.trade_date, 0) + 1
+    except Exception:
         pass
 
     # Detect: large positive NAV jump with no real fills and no cash deposits
@@ -1335,7 +1361,7 @@ def build_payload(benchmark_symbol: str = "SPY") -> dict:
     if ib_client is not None:
         ib_client.disconnect()
 
-    # 4b. Inject current marks from portfolio.json for the final date.
+    # 4b. Inject current marks from the latest portfolio snapshot for the final date.
     # This anchors final_holdings_value to IB's live marks rather than stale
     # execution prices or zeros.
     final_date = end_date

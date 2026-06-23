@@ -3,18 +3,40 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 /**
  * sync-fallback.test.ts
  *
- * When sync fails, routes must fall back to cached data and return 200.
- * 502 should only happen when both sync and cache are unavailable.
+ * When sync fails, portfolio and orders fall back to their latest Turso
+ * snapshots. 502 should only happen when refresh fails and no synced DB
+ * snapshot exists.
  */
-
-const mockStat = vi.fn();
-vi.mock("fs/promises", () => ({ stat: mockStat }));
 
 const mockReadDataFile = vi.fn();
 vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
 
 const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
+
+const mockReadOrdersSnapshotFromDb = vi.fn();
+vi.mock("@/lib/orders/readOrdersFromDb", () => ({
+  readOrdersSnapshotFromDb: mockReadOrdersSnapshotFromDb,
+}));
+
+const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+
+function mockPortfolioDb(portfolio: Record<string, unknown> | null) {
+  mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
+    if (/FROM\s+portfolio_snapshots/i.test(sql)) {
+      return {
+        rows: portfolio
+          ? [{ taken_at: portfolio.last_sync, payload: JSON.stringify(portfolio) }]
+          : [],
+      };
+    }
+    if (/FROM\s+journal/i.test(sql)) {
+      return { rows: [] };
+    }
+    return { rows: [] };
+  });
+}
 
 function makePortfolio(lastSync: string) {
   return {
@@ -46,13 +68,14 @@ describe("POST /api/portfolio — sync failure fallback", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
+    mockExecute.mockReset();
+    mockExecute.mockResolvedValue({ rows: [] });
   });
 
-  it("returns cached portfolio data with 200 when ibSync fails", async () => {
-    const cached = makePortfolio("2026-03-13T14:00:00Z");
+  it("returns latest Turso portfolio data with 200 when ibSync fails", async () => {
+    const snapshot = makePortfolio("2026-03-13T14:00:00Z");
     mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    mockPortfolioDb(snapshot);
 
     const { POST } = await import("../app/api/portfolio/route");
     const response = await POST();
@@ -62,12 +85,13 @@ describe("POST /api/portfolio — sync failure fallback", () => {
     expect(body.last_sync).toBe("2026-03-13T14:00:00Z");
     expect(body.positions).toEqual([]);
     expect(mockRadonFetch).toHaveBeenCalledWith("/portfolio/sync", expect.objectContaining({ method: "POST" }));
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("sets X-Sync-Warning header when falling back to cached data", async () => {
-    const cached = makePortfolio("2026-03-13T14:00:00Z");
+  it("sets X-Sync-Warning header when falling back to Turso data", async () => {
+    const snapshot = makePortfolio("2026-03-13T14:00:00Z");
     mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    mockPortfolioDb(snapshot);
 
     const { POST } = await import("../app/api/portfolio/route");
     const response = await POST();
@@ -75,9 +99,9 @@ describe("POST /api/portfolio — sync failure fallback", () => {
     expect(response.headers.get("X-Sync-Warning")).toBeTruthy();
   });
 
-  it("returns 502 only when sync fails AND no cached data exists", async () => {
+  it("returns 502 only when sync fails AND no synced Turso snapshot exists", async () => {
     mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "File not found" });
+    mockPortfolioDb(null);
 
     const { POST } = await import("../app/api/portfolio/route");
     const response = await POST();
@@ -85,10 +109,10 @@ describe("POST /api/portfolio — sync failure fallback", () => {
     expect(response.status).toBe(502);
   });
 
-  it("returns cached portfolio data with 200 when sync succeeds", async () => {
+  it("returns synced portfolio data with 200 when sync succeeds", async () => {
     const synced = makePortfolio("2026-03-13T15:00:00Z");
     mockRadonFetch.mockResolvedValue(synced);
-    mockReadDataFile.mockResolvedValue({ ok: true, data: synced });
+    mockExecute.mockResolvedValue({ rows: [] });
 
     const { POST } = await import("../app/api/portfolio/route");
     const response = await POST();
@@ -104,13 +128,13 @@ describe("POST /api/orders — sync failure fallback", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
-    mockStat.mockResolvedValue({ mtimeMs: Date.now() });
+    mockReadOrdersSnapshotFromDb.mockReset();
   });
 
-  it("returns cached orders data with 200 when ibOrders sync fails", async () => {
-    const cached = makeOrders("2026-03-13T14:00:00Z");
+  it("returns latest Turso orders data with 200 when ibOrders sync fails", async () => {
+    const snapshot = makeOrders("2026-03-13T14:00:00Z");
     mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(snapshot);
 
     const { POST } = await import("../app/api/orders/route");
     const response = await POST();
@@ -120,12 +144,13 @@ describe("POST /api/orders — sync failure fallback", () => {
     expect(body.last_sync).toBe("2026-03-13T14:00:00Z");
     expect(body.open_orders).toEqual([]);
     expect(mockRadonFetch).toHaveBeenCalledWith("/orders/refresh", expect.objectContaining({ method: "POST" }));
+    expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("sets X-Sync-Warning header when falling back to cached orders", async () => {
-    const cached = makeOrders("2026-03-13T14:00:00Z");
+  it("sets X-Sync-Warning header when falling back to Turso orders", async () => {
+    const snapshot = makeOrders("2026-03-13T14:00:00Z");
     mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(snapshot);
 
     const { POST } = await import("../app/api/orders/route");
     const response = await POST();
@@ -133,9 +158,9 @@ describe("POST /api/orders — sync failure fallback", () => {
     expect(response.headers.get("X-Sync-Warning")).toBeTruthy();
   });
 
-  it("returns 502 only when sync fails AND no cached orders exist", async () => {
+  it("returns 502 only when sync fails AND no synced Turso orders snapshot exists", async () => {
     mockRadonFetch.mockRejectedValue(new Error("Connect call failed"));
-    mockReadDataFile.mockResolvedValue({ ok: false, error: "File not found" });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(makeOrders(""));
 
     const { POST } = await import("../app/api/orders/route");
     const response = await POST();
@@ -144,9 +169,9 @@ describe("POST /api/orders — sync failure fallback", () => {
   });
 
   it("returns orders data with 200 when sync succeeds", async () => {
-    const cached = makeOrders("2026-03-13T15:00:00Z");
+    const snapshot = makeOrders("2026-03-13T15:00:00Z");
     mockRadonFetch.mockResolvedValue({ ok: true });
-    mockReadDataFile.mockResolvedValue({ ok: true, data: cached });
+    mockReadOrdersSnapshotFromDb.mockResolvedValue(snapshot);
 
     const { POST } = await import("../app/api/orders/route");
     const response = await POST();

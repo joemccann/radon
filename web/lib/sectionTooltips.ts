@@ -62,7 +62,7 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
   /* ── Journal ─────────────────────────────────────────── */
 
   "Trade Journal":
-    "Append-only execution log from trade_log.json. Each entry records structure, " +
+    "Append-only execution log from the Turso journal. Each entry records structure, " +
     "Kelly sizing, gate pass/fail status, and edge analysis. Return on Risk = " +
     "Realized P&L / Capital at Risk (debit paid or spread width minus credit). " +
     "Use this to audit decision quality and identify pattern drift.",
@@ -83,7 +83,7 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
   "Historical Trades (30 Days)":
     "30-day trade blotter from IB Flex Query. Groups executions by position — " +
     "shows cost basis, proceeds, realized P&L, and commission for each completed " +
-    "or open trade. Use this for reconciliation against trade_log.json and tax reporting.",
+    "or open trade. Use this for reconciliation against the Turso journal and tax reporting.",
 
   /* ── Regime / CRI ────────────────────────────────────── */
 

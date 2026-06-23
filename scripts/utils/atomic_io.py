@@ -1,7 +1,7 @@
 """Atomic JSON I/O with SHA-256 checksum verification.
 
-Provides crash-safe writes for critical data files (portfolio.json, etc.)
-via temp file + os.replace() and embedded checksum integrity verification.
+Provides crash-safe writes for JSON payload files via temp file + os.replace()
+and embedded checksum integrity verification.
 """
 
 import hashlib
