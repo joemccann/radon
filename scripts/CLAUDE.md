@@ -54,7 +54,7 @@ Quick reference; full methodology in `docs/evaluation.md`.
 4. **Edge decision — PASS/FAIL** (FAIL = stop)
 5. Structure — convex (R:R < 2:1 = stop)
 6. Kelly sizing — enforce 2.5% cap
-7. Log → Turso `journal` (executed) or `docs/status.md` (NO_TRADE)
+7. Log → `trade_log.json` (executed) or `docs/status.md` (NO_TRADE)
 
 Reports at milestone 5 are mandatory — see `docs/reports.md` for templates.
 
@@ -100,8 +100,6 @@ FastAPI timeouts now match the script deadlines: `/orders/place` is 25s subproce
 `scripts/clients/journal_basis.py:compute_open_basis_for_ticker(db, ticker)` reads raw journal rows and returns per-contract open basis. Used by `ib_sync.py:fetch_positions` to override IB's drifting VWAP with the original opening basis. Persisted-row optimization since 4c85847 (`open_basis` written by `journal_rehydrate.py` on every row) — the reader prefers the persisted value and falls back to recomputation only for older rows + rows written by the real-time daemon.
 
 Full convention (per-contract vs per-share `avg_cost`) lives in `web/CLAUDE.md` since the display layer is where the bug surfaces.
-
-**Basis precedence (per leg), MOST → LEAST trusted:** (1) journal `open_basis` override (`fetch_positions`, OPT only — the lot-matcher keys by strike/right/expiry and drops STK). (2) **Same-side basis carry-forward** (`convert_to_portfolio_format` via `_basis_carry_key`): a partial close must NOT change the remaining per-unit basis, but IB drifts `pos.avgCost` on a reduce (folds the closed units' realised P&L into the residual VWAP) and assignment-originated stock (e.g. a short from an assigned call) has no journal opener. So when a single-leg position is NOT larger than the prior snapshot on the SAME side AND the prior per-unit basis still differs from IB's avgCost, carry the prior basis forward. Size-not-increased + basis-differs makes it **sticky** — it corrects the reduce and holds the pin across later unchanged syncs, while never freezing an add/grow, a direction flip, or a position IB and the snapshot already agree on. Uses a size-independent key (stock `structure` embeds the share count). (3) IB `pos.avgCost` (last resort). Invariant: a partial close (same direction, |qty| decreased) MUST NOT change remaining per-unit basis.
 
 ---
 
