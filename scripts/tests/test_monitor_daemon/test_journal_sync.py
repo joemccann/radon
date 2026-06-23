@@ -265,6 +265,174 @@ class TestJournalSyncHandlerExecute:
         assert result["skipped"] == 1
 
 
+class TestTradeLogRecovery:
+    """Recover a corrupted disk mirror without losing DB or disk-only rows."""
+
+    def _write_bad_checksum(self, path: Path, rows: list[dict]) -> None:
+        path.write_text(
+            json.dumps({"trades": rows, "_checksum": "definitely-wrong"}, indent=2),
+            encoding="utf-8",
+        )
+
+    def _fake_db(self, journal_rows: list[tuple[str, dict, str]]):
+        recovery_rows = [
+            (trade_id, json.dumps(payload), filled_at, filled_at)
+            for trade_id, payload, filled_at in journal_rows
+        ]
+        coverage_rows = [(trade_id,) for trade_id, _payload, _filled_at in journal_rows]
+
+        def execute(sql, *args, **kwargs):
+            result = MagicMock(spec=["fetchall"])
+            statement = " ".join(str(sql).split())
+            if "SELECT trade_id, payload, filled_at, written_at FROM journal" in statement:
+                result.fetchall.return_value = recovery_rows
+            elif "SELECT trade_id FROM journal" in statement:
+                result.fetchall.return_value = coverage_rows
+            else:
+                result.fetchall.return_value = []
+            return result
+
+        db = MagicMock()
+        db.execute.side_effect = execute
+        return db
+
+    def _run_with_fills(self, trade_log_path: Path, db, fills: list | None = None):
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills or []
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            return handler.execute()
+
+    def test_checksum_mismatch_rebuilds_from_journal_and_repairs_mirror(self, trade_log_path):
+        self._write_bad_checksum(trade_log_path, [])
+        journal_payload = {
+            "date": "2026-06-23",
+            "ticker": "AAPL",
+            "action": "BUY",
+            "shares": 10,
+        }
+        db = self._fake_db([
+            ("RECOVER-1", journal_payload, "2026-06-23T15:10:00Z"),
+        ])
+
+        result = self._run_with_fills(trade_log_path, db)
+
+        assert "error" not in result
+        assert result["recovered_trade_log_from_journal"] == 1
+        assert result["salvaged_trade_log_rows"] == 0
+        assert list(trade_log_path.parent.glob("trade_log.json.corrupt.*"))
+
+        loaded = verified_load(str(trade_log_path))
+        assert loaded["trades"] == [
+            {
+                "id": 1,
+                "date": "2026-06-23",
+                "ticker": "AAPL",
+                "action": "BUY",
+                "shares": 10,
+                "ib_exec_id": "RECOVER-1",
+                "filled_at": "2026-06-23T15:10:00Z",
+            }
+        ]
+
+    def test_checksum_mismatch_salvages_disk_only_rows_for_db_reconcile(self, trade_log_path):
+        recent_date = datetime.now().strftime("%Y-%m-%d")
+        disk_only_row = {
+            "id": 99,
+            "date": recent_date,
+            "ticker": "MU",
+            "action": "SELL_TO_OPEN",
+            "ib_exec_id": "DISK-ONLY-1",
+            "contracts": 1,
+        }
+        self._write_bad_checksum(trade_log_path, [disk_only_row])
+
+        db = self._fake_db([
+            (
+                "JOURNAL-1",
+                {
+                    "date": recent_date,
+                    "ticker": "AAPL",
+                    "action": "BUY",
+                    "shares": 10,
+                },
+                f"{recent_date}T15:10:00Z",
+            ),
+        ])
+        upserted: list[str] = []
+
+        def fake_upsert(trade_id, entry, filled_at):
+            upserted.append(trade_id)
+
+        with patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            result = self._run_with_fills(trade_log_path, db)
+
+        assert "error" not in result
+        assert result["recovered_trade_log_from_journal"] == 1
+        assert result["salvaged_trade_log_rows"] == 1
+        assert result["reconciled"] == 1
+        assert upserted == ["DISK-ONLY-1"]
+
+        loaded = verified_load(str(trade_log_path))
+        exec_ids = {row.get("ib_exec_id") for row in loaded["trades"]}
+        assert exec_ids == {"JOURNAL-1", "DISK-ONLY-1"}
+
+    def test_checksum_mismatch_without_journal_rows_remains_error(self, trade_log_path):
+        self._write_bad_checksum(
+            trade_log_path,
+            [
+                {
+                    "id": 1,
+                    "date": "2026-06-23",
+                    "ticker": "AAPL",
+                    "action": "BUY",
+                    "ib_exec_id": "UNTRUSTED-DISK",
+                }
+            ],
+        )
+        db = self._fake_db([])
+
+        result = self._run_with_fills(trade_log_path, db)
+
+        assert result["error"].startswith("trade_log read failed:")
+        assert "journal table is empty" in result["error"]
+        with pytest.raises(ValueError, match="Checksum mismatch"):
+            verified_load(str(trade_log_path))
+
+    def test_recovered_journal_rows_dedupe_live_fills(self, trade_log_path):
+        self._write_bad_checksum(trade_log_path, [])
+        db = self._fake_db([
+            (
+                "DUP-RECOVER",
+                {
+                    "date": "2026-06-23",
+                    "ticker": "AAPL",
+                    "action": "BUY",
+                    "shares": 10,
+                },
+                "2026-06-23T15:10:00Z",
+            ),
+        ])
+        duplicate_fill = _mock_fill(
+            exec_id="DUP-RECOVER",
+            symbol="AAPL",
+            side="BOT",
+            shares=10,
+            price=200.0,
+        )
+
+        with patch.object(JournalSyncHandler, "_lookup_prior_qty", return_value=0.0):
+            result = self._run_with_fills(trade_log_path, db, [duplicate_fill])
+
+        assert result["imported"] == 0
+        assert result["skipped"] == 1
+        loaded = verified_load(str(trade_log_path))
+        assert [row["ib_exec_id"] for row in loaded["trades"]] == ["DUP-RECOVER"]
+
+
 class TestSellCloseLabeling:
     """Regression for 2026-05-22 SELL_TO_OPEN mislabel bug.
 

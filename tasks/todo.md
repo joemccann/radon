@@ -1,3 +1,40 @@
+# Task: Service Reliability Hardening
+
+## Dependency Graph
+
+- T1 depends_on: [] — Inventory production service health, deployment topology, and local dirty state without touching unrelated artifacts.
+- T2 depends_on: [T1] — Trace health, watchdog, monitor-daemon, API, websocket, and scheduled-service reliability contracts in code.
+- T3 depends_on: [T2] — Research official reliability practices for service health, restart/backoff, and stale-data handling; map them to Radon risks.
+- T4 depends_on: [T1, T2, T3] — Implement the highest-impact reliability hardening with regression coverage.
+- T5 depends_on: [T4] — Verify focused checks, broad suites where feasible, production/deploy evidence, then document and ship.
+
+## Checklist
+
+- [x] T1 — Inventory current production and local service health evidence.
+- [x] T2 — Trace reliability contracts and failure paths in code.
+- [x] T3 — Research and map best practices.
+- [x] T4 — Implement reliability hardening plus regressions.
+- [ ] T5 — Verify, document, commit, push, and inspect deploy.
+
+## Review
+
+- Production `/api/service-health` showed 33 rows: 25 ok, 5 dormant, 2 error, 1 stale. The actionable errors were `journal-sync` failing on `trade_log.json` checksum mismatch and `journal-reconcile` reporting executed fills missing from the journal; the stale row was an old `ib-realtime-relay-probe-test` test service.
+- Local `verified_load("data/trade_log.json")` reproduced the checksum mismatch, so the service-health error was a real shared-state failure rather than a display-only issue.
+- Reliability mapping: Kubernetes probe guidance separates periodic diagnostics, restarts, and readiness routing, and explicitly treats readiness as a way to recover from temporary dependency/cache faults. Applied that locally by removing the corrupted disk mirror as a single point of failure for `journal-sync` while keeping DB-unavailable recovery explicit. Source: https://kubernetes.io/docs/concepts/workloads/pods/pod-lifecycle/#container-probes.
+- Implemented `journal-sync` recovery: on checksum/JSON corruption, preserve a timestamped corrupt-file backup, rebuild the mirror from the canonical Turso `journal` table, salvage structurally valid disk-only rows, and let the existing reconciliation path upsert those missing rows to the DB.
+- Added regressions for DB-backed repair, disk-only salvage plus DB reconcile, refusal to mask an empty journal DB, and dedupe of live fills already recovered from the journal.
+- Verification so far:
+  - `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_monitor_daemon/test_journal_sync.py -q` passed: 28 tests.
+  - `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_monitor_daemon/test_handler_heartbeat.py -q` passed: 10 tests.
+  - `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_monitor_daemon/test_base_handler_structural_heartbeat.py -q` passed: 16 tests.
+  - `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_watchdog/test_services.py scripts/tests/test_service_registration_completeness.py -q` passed: 17 tests.
+  - `python3.13 -m pytest -q` passed: 3,587 passed, 14 skipped, 90 deselected, 18 warnings.
+  - `git diff --check` and exact conflict-marker scan passed.
+  - `web: npm run typecheck` remains red on unrelated existing TS fixture/declaration errors.
+  - `web: npm test -- --reporter=dot` remains red: 326 files passed, 10 failed; failures are the existing `window.localStorage.* is not a function` pattern.
+
+---
+
 # Task: Fix VXN Blank Data
 
 ## Dependency Graph
