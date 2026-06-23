@@ -114,7 +114,14 @@ export function resolveEntryCost(pos: PortfolioPosition): number {
 
 export function getAvgEntry(pos: PortfolioPosition): number {
   const mult = getMultiplier(pos);
-  return Math.abs(resolveEntryCost(pos)) / (Math.abs(pos.contracts) * mult);
+  const raw = resolveEntryCost(pos);
+  const denom = Math.abs(pos.contracts) * mult;
+  // A multi-leg combo carries the net credit/debit sign (credit → negative),
+  // per the "credits negative" convention. A single-leg / stock avg entry is a
+  // per-instrument PRICE and is always positive (daca786: a short stock at
+  // $1,134.97/sh shows +$1,134.97, not −). `Math.abs(pos.contracts)` keeps a
+  // short's negative contract count from re-flipping the premium sign.
+  return pos.legs.length > 1 ? raw / denom : Math.abs(raw) / denom;
 }
 
 export function getLastPrice(pos: PortfolioPosition): number | null {
