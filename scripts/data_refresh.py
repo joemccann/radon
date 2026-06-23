@@ -107,8 +107,16 @@ def main() -> int:
 
     cri_ok = _run_scan("cri_scan.py", ["--json"], _DATA_DIR / "cri.json", timeout=120)
     vcg_ok = _run_scan("vcg_scan.py", ["--json"], _DATA_DIR / "vcg.json", timeout=120)
+    # GEX had NO autonomous scheduler (unlike vcg's radon-vcg-refresh.timer), so
+    # it only refreshed when a browser opened /regime/gex — leaving it days stale
+    # between sessions. Fold it into this same RTH cadence. `--no-mq` skips the
+    # headless-Playwright MenthorQ enrichment (the long pole that blows the 120s
+    # budget on a cold run and 502s the on-demand POST); the UW-only snapshot
+    # still dual-writes disk + Turso + heartbeats service_health[gex-scan] via
+    # persist_snapshot. MQ enrichment stays best-effort on the on-demand path.
+    gex_ok = _run_scan("gex_scan.py", ["--json", "--no-mq"], _DATA_DIR / "gex.json", timeout=120)
 
-    statuses = f"cri: {'OK' if cri_ok else 'FAIL'}, vcg: {'OK' if vcg_ok else 'FAIL'}"
+    statuses = f"cri: {'OK' if cri_ok else 'FAIL'}, vcg: {'OK' if vcg_ok else 'FAIL'}, gex: {'OK' if gex_ok else 'FAIL'}"
     _log(f"Data refresh complete ({statuses})")
 
     # A scan that soft-fails (timeout / bad output) keeps the existing JSON and
