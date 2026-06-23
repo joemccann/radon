@@ -4452,10 +4452,16 @@ verify search returns results on app.radon.run.
 ### Checklist
 - [x] T35 Stage only intended source, test, and documentation changes
 - [x] T36 Create the local commit
-- [ ] T37 Merge `origin/main`
-- [ ] T38 Rerun full verification after merge
+- [x] T37 Merge `origin/main`
+- [x] T38 Rerun full verification after merge
 - [ ] T39 Push `main` and record deployment status
 
 ### Review
 - Staged the intended Turso migration, VXN fallback, web baseline fixes, tests, and task log while leaving unrelated scratch files unstaged.
-- Created local commit `de2a763` (`Migrate source-of-truth state to Turso`).
+- Created local commit `8476ea3` (`Migrate source-of-truth state to Turso`) after amending the staging checkpoint into the same commit.
+- Merged `origin/main` with the `ort` strategy; no conflicts were reported.
+- Post-merge hygiene passed: `git diff --check`.
+- Post-merge Python suite passed: `PYTHONPATH=scripts python3.13 -m pytest scripts/tests -q` — 3280 passed, 13 skipped, 90 deselected, 13 warnings.
+- Post-merge root tool tests passed: `npx vitest run lib/tools/__tests__ --config vitest.config.ts` — 8 files, 65 tests.
+- Post-merge web typecheck passed: `cd web && npm run typecheck`.
+- Post-merge web test suite passed: `cd web && npm test -- --reporter=dot` — 340 files, 3369 passed, 26 skipped.
