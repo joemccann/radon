@@ -202,6 +202,36 @@ describe("ConfirmDialog — type-to-confirm + cascade", () => {
     expect(confirm.disabled).toBe(false);
   });
 
+  it("copies the required token to the clipboard and shows feedback", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+
+    render(
+      <ConfirmDialog
+        open
+        title="Stop radon-ib-gateway.service?"
+        body="This runs systemctl stop."
+        confirmLabel="Stop"
+        destructive
+        requireTyped="radon-ib-gateway.service"
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />,
+    );
+
+    const copy = screen.getByTestId("admin-confirm-copy") as HTMLButtonElement;
+    expect(copy.getAttribute("aria-label")).toBe(
+      "Copy radon-ib-gateway.service to clipboard",
+    );
+    expect(copy.textContent).toBe("Copy");
+
+    fireEvent.click(copy);
+    expect(writeText).toHaveBeenCalledTimes(1);
+    expect(writeText).toHaveBeenCalledWith("radon-ib-gateway.service");
+
+    await screen.findByText("Copied");
+  });
+
   it("fires onConfirm only after the typed gate is satisfied", () => {
     const onConfirm = vi.fn();
     render(

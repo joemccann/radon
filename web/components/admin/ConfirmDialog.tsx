@@ -44,6 +44,8 @@ export default function ConfirmDialog({
   const typeInputRef = useRef<HTMLInputElement>(null);
   const cancelBtnRef = useRef<HTMLButtonElement>(null);
   const [typed, setTyped] = useState("");
+  const [copied, setCopied] = useState(false);
+  const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { portalTarget, panelRef } = useDialogChrome<HTMLDivElement>({
     open,
@@ -54,6 +56,21 @@ export default function ConfirmDialog({
   useEffect(() => {
     if (open) setTyped("");
   }, [open]);
+
+  // Clear the "Copied" feedback timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    };
+  }, []);
+
+  const copyToken = async () => {
+    if (!requireTyped) return;
+    await navigator.clipboard?.writeText(requireTyped);
+    setCopied(true);
+    if (copyTimerRef.current) clearTimeout(copyTimerRef.current);
+    copyTimerRef.current = setTimeout(() => setCopied(false), 1500);
+  };
 
   // Focus discipline: a type-to-confirm gate focuses the input; a destructive
   // dialog focuses Cancel (never default focus to a danger button); otherwise
@@ -99,7 +116,17 @@ export default function ConfirmDialog({
         {requireTyped && (
           <label className="admin-confirm-typed">
             <span>
-              Type <code>{requireTyped}</code> to confirm
+              Type <code>{requireTyped}</code>
+              <button
+                type="button"
+                className="admin-confirm-copy"
+                onClick={copyToken}
+                aria-label={`Copy ${requireTyped} to clipboard`}
+                data-testid="admin-confirm-copy"
+              >
+                {copied ? "Copied" : "Copy"}
+              </button>{" "}
+              to confirm
             </span>
             <input
               ref={typeInputRef}
