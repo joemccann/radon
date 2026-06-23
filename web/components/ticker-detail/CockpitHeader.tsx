@@ -99,6 +99,26 @@ export default function CockpitHeader({
           onToggle={handleToggleWatch}
           size="sm"
         />
+        {canSwitchInstrument && (
+          <div className="ckh-instr" role="group" aria-label="Instrument view">
+            <button
+              type="button"
+              className={`ckh-instr-seg mono ${instrumentView === "underlying" ? "on" : ""}`}
+              aria-pressed={instrumentView === "underlying"}
+              onClick={() => onInstrumentViewChange("underlying")}
+            >
+              STOCK
+            </button>
+            <button
+              type="button"
+              className={`ckh-instr-seg mono ${instrumentView === "position" ? "on" : ""}`}
+              aria-pressed={instrumentView === "position"}
+              onClick={() => onInstrumentViewChange("position")}
+            >
+              OPTION
+            </button>
+          </div>
+        )}
         {live && <span className="ckh-live" aria-label="Live feed" />}
         <span className="ckh-spacer" />
         <span className={`ckh-last mono ${deltaTone}`}>
