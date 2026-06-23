@@ -15,7 +15,7 @@ from utils.index_symbols import INDEX_SYMBOLS, index_exchange_for, is_index_symb
 
 class TestIsIndexSymbol:
     def test_canonical_indices_return_true(self):
-        for symbol in ["VIX", "VVIX", "SPX", "NDX", "RUT", "DJX"]:
+        for symbol in ["VIX", "VXN", "VVIX", "SPX", "NDX", "RUT", "DJX"]:
             assert is_index_symbol(symbol) is True, f"{symbol} should be an index"
 
     def test_case_insensitive(self):
@@ -34,6 +34,7 @@ class TestIsIndexSymbol:
 class TestIndexExchangeFor:
     def test_volatility_indices_on_cboe(self):
         assert index_exchange_for("VIX") == "CBOE"
+        assert index_exchange_for("VXN") == "CBOE"
         assert index_exchange_for("VVIX") == "CBOE"
         assert index_exchange_for("COR1M") == "CBOE"
 
@@ -56,6 +57,7 @@ class TestIndexSymbolsTableShape:
         """WorkspaceShell hardcodes VIX/VVIX/COR1M for the Regime tab —
         the table must include them so the /[ticker] page also handles them."""
         assert "VIX" in INDEX_SYMBOLS
+        assert "VXN" in INDEX_SYMBOLS
         assert "VVIX" in INDEX_SYMBOLS
         assert "COR1M" in INDEX_SYMBOLS
 

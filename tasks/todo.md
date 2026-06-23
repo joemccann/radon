@@ -1,3 +1,38 @@
+# Task: Fix VXN Blank Data
+
+## Dependency Graph
+
+- T1 depends_on: [] — Reproduce/classify the VXN blank data path and compare it with known working index routing such as VIX.
+- T2 depends_on: [T1] — Identify the symbol classification/subscription gap and add a regression that fails for VXN.
+- T3 depends_on: [T2] — Apply the smallest fix so VXN routes through the correct market-data channel and cockpit data model.
+- T4 depends_on: [T3] — Run focused unit tests plus browser/Playwright verification for `/VXN`; document broader suite status.
+- T5 depends_on: [T4] — Commit and push if verification is green or only unrelated baseline failures remain.
+
+## Checklist
+
+- [x] T1 — Reproduce and classify VXN data routing.
+- [x] T2 — Add regression coverage.
+- [x] T3 — Fix classification/subscription.
+- [x] T4 — Verify locally and in browser.
+- [x] T5 — Commit and push.
+
+## Review
+
+- Root cause: `/VXN` was not in the canonical index symbol tables, so the workspace subscribed to `VXN` through the stock `symbols` websocket path instead of the CBOE `indexes` path. That left the UI in the stock cockpit with no market data.
+- Fixed VXN routing by adding `VXN -> CBOE` to the frontend index table and Python mirror, and by including `VXN` in the cash-index delayed-close fallback set.
+- Added regression coverage for the index table, Python mirror, delayed cash-index tick handling, and `/VXN` Playwright websocket routing/rendering.
+- Verification:
+  - `git diff --check` passed.
+  - Exact conflict-marker scan passed.
+  - `npx vitest run web/tests/index-symbols.test.ts web/tests/ib-delayed-ticks.test.ts --config vitest.config.ts` passed: 2 files, 29 tests.
+  - `python3.13 -m pytest scripts/tests/test_index_symbols.py -q` passed: 15 tests, 1 warning.
+  - `RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/vxn-index-routing.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` passed: 1 test.
+  - `python3.13 -m pytest -q` passed: 3,583 passed, 14 skipped, 90 deselected, 18 warnings.
+  - `npm run typecheck` remains red on existing unrelated e2e/test fixture typing errors.
+  - Full `npm test -- --reporter=dot` remains red: 326 files passed, 10 failed; failures are the existing `window.localStorage.* is not a function` pattern in unrelated tests.
+
+---
+
 # Task: Merge Dirty Worktree And Push
 
 ## Dependency Graph

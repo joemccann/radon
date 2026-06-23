@@ -19,6 +19,7 @@ from typing import Optional
 INDEX_SYMBOLS: dict[str, str] = {
     # Volatility (CBOE Indexes feed)
     "VIX": "CBOE",
+    "VXN": "CBOE",
     "VVIX": "CBOE",
     "VXX": "CBOE",
     "COR1M": "CBOE",
