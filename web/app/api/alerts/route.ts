@@ -8,6 +8,14 @@ export const runtime = "nodejs";
 
 const VALID_OPS = new Set([">", "<", ">=", "<="]);
 const VALID_CHANNELS = new Set(["pushover", "service_health"]);
+// Server-side mirror of the UI's metric-aware threshold bounds: a buy_ratio rule
+// with a 0-100 threshold can never fire. Unknown metrics skip the range check so
+// the metric set can grow without a server change.
+const METRIC_RANGES: Record<string, [number, number]> = {
+  flow_strength: [0, 100],
+  score: [0, 100],
+  buy_ratio: [0, 1],
+};
 
 type AlertRuleRow = {
   id: string;
@@ -104,6 +112,11 @@ export async function POST(req: Request): Promise<Response> {
 
   const ticker = body.ticker.trim().toUpperCase();
   const metric = body.metric.trim();
+
+  const range = METRIC_RANGES[metric];
+  if (range && (threshold < range[0] || threshold > range[1])) {
+    return validationError(requestId, `threshold for ${metric} must be between ${range[0]} and ${range[1]}`);
+  }
 
   try {
     const db = getDb();

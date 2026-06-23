@@ -25,6 +25,7 @@ type UseAlertsReturn = {
   rules: AlertRule[];
   isLoading: boolean;
   error: string | null;
+  retry: () => Promise<void>;
   createRule: (draft: AlertRuleDraft) => Promise<void>;
   deleteRule: (id: string) => Promise<void>;
 };
@@ -79,5 +80,5 @@ export function useAlerts(): UseAlertsReturn {
     [load],
   );
 
-  return { rules, isLoading, error, createRule, deleteRule };
+  return { rules, isLoading, error, retry: load, createRule, deleteRule };
 }
