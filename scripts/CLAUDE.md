@@ -101,6 +101,8 @@ FastAPI timeouts now match the script deadlines: `/orders/place` is 25s subproce
 
 Full convention (per-contract vs per-share `avg_cost`) lives in `web/CLAUDE.md` since the display layer is where the bug surfaces.
 
+**Basis precedence (per leg), MOST → LEAST trusted:** (1) journal `open_basis` override (`fetch_positions`, OPT only — keys by strike/right/expiry, drops STK). (2) **Same-side basis carry-forward** (`convert_to_portfolio_format` via `_basis_carry_key`): a partial close must NOT change the remaining per-unit basis, but IB drifts `pos.avgCost` on a reduce (folds the closed units' realised P&L into the residual VWAP) and assignment-originated stock (a short from an assigned call) has no journal opener. When a single-leg position is NOT larger than the prior snapshot on the SAME side AND the prior per-unit basis still differs from IB's avgCost, carry the prior basis forward. Size-not-increased + basis-differs makes it **sticky** — corrects the reduce and holds the pin across later unchanged syncs, never freezing an add/grow, a direction flip, or a position IB and the snapshot already agree on. Size-independent key (stock `structure` embeds the share count). (3) IB `pos.avgCost` (last resort). Invariant: a partial close (same direction, |qty| decreased) MUST NOT change remaining per-unit basis.
+
 ---
 
 ## Entry-Date Resolution Contract

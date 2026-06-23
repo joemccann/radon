@@ -1071,8 +1071,9 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
     except Exception:
         trade_log_dates, blotter_dates = {}, {}
 
-    # Previous portfolio dates (fallback)
+    # Previous portfolio dates + per-unit basis (fallback)
     prev_dates: dict[str, str] = {}
+    prev_basis: dict[str, dict] = {}
     try:
         prev = read_latest_portfolio_snapshot() or {}
         for p in prev.get("positions", []):
@@ -1082,6 +1083,19 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             # the old bug where every sync set entry_date = today)
             if ed and ed != today:
                 prev_dates[key] = ed
+            # Per-unit basis for same-side reduce carry-forward (a partial close
+            # must NOT change per-unit basis; IB drifts pos.avgCost on a reduce
+            # and assignment-originated stock has no journal opener).
+            try:
+                pc = abs(float(p.get("contracts") or 0))
+                pec = abs(float(p.get("entry_cost") or 0))
+                pdir = (p.get("direction") or "").upper()
+                if pc > 0 and pec > 0 and pdir in ("LONG", "SHORT"):
+                    prev_basis[_basis_carry_key(p.get("ticker"), p.get("structure"), p.get("expiry"))] = {
+                        "direction": pdir, "contracts": pc, "per_unit": pec / pc
+                    }
+            except (TypeError, ValueError):
+                pass
     except Exception:
         pass
 
@@ -1148,6 +1162,39 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
             or prev_dates.get(key)
             or today
         )
+
+        # Same-side basis carry-forward. A partial close must NOT change the
+        # remaining per-unit basis, but IB drifts pos.avgCost on a reduce and
+        # assignment-originated stock (MU short from an assigned call) has no
+        # journal opener. When this single-leg position is NOT larger than the
+        # prior snapshot on the SAME side AND the prior per-unit basis still
+        # differs from IB's avgCost, carry the prior basis forward. Sticky
+        # (size-not-increased + basis-differs): corrects the reduce and holds the
+        # pin across unchanged syncs, never freezing an add/grow, a direction
+        # flip, or a position IB and the snapshot already agree on. A
+        # journal-corrected leg (avg_cost != ib_avg_cost) wins and is left alone.
+        pb = prev_basis.get(_basis_carry_key(ticker, structure, expiry))
+        if pb is not None and len(legs) == 1:
+            leg0 = legs[0]
+            cur_contracts = abs(float(pos.get("contracts") or 0))
+            cur_dir = (pos.get("direction") or "").upper()
+            ac = leg0.get("avg_cost")
+            ibc = leg0.get("ib_avg_cost")
+            journal_corrected = (
+                ac is not None and ibc is not None and abs(float(ac) - float(ibc)) > 1e-6
+            )
+            drifted = ibc is not None and abs(pb["per_unit"] - float(ibc)) > 1e-6
+            if (
+                not journal_corrected
+                and drifted
+                and cur_dir == pb["direction"]
+                and 0 < cur_contracts <= pb["contracts"]
+            ):
+                per_unit = pb["per_unit"]
+                sign = -1 if cur_dir == "SHORT" else 1
+                pos["entry_cost"] = round(sign * per_unit * cur_contracts, 2)
+                leg0["avg_cost"] = round(per_unit, 6)
+                leg0["entry_cost"] = round(per_unit * cur_contracts, 2)
 
     result = {
         "bankroll": round(bankroll, 2),
