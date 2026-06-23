@@ -97,7 +97,7 @@ describe("updatePriceFromTickPrice — delayed tick types (VIX/VVIX bug fix)", (
   });
 
   it("DELAYED_CLOSE (75) sets close and derives last for cash indexes", () => {
-    const d = createPriceData("VIX");
+    const d = createPriceData("VXN");
     updatePriceFromTickPrice(d, TICK.DELAYED_CLOSE, 18.50);
     expect(d.close).toBe(18.50);
     // No bid/ask → derived last falls back to close

@@ -24,6 +24,7 @@ export type IndexExchange = "CBOE" | "NASDAQ" | "NYSE" | "RUSSELL";
 export const INDEX_SYMBOLS: Record<string, IndexExchange> = {
   // Volatility (CBOE Indexes feed)
   VIX: "CBOE",
+  VXN: "CBOE",
   VVIX: "CBOE",
   VXX: "CBOE", // ETN — but tracked like an index for quote purposes here
   COR1M: "CBOE",

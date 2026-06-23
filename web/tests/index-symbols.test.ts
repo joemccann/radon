@@ -4,6 +4,7 @@ import { isIndexSymbol, indexExchangeFor, hasFuturesSupport, INDEX_SYMBOLS } fro
 describe("isIndexSymbol", () => {
   it("returns true for canonical index symbols", () => {
     expect(isIndexSymbol("VIX")).toBe(true);
+    expect(isIndexSymbol("VXN")).toBe(true);
     expect(isIndexSymbol("VVIX")).toBe(true);
     expect(isIndexSymbol("SPX")).toBe(true);
     expect(isIndexSymbol("NDX")).toBe(true);
@@ -31,6 +32,7 @@ describe("isIndexSymbol", () => {
 describe("indexExchangeFor", () => {
   it("returns CBOE for volatility indices", () => {
     expect(indexExchangeFor("VIX")).toBe("CBOE");
+    expect(indexExchangeFor("VXN")).toBe("CBOE");
     expect(indexExchangeFor("VVIX")).toBe("CBOE");
     expect(indexExchangeFor("COR1M")).toBe("CBOE");
   });
@@ -73,10 +75,10 @@ describe("hasFuturesSupport", () => {
 
 describe("INDEX_SYMBOLS table", () => {
   it("includes the four indices the regime tab subscribes to", () => {
-    // WorkspaceShell hardcodes these for the Regime tab — keep them
-    // in the index table so /VIX / /VVIX / /COR1M pages also resolve.
+    // WorkspaceShell hardcodes regime indices and /VXN must also route
+    // through the index websocket path, not the stock symbols path.
     expect(Object.keys(INDEX_SYMBOLS)).toEqual(
-      expect.arrayContaining(["VIX", "VVIX", "COR1M"]),
+      expect.arrayContaining(["VIX", "VXN", "VVIX", "COR1M"]),
     );
   });
 });
