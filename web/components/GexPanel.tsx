@@ -9,6 +9,7 @@ import InfoTooltip from "./InfoTooltip";
 import ShareReportModal from "./ShareReportModal";
 import GexLaplaceContour from "./instruments/GexLaplaceContour";
 import SpectralLoader from "./SpectralLoader";
+import RegimeSyncStatusBadge from "./RegimeSyncStatusBadge";
 
 type GexPanelProps = {
   marketState?: MarketState;
@@ -501,13 +502,8 @@ export default function GexPanel({ marketState }: GexPanelProps) {
   const netGexColor = data.net_gex >= 0 ? "var(--signal-core)" : "var(--fault)";
   const netDexColor = data.net_dex >= 0 ? "var(--signal-core)" : "var(--fault)";
   const gexIsStale = isGexDataStale(data);
-  const freshnessBadge = syncing
-    ? { label: "SYNCING", className: "gex-status-badge gex-status-badge-syncing" }
-    : gexIsStale
-      ? { label: "STALE", className: "gex-status-badge gex-status-badge-stale" }
-      : data.market_open
-        ? { label: "LIVE", className: "gex-status-badge gex-status-badge-live" }
-        : { label: "FRESH", className: "gex-status-badge gex-status-badge-fresh" };
+  const freshnessState = syncing ? "syncing" : gexIsStale ? "stale" : data.market_open ? "live" : "fresh";
+  const freshnessBadgeClass = `gex-status-badge gex-status-badge-${freshnessState}`;
 
   return (
     <div className="section gex-panel regime-relationship-panel">
@@ -523,9 +519,11 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-          <span className={freshnessBadge.className} data-testid="gex-freshness-badge">
-            {freshnessBadge.label}
-          </span>
+          <RegimeSyncStatusBadge
+            state={freshnessState}
+            className={freshnessBadgeClass}
+            testId="gex-freshness-badge"
+          />
           {daysCount > 0 && (
             <span
               className="gex-day-badge"

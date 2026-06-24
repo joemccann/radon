@@ -8,6 +8,7 @@
  *   expiry=YYYY-MM-DD   dashed ISO; maps to the compact internal expiry
  *   side=calls|puts     omitted for the default "both" (ALL)
  *   strikes=10|25|50|100|all   omitted for the default 15
+ *   legs=SELL:1x520P,SELL:1x625C   optional chain-builder prefill
  *
  * Mirrors the write/read mechanism in `useNewsfeedTagFilter.ts`: a post-commit
  * `router.replace(url, { scroll: false })` that clones the existing params (so
@@ -22,9 +23,17 @@ export type SideFilter = "both" | "calls" | "puts";
 const SIDE_PARAM = "side";
 const STRIKES_PARAM = "strikes";
 const EXPIRY_PARAM = "expiry";
+const LEGS_PARAM = "legs";
 
 const ALLOWED_STRIKES = [10, 15, 25, 50, 100] as const;
 const DEFAULT_STRIKES = 15;
+
+export type ChainLegUrlDraft = {
+  action: "BUY" | "SELL";
+  quantity: number;
+  strike: number;
+  right: "C" | "P";
+};
 
 export function parseSideParam(raw: string | null | undefined): SideFilter {
   if (raw === "calls" || raw === "puts") return raw;
@@ -47,6 +56,38 @@ function serializeStrikes(n: number): string | null {
   return String(n);
 }
 
+export function parseLegsParam(raw: string | null | undefined): ChainLegUrlDraft[] {
+  if (!raw) return [];
+  const drafts: ChainLegUrlDraft[] = [];
+  for (const segment of raw.split(",")) {
+    const token = segment.trim().toUpperCase();
+    if (!token) return [];
+    const match = token.match(/^(BUY|SELL):(?:(\d+)X)?(\d+(?:\.\d+)?)([CP])$/);
+    if (!match) return [];
+    const quantity = match[2] == null ? 1 : Number(match[2]);
+    const strike = Number(match[3]);
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > 999) return [];
+    if (!Number.isFinite(strike) || strike <= 0) return [];
+    drafts.push({
+      action: match[1] as "BUY" | "SELL",
+      quantity,
+      strike,
+      right: match[4] as "C" | "P",
+    });
+  }
+  return drafts;
+}
+
+export function serializeLegsParam(legs: ChainLegUrlDraft[]): string | null {
+  if (legs.length === 0) return null;
+  return legs
+    .map((leg) => {
+      const quantity = Math.max(1, Math.trunc(leg.quantity));
+      return `${leg.action}:${quantity}x${leg.strike}${leg.right}`;
+    })
+    .join(",");
+}
+
 export interface ChainUrlState {
   /** Lazy `useState` seed for the side toggle. */
   initialSide: SideFilter;
@@ -54,9 +95,12 @@ export interface ChainUrlState {
   initialStrikes: number;
   /** Raw dashed expiry from the URL (validated against `expirations` by caller). */
   urlExpiry: string | null;
+  /** Optional chain-builder leg prefill from the URL. */
+  urlLegs: ChainLegUrlDraft[];
   /** Raw param strings — dep keys for back/forward reconcile effects. */
   sideParamRaw: string | null;
   strikesParamRaw: string | null;
+  legsParamRaw: string | null;
   /** Post-commit writer: pushes current filter state into the URL, preserving other params. */
   syncUrl: (state: { selectedExpiry: string | null; side: SideFilter; strikes: number }) => void;
 }
@@ -76,6 +120,8 @@ export function useChainUrlState(): ChainUrlState {
   const urlExpiry = searchParams?.get(EXPIRY_PARAM) ?? null;
   const sideParamRaw = searchParams?.get(SIDE_PARAM) ?? null;
   const strikesParamRaw = searchParams?.get(STRIKES_PARAM) ?? null;
+  const legsParamRaw = searchParams?.get(LEGS_PARAM) ?? null;
+  const urlLegs = useMemo(() => parseLegsParam(legsParamRaw), [legsParamRaw]);
 
   const syncUrl = useCallback<ChainUrlState["syncUrl"]>(
     (state) => {
@@ -110,5 +156,5 @@ export function useChainUrlState(): ChainUrlState {
     [searchParams, pathname, router],
   );
 
-  return { initialSide, initialStrikes, urlExpiry, sideParamRaw, strikesParamRaw, syncUrl };
+  return { initialSide, initialStrikes, urlExpiry, urlLegs, sideParamRaw, strikesParamRaw, legsParamRaw, syncUrl };
 }

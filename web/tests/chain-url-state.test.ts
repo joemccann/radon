@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseSideParam, parseStrikesParam } from "@/lib/useChainUrlState";
+import { parseLegsParam, parseSideParam, parseStrikesParam, serializeLegsParam } from "@/lib/useChainUrlState";
 import { ALL_STRIKES, formatExpiry } from "@/lib/optionsChainUtils";
 import { normalizeOptionExpiry } from "@/lib/pricesProtocol";
 
@@ -38,6 +38,40 @@ describe("chain URL filter param parsing", () => {
     });
     it("treats the literal default 15 as valid", () => {
       expect(parseStrikesParam("15")).toBe(15);
+    });
+  });
+
+  describe("order leg prefill params", () => {
+    it("parses short strangle legs", () => {
+      expect(parseLegsParam("SELL:1x520P,SELL:1x625C")).toEqual([
+        { action: "SELL", quantity: 1, strike: 520, right: "P" },
+        { action: "SELL", quantity: 1, strike: 625, right: "C" },
+      ]);
+    });
+
+    it("supports decimal strikes and omitted quantity", () => {
+      expect(parseLegsParam("sell:152.5p,buy:2x160C")).toEqual([
+        { action: "SELL", quantity: 1, strike: 152.5, right: "P" },
+        { action: "BUY", quantity: 2, strike: 160, right: "C" },
+      ]);
+    });
+
+    it("fails closed for malformed leg params", () => {
+      expect(parseLegsParam(null)).toEqual([]);
+      expect(parseLegsParam("SELL:0x520P")).toEqual([]);
+      expect(parseLegsParam("SELL:-520P")).toEqual([]);
+      expect(parseLegsParam("SHORT:520P")).toEqual([]);
+      expect(parseLegsParam("SELL:520")).toEqual([]);
+      expect(parseLegsParam("SELL:520P,garbage")).toEqual([]);
+    });
+
+    it("serializes scanner-generated legs for URLSearchParams", () => {
+      expect(
+        serializeLegsParam([
+          { action: "SELL", quantity: 1, strike: 520, right: "P" },
+          { action: "SELL", quantity: 1, strike: 625, right: "C" },
+        ]),
+      ).toBe("SELL:1x520P,SELL:1x625C");
     });
   });
 

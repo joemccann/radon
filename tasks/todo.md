@@ -1,3 +1,70 @@
+# Task: Regime Sync Working Indicator
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot scoped instructions and locate all Regime tab sync/status render paths without touching unrelated dirty files.
+- T2 depends_on: [T1] — Add a reusable Radon-styled working indicator for Regime refresh state and wire it into GEX plus other Regime refresh statuses.
+- T3 depends_on: [T2] — Add focused regression coverage for the working indicator replacing bare SYNCING text.
+- T4 depends_on: [T2, T3] — Run focused tests/static checks and document results.
+
+## Checklist
+
+- [x] T1 — Snapshot scoped instructions and locate Regime sync/status paths.
+- [x] T2 — Implement shared Regime working indicator.
+- [x] T3 — Add focused regression coverage.
+- [x] T4 — Verify and document.
+
+## Review
+
+- Added a reusable `RegimeSyncStatusBadge` with `aria-busy`, the existing status label, and a small `Loader2` working mark for active sync state.
+- Wired the badge into GEX and GRG freshness headers while preserving existing `gex-freshness-badge` / `grg-freshness-badge` test IDs and status class names.
+- CSS is scoped to `.regime-sync-status` plus the existing `.gex-status-badge-syncing` / `.grg-status-badge-syncing` classes; the syncing state now uses `var(--signal-core)` with a matte, hairline capsule.
+- Focused verification passed: `npx vitest run --config vitest.config.ts web/tests/gex-panel.test.tsx web/tests/grg-freshness-badge.test.tsx web/tests/gamma-rotation-panel.test.tsx` — 3 files, 35 tests.
+- Static checks passed: `git diff --check`; exact conflict-marker scan passed for touched files.
+- Browser sanity check passed on `/regime/gex` with mocked `/api/gex`: badge rendered `data-state="syncing"`, `aria-busy="true"`, and the working icon was present. Screenshot: `/tmp/radon-regime-gex-sync-working.png`.
+- Gotcha: the temporary local Next dev server logged Clerk handshake warnings during the mocked visual check, but the route rendered and the badge assertion passed.
+
+---
+
+# Task: Scanner Tab UI Polish
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot dirty state and locate the scanner mode tab implementation without touching unrelated worktree changes.
+- T2 depends_on: [T1] — Replace the boxed pill treatment with a flat tab strip that has clear active, hover, focus, desktop, and mobile states.
+- T3 depends_on: [T2] — Run focused verification and visual checks for the scanner tabs.
+- T4 depends_on: [T1] — Design the theta harvester row-to-order interaction using the existing chain/order builder instead of duplicating execution UI.
+- T5 depends_on: [T4] — Add a URL-safe chain order-leg deep link and hydrate it into the order builder with the explicit expiry selected.
+- T6 depends_on: [T5] — Make theta harvester desktop rows and mobile cards navigate to the prefilled short-strangle chain order.
+- T7 depends_on: [T6] — Verify focused unit/component/E2E checks for tab polish and theta prefill.
+- T8 depends_on: [] — Delegate regime sync working-indicator implementation to a separate agent and integrate its result.
+- T9 depends_on: [T8] — Verify focused checks for regime refresh status.
+
+## Checklist
+
+- [x] T1 — Located scanner mode tabs and confirmed unrelated dirty admin files exist.
+- [x] T2 — Update scanner tab styling.
+- [x] T3 — Verify focused scanner E2E and rendered tab metrics.
+- [x] T4 — Choose row-to-order UX.
+- [x] T5 — Add chain order-leg deep link hydration.
+- [x] T6 — Link theta harvester rows/cards to prefilled order builder.
+- [x] T7 — Verify theta scanner prefill flow.
+- [x] T8 — Integrate delegated regime sync status work.
+- [x] T9 — Verify regime sync status work.
+
+## Review
+
+- Scanner tab polish: replaced the boxed segmented-pill treatment with a flat tab strip using one bottom rule and a 2px active underline. Focus, hover, and mobile touch states are preserved. Focused Playwright strength scanner E2E passed for desktop/mobile, and screenshot metrics confirmed no outer top border/radius and no active pill radius.
+- Theta harvester UX: scanner rows/cards now navigate to the existing chain order builder instead of duplicating order entry inline. This keeps execution inside the established quote, skew, risk, and confirmation surface.
+- Added the chain URL leg contract `legs=SELL:1x520P,SELL:1x625C`; the chain hydrates it only when the requested expiry matches the selected expiry, then shows a "PREFILLED FROM THETA HARVESTER" status in the order builder.
+- Updated lowercase ticker canonical redirects to preserve all query params so `deck`, `expiry`, `strikes`, and `legs` survive direct links.
+- Integrated the delegated Regime sync indicator work: GEX and GRG now use `RegimeSyncStatusBadge` with `aria-busy` and a working icon during refresh.
+- Verification passed: `npx vitest run --config vitest.config.ts web/tests/chain-url-state.test.ts web/tests/theta-harvester-scanner.test.tsx web/tests/chain-url-deeplink.test.tsx web/tests/gex-panel.test.tsx web/tests/grg-freshness-badge.test.tsx web/tests/gamma-rotation-panel.test.tsx` — 6 files, 54 tests.
+- Browser verification passed: `PLAYWRIGHT_PORT=3044 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/theta-harvester-prefill.spec.ts e2e/strength-confirmation-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 3 tests.
+- `npm run typecheck`, `git diff --check`, and exact conflict-marker scan passed.
+
+---
+
 # Task: Remove Flat JSON Source-Of-Truth Files
 
 ## Dependency Graph

@@ -2,6 +2,7 @@
 
 ## 2026-06-24
 
+- Scanner mode navigation should read as a tab strip, not as nested segmented pills. When adding scanner modes, avoid combining an outer bordered control with inner bordered active states; use one visual boundary and verify the tab surface in the actual scanner layout.
 - Scanner pages need both broad-universe and operator-directed single-name workflows. When adding a new scanner, expose and test a specific ticker probe path in the first pass, not only preset/limit scans.
 - For fallback option exposure, derive put delta from the same spot-minus-strike moneyness as call delta (`put = call - 1`); never flip moneyness for puts. An OTM short put should contribute a small positive delta, not dominate a bear put spread as nearly +1. Also verify signed compact money (`-$1.93M`) at the display layer when fixing signed exposure math.
 

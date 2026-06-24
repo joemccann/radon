@@ -2,7 +2,7 @@
 
 import React from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 
 import TickerDetailContent from "../components/TickerDetailContent";
 import { TickerDetailProvider } from "../lib/TickerDetailContext";
@@ -162,5 +162,21 @@ describe("Options chain URL deep-link", () => {
     const url = replaceMock.mock.calls.at(-1)![0] as string;
     expect(url).toContain("tab=chain");
     expect(url).toContain("side=puts");
+  });
+
+  it("hydrates theta harvester short-strangle legs into the order builder", async () => {
+    searchParamsString = "deck=c&expiry=2026-07-17&strikes=100&legs=SELL:1x950P,SELL:1x970C";
+    renderChain();
+
+    await screen.findByText("PREFILLED FROM THETA HARVESTER");
+    const builder = document.querySelector(".order-builder");
+    expect(builder).not.toBeNull();
+    expect(builder!.textContent).toContain("ORDER BUILDER : Short Strangle");
+    expect(builder!.textContent).toContain("1x $950 Put");
+    expect(builder!.textContent).toContain("1x $970 Call");
+    expect(builder!.textContent).toContain("2026-07-17");
+
+    const sellButtons = within(builder as HTMLElement).getAllByRole("button", { name: "SELL" });
+    expect(sellButtons.length).toBe(2);
   });
 });

@@ -93,13 +93,13 @@ const MOCK_GEX_DATA = {
   },
 };
 
-function renderWithData(data = MOCK_GEX_DATA, loading = false, error: string | null = null) {
+function renderWithData(data = MOCK_GEX_DATA, loading = false, error: string | null = null, syncing = false) {
   mockUseGex.mockReturnValue({
     data,
     loading,
     error,
     lastSync: data?.scan_time || null,
-    syncing: false,
+    syncing,
     syncNow: vi.fn(),
   });
   return render(<GexPanel />);
@@ -163,6 +163,17 @@ describe("GexPanel", () => {
     const { container } = renderWithData(freshData);
     const badge = container.querySelector('[data-testid="gex-freshness-badge"]');
     expect(badge?.textContent).toContain("LIVE");
+  });
+
+  it("shows a working indicator when the cached GEX refresh is syncing", () => {
+    const { container } = renderWithData(MOCK_GEX_DATA, false, null, true);
+    const badge = container.querySelector('[data-testid="gex-freshness-badge"]');
+    expect(badge).toBeTruthy();
+    expect(badge?.textContent?.trim()).toBe("SYNCING");
+    expect(badge?.getAttribute("aria-busy")).toBe("true");
+    expect(badge?.className).toContain("gex-status-badge-syncing");
+    expect(badge?.className).toContain("regime-sync-status");
+    expect(badge?.querySelector('[data-testid="regime-sync-working-icon"]')).toBeTruthy();
   });
 
   it("renders day badge", () => {
