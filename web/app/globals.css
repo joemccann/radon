@@ -9573,6 +9573,101 @@ tr {
   border-top: 1px solid var(--line-grid);
 }
 
+.short-strangle-skew {
+  margin: 8px 0 12px;
+  padding: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent-bg) 34%, var(--line-grid));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent-bg) 8%, transparent);
+}
+
+.short-strangle-skew--compact {
+  margin: 0;
+}
+
+.short-strangle-skew__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1.2;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.short-strangle-skew__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 6px;
+}
+
+.short-strangle-skew__metric {
+  min-width: 0;
+  padding: 6px;
+  border: 1px solid color-mix(in srgb, var(--line-grid) 72%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+}
+
+.short-strangle-skew__label,
+.short-strangle-skew__sub {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1.2;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.short-strangle-skew__value {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin: 3px 0;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.15;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
+.short-strangle-skew__value--positive {
+  color: var(--positive);
+}
+
+.short-strangle-skew__value--negative {
+  color: var(--negative);
+}
+
+.short-strangle-skew__value--neutral {
+  color: var(--text-primary);
+}
+
+.short-strangle-skew__unavailable {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.4;
+  color: var(--text-secondary);
+}
+
+.short-strangle-skew--compact .short-strangle-skew__grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.short-strangle-skew--compact .short-strangle-skew__value {
+  font-size: 12px;
+}
+
 /* ── GEX Panel ─────────────────────────────────────────── */
 
 .gex-panel .section-body {

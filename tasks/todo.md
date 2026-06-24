@@ -4602,3 +4602,81 @@ verify search returns results on app.radon.run.
 - Typecheck passed: `npm run typecheck`.
 - Full web suite passed: `npm test -- --reporter=dot` - 341 files, 3375 tests passing, 26 skipped.
 - Hygiene passed: `git diff --check` and strict conflict-marker scan.
+
+---
+
+## Session: MU Chain IV Zero + Strangle Skew/Delta Analysis (2026-06-24)
+
+### Dependency Graph
+- T65 (Snapshot worktree and capture the user's chain screenshot/questions) depends_on: []
+- T66 (Trace desktop options-chain IV rendering and source fields) depends_on: [T65]
+- T67 (Compute -200/+200 short-strangle skew and delta under spot $1050 using visible chain/expiry assumptions) depends_on: [T65]
+- T68 (Reconcile subagent findings and answer with assumptions, uncertainty, and next steps) depends_on: [T66, T67]
+
+### Checklist
+- [x] T65 Snapshot context
+- [x] T66 Trace IV zero root cause
+- [x] T67 Compute strangle skew/delta
+- [x] T68 Final answer
+
+### Review
+- Used two subagents: one traced the desktop options-chain IV path, one computed the -200/+200 short-strangle estimates.
+- Root cause: the chain table renders `PriceData.impliedVol` and `PriceData.delta` from the realtime IB websocket path, not from `/api/options/chain`; the screenshot shows numeric IV placeholders (`0.0`) plus impossible deltas around `1.86-1.89`, so the relay is accepting bad option-computation payloads instead of validating IV > 0 and `abs(delta) <= 1`.
+- Confirmed the installed `@stoqey/ib` decoder emits `tickOptionComputation(reqId, field, impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice)` after dropping `tickAttrib`; the likely fix is relay-side option-computation normalization/validation, not a UI percent-format change.
+- For spot `$1050`, expiry `2026-06-26`, and strikes `850P/1250C`, flat `~199%` ATM IV gives net short-strangle delta about `-0.068` per contract pair (`-6.8` shares per one-lot, `-1,355` shares for 200 pairs). With rough put-rich skew from visible prices, net delta stays negative but closer to `-0.03` to `-0.05` per pair.
+
+---
+
+## Session: Short Strangle Skew Proposal Telemetry (2026-06-24)
+
+### Dependency Graph
+- T69 (Capture correction, clarify that bad chain delta is invalid rather than literally zero, and update lessons) depends_on: []
+- T70 (Use agents to trace order-builder insertion point and define skew/delta math contract) depends_on: [T69]
+- T71 (Add focused regression coverage for short-strangle skew telemetry) depends_on: [T70]
+- T72 (Implement skew/delta telemetry for proposed short strangle orders) depends_on: [T71]
+- T73 (Run focused tests, UI verification, typecheck/full tests where feasible, and document results) depends_on: [T72]
+
+### Checklist
+- [x] T69 Capture correction and clarify delta semantics
+- [x] T70 Use agents for path/math analysis
+- [x] T71 Add regression coverage
+- [x] T72 Implement short-strangle skew telemetry
+- [x] T73 Verify and document results
+
+### Review
+- Used two subagents: one traced desktop/mobile order-builder insertion points, and one defined the skew/delta validation contract.
+- Clarification: a raw provider delta of `0` is a valid literal zero only when the provider sends exactly `0`; the screenshot's `1.88` option delta is invalid because option deltas must be finite with `abs(delta) <= 1`.
+- Added `web/lib/shortStrangleSkew.ts` to validate IV/delta inputs, backsolve IV from marks when stream IV is missing/zero, normalize positive provider put deltas to canonical signed put deltas, and compute short-strangle IV skew plus net delta.
+- Added `ShortStrangleSkewPanel` on desktop and mobile order tickets when the proposed structure is a short strangle. The panel shows call IV, put IV, IV skew, short-leg deltas, net proposed-order delta, and source.
+- Regression coverage added for invalid provider IV/delta fallback, literal zero delta handling, panel rendering, and desktop/mobile Playwright short-strangle order proposals.
+- Visual verification passed with mocked desktop browser flow. Screenshot: `/tmp/radon-short-strangle-skew.png`.
+- Focused Vitest passed: `npx vitest run web/tests/short-strangle-skew.test.ts web/tests/short-strangle-skew-panel.test.tsx --config vitest.config.ts` - 2 files, 6 tests.
+- Desktop Playwright passed: `RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/short-strangle-skew.spec.ts --project=chromium --config playwright.config.ts --timeout=30000` - 1 test.
+- Mobile Playwright passed: `RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/mobile-short-strangle-skew.spec.ts --project=mobile --config playwright.config.ts --timeout=30000` - 1 test.
+- Typecheck passed: `cd web && npm run typecheck`.
+- Full web suite passed: `cd web && npm test -- --reporter=dot` - 343 files, 3381 passed, 26 skipped.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan.
+
+---
+
+## Session: Commit Merge Push Short Strangle Skew (2026-06-24)
+
+### Dependency Graph
+- T74 (Snapshot status and stage only short-strangle skew files) depends_on: []
+- T75 (Commit the verified short-strangle skew feature) depends_on: [T74]
+- T76 (Fetch and merge `origin/main`, resolving conflicts if present) depends_on: [T75]
+- T77 (Run post-merge hygiene and focused sanity checks) depends_on: [T76]
+- T78 (Push to `origin/main` and confirm remote status) depends_on: [T77]
+
+### Checklist
+- [x] T74 Snapshot status and stage intended files
+- [x] T75 Commit verified feature
+- [x] T76 Fetch and merge origin/main
+- [x] T77 Post-merge hygiene
+- [x] T78 Push and confirm remote status
+
+### Review
+- Created commit `feat(options): show short strangle skew`.
+- `git fetch origin` and `git merge --ff-only origin/main` completed with `Already up to date`; no conflicts required resolution.
+- Post-merge hygiene passed: `git diff --check` and strict conflict-marker scan.
+- Push to `origin/main` completed after the commit.

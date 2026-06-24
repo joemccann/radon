@@ -32,6 +32,7 @@ type MobileChainLadderProps = {
   currentPrice: number | null;
   loading?: boolean;
   orderLegs?: OrderLeg[];
+  riskFreeRate?: number;
   onAddLeg?: (strike: number, right: "C" | "P", action: "BUY" | "SELL") => void;
   onRemoveLeg?: (id: string) => void;
   onUpdateLeg?: (id: string, updates: Partial<OrderLeg>) => void;
@@ -89,6 +90,7 @@ export default function MobileChainLadder({
   currentPrice,
   loading,
   orderLegs = [],
+  riskFreeRate,
   onAddLeg,
   onRemoveLeg,
   onUpdateLeg,
@@ -248,6 +250,8 @@ export default function MobileChainLadder({
         ticker={ticker}
         legs={orderLegs}
         prices={prices}
+        spot={currentPrice}
+        riskFreeRate={riskFreeRate}
         portfolio={portfolio}
         onClose={() => setTicketOpen(false)}
         onRemoveLeg={(id) => onRemoveLeg?.(id)}
