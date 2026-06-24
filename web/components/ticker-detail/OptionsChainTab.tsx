@@ -38,6 +38,7 @@ import {
 } from "@/lib/order";
 import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
+import ShortStrangleSkewPanel from "@/components/ShortStrangleSkewPanel";
 
 /* ─── Types ─── */
 
@@ -226,6 +227,8 @@ function OrderBuilder({
   ticker,
   legs,
   prices,
+  spot,
+  riskFreeRate,
   portfolio,
   onRemoveLeg,
   onUpdateLeg,
@@ -234,6 +237,8 @@ function OrderBuilder({
   ticker: string;
   legs: OrderLeg[];
   prices: Record<string, PriceData>;
+  spot?: number | null;
+  riskFreeRate?: number;
   portfolio?: PortfolioData | null;
   onRemoveLeg: (id: string) => void;
   onUpdateLeg: (id: string, updates: Partial<OrderLeg>) => void;
@@ -587,6 +592,14 @@ function OrderBuilder({
       {isCombo && stripPrices.available && (
         <OrderPriceStrip prices={stripPrices} />
       )}
+
+      <ShortStrangleSkewPanel
+        ticker={ticker}
+        legs={legs}
+        prices={prices}
+        spot={spot}
+        riskFreeRate={riskFreeRate}
+      />
 
       {/* Leg pills for combo, detailed list for single */}
       {isCombo ? (
@@ -1201,6 +1214,7 @@ export default function OptionsChainTab({
         currentPrice={currentPrice}
         loading={loadingStrikes}
         orderLegs={orderLegs}
+        riskFreeRate={riskFreeRate}
         onAddLeg={handleAddLeg}
         onRemoveLeg={handleRemoveLeg}
         onUpdateLeg={handleUpdateLeg}
@@ -1352,6 +1366,8 @@ export default function OptionsChainTab({
         ticker={ticker}
         legs={orderLegs}
         prices={prices}
+        spot={currentPrice}
+        riskFreeRate={riskFreeRate}
         portfolio={portfolio}
         onRemoveLeg={handleRemoveLeg}
         onUpdateLeg={handleUpdateLeg}

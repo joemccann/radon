@@ -18,12 +18,15 @@ import { fmtPrice } from "@/lib/positionUtils";
 import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
 import BuySellRow from "./BuySellRow";
 import BottomSheet from "./BottomSheet";
+import ShortStrangleSkewPanel from "@/components/ShortStrangleSkewPanel";
 
 type MobileOrderTicketProps = {
   open: boolean;
   ticker: string;
   legs: OrderLeg[];
   prices: Record<string, PriceData>;
+  spot?: number | null;
+  riskFreeRate?: number;
   /**
    * Live portfolio snapshot — routed into `<OrderRiskGate>` for held-LONG
    * coverage detection. `null` is acceptable (gate renders "Coverage
@@ -63,6 +66,8 @@ export default function MobileOrderTicket({
   ticker,
   legs,
   prices,
+  spot = null,
+  riskFreeRate,
   portfolio = null,
   onClose,
   onRemoveLeg,
@@ -348,6 +353,15 @@ export default function MobileOrderTicket({
             <span className="mobile-ticket__quote-label">Ask</span>
             <span className="mobile-ticket__quote-value">{signedQuote.ask != null ? fmtPrice(Math.abs(signedQuote.ask)) : "—"}</span>
           </div>
+
+          <ShortStrangleSkewPanel
+            ticker={ticker}
+            legs={legs}
+            prices={prices}
+            spot={spot}
+            riskFreeRate={riskFreeRate}
+            compact
+          />
 
           <div className="mobile-ticket__price-row">
             <span className="mobile-ticket__price-label">Limit</span>
