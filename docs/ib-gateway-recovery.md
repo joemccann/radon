@@ -60,6 +60,14 @@ The api-watchdog is a oneshot fired every minute (`radon-ib-watchdog.timer`). Tw
 
 See `feedback_gateway_api_hang_and_watchdog_self_hang`. Gateway-side farm-down (gateway authenticated but the relay gets zero ticks) is recovered by a full `radon restart`, not a relay-only restart.
 
+### 5. Pool self-heal — post-2FA stuck pool (2026-06-24, commit 46ba1e1)
+
+A failure *inside radon-api*, not the gateway: after the user approves the 2FA push the gateway authenticates, but this process's three pool clients (sync 3 / orders 4 / data 5) stay `connected=false` with empty `managed_accounts`, so `/health` reports `auth_state=awaiting_2fa` even though a throwaway-clientId probe to `4001` returns the account. The app shows "awaiting 2FA" until someone restarts radon-api.
+
+**Why the earlier (2026-05-19) edge fix never worked:** it called `pool.reconnect_all()` on the `awaiting_2fa → authenticated` edge, but `auth_state` is *derived from the pool* (`_derive_auth_state` → authenticated only when a role is connected WITH accounts). While the pool is wedged every heartbeat derives `awaiting_2fa`, so the edge never fires and `_auth_transition_state` latches at `awaiting_2fa` — an external approval is invisible to the process forever. Circular dependency.
+
+**The fix — `recover_stuck_pool` (`scripts/api/ib_gateway.py`), level-triggered + pool-independent, run from `_ib_recovery_heartbeat_tick` (15s) via `_recover_stuck_pool_guarded` (`server.py`):** healthy pool → no-op; disconnected slot + an independent `_probe_authenticated()` (throwaway clientId 98) that is NOT authenticated → genuine 2FA wait, do nothing (never touches the gateway/lock, ZERO pushes); disconnected slot + probe authenticated → `reconnect_all()` then RE-READ the pool, success iff a role is now connected WITH accounts. Single-flight + 60s cooldown; only a *verified* failure (probe authenticated yet pool still stuck) counts toward a 3-strike ladder, after which it self-restarts **radon-api only** (`os._exit(1)` under systemd `Restart=always`; never the gateway), then resets so it cannot loop. Pool reconnects in ~15-60s with no operator action and no new push. Tests: `scripts/api/tests/test_ib_gateway_pool_recovery.py` + `test_pool_recovery_escalation.py`. Follow-up not done: a `pool_stuck` /health flag to keep the watchdog from restarting the gateway on this signature — skipped because the probe is 8s and breaks the fast-/health 2.5s budget; the 15s heartbeat beats the watchdog's ~3-min threshold anyway.
+
 ---
 
 ## Status Surface
@@ -97,7 +105,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 - **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — it cascade-stops dependents (relay + monitor + api) and `Restart=always` does NOT fire because cascade-stop is a clean stop. Use `radon restart` instead. See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.
-- **Do not assume `auth_state=authenticated` means the pool is healthy.** After 2FA resolves, the FastAPI `ib_pool` can stay stuck disconnected. `systemctl restart radon-api.service` flips it. See `feedback_ib_pool_stuck_after_2fa.md`.
+- **Do not assume `auth_state=authenticated` means the pool is healthy.** After 2FA resolves, the FastAPI `ib_pool` can stay stuck disconnected. As of 2026-06-24 (46ba1e1) the `recover_stuck_pool` self-heal (Gate 5) reconnects it in ~15-60s with no operator action, so **do not reflexively restart radon-api** — give the heartbeat a minute. `systemctl restart radon-api.service` remains the emergency override if the self-heal genuinely fails. See `feedback_ib_pool_stuck_after_2fa.md`.
 - **Do not run a whole-stack `radon restart` to recover a 2FA situation.** It does NOT hold the push lock, so the watchdog self-heal can stack a second push and IBKR rejects every approval ("unsuccessful"). Prefer the lock-holding `POST /ib/restart` for a gateway-only 2FA cycle. If approvals are already failing: `POST /ib/reset-backoff` (clears the stale lock) → single `POST /ib/restart` → approve ONE push → `systemctl restart radon-api`. See `feedback_radon_restart_stacks_2fa_with_watchdog`.
 - **Do not run a synchronous libsql write on the FastAPI event loop.** A hung Turso write freezes the whole API (`/health` times out, which also fails `deploy.sh`'s gateway-ready gate). Offload to a thread. See `feedback_no_sync_libsql_on_fastapi_event_loop`.
 
@@ -106,6 +114,8 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 ## Code References
 
 - `scripts/api/ib_gateway.py:restart_ib_gateway`
+- `scripts/api/ib_gateway.py:recover_stuck_pool` + `_probe_authenticated` (Gate 5, pool self-heal)
+- `scripts/api/server.py:_recover_stuck_pool_guarded` + `_ib_recovery_heartbeat_tick` (the 15s driver)
 - `scripts/ib_watchdog.py:run_cycle`
 - `scripts/utils/ib_2fa_lock.py`
 - `scripts/api/auth.py:51-54` (localhost bypass for Next.js → FastAPI)
