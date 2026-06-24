@@ -107,6 +107,9 @@ export function IndexOptionOrderForm({ ticker, portfolio = null }: IndexOptionOr
           netPremium: action === "SELL" ? -price : price,
           description,
           totalCost: action === "SELL" ? -totalCost : totalCost,
+          // No live underlying spot is resolved on this surface; a naked-short
+          // margin requirement renders "unavailable" rather than a guess.
+          underlyingSpot: null,
         };
       },
     [selectedContract, right, symbol],

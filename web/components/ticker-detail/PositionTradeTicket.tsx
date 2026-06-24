@@ -107,12 +107,14 @@ export default function PositionTradeTicket({
       : Number.isFinite(parsedPrice) && parsedPrice > 0;
   const isValid = !isNaN(parsedQty) && parsedQty > 0 && priceValid;
 
+  const underlyingSpot = prices[position.ticker]?.last ?? null;
+
   const built = useMemo(
     () =>
       isValid
-        ? buildPositionTradeOrder({ position, target, action, quantity: parsedQty, limitPrice: parsedPrice, tif, quote: { bid, ask } })
+        ? buildPositionTradeOrder({ position, target, action, quantity: parsedQty, limitPrice: parsedPrice, tif, quote: { bid, ask }, underlyingSpot })
         : null,
-    [isValid, position, target, action, parsedQty, parsedPrice, tif, bid, ask],
+    [isValid, position, target, action, parsedQty, parsedPrice, tif, bid, ask, underlyingSpot],
   );
 
   const nakedShortWarning = useMemo(() => {

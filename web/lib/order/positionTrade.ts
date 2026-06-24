@@ -70,8 +70,15 @@ export function buildPositionTradeOrder(params: {
    * P&L and have no risk math to adjust, so the quote is ignored there.
    */
   quote?: { bid: number | null; ask: number | null } | null;
+  /**
+   * Phase-1 margin: already-resolved underlying spot for the order's symbol.
+   * Threaded into the single-leg OPENING branch so a naked short surfaces a
+   * Reg-T margin requirement (not the assignment-at-zero `maxLoss`). Null when
+   * the caller has no spot.
+   */
+  underlyingSpot?: number | null;
 }): PositionTradeOrder | null {
-  const { position, target, action, quantity, limitPrice, tif, quote } = params;
+  const { position, target, action, quantity, limitPrice, tif, quote, underlyingSpot } = params;
   const ticker = position.ticker;
 
   if (target.kind === "combo") {
@@ -221,6 +228,7 @@ export function buildPositionTradeOrder(params: {
       description,
       totalCost: action === "SELL" ? -grossCash : grossCash,
       quote: quote ?? null,
+      underlyingSpot: underlyingSpot ?? null,
     },
   };
 }

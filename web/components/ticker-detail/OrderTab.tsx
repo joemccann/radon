@@ -375,6 +375,7 @@ function NewOrderForm({
         netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
         description,
         totalCost: action === "SELL" ? -totalCost : totalCost,
+        underlyingSpot: tickerPriceData?.last ?? null,
       };
     }
 
@@ -450,8 +451,10 @@ function NewOrderForm({
       // FU7: thread the single-leg live quote so net-of-cost renders. Off-hours
       // null bid/ask falls back to the F1 estimated half-spread inside the hook.
       quote: { bid, ask },
+      // Phase-1 margin: underlying spot for the naked-short Reg-T estimate.
+      underlyingSpot: tickerPriceData?.last ?? null,
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, position, bid, ask]);
+  }, [isValid, parsedQty, parsedPrice, action, ticker, position, bid, ask, tickerPriceData?.last]);
 
   // Naked short guard — reactive warning when action is SELL
   const nakedShortWarning = useMemo(() => {
