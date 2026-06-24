@@ -33,6 +33,7 @@ const thetaPayload = {
   scan_time: "2026-06-24T15:00:00Z",
   source: "Unusual Whales",
   universe: "fallback:ndx100",
+  requested_tickers: ["AAPL", "MSFT"],
   tickers_scanned: 2,
   candidates_found: 1,
   theta_harvest_count: 1,
@@ -129,6 +130,40 @@ describe("POST /api/scanner/theta/scan", () => {
       "/theta-harvester/scan?preset=ndx100&limit=2",
       { method: "POST", timeout: 430_000 },
     );
+  });
+
+  it("runs the FastAPI scan endpoint for a specific ticker", async () => {
+    mocks.radonFetch.mockResolvedValueOnce({ ...thetaPayload, universe: "explicit", requested_tickers: ["MU"] });
+    const { POST } = await import("../app/api/scanner/theta/scan/route");
+    const req = new Request("http://localhost/api/scanner/theta/scan", {
+      method: "POST",
+      body: JSON.stringify({ ticker: "mu" }),
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.requested_tickers).toEqual(["MU"]);
+    expect(mocks.radonFetch).toHaveBeenCalledWith(
+      "/theta-harvester/scan?ticker=MU",
+      { method: "POST", timeout: 430_000 },
+    );
+  });
+
+  it("rejects malformed ticker searches before hitting FastAPI", async () => {
+    const { POST } = await import("../app/api/scanner/theta/scan/route");
+    const req = new Request("http://localhost/api/scanner/theta/scan", {
+      method: "POST",
+      body: JSON.stringify({ ticker: "MU1" }),
+    });
+
+    const res = await POST(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(400);
+    expect(body.error).toContain("Ticker must be 1-6 letters");
+    expect(mocks.radonFetch).not.toHaveBeenCalled();
   });
 
   it("serves stale cache with a sync warning when FastAPI is unavailable", async () => {

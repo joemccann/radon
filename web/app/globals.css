@@ -9718,8 +9718,77 @@ tr {
 .theta-harvester__meta {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
+}
+
+.theta-search {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 4px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line-grid) 80%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel-raised) 70%, transparent);
+  color: var(--text-secondary);
+}
+
+.theta-search:focus-within {
+  border-color: color-mix(in srgb, var(--signal-core) 42%, transparent);
+  color: var(--text-primary);
+}
+
+.theta-search__input {
+  width: 86px;
+  min-width: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  outline: none;
+}
+
+.theta-search__input::placeholder {
+  color: var(--text-muted);
+}
+
+.theta-search__button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 8px;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 34%, transparent);
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--signal-core) 9%, transparent);
+  color: var(--signal-core);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.theta-search__button:disabled {
+  cursor: default;
+  opacity: 0.54;
+}
+
+.theta-search__error {
+  color: var(--fault);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
 }
 
 .theta-scan-button {
@@ -13700,6 +13769,28 @@ body[data-mobile="true"] .theta-harvester__meta {
   width: 100%;
   flex-wrap: wrap;
   justify-content: flex-start;
+}
+
+body[data-mobile="true"] .theta-search {
+  flex: 1 1 100%;
+  min-height: 44px;
+  padding: 0 6px 0 12px;
+}
+
+body[data-mobile="true"] .theta-search__input {
+  flex: 1 1 auto;
+  width: auto;
+  min-height: 40px;
+  font-size: 16px;
+}
+
+body[data-mobile="true"] .theta-search__button {
+  min-height: 36px;
+  padding: 0 12px;
+}
+
+body[data-mobile="true"] .theta-search__error {
+  flex: 1 1 100%;
 }
 
 body[data-mobile="true"] .theta-scan-button {

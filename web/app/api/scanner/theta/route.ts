@@ -42,6 +42,7 @@ export function emptyThetaHarvesterPayload() {
     scan_time: "",
     source: "Unusual Whales",
     universe: "preset:ndx100",
+    requested_tickers: [],
     tickers_scanned: 0,
     candidates_found: 0,
     theta_harvest_count: 0,

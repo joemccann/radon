@@ -566,6 +566,7 @@ export type ThetaHarvesterData = {
   scan_time: string;
   source: string;
   universe: string;
+  requested_tickers?: string[];
   tickers_scanned: number;
   candidates_found: number;
   theta_harvest_count: number;

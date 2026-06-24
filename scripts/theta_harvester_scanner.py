@@ -562,12 +562,18 @@ def resolve_tickers(tickers: Sequence[str], preset: Optional[str]) -> Tuple[List
     return [], f"preset:{preset_name}"
 
 
-def build_output(results: List[ThetaCandidate], source: str, universe_count: int) -> Dict[str, Any]:
+def build_output(
+    results: List[ThetaCandidate],
+    source: str,
+    universe_count: int,
+    requested_tickers: Optional[Sequence[str]] = None,
+) -> Dict[str, Any]:
     sorted_results = sorted(results, key=lambda row: row.score, reverse=True)
     return {
         "scan_time": datetime.now(timezone.utc).isoformat(),
         "source": "Unusual Whales",
         "universe": source,
+        "requested_tickers": list(requested_tickers or []),
         "tickers_scanned": universe_count,
         "candidates_found": len(sorted_results),
         "theta_harvest_count": sum(1 for row in sorted_results if row.verdict == "THETA_HARVEST"),
@@ -601,7 +607,7 @@ def scan_universe(
                 continue
             print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.score:.1f})", file=sys.stderr)
             results.append(row)
-    return build_output(results, source, len(resolved))
+    return build_output(results, source, len(resolved), requested_tickers=resolved)
 
 
 def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> None:

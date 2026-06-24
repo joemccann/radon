@@ -16,8 +16,19 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const params = new URLSearchParams();
-  if (typeof body.preset === "string") params.set("preset", body.preset);
-  if (typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0) {
+  const ticker = typeof body.ticker === "string" ? body.ticker.trim().toUpperCase() : "";
+  if (ticker && !/^[A-Z]{1,6}$/.test(ticker)) {
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ ...emptyThetaHarvesterPayload(), error: "Ticker must be 1-6 letters" }, { status: 400 }),
+      requestId,
+    );
+  }
+  if (ticker) {
+    params.set("ticker", ticker);
+  } else if (typeof body.preset === "string") {
+    params.set("preset", body.preset);
+  }
+  if (!ticker && typeof body.limit === "number" && Number.isFinite(body.limit) && body.limit > 0) {
     params.set("limit", String(Math.trunc(body.limit)));
   }
 

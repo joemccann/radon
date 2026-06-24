@@ -4,6 +4,7 @@ const thetaPayload = {
   scan_time: "2026-06-24T15:00:00Z",
   source: "Unusual Whales",
   universe: "fallback:ndx100",
+  requested_tickers: ["AAPL", "MSFT"],
   tickers_scanned: 2,
   candidates_found: 1,
   theta_harvest_count: 1,
@@ -167,6 +168,11 @@ test.describe("theta harvester scanner", () => {
     await page.getByRole("button", { name: /scan ndx/i }).click();
     await expect.poll(() => scanBodies.length).toBe(1);
     expect(scanBodies[0]).toEqual({ preset: "ndx100" });
+
+    await page.getByLabel("Ticker symbol").fill("mu");
+    await page.getByRole("button", { name: /^scan$/i }).click();
+    await expect.poll(() => scanBodies.length).toBe(2);
+    expect(scanBodies[1]).toEqual({ ticker: "MU" });
   });
 
   test("mobile renders theta cards without horizontal overflow", async ({ page }) => {
@@ -179,6 +185,7 @@ test.describe("theta harvester scanner", () => {
     const section = page.getByTestId("theta-harvester-section");
     await expect(section).toBeVisible();
     await expect(page.getByTestId("theta-harvester-mobile-list")).toBeVisible();
+    await expect(page.getByLabel("Ticker symbol")).toBeVisible();
     await expect(section.locator(".theta-card").first()).toContainText("AAPL");
     await expect(section.locator(".theta-card").first()).toContainText("TRUE THETA");
 
