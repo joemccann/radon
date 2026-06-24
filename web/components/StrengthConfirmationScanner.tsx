@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from "react";
 import { CheckCircle2, Loader2, Search, ShieldCheck, XCircle } from "lucide-react";
+import InfoTooltip from "./InfoTooltip";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import TickerLink from "./TickerLink";
@@ -38,6 +39,26 @@ const FACTOR_SHORT: Record<string, string> = {
   "VOLATILITY SMILE": "SMILE",
   "SYSTEMATIC POSITIONING": "SYS",
   "MARKET BREADTH": "BREADTH",
+};
+
+const FACTOR_HELP: Record<string, string> = {
+  "Q-SCORES": "Composite sentiment gate: option score above 3, momentum score above 3, and volatility score below 3 so strength is not stress-driven.",
+  "NET GEX": "Dealer gamma gate: negative GEX clusters are shrinking, net GEX is less negative near spot, and hedging pressure is declining.",
+  "CALL POSITIONING": "Upside positioning gate: a positive gamma wall sits above spot, calls are building across strikes, and support spans multiple expiries.",
+  "TERM STRUCTURE": "Vol curve gate: VIX term structure is in contango, the front curve is dropping, and the back curve is stable.",
+  "VOLATILITY SMILE": "Skew gate: downside skew is reducing, the smile is flattening bullishly, and upside convexity remains bid.",
+  "SYSTEMATIC POSITIONING": "Systematic flow gate: CTAs are net buyers, vol-control exposure is supportive, and risk-parity posture is bullish.",
+  "MARKET BREADTH": "Breadth gate: sectors are participating, advancing stocks are expanding, and the breadth indicator confirms the move.",
+};
+
+const FACTOR_TEST_ID: Record<string, string> = {
+  "Q-SCORES": "q",
+  "NET GEX": "gex",
+  "CALL POSITIONING": "call",
+  "TERM STRUCTURE": "term",
+  "VOLATILITY SMILE": "smile",
+  "SYSTEMATIC POSITIONING": "sys",
+  "MARKET BREADTH": "breadth",
 };
 
 function extract(row: StrengthConfirmationResult, key: StrengthSortKey): string | number | null {
@@ -79,6 +100,24 @@ function failedFactors(row: StrengthConfirmationResult): string {
 
 function StatusPill({ row }: { row: StrengthConfirmationResult }) {
   return <span className={`theta-pill theta-pill--${verdictTone(row.verdict)}`}>{verdictLabel(row.verdict)}</span>;
+}
+
+function FactorHeader({ group }: { group: string }) {
+  const shortLabel = FACTOR_SHORT[group];
+  const testId = FACTOR_TEST_ID[group];
+  return (
+    <th className="center strength-factor-header-cell">
+      <span className="strength-factor-header">
+        <span>{shortLabel}</span>
+        <InfoTooltip
+          text={FACTOR_HELP[group]}
+          ariaLabel={`${group} strength input details`}
+          triggerTestId={`strength-factor-tooltip-${testId}`}
+          contentTestId={`strength-factor-tooltip-content-${testId}`}
+        />
+      </span>
+    </th>
+  );
 }
 
 function FactorStrip({ row }: { row: StrengthConfirmationResult }) {
@@ -247,7 +286,7 @@ export default function StrengthConfirmationScanner({
                   <SortTh<StrengthSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<StrengthSortKey> label="Groups" sortKey="groups" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<StrengthSortKey> label="Spot" sortKey="spot" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  {FACTOR_ORDER.map((group) => <th key={group} className="center">{FACTOR_SHORT[group]}</th>)}
+                  {FACTOR_ORDER.map((group) => <FactorHeader key={group} group={group} />)}
                   <th>Failed</th>
                   <SortTh<StrengthSortKey> label="Status" sortKey="verdict" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                 </tr>

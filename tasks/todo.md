@@ -1,3 +1,31 @@
+# Task: 7-Step Strength Factor Info Bubbles
+
+## Dependency Graph
+
+- T1 depends_on: [] — Define the seven factor tooltip copy and table-header placement.
+- T2 depends_on: [T1] — Render accessible info bubbles on each factor column without changing table density.
+- T3 depends_on: [T2] — Add focused component and Playwright assertions for all seven factor help triggers.
+- T4 depends_on: [T3] — Run focused checks, full web suite, and a browser visual pass.
+
+## Checklist
+
+- [x] T1 — Define copy and placement.
+- [x] T2 — Implement factor info bubbles.
+- [x] T3 — Add regression coverage.
+- [x] T4 — Verify and document.
+
+## Review
+
+- Added seven `InfoTooltip` bubbles to the 7-step strength table factor headers: Q, GEX, CALL, TERM, SMILE, SYS, and BREADTH.
+- Tooltip copy maps directly to the seven checklist gates: sentiment/momentum/vol stress, dealer gamma, call positioning, term structure, volatility smile/skew, systematic positioning, and breadth.
+- Kept the existing dense table rhythm by adding a compact inline header affordance and scoped `.strength-factor-header` CSS.
+- Focused component verification passed: `npx vitest run --config vitest.config.ts web/tests/strength-confirmation-scanner.test.tsx` — 1 file, 4 tests.
+- Focused browser verification passed: `PLAYWRIGHT_PORT=3046 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/strength-confirmation-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 tests. The desktop path checks all seven triggers and opens the GEX bubble; the mobile path still has no horizontal overflow.
+- Screenshot sanity check passed on `/scanner?mode=strength`: 7 triggers, GEX bubble visible with `Dealer gamma gate`, no desktop horizontal overflow, screenshot saved to `/tmp/radon-strength-factor-tooltips.png`.
+- Full web suite passed: `npm test` — 348 files, 3,443 passed, 26 skipped. `npm run typecheck` passed. `npm run lint` passed with 10 existing warnings. `git diff --check` passed.
+
+---
+
 # Task: Order Margin Impact Unavailable State
 
 ## Dependency Graph

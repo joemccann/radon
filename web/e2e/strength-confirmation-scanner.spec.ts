@@ -152,6 +152,12 @@ test.describe("7-step strength scanner", () => {
     await expect(section).toContainText("7/7");
     await expect(section).toContainText("CONFIRMED");
 
+    for (const key of ["q", "gex", "call", "term", "smile", "sys", "breadth"]) {
+      await expect(section.getByTestId(`strength-factor-tooltip-${key}`)).toBeVisible();
+    }
+    await section.getByTestId("strength-factor-tooltip-gex").hover();
+    await expect(section.getByTestId("strength-factor-tooltip-content-gex")).toContainText("Dealer gamma gate");
+
     await page.getByRole("button", { name: /scan ndx/i }).click();
     await expect.poll(() => scanBodies.length).toBe(1);
     expect(scanBodies[0]).toEqual({ preset: "ndx100" });
