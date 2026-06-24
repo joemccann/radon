@@ -32,6 +32,10 @@ type Ib2faControlsProps = {
   /** Full-stack recovery (radon restart): brings the gateway + dependents back
    *  in order. Reuses the Restart All Services path. */
   onStartGateway?: () => Promise<void>;
+  /** Both admin polls (/admin/services + /health) are failing — radon-api is
+   *  unreachable, which is exactly what a gateway stop causes (cascade). The
+   *  cached unit row then reads a stale "active"; treat the gateway as stopped. */
+  apiUnreachable?: boolean;
   onAfter?: () => void;
 };
 
@@ -49,6 +53,7 @@ export default function Ib2faControls({
   servicesSupported = true,
   onStopGateway,
   onStartGateway,
+  apiUnreachable = false,
   onAfter,
 }: Ib2faControlsProps) {
   const [showForceConfirm, setShowForceConfirm] = useState(false);
@@ -70,10 +75,15 @@ export default function Ib2faControls({
   const disableForce = isForcePushDisabled({ pushLock, pending: pendingForce });
   const disableReason = forcePushDisabledReason({ pushLock, pending: pendingForce });
 
-  const polledPowerState = gatewayPowerState({
-    unit: gatewayUnit,
-    portListening: health?.ib_gateway?.port_listening,
-  });
+  // When radon-api is unreachable (both admin polls failing — the cascade a
+  // gateway stop causes), the cached unit row is stale "active". Don't latch
+  // "running" off stale data: report stopped so the control offers Start Gateway.
+  const polledPowerState: GatewayPowerState = apiUnreachable
+    ? "stopped"
+    : gatewayPowerState({
+        unit: gatewayUnit,
+        portListening: health?.ib_gateway?.port_listening,
+      });
   const powerState = optimisticPower ?? polledPowerState;
 
   // Reconcile the optimistic override with the authoritative poll: clear it
