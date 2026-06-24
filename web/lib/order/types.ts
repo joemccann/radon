@@ -91,6 +91,24 @@ export interface OrderPresentationSummary {
   breakeven?: number | null;  // For options/spreads
   estimatedPnl?: number | null;
   estimatedPnlLabel?: string;
+  /**
+   * Phase-1 margin-impact estimate. Optional/nullable so existing producers
+   * may omit it; it rides inside the existing brand (no brand change). Only
+   * populated by `useOrderRisk` when coverage is resolved AND a baseline
+   * (available funds / buying power) is present — never $0 for a missing
+   * baseline. `source` is the Phase-1 union; Phase 2 will add `'ib-whatif'`.
+   * For naked / undefined-risk shorts `requirement` is the Reg-T ESTIMATE,
+   * NOT `maxLoss` (which is the assignment-at-zero stress bound and massively
+   * overstates real margin).
+   */
+  marginImpact?: {
+    requirement: number | null;
+    availableBefore: number | null;
+    availableAfter: number | null;
+    baselineLabel: string;
+    source: "exact-maxloss" | "regt-estimate";
+    approximate: boolean;
+  } | null;
 }
 
 /**

@@ -27,6 +27,13 @@ export {
   type AugmentedOrderLegs,
 } from "./internal/computeOrderRisk";
 
+export {
+  estimateInitialMargin,
+  type MarginEstimate,
+  type MarginEstimateArgs,
+  type MarginEstimateSource,
+} from "./internal/marginEstimate";
+
 /**
  * Wrap a plain presentation summary with the augmentation brand for use
  * in component-render tests. The `coverageStatus` defaults to `"resolved"`

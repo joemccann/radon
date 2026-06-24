@@ -43,8 +43,13 @@ import {
   computeOrderRisk,
   type ChainOrderLeg,
   type CoveringPortfolioLeg,
+  type OrderRisk,
 } from "./internal/computeOrderRisk";
 import { computeLinearRisk } from "./internal/computeLinearRisk";
+import {
+  estimateInitialMargin,
+  type MarginEstimate,
+} from "./internal/marginEstimate";
 import { estimateRoundTripCost } from "../costs";
 
 export type { ChainOrderLeg, CoveringPortfolioLeg };
@@ -118,6 +123,16 @@ export interface OptionOrderRiskInput {
    * estimated half-spread inside the cost model rather than disabling cost.
    */
   quote?: { bid: number | null; ask: number | null } | null;
+  /**
+   * Already-resolved underlying spot for the order's symbol. Used ONLY by the
+   * Phase-1 margin estimator for naked single-leg shorts (Reg-T initial =
+   * 20% spot less OTM, floored at 10% strike). The surface threads in the
+   * spot it already has (`prices[ticker].last`, or the forward-priced
+   * underlying for VIX); `null` when the surface has no spot. When null on a
+   * naked short, the margin requirement renders "unavailable" rather than a
+   * guess. Has no effect on max-loss/max-gain math.
+   */
+  underlyingSpot?: number | null;
 }
 
 /**
@@ -227,6 +242,114 @@ function brand(
   } as AugmentedOrderSummary;
 }
 
+type MarginImpact = NonNullable<OrderPresentationSummary["marginImpact"]>;
+
+/**
+ * Resolve the operator-visible margin baseline from the account summary.
+ * Prefers AvailableFunds; falls back to BuyingPower. Returns null + a
+ * coherent label when neither is present.
+ */
+function resolveMarginBaseline(
+  portfolio: PortfolioData | null,
+): { availableBefore: number | null; baselineLabel: string } {
+  const account = portfolio?.account_summary;
+  if (account && Number.isFinite(account.available_funds)) {
+    return { availableBefore: account.available_funds as number, baselineLabel: "Available Funds" };
+  }
+  if (account && Number.isFinite(account.buying_power)) {
+    return { availableBefore: account.buying_power, baselineLabel: "Buying Power" };
+  }
+  return { availableBefore: null, baselineLabel: "Available Funds" };
+}
+
+/**
+ * Compose the Phase-1 `marginImpact` field from a margin estimate + the
+ * portfolio baseline. Returns null (NEVER a $0 baseline) when coverage is not
+ * resolved or no account summary is present, so the UI omits the rows rather
+ * than rendering a misleading zero.
+ */
+function buildMarginImpact(
+  estimate: MarginEstimate,
+  portfolio: PortfolioData | null,
+  coverageStatus: CoverageStatus,
+): MarginImpact | null {
+  if (coverageStatus !== "resolved") return null;
+  if (portfolio?.account_summary == null) return null;
+  const { availableBefore, baselineLabel } = resolveMarginBaseline(portfolio);
+  if (availableBefore == null) return null;
+  const requirement = estimate.requirement;
+  const availableAfter = requirement != null ? availableBefore - requirement : null;
+  return {
+    requirement,
+    availableBefore,
+    availableAfter,
+    baselineLabel,
+    source: estimate.source,
+    approximate: estimate.approximate,
+  };
+}
+
+/**
+ * Margin estimate for a freshly-opened linear order (no close-out).
+ *   - BUY stock → cash buy (`Math.abs(totalCost)`).
+ *   - SELL stock → Reg-T 50% of notional.
+ *   - SHORT future → UNBOUNDED → null requirement (never the unbounded maxLoss).
+ *   - LONG future → bounded maxLoss (price-to-zero × mult × qty) is the
+ *     conservative defined-risk requirement.
+ */
+function estimateLinearMargin(
+  input: LinearOrderRiskInput,
+  maxLoss: number | null,
+  maxLossUnbounded: boolean,
+): MarginEstimate {
+  const notional = Math.abs(input.limitPrice * input.quantity * input.multiplier);
+  if (input.instrument === "stock") {
+    return input.action === "SELL"
+      ? estimateInitialMargin({ kind: "short-stock", price: input.limitPrice, quantity: input.quantity })
+      : estimateInitialMargin({ kind: "long-debit", totalCost: notional });
+  }
+  // Future
+  if (maxLossUnbounded) {
+    return estimateInitialMargin({ kind: "short-future-unbounded" });
+  }
+  return estimateInitialMargin({ kind: "defined-risk", maxLoss });
+}
+
+/**
+ * Margin estimate for a freshly-opened option order (no close-out).
+ *
+ * Classification:
+ *   - Single-leg naked SHORT (the risk model returns an undefined-risk reason
+ *     or an unbounded loss) → Reg-T per-leg estimate from spot/strike/right.
+ *     This is the case where `maxLoss` (assignment-at-zero stress) is wrong —
+ *     for a 15× MU 850P naked put it reads ~$1.275M, vs ~$138k Reg-T.
+ *   - Everything else (defined-risk spreads, long debit, covered shorts that
+ *     augmentation turned into spreads) → `maxLoss`, which IS the Reg-T margin
+ *     for a defined-risk position. Long single options bottom out at the
+ *     premium, so `maxLoss` already equals the debit there.
+ *   - Multi-leg undefined/unbounded combos → no reliable client-side Reg-T;
+ *     requirement null (renders "unavailable").
+ */
+function estimateOptionMargin(opt: OptionOrderRiskInput, risk: OrderRisk): MarginEstimate {
+  const isUndefined = risk.maxLossUnbounded || risk.undefinedRiskReason != null;
+  const single = opt.chainLegs.length === 1 ? opt.chainLegs[0] : null;
+  if (isUndefined && single != null && single.action === "SELL") {
+    return estimateInitialMargin({
+      kind: "naked-option",
+      right: single.right,
+      strike: single.strike,
+      spot: opt.underlyingSpot ?? null,
+      quantity: Math.max(1, Math.trunc(single.quantity)),
+      premiumPerShare: Math.abs(opt.netPremium),
+    });
+  }
+  if (isUndefined) {
+    // Multi-leg undefined/unbounded — no reliable client-side Reg-T estimate.
+    return { requirement: null, source: "regt-estimate", approximate: true };
+  }
+  return estimateInitialMargin({ kind: "defined-risk", maxLoss: risk.maxLoss });
+}
+
 /**
  * Build the augmented summary from raw inputs + portfolio.
  *
@@ -290,6 +413,12 @@ export function useOrderRisk(
               : "Cost to Cover:",
           estimatedPnl: pnl,
           estimatedPnlLabel: input.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
+          // A pure close consumes no margin.
+          marginImpact: buildMarginImpact(
+            estimateInitialMargin({ kind: "close-out" }),
+            portfolio,
+            coverageStatus,
+          ),
         };
         return {
           summary: brand(closeSummary, coverageStatus, traceId),
@@ -308,6 +437,8 @@ export function useOrderRisk(
         heldShort: input.heldShortQuantity,
       });
 
+      const linearMargin = estimateLinearMargin(input, risk.maxLoss, risk.maxLossUnbounded);
+
       const resolved: OrderPresentationSummary = {
         ...baseSummary,
         maxGain: risk.maxGain,
@@ -315,6 +446,7 @@ export function useOrderRisk(
         maxLossUnbounded: risk.maxLossUnbounded,
         maxGainUnbounded: risk.maxGainUnbounded,
         undefinedRiskReason: risk.undefinedRiskReason,
+        marginImpact: buildMarginImpact(linearMargin, portfolio, coverageStatus),
       };
 
       const okToSubmit =
@@ -363,6 +495,12 @@ export function useOrderRisk(
         totalLabel: opt.totalLabel ?? (proceeds >= 0 ? "Close Credit:" : "Close Debit:"),
         estimatedPnl: pnl,
         estimatedPnlLabel: opt.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
+        // A pure close consumes no margin.
+        marginImpact: buildMarginImpact(
+          estimateInitialMargin({ kind: "close-out" }),
+          portfolio,
+          coverageStatus,
+        ),
       };
       return {
         summary: brand(closeSummary, coverageStatus, traceId),
@@ -409,6 +547,8 @@ export function useOrderRisk(
       costs,
     );
 
+    const optionMargin = estimateOptionMargin(opt, risk);
+
     const resolved: OrderPresentationSummary = {
       ...baseSummary,
       maxGain: risk.maxGain,
@@ -416,6 +556,7 @@ export function useOrderRisk(
       maxLossUnbounded: risk.maxLossUnbounded,
       maxGainUnbounded: risk.maxGainUnbounded,
       undefinedRiskReason: risk.undefinedRiskReason,
+      marginImpact: buildMarginImpact(optionMargin, portfolio, coverageStatus),
     };
 
     const okToSubmit =

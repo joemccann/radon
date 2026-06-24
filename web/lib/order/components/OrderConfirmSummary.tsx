@@ -113,6 +113,44 @@ export function OrderConfirmSummary({
             <span className="order-confirm-metric-value">{formatCurrency(summary.totalCost)}</span>
           </span>
         )}
+        {summary.coverageStatus === "resolved" && summary.marginImpact?.requirement != null && (
+          <>
+            <span className="order-confirm-metric">
+              <span className="order-confirm-metric-label">Margin Req:</span>
+              <span className="order-confirm-metric-value">
+                {summary.marginImpact.approximate ? "~" : ""}
+                {formatCurrency(summary.marginImpact.requirement)}
+                {summary.marginImpact.source === "regt-estimate" && (
+                  <span
+                    style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
+                  >
+                    est. Reg-T
+                  </span>
+                )}
+              </span>
+            </span>
+            <span className="order-confirm-metric">
+              <span className="order-confirm-metric-label">{summary.marginImpact.baselineLabel} After:</span>
+              <span
+                className="order-confirm-metric-value"
+                data-margin-exceeded={
+                  summary.marginImpact.availableAfter != null &&
+                  summary.marginImpact.availableAfter < 0
+                    ? "true"
+                    : undefined
+                }
+                style={
+                  summary.marginImpact.availableAfter != null &&
+                  summary.marginImpact.availableAfter < 0
+                    ? { color: "var(--negative)" }
+                    : undefined
+                }
+              >
+                {formatCurrency(summary.marginImpact.availableAfter)}
+              </span>
+            </span>
+          </>
+        )}
         {showMaxGain && (
           <span className="order-confirm-metric">
             <span className="order-confirm-metric-label">Max Gain:</span>

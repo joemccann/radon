@@ -379,8 +379,11 @@ function OrderBuilder({
       // are null (off-hours), the cost model falls back to its estimated
       // half-spread; the risk verdict is unchanged shape, just cost-aware.
       quote: { bid: netPrices.bid, ask: netPrices.ask },
+      // Phase-1 margin estimate: thread the already-resolved underlying spot so
+      // a naked single-leg short surfaces a Reg-T requirement (not maxLoss).
+      underlyingSpot: spot ?? null,
     };
-  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, legs, ticker, netPrices.bid, netPrices.ask]);
+  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, legs, ticker, netPrices.bid, netPrices.ask, spot]);
 
   // Pull the resolved state for the coverage chip + (later) submit gating.
   // Calling `useOrderRisk` directly here is equivalent to the gate; the gate
