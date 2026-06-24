@@ -54,6 +54,12 @@ function daysToExpiry(expiry: string): number {
   return Math.max(0, Math.ceil((exp.getTime() - now.getTime()) / 86_400_000));
 }
 
+function normalizeProviderOptionDelta(rawDelta: number, type: "Call" | "Put"): number {
+  if (type === "Call") return rawDelta < 0 ? Math.abs(rawDelta) : rawDelta;
+  if (rawDelta <= 0) return rawDelta;
+  return rawDelta <= 1 ? rawDelta - 1 : -rawDelta;
+}
+
 /* ─── Per-position delta with leg breakdown ──────────── */
 
 function positionDeltaDetailed(
@@ -87,7 +93,11 @@ function positionDeltaDetailed(
     const lp = key ? prices[key] : null;
 
     if (lp?.delta != null) {
-      const legDelta = sign * lp.delta * leg.contracts * 100;
+      const rawOptionDelta = normalizeProviderOptionDelta(
+        lp.delta,
+        leg.type as "Call" | "Put",
+      );
+      const legDelta = sign * rawOptionDelta * leg.contracts * 100;
       totalDelta += legDelta;
       usedIb = true;
       legs.push({
@@ -95,7 +105,7 @@ function positionDeltaDetailed(
         direction: leg.direction,
         strike: leg.strike,
         contracts: leg.contracts,
-        rawDelta: sign * lp.delta,
+        rawDelta: sign * rawOptionDelta,
         legDelta,
       });
       continue;

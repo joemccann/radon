@@ -4574,3 +4574,31 @@ verify search returns results on app.radon.run.
 - Left unrelated untracked scratch files untouched: `.serena/.gitignore`, `.serena/project.yml`, `data/backtest/cri.json`, `deploy/beta/setup-beta.sh`, and `tasks/tradingview-chart-eval-report.html`.
 - Post-fetch focused verification passed: `npx vitest run web/tests/exposure-breakdown.test.ts web/tests/exposure-breakdown-modal-leverage.test.tsx web/tests/dollar-delta-leverage.test.ts --config vitest.config.ts` - 3 files, 34 tests.
 - Hygiene passed: `git diff --check` and strict conflict-marker scan.
+
+---
+
+## Session: IB Put Delta Expanded Leg Sign Bug (2026-06-24)
+
+### Dependency Graph
+- T60 (Capture the user correction, inspect live screenshot semantics, and trace IB delta normalization) depends_on: []
+- T61 (Add a regression for positive IB put deltas on expanded bear-put-spread legs) depends_on: [T60]
+- T62 (Normalize provider put deltas before applying LONG/SHORT direction) depends_on: [T61]
+- T63 (Run focused Vitest, Playwright/browser visual verification, typecheck, full web tests, and hygiene) depends_on: [T62]
+- T64 (Commit, merge/fetch, push, and confirm CI/deploy) depends_on: [T63]
+
+### Checklist
+- [x] T60 Capture correction and trace IB delta normalization
+- [x] T61 Add failing regression
+- [x] T62 Normalize provider put deltas
+- [x] T63 Verify calculation/UI behavior
+- [ ] T64 Commit, push, and confirm remote status
+
+### Review
+- The first spread-level fix did not cover expanded IB leg rows. The bug was in the provider-delta path: positive put deltas needed to be normalized to canonical signed put delta before applying LONG/SHORT direction.
+- Added a red/green regression for the screenshot shape (`SPY_20260918_650_P` and `SPY_20260918_740_P` with positive provider deltas) and a modal regression that expands the bear-put-spread row.
+- Visual Playwright verification writes `/tmp/radon-spy-bear-put-ib-leg-signs.png`; the modal shows `SHORT 50x Put $650` as positive exposure and `LONG 50x Put $740` as negative exposure.
+- Focused Vitest passed: `npx vitest run web/tests/exposure-breakdown.test.ts web/tests/exposure-breakdown-modal-leverage.test.tsx web/tests/dollar-delta-leverage.test.ts --config vitest.config.ts` - 3 files, 36 tests.
+- Playwright passed: `RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/dollar-delta-leverage.spec.ts --project=chromium --config playwright.config.ts --timeout=30000` - 4 tests.
+- Typecheck passed: `npm run typecheck`.
+- Full web suite passed: `npm test -- --reporter=dot` - 341 files, 3375 tests passing, 26 skipped.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan.

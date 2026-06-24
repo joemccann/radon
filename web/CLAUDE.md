@@ -139,7 +139,7 @@ IB recomputes `pos.avgCost` server-side on every fill including partial closes, 
 **Forward-priced indices (VIX) underlying.** VIX options settle against the VIX FUTURE for their OWN expiry, not cash spot — so an underlying/spot for a VIX option position must come from `resolveUnderlyingSpot()` (`lib/impliedValue.ts`): `prices[ticker].fwdCurve[YYYYMMDD]` → front-month `fwd` → cash `.last`, gated on `isForwardPricedIndex()` (only `VIX`; SPX/NDX/RUT are cash-settled). NEVER resolve a VIX option's underlying as plain `prices[ticker].last` — that shows spot (~15) for an August spread whose real underlying is the August future. The relay publishes the per-held-expiry curve in `prices[ticker].fwdCurve`; `resolveSpot()` already prices BS legs off it. Commit e02f4bd.
 
 ### Exposure Delta Sign
-`rawDelta = sign × lp.delta` where `sign = -1` for SHORT. LONG Call →+, SHORT Call →−, LONG Put →−, SHORT Put →+. Impl: `web/lib/exposureBreakdown.ts`.
+Normalize provider option delta to canonical option delta first, then apply position direction. LONG Call -> +, SHORT Call -> -, LONG Put -> -, SHORT Put -> +. Positive provider put deltas may be call-equivalent; convert with `delta - 1` before applying LONG/SHORT. Impl: `web/lib/exposureBreakdown.ts`.
 
 ### Implied (Black-Scholes) Value
 TS port of `scripts/scenario_analysis.py:192-226`, verified to 4-decimal Python parity.
