@@ -96,6 +96,8 @@ export function OrderConfirmSummary({
   const variantClass = variant === "info" ? "order-confirm-summary-info" : "";
   const showMaxGain = summary.maxGainUnbounded === true || summary.maxGain != null;
   const showMaxLoss = summary.maxLossUnbounded === true || summary.maxLoss != null;
+  const marginImpact = summary.coverageStatus === "resolved" ? summary.marginImpact ?? null : null;
+  const marginRequirementUnavailable = marginImpact != null && marginImpact.requirement == null;
   const hasUndefinedRisk =
     summary.maxLossUnbounded === true ||
     (summary.undefinedRiskReason != null && summary.undefinedRiskReason.length > 0);
@@ -113,40 +115,59 @@ export function OrderConfirmSummary({
             <span className="order-confirm-metric-value">{formatCurrency(summary.totalCost)}</span>
           </span>
         )}
-        {summary.coverageStatus === "resolved" && summary.marginImpact?.requirement != null && (
+        {marginImpact != null && (
           <>
             <span className="order-confirm-metric">
               <span className="order-confirm-metric-label">Margin Req:</span>
-              <span className="order-confirm-metric-value">
-                {summary.marginImpact.approximate ? "~" : ""}
-                {formatCurrency(summary.marginImpact.requirement)}
-                {summary.marginImpact.source === "regt-estimate" && (
-                  <span
-                    style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
-                  >
-                    est. Reg-T
-                  </span>
+              <span
+                className="order-confirm-metric-value"
+                data-margin-requirement-unavailable={
+                  marginRequirementUnavailable ? "true" : undefined
+                }
+                style={marginRequirementUnavailable ? { color: "var(--warning)" } : undefined}
+              >
+                {marginRequirementUnavailable ? (
+                  <>
+                    UNAVAILABLE
+                    <span
+                      style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
+                    >
+                      IB what-if required
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    {marginImpact.approximate ? "~" : ""}
+                    {formatCurrency(marginImpact.requirement)}
+                    {marginImpact.source === "regt-estimate" && (
+                      <span
+                        style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
+                      >
+                        est. Reg-T
+                      </span>
+                    )}
+                  </>
                 )}
               </span>
             </span>
             <span className="order-confirm-metric">
-              <span className="order-confirm-metric-label">{summary.marginImpact.baselineLabel} After:</span>
+              <span className="order-confirm-metric-label">{marginImpact.baselineLabel} After:</span>
               <span
                 className="order-confirm-metric-value"
                 data-margin-exceeded={
-                  summary.marginImpact.availableAfter != null &&
-                  summary.marginImpact.availableAfter < 0
+                  marginImpact.availableAfter != null &&
+                  marginImpact.availableAfter < 0
                     ? "true"
                     : undefined
                 }
                 style={
-                  summary.marginImpact.availableAfter != null &&
-                  summary.marginImpact.availableAfter < 0
+                  marginImpact.availableAfter != null &&
+                  marginImpact.availableAfter < 0
                     ? { color: "var(--negative)" }
                     : undefined
                 }
               >
-                {formatCurrency(summary.marginImpact.availableAfter)}
+                {formatCurrency(marginImpact.availableAfter)}
               </span>
             </span>
           </>

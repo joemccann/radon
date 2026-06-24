@@ -308,6 +308,33 @@ describe("useOrderRisk — marginImpact attachment", () => {
 // ── 3. OrderConfirmSummary renders the two rows ───────────────────────────────
 
 describe("OrderConfirmSummary — margin rows render", () => {
+  it("multi-leg unbounded combo: renders explicit unavailable margin impact instead of hiding it", () => {
+    const input = {
+      ticker: "AVGO",
+      chainLegs: [
+        { action: "SELL" as const, right: "C" as const, strike: 1250, expiry: "20260626", quantity: 10 },
+        { action: "BUY" as const, right: "C" as const, strike: 1200, expiry: "20260626", quantity: 5 },
+      ],
+      netPremium: -1.17,
+      description: "Bull Call Spread @ $-1.17",
+      totalCost: -585,
+      underlyingSpot: 1200,
+    };
+    const { result } = renderHook(() => useOrderRisk(input, resolvedPortfolio));
+    expect(result.current!.summary.maxLossUnbounded).toBe(true);
+    expect(result.current!.summary.marginImpact?.requirement).toBeNull();
+
+    const { container } = render(
+      <OrderConfirmSummary summary={result.current!.summary} variant="info" />,
+    );
+    const text = container.textContent ?? "";
+    expect(text).toMatch(/Margin Req:/);
+    expect(text).toMatch(/UNAVAILABLE/);
+    expect(text).toMatch(/IB what-if required/);
+    expect(text).toMatch(/Available Funds After:/);
+    expect(text).toMatch(/---/);
+  });
+
   it("naked short put: renders Margin Req with ~ + est. Reg-T and the After row", () => {
     const input = {
       ticker: "MU",

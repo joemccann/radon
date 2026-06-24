@@ -1,3 +1,30 @@
+# Task: Order Margin Impact Unavailable State
+
+## Dependency Graph
+
+- T1 depends_on: [] — Document margin-impact bug scope and inspect current order-risk estimator/render path.
+- T2 depends_on: [T1] — Add a regression for multi-leg undefined/unbounded combos rendering a margin-impact unavailable state.
+- T3 depends_on: [T2] — Update summary rendering so margin impact never silently disappears when coverage/baseline exist but requirement is unavailable.
+- T4 depends_on: [T3] — Run focused tests, typecheck/lint where relevant, and update task review/lessons.
+
+## Checklist
+
+- [x] T1 — Inspected current margin-impact estimator/render path.
+- [x] T2 — Add regression for undefined multi-leg margin unavailable rendering.
+- [x] T3 — Render explicit unavailable margin-impact state.
+- [x] T4 — Verify and document.
+
+## Review
+
+- Root cause: `useOrderRisk` produced `summary.marginImpact`, but multi-leg undefined/unbounded combos can have `requirement: null`; `OrderConfirmSummary` only rendered margin rows when a numeric requirement existed.
+- Added a regression for the screenshot-class ratio call spread so the confirm summary must show an explicit unavailable margin state instead of hiding the row.
+- Updated the confirm summary to render `Margin Req: UNAVAILABLE` with `IB what-if required`, plus `Available Funds After: ---`, whenever account coverage is resolved but the client-side estimator cannot produce a reliable requirement.
+- Focused verification passed: `npx vitest run --config vitest.config.ts web/tests/order-margin-impact.test.tsx web/tests/order-risk-chokepoint.test.tsx web/tests/order-confirm-summary-undefined-risk.test.tsx web/tests/order-cost-quotes.test.tsx` — 4 files, 53 tests.
+- Browser/E2E verification passed: `PLAYWRIGHT_PORT=3045 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/order-margin-impact-unavailable.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 1 test.
+- Full web suite passed: `npm test` — 348 files, 3,442 passed, 26 skipped. `npm run typecheck` passed. `npm run lint` passed with 10 existing hook-dependency warnings. `git diff --check` passed; exact conflict-marker scan found no matches.
+
+---
+
 # Task: Regime Sync Working Indicator
 
 ## Dependency Graph
