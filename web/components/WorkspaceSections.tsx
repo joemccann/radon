@@ -1409,15 +1409,16 @@ function ScannerSections() {
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
   };
 
-  const runThetaScan = async () => {
+  const runThetaScan = async (ticker?: string) => {
     if (thetaScanning) return;
+    const normalizedTicker = ticker?.trim().toUpperCase();
     setThetaScanError(null);
     setThetaScanning(true);
     try {
       const res = await fetch("/api/scanner/theta/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preset: "ndx100" }),
+        body: JSON.stringify(normalizedTicker ? { ticker: normalizedTicker } : { preset: "ndx100" }),
         cache: "no-store",
       });
       if (!res.ok) {
@@ -1484,7 +1485,8 @@ function ScannerSections() {
           scanning={thetaScanning}
           error={thetaScanError || theta.error}
           lastSync={theta.lastSync}
-          onScan={runThetaScan}
+          onScan={() => { void runThetaScan(); }}
+          onTickerScan={(ticker) => { void runThetaScan(ticker); }}
         />
       </div>
     );

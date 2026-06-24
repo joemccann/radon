@@ -103,7 +103,15 @@ const data: ThetaHarvesterData = {
 describe("ThetaHarvesterScanner", () => {
   it("renders desktop rows, mobile cards, and the scan action", () => {
     const onScan = vi.fn();
-    render(<ThetaHarvesterScanner data={data} onScan={onScan} lastSync={data.scan_time} />);
+    const onTickerScan = vi.fn();
+    render(
+      <ThetaHarvesterScanner
+        data={data}
+        onScan={onScan}
+        onTickerScan={onTickerScan}
+        lastSync={data.scan_time}
+      />,
+    );
 
     const section = screen.getByTestId("theta-harvester-section");
     expect(within(section).getByText("Theta Harvester")).toBeTruthy();
@@ -120,6 +128,21 @@ describe("ThetaHarvesterScanner", () => {
 
     fireEvent.click(screen.getByRole("button", { name: /scan ndx/i }));
     expect(onScan).toHaveBeenCalledTimes(1);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbol"), { target: { value: "mu" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+    expect(onTickerScan).toHaveBeenCalledWith("MU");
+  });
+
+  it("rejects malformed ticker search text", () => {
+    const onTickerScan = vi.fn();
+    render(<ThetaHarvesterScanner data={data} onTickerScan={onTickerScan} />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbol"), { target: { value: "MU1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+
+    expect(onTickerScan).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain("Enter 1-6 letters.");
   });
 
   it("renders the measured-empty state when the latest scan has no candidates", () => {

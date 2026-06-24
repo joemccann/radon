@@ -2029,39 +2029,57 @@ _theta_scan_lock: Optional[asyncio.Lock] = None
 THETA_COOLDOWN_S = 600  # 10 min — UW option-chain + GEX scan budget
 
 
+def _theta_cache_matches_preset(cached: Any, preset: str) -> bool:
+    if not isinstance(cached, dict):
+        return False
+    universe = str(cached.get("universe") or "")
+    preset_key = preset.lower()
+    return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
+
+
 @app.post("/theta-harvester/scan")
-async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0):
-    """Run theta_harvester_scanner.py against a preset.
+async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: str = ""):
+    """Run theta_harvester_scanner.py against a preset or explicit ticker.
 
     The script writes data/theta_harvester.json and records its own
     service_health row. Cooldown mirrors LEAP/GARCH to protect UW quotas.
     """
     global _theta_last_scan, _theta_scan_lock
     import time as _time
+    ticker = ticker.upper().strip()
+    if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
+        raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
     if _theta_scan_lock is None:
         _theta_scan_lock = asyncio.Lock()
     now = _time.monotonic()
-    if now - _theta_last_scan < THETA_COOLDOWN_S:
+    is_ticker_scan = bool(ticker)
+    if not is_ticker_scan and now - _theta_last_scan < THETA_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
-        if cached:
+        if _theta_cache_matches_preset(cached, preset):
             return cached
     async with _theta_scan_lock:
-        if _time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
+        if not is_ticker_scan and _time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
-            if cached:
+            if _theta_cache_matches_preset(cached, preset):
                 return cached
-        args = ["--preset", preset, "--json"]
-        if limit and limit > 0:
+        args = ["--json"]
+        if is_ticker_scan:
+            args.append(ticker)
+        else:
+            args.extend(["--preset", preset])
+        if not is_ticker_scan and limit and limit > 0:
             args.extend(["--limit", str(limit)])
         result = await run_script("theta_harvester_scanner.py", args, timeout=420)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
-        _theta_last_scan = _time.monotonic()
+        if not is_ticker_scan:
+            _theta_last_scan = _time.monotonic()
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
         return cached or {
             "scan_time": "",
             "source": "Unusual Whales",
-            "universe": f"preset:{preset}",
+            "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
+            "requested_tickers": [ticker] if is_ticker_scan else [],
             "tickers_scanned": 0,
             "candidates_found": 0,
             "theta_harvest_count": 0,

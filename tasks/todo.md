@@ -4713,3 +4713,32 @@ verify search returns results on app.radon.run.
 - Focused verification passed: `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_theta_harvester_scanner.py scripts/tests/test_scan_service_health.py scripts/tests/test_service_registration_completeness.py scripts/tests/test_watchdog/test_services.py -q` — 44 tests. `npx vitest run --config vitest.config.ts web/tests/theta-harvester-route.test.ts web/tests/theta-harvester-scanner.test.tsx web/tests/api-routes-no-cache-contract.test.ts web/tests/service-health-windows.test.ts` — 168 tests. `PLAYWRIGHT_PORT=3040 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/theta-harvester-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 tests.
 - Full verification passed: `python3.13 -m pytest -q` — 3,605 passed, 13 skipped, 90 deselected. `npm run typecheck` passed. `npm test -- --reporter=dot` passed — 345 files, 3,396 passed, 26 skipped.
 - Hygiene passed: `git diff --check` and exact conflict-marker scan. Commit, merge, and push were requested in the follow-up handoff.
+
+---
+
+## Session: Theta Harvester Ticker Search (2026-06-24)
+
+### Dependency Graph
+- T87 (Capture correction, sync latest main, and map existing theta scanner API/UI flow) depends_on: []
+- T88 (Add backend/route plumbing for explicit ticker scans) depends_on: [T87]
+- T89 (Add accessible desktop/mobile ticker search controls to the harvester header) depends_on: [T88]
+- T90 (Add focused regressions for route payload, UI search behavior, and e2e request body) depends_on: [T89]
+- T91 (Run focused/full verification, visual checks, hygiene, and document results) depends_on: [T90]
+
+### Checklist
+- [x] T87 Capture correction and inspect current flow
+- [x] T88 Backend/route explicit ticker plumbing
+- [x] T89 Search UI
+- [x] T90 Regression coverage
+- [x] T91 Verification and review
+
+### Review
+- Added explicit ticker scan support end to end: `POST /api/scanner/theta/scan` now accepts `{ ticker: "MU" }`, validates it, and proxies `ticker=MU` to FastAPI. FastAPI runs `theta_harvester_scanner.py --json MU`, bypassing the preset cooldown for accurate single-name probes.
+- Added a cache guard so preset scans do not return a single-ticker cache when the shared theta cache was last written by a ticker search. Scanner output now includes `requested_tickers` for auditability.
+- Added a compact ticker search form to `ThetaHarvesterScanner`; it supports Enter-to-scan, uppercases user input, validates 1-6 letters, and wraps cleanly on mobile with 44px-class touch targets.
+- Regression coverage added for scanner explicit resolution/output metadata, FastAPI ticker scan cooldown bypass and preset-cache guard, Next proxy ticker/invalid payloads, component search behavior, and Playwright desktop/mobile request/layout behavior.
+- Focused verification passed: `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_theta_harvester_scanner.py scripts/api/tests/test_theta_harvester_route.py -q` — 9 passed. `npx vitest run --config vitest.config.ts web/tests/theta-harvester-route.test.ts web/tests/theta-harvester-scanner.test.tsx` — 10 passed. `npx vitest run --config vitest.config.ts web/tests/api-routes-no-cache-contract.test.ts` — 74 passed.
+- Browser verification passed: `PLAYWRIGHT_PORT=3040 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/theta-harvester-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` from `web/` — 2 passed. Desktop sends `{ ticker: "MU" }`; mobile shows the search field without horizontal overflow.
+- Full verification passed: `python3.13 -m pytest -q` — 3,626 passed, 13 skipped, 90 deselected. `cd web && npm run typecheck` passed. `cd web && npm test -- --reporter=dot` — 345 files, 3,399 passed, 26 skipped.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan.
+- Commit and push were requested in the follow-up. Worktree also contains an unrelated tracked doc change in `docs/ib-gateway-recovery.md` and existing untracked scratch paths; those were left untouched.

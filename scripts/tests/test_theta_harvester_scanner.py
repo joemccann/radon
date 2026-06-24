@@ -16,6 +16,21 @@ def test_dedupe_tickers_rejects_corrupt_numeric_preset_entries() -> None:
     ]
 
 
+def test_resolve_explicit_tickers_overrides_preset() -> None:
+    tickers, source = theta.resolve_tickers(["mu", "MU", "2026"], "ndx100")
+
+    assert tickers == ["MU"]
+    assert source == "explicit"
+
+
+def test_build_output_records_requested_tickers() -> None:
+    payload = theta.build_output([], "explicit", 1, requested_tickers=["MU"])
+
+    assert payload["universe"] == "explicit"
+    assert payload["requested_tickers"] == ["MU"]
+    assert payload["tickers_scanned"] == 1
+
+
 def test_resolve_ndx100_uses_fallback_when_preset_is_structurally_corrupt(monkeypatch) -> None:
     import utils.presets as presets
 

@@ -1,7 +1,8 @@
 "use client";
 
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
-import { Loader2, Sparkles } from "lucide-react";
+import { Loader2, Search, Sparkles } from "lucide-react";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import TickerLink from "./TickerLink";
@@ -17,6 +18,7 @@ type ThetaHarvesterScannerProps = {
   error?: string | null;
   lastSync?: string | null;
   onScan?: () => void;
+  onTickerScan?: (ticker: string) => void;
 };
 
 function extract(row: ThetaHarvesterResult, key: ThetaSortKey): string | number | null {
@@ -108,9 +110,24 @@ export default function ThetaHarvesterScanner({
   error = null,
   lastSync = null,
   onScan,
+  onTickerScan,
 }: ThetaHarvesterScannerProps) {
+  const [tickerQuery, setTickerQuery] = useState("");
+  const [tickerError, setTickerError] = useState<string | null>(null);
   const rows = data?.results ?? [];
   const { sorted, sort, toggle } = useSort(rows, extract);
+  const normalizedTicker = tickerQuery.trim().toUpperCase();
+
+  const submitTickerScan = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!onTickerScan || scanning) return;
+    if (!/^[A-Z]{1,6}$/.test(normalizedTicker)) {
+      setTickerError("Enter 1-6 letters.");
+      return;
+    }
+    setTickerError(null);
+    onTickerScan(normalizedTicker);
+  };
 
   return (
     <section className="section theta-harvester" data-testid="theta-harvester-section">
@@ -122,6 +139,40 @@ export default function ThetaHarvesterScanner({
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{data?.theta_harvest_count ?? 0} TRUE THETA</span>
+          {onTickerScan && (
+            <form className="theta-search" onSubmit={submitTickerScan}>
+              <Search size={13} aria-hidden="true" />
+              <input
+                id="theta-ticker-search"
+                className="theta-search__input"
+                value={tickerQuery}
+                onChange={(event) => {
+                  setTickerQuery(event.target.value.toUpperCase());
+                  setTickerError(null);
+                }}
+                placeholder="Ticker"
+                autoCapitalize="characters"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="Ticker symbol"
+                aria-invalid={tickerError ? "true" : "false"}
+                aria-describedby={tickerError ? "theta-ticker-search-error" : undefined}
+              />
+              <button
+                type="submit"
+                className="theta-search__button"
+                disabled={scanning || normalizedTicker.length === 0}
+              >
+                {scanning ? <Loader2 size={12} className="spin" /> : null}
+                Scan
+              </button>
+              {tickerError && (
+                <span id="theta-ticker-search-error" className="theta-search__error" role="alert">
+                  {tickerError}
+                </span>
+              )}
+            </form>
+          )}
           {onScan && (
             <button
               type="button"
