@@ -6,9 +6,10 @@ import { useScanner } from "@/lib/useScanner";
 import { useDiscover } from "@/lib/useDiscover";
 import { useLeap } from "@/lib/useLeap";
 import { useGarchConvergence } from "@/lib/useGarchConvergence";
+import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { formatForecastBand, forecastBandTone } from "@/lib/forecastBand";
 
-type Tab = "scanner" | "discover" | "leap" | "garch";
+type Tab = "scanner" | "discover" | "theta" | "leap" | "garch";
 
 async function triggerLeapScan(): Promise<void> {
   const res = await fetch("/api/leap/scan", {
@@ -36,6 +37,19 @@ async function triggerGarchScan(): Promise<void> {
   }
 }
 
+async function triggerThetaScan(): Promise<void> {
+  const res = await fetch("/api/scanner/theta/scan", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ preset: "ndx100" }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(text || `Theta scan failed (${res.status})`);
+  }
+}
+
 /**
  * OpportunitiesCard — surfaces trading candidates from the scanner, the
  * discover (dark-pool) engine, the LEAP IV-mispricing scan, and the
@@ -47,11 +61,14 @@ export function OpportunitiesCard() {
   const [tab, setTab] = useState<Tab>("scanner");
   const [leapScanning, setLeapScanning] = useState(false);
   const [leapError, setLeapError] = useState<string | null>(null);
+  const [thetaScanning, setThetaScanning] = useState(false);
+  const [thetaError, setThetaError] = useState<string | null>(null);
   const [garchScanning, setGarchScanning] = useState(false);
   const [garchError, setGarchError] = useState<string | null>(null);
 
   const scanner = useScanner(tab === "scanner");
   const discover = useDiscover(tab === "discover");
+  const theta = useThetaHarvester(tab === "theta");
   const leap = useLeap(tab === "leap");
   const garch = useGarchConvergence(tab === "garch");
 
@@ -59,6 +76,7 @@ export function OpportunitiesCard() {
   const discoverRows = (discover.data?.candidates ?? []).slice(0, 5);
   // LEAP results are pre-sorted by best_gap desc inside the script.
   const leapRows = (leap.data?.results ?? []).slice(0, 5);
+  const thetaRows = (theta.data?.results ?? []).slice(0, 5);
   // GARCH: rank actionable pairs by |divergence| descending; if none pass
   // gates, show the highest-divergence pairs anyway so the user sees why.
   const garchRows = (garch.data?.pairs ?? [])
@@ -71,25 +89,31 @@ export function OpportunitiesCard() {
       ? scanner.loading
       : tab === "discover"
         ? discover.loading
-        : tab === "leap"
-          ? leap.loading || leapScanning
-          : garch.loading || garchScanning;
+        : tab === "theta"
+          ? theta.loading || thetaScanning
+          : tab === "leap"
+            ? leap.loading || leapScanning
+            : garch.loading || garchScanning;
   const error =
     tab === "scanner"
       ? scanner.error
       : tab === "discover"
         ? discover.error
-        : tab === "leap"
-          ? leapError || leap.error
-          : garchError || garch.error;
+        : tab === "theta"
+          ? thetaError || theta.error
+          : tab === "leap"
+            ? leapError || leap.error
+            : garchError || garch.error;
   const lastSync =
     tab === "scanner"
       ? scanner.lastSync
       : tab === "discover"
         ? discover.lastSync
-        : tab === "leap"
-          ? leap.lastSync
-          : garch.lastSync;
+        : tab === "theta"
+          ? theta.lastSync
+          : tab === "leap"
+            ? leap.lastSync
+            : garch.lastSync;
 
   const onLeapRefresh = async () => {
     if (leapScanning) return;
@@ -119,13 +143,36 @@ export function OpportunitiesCard() {
     }
   };
 
+  const onThetaRefresh = async () => {
+    if (thetaScanning) return;
+    setThetaError(null);
+    setThetaScanning(true);
+    try {
+      await triggerThetaScan();
+      theta.syncNow();
+    } catch (err) {
+      setThetaError(err instanceof Error ? err.message : "Theta scan failed");
+    } finally {
+      setThetaScanning(false);
+    }
+  };
+
   return (
     <section className="snapshot-card">
       <span className="panel-edge-trace" aria-hidden />
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Opportunities / 04</p>
         <h3 className="panel-title">Trading Candidates</h3>
-        {tab === "leap" ? (
+        {tab === "theta" ? (
+          <button
+            type="button"
+            className="snapshot-card__see-all snapshot-card__see-all--action"
+            onClick={onThetaRefresh}
+            disabled={thetaScanning}
+          >
+            {thetaScanning ? "Scanning…" : "Run latest →"}
+          </button>
+        ) : tab === "leap" ? (
           <button
             type="button"
             className="snapshot-card__see-all snapshot-card__see-all--action"
@@ -183,6 +230,16 @@ export function OpportunitiesCard() {
         >
           LEAP
           {leap.data ? <span className="snapshot-tab__count">{leap.data.results.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={tab === "theta"}
+          className={`snapshot-tab${tab === "theta" ? " snapshot-tab--active" : ""}`}
+          onClick={() => setTab("theta")}
+        >
+          Theta
+          {theta.data ? <span className="snapshot-tab__count">{theta.data.theta_harvest_count}</span> : null}
         </button>
         <button
           type="button"
@@ -251,6 +308,46 @@ export function OpportunitiesCard() {
                 <span className="snapshot-row__score">{c.score?.toFixed(1) ?? "—"}</span>
               </li>
             ))}
+          </ul>
+        )
+      ) : tab === "theta" ? (
+        thetaRows.length === 0 ? (
+          <div className="snapshot-card__empty">
+            No theta harvester scans on file. Click <strong>Run latest →</strong> above, or open Scanner.
+          </div>
+        ) : (
+          <ul className="snapshot-rows">
+            {thetaRows.map((r) => {
+              const verdict =
+                r.verdict === "THETA_HARVEST"
+                  ? "TRUE THETA"
+                  : r.verdict === "DIRECTIONAL_DISGUISE"
+                    ? "DIRECTIONAL"
+                    : "WATCH";
+              const direction =
+                r.verdict === "THETA_HARVEST"
+                  ? "bull"
+                  : r.verdict === "DIRECTIONAL_DISGUISE"
+                    ? "bear"
+                    : "neutral";
+              const edgeText = r.iv_rv_edge >= 0
+                ? `+${r.iv_rv_edge.toFixed(1)}`
+                : r.iv_rv_edge.toFixed(1);
+              return (
+                <li key={`t-${r.ticker}`} className="snapshot-row">
+                  <Link href={`/${encodeURIComponent(r.ticker)}?tab=chain`} className="snapshot-row__ticker">
+                    {r.ticker}
+                  </Link>
+                  <span className="snapshot-row__signal">
+                    {r.structure.short_put.strike.toFixed(0)}P/{r.structure.short_call.strike.toFixed(0)}C · Δ {(r.structure.net_delta * 100).toFixed(1)}
+                  </span>
+                  <span className={`snapshot-row__direction snapshot-row__direction--${direction}`}>
+                    {verdict}
+                  </span>
+                  <span className="snapshot-row__score">{edgeText}</span>
+                </li>
+              );
+            })}
           </ul>
         )
       ) : tab === "leap" ? (

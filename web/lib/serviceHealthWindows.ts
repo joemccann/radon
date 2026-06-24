@@ -169,6 +169,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // IB-down alert grouping stays accurate — the writer still records a
   // healthy ok row when IB is unreachable but UW serves the data.
   "scanner": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``theta-harvester`` writes when a user POSTs the theta scanner against
+  // a ticker list/preset. UW-only data path; the route serves the latest
+  // file cache until a fresh scan is requested. On-demand category avoids a
+  // stale banner when nobody has inspected theta setups today.
+  "theta-harvester": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "discover": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "flow-analysis": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },

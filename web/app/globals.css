@@ -9668,6 +9668,213 @@ tr {
   font-size: 12px;
 }
 
+/* ── Theta Harvester Scanner ───────────────────────────────────── */
+
+.scanner-page-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scanner-mode-tabs {
+  display: inline-flex;
+  align-items: center;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.scanner-mode-tab {
+  min-height: 32px;
+  padding: 0 12px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.scanner-mode-tab:hover,
+.scanner-mode-tab:focus-visible {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--line-grid) 80%, transparent);
+  outline: none;
+}
+
+.scanner-mode-tab--active {
+  color: var(--signal-core);
+  border-color: color-mix(in srgb, var(--signal-core) 36%, transparent);
+  background: color-mix(in srgb, var(--signal-core) 10%, transparent);
+}
+
+.theta-harvester__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.theta-scan-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 10px;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 34%, transparent);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--signal-core) 9%, transparent);
+  color: var(--signal-core);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.theta-scan-button:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.theta-gates {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.theta-gate,
+.theta-pill {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  line-height: 1.25;
+  text-transform: uppercase;
+}
+
+.theta-gate {
+  padding: 1px 4px;
+  color: var(--text-secondary);
+}
+
+.theta-gate--pass {
+  border-color: color-mix(in srgb, var(--signal-core) 34%, transparent);
+  color: var(--signal-core);
+}
+
+.theta-gate--fail {
+  border-color: color-mix(in srgb, var(--fault) 34%, transparent);
+  color: var(--fault);
+}
+
+.theta-pill {
+  padding: 2px 6px;
+}
+
+.theta-pill--pos {
+  border-color: color-mix(in srgb, var(--signal-core) 40%, transparent);
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
+}
+
+.theta-pill--warn {
+  border-color: color-mix(in srgb, var(--warning) 40%, transparent);
+  color: var(--warning);
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.theta-pill--neg {
+  border-color: color-mix(in srgb, var(--fault) 40%, transparent);
+  color: var(--fault);
+  background: color-mix(in srgb, var(--fault) 8%, transparent);
+}
+
+.theta-harvester__cards {
+  display: none;
+}
+
+.theta-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  text-decoration: none;
+}
+
+.theta-card__head,
+.theta-card__stats {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.theta-card__ticker {
+  font-family: var(--font-mono);
+  font-size: 18px;
+  font-weight: 750;
+  letter-spacing: 0;
+}
+
+.theta-card__structure {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.theta-card__stats span {
+  min-width: 0;
+}
+
+.theta-card__stats b,
+.theta-card__stats em {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-style: normal;
+}
+
+.theta-card__stats b {
+  color: var(--text-primary);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.theta-card__stats em {
+  margin-top: 2px;
+  color: var(--text-secondary);
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* ── GEX Panel ─────────────────────────────────────────── */
 
 .gex-panel .section-body {
@@ -13461,6 +13668,58 @@ body[data-mobile="true"] button {
   background: color-mix(in srgb, var(--signal-core) 12%, transparent);
   color: var(--signal-core);
   border-color: color-mix(in srgb, var(--signal-core) 32%, transparent);
+}
+
+body[data-mobile="true"] .scanner-page-shell {
+  gap: 8px;
+}
+
+body[data-mobile="true"] .scanner-mode-tabs {
+  width: calc(100% - 32px);
+  margin: 8px 16px 0;
+}
+
+body[data-mobile="true"] .scanner-mode-tab {
+  flex: 1 1 0;
+  min-height: 44px;
+  padding: 0 8px;
+  font-size: 10px;
+}
+
+body[data-mobile="true"] .theta-harvester {
+  border-left: 0;
+  border-right: 0;
+}
+
+body[data-mobile="true"] .theta-harvester .section-header {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+body[data-mobile="true"] .theta-harvester__meta {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+body[data-mobile="true"] .theta-scan-button {
+  min-height: 44px;
+  padding: 0 12px;
+}
+
+body[data-mobile="true"] .theta-harvester__table-wrap {
+  display: none;
+}
+
+body[data-mobile="true"] .theta-harvester__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 16px;
+}
+
+body[data-mobile="true"] .theta-card {
+  min-height: 44px;
 }
 
 .m-card-press {

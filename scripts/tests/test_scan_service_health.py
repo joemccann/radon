@@ -129,11 +129,13 @@ class TestMirrorScanSnapshot:
 
         mirror_scan_snapshot("leap-scan", {"scan_time": "T1"})
         mirror_scan_snapshot("garch-scan", {"scan_time": "T2"})
+        mirror_scan_snapshot("theta-harvester", {"scan_time": "T3"})
 
         assert writer_calls["upserts"] == []
         assert writer_calls["health"] == [
             ("leap-scan", "ok", {"finished_at": "T1"}),
             ("garch-scan", "ok", {"finished_at": "T2"}),
+            ("theta-harvester", "ok", {"finished_at": "T3"}),
         ]
 
     def test_unknown_service_is_a_programmer_error(self, writer_calls):

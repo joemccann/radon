@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bell,
   CheckCircle2,
@@ -29,6 +30,7 @@ import { useJournal } from "@/lib/useJournal";
 import { useDiscover } from "@/lib/useDiscover";
 import { useFlowAnalysis } from "@/lib/useFlowAnalysis";
 import { useScanner } from "@/lib/useScanner";
+import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
 import CashFlowsSection from "@/components/CashFlowsSection";
@@ -76,6 +78,7 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import TickerLink from "./TickerLink";
 import TickerWorkspace from "./TickerWorkspace";
 import TickerFlowReport from "./flow-analysis/TickerFlowReport";
+import ThetaHarvesterScanner from "./ThetaHarvesterScanner";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import { AlertsPanel } from "./alerts/AlertsPanel";
@@ -1347,6 +1350,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
 /* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
+type ScannerMode = "flow" | "theta";
 
 const scannerSigExtract = (item: ScannerSignal, key: ScannerSortKey): string | number | null => {
   switch (key) {
@@ -1375,11 +1379,81 @@ function scannerDirTone(dir: string): "pos" | "neg" | "mut" {
 }
 
 function ScannerSections() {
-  const { data, syncing, error, lastSync, syncNow } = useScanner(true);
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+  const queryMode = searchParams.get("mode") === "theta" ? "theta" : "flow";
+  const [mode, setModeState] = useState<ScannerMode>(queryMode);
+  const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
+  const theta = useThetaHarvester(mode === "theta");
+  const [thetaScanning, setThetaScanning] = useState(false);
+  const [thetaScanError, setThetaScanError] = useState<string | null>(null);
   const signals = data?.top_signals ?? [];
   const { sorted, sort, toggle } = useSort(signals, scannerSigExtract);
   const { isMobile, hasMounted } = useViewport();
   const [sortKey, setSortKey] = useState<ScannerSortKey>("score");
+
+  useEffect(() => {
+    setModeState(queryMode);
+  }, [queryMode]);
+
+  const setMode = (next: ScannerMode) => {
+    setModeState(next);
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "theta") {
+      params.set("mode", "theta");
+    } else {
+      params.delete("mode");
+    }
+    const qs = params.toString();
+    router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
+  };
+
+  const runThetaScan = async () => {
+    if (thetaScanning) return;
+    setThetaScanError(null);
+    setThetaScanning(true);
+    try {
+      const res = await fetch("/api/scanner/theta/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset: "ndx100" }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Theta scan failed (${res.status})`);
+      }
+      theta.syncNow();
+    } catch (err) {
+      setThetaScanError(err instanceof Error ? err.message : "Theta scan failed");
+    } finally {
+      setThetaScanning(false);
+    }
+  };
+
+  const modeTabs = (
+    <div className="scanner-mode-tabs" role="tablist" aria-label="Scanner mode">
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "flow"}
+        className={`scanner-mode-tab${mode === "flow" ? " scanner-mode-tab--active" : ""}`}
+        onClick={() => setMode("flow")}
+      >
+        Flow Signals
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "theta"}
+        className={`scanner-mode-tab${mode === "theta" ? " scanner-mode-tab--active" : ""}`}
+        onClick={() => setMode("theta")}
+      >
+        Theta Harvester
+      </button>
+    </div>
+  );
 
   const signalClass = (signal: string) => {
     if (signal === "STRONG") return "bullish";
@@ -1400,6 +1474,22 @@ function ScannerSections() {
     { key: "num_prints", label: "Prints" },
   ];
 
+  if (mode === "theta") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <ThetaHarvesterScanner
+          data={theta.data ?? null}
+          loading={theta.loading}
+          scanning={thetaScanning}
+          error={thetaScanError || theta.error}
+          lastSync={theta.lastSync}
+          onScan={runThetaScan}
+        />
+      </div>
+    );
+  }
+
   if (hasMounted && isMobile) {
     const mobileSorted = [...signals].sort((a, b) => {
       const av = scannerSigExtract(a, sortKey) ?? 0;
@@ -1409,6 +1499,7 @@ function ScannerSections() {
 
     return (
       <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+        {modeTabs}
         {/* Mobile section header strip */}
         <div className="m-scanner-header">
           <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -1562,6 +1653,7 @@ function ScannerSections() {
 
   return (
     <>
+      {modeTabs}
       <div className="section">
         <div className="section-header">
           <div className="section-title">
