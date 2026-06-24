@@ -22,6 +22,7 @@ import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
 import net from "node:net";
+import { execFile } from "node:child_process";
 import { WebSocketServer } from "ws";
 import { IBApi, EventName, SecType, OptionType, TickByTickDataType } from "@stoqey/ib";
 import { classifyIBConnectionError } from "./ib_connection_status.js";
@@ -52,6 +53,36 @@ const SNAPSHOT_TIMEOUT_MS = 5000;
 /* ─── Keep-Alive Ping/Pong ─────────────────────────────────────────────── */
 const PING_INTERVAL_MS = 30_000;
 const PONG_TIMEOUT_MS = 65_000; // 30s * 2 + 5s grace
+
+/* ─── systemd watchdog liveness (DUR-17) ───────────────────────────────────
+ * On 2026-06-24 the relay served no data for 38 min while ALIVE (NRestarts=0):
+ * its single Node event loop wedged, so every in-process self-heal (stale-tick
+ * ladder, ping reaper, batch flush, the service_health heartbeat) froze at once
+ * and nothing restarted it. An in-process timer cannot rescue an in-process
+ * stall — the liveness signal must be external. Under systemd Type=notify +
+ * WatchdogSec we emit an UNCONDITIONAL WATCHDOG=1 keep-alive; a wedged loop
+ * stops emitting and systemd restarts ONLY this leaf unit (no gateway touch, no
+ * 2FA — the same safe action an operator takes). Because the ping proves only
+ * "the loop is turning" (never tick-presence), a legitimately idle or farm-down
+ * relay keeps pinging and is never killed; farm-down stays owned by the existing
+ * lock-held /ib/restart escalation. Node's stdlib cannot open an AF_UNIX
+ * SOCK_DGRAM (node:dgram is UDP-only), so the ping is delegated to
+ * `systemd-notify` (hence the unit needs NotifyAccess=all — the child PID
+ * sends). Absent under scripts/cloud.sh / local dev → the whole feature no-ops. */
+const SD_NOTIFY_SOCKET = process.env.NOTIFY_SOCKET || "";
+const SD_WATCHDOG_USEC = parseInt(process.env.WATCHDOG_USEC || "0", 10);
+const sdWatchdogEnabled = Boolean(SD_NOTIFY_SOCKET && SD_WATCHDOG_USEC > 0);
+
+function sdNotify(state) {
+  if (!sdWatchdogEnabled) return;
+  try {
+    // Fire-and-forget; the callback swallows ENOENT / send errors so a watchdog
+    // hiccup can never throw or block the event loop.
+    execFile("systemd-notify", [state], () => {});
+  } catch {
+    /* never propagate into the loop */
+  }
+}
 
 function parseArgs(argv) {
   const args = {
@@ -308,7 +339,18 @@ httpServer.on("upgrade", async (req, socket, head) => {
   }
 });
 
-httpServer.listen(cli.port, WS_HOST);
+httpServer.listen(cli.port, WS_HOST, () => {
+  // Type=notify: tell systemd we're up only once the WS port is actually bound.
+  sdNotify("READY=1");
+});
+
+// DUR-17: unconditional event-loop liveness heartbeat. Fire at half the systemd
+// WatchdogSec deadline so a single missed tick never false-restarts. unref() so
+// it never by itself keeps a dying process alive (the WS server holds the loop).
+if (sdWatchdogEnabled) {
+  const heartbeatMs = Math.max(5_000, Math.floor(SD_WATCHDOG_USEC / 1000 / 2));
+  setInterval(() => sdNotify("WATCHDOG=1"), heartbeatMs).unref();
+}
 
 const clients = new Set();
 const symbolSubscribers = new Map();
