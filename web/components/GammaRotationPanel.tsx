@@ -12,6 +12,7 @@ import {
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
 import InfoTooltip from "./InfoTooltip";
 import SpectralLoader from "./SpectralLoader";
+import RegimeSyncStatusBadge from "./RegimeSyncStatusBadge";
 
 type GammaRotationPanelProps = {
   marketState?: MarketState;
@@ -194,13 +195,8 @@ function GateList({ gates }: { gates: GammaRotationGate[] }) {
 function GammaRotationBody({ data, lastSync, syncing }: { data: GammaRotationData; lastSync: string | null; syncing: boolean }) {
   const tone = interpretationColor(data.signal.interpretation);
   const gammaRotationIsStale = isGammaRotationStale(data);
-  const freshnessBadge = syncing
-    ? { label: "SYNCING", className: "grg-status-badge grg-status-badge-syncing" }
-    : gammaRotationIsStale
-      ? { label: "STALE", className: "grg-status-badge grg-status-badge-stale" }
-      : data.market_open
-        ? { label: "LIVE", className: "grg-status-badge grg-status-badge-live" }
-        : { label: "FRESH", className: "grg-status-badge grg-status-badge-fresh" };
+  const freshnessState = syncing ? "syncing" : gammaRotationIsStale ? "stale" : data.market_open ? "live" : "fresh";
+  const freshnessBadgeClass = `grg-status-badge grg-status-badge-${freshnessState}`;
   return (
     <div className="section grg-panel regime-relationship-panel">
       <div className="regime-relationship-panel-head">
@@ -214,9 +210,11 @@ function GammaRotationBody({ data, lastSync, syncing }: { data: GammaRotationDat
           />
         </div>
         <div className="grg-header-meta">
-          <span className={freshnessBadge.className} data-testid="grg-freshness-badge">
-            {freshnessBadge.label}
-          </span>
+          <RegimeSyncStatusBadge
+            state={freshnessState}
+            className={freshnessBadgeClass}
+            testId="grg-freshness-badge"
+          />
           <span className="grg-badge" style={{ color: tone, borderColor: `color-mix(in srgb, ${tone} 42%, var(--line-grid))` }}>
             {interpretationLabel(data.signal.interpretation)}
           </span>

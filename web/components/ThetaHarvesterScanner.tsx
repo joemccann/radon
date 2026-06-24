@@ -1,12 +1,13 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { Loader2, Search, Sparkles } from "lucide-react";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
-import TickerLink from "./TickerLink";
 import { useSort } from "@/lib/useSort";
+import { formatExpiry } from "@/lib/optionsChainUtils";
 import type { ThetaHarvesterData, ThetaHarvesterResult } from "@/lib/types";
 
 type ThetaSortKey = "ticker" | "score" | "theta" | "delta" | "iv_edge" | "range" | "dte" | "credit";
@@ -80,6 +81,23 @@ function structureLabel(row: ThetaHarvesterResult): string {
   return `${put.strike.toFixed(0)}P / ${call.strike.toFixed(0)}C`;
 }
 
+function legStrikeParam(strike: number): string {
+  return Number.isInteger(strike) ? String(strike) : String(strike).replace(/0+$/, "").replace(/\.$/, "");
+}
+
+export function thetaOrderHref(row: ThetaHarvesterResult): string {
+  const ticker = row.ticker.toUpperCase();
+  const put = row.structure.short_put;
+  const call = row.structure.short_call;
+  const expiry = row.structure.expiry || put.expiry || call.expiry;
+  const params = new URLSearchParams();
+  params.set("deck", "c");
+  params.set("expiry", formatExpiry(expiry));
+  params.set("strikes", "100");
+  params.set("legs", `SELL:1x${legStrikeParam(put.strike)}P,SELL:1x${legStrikeParam(call.strike)}C`);
+  return `/${encodeURIComponent(ticker)}?${params.toString()}`;
+}
+
 function RowStatus({ row }: { row: ThetaHarvesterResult }) {
   const tone = verdictTone(row.verdict);
   return <span className={`theta-pill theta-pill--${tone}`}>{verdictLabel(row.verdict)}</span>;
@@ -112,6 +130,7 @@ export default function ThetaHarvesterScanner({
   onScan,
   onTickerScan,
 }: ThetaHarvesterScannerProps) {
+  const router = useRouter();
   const [tickerQuery, setTickerQuery] = useState("");
   const [tickerError, setTickerError] = useState<string | null>(null);
   const rows = data?.results ?? [];
@@ -127,6 +146,16 @@ export default function ThetaHarvesterScanner({
     }
     setTickerError(null);
     onTickerScan(normalizedTicker);
+  };
+
+  const openThetaOrder = (href: string) => {
+    router.push(href);
+  };
+
+  const onThetaOrderKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, href: string) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    openThetaOrder(href);
   };
 
   return (
@@ -223,9 +252,28 @@ export default function ThetaHarvesterScanner({
                 </tr>
               </thead>
               <tbody>
-                {sorted.map((row) => (
-                  <tr key={`theta-${row.ticker}`}>
-                    <td><TickerLink ticker={row.ticker} /></td>
+                {sorted.map((row) => {
+                  const href = thetaOrderHref(row);
+                  return (
+                  <tr
+                    key={`theta-${row.ticker}`}
+                    className="theta-row theta-row--actionable"
+                    role="link"
+                    tabIndex={0}
+                    aria-label={`Open ${row.ticker} theta order builder`}
+                    title={`Open ${row.ticker} chain order builder`}
+                    onClick={() => openThetaOrder(href)}
+                    onKeyDown={(event) => onThetaOrderKeyDown(event, href)}
+                  >
+                    <td>
+                      <Link
+                        href={href}
+                        className="theta-row__ticker-link"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        {row.ticker}
+                      </Link>
+                    </td>
                     <td>
                       <span className="mono">SHORT {structureLabel(row)}</span>
                       <GateStrip row={row} />
@@ -240,14 +288,15 @@ export default function ThetaHarvesterScanner({
                     <td className="right">{fmtMoney(row.structure.credit)}</td>
                     <td><RowStatus row={row} /></td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
 
           <div className="theta-harvester__cards" data-testid="theta-harvester-mobile-list">
             {sorted.map((row) => (
-              <Link key={`theta-card-${row.ticker}`} href={`/${encodeURIComponent(row.ticker)}?tab=chain`} className="theta-card">
+              <Link key={`theta-card-${row.ticker}`} href={thetaOrderHref(row)} className="theta-card">
                 <div className="theta-card__head">
                   <span className="theta-card__ticker">{row.ticker}</span>
                   <RowStatus row={row} />

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import type { PriceData, OptionContract } from "@/lib/pricesProtocol";
 import { optionKey, normalizeOptionExpiry } from "@/lib/pricesProtocol";
 import type { PortfolioData, PortfolioPosition } from "@/lib/types";
@@ -230,6 +230,8 @@ function OrderBuilder({
   spot,
   riskFreeRate,
   portfolio,
+  builderRef,
+  prefillLabel,
   onRemoveLeg,
   onUpdateLeg,
   onClearLegs,
@@ -240,6 +242,8 @@ function OrderBuilder({
   spot?: number | null;
   riskFreeRate?: number;
   portfolio?: PortfolioData | null;
+  builderRef?: Ref<HTMLDivElement>;
+  prefillLabel?: string | null;
   onRemoveLeg: (id: string) => void;
   onUpdateLeg: (id: string, updates: Partial<OrderLeg>) => void;
   onClearLegs: () => void;
@@ -493,7 +497,7 @@ function OrderBuilder({
   if (legs.length === 0) return null;
 
   return (
-    <div className="order-builder">
+    <div className="order-builder" ref={builderRef} data-prefilled={prefillLabel ? "true" : undefined}>
       <div className="order-builder-header">
         <span
           style={{
@@ -520,6 +524,12 @@ function OrderBuilder({
           Clear
         </button>
       </div>
+
+      {prefillLabel && (
+        <div className="order-builder-prefill" role="status">
+          {prefillLabel}
+        </div>
+      )}
 
       {/* Coverage hint: show when a held LONG bounds an otherwise-naked SELL.
           Helps the operator understand why Max Loss dropped from UNBOUNDED.
@@ -886,6 +896,9 @@ export default function OptionsChainTab({
   const atmRef = useRef<HTMLTableRowElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const initialFocusAppliedRef = useRef(false);
+  const appliedLegsParamRef = useRef<string | null>(null);
+  const orderBuilderRef = useRef<HTMLDivElement>(null);
+  const [prefillLabel, setPrefillLabel] = useState<string | null>(null);
 
   const focusedExpiry = useMemo(
     () => (focusPosition ? normalizeOptionExpiry(focusPosition.expiry) : null),
@@ -903,6 +916,8 @@ export default function OptionsChainTab({
   useEffect(() => {
     let cancelled = false;
     initialFocusAppliedRef.current = false;
+    appliedLegsParamRef.current = null;
+    setPrefillLabel(null);
     setLoadingExpiries(true);
     setError(null);
 
@@ -949,6 +964,43 @@ export default function OptionsChainTab({
     }
     initialFocusAppliedRef.current = true;
   }, [expirations, focusedExpiry, chainUrl.urlExpiry]);
+
+  useEffect(() => {
+    const signature = chainUrl.legsParamRaw ?? "";
+    if (!selectedExpiry || !signature || chainUrl.urlLegs.length === 0) return;
+    if (appliedLegsParamRef.current === signature) return;
+
+    const requestedExpiry = chainUrl.urlExpiry ? normalizeOptionExpiry(chainUrl.urlExpiry) : null;
+    if (requestedExpiry && requestedExpiry !== selectedExpiry) return;
+
+    const nextLegs: OrderLeg[] = chainUrl.urlLegs.map((leg) => ({
+      id: `${ticker}_${selectedExpiry}_${leg.strike}_${leg.right}`,
+      action: leg.action,
+      right: leg.right,
+      strike: leg.strike,
+      expiry: selectedExpiry,
+      quantity: leg.quantity,
+      limitPrice: null,
+      priceManuallySet: false,
+    }));
+
+    setOrderLegs(nextLegs);
+    setPrefillLabel("PREFILLED FROM THETA HARVESTER");
+    appliedLegsParamRef.current = signature;
+  }, [ticker, selectedExpiry, chainUrl.legsParamRaw, chainUrl.urlExpiry, chainUrl.urlLegs]);
+
+  useEffect(() => {
+    if (!prefillLabel || orderLegs.length === 0) return;
+    const scrollToBuilder = () => {
+      orderBuilderRef.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    };
+    if (typeof window.requestAnimationFrame !== "function") {
+      scrollToBuilder();
+      return;
+    }
+    const raf = window.requestAnimationFrame(scrollToBuilder);
+    return () => window.cancelAnimationFrame(raf);
+  }, [prefillLabel, orderLegs.length]);
 
   // Write filter state → URL after commit (preserves tab + other params).
   // Gated until the initial expiry has been resolved so we don't strip a
@@ -1174,6 +1226,7 @@ export default function OptionsChainTab({
 
   const handleClearLegs = useCallback(() => {
     setOrderLegs([]);
+    setPrefillLabel(null);
   }, []);
 
   // Collect option keys the chain needs subscribed
@@ -1369,6 +1422,8 @@ export default function OptionsChainTab({
         spot={currentPrice}
         riskFreeRate={riskFreeRate}
         portfolio={portfolio}
+        builderRef={orderBuilderRef}
+        prefillLabel={prefillLabel}
         onRemoveLeg={handleRemoveLeg}
         onUpdateLeg={handleUpdateLeg}
         onClearLegs={handleClearLegs}

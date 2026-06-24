@@ -13,7 +13,7 @@ const TICKER_RE = /^[A-Za-z]{1,5}$/;
 
 type Props = {
   params: Promise<{ ticker: string }>;
-  searchParams: Promise<{ tab?: string; posId?: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 };
 
 export default async function TickerPage({ params, searchParams }: Props) {
@@ -29,8 +29,16 @@ export default async function TickerPage({ params, searchParams }: Props) {
   // Canonical URL is uppercase — redirect if not
   const upper = raw.toUpperCase();
   if (raw !== upper) {
-    const qs = sp.tab ? `?tab=${sp.tab}` : "";
-    redirect(`/${upper}${qs}`);
+    const params = new URLSearchParams();
+    for (const [key, value] of Object.entries(sp)) {
+      if (Array.isArray(value)) {
+        value.forEach((item) => params.append(key, item));
+      } else if (value != null) {
+        params.set(key, value);
+      }
+    }
+    const qs = params.toString();
+    redirect(`/${upper}${qs ? `?${qs}` : ""}`);
   }
 
   return (

@@ -9,10 +9,18 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import ThetaHarvesterScanner from "../components/ThetaHarvesterScanner";
 import type { ThetaHarvesterData } from "../lib/types";
 
+const pushMock = vi.fn();
+
 vi.mock("next/link", () => ({
   default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
     <a href={href} {...props}>{children}</a>
   ),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: pushMock,
+  }),
 }));
 
 vi.mock("@/lib/useTickerNav", () => ({
@@ -23,7 +31,18 @@ vi.mock("@/lib/useTickerNav", () => ({
 
 afterEach(() => {
   cleanup();
+  pushMock.mockReset();
 });
+
+function expectThetaHref(raw: string | null) {
+  expect(raw).toBeTruthy();
+  const url = new URL(raw!, "http://localhost");
+  expect(url.pathname).toBe("/AAPL");
+  expect(url.searchParams.get("deck")).toBe("c");
+  expect(url.searchParams.get("expiry")).toBe("2026-07-17");
+  expect(url.searchParams.get("strikes")).toBe("100");
+  expect(url.searchParams.get("legs")).toBe("SELL:1x95P,SELL:1x105C");
+}
 
 const data: ThetaHarvesterData = {
   scan_time: "2026-06-24T15:00:00Z",
@@ -123,8 +142,19 @@ describe("ThetaHarvesterScanner", () => {
     expect(within(section).getByText("+23.0 pt / 2.92x")).toBeTruthy();
     expect(within(section).getAllByText("IV RICH").length).toBeGreaterThan(0);
 
+    const rowLink = within(section.querySelector("tbody")!).getByRole("link", {
+      name: /open AAPL theta order builder/i,
+    });
+    fireEvent.click(rowLink);
+    expect(pushMock).toHaveBeenCalledWith(expect.stringContaining("/AAPL?"));
+    expectThetaHref(pushMock.mock.calls[0][0]);
+
+    fireEvent.keyDown(rowLink, { key: "Enter" });
+    expect(pushMock).toHaveBeenCalledTimes(2);
+    expectThetaHref(pushMock.mock.calls[1][0]);
+
     const mobileList = screen.getByTestId("theta-harvester-mobile-list");
-    expect(within(mobileList).getByRole("link").getAttribute("href")).toBe("/AAPL?tab=chain");
+    expectThetaHref(within(mobileList).getByRole("link").getAttribute("href"));
 
     fireEvent.click(screen.getByRole("button", { name: /scan ndx/i }));
     expect(onScan).toHaveBeenCalledTimes(1);

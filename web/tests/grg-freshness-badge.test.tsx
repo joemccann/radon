@@ -2,7 +2,7 @@
  * @vitest-environment jsdom
  *
  * GRG freshness badge (data-testid="grg-freshness-badge") priority:
- *   syncing                  -> "SYNCING" (grg-status-badge-syncing)
+ *   syncing                  -> spinner + "SYNCING" (grg-status-badge-syncing)
  *   isGammaRotationStale     -> "STALE"   (grg-status-badge-stale)
  *   data.market_open         -> "LIVE"    (grg-status-badge-live)
  *   otherwise                -> "FRESH"   (grg-status-badge-fresh)
@@ -142,7 +142,10 @@ describe("GRG freshness badge", () => {
     const badge = renderWith({ marketOpen: true, syncing: true, stale: true });
     expect(badge).toBeTruthy();
     expect(badge?.textContent?.trim()).toBe("SYNCING");
+    expect(badge?.getAttribute("aria-busy")).toBe("true");
     expect(badge?.className).toContain("grg-status-badge-syncing");
+    expect(badge?.className).toContain("regime-sync-status");
+    expect(badge?.querySelector('[data-testid="regime-sync-working-icon"]')).toBeTruthy();
   });
 
   it("renders FRESH for market-closed, same-session, non-stale data", () => {
