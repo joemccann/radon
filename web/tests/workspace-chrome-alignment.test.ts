@@ -3,11 +3,19 @@
  */
 
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import Sidebar from "../components/Sidebar";
+
+vi.mock("@/lib/IBStatusContext", () => ({
+  useIBStatusContext: () => ({ displayStatus: "unreachable" }),
+}));
+
+vi.mock("@/lib/useProfile", () => ({
+  useProfile: () => ({ profile: { username: "Operator", avatar_url: null } }),
+}));
 
 const globalsCss = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
 
