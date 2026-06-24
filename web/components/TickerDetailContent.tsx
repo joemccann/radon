@@ -102,6 +102,12 @@ function resolveTickerQuoteTelemetry(
   return { priceData: prices[ticker] ?? null, label: `${ticker} (underlying)` };
 }
 
+function hasOptionLeg(position: PortfolioPosition | null): boolean {
+  return Boolean(
+    position?.legs.some((leg) => leg.type === "Call" || leg.type === "Put"),
+  );
+}
+
 export type TickerDetailContentProps = {
   ticker: string;
   positionId?: number | null;
@@ -143,19 +149,16 @@ export default function TickerDetailContent({
     return portfolio.positions.find((p) => p.ticker === ticker) ?? null;
   }, [ticker, positionId, portfolio]);
 
-  // Instrument switch: a single-leg equity option position otherwise LOCKS the
-  // whole page (book/header/ticket) to the option, hiding the underlying stock.
-  // Offer a STOCK ⟷ OPTION toggle so the trader can view the underlying's order
-  // book without giving up the held position (still one tap away in the POSN
-  // deck). Only meaningful for a single-leg equity option — multi-leg already
-  // books the underlying, and an index/futures option's "underlying" is not a
-  // stock. Resets to the held view on every ticker change.
+  // Instrument switch: an equity option position otherwise locks the header /
+  // quote surface to either the held option/spread or the underlying stock with
+  // no obvious way back. Offer a STOCK ⟷ OPTION toggle for any held equity
+  // option structure, including ratios/reversals. Index/futures options are
+  // excluded because their "underlying" is not an equity stock. Resets to the
+  // held view on every ticker change.
   const [instrumentView, setInstrumentView] = useState<"position" | "underlying">("position");
   useEffect(() => setInstrumentView("position"), [ticker]);
   const canSwitchInstrument =
-    position != null &&
-    position.structure_type !== "Stock" &&
-    position.legs.length === 1 &&
+    hasOptionLeg(position) &&
     !isFuturesRoot(ticker) &&
     !(isIndexSymbol(ticker) && hasFuturesSupport(ticker));
   const viewUnderlying = instrumentView === "underlying" && canSwitchInstrument;
@@ -190,7 +193,7 @@ export default function TickerDetailContent({
   // OrderBook header uses, so the two never diverge. Falls through to raw
   // priceData (incl. the closed-market fallback) when there is no entitled book.
   const quotePriceData = useMemo<PriceData | null>(() => {
-    if (!priceData || !bookDepth || bookDepth.entitled !== true) return priceData;
+    if (!priceData || isSpreadNet || !bookDepth || bookDepth.entitled !== true) return priceData;
     const head = deriveBookHeader(bookDepth, {
       bid: priceData.bid,
       ask: priceData.ask,
@@ -204,7 +207,7 @@ export default function TickerDetailContent({
       last: head.last,
       lastIsCalculated: head.lastLabel !== "LAST",
     };
-  }, [priceData, bookDepth]);
+  }, [priceData, isSpreadNet, bookDepth]);
 
   // Resolve instrument kind for the depth panel. depth.kind wins when the relay
   // has classified it; else a relay-supported futures root (ES/NQ/...) or an
