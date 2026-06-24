@@ -107,6 +107,41 @@ describe("ExposureBreakdownModal — delta-adjusted leverage block", () => {
     expect(within(block).getByTestId("dd-leverage-bias").textContent).toMatch(/short-biased/i);
   });
 
+  it("preserves the negative sign on compact dollar-delta row values", () => {
+    const exposure = makeExposure({
+      dollarDelta: -1_930_000,
+      rows: [
+        makeRow({
+          ticker: "SPY",
+          structure: "Bear Put Spread $650.0/$740.0",
+          delta: -2621,
+          dollarDelta: -1_930_000,
+          deltaSource: "approx",
+          legs: [
+            { type: "Put", direction: "SHORT", strike: 650, contracts: 50, rawDelta: 0.02, legDelta: 100 },
+            { type: "Put", direction: "LONG", strike: 740, contracts: 50, rawDelta: -0.54, legDelta: -2700 },
+          ],
+        }),
+      ],
+    });
+
+    render(
+      <ExposureBreakdownModal
+        metric="dollarDelta"
+        exposure={exposure}
+        bankroll={1_611_889.79}
+        netLiquidation={1_611_889.79}
+        onClose={() => {}}
+      />,
+    );
+
+    const row = screen.getByText("Bear Put Spread $650.0/$740.0").closest("tr");
+    expect(row?.textContent ?? "").toContain("-$1.93M");
+    expect(document.querySelector(".dd-leverage-dollar-delta")?.textContent ?? "").toContain(
+      "$ Delta -$1.93M",
+    );
+  });
+
   it("renders 'Neutral' label when dollar delta is round-tripping near zero", () => {
     const exposure = makeExposure({ dollarDelta: 100 }); // 100/1.6M = 0.006%
 

@@ -29,7 +29,7 @@ export function fmtUsd(value: number): string {
 
 /** Signed rounded USD with sign ahead of the dollar sign: "+$45,678" / "-$1,234". */
 export function fmtSignedUsd(value: number): string {
-  return `${value >= 0 ? "+" : ""}${fmtUsd(Math.abs(value))}${value < 0 ? "" : ""}`.replace("+-", "-");
+  return `${value >= 0 ? "+" : "-"}${fmtUsd(Math.abs(value))}`;
 }
 
 /**
