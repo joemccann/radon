@@ -10008,6 +10008,18 @@ tr {
   margin-top: 5px;
 }
 
+.strength-factor-header-cell {
+  min-width: 58px;
+}
+
+.strength-factor-header {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
 .strength-factor-chip {
   display: inline-flex;
   align-items: center;

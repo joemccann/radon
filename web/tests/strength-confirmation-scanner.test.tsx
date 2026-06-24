@@ -107,6 +107,28 @@ describe("StrengthConfirmationScanner", () => {
     expect(onTickerScan).toHaveBeenCalledWith("MU");
   });
 
+  it("renders help bubbles for all seven strength inputs", () => {
+    render(<StrengthConfirmationScanner data={data} />);
+
+    const expectations = [
+      ["q", "Composite sentiment gate"],
+      ["gex", "Dealer gamma gate"],
+      ["call", "Upside positioning gate"],
+      ["term", "Vol curve gate"],
+      ["smile", "Skew gate"],
+      ["sys", "Systematic flow gate"],
+      ["breadth", "Breadth gate"],
+    ] as const;
+
+    for (const [key, expectedText] of expectations) {
+      const trigger = screen.getByTestId(`strength-factor-tooltip-${key}`);
+      expect(trigger).toBeTruthy();
+      fireEvent.mouseEnter(trigger);
+      expect(screen.getByTestId(`strength-factor-tooltip-content-${key}`).textContent).toContain(expectedText);
+      fireEvent.mouseLeave(trigger);
+    }
+  });
+
   it("rejects malformed ticker search text", () => {
     const onTickerScan = vi.fn();
     render(<StrengthConfirmationScanner data={data} onTickerScan={onTickerScan} />);
