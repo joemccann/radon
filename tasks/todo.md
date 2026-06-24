@@ -4742,3 +4742,30 @@ verify search returns results on app.radon.run.
 - Full verification passed: `python3.13 -m pytest -q` — 3,626 passed, 13 skipped, 90 deselected. `cd web && npm run typecheck` passed. `cd web && npm test -- --reporter=dot` — 345 files, 3,399 passed, 26 skipped.
 - Hygiene passed: `git diff --check` and strict conflict-marker scan.
 - Commit and push were requested in the follow-up. Worktree also contains an unrelated tracked doc change in `docs/ib-gateway-recovery.md` and existing untracked scratch paths; those were left untouched.
+
+---
+
+## Session: 7-Step Strength Scanner (2026-06-24)
+
+### Dependency Graph
+- T92 (Commit/push completed theta ticker-search checkpoint) depends_on: []
+- T93 (Translate image into scanner requirements and map available data sources) depends_on: [T92]
+- T94 (Delegate implementation to a separate worker agent with disjoint ownership and verification criteria) depends_on: [T93]
+- T95 (Review and integrate worker changes into the main workspace) depends_on: [T94]
+- T96 (Run focused backend, UI, Playwright, full suites, hygiene, and document results) depends_on: [T95]
+
+### Checklist
+- [x] T92 Commit/push theta ticker-search checkpoint
+- [x] T93 Requirements and data-source mapping
+- [x] T94 Separate-agent implementation
+- [x] T95 Integration review
+- [x] T96 Verification and review
+
+### Review
+- Implemented the 7-Step Strength Confirmation scanner end to end. The backend writes `data/strength_confirmation.json`, mirrors `service_health[strength-confirmation]`, supports preset NDX scans and explicit ticker scans, and only emits `REAL_STRENGTH_CONFIRMED` when all seven factor groups pass.
+- Added FastAPI `POST /strength-confirmation/scan`, Next `GET /api/scanner/strength` and `POST /api/scanner/strength/scan`, shared Strength Confirmation types, a `useStrengthConfirmation` hook, service-health/no-store contracts, and the `/scanner?mode=strength` tab.
+- Added a Radon-styled desktop factor table and mobile cards with ticker search, scan controls, confirmed/candidate/scanned counts, factor-level pass/fail evidence, and explicit `APPROX` notes where direct feeds are unavailable.
+- Regression coverage added for scanner scoring/cache metadata, FastAPI ticker/preset behavior, Next proxy/cache fallback, component rendering/actions, route no-store contract, service-health registration, and Playwright desktop/mobile behavior.
+- Focused verification passed: `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_strength_confirmation_scanner.py scripts/api/tests/test_strength_confirmation_route.py -q` — 9 passed. `npx vitest run --config vitest.config.ts web/tests/strength-confirmation-route.test.ts web/tests/strength-confirmation-scanner.test.tsx web/tests/api-routes-no-cache-contract.test.ts` — 88 passed. `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_scan_service_health.py scripts/tests/test_service_registration_completeness.py scripts/tests/test_watchdog/test_services.py -q` — 40 passed. `npx vitest run --config vitest.config.ts web/tests/service-health-windows.test.ts` — 87 passed.
+- Full verification passed after main-agent review: `python3.13 -m pytest -q` — 3,639 passed, 13 skipped, 90 deselected, 19 warnings. `cd web && npm run typecheck` passed. `cd web && npm test -- --reporter=dot` — 347 files passed, 3,413 passed, 26 skipped. `PLAYWRIGHT_PORT=3041 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/strength-confirmation-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 passed.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan. No unrelated scratch paths were staged.

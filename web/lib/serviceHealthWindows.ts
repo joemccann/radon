@@ -174,6 +174,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // file cache until a fresh scan is requested. On-demand category avoids a
   // stale banner when nobody has inspected theta setups today.
   "theta-harvester": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``strength-confirmation`` writes when a user POSTs the 7-step strength
+  // scanner. UW + local CRI/MenthorQ cache inputs only; no IB dependency.
+  "strength-confirmation": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "discover": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "flow-analysis": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   "analyst-ratings": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },

@@ -573,6 +573,46 @@ export type ThetaHarvesterData = {
   results: ThetaHarvesterResult[];
 };
 
+export type StrengthFactorCheck = {
+  label: string;
+  passed: boolean;
+  value: number | null;
+  threshold: string;
+  note: string;
+  source: "UW" | "APPROX" | string;
+};
+
+export type StrengthFactorAssessment = {
+  group: string;
+  passed: boolean;
+  checks_passed: number;
+  checks_total: number;
+  source: "UW" | "APPROX" | string;
+  checks: StrengthFactorCheck[];
+  notes: string[];
+};
+
+export type StrengthConfirmationResult = {
+  ticker: string;
+  verdict: "REAL_STRENGTH_CONFIRMED" | "WATCHLIST" | "WEAK" | string;
+  score: number;
+  groups_passed: number;
+  spot: number;
+  factors: StrengthFactorAssessment[];
+  errors: string[];
+};
+
+export type StrengthConfirmationData = {
+  scan_time: string;
+  source: string;
+  universe: string;
+  requested_tickers?: string[];
+  tickers_scanned: number;
+  candidates_found: number;
+  confirmed_strength_count: number;
+  results: StrengthConfirmationResult[];
+};
+
 // Flow Analysis types
 export type FlowAnalysisPosition = {
   ticker: string;

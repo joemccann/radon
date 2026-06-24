@@ -2087,6 +2087,71 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
         }
 
 
+# ── 7-Step Strength Confirmation scanner ───────────────────────────
+
+_strength_last_scan: float = 0.0
+_strength_scan_lock: Optional[asyncio.Lock] = None
+STRENGTH_COOLDOWN_S = 600  # 10 min — UW option-chain + GEX + breadth budget
+
+
+def _strength_cache_matches_preset(cached: Any, preset: str) -> bool:
+    if not isinstance(cached, dict):
+        return False
+    universe = str(cached.get("universe") or "")
+    preset_key = preset.lower()
+    return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
+
+
+@app.post("/strength-confirmation/scan")
+async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, ticker: str = ""):
+    """Run strength_confirmation_scanner.py against a preset or explicit ticker.
+
+    The script writes data/strength_confirmation.json and records its own
+    service_health row. Ticker scans bypass preset cooldown for operator probes.
+    """
+    global _strength_last_scan, _strength_scan_lock
+    import time as _time
+    ticker = ticker.upper().strip()
+    if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
+        raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    if _strength_scan_lock is None:
+        _strength_scan_lock = asyncio.Lock()
+    now = _time.monotonic()
+    is_ticker_scan = bool(ticker)
+    if not is_ticker_scan and now - _strength_last_scan < STRENGTH_COOLDOWN_S:
+        cached = _read_cache(DATA_DIR / "strength_confirmation.json")
+        if _strength_cache_matches_preset(cached, preset):
+            return cached
+    async with _strength_scan_lock:
+        if not is_ticker_scan and _time.monotonic() - _strength_last_scan < STRENGTH_COOLDOWN_S:
+            cached = _read_cache(DATA_DIR / "strength_confirmation.json")
+            if _strength_cache_matches_preset(cached, preset):
+                return cached
+        args = ["--json"]
+        if is_ticker_scan:
+            args.append(ticker)
+        else:
+            args.extend(["--preset", preset])
+        if not is_ticker_scan and limit and limit > 0:
+            args.extend(["--limit", str(limit)])
+        result = await run_script("strength_confirmation_scanner.py", args, timeout=480)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        if not is_ticker_scan:
+            _strength_last_scan = _time.monotonic()
+        cached = _read_cache(DATA_DIR / "strength_confirmation.json")
+        return cached or {
+            "scan_time": "",
+            "source": "Unusual Whales + Radon regime caches",
+            "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
+            "requested_tickers": [ticker] if is_ticker_scan else [],
+            "tickers_scanned": 0,
+            "candidates_found": 0,
+            "confirmed_strength_count": 0,
+            "results": [],
+        }
+
+
 # ── Market calendar (IBKR-sourced trading schedule) ─────────────────
 
 

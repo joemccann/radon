@@ -9944,6 +9944,127 @@ tr {
   text-transform: uppercase;
 }
 
+.strength-confirmation__meta {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 8px;
+  min-width: 0;
+}
+
+.strength-factor-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 5px;
+}
+
+.strength-factor-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 4px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  line-height: 1.25;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.strength-factor-chip--pass {
+  border-color: color-mix(in srgb, var(--signal-core) 34%, transparent);
+  color: var(--signal-core);
+}
+
+.strength-factor-chip--fail {
+  border-color: color-mix(in srgb, var(--fault) 34%, transparent);
+  color: var(--fault);
+}
+
+.strength-factor-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  color: var(--text-muted);
+}
+
+.strength-factor-dot--pass {
+  border-color: color-mix(in srgb, var(--signal-core) 34%, transparent);
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 7%, transparent);
+}
+
+.strength-factor-dot--fail {
+  border-color: color-mix(in srgb, var(--fault) 34%, transparent);
+  color: var(--fault);
+  background: color-mix(in srgb, var(--fault) 7%, transparent);
+}
+
+.strength-confirmation__cards {
+  display: none;
+}
+
+.strength-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+}
+
+.strength-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.strength-card__meta,
+.strength-card__failed {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.strength-card__score {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-family: var(--font-mono);
+}
+
+.strength-card__score span {
+  color: var(--text-primary);
+  font-size: 22px;
+  font-weight: 760;
+  letter-spacing: 0;
+}
+
+.strength-card__score em {
+  color: var(--text-secondary);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 /* ── GEX Panel ─────────────────────────────────────────── */
 
 .gex-panel .section-body {
@@ -13811,6 +13932,41 @@ body[data-mobile="true"] .theta-harvester__cards {
 
 body[data-mobile="true"] .theta-card {
   min-height: 44px;
+}
+
+body[data-mobile="true"] .strength-confirmation {
+  border-left: 0;
+  border-right: 0;
+}
+
+body[data-mobile="true"] .strength-confirmation .section-header {
+  align-items: flex-start;
+  gap: 8px;
+}
+
+body[data-mobile="true"] .strength-confirmation__meta {
+  width: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+body[data-mobile="true"] .strength-confirmation__table-wrap {
+  display: none;
+}
+
+body[data-mobile="true"] .strength-confirmation__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 16px 16px;
+}
+
+body[data-mobile="true"] .strength-card {
+  min-height: 44px;
+}
+
+body[data-mobile="true"] .strength-card__head {
+  align-items: flex-start;
 }
 
 .m-card-press {
