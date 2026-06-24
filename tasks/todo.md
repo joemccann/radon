@@ -4518,3 +4518,59 @@ verify search returns results on app.radon.run.
 - Verification passed: `cd web && npm run typecheck`.
 - Verification passed: `cd web && npm test -- --reporter=dot` - 341 files, 3371 passed, 26 skipped.
 - Hygiene passed: `git diff --check` and strict conflict-marker scan.
+
+---
+
+## Session: Bear Put Spread Dollar Delta Sign Bug (2026-06-24)
+
+### Dependency Graph
+- T50 (Snapshot dirty state, load web calculation invariants, and trace dollar-delta computation) depends_on: []
+- T51 (Add a regression proving an OTM short put in a bear put spread does not dominate the long put) depends_on: [T50]
+- T52 (Patch the put fallback delta approximation with minimal blast radius) depends_on: [T51]
+- T53 (Run focused Vitest, visual/browser verification for the Dollar Delta modal, and hygiene checks) depends_on: [T52]
+- T54 (Document results and prepare final status) depends_on: [T53]
+
+### Checklist
+- [x] T50 Snapshot state and trace dollar-delta computation
+- [x] T51 Add failing regression
+- [x] T52 Patch put approximation
+- [x] T53 Verify focused UI/calculation behavior
+- [x] T54 Document results
+
+### Review
+- Root cause: `web/lib/exposureBreakdown.ts` inverted fallback put moneyness by using `(strike - spot) / strike`, so an out-of-the-money lower-strike short put in a bear put spread approximated near `+1` raw delta after the short-leg sign was applied. That made the SPY bear put spread in the screenshot net positive delta.
+- Fix: fallback option delta now uses one call-style moneyness calculation `(spot - strike) / strike` and derives put delta as `callDelta - 1`, matching the existing sign invariant: LONG Call +, SHORT Call -, LONG Put -, SHORT Put +.
+- Also fixed `fmtSignedUsd()` so compact negative dollar deltas render as `-$1.93M` instead of losing the sign as `$1.93M`.
+- Added a red/green regression for a SPY bear put spread between strikes: short OTM put contributes a smaller positive delta than the long put's negative delta, so the position and portfolio dollar delta are negative.
+- Added a modal regression that a negative compact dollar-delta row and leverage footnote preserve the negative sign.
+- Visual verification passed with a mocked `/portfolio` browser run: SPY bear put spread rendered `-2621` delta, `-$1.93M` dollar delta, and short-biased leverage. Screenshot: `/tmp/radon-bear-put-dollar-delta-fixed.png`.
+- Verification passed: `npx vitest run web/tests/exposure-breakdown.test.ts web/tests/exposure-breakdown-modal-leverage.test.tsx web/tests/dollar-delta-leverage.test.ts --config vitest.config.ts` - 3 files, 34 tests.
+- Verification passed: `RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/dollar-delta-leverage.spec.ts --project=chromium --config playwright.config.ts --timeout=30000` - 3 tests.
+- Verification passed: `cd web && npm run typecheck`.
+- Verification passed: `cd web && npm test -- --reporter=dot` - 341 files, 3373 passed, 26 skipped.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan.
+
+---
+
+## Session: Commit Merge Cleanup Push Bear Put Fix (2026-06-24)
+
+### Dependency Graph
+- T55 (Snapshot status and stage only the delta-fix files) depends_on: []
+- T56 (Commit the verified fix) depends_on: [T55]
+- T57 (Fetch and merge `origin/main` if needed) depends_on: [T56]
+- T58 (Run post-merge hygiene and verification) depends_on: [T57]
+- T59 (Push and confirm remote status) depends_on: [T58]
+
+### Checklist
+- [x] T55 Snapshot status and stage intended files
+- [x] T56 Commit verified fix
+- [x] T57 Fetch and merge origin/main if needed
+- [x] T58 Run post-merge hygiene/verification
+- [ ] T59 Push and confirm remote status
+
+### Review
+- Created local commit `fix(portfolio): correct bear put dollar delta` with the exposure fallback fix, signed compact money formatting fix, regression tests, and task log updates.
+- `git fetch origin` confirmed `origin/main` had not moved past `4ddaf6b`; no merge commit or conflict resolution was required.
+- Left unrelated untracked scratch files untouched: `.serena/.gitignore`, `.serena/project.yml`, `data/backtest/cri.json`, `deploy/beta/setup-beta.sh`, and `tasks/tradingview-chart-eval-report.html`.
+- Post-fetch focused verification passed: `npx vitest run web/tests/exposure-breakdown.test.ts web/tests/exposure-breakdown-modal-leverage.test.tsx web/tests/dollar-delta-leverage.test.ts --config vitest.config.ts` - 3 files, 34 tests.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan.

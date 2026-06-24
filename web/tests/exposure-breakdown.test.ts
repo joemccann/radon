@@ -14,6 +14,10 @@ function makePriceData(overrides: Partial<PriceData> = {}): PriceData {
   return { last: null, bid: null, ask: null, close: null, volume: null, ...overrides };
 }
 
+function futureExpiry(days = 180): string {
+  return new Date(Date.now() + days * 86_400_000).toISOString().slice(0, 10);
+}
+
 const SPREAD_POSITION: PortfolioData = {
   bankroll: 100_000,
   positions: [
@@ -117,5 +121,45 @@ describe("Exposure breakdown — short leg delta sign", () => {
     const stockLeg = result.rows[0].legs[0];
     expect(stockLeg.rawDelta).toBe(1);
     expect(stockLeg.legDelta).toBe(1000);
+  });
+
+  it("approximates a bear put spread as net negative delta between strikes", () => {
+    const portfolio: PortfolioData = {
+      bankroll: 1_500_000,
+      positions: [
+        {
+          id: 3,
+          ticker: "SPY",
+          structure: "Bear Put Spread $650.0/$740.0",
+          structure_type: "Vertical",
+          risk_profile: "defined",
+          direction: "DEBIT",
+          contracts: 50,
+          expiry: futureExpiry(),
+          market_value: 200_000,
+          legs: [
+            { type: "Put", direction: "SHORT", strike: 650, contracts: 50, avg_cost: -250, market_value: -12_500 },
+            { type: "Put", direction: "LONG", strike: 740, contracts: 50, avg_cost: 600, market_value: 30_000 },
+          ],
+        },
+      ],
+      account_summary: {},
+      exposure: {},
+      violations: [],
+    };
+
+    const result = computeExposureDetailed(portfolio, {
+      SPY: makePriceData({ last: 734.97 }),
+    });
+    const row = result.rows[0];
+    const shortPut = row.legs.find((l) => l.direction === "SHORT")!;
+    const longPut = row.legs.find((l) => l.direction === "LONG")!;
+
+    expect(shortPut.rawDelta).toBeGreaterThan(0);
+    expect(longPut.rawDelta).toBeLessThan(0);
+    expect(Math.abs(shortPut.rawDelta ?? 0)).toBeLessThan(Math.abs(longPut.rawDelta ?? 0));
+    expect(row.delta).toBeLessThan(0);
+    expect(row.dollarDelta).toBeLessThan(0);
+    expect(result.dollarDelta).toBeLessThan(0);
   });
 });

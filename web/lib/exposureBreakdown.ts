@@ -40,9 +40,7 @@ export type ExposureDataWithBreakdown = ExposureData & {
 
 function approxDelta(spot: number, strike: number, dte: number, type: "Call" | "Put"): number {
   if (spot <= 0 || strike <= 0 || dte <= 0) return type === "Call" ? 0.5 : -0.5;
-  const moneyness = type === "Call"
-    ? (spot - strike) / strike
-    : (strike - spot) / strike;
+  const moneyness = (spot - strike) / strike;
   const timeFactor = Math.max(0.1, Math.sqrt(dte / 365));
   const adjusted = moneyness / (0.2 * timeFactor);
   const callDelta = 0.5 + 0.5 * Math.tanh(adjusted * 2);
@@ -118,8 +116,8 @@ function positionDeltaDetailed(
     }
 
     const dte = daysToExpiry(pos.expiry);
-    const absRawDelta = approxDelta(spot, leg.strike, dte, leg.type as "Call" | "Put");
-    const legDelta = sign * absRawDelta * leg.contracts * 100;
+    const rawOptionDelta = approxDelta(spot, leg.strike, dte, leg.type as "Call" | "Put");
+    const legDelta = sign * rawOptionDelta * leg.contracts * 100;
     totalDelta += legDelta;
     usedApprox = true;
     legs.push({
@@ -127,7 +125,7 @@ function positionDeltaDetailed(
       direction: leg.direction,
       strike: leg.strike,
       contracts: leg.contracts,
-      rawDelta: sign * absRawDelta,
+      rawDelta: sign * rawOptionDelta,
       legDelta,
     });
   }

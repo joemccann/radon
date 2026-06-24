@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-06-24
+
+- For fallback option exposure, derive put delta from the same spot-minus-strike moneyness as call delta (`put = call - 1`); never flip moneyness for puts. An OTM short put should contribute a small positive delta, not dominate a bear put spread as nearly +1. Also verify signed compact money (`-$1.93M`) at the display layer when fixing signed exposure math.
+
 ## 2026-06-23
 
 - Before reporting that `main` is fully synced after a push, run a final `git fetch origin && git status --short --branch`; parallel agents can advance `origin/main` moments after a successful push, and a stale local status makes the next turn start behind.
