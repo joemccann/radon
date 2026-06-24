@@ -31,6 +31,7 @@ import { useDiscover } from "@/lib/useDiscover";
 import { useFlowAnalysis } from "@/lib/useFlowAnalysis";
 import { useScanner } from "@/lib/useScanner";
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
+import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
 import CashFlowsSection from "@/components/CashFlowsSection";
@@ -79,6 +80,7 @@ import TickerLink from "./TickerLink";
 import TickerWorkspace from "./TickerWorkspace";
 import TickerFlowReport from "./flow-analysis/TickerFlowReport";
 import ThetaHarvesterScanner from "./ThetaHarvesterScanner";
+import StrengthConfirmationScanner from "./StrengthConfirmationScanner";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import { AlertsPanel } from "./alerts/AlertsPanel";
@@ -1350,7 +1352,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
 /* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
-type ScannerMode = "flow" | "theta";
+type ScannerMode = "flow" | "theta" | "strength";
 
 const scannerSigExtract = (item: ScannerSignal, key: ScannerSortKey): string | number | null => {
   switch (key) {
@@ -1382,12 +1384,20 @@ function ScannerSections() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const queryMode = searchParams.get("mode") === "theta" ? "theta" : "flow";
+  const queryModeParam = searchParams.get("mode");
+  const queryMode: ScannerMode = queryModeParam === "theta"
+    ? "theta"
+    : queryModeParam === "strength"
+      ? "strength"
+      : "flow";
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
   const theta = useThetaHarvester(mode === "theta");
+  const strength = useStrengthConfirmation(mode === "strength");
   const [thetaScanning, setThetaScanning] = useState(false);
   const [thetaScanError, setThetaScanError] = useState<string | null>(null);
+  const [strengthScanning, setStrengthScanning] = useState(false);
+  const [strengthScanError, setStrengthScanError] = useState<string | null>(null);
   const signals = data?.top_signals ?? [];
   const { sorted, sort, toggle } = useSort(signals, scannerSigExtract);
   const { isMobile, hasMounted } = useViewport();
@@ -1400,10 +1410,10 @@ function ScannerSections() {
   const setMode = (next: ScannerMode) => {
     setModeState(next);
     const params = new URLSearchParams(searchParams.toString());
-    if (next === "theta") {
-      params.set("mode", "theta");
-    } else {
+    if (next === "flow") {
       params.delete("mode");
+    } else {
+      params.set("mode", next);
     }
     const qs = params.toString();
     router.replace(qs ? `${pathname}?${qs}` : pathname, { scroll: false });
@@ -1433,6 +1443,30 @@ function ScannerSections() {
     }
   };
 
+  const runStrengthScan = async (ticker?: string) => {
+    if (strengthScanning) return;
+    const normalizedTicker = ticker?.trim().toUpperCase();
+    setStrengthScanError(null);
+    setStrengthScanning(true);
+    try {
+      const res = await fetch("/api/scanner/strength/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(normalizedTicker ? { ticker: normalizedTicker } : { preset: "ndx100" }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `Strength scan failed (${res.status})`);
+      }
+      strength.syncNow();
+    } catch (err) {
+      setStrengthScanError(err instanceof Error ? err.message : "Strength scan failed");
+    } finally {
+      setStrengthScanning(false);
+    }
+  };
+
   const modeTabs = (
     <div className="scanner-mode-tabs" role="tablist" aria-label="Scanner mode">
       <button
@@ -1452,6 +1486,15 @@ function ScannerSections() {
         onClick={() => setMode("theta")}
       >
         Theta Harvester
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "strength"}
+        className={`scanner-mode-tab${mode === "strength" ? " scanner-mode-tab--active" : ""}`}
+        onClick={() => setMode("strength")}
+      >
+        7-Step Strength
       </button>
     </div>
   );
@@ -1487,6 +1530,23 @@ function ScannerSections() {
           lastSync={theta.lastSync}
           onScan={() => { void runThetaScan(); }}
           onTickerScan={(ticker) => { void runThetaScan(ticker); }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "strength") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <StrengthConfirmationScanner
+          data={strength.data ?? null}
+          loading={strength.loading}
+          scanning={strengthScanning}
+          error={strengthScanError || strength.error}
+          lastSync={strength.lastSync}
+          onScan={() => { void runStrengthScan(); }}
+          onTickerScan={(ticker) => { void runStrengthScan(ticker); }}
         />
       </div>
     );
