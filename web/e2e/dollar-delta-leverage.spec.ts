@@ -21,6 +21,15 @@ import { test, expect, type Page } from "@playwright/test";
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
 type Side = "long" | "short";
+type MockSnapshot = {
+  symbol: string;
+  last: number;
+  bid: number;
+  ask: number;
+  close: number;
+  volume: number;
+  delta?: number;
+};
 
 const NLV = 1_611_889.79;
 
@@ -80,6 +89,65 @@ function makePortfolio(side: Side) {
   };
 }
 
+function makeBearPutPortfolio() {
+  return {
+    bankroll: NLV,
+    peak_value: NLV,
+    last_sync: new Date().toISOString(),
+    total_deployed_pct: 4.02,
+    total_deployed_dollars: 64_750,
+    remaining_capacity_pct: 95.98,
+    position_count: 1,
+    defined_risk_count: 1,
+    undefined_risk_count: 0,
+    avg_kelly_optimal: null,
+    positions: [
+      {
+        id: 11,
+        ticker: "SPY",
+        structure: "Bear Put Spread $650.0/$740.0",
+        structure_type: "Bear Put Spread",
+        risk_profile: "defined",
+        direction: "DEBIT",
+        contracts: 50,
+        expiry: "2026-09-18",
+        market_value: 64_750,
+        legs: [
+          {
+            type: "Put",
+            direction: "SHORT",
+            strike: 650,
+            contracts: 50,
+            avg_cost: 1026.27,
+            market_value: 26_600,
+          },
+          {
+            type: "Put",
+            direction: "LONG",
+            strike: 740,
+            contracts: 50,
+            avg_cost: 3250.7,
+            market_value: 91_350,
+          },
+        ],
+      },
+    ],
+    exposure: {},
+    violations: [],
+    account_summary: {
+      net_liquidation: NLV,
+      daily_pnl: 0,
+      unrealized_pnl: -46_471,
+      realized_pnl: 0,
+      settled_cash: 0,
+      maintenance_margin: 100_000,
+      excess_liquidity: 1_000_000,
+      buying_power: 4_000_000,
+      dividends: 0,
+    },
+  };
+}
+
 const ORDERS_EMPTY = {
   last_sync: new Date().toISOString(),
   open_orders: [],
@@ -92,10 +160,36 @@ const ORDERS_EMPTY = {
 //
 // usePrices opens ws://localhost:8765 and listens for `snapshot` / `batch`
 // messages. We patch window.WebSocket before page load so the hook receives
-// a single AAPL spot snapshot deterministically.
+// deterministic quote snapshots without depending on the real relay.
 
-async function installWsMock(page: Page) {
-  await page.addInitScript(() => {
+const AAPL_SNAPSHOTS: MockSnapshot[] = [
+  { symbol: "AAPL", last: 260, bid: 259.95, ask: 260.05, close: 250, volume: 1_000_000 },
+];
+
+const BEAR_PUT_SNAPSHOTS: MockSnapshot[] = [
+  { symbol: "SPY", last: 737.46, bid: 737.45, ask: 737.47, close: 740, volume: 1_000_000 },
+  {
+    symbol: "SPY_20260918_650_P",
+    last: 6.68,
+    bid: 6.65,
+    ask: 6.70,
+    close: 6.50,
+    volume: 10_000,
+    delta: 0.2468,
+  },
+  {
+    symbol: "SPY_20260918_740_P",
+    last: 24.45,
+    bid: 24.40,
+    ask: 24.50,
+    close: 24.00,
+    volume: 10_000,
+    delta: 0.1623,
+  },
+];
+
+async function installWsMock(page: Page, snapshots: MockSnapshot[] = AAPL_SNAPSHOTS) {
+  await page.addInitScript((mockSnapshots: MockSnapshot[]) => {
     class MockWS {
       static CONNECTING = 0;
       static OPEN = 1;
@@ -116,23 +210,14 @@ async function installWsMock(page: Page) {
           this.onopen?.(ev);
           this._listeners["open"]?.forEach((fn) => fn(ev));
 
-          // Push an AAPL snapshot a tick later so the position table receives a price.
-          setTimeout(() => {
-            const message = JSON.stringify({
-              type: "snapshot",
-              data: {
-                symbol: "AAPL",
-                last: 260,
-                bid: 259.95,
-                ask: 260.05,
-                close: 250,
-                volume: 1_000_000,
-              },
-            });
-            const me = new MessageEvent("message", { data: message });
-            this.onmessage?.(me);
-            this._listeners["message"]?.forEach((fn) => fn(me));
-          }, 50);
+          mockSnapshots.forEach((data, index) => {
+            setTimeout(() => {
+              const message = JSON.stringify({ type: "snapshot", symbol: data.symbol, data });
+              const me = new MessageEvent("message", { data: message });
+              this.onmessage?.(me);
+              this._listeners["message"]?.forEach((fn) => fn(me));
+            }, 50 + index * 10);
+          });
         }, 10);
       }
 
@@ -160,7 +245,7 @@ async function installWsMock(page: Page) {
     }
     // @ts-ignore — patching for E2E
     window.WebSocket = MockWS;
-  });
+  }, snapshots);
 }
 
 async function setupMocks(page: Page, side: Side) {
@@ -172,6 +257,59 @@ async function setupMocks(page: Page, side: Side) {
       status: 200,
       contentType: "application/json",
       body: JSON.stringify(makePortfolio(side)),
+    }),
+  );
+  await page.route("**/api/orders", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(ORDERS_EMPTY),
+    }),
+  );
+  await page.route("**/api/regime", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ score: 15, level: "LOW", cri: { score: 15 } }),
+    }),
+  );
+  await page.route("**/api/ib-status", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ connected: true }),
+    }),
+  );
+  await page.route("**/api/blotter", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        as_of: new Date().toISOString(),
+        summary: { realized_pnl: 0 },
+        closed_trades: [],
+        open_trades: [],
+      }),
+    }),
+  );
+  await page.route("**/ws-ticket", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ticket: "stub" }),
+    }),
+  );
+}
+
+async function setupBearPutMocks(page: Page) {
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await installWsMock(page, BEAR_PUT_SNAPSHOTS);
+
+  await page.route("**/api/portfolio", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify(makeBearPutPortfolio()),
     }),
   );
   await page.route("**/api/orders", (route) =>
@@ -297,5 +435,32 @@ test.describe("Dollar Delta — delta-adjusted leverage", () => {
     const block = modal.locator('[data-testid="dd-leverage-block"]');
     await expect(block).toHaveClass(/dd-leverage-short/);
     await expect(modal.locator('[data-testid="dd-leverage-bias"]')).toContainText(/short-biased/i);
+  });
+
+  test("bear put spread modal expands with signed put-leg exposure", async ({ page }) => {
+    await setupBearPutMocks(page);
+    await page.goto("/portfolio");
+    await expandExposureSection(page);
+
+    const card = page.locator(".metric-card", { hasText: "Dollar Delta" }).first();
+    await card.waitFor({ timeout: 10_000 });
+    await expect(card.locator('[data-testid="dd-card-leverage-pct"]')).toContainText("-19.3% of NLV");
+
+    await card.click();
+    const modal = page.locator(".modal-content");
+    await modal.waitFor({ timeout: 5_000 });
+
+    const spreadRow = modal.locator("tr", { hasText: "Bear Put Spread $650.0/$740.0" }).first();
+    await spreadRow.click();
+
+    const shortPut = modal.locator("tr", { hasText: "SHORT 50x Put $650" }).first();
+    await expect(shortPut).toContainText("+0.7532");
+    await expect(shortPut).toContainText("+3766");
+
+    const longPut = modal.locator("tr", { hasText: "LONG 50x Put $740" }).first();
+    await expect(longPut).toContainText("-0.8377");
+    await expect(longPut).toContainText("-4189");
+
+    await page.screenshot({ path: "/tmp/radon-spy-bear-put-ib-leg-signs.png", fullPage: true });
   });
 });

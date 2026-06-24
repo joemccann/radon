@@ -69,7 +69,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - Per-leg P&L = `sign * (|MV| - |EC|)`. Position P&L is the sum.
 - Total P&L percent = `(MV - EC) / |EC| * 100`.
 - Price resolution: stock `prices[ticker].last`; single option `prices[optionKey].last`; spreads from signed leg prices; BAG via `resolveOrderLastPrice()` / `resolveOrderPriceData()`. Show `---` if unavailable.
-- Exposure delta sign: LONG Call +, SHORT Call -, LONG Put -, SHORT Put +.
+- Exposure delta sign: normalize provider option delta to canonical option delta first, then apply position direction. LONG Call +, SHORT Call -, LONG Put -, SHORT Put +. Positive provider put deltas may be call-equivalent; convert with `delta - 1` before applying LONG/SHORT.
 - Margin warning thresholds live in `web/lib/marginWarning.ts`; toasts are persistent and fire only on transition to worse rank.
 
 ## Key Component Notes

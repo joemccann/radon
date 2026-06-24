@@ -1,8 +1,8 @@
 /**
  * Unit tests: Exposure breakdown — per-leg delta signs.
  *
- * Short legs must display negative rawDelta so the modal shows
- * the correct sign (e.g. -0.08 for a short call, not +0.08).
+ * Expanded leg rows must show signed position exposure:
+ * LONG Call +, SHORT Call -, LONG Put -, SHORT Put +.
  */
 
 import { describe, it, expect } from "vitest";
@@ -68,6 +68,51 @@ describe("Exposure breakdown — short leg delta sign", () => {
 
     // Position-level delta: net of long - short
     expect(row.delta).toBeCloseTo(2800, 0);
+  });
+
+  it("normalizes positive IB put deltas before applying leg direction", () => {
+    const portfolio: PortfolioData = {
+      bankroll: 1_500_000,
+      positions: [
+        {
+          id: 4,
+          ticker: "SPY",
+          structure: "Bear Put Spread $650.0/$740.0",
+          structure_type: "Bear Put Spread",
+          risk_profile: "defined",
+          direction: "DEBIT",
+          contracts: 50,
+          expiry: "2026-09-18",
+          market_value: 64_750,
+          legs: [
+            { type: "Put", direction: "SHORT", strike: 650, contracts: 50, avg_cost: -1026.27, market_value: 26_600 },
+            { type: "Put", direction: "LONG", strike: 740, contracts: 50, avg_cost: 3250.7, market_value: 91_350 },
+          ],
+        },
+      ],
+      account_summary: {},
+      exposure: {},
+      violations: [],
+    };
+
+    const prices: Record<string, PriceData> = {
+      SPY: makePriceData({ last: 737.46 }),
+      "SPY_20260918_650_P": makePriceData({ last: 6.68, delta: 0.2468 }),
+      "SPY_20260918_740_P": makePriceData({ last: 24.45, delta: 0.1623 }),
+    };
+
+    const result = computeExposureDetailed(portfolio, prices);
+    const row = result.rows[0];
+    const shortPut = row.legs.find((l) => l.direction === "SHORT")!;
+    const longPut = row.legs.find((l) => l.direction === "LONG")!;
+
+    expect(row.deltaSource).toBe("ib");
+    expect(shortPut.rawDelta).toBeCloseTo(0.7532, 4);
+    expect(shortPut.legDelta).toBeCloseTo(3766, 0);
+    expect(longPut.rawDelta).toBeCloseTo(-0.8377, 4);
+    expect(longPut.legDelta).toBeCloseTo(-4188.5, 4);
+    expect(row.delta).toBeCloseTo(-422.5, 4);
+    expect(row.dollarDelta).toBeLessThan(0);
   });
 
   it("short leg rawDelta is negative with approx delta fallback", () => {

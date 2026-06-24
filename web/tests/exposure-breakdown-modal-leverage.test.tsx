@@ -15,7 +15,7 @@
 
 import React from "react";
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import ExposureBreakdownModal from "../components/ExposureBreakdownModal";
 import type { ExposureDataWithBreakdown } from "../lib/exposureBreakdown";
@@ -140,6 +140,48 @@ describe("ExposureBreakdownModal — delta-adjusted leverage block", () => {
     expect(document.querySelector(".dd-leverage-dollar-delta")?.textContent ?? "").toContain(
       "$ Delta -$1.93M",
     );
+  });
+
+  it("renders expanded put-spread legs with signed position exposure", () => {
+    const exposure = makeExposure({
+      dollarDelta: -311_527,
+      rows: [
+        makeRow({
+          ticker: "SPY",
+          structure: "Bear Put Spread $650.0/$740.0",
+          spot: 737.46,
+          delta: -422.5,
+          dollarDelta: -311_527,
+          deltaSource: "ib",
+          legs: [
+            { type: "Put", direction: "SHORT", strike: 650, contracts: 50, rawDelta: 0.7532, legDelta: 3766 },
+            { type: "Put", direction: "LONG", strike: 740, contracts: 50, rawDelta: -0.8377, legDelta: -4188.5 },
+          ],
+        }),
+      ],
+    });
+
+    render(
+      <ExposureBreakdownModal
+        metric="dollarDelta"
+        exposure={exposure}
+        bankroll={1_611_889.79}
+        netLiquidation={1_611_889.79}
+        onClose={() => {}}
+      />,
+    );
+
+    const row = screen.getByText("Bear Put Spread $650.0/$740.0").closest("tr");
+    expect(row).not.toBeNull();
+    fireEvent.click(row!);
+
+    const shortPut = screen.getByText("SHORT 50x Put $650").closest("tr");
+    expect(shortPut?.textContent ?? "").toContain("+0.7532");
+    expect(shortPut?.textContent ?? "").toContain("+3766");
+
+    const longPut = screen.getByText("LONG 50x Put $740").closest("tr");
+    expect(longPut?.textContent ?? "").toContain("-0.8377");
+    expect(longPut?.textContent ?? "").toContain("-4189");
   });
 
   it("renders 'Neutral' label when dollar delta is round-tripping near zero", () => {
