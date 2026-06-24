@@ -475,6 +475,12 @@ export default function AdminWorkspace() {
               servicesSupported={services?.supported ?? false}
               onStopGateway={stopGateway}
               onStartGateway={restartStack}
+              // Stopping the gateway cascade-stops radon-api — the very service
+              // serving /admin/services + /health — so both polls fail. When the
+              // API is unreachable, the last-known unit row reads stale "active";
+              // treat that as a stopped gateway so the power control flips to
+              // "Start Gateway" instead of latching "running" forever.
+              apiUnreachable={servicesError != null && healthError != null}
             />
           </div>
           <ServiceControlPanel

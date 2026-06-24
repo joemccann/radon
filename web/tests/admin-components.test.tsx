@@ -148,6 +148,50 @@ describe("<Ib2faControls />", () => {
     expect(screen.getByTestId("force-2fa-disabled-reason").textContent).toContain("ib_watchdog");
   });
 
+  const activeGatewayUnit = {
+    unit: "radon-ib-gateway.service",
+    active_state: "active",
+    sub_state: "exited",
+  } as unknown as Parameters<typeof Ib2faControls>[0]["gatewayUnit"];
+
+  it("offers Stop Gateway when the API is reachable and the unit is active", () => {
+    render(
+      <Ib2faControls
+        health={buildHealth()}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={activeGatewayUnit}
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+        servicesSupported
+        apiUnreachable={false}
+      />,
+    );
+    expect(screen.getByTestId("gateway-power-button").textContent).toContain("Stop Gateway");
+    expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/running/i);
+  });
+
+  it("flips to Start Gateway when the API is unreachable (cascade), ignoring the stale active unit row", () => {
+    // Stopping the gateway cascade-stops radon-api, so both polls fail and the
+    // cached unit row stays "active". The control must not latch "running".
+    render(
+      <Ib2faControls
+        health={buildHealth()}
+        onForcePush={vi.fn()}
+        onResetBackoff={vi.fn()}
+        onRestartStack={vi.fn()}
+        gatewayUnit={activeGatewayUnit}
+        onStopGateway={vi.fn()}
+        onStartGateway={vi.fn()}
+        servicesSupported
+        apiUnreachable
+      />,
+    );
+    expect(screen.getByTestId("gateway-power-button").textContent).toContain("Start Gateway");
+    expect(screen.getByTestId("gateway-power-status").textContent).toMatch(/stopped/i);
+  });
+
   it("clicking Force 2FA opens confirmation (does not fire onForcePush directly)", () => {
     const onForcePush = vi.fn().mockResolvedValue(undefined);
     render(
