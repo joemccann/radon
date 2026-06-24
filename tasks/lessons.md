@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-06-23
+
+- Before reporting that `main` is fully synced after a push, run a final `git fetch origin && git status --short --branch`; parallel agents can advance `origin/main` moments after a successful push, and a stale local status makes the next turn start behind.
+
 ## 2026-06-13
 
 Session: reliability roadmap (DUR-01..16) + a chain of trade-data bugs (CTA-01, MU P&L, JRN-01/02, SPX-01..06) + ops fixes.

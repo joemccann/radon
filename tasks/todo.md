@@ -4488,3 +4488,33 @@ verify search returns results on app.radon.run.
 - Updated `scripts/CLAUDE.md` so the evaluation pipeline points executed trades at the Turso `journal` table instead of `trade_log.json`.
 - Focused repair verification passed: no `portfolio.json` / `trade_log.json` / `orders.json` / `blotter.json` source hits in `scripts/ib_sync.py` or `scripts/CLAUDE.md`; `python3.13 -m py_compile scripts/ib_sync.py`; `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_flat_json_source_truth_contract.py scripts/tests/test_combo_entry_date.py scripts/tests/test_db_readers.py -q` — 15 passed, 1 warning.
 - Full post-repair verification passed: `git diff --check`; `PYTHONPATH=scripts python3.13 -m pytest scripts/tests -q` — 3273 passed, 13 skipped, 90 deselected, 13 warnings; `npx vitest run lib/tools/__tests__ --config vitest.config.ts` — 8 files, 65 tests; `cd web && npm run typecheck`; `cd web && npm test -- --reporter=dot` — 340 files, 3369 passed, 26 skipped.
+
+---
+
+## Session: Mobile Position Stock Option Toggle Bug (2026-06-23)
+
+### Dependency Graph
+- T45 (Fast-forward local `main`, record the status-reporting lesson, and inspect the mobile position detail quote-toggle path) depends_on: []
+- T46 (Add a focused regression for combo positions whose stock/option toggle should be visible on mobile) depends_on: [T45]
+- T47 (Patch the smallest rendering/state logic so the toggle appears without clipping or hiding the book) depends_on: [T46]
+- T48 (Run focused Vitest plus visual/mobile verification and hygiene checks) depends_on: [T47]
+- T49 (Document results, commit, and push) depends_on: [T48]
+
+### Checklist
+- [x] T45 Fast-forward, record lesson, and inspect quote-toggle path
+- [x] T46 Add focused regression
+- [x] T47 Patch rendering/state logic
+- [x] T48 Run focused verification
+- [x] T49 Document, commit, and push
+
+### Review
+- Root cause: `TickerDetailContent` only exposed the mobile `STOCK` / `OPTION` instrument switcher for single-leg non-stock positions, so ratio/reversal equity option positions such as the EWY screenshot were locked to one instrument view with no visible toggle.
+- Fix: switcher eligibility now keys off any held call/put leg for equity positions, while still excluding futures roots and index/futures-underlying options. Spread-net quotes also bypass depth-book NBBO replacement so the option/spread header stays on the synthetic net price until the user switches to `STOCK`.
+- Added jsdom regression coverage for an EWY ratio reverse risk reversal: the mobile header renders the `Instrument view` group, defaults to active `OPTION`, shows the spread quote, and flips to active `STOCK` on tap.
+- Added mobile Playwright coverage for `/IWM?posId=12` with mocked portfolio/orders/websocket data: the real route renders the switcher, keeps `OPTION` active at `$-0.40`, then switches to active `STOCK` at `$244.65`.
+- Visual verification: temporary Playwright screenshots of the mobile route confirmed the switcher renders in the position header and the stock view updates the quote/book without layout clipping.
+- Verification passed: `npx vitest run web/tests/mobile-combo-instrument-switcher.test.tsx web/tests/cockpit-header-mobile-switcher.test.tsx web/tests/asset-cockpit-render.test.tsx web/tests/ticker-chain-position-focus.test.tsx web/tests/chain-atm-scroll-isolation.test.tsx web/tests/chain-url-deeplink.test.tsx --config vitest.config.ts` - 6 files, 22 tests.
+- Verification passed: `RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/mobile-combo-instrument-switcher.spec.ts --project=mobile --config playwright.config.ts --timeout=30000` - 1 mobile test.
+- Verification passed: `cd web && npm run typecheck`.
+- Verification passed: `cd web && npm test -- --reporter=dot` - 341 files, 3371 passed, 26 skipped.
+- Hygiene passed: `git diff --check` and strict conflict-marker scan.
