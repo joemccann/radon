@@ -133,6 +133,7 @@ describe("market-hours-only services (weekend-aware closed window)", () => {
 
   it.each([
     "scanner",
+    "theta-harvester",
     "discover",
     "flow-analysis",
     "analyst-ratings",
@@ -144,6 +145,7 @@ describe("market-hours-only services (weekend-aware closed window)", () => {
 
   it.each([
     "scanner",
+    "theta-harvester",
     "discover",
     "flow-analysis",
     "analyst-ratings",
@@ -279,6 +281,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
     ["orders-sync", "scheduled"],
     ["portfolio-sync", "scheduled"],
     ["scanner", "on-demand"],
+    ["theta-harvester", "on-demand"],
     ["discover", "on-demand"],
     ["flow-analysis", "on-demand"],
     ["analyst-ratings", "on-demand"],
@@ -354,6 +357,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["watchdog-alerts", false],
     ["gex-scan", false],
     ["scanner", false],
+    ["theta-harvester", false],
     ["discover", false],
     ["flow-analysis", false],
     ["ib-watchdog", false],

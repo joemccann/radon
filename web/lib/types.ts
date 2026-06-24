@@ -513,6 +513,65 @@ export type GarchConvergenceData = {
   pairs: GarchPair[];
 };
 
+export type ThetaHarvesterLeg = {
+  symbol: string;
+  expiry: string;
+  strike: number;
+  right: "C" | "P";
+  iv: number;
+  delta: number;
+  theta: number;
+  gamma: number;
+  vega: number;
+  bid?: number | null;
+  ask?: number | null;
+  volume: number;
+  open_interest: number;
+};
+
+export type ThetaHarvesterStructure = {
+  expiry: string;
+  dte: number;
+  short_put: ThetaHarvesterLeg;
+  short_call: ThetaHarvesterLeg;
+  net_delta: number;
+  theta: number;
+  gamma: number;
+  vega: number;
+  credit?: number | null;
+};
+
+export type ThetaHarvesterResult = {
+  ticker: string;
+  score: number;
+  verdict: "THETA_HARVEST" | "WATCHLIST" | "DIRECTIONAL_DISGUISE" | string;
+  structure: ThetaHarvesterStructure;
+  spot: number;
+  iv: number;
+  hv20: number;
+  hv60: number;
+  iv_rv_edge: number;
+  iv_rv_ratio: number;
+  trend_20d_pct: number;
+  range_score: number;
+  dealer_support: "SUPPORT" | "NO_SUPPORT" | "UNKNOWN" | string;
+  net_gex: number | null;
+  gex_flip: number | null;
+  setup: string;
+  gates: Record<string, boolean>;
+  errors: string[];
+};
+
+export type ThetaHarvesterData = {
+  scan_time: string;
+  source: string;
+  universe: string;
+  tickers_scanned: number;
+  candidates_found: number;
+  theta_harvest_count: number;
+  results: ThetaHarvesterResult[];
+};
+
 // Flow Analysis types
 export type FlowAnalysisPosition = {
   ticker: string;

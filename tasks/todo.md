@@ -4680,3 +4680,36 @@ verify search returns results on app.radon.run.
 - `git fetch origin` and `git merge --ff-only origin/main` completed with `Already up to date`; no conflicts required resolution.
 - Post-merge hygiene passed: `git diff --check` and strict conflict-marker scan.
 - Push to `origin/main` completed after the commit.
+
+---
+
+## Session: Theta Harvester Scanner (2026-06-24)
+
+### Dependency Graph
+- T79 (Translate the reference image into product requirements and scanner scoring gates) depends_on: []
+- T80 (Analyze available data APIs, scripts, cache files, and Nasdaq 100 universe support) depends_on: [T79]
+- T81 (Map the correct desktop/mobile UI surface using `ui-skills` and existing Radon scanner patterns) depends_on: [T79]
+- T82 (Design the theta-harvester data model, API route/hook, and ranking logic) depends_on: [T80, T81]
+- T83 (Add focused regressions for scoring, API/cache behavior, and responsive UI rendering) depends_on: [T82]
+- T84 (Implement backend scanner, Next route/hook, and desktop/mobile UI) depends_on: [T83]
+- T85 (Run scanner/test coverage against Nasdaq 100 symbols and visually verify desktop/mobile) depends_on: [T84]
+- T86 (Document results, hygiene, and commit/push if requested) depends_on: [T85]
+
+### Checklist
+- [x] T79 Requirements from image
+- [x] T80 API/data analysis
+- [x] T81 UI surface analysis
+- [x] T82 Data model and implementation design
+- [x] T83 Regression coverage
+- [x] T84 Implementation
+- [x] T85 Nasdaq 100 verification
+- [x] T86 Review and cleanup
+
+### Review
+- Built a new UW-backed theta harvester scanner in `scripts/theta_harvester_scanner.py`. It resolves Nasdaq-100 symbols through the preset path, falls back when `data/presets/ndx100.json` is structurally corrupt, ranks short-strangle candidates using near-zero net delta, IV/RV richness, dealer GEX support, positive theta, controlled short gamma, and range-bound behavior, then writes `data/theta_harvester.json` plus `service_health[theta-harvester]`.
+- Added FastAPI `POST /theta-harvester/scan`, Next routes `GET /api/scanner/theta` and `POST /api/scanner/theta/scan`, the `useThetaHarvester` hook, shared Theta Harvester types, and explicit service-health/no-store contracts.
+- Added `/scanner?mode=theta` with desktop table and mobile card layouts, plus a `Theta` tab in dashboard Trading Candidates. The scanner mode switch now only fetches the active scanner data path.
+- Live Nasdaq-100 smoke: `PYTHONPATH=scripts python3.13 scripts/theta_harvester_scanner.py --preset ndx100 --limit 3 --workers 1 --json --output /tmp/theta_harvester_smoke.json` passed using fallback `ndx100` symbols; AAPL, MSFT, and NVDA produced `THETA_HARVEST` candidates with populated NBBO credits.
+- Focused verification passed: `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_theta_harvester_scanner.py scripts/tests/test_scan_service_health.py scripts/tests/test_service_registration_completeness.py scripts/tests/test_watchdog/test_services.py -q` — 44 tests. `npx vitest run --config vitest.config.ts web/tests/theta-harvester-route.test.ts web/tests/theta-harvester-scanner.test.tsx web/tests/api-routes-no-cache-contract.test.ts web/tests/service-health-windows.test.ts` — 168 tests. `PLAYWRIGHT_PORT=3040 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/theta-harvester-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 tests.
+- Full verification passed: `python3.13 -m pytest -q` — 3,605 passed, 13 skipped, 90 deselected. `npm run typecheck` passed. `npm test -- --reporter=dot` passed — 345 files, 3,396 passed, 26 skipped.
+- Hygiene passed: `git diff --check` and exact conflict-marker scan. Commit, merge, and push were requested in the follow-up handoff.

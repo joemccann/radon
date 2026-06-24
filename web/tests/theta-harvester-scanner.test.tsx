@@ -1,0 +1,135 @@
+/**
+ * @vitest-environment jsdom
+ */
+
+import React from "react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import ThetaHarvesterScanner from "../components/ThetaHarvesterScanner";
+import type { ThetaHarvesterData } from "../lib/types";
+
+vi.mock("next/link", () => ({
+  default: ({ href, children, ...props }: { href: string; children: React.ReactNode }) => (
+    <a href={href} {...props}>{children}</a>
+  ),
+}));
+
+vi.mock("@/lib/useTickerNav", () => ({
+  useTickerNav: () => ({
+    navigateToTicker: vi.fn(),
+  }),
+}));
+
+afterEach(() => {
+  cleanup();
+});
+
+const data: ThetaHarvesterData = {
+  scan_time: "2026-06-24T15:00:00Z",
+  source: "Unusual Whales",
+  universe: "fallback:ndx100",
+  tickers_scanned: 2,
+  candidates_found: 1,
+  theta_harvest_count: 1,
+  results: [
+    {
+      ticker: "AAPL",
+      score: 87.5,
+      verdict: "THETA_HARVEST",
+      spot: 100,
+      iv: 35,
+      hv20: 12,
+      hv60: 15,
+      iv_rv_edge: 23,
+      iv_rv_ratio: 2.92,
+      trend_20d_pct: 0.2,
+      range_score: 0.86,
+      dealer_support: "SUPPORT",
+      net_gex: 1_500_000,
+      gex_flip: 95,
+      setup: "TRUE_THETA",
+      gates: {
+        delta_near_zero: true,
+        iv_rich_vs_rv: true,
+        dealer_support: true,
+        theta_positive: true,
+        range_bound: true,
+      },
+      errors: [],
+      structure: {
+        expiry: "20260717",
+        dte: 23,
+        net_delta: -0.01,
+        theta: 0.075,
+        gamma: -0.0042,
+        vega: -0.038,
+        credit: 1.9,
+        short_put: {
+          symbol: "AAPL260717P00095000",
+          expiry: "20260717",
+          strike: 95,
+          right: "P",
+          iv: 35,
+          delta: -0.15,
+          theta: -0.04,
+          gamma: 0.002,
+          vega: 0.018,
+          bid: 0.9,
+          ask: 1.1,
+          volume: 200,
+          open_interest: 900,
+        },
+        short_call: {
+          symbol: "AAPL260717C00105000",
+          expiry: "20260717",
+          strike: 105,
+          right: "C",
+          iv: 35,
+          delta: 0.16,
+          theta: -0.035,
+          gamma: 0.0022,
+          vega: 0.02,
+          bid: 0.8,
+          ask: 1.0,
+          volume: 180,
+          open_interest: 850,
+        },
+      },
+    },
+  ],
+};
+
+describe("ThetaHarvesterScanner", () => {
+  it("renders desktop rows, mobile cards, and the scan action", () => {
+    const onScan = vi.fn();
+    render(<ThetaHarvesterScanner data={data} onScan={onScan} lastSync={data.scan_time} />);
+
+    const section = screen.getByTestId("theta-harvester-section");
+    expect(within(section).getByText("Theta Harvester")).toBeTruthy();
+    expect(within(section).getAllByText("AAPL").length).toBeGreaterThan(0);
+    expect(within(section).getAllByText("TRUE THETA").length).toBeGreaterThan(0);
+    expect(within(section).getAllByText("SHORT 95P / 105C").length).toBeGreaterThan(0);
+    expect(within(section).getAllByText("+7.50/day").length).toBeGreaterThan(0);
+    expect(within(section).getAllByText("-1.0 sh").length).toBeGreaterThan(0);
+    expect(within(section).getByText("+23.0 pt / 2.92x")).toBeTruthy();
+    expect(within(section).getAllByText("IV RICH").length).toBeGreaterThan(0);
+
+    const mobileList = screen.getByTestId("theta-harvester-mobile-list");
+    expect(within(mobileList).getByRole("link").getAttribute("href")).toBe("/AAPL?tab=chain");
+
+    fireEvent.click(screen.getByRole("button", { name: /scan ndx/i }));
+    expect(onScan).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders the measured-empty state when the latest scan has no candidates", () => {
+    render(
+      <ThetaHarvesterScanner
+        data={{ ...data, theta_harvest_count: 0, candidates_found: 0, results: [] }}
+      />,
+    );
+
+    expect(screen.getByText("No theta harvest candidates")).toBeTruthy();
+    expect(screen.getByText("No neutral short-premium setups are measured in the latest scan.")).toBeTruthy();
+  });
+});
