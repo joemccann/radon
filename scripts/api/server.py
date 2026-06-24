@@ -45,6 +45,7 @@ from api.ib_gateway import (
     check_ib_gateway,
     ensure_ib_gateway,
     restart_ib_gateway,
+    recover_stuck_pool,
     is_docker_mode,
     is_cloud_mode,
     is_launchd_mode,
@@ -110,6 +111,107 @@ IB_HEARTBEAT_INTERVAL_SECS = 15
 HEALTH_GATEWAY_PROBE_TIMEOUT_SECS = 2.5
 
 
+# Pool-recovery escalation guard. Mirrors ib_gateway._auth_transition_state but
+# governs the LEVEL-triggered recover_stuck_pool path: the auth_state edge in
+# handle_auth_state_transition cannot fire while the pool is wedged because
+# auth_state is derived FROM the pool (circular dependency / deadlock). This
+# state machine drives the pool-independent probe-gated recovery on the same 15s
+# heartbeat — single-flight + cooldown so a stuck episode triggers at most one
+# reconnect per cooldown window, and only ever ONE self-restart per episode.
+# See feedback_ib_pool_stuck_after_2fa.md.
+POOL_RECOVERY_COOLDOWN_SECS = 60.0
+POOL_RECOVERY_MAX_BEFORE_RESTART = 3
+
+_pool_recovery_state: dict = {
+    "in_progress": False,       # single-flight: skip overlapping ticks
+    "last_attempt_at": 0.0,     # epoch seconds; cooldown gate
+    "consecutive_failures": 0,  # verified-fail count → escalation ladder
+}
+
+
+def _restart_radon_api_self() -> None:
+    """Exit the process so systemd (Restart=always) brings radon-api back fresh.
+
+    This is the documented last-resort remedy when the pool stays wedged after
+    a verified-authenticated Gateway: `systemctl restart radon-api.service`.
+    Exiting under systemd restarts ONLY radon-api — never the Gateway (no 2FA
+    push, no cascade to relay/monitor). os._exit avoids running atexit/teardown
+    that could itself wedge on the very sockets we're trying to recycle.
+    """
+    logger.error(
+        "pool recovery: escalation threshold reached — exiting radon-api for a "
+        "systemd-managed restart (radon-api only; Gateway untouched)"
+    )
+    os._exit(1)
+
+
+async def _recover_stuck_pool_guarded() -> None:
+    """Single-flight + cooldown + escalation wrapper around recover_stuck_pool.
+
+    Runs inside the heartbeat try/except so a probe/reconnect error can never
+    kill the 15s loop. Escalates to a SINGLE radon-api self-restart only after
+    POOL_RECOVERY_MAX_BEFORE_RESTART consecutive verified failures (Gateway
+    probe authenticated yet pool still has no connected+accounted slot). The
+    counter resets on success AND after an escalation so it can never loop.
+    """
+    if test_mode or ib_pool is None:
+        return
+    if _pool_recovery_state["in_progress"]:
+        return
+    now = time.time()
+    if now - _pool_recovery_state["last_attempt_at"] < POOL_RECOVERY_COOLDOWN_SECS:
+        return
+
+    _pool_recovery_state["in_progress"] = True
+    _pool_recovery_state["last_attempt_at"] = now
+    try:
+        recovered = await recover_stuck_pool(ib_pool)
+    except Exception:
+        logger.exception("pool recovery: recover_stuck_pool raised; will retry next cycle")
+        return
+    finally:
+        _pool_recovery_state["in_progress"] = False
+
+    if recovered:
+        _pool_recovery_state["consecutive_failures"] = 0
+        return
+
+    # recover_stuck_pool returns False either for a healthy/no-op pool OR a
+    # genuine 2FA wait — neither is a "verified failure" worth escalating. Only
+    # escalate when the Gateway probe says authenticated yet the pool is STILL
+    # stuck (reconnect ran but didn't take). Re-derive that exact signature.
+    from api.ib_gateway import (
+        _pool_has_disconnected_slot,
+        _pool_has_connected_accounted_slot,
+        _probe_authenticated,
+    )
+
+    if not _pool_has_disconnected_slot(ib_pool):
+        _pool_recovery_state["consecutive_failures"] = 0
+        return
+    if _pool_has_connected_accounted_slot(ib_pool):
+        _pool_recovery_state["consecutive_failures"] = 0
+        return
+    try:
+        authenticated, _accounts = await _probe_authenticated()
+    except Exception:
+        logger.exception("pool recovery: escalation probe raised; not escalating")
+        return
+    if not authenticated:
+        # Genuine 2FA wait — do NOT count toward escalation.
+        return
+
+    _pool_recovery_state["consecutive_failures"] += 1
+    failures = _pool_recovery_state["consecutive_failures"]
+    logger.warning(
+        "pool recovery: verified-fail %d/%d (Gateway authenticated, pool still stuck)",
+        failures, POOL_RECOVERY_MAX_BEFORE_RESTART,
+    )
+    if failures >= POOL_RECOVERY_MAX_BEFORE_RESTART:
+        _pool_recovery_state["consecutive_failures"] = 0
+        _restart_radon_api_self()
+
+
 async def _ib_recovery_heartbeat_tick() -> None:
     """Drive check_ib_gateway WITH the pool once, so the documented
     awaiting_2fa -> authenticated pool recovery (pool.reconnect_all) fires
@@ -119,11 +221,17 @@ async def _ib_recovery_heartbeat_tick() -> None:
     probes /health/lite with pool=None and has NO side effects), so this loop is
     the sole FAST driver of recovery; the every-minute watchdog /health curl is
     the slower backstop. See feedback_ib_pool_stuck_after_2fa.md.
+
+    After the edge-triggered check, we ALSO run the level-triggered
+    recover_stuck_pool path (probe-gated, pool-independent) which breaks the
+    auth_state-derived-from-pool deadlock the edge handler cannot escape. Both
+    live under the same try/except so neither can kill the loop.
     """
     if ib_pool is None:
         return
     try:
         await check_ib_gateway(pool_status=ib_pool.status(), pool=ib_pool)
+        await _recover_stuck_pool_guarded()
     except Exception:
         logger.exception("IB recovery heartbeat tick failed")
 

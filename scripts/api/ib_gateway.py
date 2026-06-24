@@ -887,6 +887,80 @@ async def handle_auth_state_transition(
     return True
 
 
+def _pool_has_connected_accounted_slot(pool) -> bool:
+    """Return True iff some pool role reports connected==True AND non-empty
+    managed_accounts — the only state that proves this process can talk to a
+    logged-in Gateway. This is the success predicate for ``recover_stuck_pool``:
+    a TCP-connected-but-account-less slot is NOT a recovered pool.
+    """
+    if pool is None:
+        return False
+    try:
+        status = pool.status() or {}
+    except Exception:
+        return False
+    return any(
+        role_info.get("connected") and role_info.get("managed_accounts")
+        for role_info in status.values()
+    )
+
+
+async def recover_stuck_pool(
+    pool,
+    reconnect_timeout: float = RECONNECT_TIMEOUT_SECS,
+) -> bool:
+    """Level-triggered, pool-INDEPENDENT recovery for the stuck-pool-after-2FA case.
+
+    The edge-triggered ``handle_auth_state_transition`` cannot escape the
+    documented deadlock: ``auth_state`` is derived FROM the pool, so while the
+    pool is stuck (all roles connected=False / account-less) every probe derives
+    "awaiting_2fa", the transition edge never fires, and an external 2FA approval
+    is invisible forever. This function breaks that loop by probing the Gateway
+    directly (throwaway clientId 98), NOT by reading the wedged pool's own state.
+
+    Decision ladder:
+      1. No pool, or no disconnected slot → no-op, return False (healthy: nothing
+         to do, and crucially we do NOT probe).
+      2. Disconnected slot present → probe the Gateway with ``_probe_authenticated``.
+         If NOT authenticated (no managed accounts) → genuine 2FA wait; return
+         False and do NOTHING. We never touch the Gateway, never acquire the 2FA
+         push lock, never restart — those paths live in ``restart_ib_gateway``.
+      3. Probe authenticated → ``pool.reconnect_all()`` (bounded). RE-READ the
+         pool and return True iff ≥1 role is now connected WITH managed_accounts.
+         The verified re-read is what the transition handler lacks — it swallows
+         the reconnect outcome and reports success on a still-dead pool.
+
+    Bounded by ``asyncio.wait_for`` so a wedge in the connect path can never
+    block the calling heartbeat loop. Errors propagate to the caller, which runs
+    this inside the heartbeat try/except.
+    """
+    if not _pool_has_disconnected_slot(pool):
+        return False
+
+    authenticated, accounts = await _probe_authenticated()
+    if not authenticated:
+        logger.debug(
+            "pool recovery: disconnected slot present but Gateway probe is not "
+            "authenticated (genuine 2FA wait); pool state: %s",
+            _format_pool_state(pool),
+        )
+        return False
+
+    logger.info(
+        "pool recovery: Gateway authenticated (accounts=%s) but pool stuck (%s); "
+        "triggering reconnect",
+        accounts, _format_pool_state(pool),
+    )
+    await asyncio.wait_for(pool.reconnect_all(), timeout=reconnect_timeout)
+
+    recovered = _pool_has_connected_accounted_slot(pool)
+    logger.info(
+        "pool recovery: reconnect complete; recovered=%s; pool state: %s",
+        recovered, _format_pool_state(pool),
+    )
+    return recovered
+
+
 def _derive_auth_state(check_result: Dict, pool_status: Optional[dict]) -> str:
     """Derive auth_state from a check result + optional pool status.
 
