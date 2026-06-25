@@ -2,6 +2,7 @@
 
 ## 2026-06-25
 
+- When modifying or displaying multi-leg combo orders, preserve the signed BAG net price end to end. Do not apply `Math.abs()` to risk-reversal bid/mid/ask/implied references, and validate combo limits as finite nonzero signed prices; negative `BUY` combo limits are valid credits.
 - When all app routes lose live data but edge health says IB, relay, Next, and Gateway are up, check the shared Turso/libSQL read path before restarting IB. DB-backed fallback reads need hard per-source deadlines; a hung DB promise must never block a fresher disk fallback or leave the UI in a quiet empty state.
 - Browser realtime sockets in production must default to same-origin `/ws` plus a short-lived FastAPI ticket. Never let authenticated production clients fall back to `ws://localhost:8765` or to an unauthenticated socket after ticket failure.
 - A live-data outage should surface in the shared shell, not disappear into per-route placeholders. Portfolio, orders, and price-stream failures should render a visible degraded state so blank dashboards are diagnosable.

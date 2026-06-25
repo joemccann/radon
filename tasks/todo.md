@@ -1,3 +1,61 @@
+# Task: Risk Reversal Modify Negative Price
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot worktree state, screenshot symptom, scoped web instructions, and existing modify-order tests without touching unrelated files.
+- T2 depends_on: [T1] — Trace combo modify quote math, display formatting, quick-price buttons, validation, and submit payload for signed risk reversal prices.
+- T3 depends_on: [T2] — Add a regression that reproduces a short-put/long-call risk reversal showing positive B/M/A/I and disabling a negative modify price.
+- T4 depends_on: [T3] — Implement the minimal signed-price fix for modify-order combo quotes and negative limit validation.
+- T5 depends_on: [T4] — Run focused unit/component/E2E verification, visually verify the modal, update review/lessons, and report results.
+
+## Checklist
+
+- [x] T1 — Snapshot state and existing modify-order context.
+- [x] T2 — Trace signed quote math and validation.
+- [x] T3 — Add failing regression.
+- [x] T4 — Implement signed risk reversal modify fix.
+- [x] T5 — Verify, document, and update lessons.
+
+## Review
+
+- Root cause: `ModifyOrderModal.resolveOrderPriceData` computed signed BAG `netBid`/`netAsk`, then sorted `Math.abs(netBid)`/`Math.abs(netAsk)`. That made a credit risk reversal render as positive bid/mid/ask. The same modal also used single-leg validation (`parsedNew > 0`) and `min="0.01"` for combo net prices, so valid negative replacement limits stayed disabled.
+- Fixed the signed path end to end: combo bid/ask now preserve sign, implied quick-fill preserves sign, combo net price inputs allow finite nonzero signed prices, `OrderRiskGate` receives signed combo `netPremium`/`totalCost`, resting-limit quote overlays allow negative limits, and spread telemetry divides by `abs(mid)` for negative net markets.
+- Fixed the Next modify route validator to accept negative signed combo replacement `limitPrice` while still rejecting missing, zero, non-finite, or malformed combo payloads.
+- Added regression coverage in `web/tests/modify-order-negative-risk-reversal.test.tsx`, `web/tests/api-routes-extended.test.ts`, and `web/e2e/modify-combo-order.spec.ts`. The browser test verifies `/orders` displays `BID -3.65`, `MID -3.45`, `ASK -3.25`, an `IMPLIED -...` reference, enables `-3.40`, and submits `replaceOrder.limitPrice: -3.4`.
+- Verification passed: focused Vitest `npx vitest run --config vitest.config.ts web/tests/modify-order-negative-risk-reversal.test.tsx web/tests/order-ticket-spread-notional.test.ts web/tests/open-order-combo-modify.test.ts web/tests/modify-order-ticker-detail.test.ts web/tests/order-reliability.test.ts web/tests/api-routes-extended.test.ts` — 6 files, 125 tests. Browser verification passed: `PLAYWRIGHT_PORT=3050 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/modify-combo-order.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 tests. Full web suite passed: `npm test` — 356 files, 3,488 passed, 26 skipped. `npm run lint` passed with 9 existing warnings. `git diff --check` passed.
+- Verification blocker: `npm run typecheck` fails before reaching this patch because local `web/node_modules` is missing declared dependencies `@upstash/ratelimit` and `@upstash/redis`. `npm ls @upstash/ratelimit @upstash/redis` returns empty. A full `npm install` hung retrying registry fetches with npm `EBADF`; a targeted no-save install failed fast with the same `EBADF` registry error while resolving `@clerk/nextjs`. `web/package.json` and `web/package-lock.json` were not changed.
+
+---
+
+# Task: MSFT Option Chain Strike Truncation
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot worktree state, task history, and relevant lessons before touching endpoint code.
+- T2 depends_on: [T1] — Reproduce the production `/api/options/chain?symbol=MSFT&expiry=20260717` payload and quantify strikes/contracts returned.
+- T3 depends_on: [T1] — Trace the Next/FastAPI/provider option-chain route for expiry normalization, strike-window filters, limits, cache use, and provider fallback.
+- T4 depends_on: [T2, T3] — Identify whether the short chain is caused by provider data, an intentional filter, stale cache, or a route bug; implement a minimal fix if it is code-owned.
+- T5 depends_on: [T4] — Add fitting regression coverage, run focused/full verification required by scope, and document the review.
+
+## Checklist
+
+- [x] T1 — Snapshot state and relevant lessons.
+- [x] T2 — Reproduce production response and quantify returned strikes.
+- [x] T3 — Trace route/provider filtering.
+- [x] T4 — Root-cause and fix if code-owned.
+- [x] T5 — Verify and document.
+
+## Review
+
+- Root cause: IB returns multiple `reqSecDefOptParams` records for MSFT. The first matching 20260717 record was `SMART / tradingClass=2MSFT`, an adjusted chain with only 4 strikes. The standard `MSFT` chains have 151 strikes from 175 to 800. `scripts/ib_option_chain.py` picked the first matching expiry and discarded the canonical chain.
+- Fixed `scripts/ib_option_chain.py` to prefer canonical trading classes (`tradingClass == symbol`) when present, union strikes across matching canonical venues, prefer `SMART` for the response exchange, and filter the no-expiry expiration list through canonical chains so adjusted-only dates are not advertised in the normal chain UI.
+- Fixed a second production symptom from the screenshot: equity option-chain metadata calls were using a 15s FastAPI timeout while live IB calls can land around 14-17s. `/options/chain` and `/options/expirations` now share `_EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 30.0`.
+- Live local verification: before the fix, `python3.13 scripts/ib_option_chain.py --symbol MSFT --expiry 20260717` returned `[380.0, 400.0, 410.0, 430.0]`; after the fix it returns 151 strikes. `20260724` also returns 151. The adjusted-only `20260728` is no longer present in the normal expiration list.
+- Added regressions in `scripts/tests/test_ib_option_chain.py` and `scripts/api/tests/test_equity_options_chain.py`.
+- Verification passed: focused `python3.13 -m pytest scripts/tests/test_ib_option_chain.py scripts/api/tests/test_equity_options_chain.py -q` (5 passed); affected `python3.13 scripts/run_pytest_affected.py --files scripts/ib_option_chain.py scripts/api/server.py scripts/tests/test_ib_option_chain.py scripts/api/tests/test_equity_options_chain.py -- -q` (80 passed); full `python3.13 -m pytest scripts -q` (3646 passed, 13 skipped); `git diff --check`.
+
+---
+
 # Task: Modify Order Net Price UI Regression
 
 ## Dependency Graph
