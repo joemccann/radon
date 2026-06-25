@@ -2635,13 +2635,18 @@ async def performance_background():
     return {"status": "accepted"}
 
 
+_EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 30.0
+
+
 @app.get("/options/chain")
 async def options_chain(symbol: str, expiry: Optional[str] = None):
     """Fetch options chain for a symbol."""
     args = ["--symbol", symbol.upper()]
     if expiry:
         args.extend(["--expiry", expiry])
-    result = await _run_ib_script_with_recovery("ib_option_chain.py", args, timeout=15)
+    result = await _run_ib_script_with_recovery(
+        "ib_option_chain.py", args, timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S
+    )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     if result.data and result.data.get("error"):
@@ -2653,7 +2658,9 @@ async def options_chain(symbol: str, expiry: Optional[str] = None):
 async def options_expirations(symbol: str):
     """List option expirations for a symbol."""
     result = await run_script(
-        "ib_option_chain.py", ["--symbol", symbol.upper()], timeout=15
+        "ib_option_chain.py",
+        ["--symbol", symbol.upper()],
+        timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S,
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
