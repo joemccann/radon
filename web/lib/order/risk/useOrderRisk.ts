@@ -110,10 +110,9 @@ export interface OptionOrderRiskInput {
    */
   breakeven?: number | null;
   /**
-   * Optional live entry quote for the order as a whole (the NET combo quote
-   * for multi-leg, or the single option's quote for single-leg). Both fields
-   * are per-share positive magnitudes — the same `netPrices.bid` / `.ask` the
-   * chain already computes. When supplied, `useOrderRisk` runs the F1 cost
+   * Optional live entry quote for the order as a whole (the signed NET combo
+   * quote for multi-leg, or the positive single option quote for single-leg).
+   * When supplied, `useOrderRisk` runs the F1 cost
    * model (`estimateRoundTripCost`) and folds the round-trip cost into the
    * risk verdict: bounded max-loss grows by the cost, bounded max-gain shrinks
    * by it (clamped at 0). Unbounded legs stay unbounded.

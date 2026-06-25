@@ -7,7 +7,7 @@ type ModifyQuoteOverlayInput = {
 };
 
 function normalizeLimitPrice(limitPrice: number | null | undefined): number | null {
-  if (typeof limitPrice !== "number" || !Number.isFinite(limitPrice) || limitPrice <= 0) {
+  if (typeof limitPrice !== "number" || !Number.isFinite(limitPrice) || limitPrice === 0) {
     return null;
   }
   return limitPrice;

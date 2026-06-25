@@ -107,7 +107,9 @@ export async function POST(request: Request): Promise<Response> {
         || !replaceOrder.symbol
         || !replaceOrder.action
         || !replaceOrder.quantity
-        || !replaceOrder.limitPrice
+        || replaceOrder.limitPrice == null
+        || replaceOrder.limitPrice === 0
+        || !Number.isFinite(replaceOrder.limitPrice)
         || !replaceOrder.legs
         || replaceOrder.legs.length < 2
       ) {

@@ -86,6 +86,217 @@ const ORDERS = {
   executed_count: 0,
 };
 
+const MSFT_PORTFOLIO = {
+  ...PORTFOLIO,
+  positions: [
+    {
+      id: 2,
+      ticker: "MSFT",
+      structure: "Risk Reversal",
+      structure_type: "Risk Reversal",
+      risk_profile: "Undefined",
+      expiry: "2026-07-17",
+      contracts: 25,
+      direction: "COMBO",
+      entry_cost: 0,
+      max_risk: null,
+      market_value: 0,
+      legs: [
+        { direction: "SHORT", contracts: 25, type: "Put", strike: 350, entry_cost: 0, avg_cost: 0, market_price: 0, market_value: 0 },
+        { direction: "LONG", contracts: 25, type: "Call", strike: 375, entry_cost: 0, avg_cost: 0, market_price: 0, market_value: 0 },
+      ],
+      ib_daily_pnl: null,
+      kelly_optimal: null,
+      target: null,
+      stop: null,
+      entry_date: "2026-06-25",
+    },
+  ],
+};
+
+const MSFT_ORDERS = {
+  last_sync: new Date().toISOString(),
+  open_orders: [
+    {
+      orderId: 77,
+      permId: 653611587,
+      symbol: "MSFT Spread",
+      contract: {
+        conId: 28812380,
+        symbol: "MSFT",
+        secType: "BAG",
+        strike: 0,
+        right: "?",
+        expiry: null,
+        comboLegs: [
+          { conId: 859556931, ratio: 1, action: "SELL", symbol: "MSFT", strike: 350, right: "P", expiry: "2026-07-17" },
+          { conId: 861002104, ratio: 1, action: "BUY", symbol: "MSFT", strike: 375, right: "C", expiry: "2026-07-17" },
+        ],
+      },
+      action: "BUY",
+      orderType: "LMT",
+      totalQuantity: 25,
+      limitPrice: -3.65,
+      auxPrice: null,
+      status: "Submitted",
+      filled: 0,
+      remaining: 25,
+      avgFillPrice: null,
+      tif: "DAY",
+    },
+  ],
+  executed_orders: [],
+  open_count: 1,
+  executed_count: 0,
+};
+
+const MSFT_PRICE_FIXTURES = {
+  MSFT: {
+    symbol: "MSFT",
+    last: 355.54,
+    lastIsCalculated: false,
+    bid: 355.5,
+    ask: 355.6,
+    bidSize: null,
+    askSize: null,
+    volume: null,
+    high: null,
+    low: null,
+    open: null,
+    close: 365.45,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: null,
+    timestamp: new Date().toISOString(),
+  },
+  MSFT_20260717_350_P: {
+    symbol: "MSFT_20260717_350_P",
+    last: 6.75,
+    lastIsCalculated: false,
+    bid: 6.6,
+    ask: 6.9,
+    bidSize: null,
+    askSize: null,
+    volume: null,
+    high: null,
+    low: null,
+    open: null,
+    close: null,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: 0.28,
+    undPrice: 355.54,
+    timestamp: new Date().toISOString(),
+  },
+  MSFT_20260717_375_C: {
+    symbol: "MSFT_20260717_375_C",
+    last: 3.2,
+    lastIsCalculated: false,
+    bid: 3.05,
+    ask: 3.35,
+    bidSize: null,
+    askSize: null,
+    volume: null,
+    high: null,
+    low: null,
+    open: null,
+    close: null,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: 0.28,
+    undPrice: 355.54,
+    timestamp: new Date().toISOString(),
+  },
+};
+
+async function installMockWebSocket(
+  page: import("@playwright/test").Page,
+  priceFixtures: Record<string, unknown>,
+) {
+  await page.addInitScript((fixtures) => {
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      url: string;
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event?: unknown) => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.({});
+          this.emit({
+            type: "status",
+            ib_connected: true,
+            ib_issue: null,
+            ib_status_message: null,
+            subscriptions: [],
+          });
+        }, 0);
+      }
+
+      send(raw: string) {
+        const message = JSON.parse(raw) as {
+          action?: string;
+          symbols?: string[];
+          contracts?: Array<{ symbol: string; expiry: string; strike: number; right: "C" | "P" }>;
+        };
+        if (message.action !== "subscribe") return;
+
+        const updates: Record<string, unknown> = {};
+        for (const symbol of message.symbols ?? []) {
+          const key = String(symbol).toUpperCase();
+          if (fixtures[key]) updates[key] = fixtures[key];
+        }
+        for (const contract of message.contracts ?? []) {
+          const expiry = String(contract.expiry).replace(/-/g, "");
+          const key = `${String(contract.symbol).toUpperCase()}_${expiry}_${Number(contract.strike)}_${contract.right}`;
+          if (fixtures[key]) updates[key] = fixtures[key];
+        }
+
+        if (Object.keys(updates).length > 0) {
+          this.emit({ type: "batch", updates });
+        }
+      }
+
+      close() {
+        this.readyState = MockWebSocket.CLOSED;
+        this.onclose?.({});
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.({ data: JSON.stringify(payload) });
+      }
+    }
+
+    // @ts-expect-error test-only replacement
+    window.WebSocket = MockWebSocket;
+  }, priceFixtures);
+}
+
 async function stubApis(page: import("@playwright/test").Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
 
@@ -204,6 +415,83 @@ test.describe("Combo order modify flow", () => {
         legs: [
           { action: "SELL", right: "P", strike: 90, expiry: "20260327", ratio: 1 },
           { action: "BUY", right: "C", strike: 100, expiry: "20260327", ratio: 1 },
+        ],
+      },
+    });
+  });
+
+  test("shows signed negative risk reversal prices and submits a negative replacement limit", async ({ page }) => {
+    await installMockWebSocket(page, MSFT_PRICE_FIXTURES);
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+
+    await page.route("**/api/portfolio", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MSFT_PORTFOLIO) }),
+    );
+    await page.route("**/api/orders", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(MSFT_ORDERS) }),
+    );
+    await page.route("**/api/blotter", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          as_of: new Date().toISOString(),
+          summary: { closed_trades: 0, open_trades: 0, total_commissions: 0, realized_pnl: 0 },
+          closed_trades: [],
+          open_trades: [],
+        }),
+      }),
+    );
+    await page.route("**/api/ib-status", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
+    );
+    await page.route("**/api/regime", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
+    );
+    await page.route("**/api/prices", (route) => route.abort());
+
+    let modifyBody: Record<string, unknown> | null = null;
+    await page.route("**/api/orders/modify", async (route) => {
+      modifyBody = route.request().postDataJSON() as Record<string, unknown>;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", message: "Replacement placed", orders: MSFT_ORDERS }),
+      });
+    });
+
+    await page.goto("/orders");
+
+    const row = page.locator("tbody tr").filter({ hasText: "MSFT" }).first();
+    await expect(row).toBeVisible({ timeout: 10_000 });
+    await row.getByRole("button", { name: "MODIFY" }).click();
+
+    const modal = page.locator(".modify-dialog");
+    await expect(modal).toBeVisible();
+    await expect(modal.getByRole("button", { name: /BID -3\.65/i })).toBeVisible();
+    await expect(modal.getByRole("button", { name: /MID -3\.45/i })).toBeVisible();
+    await expect(modal.getByRole("button", { name: /ASK -3\.25/i })).toBeVisible();
+    await expect(modal.getByRole("button", { name: /IMPLIED -/i })).toBeVisible();
+
+    await expect.poll(() => modal.locator("#modify-price-input").getAttribute("min")).toBeNull();
+    await modal.locator("#modify-price-input").fill("-3.40");
+    await expect(modal.getByRole("button", { name: /modify order/i })).toBeEnabled();
+    await modal.getByRole("button", { name: /modify order/i }).click();
+
+    await expect.poll(() => modifyBody).not.toBeNull();
+    expect(modifyBody).toMatchObject({
+      orderId: 77,
+      permId: 653611587,
+      replaceOrder: {
+        type: "combo",
+        symbol: "MSFT",
+        action: "BUY",
+        quantity: 25,
+        limitPrice: -3.4,
+        tif: "DAY",
+        legs: [
+          { action: "SELL", right: "P", strike: 350, expiry: "20260717", ratio: 1 },
+          { action: "BUY", right: "C", strike: 375, expiry: "20260717", ratio: 1 },
         ],
       },
     });

@@ -54,8 +54,9 @@ export function getQuoteMetrics(priceData?: Pick<PriceData, "bid" | "ask"> | nul
   const ask = priceData?.ask ?? null;
   const mid = bid != null && ask != null ? roundQuoteValue((bid + ask) / 2) : null;
   const spread = bid != null && ask != null ? roundQuoteValue(ask - bid) : null;
-  const spreadBps = spread != null && mid != null && mid > 0
-    ? Math.round((spread / mid) * 10_000)
+  const midMagnitude = mid != null ? Math.abs(mid) : null;
+  const spreadBps = spread != null && midMagnitude != null && midMagnitude > 0
+    ? Math.round((spread / midMagnitude) * 10_000)
     : null;
 
   return { bid, mid, ask, spread, spreadBps };
@@ -66,8 +67,9 @@ export function formatSpreadTelemetry(
 ): string {
   const { spread, mid } = getQuoteMetrics(priceData);
   if (spread == null) return "---";
-  if (mid == null || mid <= 0) return fmtPrice(spread);
-  return `${fmtPrice(spread)} / ${((spread / mid) * 100).toFixed(2)}%`;
+  const midMagnitude = mid != null ? Math.abs(mid) : null;
+  if (midMagnitude == null || midMagnitude <= 0) return fmtPrice(spread);
+  return `${fmtPrice(spread)} / ${((spread / midMagnitude) * 100).toFixed(2)}%`;
 }
 
 function formatMetricValue(value: number | null): string {
