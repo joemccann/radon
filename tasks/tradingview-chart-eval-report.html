@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TradingView Chart Integration: Evaluation</title>
+<style>
+  :root{
+    --canvas:#0a0f14; --panel:#0f1519; --panel-raised:#151c22; --grid:#1e293b;
+    --text:#e2e8f0; --text-2:#94a3b8; --text-muted:#475569;
+    --core:#05AD98; --strong:#0FCFB5; --deep:#048A7A;
+    --warn:#F5A623; --fault:#E85D6C; --extreme:#8B5CF6; --dislocation:#D946A8;
+    --radius:4px;
+    --mono:"SF Mono",ui-monospace,"JetBrains Mono",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--canvas);color:var(--text);font-family:var(--sans);-webkit-font-smoothing:antialiased;line-height:1.55}
+  a{color:var(--strong);text-decoration:none} a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:40px 24px 90px}
+  header.masthead{border-bottom:1px solid var(--grid);padding-bottom:24px;margin-bottom:26px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--core);margin:0 0 10px}
+  h1{font-size:28px;line-height:1.15;margin:0 0 12px;font-weight:650;letter-spacing:-.01em}
+  .sub{color:var(--text-2);font-size:15px;max-width:840px;margin:0}
+  .meta{font-family:var(--mono);font-size:11px;color:var(--text-muted);margin-top:16px;display:flex;gap:18px;flex-wrap:wrap}
+  .meta b{color:var(--text-2);font-weight:500}
+  h2.section{font-size:13px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.14em;color:var(--text-2);border-bottom:1px solid var(--grid);padding-bottom:8px;margin:42px 0 16px}
+  h3{font-size:17px;margin:24px 0 8px;font-weight:600}
+  p{margin:10px 0}
+  .lead{background:color-mix(in srgb,var(--fault) 9%,transparent);border:1px solid color-mix(in srgb,var(--fault) 40%,transparent);border-radius:var(--radius);padding:16px 18px;margin:0 0 24px;font-size:14px}
+  .lead b{color:var(--fault)}
+  .gate{background:color-mix(in srgb,var(--warn) 9%,transparent);border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:var(--radius);padding:14px 18px;margin:14px 0}
+  .gate b{color:var(--warn)}
+  .win{background:color-mix(in srgb,var(--core) 9%,transparent);border:1px solid color-mix(in srgb,var(--core) 38%,transparent);border-radius:var(--radius);padding:14px 18px;margin:14px 0}
+  .win b{color:var(--strong)}
+  table{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0}
+  th,td{text-align:left;padding:9px 11px;border-bottom:1px solid var(--grid);vertical-align:top}
+  th{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--text-muted)}
+  td code{font-family:var(--mono);color:var(--strong);font-size:.9em}
+  .yes{color:var(--strong);font-weight:600} .no{color:var(--fault);font-weight:600} .maybe{color:var(--warn);font-weight:600}
+  ul{margin:8px 0;padding-left:20px} li{margin-bottom:9px;font-size:14px;color:var(--text)}
+  li b{color:var(--text)}
+  .conf{font-family:var(--mono);font-size:10px;letter-spacing:.05em;padding:1px 6px;border-radius:3px;border:1px solid var(--grid);text-transform:uppercase;white-space:nowrap;margin-left:4px}
+  .conf.high{color:var(--strong);border-color:color-mix(in srgb,var(--core) 45%,transparent)}
+  .conf.mod{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 45%,transparent)}
+  .conf.low{color:var(--fault);border-color:color-mix(in srgb,var(--fault) 45%,transparent)}
+  .conf.unk{color:var(--text-2)}
+  .round{background:var(--panel);border:1px solid var(--grid);border-radius:var(--radius);padding:18px 20px;margin:14px 0;position:relative;overflow:hidden}
+  .round::before{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--extreme)}
+  .round h3{margin-top:0}
+  .round .attacks{margin-top:10px}
+  .phase{display:flex;gap:12px;margin:10px 0;align-items:flex-start}
+  .phase .n{font-family:var(--mono);font-size:11px;color:var(--core);border:1px solid color-mix(in srgb,var(--core) 40%,transparent);border-radius:var(--radius);padding:3px 9px;white-space:nowrap;flex-shrink:0;margin-top:2px}
+  .phase .b{font-size:14px}
+  code.path{font-family:var(--mono);color:var(--text-2);font-size:.9em}
+  footer{margin-top:50px;padding-top:18px;border-top:1px solid var(--grid);font-family:var(--mono);font-size:11px;color:var(--text-muted);line-height:1.7}
+  footer a{color:var(--text-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="masthead">
+    <p class="eyebrow">Radon &middot; Architecture Evaluation</p>
+    <h1>Putting a TradingView-class chart on the stock detail page</h1>
+    <p class="sub">An evaluation of the charting goal against TradingView's actual product lineup, Radon's data APIs, and IBKR's instrument + market-data realities. Led by the constraints most likely to kill the project, then debated through three adversarial passes.</p>
+    <div class="meta">
+      <span><b>Verdict</b> engineering is the easy 30%; licensing + data rights gate it</span>
+      <span><b>Generated</b> 2026-06-23</span>
+    </div>
+  </header>
+
+  <div class="lead">
+    <b>Premise correction.</b> The screenshot is the TradingView <i>web app</i>, which is not embeddable. What you can integrate is one of five different products, and the one that recreates that screenshot (Advanced Charts / Trading Platform) carries a free license that is <b>public-websites-only</b> and likely excludes an auth-gated app like Radon. Separately, your IBKR market data is almost certainly not licensed for redistribution to a hosted browser. These two licensing facts, not the code, decide the project.
+  </div>
+
+  <h2 class="section">The five TradingView products (pick correctly or lose a month)</h2>
+  <table>
+    <thead><tr><th>Product</th><th>What it is</th><th>Recreates screenshot?</th><th>License reality</th></tr></thead>
+    <tbody>
+      <tr><td><b>Lightweight Charts&trade;</b></td><td>35 KB Apache-2.0 canvas renderer, npm, you feed data</td><td class="no">No</td><td>Series only (candles/bar/line/area/baseline/volume). No drawing toolbar, no indicator library, no symbol search, no event marks, no chart-type switcher. Genuinely free + commercial OK <span class="conf high">high</span></td></tr>
+      <tr><td><b>Advanced Charts</b><br><span style="color:var(--text-muted);font-size:11px">(was Charting Library)</span></td><td>Full widget, custom datafeed (your servers, your data)</td><td class="yes">Yes</td><td>110+ drawing tools, 100+ indicators, 13 chart types, custom marks. "Free" but <b>public-websites-only</b>, attribution required; not for private/internal/paywalled/paid apps <span class="conf high">high</span></td></tr>
+      <tr><td><b>Trading Platform</b></td><td>Advanced Charts + Broker Integration API</td><td class="yes">Yes + trade ticket</td><td>Adds the SELL/BUY ticket, DOM, positions, the Trade button. Same restriction, enterprise discussion <span class="conf high">high</span></td></tr>
+      <tr><td><b>Embeddable Widgets</b></td><td>iframe widgets using TradingView's data + symbology</td><td class="maybe">Looks close</td><td>Cannot inject your IBKR/UW data or your symbols. Useless for Radon's thesis <span class="conf high">high</span></td></tr>
+      <tr><td><b>"TradingView SDK"</b></td><td>Not a real product name</td><td>n/a</td><td>The closest "SDK" is Lightweight Charts (npm) or the Advanced Charts JS APIs (Datafeed / Broker / SaveLoad). Don't search for a package called the SDK <span class="conf high">high</span></td></tr>
+    </tbody>
+  </table>
+
+  <h2 class="section">The two gates (you didn't mention either)</h2>
+  <div class="gate"><b>Gate 1 &mdash; TradingView license vs Radon's shape.</b> Their FAQ states verbatim: "according to the license agreement you can use the library on public websites only." Radon sits behind Clerk auth and is effectively a private operator tool. Standard reading: auth-gated / internal / paid apps need a negotiated commercial license. <span class="conf high">high</span> that the restriction exists; <span class="conf mod">moderate</span> on the Radon-specific ruling (get it in writing). Enterprise price is not public <span class="conf unk">unknown</span>.</div>
+  <div class="gate"><b>Gate 2 &mdash; IBKR market-data redistribution.</b> IBKR real-time data is licensed to you the subscriber; exchanges (Nasdaq, NYSE/CTA, OPRA) restrict external display. A hosted browser receiving IBKR-sourced real-time prices is architecturally redistribution. <span class="conf high">high</span> it's restricted; <span class="conf mod">moderate</span> on single-user enforcement. Escape hatches: delayed (15-min) data, a licensed vendor, or device-local-only real-time.</div>
+
+  <h2 class="section">Three adversarial passes</h2>
+
+  <div class="round">
+    <h3>Round 1 &mdash; Plan A: Advanced/Trading Platform, IBKR-fed</h3>
+    <p>Advanced Charts (Trading Platform tier) on the detail page; custom JS Datafeed on FastAPI; real-time from the :8765 relay; earnings marks via <code>getMarks</code>; on-chart buy/sell wired to IBKR via the Broker API.</p>
+    <div class="attacks">
+      <ul>
+        <li><b>License invalid for Radon's shape</b> &mdash; behind Clerk = not a public website. Breaches the free license on day one. <span class="conf high">high</span></li>
+        <li><b>Broker API duplicates and threatens the order chokepoint.</b> Radon's rule is every order through <code class="path">OrderRiskGate</code> + Four Gates + net-of-cost <code class="path">computeOrderRisk</code>. TradingView's <code class="path">placeOrder</code> is a parallel path that bypasses your gates. <span class="conf high">high</span></li>
+        <li><b>IBKR is a poor backfill source</b> &mdash; <code class="path">reqHistoricalData</code> pacing (~60 req/10min, duration caps) + shallow intraday depth. A chart scrolling years of 1m bars hits the wall instantly. <span class="conf high">high</span> (exact numbers <span class="conf mod">mod</span>)</li>
+        <li><b>Redistribution</b> (Gate 2). <span class="conf high">high</span></li>
+        <li><b>Theming/iframe friction</b> &mdash; Advanced Charts loads in an iframe and themes via an overrides object, not <code class="path">var(--token)</code>. Your "no raw hex" rule does not pass through. <span class="conf mod">mod-high</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="round">
+    <h3>Round 2 &mdash; Plan B: decouple, delay data, no on-chart trading</h3>
+    <p>Advanced Charts only if licensed, else fall back to Lightweight Charts + a hand-built toolbar. Default hosted chart to delayed/EOD data (Yahoo + a vendor) cached in Turso; IBKR real-time device-local only. Keep the chart read-only; deep-link the existing ticket.</p>
+    <div class="attacks">
+      <ul>
+        <li><b>You deleted the reason the screenshot is impressive.</b> Lightweight Charts has none of the 110 tools / 100 indicators / 13 types / marks. The fallback is "build a charting platform," a multi-quarter effort. The Ferrari became a bicycle with a weld-it-yourself kit. <span class="conf high">high</span></li>
+        <li><b>Delayed data guts a trading terminal.</b> Radon is "flow signal or nothing," sub-500ms. A 15-min-delayed chart contradicts the product. Legality and purpose are in direct tension; Plan B resolves it by neutering. <span class="conf high">high</span></li>
+        <li><b>Two renderers = maintenance trap.</b> "We'll just swap libraries" is a lie told once. <span class="conf mod">mod</span></li>
+        <li><b>Per-instrument <code class="path">SymbolInfo</code> underestimated</b> &mdash; FX (no volume, 5 dp), futures (tick size + continuous roll IBKR won't give you), options (OCC, near-useless history). <span class="conf high">high</span></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="round">
+    <h3>Round 3 &mdash; The reframe that resolves it</h3>
+    <p><b>What data is the chart actually showing?</b> Your screenshot shows MU at <b>$1,211.38, June 2026, +300% YTD</b> &mdash; not real (<span class="conf high">high</span>). That is Radon's synthetic / reconstructed series. That single fact reorders everything:</p>
+    <ul>
+      <li><b>If the chart renders Radon's own computed series</b> (reconstructed structure, forecast bands, your normalized OHLCV), it is genuinely "your data." Gate 2 largely evaporates and you fit Advanced Charts' "your servers, your data" model cleanly. <span class="conf mod">mod-high</span>, contingent on provenance.</li>
+      <li><b>If it must show raw real-time exchange prices</b>, no library saves you; you need delayed data or a licensed vendor regardless.</li>
+    </ul>
+    <p>So the real first task is not picking a library. It is answering: is the detail-page chart showing licensed real-time, delayed, or Radon-derived data? That answer selects the path.</p>
+  </div>
+
+  <h2 class="section">Final recommended plan (phased, feature-flagged)</h2>
+  <div class="phase"><span class="n">Phase 0</span><span class="b"><b>Resolve the two licenses (blocking).</b> Get TradingView's ruling + price in writing for an auth-gated app. Pin down market-data provenance + IBKR/exchange display rights. Until both are answered, write zero chart code.</span></div>
+  <div class="phase"><span class="n">Phase 1</span><span class="b"><b>Advanced Charts behind a flag, custom Datafeed, your data.</b> Implement <code class="path">onReady</code> / <code class="path">resolveSymbol</code> (&rarr; <code class="path">GET /chart/symbol/{ticker}</code>) / <code class="path">getBars</code> (&rarr; Turso bar-store, backfilled Yahoo daily + vendor intraday) / <code class="path">searchSymbols</code>. Theme via an overrides object generated from brand tokens. Persist drawings via <code class="path">IExternalSaveLoadAdapter</code> &rarr; Turso <code class="path">chart_layouts</code>.</span></div>
+  <div class="win"><b>The differentiator (do this or use the free widget).</b> <code class="path">getMarks</code> / <code class="path">getTimescaleMarks</code> overlay your edge on the axis: earnings (FU3 catalysts), dividends, dark-pool prints, sweeps, insider/congress (FU4), Chronos-2 forecast bands. The embeddable widget cannot do this; a custom datafeed can. "Flow signal or nothing" lives here. This is the only reason to take on Advanced Charts' weight.</div>
+  <div class="phase"><span class="n">Phase 2</span><span class="b"><b>Real-time forming candle</b>, only where entitlement permits: bridge <code class="path">subscribeBars</code> to the :8765 relay; aggregate last-trade ticks into the current bar client-side.</span></div>
+  <div class="phase"><span class="n">Phase 3</span><span class="b"><b>Trading on chart</b>, only via the Broker API routed through <code class="path">OrderRiskGate</code> / <code class="path">computeOrderRisk</code> (net-of-cost, Four Gates). If that adapter looks risky, skip it and deep-link the existing ticket. Never let the chart become a second, ungated path to the live IBKR account.</span></div>
+  <div class="phase"><span class="n">Fallback</span><span class="b">If Phase 0 licensing fails: Lightweight Charts + a deliberately small toolbar (candles, volume, 3-4 server-computed indicators, your marks). Accept you are not reproducing the screenshot, and scope expectations down.</span></div>
+
+  <h2 class="section">Gaps</h2>
+  <h3>UI / UX</h3>
+  <ul>
+    <li><b>The right-hand watchlist + symbol-info + key-stats panel is not part of any TradingView library</b> &mdash; those are separate web-app widgets. Radon builds it from data it already has (watchlist.json, UW key stats, FU3/FU4). <span class="conf high">high</span></li>
+    <li><b>Brand-token theming through iframe/overrides</b> needs a token&rarr;overrides translation layer (no raw hex, 4px radius). <span class="conf high">high</span></li>
+    <li><b>Drawing/layout persistence</b> must be server-side (Turso) to survive across machines. <span class="conf high">high</span></li>
+    <li><b>Mobile</b> &mdash; Advanced Charts is heavy and iframe-mounted; it fights the PWA shell + App Router. Lightweight Charts is far better on mobile, which reintroduces the two-renderer cost. <span class="conf mod">mod-high</span></li>
+    <li><b>Tick&rarr;bar aggregation</b> for the live candle is real work and a classic bug source. <span class="conf mod">mod</span></li>
+  </ul>
+  <h3>APIs</h3>
+  <ul>
+    <li><b><code class="path">price_history_cache</code> (capped ~500) is not a bar store.</b> Need a per-symbol/per-resolution OHLCV table + gap-fill + backfill pipeline. <span class="conf high">high</span></li>
+    <li><b>No clean deep intraday source today</b> &mdash; Yahoo intraday is shallow/unofficial; budget Polygon/Databento/Tiingo. IBKR pacing makes it unusable as primary backfill. <span class="conf high">high</span></li>
+    <li><b>Real-time bridge</b> from the relay into <code class="path">subscribeBars</code> does not exist (relay is built for depth/montage, not chart bars). <span class="conf high">high</span></li>
+    <li><b><code class="path">getMarks</code> plumbing</b> for earnings/dividends/flow must be added (data exists post-FU3/FU4; endpoint does not). <span class="conf mod">mod</span></li>
+    <li><b>Broker API &harr; OrderRiskGate adapter</b> does not exist and is the most dangerous piece (parallel order path). <span class="conf high">high</span></li>
+  </ul>
+  <h3>Instruments IBKR supports vs what the chart demands</h3>
+  <p style="font-size:13px;color:var(--text-2)">IBKR covers stocks, ETFs, options, futures, futures options, FX cash, cash indices, bonds, funds, warrants, CFDs, metals, crypto (Paxos) <span class="conf high">high</span>. Radon's relay today: stocks, options, index futures (VIX&rarr;VX/CFE, SPX&rarr;ES, NDX&rarr;NQ, RUT&rarr;RTY). Datafeed gaps:</p>
+  <ul>
+    <li><b>Futures</b> &mdash; IBKR gives single contracts; charting wants a continuous front-month series. You build roll logic. <span class="conf high">high</span></li>
+    <li><b>FX</b> &mdash; no equity volume (<code class="path">has_volume=false</code>), 5-dp pricescale, 24&times;5 sessions. <span class="conf high">high</span></li>
+    <li><b>Cash indices (SPX, VIX as index)</b> &mdash; separate CBOE entitlement from the futures you route to now. <span class="conf mod">mod-high</span></li>
+    <li><b>Options</b> &mdash; OCC symbology + near-useless historical bars for illiquid strikes; out of scope for v1. <span class="conf high">high</span></li>
+    <li><b>Crypto / bonds / funds</b> &mdash; sparse or non-chartable; exclude. <span class="conf high">high</span></li>
+    <li>For a page called "stock detail," the 80% case (stocks/ETFs) is clean. The trap: one FX/futures ticker with a wrong <code class="path">SymbolInfo</code> renders garbage, so <code class="path">resolveSymbol</code> must fail safe.</li>
+  </ul>
+
+  <h2 class="section">Bottom line</h2>
+  <p>The engineering is the easy 30%. The project is gated by (1) the TradingView license ruling for an auth-gated app, (2) your market-data display rights, and (3) the provenance of the data you intend to chart. Answer those three first; they decide whether you ship Advanced Charts with your flow overlays (the version worth building) or a stripped Lightweight Charts widget. Keep trading off the chart until it can route through <code class="path">OrderRiskGate</code>, or you quietly build a second, ungated path to your live account.</p>
+  <p style="color:var(--text-2);font-size:13px">Not verified, do not take on faith: the exact line TradingView draws between "public website" and "auth-gated app," and their enterprise price. Both require a written answer from TradingView.</p>
+
+  <footer>
+    Sources:
+    <a href="https://www.tradingview.com/lightweight-charts/">Lightweight Charts</a> &middot;
+    <a href="https://www.tradingview.com/advanced-charts/">Advanced Charts</a> &middot;
+    <a href="https://www.tradingview.com/charting-library-docs/latest/introduction/">Advanced Charts docs</a> &middot;
+    <a href="https://www.tradingview.com/charting-library-docs/latest/getting_started/Frequently-Asked-Questions/">FAQ</a> &middot;
+    <a href="https://www.tradingview.com/free-charting-libraries/">Free Charting Libraries</a> &middot;
+    <a href="https://s3.amazonaws.com/tradingview/charting_library_license_agreement.pdf">Free Advanced Charts License (PDF)</a>
+    <br>tasks/tradingview-chart-eval-report.html &middot; confidence tags inline (high / mod / unknown)
+  </footer>
+</div>
+</body>
+</html>
