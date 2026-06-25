@@ -223,7 +223,9 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
                 return f"{ratio_prefix}Synthetic Short", "undefined"
             return f"{ratio_prefix}Reverse Risk Reversal", "undefined"
         if puts[0]['position'] > 0 and calls[0]['position'] > 0:
-            return "Strangle" if not same_strike else "Straddle", "defined"
+            return f"{ratio_prefix}Long {'Straddle' if same_strike else 'Strangle'}", "defined"
+        if puts[0]['position'] < 0 and calls[0]['position'] < 0:
+            return f"{ratio_prefix}Short {'Straddle' if same_strike else 'Strangle'}", "undefined"
 
     # Vertical Spreads: Same type, different strikes, opposite directions
     if len(calls) == 2 and len(puts) == 0:
@@ -343,11 +345,11 @@ def format_structure_description(structure_type: str, legs: list) -> str:
         call_strike = next((l.get('strike') for l in opt_legs if l.get('right') == 'C'), '?')
         return f"{structure_type}{ratio_suffix} (P${put_strike}/C${call_strike})"
 
-    if structure_type in ("Straddle", "Strangle"):
+    if structure_type.endswith("Straddle") or structure_type.endswith("Strangle"):
         strikes = [l.get('strike') for l in opt_legs]
         if len(set(strikes)) == 1:
-            return f"{structure_type} ${strikes[0]}"
-        return f"{structure_type} ${min(strikes)}/${max(strikes)}"
+            return f"{structure_type}{ratio_suffix} ${strikes[0]}"
+        return f"{structure_type}{ratio_suffix} ${min(strikes)}/${max(strikes)}"
 
     # Single-leg options: Short Put, Short Call, Long Put, Long Call
     if len(opt_legs) == 1:

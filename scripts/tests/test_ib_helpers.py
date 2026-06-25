@@ -11,6 +11,7 @@ from ib_orders import (
     IB_SENTINEL,
 )
 from ib_sync import (
+    collapse_positions,
     detect_structure_type,
     format_structure_description,
     _normalize_market_price,
@@ -197,21 +198,41 @@ class TestDetectStructureType:
         assert name == "Risk Reversal"
         assert risk == "undefined"
 
-    def test_straddle(self):
+    def test_long_straddle(self):
         legs = [
             {"secType": "OPT", "position": 1, "right": "P", "strike": 200},
             {"secType": "OPT", "position": 1, "right": "C", "strike": 200},
         ]
         name, risk = detect_structure_type(legs)
-        assert name == "Straddle"
+        assert name == "Long Straddle"
+        assert risk == "defined"
 
-    def test_strangle(self):
+    def test_long_strangle(self):
         legs = [
             {"secType": "OPT", "position": 1, "right": "P", "strike": 190},
             {"secType": "OPT", "position": 1, "right": "C", "strike": 210},
         ]
         name, risk = detect_structure_type(legs)
-        assert name == "Strangle"
+        assert name == "Long Strangle"
+        assert risk == "defined"
+
+    def test_short_straddle_is_undefined(self):
+        legs = [
+            {"secType": "OPT", "position": -5, "right": "P", "strike": 1125},
+            {"secType": "OPT", "position": -5, "right": "C", "strike": 1125},
+        ]
+        name, risk = detect_structure_type(legs)
+        assert name == "Short Straddle"
+        assert risk == "undefined"
+
+    def test_short_strangle_is_undefined(self):
+        legs = [
+            {"secType": "OPT", "position": -5, "right": "P", "strike": 1125},
+            {"secType": "OPT", "position": -5, "right": "C", "strike": 1250},
+        ]
+        name, risk = detect_structure_type(legs)
+        assert name == "Short Strangle"
+        assert risk == "undefined"
 
 
 # ── format_structure_description ────────────────────────────────────
@@ -239,8 +260,47 @@ class TestFormatStructureDescription:
             {"secType": "OPT", "right": "P", "strike": 200, "structure": ""},
             {"secType": "OPT", "right": "C", "strike": 200, "structure": ""},
         ]
-        result = format_structure_description("Straddle", legs)
-        assert "$200" in result
+        result = format_structure_description("Long Straddle", legs)
+        assert result == "Long Straddle $200"
+
+    def test_short_strangle_with_two_strikes(self):
+        legs = [
+            {"secType": "OPT", "right": "P", "strike": 1125, "structure": ""},
+            {"secType": "OPT", "right": "C", "strike": 1250, "structure": ""},
+        ]
+        result = format_structure_description("Short Strangle", legs)
+        assert result == "Short Strangle $1125/$1250"
+
+    def test_collapse_short_strangle_uses_descriptive_label(self):
+        positions = [
+            {
+                "symbol": "MU",
+                "secType": "OPT",
+                "position": -5,
+                "right": "C",
+                "strike": 1250,
+                "expiry": "2026-06-26",
+                "entry_cost": 2875.0,
+                "avgCost": 575.0,
+                "marketValue": 2500.0,
+            },
+            {
+                "symbol": "MU",
+                "secType": "OPT",
+                "position": -5,
+                "right": "P",
+                "strike": 1125,
+                "expiry": "2026-06-26",
+                "entry_cost": 5162.5,
+                "avgCost": 1032.5,
+                "marketValue": 4750.0,
+            },
+        ]
+        [position] = collapse_positions(positions)
+        assert position["structure_type"] == "Short Strangle"
+        assert position["structure"] == "Short Strangle $1125/$1250"
+        assert position["risk_profile"] == "undefined"
+        assert position["direction"] == "COMBO"
 
     def test_single_leg_short_put_includes_strike(self):
         legs = [{"secType": "OPT", "right": "P", "strike": 85, "structure": ""}]
