@@ -1,5 +1,5 @@
 import { Analytics } from "@vercel/analytics/next";
-import { Inter, IBM_Plex_Mono } from "next/font/google";
+import { Inter, IBM_Plex_Mono, Newsreader } from "next/font/google";
 import "./globals.css";
 import { siteMetadata, siteStructuredData, siteViewport } from "../lib/seo";
 import { siteThemeBootstrapScript } from "../lib/theme";
@@ -17,6 +17,14 @@ const ibmPlexMono = IBM_Plex_Mono({
   display: "swap",
 });
 
+const newsreader = Newsreader({
+  weight: ["400", "500", "600"],
+  style: ["normal", "italic"],
+  subsets: ["latin"],
+  variable: "--font-serif",
+  display: "swap",
+});
+
 export const metadata = siteMetadata;
 export const viewport = siteViewport;
 
@@ -28,7 +36,7 @@ export default function RootLayout({
   return (
     <html
       lang="en-US"
-      className={`${inter.variable} ${ibmPlexMono.variable}`}
+      className={`${inter.variable} ${ibmPlexMono.variable} ${newsreader.variable}`}
       suppressHydrationWarning
     >
       <head>

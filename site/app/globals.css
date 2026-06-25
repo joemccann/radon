@@ -18,12 +18,20 @@
   --color-extreme: #8B5CF6;
   --color-neutral: #94a3b8;
 
+  /* Editorial journal-plate tokens (dark defaults; light overrides below) */
+  --color-hairline-soft: #16202b;
+  --color-figure-bg: #0d1318;
+  --color-chart-grid: #131c26;
+
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  --font-serif: "Newsreader", Georgia, "Times New Roman", serif;
   --font-display: "Söhne", "Inter", ui-sans-serif, system-ui, sans-serif;
 
   --radius-panel: 4px;
   --radius-badge: 999px;
+
+  --ease-editorial: cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 :root {
@@ -48,11 +56,16 @@ html[data-theme="light"] {
   --color-negative: #D4183D;
   --color-dislocation: #C026A0;
   --color-extreme: #7C3AED;
+
+  /* Editorial light: grid token already maps to the editorial hairline */
+  --color-hairline-soft: #E2E6E6;
+  --color-figure-bg: #FCFDFD;
+  --color-chart-grid: #EEF1F1;
 }
 
 html[data-theme="light"] body {
-  background-color: #FFFFFF;
-  color: #0f172a;
+  background-color: var(--color-canvas);
+  color: var(--color-primary);
   -webkit-font-smoothing: auto;
 }
 
@@ -182,5 +195,478 @@ a {
   }
   .module-content-enter {
     animation: none;
+  }
+}
+
+/* ============================================================
+   EDITORIAL QUANT RESEARCH — journal-plate landing
+   Light-first serif (Newsreader) + IBM Plex Mono figures.
+   Color comes from the shared @theme tokens above so light/dark
+   tracks the site theme attribute with no parallel system.
+   ============================================================ */
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 22%, transparent);
+  color: var(--color-primary);
+}
+
+/* ---------- Eyebrow with 22px leading line ---------- */
+.editorial-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--color-signal-deep);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.editorial-eyebrow::before {
+  content: "";
+  width: 22px;
+  height: 1px;
+  background: var(--color-signal-deep);
+  display: inline-block;
+}
+
+/* ---------- Display + thesis serif headings ---------- */
+.editorial-display {
+  font-family: var(--font-serif);
+  font-size: clamp(2.7rem, 6.2vw, 4.6rem);
+  line-height: 1.02;
+  letter-spacing: -0.022em;
+  font-weight: 500;
+}
+
+.editorial-display em {
+  font-style: italic;
+  color: var(--color-signal-deep);
+}
+
+.editorial-thesis {
+  font-family: var(--font-serif);
+  font-size: clamp(1.9rem, 3.6vw, 2.85rem);
+  line-height: 1.06;
+  letter-spacing: -0.018em;
+  font-weight: 500;
+  max-width: 18ch;
+}
+
+.editorial-pull {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: clamp(1.5rem, 3vw, 2.1rem);
+  line-height: 1.28;
+  letter-spacing: -0.01em;
+  color: var(--color-primary);
+  border-left: 2px solid var(--color-accent);
+  padding-left: 1.1em;
+}
+
+/* ---------- Journal plate frame ---------- */
+.plate {
+  margin: 0;
+  border: 1px solid var(--color-grid);
+  border-radius: var(--radius-panel);
+  background: var(--color-figure-bg);
+  overflow: hidden;
+}
+
+.plate-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--color-hairline-soft);
+  gap: 14px;
+  flex-wrap: wrap;
+}
+
+.plate-body {
+  padding: 22px 20px 8px;
+}
+
+.plate-shot {
+  padding: 0;
+  border-bottom: 1px solid var(--color-hairline-soft);
+}
+
+.plate-shot img {
+  display: block;
+  width: 100%;
+  height: auto;
+  border: 0;
+  image-rendering: -webkit-optimize-contrast;
+}
+
+/* THEME SWAP: render the capture that matches the active theme. */
+.plate-shot .shot-dark {
+  display: none;
+}
+
+html[data-theme="dark"] .plate-shot .shot-light {
+  display: none;
+}
+
+html[data-theme="dark"] .plate-shot .shot-dark {
+  display: block;
+}
+
+.plate figcaption {
+  border-top: 1px solid var(--color-hairline-soft);
+  padding: 13px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+/* ---------- SVG figure colors (track theme tokens) ---------- */
+.fig-svg .axis {
+  stroke: var(--color-grid);
+  stroke-width: 1;
+}
+
+.fig-svg .grid {
+  stroke: var(--color-chart-grid);
+  stroke-width: 1;
+}
+
+.fig-svg .axis-label {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  fill: var(--color-muted);
+  letter-spacing: 0.04em;
+}
+
+.fig-svg .annot {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  fill: var(--color-secondary);
+}
+
+.fig-svg .annot-serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+  fill: var(--color-primary);
+}
+
+.fig-svg .line-flow {
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  fill: none;
+}
+
+.fig-svg .line-price {
+  stroke: var(--color-primary);
+  stroke-width: 1.5;
+  fill: none;
+  opacity: 0.85;
+}
+
+.fig-svg .lead-band {
+  fill: color-mix(in srgb, var(--color-accent) 9%, transparent);
+}
+
+.fig-svg .marker {
+  fill: var(--color-signal-deep);
+}
+
+.fig-svg .marker-ring {
+  fill: none;
+  stroke: var(--color-signal-deep);
+  stroke-width: 1;
+}
+
+.fig-svg .bar-strike {
+  fill: var(--color-accent);
+}
+
+.fig-svg .bar-strike.neg {
+  fill: var(--color-negative);
+}
+
+.fig-svg .bar-strike.wall {
+  fill: var(--color-signal-deep);
+}
+
+.fig-svg .spark-line {
+  fill: none;
+  stroke: var(--color-accent);
+  stroke-width: 1.5;
+}
+
+.fig-svg .spark-line.ext {
+  stroke: var(--color-extreme);
+}
+
+.fig-svg .spark-line.sec {
+  stroke: var(--color-secondary);
+}
+
+.fig-svg .ref-line {
+  stroke: var(--color-grid);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.fig-svg .mini-label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  fill: var(--color-muted);
+  letter-spacing: 0.04em;
+}
+
+/* ---------- Four Gates lattice ---------- */
+.gates {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0;
+  border: 1px solid var(--color-grid);
+  border-radius: var(--radius-panel);
+  overflow: hidden;
+}
+
+@media (max-width: 760px) {
+  .gates {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 460px) {
+  .gates {
+    grid-template-columns: 1fr;
+  }
+}
+
+.gate {
+  padding: 24px 22px 26px;
+  border-right: 1px solid var(--color-hairline-soft);
+  background: var(--color-figure-bg);
+  position: relative;
+}
+
+.gate:last-child {
+  border-right: 0;
+}
+
+@media (max-width: 760px) {
+  .gate:nth-child(2) {
+    border-right: 0;
+  }
+  .gate:nth-child(1),
+  .gate:nth-child(2) {
+    border-bottom: 1px solid var(--color-hairline-soft);
+  }
+}
+
+.gate-rule {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--color-primary);
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
+  border-radius: var(--radius-panel);
+  padding: 6px 9px;
+  display: inline-block;
+  letter-spacing: 0.01em;
+}
+
+.gate-disabled {
+  opacity: 0.62;
+}
+
+.gate-disabled .gate-rule {
+  background: transparent;
+  border-color: var(--color-grid);
+  color: var(--color-muted);
+  text-decoration: line-through;
+}
+
+/* ---------- Pipeline counter ---------- */
+.pipeline {
+  counter-reset: ms;
+  border-top: 1px solid var(--color-grid);
+}
+
+.milestone-no {
+  counter-increment: ms;
+}
+
+.milestone-no::before {
+  content: "0" counter(ms);
+}
+
+/* ---------- Scan + registry tables ---------- */
+.scan-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+
+.scan-table th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-muted);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0 12px 12px 0;
+  border-bottom: 1px solid var(--color-grid);
+}
+
+.scan-table td {
+  padding: 11px 12px 11px 0;
+  border-bottom: 1px solid var(--color-hairline-soft);
+  color: var(--color-secondary);
+}
+
+.scan-table td.tk {
+  color: var(--color-primary);
+  font-weight: 500;
+}
+
+.scan-table td.num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.score-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.score-bar .track {
+  width: 64px;
+  height: 5px;
+  background: var(--color-hairline-soft);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.score-bar .fill {
+  height: 100%;
+  background: var(--color-accent);
+  display: block;
+}
+
+.registry {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+  min-width: 720px;
+}
+
+.registry thead th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--color-muted);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 15px 18px;
+  border-bottom: 1px solid var(--color-grid);
+  background: var(--color-panel-raised);
+}
+
+.registry tbody td {
+  padding: 16px 18px;
+  border-bottom: 1px solid var(--color-hairline-soft);
+  color: var(--color-secondary);
+  vertical-align: top;
+  line-height: 1.5;
+}
+
+.registry tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.registry .name {
+  color: var(--color-primary);
+  font-weight: 600;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.registry .name small {
+  display: block;
+  font-weight: 400;
+  color: var(--color-muted);
+  font-size: 10px;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  margin-top: 3px;
+}
+
+.registry .mech {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  color: var(--color-secondary);
+  max-width: 38ch;
+}
+
+.registry .conv {
+  color: var(--color-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.risk-pill {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 3px 8px;
+  border-radius: var(--radius-panel);
+  border: 1px solid var(--color-grid);
+  color: var(--color-secondary);
+  white-space: nowrap;
+}
+
+.risk-pill.defined {
+  color: var(--color-signal-deep);
+  border-color: color-mix(in srgb, var(--color-accent) 36%, transparent);
+}
+
+/* ---------- Geometry backdrop (hero + colophon) ---------- */
+.geo-bg {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.5;
+  z-index: 0;
+}
+
+.geo-bg line {
+  stroke: var(--color-chart-grid);
+  stroke-width: 1;
+}
+
+/* ---------- Scroll reveal ---------- */
+.reveal {
+  opacity: 0;
+  transform: translateY(16px);
+  transition:
+    opacity 0.7s var(--ease-editorial),
+    transform 0.7s var(--ease-editorial);
+}
+
+.reveal.in {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal {
+    opacity: 1;
+    transform: none;
+    transition: none;
   }
 }

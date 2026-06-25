@@ -2,18 +2,20 @@ import type { Metadata, Viewport } from "next";
 
 export const DEFAULT_SITE_URL = "https://radon.run";
 export const SITE_NAME = "Radon Terminal";
-export const SITE_TITLE = "Radon Terminal | Strategies, Execution, and Market Structure";
+export const SITE_TITLE = "Radon Terminal | Market-Structure Reconstruction";
 export const SITE_DESCRIPTION =
-  "Radon Terminal is an institutional-grade instrument for strategy discovery, execution discipline, and market-structure reconstruction.";
+  "A research instrument for reconstructing market structure from dark-pool and OTC flow. Radon scores institutional accumulation before the lit price moves, then routes only what clears four gates and seven milestones. Convexity or no trade.";
 export const SITE_KEYWORDS = [
   "Radon Terminal",
   "market structure",
-  "options trading",
   "dark pool flow",
+  "flow signal",
+  "convexity",
+  "regime",
+  "options research",
+  "institutional trading",
   "crash risk index",
-  "volatility trading",
-  "portfolio analytics",
-  "trading terminal",
+  "gamma exposure",
 ];
 export const SOCIAL_IMAGE_PATH = "/og-image.png";
 export const SOCIAL_IMAGE_ALT =
