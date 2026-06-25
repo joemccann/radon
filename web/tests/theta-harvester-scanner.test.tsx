@@ -164,6 +164,35 @@ describe("ThetaHarvesterScanner", () => {
     expect(onTickerScan).toHaveBeenCalledWith("MU");
   });
 
+  it("renders help bubbles for the theta scanner and metric inputs", () => {
+    render(<ThetaHarvesterScanner data={data} />);
+
+    const titleTrigger = screen.getByTestId("theta-harvester-title-tooltip");
+    fireEvent.mouseEnter(titleTrigger);
+    expect(screen.getByTestId("theta-harvester-title-tooltip-content").textContent).toContain("Neutral short-premium scan");
+    fireEvent.mouseLeave(titleTrigger);
+
+    const expectations = [
+      ["score", "Composite theta harvest score"],
+      ["theta", "Estimated daily theta"],
+      ["net-delta", "Near zero"],
+      ["iv-rv", "Implied-volatility edge"],
+      ["dealer", "Dealer support gate"],
+      ["range", "Range-bound score"],
+      ["dte", "Days to expiration"],
+      ["credit", "Estimated entry credit"],
+      ["status", "Final verdict"],
+    ] as const;
+
+    for (const [key, expectedText] of expectations) {
+      const trigger = screen.getByTestId(`theta-harvester-tooltip-${key}`);
+      expect(trigger).toBeTruthy();
+      fireEvent.mouseEnter(trigger);
+      expect(screen.getByTestId(`theta-harvester-tooltip-content-${key}`).textContent).toContain(expectedText);
+      fireEvent.mouseLeave(trigger);
+    }
+  });
+
   it("rejects malformed ticker search text", () => {
     const onTickerScan = vi.fn();
     render(<ThetaHarvesterScanner data={data} onTickerScan={onTickerScan} />);

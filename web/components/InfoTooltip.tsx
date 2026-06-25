@@ -73,6 +73,7 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
   return (
     <span
       ref={ref}
+      data-sort-ignore="true"
       data-testid={triggerTestId}
       style={{ display: "inline-flex", alignItems: "center" }}
       onMouseEnter={show}

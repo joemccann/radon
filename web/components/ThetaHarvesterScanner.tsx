@@ -4,6 +4,7 @@ import { useState, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, Sparkles } from "lucide-react";
+import InfoTooltip from "./InfoTooltip";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
@@ -21,6 +22,46 @@ type ThetaHarvesterScannerProps = {
   onScan?: () => void;
   onTickerScan?: (ticker: string) => void;
 };
+
+const THETA_SECTION_HELP =
+  "Neutral short-premium scan for true theta setups: near-zero net delta, positive theta, rich IV versus realized vol, dealer support, and range-bound price action.";
+
+const THETA_HEADER_HELP = {
+  score: "Composite theta harvest score across delta neutrality, IV/RV richness, dealer support, range state, theta, and credit quality.",
+  theta: "Estimated daily theta for the short strangle, shown per 1-lot. Positive means the structure earns decay.",
+  "net-delta": "Net position delta for both short legs, normalized to shares. Near zero means less directional exposure.",
+  "iv-rv": "Implied-volatility edge versus realized volatility, shown as point spread and IV/RV ratio.",
+  dealer: "Dealer support gate. SUPPORT means positioning is expected to dampen spot movement inside the short range.",
+  range: "Range-bound score. RANGE favors contained movement; TREND warns directional movement.",
+  dte: "Days to expiration for the selected short put and short call expiry.",
+  credit: "Estimated entry credit per share for the 1x short put plus 1x short call. Multiply by 100 per contract.",
+  status: "Final verdict: TRUE THETA passes the active gates, DIRECTIONAL indicates disguised delta exposure, and WATCH is mixed.",
+} as const;
+
+type ThetaHelpKey = keyof typeof THETA_HEADER_HELP;
+
+function thetaHelpProps(label: string, helpKey: ThetaHelpKey) {
+  return {
+    helpText: THETA_HEADER_HELP[helpKey],
+    helpAriaLabel: `${label} theta harvester details`,
+    helpTriggerTestId: `theta-harvester-tooltip-${helpKey}`,
+    helpContentTestId: `theta-harvester-tooltip-content-${helpKey}`,
+  };
+}
+
+function ThetaHeaderInfoLabel({ label, helpKey }: { label: string; helpKey: ThetaHelpKey }) {
+  return (
+    <span className="scanner-header-label">
+      <span>{label}</span>
+      <InfoTooltip
+        text={THETA_HEADER_HELP[helpKey]}
+        ariaLabel={`${label} theta harvester details`}
+        triggerTestId={`theta-harvester-tooltip-${helpKey}`}
+        contentTestId={`theta-harvester-tooltip-content-${helpKey}`}
+      />
+    </span>
+  );
+}
 
 function extract(row: ThetaHarvesterResult, key: ThetaSortKey): string | number | null {
   switch (key) {
@@ -164,6 +205,12 @@ export default function ThetaHarvesterScanner({
         <div className="section-title">
           <Sparkles size={14} />
           Theta Harvester
+          <InfoTooltip
+            text={THETA_SECTION_HELP}
+            ariaLabel="Theta Harvester scanner details"
+            triggerTestId="theta-harvester-title-tooltip"
+            contentTestId="theta-harvester-title-tooltip-content"
+          />
         </div>
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
@@ -240,15 +287,15 @@ export default function ThetaHarvesterScanner({
                 <tr>
                   <SortTh<ThetaSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <th>Structure</th>
-                  <SortTh<ThetaSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ThetaSortKey> label="Theta" sortKey="theta" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ThetaSortKey> label="Net Delta" sortKey="delta" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ThetaSortKey> label="IV/RV" sortKey="iv_edge" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <th>Dealer</th>
-                  <SortTh<ThetaSortKey> label="Range" sortKey="range" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ThetaSortKey> label="DTE" sortKey="dte" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ThetaSortKey> label="Credit" sortKey="credit" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <th>Status</th>
+                  <SortTh<ThetaSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Score", "score")} />
+                  <SortTh<ThetaSortKey> label="Theta" sortKey="theta" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Theta", "theta")} />
+                  <SortTh<ThetaSortKey> label="Net Delta" sortKey="delta" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Net Delta", "net-delta")} />
+                  <SortTh<ThetaSortKey> label="IV/RV" sortKey="iv_edge" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("IV/RV", "iv-rv")} />
+                  <th><ThetaHeaderInfoLabel label="Dealer" helpKey="dealer" /></th>
+                  <SortTh<ThetaSortKey> label="Range" sortKey="range" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Range", "range")} />
+                  <SortTh<ThetaSortKey> label="DTE" sortKey="dte" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("DTE", "dte")} />
+                  <SortTh<ThetaSortKey> label="Credit" sortKey="credit" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Credit", "credit")} />
+                  <th><ThetaHeaderInfoLabel label="Status" helpKey="status" /></th>
                 </tr>
               </thead>
               <tbody>
