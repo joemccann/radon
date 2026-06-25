@@ -8,6 +8,7 @@ This root file is intentionally small. Scoped `AGENTS.md` files live beside subs
 |---|---|---|
 | Root | `AGENTS.md` -> `.pi/AGENTS.md` | `CLAUDE.md` |
 | Web | `web/AGENTS.md` | `web/CLAUDE.md` |
+| Marketing site | `site/AGENTS.md` | `site/CLAUDE.md` |
 | Scripts | `scripts/AGENTS.md` | `scripts/CLAUDE.md` |
 | FastAPI | `scripts/api/AGENTS.md` | `scripts/api/CLAUDE.md` |
 | Monitor daemon | `scripts/monitor_daemon/AGENTS.md` | `scripts/monitor_daemon/CLAUDE.md` |
