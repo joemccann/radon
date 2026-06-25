@@ -1,48 +1,43 @@
-import dynamic from "next/dynamic";
 import { ScrollProgress } from "@/components/atoms/ScrollProgress";
-import { FooterSection } from "@/components/sections/FooterSection";
-import { HeaderShell } from "@/components/sections/HeaderShell";
-import { HeroSection } from "@/components/sections/HeroSection";
-
-const StrategySection = dynamic(() =>
-  import("@/components/sections/StrategySection").then((m) => m.StrategySection)
-);
-const ExecutionSection = dynamic(() =>
-  import("@/components/sections/ExecutionSection").then((m) => m.ExecutionSection)
-);
-const PreviewSection = dynamic(() =>
-  import("@/components/sections/PreviewSection").then((m) => m.PreviewSection)
-);
-const AuditSection = dynamic(() =>
-  import("@/components/sections/AuditSection").then((m) => m.AuditSection)
-);
-const FinalCTASection = dynamic(() =>
-  import("@/components/sections/FinalCTASection").then((m) => m.FinalCTASection)
-);
+import { SectionRule } from "@/components/atoms/SectionRule";
+import { ColophonSection } from "@/components/sections/ColophonSection";
+import { ConvexitySection } from "@/components/sections/ConvexitySection";
+import { EditorialFooter } from "@/components/sections/EditorialFooter";
+import { EditorialHeader } from "@/components/sections/EditorialHeader";
+import { EditorialHeroSection } from "@/components/sections/EditorialHeroSection";
+import { EvidenceSection } from "@/components/sections/EvidenceSection";
+import { FlowThesisSection } from "@/components/sections/FlowThesisSection";
+import { PipelineSection } from "@/components/sections/PipelineSection";
+import { RegimeSection } from "@/components/sections/RegimeSection";
+import { RegistrySection } from "@/components/sections/RegistrySection";
 
 export default function LandingPage() {
   return (
-    <div className="min-h-screen bg-canvas text-primary selection:bg-accent selection:text-canvas">
+    <div className="min-h-screen bg-canvas font-serif text-[19px] leading-[1.62] text-primary">
       <ScrollProgress />
       <a
         href="#main-content"
-        className="sr-only focus:not-sr-only focus:fixed focus:top-4 focus:left-4 focus:z-50 focus:rounded focus:bg-accent focus:px-4 focus:py-2 focus:text-canvas focus:outline-none"
+        className="sr-only focus:not-sr-only focus:fixed focus:left-4 focus:top-4 focus:z-[60] focus:rounded focus:bg-accent focus:px-4 focus:py-2 focus:text-canvas focus:outline-none"
       >
         Skip to content
       </a>
-      <div className="pointer-events-none fixed inset-0 z-0 instrument-grid opacity-[0.05]" />
-      <div className="pointer-events-none fixed inset-0 z-10 projection-lines opacity-[0.08]" />
-      <HeaderShell />
-      <main id="main-content" className="relative z-20">
-        <div className="mx-auto w-full max-w-[1440px] px-4 pb-14 pt-24 sm:px-6 lg:px-8">
-          <HeroSection />
-          <StrategySection />
-          <ExecutionSection />
-          <PreviewSection />
-          <AuditSection />
-          <FinalCTASection />
-          <FooterSection />
-        </div>
+      <EditorialHeader />
+      <main id="main-content">
+        <EditorialHeroSection />
+        <SectionRule />
+        <FlowThesisSection />
+        <SectionRule />
+        <ConvexitySection />
+        <SectionRule />
+        <RegimeSection />
+        <SectionRule />
+        <PipelineSection />
+        <SectionRule />
+        <RegistrySection />
+        <SectionRule />
+        <EvidenceSection />
+        <ColophonSection />
+        <EditorialFooter />
       </main>
     </div>
   );
