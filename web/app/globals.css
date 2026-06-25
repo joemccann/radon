@@ -4675,6 +4675,13 @@ tr.leg-row td {
   gap: 4px;
 }
 
+.scanner-header-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+}
+
 .sortable-th.right .sort-label {
   justify-content: flex-end;
 }

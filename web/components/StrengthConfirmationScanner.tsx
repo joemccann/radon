@@ -31,6 +31,9 @@ const FACTOR_ORDER = [
   "MARKET BREADTH",
 ];
 
+const STRENGTH_SECTION_HELP =
+  "Seven-factor confirmation scan for sustained upside strength. It checks sentiment, dealer gamma, call positioning, vol term structure, skew, systematic positioning, and breadth.";
+
 const FACTOR_SHORT: Record<string, string> = {
   "Q-SCORES": "Q",
   "NET GEX": "GEX",
@@ -206,6 +209,12 @@ export default function StrengthConfirmationScanner({
         <div className="section-title">
           <ShieldCheck size={14} />
           7-Step Strength
+          <InfoTooltip
+            text={STRENGTH_SECTION_HELP}
+            ariaLabel="7-Step Strength scanner details"
+            triggerTestId="strength-title-tooltip"
+            contentTestId="strength-title-tooltip-content"
+          />
         </div>
         <div className="strength-confirmation__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}

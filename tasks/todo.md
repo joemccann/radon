@@ -1,3 +1,36 @@
+# Task: Theta Harvester Info Bubbles
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot dirty state, scoped UI instructions, and remote branch delta without touching unrelated files.
+- T2 depends_on: [T1] — Use parallel agents to map theta scanner header/tooltips, scanner tab/header affordances, styling, and regression coverage.
+- T3 depends_on: [T1, T2] — Define concise operator-facing tooltip copy for theta table metrics and scanner-level controls.
+- T4 depends_on: [T3] — Implement accessible `InfoTooltip` bubbles in the theta harvester table and relevant scanner header controls.
+- T5 depends_on: [T4] — Add focused component tests for all new tooltip triggers and content.
+- T6 depends_on: [T5] — Run focused checks, static checks, browser visual verification, then document review.
+
+## Checklist
+
+- [x] T1 — Snapshot state and remote delta.
+- [x] T2 — Collect parallel agent findings.
+- [x] T3 — Define tooltip copy and placement.
+- [x] T4 — Implement tooltip UI.
+- [x] T5 — Add regression coverage.
+- [x] T6 — Verify and document.
+
+## Review
+
+- Added `InfoTooltip` help bubbles to all theta harvester metric headers requested: Score, Theta, Net Delta, IV/RV, Dealer, Range, DTE, Credit, and Status.
+- Added a theta harvester section-title help bubble that summarizes the scanner contract without crowding the tab strip. Also added a 7-step strength title bubble for parity with the active scanner modes.
+- Kept the scanner mode tabs text-only, per the UI review. Added Flow Signals table-header help for Signal, Direction, Score, Strength, Buy Ratio, Sustained, and Prints, plus a mobile scanner title help bubble.
+- Extended `SortTh` so sortable headers can own help bubbles safely. Tooltip clicks and keyboard events are ignored by sort handlers, while the rest of the header still sorts normally.
+- Focused component tests passed: `npx vitest run --config vitest.config.ts web/tests/theta-harvester-scanner.test.tsx web/tests/scanner-header-tooltips.test.tsx web/tests/sort-th-tooltip.test.tsx web/tests/strength-confirmation-scanner.test.tsx` — 4 files, 10 tests.
+- Static checks passed: `npm run typecheck`, `npm run lint` (9 existing warnings), and `git diff --check`.
+- Browser verification passed through the project Playwright harness: `PLAYWRIGHT_PORT=3048 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/theta-harvester-scanner.spec.ts e2e/strength-confirmation-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 4 tests across desktop/mobile. The manual screenshot script hit the local Clerk handshake loop, so no screenshot artifact was kept.
+- Full web suite passed: `npm test` — 352 files, 3,468 passed, 26 skipped.
+
+---
+
 # Task: Production Live Data Regression
 
 ## Dependency Graph

@@ -1354,6 +1354,27 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
 type ScannerMode = "flow" | "theta" | "strength";
 
+const SCANNER_HEADER_HELP = {
+  signal: "Flow intensity bucket from dark-pool activity. STRONG means the flow score is high enough to review immediately.",
+  direction: "Dominant institutional flow direction. ACCUMULATION leans bullish; DISTRIBUTION leans bearish.",
+  score: "Composite flow score across strength, buy ratio, sustained activity, and print count.",
+  strength: "Raw dark-pool flow strength for the ticker. Higher values indicate more forceful institutional activity.",
+  "buy-ratio": "Share of prints classified as buyer-initiated. Higher ratios support accumulation; lower ratios support distribution.",
+  sustained: "Number of sessions the signal has persisted. Longer streaks carry more weight than one-day prints.",
+  prints: "Number of dark-pool transactions in the scan window. More prints improve confidence in the signal.",
+} as const;
+
+type ScannerHelpKey = keyof typeof SCANNER_HEADER_HELP;
+
+function scannerHelpProps(label: string, helpKey: ScannerHelpKey) {
+  return {
+    helpText: SCANNER_HEADER_HELP[helpKey],
+    helpAriaLabel: `${label} scanner signal details`,
+    helpTriggerTestId: `scanner-header-tooltip-${helpKey}`,
+    helpContentTestId: `scanner-header-tooltip-content-${helpKey}`,
+  };
+}
+
 const scannerSigExtract = (item: ScannerSignal, key: ScannerSortKey): string | number | null => {
   switch (key) {
     case "ticker": return item.ticker;
@@ -1569,6 +1590,12 @@ function ScannerSections() {
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, fontWeight: 600, letterSpacing: "0.08em", color: "var(--text-primary)", textTransform: "uppercase" }}>
               Scanner
             </span>
+            <InfoTooltip
+              text={SECTION_TOOLTIPS["Scanner Signals"]}
+              ariaLabel="Scanner Signals details"
+              triggerTestId="scanner-mobile-title-tooltip"
+              contentTestId="scanner-mobile-title-tooltip-content"
+            />
             <span
               style={{
                 fontFamily: "var(--font-mono)",
@@ -1750,13 +1777,13 @@ function ScannerSections() {
               <thead>
                 <tr>
                   <SortTh<ScannerSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Strength" sortKey="strength" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Buy Ratio" sortKey="buy_ratio" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Sustained" sortKey="sustained_days" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<ScannerSortKey> label="Prints" sortKey="num_prints" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<ScannerSortKey> label="Signal" sortKey="signal" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Signal", "signal")} />
+                  <SortTh<ScannerSortKey> label="Direction" sortKey="direction" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Direction", "direction")} />
+                  <SortTh<ScannerSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Score", "score")} />
+                  <SortTh<ScannerSortKey> label="Strength" sortKey="strength" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Strength", "strength")} />
+                  <SortTh<ScannerSortKey> label="Buy Ratio" sortKey="buy_ratio" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Buy Ratio", "buy-ratio")} />
+                  <SortTh<ScannerSortKey> label="Sustained" sortKey="sustained_days" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Sustained", "sustained")} />
+                  <SortTh<ScannerSortKey> label="Prints" sortKey="num_prints" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...scannerHelpProps("Prints", "prints")} />
                 </tr>
               </thead>
               <tbody>
