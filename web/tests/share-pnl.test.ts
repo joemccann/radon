@@ -5,6 +5,7 @@ import {
   type PositionFillGroup,
 } from "../components/WorkspaceSections";
 import { buildTweetText } from "../components/SharePnlButton";
+import { formatHoldDuration } from "../lib/holdTime";
 import type { ExecutedOrder } from "../lib/types";
 import type { PortfolioPosition } from "../lib/types";
 
@@ -992,6 +993,62 @@ describe("buildTweetText", () => {
   it("does not double-tag if ticker already has $", () => {
     const text = buildTweetText("Some custom description", 100, 10, false, true);
     expect(text).toContain("Some custom description");
+  });
+
+  it("appends hold time with a separator when provided", () => {
+    const text = buildTweetText("Closed AAPL Stock", 500, 2.86, false, true, "1 day");
+    expect(text).toContain("+2.86% · Held 1 day");
+  });
+
+  it("shows hold time without a leading separator when pnl portion is empty", () => {
+    const text = buildTweetText("Closed X", 100, 50, false, false, "37 minutes");
+    expect(text).toContain("$X Held 37 minutes");
+    expect(text).not.toContain("· Held");
+  });
+
+  it("omits hold time when null or absent (backward compatible)", () => {
+    expect(buildTweetText("Closed GOOG Spread", 100, 12, false, true, null)).not.toContain("Held");
+    expect(buildTweetText("Closed GOOG Spread", 100, 12, false, true)).not.toContain("Held");
+  });
+});
+
+describe("formatHoldDuration", () => {
+  it("formats minutes under an hour", () => {
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-24T12:37:00Z")).toBe("37 minutes");
+  });
+
+  it("formats hours under a day", () => {
+    // the screenshot's trade: 12:06 PM -> next day 6:30 AM is ~18h
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-25T06:00:00Z")).toBe("18 hours");
+  });
+
+  it("rolls 47 hours up to 2 days", () => {
+    expect(formatHoldDuration("2026-06-24T00:00:00Z", "2026-06-25T23:00:00Z")).toBe("2 days");
+  });
+
+  it("uses singular for exactly one minute / hour / day", () => {
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-24T12:01:00Z")).toBe("1 minute");
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-24T13:00:00Z")).toBe("1 hour");
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-25T12:00:00Z")).toBe("1 day");
+  });
+
+  it("collapses sub-minute holds to '1 minute'", () => {
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-24T12:00:30Z")).toBe("1 minute");
+  });
+
+  it("treats date-only timestamps as local midnight (no tz day-shift)", () => {
+    expect(formatHoldDuration("2026-03-17", "2026-03-18")).toBe("1 day");
+    expect(formatHoldDuration("2026-03-17", "2026-03-19")).toBe("2 days");
+  });
+
+  it("returns null when a timestamp is missing or unparseable", () => {
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", null)).toBeNull();
+    expect(formatHoldDuration(null, "2026-06-24T12:00:00Z")).toBeNull();
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "not-a-date")).toBeNull();
+  });
+
+  it("returns null when exit precedes entry (bad data)", () => {
+    expect(formatHoldDuration("2026-06-24T12:00:00Z", "2026-06-24T11:00:00Z")).toBeNull();
   });
 });
 

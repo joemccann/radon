@@ -57,6 +57,7 @@ export async function GET(request: Request) {
     const exitPrice = exitPriceRaw != null ? parseFloat(exitPriceRaw) : null;
     const entryTime = searchParams.get("entryTime") ?? "";
     const exitTime = searchParams.get("exitTime") ?? "";
+    const holdTime = searchParams.get("holdTime") ?? "";
     const time = searchParams.get("time") ?? "";
 
     if (!description) {
@@ -86,6 +87,11 @@ export async function GET(request: Request) {
         ? `${fmtSignedPrice(entryPrice)} @ ${entryTimeFormatted}`
         : fmtSignedPrice(entryPrice);
       detailItems.push({ label: "ENTRY", value: entryValue });
+    }
+
+    // Hold time: entry to exit in natural language, centered between ENTRY and EXIT
+    if (holdTime) {
+      detailItems.push({ label: "HELD", value: holdTime });
     }
 
     // Exit: price @ time (PST)
