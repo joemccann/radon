@@ -161,7 +161,7 @@ def test_scanner_process_ticker_degrades_without_chronos(monkeypatch):
     monkeypatch.setattr(
         scanner,
         "fetch_flow_data",
-        lambda ticker, days=5: {"total_prints": 5, "buy_ratio": 0.7},
+        lambda ticker, days=5, **_kwargs: {"total_prints": 5, "buy_ratio": 0.7},
     )
     monkeypatch.setattr(
         scanner,
@@ -183,7 +183,7 @@ def test_scanner_process_ticker_degrades_without_chronos(monkeypatch):
 
     monkeypatch.setattr(fs, "attach_forecast_score", boom)
 
-    out = scanner._process_ticker({"ticker": "NVDA", "sector": "Tech"})
+    out = scanner._process_ticker({"ticker": "NVDA", "sector": "Tech"}, include_forecast=True)
     assert out is not None
     assert out["ticker"] == "NVDA"
     assert out["score"] == 55.0
@@ -196,7 +196,7 @@ def test_scanner_attaches_forecast_when_available(monkeypatch):
     monkeypatch.setattr(
         scanner,
         "fetch_flow_data",
-        lambda ticker, days=5: {"total_prints": 5, "buy_ratio": 0.7},
+        lambda ticker, days=5, **_kwargs: {"total_prints": 5, "buy_ratio": 0.7},
     )
     monkeypatch.setattr(
         scanner,
@@ -225,6 +225,6 @@ def test_scanner_attaches_forecast_when_available(monkeypatch):
 
     monkeypatch.setattr(fs, "attach_forecast_score", fake_attach)
 
-    out = scanner._process_ticker({"ticker": "NVDA", "sector": "Tech"})
+    out = scanner._process_ticker({"ticker": "NVDA", "sector": "Tech"}, include_forecast=True)
     assert out["forecast"]["convex_reinforced"] is True
     assert out["forecast"]["band"]["hi"] == 70.0

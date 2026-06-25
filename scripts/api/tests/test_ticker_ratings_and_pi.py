@@ -125,6 +125,37 @@ def test_ticker_ratings_400_on_empty_ticker(client):
 
 
 # ---------------------------------------------------------------------------
+# /scan
+# ---------------------------------------------------------------------------
+
+def test_scan_route_passes_explicit_worker_count(client, monkeypatch):
+    """The on-demand scanner route should use the faster bounded worker count."""
+    monkeypatch.delenv("RADON_SCANNER_WORKERS", raising=False)
+    fake = _fake_script_result(
+        ok=True,
+        data={
+            "scan_time": "2026-06-25T16:00:00Z",
+            "tickers_scanned": 0,
+            "signals_found": 0,
+            "top_signals": [],
+        },
+    )
+
+    async def _stub(*args, **kwargs):
+        return fake
+
+    with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
+        response = client.post("/scan")
+
+    assert response.status_code == 200
+    args = run_mock.call_args.args
+    kwargs = run_mock.call_args.kwargs
+    assert args[0] == "scanner.py"
+    assert args[1] == ["--top", "25", "--workers", "24"]
+    assert kwargs["timeout"] == 120
+
+
+# ---------------------------------------------------------------------------
 # /pi/exec
 # ---------------------------------------------------------------------------
 
