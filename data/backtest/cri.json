@@ -1,0 +1,22 @@
+{
+  "trades": [],
+  "metrics": {
+    "n_trades": 0,
+    "sharpe": 0.0,
+    "sortino": 0.0,
+    "calmar": 0.0,
+    "max_drawdown": 0.0,
+    "hit_rate": 0.0,
+    "expectancy": 0.0,
+    "annualized_return": 0.0,
+    "equity_curve": [
+      1.0
+    ]
+  },
+  "strategy": "cri",
+  "label": "Crash Risk Index (CRI)",
+  "horizon": 1,
+  "wired": true,
+  "status": "ok",
+  "run_at": "2026-06-22T06:20:31.005997Z"
+}

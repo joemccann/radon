@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>demo.radon.run — Manual Setup Guide</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --canvas:#0a0f14; --panel:#0f1519; --panel-raised:#151c22; --grid:#1e293b;
+    --text:#e2e8f0; --text-secondary:#94a3b8; --text-muted:#475569;
+    --signal:#05AD98; --signal-strong:#0FCFB5; --signal-deep:#048A7A;
+    --warn:#F5A623; --fault:#E85D6C; --violet:#8B5CF6;
+    --mono:"IBM Plex Mono",ui-monospace,Menlo,monospace;
+    --sans:"Space Grotesk",system-ui,sans-serif;
+    --radius:4px;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--canvas);color:var(--text);font-family:var(--sans);
+    font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased;
+    background-image:radial-gradient(circle at 12% -10%, rgba(5,173,152,.06), transparent 40%);}
+  .wrap{max-width:920px;margin:0 auto;padding:0 28px 120px}
+  header.top{position:sticky;top:0;z-index:5;background:color-mix(in srgb,var(--canvas) 88%,transparent);
+    backdrop-filter:blur(10px);border-bottom:1px solid var(--grid);padding:18px 0;margin-bottom:8px}
+  .top-inner{max-width:920px;margin:0 auto;padding:0 28px;display:flex;align-items:center;justify-content:space-between;gap:16px}
+  .brand{display:flex;align-items:center;gap:11px;font-family:var(--mono);font-weight:600;letter-spacing:.04em}
+  .glyph{width:14px;height:14px;border:1.5px solid var(--signal);border-radius:50%;position:relative}
+  .glyph::after{content:"";position:absolute;inset:3px;background:var(--signal);border-radius:50%}
+  .brand small{display:block;font-weight:400;font-size:10px;color:var(--text-muted);letter-spacing:.14em;text-transform:uppercase}
+  .progress{font-family:var(--mono);font-size:12px;color:var(--text-secondary)}
+  .progress b{color:var(--signal-strong)}
+  h1{font-size:34px;font-weight:600;letter-spacing:-.02em;margin:34px 0 6px;line-height:1.08}
+  .lede{color:var(--text-secondary);font-size:16px;max-width:62ch;margin:0 0 8px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--signal-deep);display:inline-flex;align-items:center;gap:9px;margin-top:30px}
+  .eyebrow::before{content:"";width:20px;height:1px;background:var(--signal-deep)}
+  .note{border:1px solid var(--grid);border-left:2px solid var(--signal);background:var(--panel);
+    border-radius:var(--radius);padding:14px 16px;margin:18px 0;font-size:14px;color:var(--text-secondary)}
+  .note.warn{border-left-color:var(--warn)} .note.warn b{color:var(--warn)}
+  .note b{color:var(--text)}
+  section.step{border:1px solid var(--grid);background:var(--panel);border-radius:var(--radius);
+    margin:18px 0;overflow:hidden}
+  .step-head{display:flex;align-items:flex-start;gap:14px;padding:18px 20px;cursor:pointer;user-select:none}
+  .step-head:hover{background:var(--panel-raised)}
+  .num{flex:none;width:30px;height:30px;border-radius:var(--radius);border:1px solid var(--signal-deep);
+    color:var(--signal-strong);font-family:var(--mono);font-weight:600;font-size:14px;
+    display:flex;align-items:center;justify-content:center}
+  .step.done .num{background:var(--signal-deep);border-color:var(--signal-deep);color:#04140f}
+  .step-title{flex:1}
+  .step-title h2{margin:0;font-size:19px;font-weight:600;letter-spacing:-.01em}
+  .step-title .sub{font-size:13px;color:var(--text-muted);font-family:var(--mono);margin-top:3px}
+  .chk{flex:none;width:22px;height:22px;border:1px solid var(--grid);border-radius:var(--radius);
+    display:flex;align-items:center;justify-content:center;cursor:pointer;color:transparent;font-size:13px}
+  .step.done .chk{background:var(--signal);border-color:var(--signal);color:#04140f}
+  .step-body{padding:4px 20px 22px 64px;display:block}
+  ol.sub{margin:6px 0;padding-left:20px}
+  ol.sub li{margin:9px 0}
+  ul.tight{margin:6px 0;padding-left:18px;color:var(--text-secondary)}
+  code{font-family:var(--mono);font-size:.88em;background:var(--panel-raised);border:1px solid var(--grid);
+    border-radius:3px;padding:1px 6px;color:var(--signal-strong)}
+  .cmd{position:relative;font-family:var(--mono);font-size:13px;background:#070b0f;border:1px solid var(--grid);
+    border-radius:var(--radius);padding:12px 44px 12px 14px;margin:8px 0;white-space:pre-wrap;word-break:break-word;color:#cfe8e2}
+  .cmd .copy{position:absolute;top:8px;right:8px;background:var(--panel-raised);border:1px solid var(--grid);
+    border-radius:3px;color:var(--text-secondary);font-family:var(--mono);font-size:10px;letter-spacing:.06em;
+    text-transform:uppercase;padding:4px 7px;cursor:pointer}
+  .cmd .copy:hover{border-color:var(--signal);color:var(--signal-strong)}
+  .record{border:1px dashed var(--signal-deep);background:color-mix(in srgb,var(--signal) 6%,transparent);
+    border-radius:var(--radius);padding:11px 14px;margin:12px 0;font-size:13.5px}
+  .record b{color:var(--signal-strong);font-family:var(--mono)}
+  a{color:var(--signal-strong);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--signal) 40%,transparent)}
+  a:hover{border-color:var(--signal)}
+  .pill{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;
+    border:1px solid var(--grid);border-radius:3px;padding:2px 7px;color:var(--text-secondary);margin-left:6px}
+  .pill.manual{color:var(--warn);border-color:color-mix(in srgb,var(--warn) 40%,transparent)}
+  .final{border:1px solid var(--signal-deep);background:var(--panel);border-radius:var(--radius);padding:22px 24px;margin:28px 0}
+  .final h2{margin:0 0 6px;font-size:22px}
+  .kv{font-family:var(--mono);font-size:13px;border-top:1px solid var(--grid);padding:9px 0;display:flex;gap:12px;flex-wrap:wrap}
+  .kv .k{color:var(--signal-strong);min-width:230px}
+  .kv .v{color:var(--text-muted)}
+  footer{color:var(--text-muted);font-family:var(--mono);font-size:11px;text-align:center;margin-top:40px;letter-spacing:.04em}
+  .reset{background:none;border:1px solid var(--grid);color:var(--text-secondary);font-family:var(--mono);
+    font-size:11px;border-radius:var(--radius);padding:6px 10px;cursor:pointer}
+  .reset:hover{border-color:var(--fault);color:var(--fault)}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <div class="brand"><span class="glyph"></span><span>RADON<small>demo setup</small></span></div>
+    <div class="progress"><b id="pdone">0</b> / <span id="ptotal">6</span> done &nbsp; <button class="reset" onclick="resetAll()">reset</button></div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="eyebrow">Operator provisioning</div>
+  <h1>demo.radon.run — what you set up manually</h1>
+  <p class="lede">Six infrastructure tasks only you can do (they need your dashboards + credentials). Everything else (the demo app code, migrations, guards, admin panel) I build in the repo. Do these in order; at the end, send me the values in the green boxes and I wire them into the demo deploy.</p>
+
+  <div class="note warn"><b>Isolation rule:</b> the whole point is that the demo can never touch your real IB account or production data. The demo VM gets <b>no IB Gateway</b> and its <b>own Turso DB</b>. Do not reuse the prod Turso URL, prod IB host, or prod AI keys anywhere below.</div>
+  <div class="note">Full architecture + rationale: <code>docs/demo-environment.md</code>. Your locked decisions: same Clerk instance · new Hetzner VM · separate Turso · Upstash · realtime feed · low-budget demo keys · email-verify.</div>
+
+  <!-- STEP 1 -->
+  <section class="step" data-id="1">
+    <div class="step-head" onclick="toggle(this)">
+      <div class="num">1</div>
+      <div class="step-title"><h2>Provision the Hetzner VM <span class="pill manual">Hetzner</span></h2><div class="sub">a fresh box for the isolated demo stack</div></div>
+      <div class="chk" onclick="check(event,this)">&#10003;</div>
+    </div>
+    <div class="step-body">
+      <ol class="sub">
+        <li>In <a href="https://console.hetzner.cloud" target="_blank">Hetzner Cloud Console</a> → your project → <b>Add Server</b>.</li>
+        <li><b>Location</b>: same region as your prod <code>ib-gateway</code> VM (lowest latency to Turso/UW). <b>Image</b>: Ubuntu 24.04. <b>Type</b>: CPX21 (3 vCPU / 4 GB) is plenty for a demo; CPX31 if you expect many concurrent users.</li>
+        <li>Add your SSH key. Name it <code>radon-demo</code>. Create.</li>
+        <li>Copy the new <b>public IPv4</b>. SSH in and install Docker + compose plugin:</li>
+      </ol>
+      <div class="cmd"><button class="copy" onclick="cp(this)">copy</button>ssh root@&lt;NEW_VM_IP&gt;
+curl -fsSL https://get.docker.com | sh
+apt-get install -y docker-compose-plugin
+useradd -m -s /bin/bash radon &amp;&amp; usermod -aG docker radon</div>
+      <div class="note"><b>Do NOT</b> join this VM to the Tailscale tailnet that reaches <code>ib-gateway:4001</code>, and do not run an IB Gateway container on it. IB must be physically unreachable. I will provide the demo <code>docker-compose.yml</code> (Next.js + FastAPI in <code>RADON_API_TEST_MODE=1</code> + relay + Caddy) — you do not build it.</div>
+      <div class="record">Send me: <b>DEMO_VM_IP</b> &nbsp;(and confirm SSH + docker work)</div>
+    </div>
+  </section>
+
+  <!-- STEP 2 -->
+  <section class="step" data-id="2">
+    <div class="step-head" onclick="toggle(this)">
+      <div class="num">2</div>
+      <div class="step-title"><h2>Deploy the demo frontend on Vercel <span class="pill manual">Vercel</span></h2><div class="sub">demo.radon.run frontend + edge firewall / DDoS / IP rate-limiting</div></div>
+      <div class="chk" onclick="check(event,this)">&#10003;</div>
+    </div>
+    <div class="step-body">
+      <div class="note"><b>Architecture:</b> the demo <b>frontend</b> (the <code>web/</code> Next.js app) runs on <b>Vercel</b> as <code>demo.radon.run</code> — same platform as radon.run — so Vercel gives us the edge WAF, DDoS, and IP rate-limiting for free. The <b>FastAPI + relay backend</b> stays on the isolated Hetzner VM from step 1. The Vercel frontend calls the VM's FastAPI over the public internet, so the backend authenticates the Clerk JWT (no localhost trust bypass) — a security upgrade I wire on my side.</div>
+      <ol class="sub">
+        <li>The <code>joemccann/radon</code> repo is <b>already connected</b> to Vercel (it backs the marketing-site project, root <code>site/</code>). In <a href="https://vercel.com/dashboard" target="_blank">Vercel</a> → <b>Add New → Project</b> → pick the <b>existing</b> <code>joemccann/radon</code> repo and create a <b>second project</b> from it with <b>Root Directory</b> = <code>web/</code>. One repo backs multiple Vercel projects, each with its own root + domain. Framework: Next.js.</li>
+        <li><b>Settings → Domains</b>: add <code>demo.radon.run</code> (Vercel manages DNS + TLS since radon.run is already a Vercel domain — no A record / Cloudflare needed).</li>
+        <li><b>Settings → Git</b>: set the <b>Production Branch</b> to a dedicated <code>demo</code> branch (so demo deploys are independent of prod <code>main</code>), or use an Ignored Build Step scoped to <code>web/</code>. I'll confirm the exact gating when wiring.</li>
+        <li><b>Settings → Firewall</b>: enable <b>Vercel WAF</b> (managed OWASP ruleset), add <b>Rate Limiting</b> rules (e.g. challenge at 100 req/min/IP, block at 1000/min/IP), and turn on <b>Attack Challenge Mode</b> readiness for DDoS. This replaces the old Cloudflare layer.</li>
+        <li><b>Settings → Environment Variables</b> (Production): I'll hand you the exact list when wiring — it points the frontend at the VM backend (<code>RADON_API_URL</code> → the VM's public FastAPI URL) and carries the demo Clerk role, demo Turso, Upstash, and demo AI keys. Leave this until I send the list.</li>
+      </ol>
+      <div class="note warn"><b>Don't deploy to production yet</b> — create the project + attach the domain + firewall, but hold the first prod deploy until I've added the demo-mode code (Phase 2) and given you the env vars, so demo.radon.run never goes live pointing at the wrong backend.</div>
+      <div class="record">Send me: the <b>Vercel project name/URL</b> + confirm <b>demo.radon.run</b> is attached and the <b>Firewall + rate-limit rules</b> are on. (The backend <code>RADON_API_URL</code> I derive from the VM.)</div>
+    </div>
+  </section>
+
+  <!-- STEP 3 -->
+  <section class="step" data-id="3">
+    <div class="step-head" onclick="toggle(this)">
+      <div class="num">3</div>
+      <div class="step-title"><h2>Create the separate demo Turso DB <span class="pill manual">Turso CLI</span></h2><div class="sub">demo data physically apart from the prod journal/account</div></div>
+      <div class="chk" onclick="check(event,this)">&#10003;</div>
+    </div>
+    <div class="step-body">
+      <ol class="sub">
+        <li>From your laptop (Turso CLI already authed for prod). Match the prod region (prod is <code>aws-us-west-2</code>):</li>
+      </ol>
+      <div class="cmd"><button class="copy" onclick="cp(this)">copy</button>turso db create radon-demo --location lax
+turso db show radon-demo --url
+turso db tokens create radon-demo</div>
+      <ul class="tight">
+        <li><code>db show --url</code> prints the <b>libsql:// URL</b>.</li>
+        <li><code>tokens create</code> prints the <b>auth token</b>.</li>
+        <li>I will run the migrations + <code>demo_seed.py</code> against this DB — you just create it + hand me the URL/token.</li>
+      </ul>
+      <div class="note warn"><b>Critical:</b> this must be a <b>brand-new</b> DB, never the prod <code>radon-joemccann</code> URL. The prod portfolio/journal/orders tables have no user_id, so a shared DB would leak your real positions.</div>
+      <div class="record">Send me: <b>TURSO_DEMO_DB_URL</b> &nbsp;·&nbsp; <b>TURSO_DEMO_AUTH_TOKEN</b></div>
+    </div>
+  </section>
+
+  <!-- STEP 4 -->
+  <section class="step" data-id="4">
+    <div class="step-head" onclick="toggle(this)">
+      <div class="num">4</div>
+      <div class="step-title"><h2>Create an Upstash Redis (rate limiting) <span class="pill manual">Upstash</span></h2><div class="sub">per-user sliding-window limits + quota counters</div></div>
+      <div class="chk" onclick="check(event,this)">&#10003;</div>
+    </div>
+    <div class="step-body">
+      <ol class="sub">
+        <li>In <a href="https://console.upstash.com" target="_blank">Upstash Console</a> → <b>Redis</b> → <b>Create Database</b>.</li>
+        <li>Name <code>radon-demo-ratelimit</code>, region closest to the VM, <b>TLS on</b>, eviction enabled (free/pay-as-you-go tier is fine).</li>
+        <li>Open the DB → <b>REST API</b> section → copy the <b>UPSTASH_REDIS_REST_URL</b> and <b>UPSTASH_REDIS_REST_TOKEN</b>.</li>
+      </ol>
+      <div class="record">Send me: <b>UPSTASH_REDIS_REST_URL</b> &nbsp;·&nbsp; <b>UPSTASH_REDIS_REST_TOKEN</b></div>
+    </div>
+  </section>
+
+  <!-- STEP 5 -->
+  <section class="step" data-id="5">
+    <div class="step-head" onclick="toggle(this)">
+      <div class="num">5</div>
+      <div class="step-title"><h2>Issue low-budget demo AI keys <span class="pill manual">Anthropic · Cerebras · Exa</span></h2><div class="sub">hard provider spend caps = the real backstop behind per-user quotas</div></div>
+      <div class="chk" onclick="check(event,this)">&#10003;</div>
+    </div>
+    <div class="step-body">
+      <ol class="sub">
+        <li><b>Anthropic</b> (<a href="https://console.anthropic.com" target="_blank">console</a>): create a separate <b>workspace</b> "Radon Demo" with a <b>monthly spend limit</b> (e.g. $20), then create an API key inside it.</li>
+        <li><b>Cerebras</b> (<a href="https://cloud.cerebras.ai" target="_blank">cloud</a>): create a new API key; set/confirm any account spend cap.</li>
+        <li><b>Exa</b> (<a href="https://dashboard.exa.ai" target="_blank">dashboard</a>): create a new API key; set a usage cap if available.</li>
+      </ol>
+      <div class="note">These are separate from your prod keys on purpose: even if a quota bug slips through, the provider cap bounds total spend. (If you'd rather skip realism, leaving them unset forces the assistant's existing mock path.)</div>
+      <div class="record">Send me: <b>DEMO_ANTHROPIC_API_KEY</b> · <b>DEMO_CEREBRAS_API_KEY</b> · <b>DEMO_EXA_API_KEY</b></div>
+    </div>
+  </section>
+
+  <!-- STEP 6 -->
+  <section class="step" data-id="6">
+    <div class="step-head" onclick="toggle(this)">
+      <div class="num">6</div>
+      <div class="step-title"><h2>Clerk: email-verify + the signup webhook <span class="pill manual">Clerk</span></h2><div class="sub">same instance; demo users tagged + trial-clocked on signup</div></div>
+      <div class="chk" onclick="check(event,this)">&#10003;</div>
+    </div>
+    <div class="step-body">
+      <ol class="sub">
+        <li>In the <a href="https://dashboard.clerk.com" target="_blank">Clerk dashboard</a> (your existing instance) → <b>User &amp; Authentication → Email, phone, username</b>: require <b>email verification</b> (link or code) before sign-up completes.</li>
+        <li><b>Webhooks</b> → <b>Add Endpoint</b>: URL <code>https://demo.radon.run/api/webhooks/clerk</code>, subscribe to <b>user.created</b> (I build this route — it tags the user <code>demoRole=trial</code> and sets the 3-trading-day expiry). Copy the <b>Signing Secret</b> (<code>whsec_...</code>).</li>
+        <li>Confirm the demo deploy may reuse your existing Clerk <b>publishable + secret keys</b> (same instance, decision 1). Add <code>https://demo.radon.run</code> to Clerk's allowed origins / paths.</li>
+      </ol>
+      <div class="note warn"><b>Default-deny:</b> if the webhook ever fails to fire, a user must NOT get demo access. The middleware treats "no <code>demoRole</code> metadata" as no access, and a reconciliation sweep backfills — so a missed webhook fails closed, not open.</div>
+      <div class="record">Send me: <b>CLERK_WEBHOOK_SIGNING_SECRET</b> &nbsp;(and confirm email-verify is on + demo origin added)</div>
+    </div>
+  </section>
+
+  <!-- FINAL -->
+  <div class="final">
+    <div class="eyebrow" style="margin-top:0">Hand-off</div>
+    <h2>Values to send back to me</h2>
+    <p style="color:var(--text-secondary);margin:2px 0 14px">Once you have these, paste them in chat (or drop them in the demo VM's <code>.env</code> and tell me) and I wire up the demo deploy + run the migrations/seed and ship Phases 1-6.</p>
+    <div class="kv"><span class="k">DEMO_VM_IP</span><span class="v">step 1 · Hetzner public IPv4</span></div>
+    <div class="kv"><span class="k">TURSO_DEMO_DB_URL</span><span class="v">step 3 · libsql:// url</span></div>
+    <div class="kv"><span class="k">TURSO_DEMO_AUTH_TOKEN</span><span class="v">step 3</span></div>
+    <div class="kv"><span class="k">UPSTASH_REDIS_REST_URL</span><span class="v">step 4</span></div>
+    <div class="kv"><span class="k">UPSTASH_REDIS_REST_TOKEN</span><span class="v">step 4</span></div>
+    <div class="kv"><span class="k">DEMO_ANTHROPIC_API_KEY</span><span class="v">step 5</span></div>
+    <div class="kv"><span class="k">DEMO_CEREBRAS_API_KEY</span><span class="v">step 5</span></div>
+    <div class="kv"><span class="k">DEMO_EXA_API_KEY</span><span class="v">step 5</span></div>
+    <div class="kv"><span class="k">CLERK_WEBHOOK_SIGNING_SECRET</span><span class="v">step 6 · whsec_...</span></div>
+    <div class="note warn" style="margin-top:16px"><b>Treat these as secrets.</b> Better than chat: put them straight into the demo VM's <code>/home/radon/.env</code> and just tell me "done" — I will read them server-side and never echo them.</div>
+  </div>
+
+  <footer>RADON · demo.radon.run provisioning runbook · generated from docs/demo-environment.md · nothing is live until these six steps are done</footer>
+</div>
+
+<script>
+  const KEY="radon-demo-setup-v1";
+  function load(){try{return JSON.parse(localStorage.getItem(KEY)||"{}")}catch(e){return {}}}
+  function save(s){localStorage.setItem(KEY,JSON.stringify(s))}
+  function refresh(){const s=load();let n=0;document.querySelectorAll('.step').forEach(el=>{const id=el.dataset.id;if(s[id]){el.classList.add('done');n++}else{el.classList.remove('done')}});document.getElementById('pdone').textContent=n;}
+  function check(ev,el){ev.stopPropagation();const sec=el.closest('.step');const id=sec.dataset.id;const s=load();s[id]=!s[id];save(s);refresh();}
+  function toggle(head){/* whole-row toggles the check for convenience */const sec=head.closest('.step');const id=sec.dataset.id;const s=load();s[id]=!s[id];save(s);refresh();}
+  function resetAll(){localStorage.removeItem(KEY);refresh();}
+  function cp(btn){const t=btn.parentElement.innerText.replace(/^copy/,'').trim();navigator.clipboard&&navigator.clipboard.writeText(t);const o=btn.textContent;btn.textContent="copied";setTimeout(()=>btn.textContent=o,1200);}
+  document.getElementById('ptotal').textContent=document.querySelectorAll('.step').length;
+  refresh();
+</script>
+</body>
+</html>
