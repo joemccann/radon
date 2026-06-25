@@ -16,6 +16,54 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from scripts.clients.ib_client import IBClient
 
 
+def _normalize_expiry(expiry) -> str:
+    return str(expiry).replace("-", "")
+
+
+def _chain_expirations(chain) -> set[str]:
+    return {_normalize_expiry(expiry) for expiry in getattr(chain, "expirations", [])}
+
+
+def _canonical_trading_class_chains(chains, symbol: str) -> list:
+    symbol_upper = symbol.upper()
+    canonical = [
+        chain
+        for chain in chains
+        if str(getattr(chain, "tradingClass", "")).upper() == symbol_upper
+    ]
+    return canonical or list(chains)
+
+
+def _chains_for_expiry(chains, symbol: str, expiry: str) -> list:
+    normalized_expiry = _normalize_expiry(expiry)
+    matching = [
+        chain
+        for chain in chains
+        if normalized_expiry in _chain_expirations(chain)
+    ]
+    return _canonical_trading_class_chains(matching, symbol)
+
+
+def _union_strikes(chains) -> list[float]:
+    return sorted({float(strike) for chain in chains for strike in getattr(chain, "strikes", [])})
+
+
+def _preferred_exchange(chains) -> str:
+    if not chains:
+        return ""
+    for chain in chains:
+        exchange = str(getattr(chain, "exchange", ""))
+        if exchange.upper() == "SMART":
+            return exchange
+    return str(getattr(chains[0], "exchange", ""))
+
+
+def _preferred_multiplier(chains) -> str:
+    if not chains:
+        return ""
+    return str(getattr(chains[0], "multiplier", ""))
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", required=True)
@@ -61,34 +109,33 @@ def main():
         )
 
         if args.expiry:
-            # Find the matching chain
-            target_chain = None
-            for chain in chains:
-                if args.expiry in [e.replace("-", "") for e in chain.expirations]:
-                    target_chain = chain
-                    break
+            # IB can return both adjusted and standard option chains for the
+            # same expiry. Prefer the canonical trading class and union strikes
+            # across matching venues so an adjusted chain listed first does not
+            # collapse the visible book to a handful of strikes.
+            target_chains = _chains_for_expiry(chains, args.symbol, args.expiry)
 
-            if not target_chain:
+            if not target_chains:
                 print(json.dumps({"error": f"No chain found for expiry {args.expiry}"}))
                 return
 
             # Get strikes for this expiry
-            strikes = sorted(target_chain.strikes)
+            strikes = _union_strikes(target_chains)
 
             print(json.dumps({
                 "symbol": args.symbol,
                 "expiry": args.expiry,
-                "exchange": target_chain.exchange,
+                "exchange": _preferred_exchange(target_chains),
                 "strikes": strikes,
-                "multiplier": str(target_chain.multiplier),
+                "multiplier": _preferred_multiplier(target_chains),
             }))
         else:
             # Fetch all expirations
             all_expirations = set()
             exchanges = []
-            for chain in chains:
+            for chain in _canonical_trading_class_chains(chains, args.symbol):
                 for exp in chain.expirations:
-                    all_expirations.add(exp.replace("-", ""))
+                    all_expirations.add(_normalize_expiry(exp))
                 exchanges.append(chain.exchange)
 
             expirations = sorted(all_expirations)
