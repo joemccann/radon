@@ -1,3 +1,37 @@
+# Task: Scanner Speed Order-of-Magnitude
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot worktree state, scoped instructions, and scanner invocation paths for normal scan, theta harvest, and 7-step strength.
+- T2 depends_on: [T1] — Baseline current runtimes and identify network/provider, per-ticker, and API wrapper bottlenecks.
+- T3 depends_on: [T2] — Tune bounded worker controls and API subprocess arguments across all three scanners.
+- T4 depends_on: [T2] — Optimize normal scanner per-ticker overhead without changing signal semantics.
+- T5 depends_on: [T2, T3] — Optimize theta harvest and 7-step strength provider fanout while preserving rate-limit handling.
+- T6 depends_on: [T4, T5] — Add regression coverage for worker arguments, concurrency controls, and scanner output contracts.
+- T7 depends_on: [T6] — Run focused tests, full required suites, speed benchmarks, document review, then commit and push.
+
+## Checklist
+
+- [x] T1 — Snapshot state, scoped instructions, and scanner invocation paths.
+- [x] T2 — Baseline runtimes and bottlenecks.
+- [x] T3 — Tune worker controls and API subprocess arguments.
+- [x] T4 — Optimize normal scanner overhead.
+- [x] T5 — Optimize theta/strength provider fanout.
+- [x] T6 — Add regressions.
+- [x] T7 — Verify, document, commit, and push.
+
+## Review
+
+- Baseline normal scan, using the actual watchlist path with env loaded, took 42.15s for 28 non-position tickers at 15 workers. Root cause was not local CPU; it was cold/incomplete dark-pool cache behavior causing live backfill of multiple closed sessions per ticker, followed by UW retry/backoff. Optional forecast scoring also ran per ticker and repeatedly failed on lean hosts where Chronos is not installed.
+- Normal scanner now loads the same `.env` files as the other scanners, uses 24 bounded workers by default, reads closed-session dark-pool history from cache only by default, skips missing closed-day backfill in interactive mode, skips transient UW failures quickly unless `--retry-transient` is requested, and makes optional forecast attachment opt-in via `--forecast`. Full-history behavior remains available with `--backfill-history`; the underlying `fetch_flow()` default remains full backfill/retry for evaluation-style callers.
+- FastAPI now passes explicit worker counts to `/scan`, `/theta-harvester/scan`, and `/strength-confirmation/scan`, with env overrides `RADON_SCANNER_WORKERS`, `RADON_THETA_SCANNER_WORKERS`, and `RADON_STRENGTH_SCANNER_WORKERS`.
+- Theta harvest and 7-step strength now default to 24 bounded workers and construct owned UW clients with `max_retries=0` for on-demand scans. `--retry-transient` restores slower retry/backoff behavior for thorough runs.
+- Measured after changes: normal scan completed in 5.27s under active UW throttling, an 8.0x improvement versus the 42.15s baseline. Theta 8-name throttled slice dropped from 8.06s retry-wait behavior to 1.22s fail-fast behavior. Strength 8-name throttled slice completed in 1.93s. 20-name throttled slices completed in 1.17s for theta and 1.61s for strength, with explicit rate-limit/no-data skips rather than hidden retry stalls.
+- Regression coverage added/updated for cache-only dark-pool history, fail-fast transient handling, scanner wrapper args, route worker args, and widened test doubles.
+- Verification passed: focused scanner/API suite `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_darkpool_cache.py scripts/tests/test_fetch_flow.py scripts/tests/test_scanner.py scripts/tests/test_scanner_parallel.py scripts/tests/test_scanner_refactor.py scripts/tests/test_theta_harvester_scanner.py scripts/tests/test_strength_confirmation_scanner.py scripts/api/tests/test_theta_harvester_route.py scripts/api/tests/test_strength_confirmation_route.py scripts/api/tests/test_ticker_ratings_and_pi.py -q` — 102 passed; affected helper `python3.13 scripts/run_pytest_affected.py --files ... -- -q` — 222 passed; full Python `python3.13 -m pytest scripts -q` — 3687 passed, 13 skipped, 90 deselected; `git diff --check` passed; conflict-marker scan passed.
+
+---
+
 # Task: Operator Table Sorting
 
 ## Dependency Graph

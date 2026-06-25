@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
@@ -46,6 +47,15 @@ MAX_DTE = 45
 TARGET_DELTA = 0.16
 NEAR_ZERO_DELTA = 0.10
 RISK_FREE_RATE = 0.045
+DEFAULT_MAX_WORKERS = 24
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
+    try:
+        parsed = int(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
 
 # Fallback is only used when the file preset exists but is structurally
 # corrupted (for example numeric year strings instead of tickers). The normal
@@ -452,10 +462,17 @@ def _prices_from_ohlc(payload: Any) -> List[float]:
     return prices
 
 
-def scan_ticker(ticker: str, client: Optional[Any] = None, now: Optional[datetime] = None) -> Optional[ThetaCandidate]:
+def scan_ticker(
+    ticker: str,
+    client: Optional[Any] = None,
+    now: Optional[datetime] = None,
+    *,
+    retry_transient: bool = False,
+) -> Optional[ThetaCandidate]:
     own_client = None
     if client is None:
-        own_client = UWClient()
+        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+        own_client = UWClient(**client_kwargs)
         client = own_client
     errors: List[str] = []
     try:
@@ -585,7 +602,8 @@ def scan_universe(
     tickers: Sequence[str],
     preset: Optional[str] = "ndx100",
     limit: Optional[int] = None,
-    max_workers: int = 5,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+    retry_transient: bool = False,
 ) -> Dict[str, Any]:
     resolved, source = resolve_tickers(tickers, preset)
     if limit is not None and limit > 0:
@@ -594,7 +612,10 @@ def scan_universe(
 
     results: List[ThetaCandidate] = []
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
-        futures = {pool.submit(scan_ticker, ticker): ticker for ticker in resolved}
+        futures = {
+            pool.submit(scan_ticker, ticker, retry_transient=retry_transient): ticker
+            for ticker in resolved
+        }
         for idx, future in enumerate(as_completed(futures), start=1):
             ticker = futures[future]
             try:
@@ -623,12 +644,28 @@ def main() -> None:
     parser.add_argument("tickers", nargs="*", help="Tickers to scan. Overrides --preset.")
     parser.add_argument("--preset", default="ndx100", help="Preset name from data/presets (default: ndx100).")
     parser.add_argument("--limit", type=int, default=None, help="Limit tickers for smoke/validation runs.")
-    parser.add_argument("--workers", type=int, default=5, help="Concurrent workers.")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=_env_int("RADON_THETA_SCANNER_WORKERS", DEFAULT_MAX_WORKERS),
+        help=f"Concurrent workers (default {DEFAULT_MAX_WORKERS}; override RADON_THETA_SCANNER_WORKERS).",
+    )
+    parser.add_argument(
+        "--retry-transient",
+        action="store_true",
+        help="Retry UW 429/5xx responses instead of skipping transient failures quickly.",
+    )
     parser.add_argument("--json", action="store_true", help="Print JSON payload to stdout.")
     parser.add_argument("--output", default=str(_CACHE_PATH), help="Cache output path.")
     args = parser.parse_args()
 
-    payload = scan_universe(args.tickers, preset=args.preset, limit=args.limit, max_workers=args.workers)
+    payload = scan_universe(
+        args.tickers,
+        preset=args.preset,
+        limit=args.limit,
+        max_workers=args.workers,
+        retry_transient=args.retry_transient,
+    )
     save_cache(payload, Path(args.output))
     if args.json:
         print(json.dumps(payload, indent=2))

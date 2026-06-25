@@ -38,7 +38,7 @@ def test_theta_harvester_ticker_scan_bypasses_preset_cooldown(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["requested_tickers"] == ["MU"]
-    assert calls == [("theta_harvester_scanner.py", ["--json", "MU"], 420)]
+    assert calls == [("theta_harvester_scanner.py", ["--json", "--workers", "24", "MU"], 420)]
 
 
 def test_theta_harvester_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
@@ -82,7 +82,7 @@ def test_theta_harvester_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["universe"] == "fallback:ndx100"
-    assert calls == [("theta_harvester_scanner.py", ["--json", "--preset", "ndx100"], 420)]
+    assert calls == [("theta_harvester_scanner.py", ["--json", "--workers", "24", "--preset", "ndx100"], 420)]
 
 
 def test_theta_harvester_rejects_invalid_ticker(monkeypatch):

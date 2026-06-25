@@ -35,7 +35,7 @@ from utils.market_calendar import (
     load_holidays,
     _is_trading_day,
 )
-from utils.darkpool_cache import get_cached_darkpool, set_cached_darkpool
+from utils.darkpool_cache import get_cached_darkpool, is_immutable, set_cached_darkpool
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +233,7 @@ def is_market_open(date: datetime) -> bool:
     return _is_trading_day(date)
 
 
-def _call_uw_with_retry(call, *, what: str):
+def _call_uw_with_retry(call, *, what: str, retry_transient: bool = True):
     """Invoke a UW client call with one bounded retry on transient errors.
 
     Returns the raw response on success. Returns ``[]`` ONLY for
@@ -257,6 +257,8 @@ def _call_uw_with_retry(call, *, what: str):
         logger.info("UW %s: not found (legit empty): %s", what, exc)
         return None
     except (UWRateLimitError, UWServerError) as exc:
+        if not retry_transient:
+            raise
         logger.warning(
             "UW %s: transient %s, retrying once after %ss",
             what, type(exc).__name__, _UW_TRANSIENT_RETRY_SLEEP_S,
@@ -268,7 +270,13 @@ def _call_uw_with_retry(call, *, what: str):
         raise
 
 
-def fetch_darkpool(ticker: str, date: Optional[str] = None, _client: Optional[UWClient] = None) -> List[Dict]:
+def fetch_darkpool(
+    ticker: str,
+    date: Optional[str] = None,
+    _client: Optional[UWClient] = None,
+    *,
+    retry_transient: bool = True,
+) -> List[Dict]:
     """Fetch dark pool trade prints for a ticker.
 
     Returns list of individual dark pool transactions with price, size,
@@ -284,6 +292,7 @@ def fetch_darkpool(ticker: str, date: Optional[str] = None, _client: Optional[UW
         resp = _call_uw_with_retry(
             lambda: client.get_darkpool_flow(ticker, date=date),
             what=what,
+            retry_transient=retry_transient,
         )
         if resp is None:
             return []
@@ -291,12 +300,17 @@ def fetch_darkpool(ticker: str, date: Optional[str] = None, _client: Optional[UW
 
     if _client is not None:
         return _fetch(_client)
-    with UWClient() as client:
+    client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+    with UWClient(**client_kwargs) as client:
         return _fetch(client)
 
 
 def fetch_flow_alerts(
-    ticker: str, min_premium: int = 50000, _client: Optional[UWClient] = None
+    ticker: str,
+    min_premium: int = 50000,
+    _client: Optional[UWClient] = None,
+    *,
+    retry_transient: bool = True,
 ) -> List[Dict]:
     """Fetch options flow alerts for a ticker.
 
@@ -309,6 +323,7 @@ def fetch_flow_alerts(
         resp = _call_uw_with_retry(
             lambda: client.get_flow_alerts(ticker=ticker, min_premium=min_premium, limit=100),
             what=what,
+            retry_transient=retry_transient,
         )
         if resp is None:
             return []
@@ -316,7 +331,8 @@ def fetch_flow_alerts(
 
     if _client is not None:
         return _fetch(_client)
-    with UWClient() as client:
+    client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+    with UWClient(**client_kwargs) as client:
         return _fetch(client)
 
 
@@ -448,7 +464,8 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
 
 
 def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] = None, 
-               skip_options_flow: bool = False) -> Dict:
+               skip_options_flow: bool = False, fetch_missing_history: bool = True,
+               retry_transient: bool = True) -> Dict:
     """Full flow analysis: dark pool prints + options flow alerts.
 
     Fetches dark pool data for each of the last N TRADING days and aggregates,
@@ -467,12 +484,20 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
         lookback_days: Number of trading days to fetch (default 5)
         _client: Optional UWClient to reuse (avoids connection overhead)
         skip_options_flow: If True, skip flow_alerts API call (saves 1 call/ticker)
+        fetch_missing_history: If False, prior closed days are read from the
+            persistent cache only. Missing immutable days are skipped instead
+            of fetched live, which keeps interactive scans bounded to today's
+            live request per ticker.
+        retry_transient: Retry UW 429/5xx responses with backoff. Disable for
+            interactive scanners so rate-limited names fail fast and the batch
+            can keep moving.
     """
     ticker = ticker.upper()
 
     # Fetch dark pool data for recent TRADING days (skip weekends/holidays)
     all_dp_trades = []
     daily_signals = []
+    skipped_history_dates = []
     today = datetime.now()
 
     trading_days = get_last_n_trading_days(lookback_days, today)
@@ -494,7 +519,10 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
             # no-ops in set_cached_darkpool. This is the P0 UW-load reduction.
             trades = get_cached_darkpool(ticker, date)
             if trades is None:
-                trades = fetch_darkpool(ticker, date, _client=client)
+                if not fetch_missing_history and is_immutable(date):
+                    skipped_history_dates.append(date)
+                    continue
+                trades = fetch_darkpool(ticker, date, _client=client, retry_transient=retry_transient)
                 set_cached_darkpool(ticker, date, trades)
             if isinstance(trades, list):
                 day_analysis = analyze_darkpool(trades)
@@ -504,13 +532,14 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
         # Skip flow_alerts if not needed (saves API call for scanning)
         if skip_options_flow:
             return []
-        return fetch_flow_alerts(ticker, _client=client)
+        return fetch_flow_alerts(ticker, _client=client, retry_transient=retry_transient)
 
     # Use provided client or create new one
     if _client is not None:
         flow_alerts = _do_fetch(_client)
     else:
-        with UWClient() as client:
+        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+        with UWClient(**client_kwargs) as client:
             flow_alerts = _do_fetch(client)
 
     # Aggregate dark pool analysis
@@ -596,6 +625,7 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
         "fetched_at": today.isoformat(),
         "lookback_trading_days": lookback_days,
         "trading_days_checked": trading_days,
+        "history_backfill_skipped": skipped_history_dates,
         "market_status": market_status,
         "trading_day_progress": trading_day_progress,
         "dark_pool": {
