@@ -62,6 +62,12 @@ type ChainStrike = {
   putKey: string;
 };
 
+function optionFetchErrorMessage(data: Record<string, unknown>, fallback: string): string {
+  const error = typeof data.error === "string" ? data.error : fallback;
+  const detail = typeof data.detail === "string" ? data.detail : "";
+  return detail && detail !== error ? `${error}: ${detail}` : error;
+}
+
 /* ─── Chain Strike Row ─── */
 
 function StrikeRow({
@@ -924,12 +930,14 @@ export default function OptionsChainTab({
     setLoadingExpiries(true);
     setError(null);
 
-    fetch(`/api/options/expirations?symbol=${encodeURIComponent(ticker)}`)
+    fetch(`/api/options/expirations?symbol=${encodeURIComponent(ticker)}`, {
+      cache: "no-store",
+    })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
         if (data.error) {
-          setError(data.error);
+          setError(optionFetchErrorMessage(data, "Option expirations unavailable"));
           setLoadingExpiries(false);
           return;
         }
@@ -1042,12 +1050,14 @@ export default function OptionsChainTab({
     let cancelled = false;
     setLoadingStrikes(true);
 
-    fetch(`/api/options/chain?symbol=${encodeURIComponent(ticker)}&expiry=${selectedExpiry}`)
+    fetch(`/api/options/chain?symbol=${encodeURIComponent(ticker)}&expiry=${selectedExpiry}`, {
+      cache: "no-store",
+    })
       .then((res) => res.json())
       .then((data) => {
         if (cancelled) return;
         if (data.error) {
-          setError(data.error);
+          setError(optionFetchErrorMessage(data, "Option chain unavailable"));
           setLoadingStrikes(false);
           return;
         }

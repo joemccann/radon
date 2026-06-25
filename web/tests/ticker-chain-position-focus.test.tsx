@@ -213,7 +213,10 @@ describe("Ticker chain position focus", () => {
     });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith("/api/options/chain?symbol=PLTR&expiry=20260327");
+      expect(fetchMock).toHaveBeenCalledWith(
+        "/api/options/chain?symbol=PLTR&expiry=20260327",
+        { cache: "no-store" },
+      );
     });
   });
 });
