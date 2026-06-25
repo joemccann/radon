@@ -2,6 +2,7 @@
 
 ## 2026-06-25
 
+- Same-action call+put combos must carry direction in the structure label. A short call plus short put is `Short Strangle`/`Short Straddle`, not `Combo (2 legs)`, and long call+put pairs should be `Long Strangle`/`Long Straddle`; keep portfolio sync and order-builder classifiers aligned.
 - When modifying or displaying multi-leg combo orders, preserve the signed BAG net price end to end. Do not apply `Math.abs()` to risk-reversal bid/mid/ask/implied references, and validate combo limits as finite nonzero signed prices; negative `BUY` combo limits are valid credits.
 - Option-chain metadata routes must fail with structured detail and bounded fallbacks, not opaque 502s. A provider timeout on `/api/options/expirations` should preserve upstream context and leave the chain UI with a diagnosable degraded/empty state instead of a centered timeout string.
 - When all app routes lose live data but edge health says IB, relay, Next, and Gateway are up, check the shared Turso/libSQL read path before restarting IB. DB-backed fallback reads need hard per-source deadlines; a hung DB promise must never block a fresher disk fallback or leave the UI in a quiet empty state.

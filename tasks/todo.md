@@ -1,3 +1,31 @@
+# Task: Combo Strangle Straddle Labels
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot state, UI guidance, and current combo label classifiers/tests.
+- T2 depends_on: [T1] — Add task plan/review scaffold in `tasks/todo.md` before code edits.
+- T3 depends_on: [T2] — Add regression coverage for short/long strangle and straddle labels.
+- T4 depends_on: [T3] — Update shared portfolio structure detection/formatting to emit long/short labels.
+- T5 depends_on: [T4] — Run focused and broader verification, then document results.
+
+## Checklist
+
+- [x] T1 — Snapshot state, UI guidance, and current combo label classifiers/tests.
+- [x] T2 — Add task plan/review scaffold.
+- [x] T3 — Add regression coverage for short/long strangle and straddle labels.
+- [x] T4 — Update shared portfolio structure detection/formatting.
+- [x] T5 — Verify and document.
+
+## Review
+
+- Root cause: `scripts/ib_sync.py` only identified same-action call+put pairs when both legs were long, and it returned generic `Straddle`/`Strangle`. A short call plus short put fell through to `Combo (2 legs)`, which is why the MU row rendered generically.
+- Updated `detect_structure_type` to emit explicit `Long Straddle`, `Short Straddle`, `Long Strangle`, and `Short Strangle` labels. Short straddles/strangles remain `undefined` risk; long versions remain `defined`.
+- Updated `format_structure_description` so directional straddle/strangle names still include strike detail, e.g. `Short Strangle $1125/$1250`.
+- Added regression coverage for long/short straddle and strangle detection plus a collapsed MU-shaped short strangle row.
+- Verification passed: focused red/green `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_ib_helpers.py -q`; affected structure suite `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_ib_helpers.py scripts/tests/test_all_long_combo.py scripts/tests/test_ratio_detection.py scripts/tests/test_covered_call_detection.py -q` — 77 passed; affected-file helper `python3.13 scripts/run_pytest_affected.py --files scripts/ib_sync.py scripts/tests/test_ib_helpers.py -- -q` — 119 passed; full Python `python3.13 -m pytest scripts -q` — 3684 passed, 13 skipped, 90 deselected. A direct collapse check for the screenshot shape prints `Short Strangle`, `Short Strangle $1125/$1250`, `undefined`, `COMBO`.
+
+---
+
 # Task: Risk Reversal Modify Negative Price
 
 ## Dependency Graph
