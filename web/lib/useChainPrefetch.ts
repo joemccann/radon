@@ -76,7 +76,7 @@ export function useChainPrefetch(
 
           const res = await fetch(
             `/api/options/chain?symbol=${encodeURIComponent(ticker)}&expiry=${expiry}`,
-            { signal: controller.signal },
+            { signal: controller.signal, cache: "no-store" },
           );
           if (!res.ok) continue;
           const data = await res.json();

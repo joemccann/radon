@@ -56,7 +56,7 @@ def test_options_chain_uses_equity_chain_timeout(client):
     from scripts.api import server
 
     assert kwargs["timeout"] == server._EQUITY_OPTIONS_CHAIN_TIMEOUT_S
-    assert kwargs["timeout"] == 30.0
+    assert kwargs["timeout"] == 45.0
 
 
 def test_options_expirations_uses_equity_chain_timeout(client):
@@ -65,7 +65,7 @@ def test_options_expirations_uses_equity_chain_timeout(client):
     async def _stub(*args, **kwargs):
         return _fake_script_result(ok=True, data=payload)
 
-    with patch("scripts.api.server.run_script", side_effect=_stub) as run_mock:
+    with patch("scripts.api.server._run_ib_script_with_recovery", side_effect=_stub) as run_mock:
         resp = client.get("/options/expirations?symbol=MSFT")
 
     assert resp.status_code == 200
@@ -73,4 +73,26 @@ def test_options_expirations_uses_equity_chain_timeout(client):
     from scripts.api import server
 
     assert kwargs["timeout"] == server._EQUITY_OPTIONS_CHAIN_TIMEOUT_S
-    assert kwargs["timeout"] == 30.0
+    assert kwargs["timeout"] == 45.0
+
+
+def test_options_chain_timeout_maps_to_504(client):
+    async def _stub(*args, **kwargs):
+        return _fake_script_result(ok=False, error="Script timed out after 45.0s")
+
+    with patch("scripts.api.server._run_ib_script_with_recovery", side_effect=_stub):
+        resp = client.get("/options/chain?symbol=IWM&expiry=20260717")
+
+    assert resp.status_code == 504
+    assert resp.json()["detail"] == "Script timed out after 45.0s"
+
+
+def test_options_expirations_timeout_maps_to_504(client):
+    async def _stub(*args, **kwargs):
+        return _fake_script_result(ok=False, error="ib_insync qualifyContracts timed out after 15s")
+
+    with patch("scripts.api.server._run_ib_script_with_recovery", side_effect=_stub):
+        resp = client.get("/options/expirations?symbol=IWM")
+
+    assert resp.status_code == 504
+    assert resp.json()["detail"] == "ib_insync qualifyContracts timed out after 15s"

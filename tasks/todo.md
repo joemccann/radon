@@ -5076,3 +5076,35 @@ verify search returns results on app.radon.run.
 - Full verification passed after main-agent review: `python3.13 -m pytest -q` — 3,639 passed, 13 skipped, 90 deselected, 19 warnings. `cd web && npm run typecheck` passed. `cd web && npm test -- --reporter=dot` — 347 files passed, 3,413 passed, 26 skipped. `PLAYWRIGHT_PORT=3041 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/strength-confirmation-scanner.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 passed.
 - Hygiene passed: `git diff --check` and strict conflict-marker scan. No unrelated scratch paths were staged.
 - Post-push CI initially failed in the Vitest coverage job from an unrelated `workspace-chrome-alignment.test.ts` unhandled React scheduler error after jsdom teardown. The test now mocks Sidebar's profile and IB-status hooks, and the exact CI command `bunx vitest run --config vitest.config.ts --coverage --exclude '**/web/tests/integration.test.ts' --exclude '**/lib/tools/__tests__/kelly.test.ts' --exclude '**/lib/tools/__tests__/runner.test.ts' --exclude '**/lib/tools/__tests__/data-reader.test.ts'` passes locally.
+
+---
+
+## Session: IWM Option Chain 502 Timeout (2026-06-25)
+
+### Dependency Graph
+- T97 (Snapshot dirty state, scoped instructions, and production symptom without touching unrelated files) depends_on: []
+- T98 (Reproduce `/api/options/expirations?symbol=IWM` and capture upstream status/detail) depends_on: [T97]
+- T99 (Trace Next option routes plus FastAPI/provider chain/expiration timeout handling) depends_on: [T97]
+- T100 (Identify root cause and implement a minimal durable fix for IWM/ETF chains) depends_on: [T98, T99]
+- T101 (Add regression coverage for the timeout/502 path and run focused verification) depends_on: [T100]
+- T102 (Run broader verification, visually check the chain route, document review, then commit/push if requested) depends_on: [T101]
+
+### Checklist
+- [x] T97 Snapshot state and production symptom
+- [x] T98 Reproduce API failure
+- [x] T99 Trace route/provider handling
+- [x] T100 Implement durable fix
+- [x] T101 Focused regression and verification
+- [x] T102 Broad verification and review
+
+### Review
+- Production reproduction showed authenticated users hit a Next-side abort first: `/api/options/expirations?symbol=IWM` displayed `The operation was aborted due to timeout` after the web proxy's 20s timeout. A direct FastAPI probe from the VPS showed the underlying provider path timing out after 30s for IWM, SPY, and MSFT, so the outage was equity-option metadata generally, not IWM-specific.
+- Root cause: `scripts/ib_option_chain.py` made synchronous `ib_insync` `qualifyContracts` and `reqSecDefOptParams` calls with no per-request deadline. When those calls stalled, FastAPI killed the subprocess after 30s, while Next had already aborted at 20s and collapsed the failure into an opaque browser 502.
+- Fixed the provider path by setting `IB.RequestTimeout` around the sync qualification and secdef calls, returning method-specific timeout errors if IB stalls. The IWM chain script now returns expirations locally in about 1.9s and the 2026-07-17 strike ladder in about 1.6s.
+- Fixed FastAPI equity option routes to use a 45s equity-chain budget, route expirations through `_run_ib_script_with_recovery`, and map timeout-class failures to HTTP 504 instead of generic 502.
+- Fixed Next option proxy routes to use a shared 50s timeout, `dynamic = "force-dynamic"`, `Cache-Control: no-store`, preserved FastAPI statuses, and structured error bodies. The chain UI now fetches option metadata with `cache: "no-store"` and renders a named option-chain error with upstream detail instead of the raw abort string.
+- Added regressions for IWM/ETF canonical-chain selection, bounded IB request errors, FastAPI 504 timeout mapping, Next no-store/status preservation, and client chain fetch freshness.
+- Verification passed: focused Python `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_ib_option_chain.py scripts/api/tests/test_equity_options_chain.py -q` — 11 passed. Affected Python `python3.13 scripts/run_pytest_affected.py --files ... -- -q` — 84 passed. Full Python `python3.13 -m pytest scripts -q` — 3,680 passed, 13 skipped, 90 deselected.
+- Verification passed: focused Vitest `npx vitest run --config vitest.config.ts web/tests/fastapi-migration.test.ts web/tests/api-routes-smoke.test.ts web/tests/api-routes-smoke-misc.test.ts web/tests/chain-prefetch.test.ts` — 116 passed; focused rerun after assertion update — 59 passed. Full web `npm test -- --reporter=dot` — 356 files, 3,492 passed, 26 skipped. `npm run lint` passed with 9 existing warnings. `git diff --check` passed.
+- Browser verification passed on local authless `http://127.0.0.1:3060/IWM?deck=c`: `/api/options/expirations` and `/api/options/chain` both returned 200, the page rendered expiry and strike rows, and the timeout text was absent. Screenshot: `/tmp/radon-iwm-chain-fixed.png`.
+- Verification blocker: `npm run typecheck` is still blocked by missing installed packages `@upstash/ratelimit` and `@upstash/redis` under `web/node_modules`; `npm ls @upstash/ratelimit @upstash/redis` returns empty. A targeted `npm install --no-audit --no-fund @upstash/ratelimit@^2.0.5 @upstash/redis@^1.34.3` produced no output for over two minutes and was interrupted without tracked-file changes. This local dependency issue predates this patch and is unrelated to the option-chain changes.

@@ -726,6 +726,22 @@ describe("GET /api/options/chain (via radonFetch)", () => {
       expect.any(Object),
     );
   });
+
+  it("preserves FastAPI timeout status and returns no-store headers", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValue(new RadonApiError(504, "Script timed out after 45.0s"));
+
+    const { GET } = await import("../app/api/options/chain/route");
+    const req = makeRequest("http://localhost/api/options/chain?symbol=IWM&expiry=20260717");
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(504);
+    expect(res.headers.get("Cache-Control")).toContain("no-store");
+    expect(body.error).toBe("Option chain unavailable");
+    expect(body.detail).toBe("Script timed out after 45.0s");
+    expect(body.code).toBe("UPSTREAM_TIMEOUT");
+  });
 });
 
 // =============================================================================
@@ -761,5 +777,23 @@ describe("GET /api/options/expirations (via radonFetch)", () => {
     const req = makeRequest("http://localhost/api/options/expirations?symbol=GOOG");
     const res = await GET(req);
     expect(res.status).toBe(502);
+  });
+
+  it("preserves FastAPI timeout status and returns no-store headers", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValue(
+      new RadonApiError(504, "ib_insync qualifyContracts timed out after 15s"),
+    );
+
+    const { GET } = await import("../app/api/options/expirations/route");
+    const req = makeRequest("http://localhost/api/options/expirations?symbol=IWM");
+    const res = await GET(req);
+    const body = await res.json();
+
+    expect(res.status).toBe(504);
+    expect(res.headers.get("Cache-Control")).toContain("no-store");
+    expect(body.error).toBe("Option expirations unavailable");
+    expect(body.detail).toBe("ib_insync qualifyContracts timed out after 15s");
+    expect(body.code).toBe("UPSTREAM_TIMEOUT");
   });
 });
