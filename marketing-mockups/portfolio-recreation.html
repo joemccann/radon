@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=1512, initial-scale=1">
+<title>Radon Terminal — Portfolio</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --canvas:#FFFFFF; --raised:#F1F5F9; --hairline:#BBBFBF;
+  --text:#000000; --text-secondary:#636363; --muted:#878787;
+  --pos:#048A7A; --neg:#D4183D;
+  --nav-active:#F1F5F9;
+}
+html[data-theme="dark"]{
+  --canvas:#0a0f14; --raised:#0f1519; --hairline:#1e293b;
+  --text:#e2e8f0; --text-secondary:#94a3b8; --muted:#64748b;
+  --pos:#05AD98; --neg:#f43f5e;
+  --nav-active:#0f1519;
+}
+*{box-sizing:border-box;margin:0;padding:0;}
+html,body{background:var(--canvas);color:var(--text);}
+body{font-family:'IBM Plex Sans',sans-serif;font-size:13px;-webkit-font-smoothing:antialiased;}
+.mono{font-family:'IBM Plex Mono',monospace;}
+.pos{color:var(--pos);}
+.neg{color:var(--neg);}
+.app{display:grid;grid-template-columns:178px 1fr;height:862px;width:1512px;overflow:hidden;}
+
+/* SIDEBAR */
+.sidebar{border-right:1px solid var(--hairline);display:flex;flex-direction:column;background:var(--canvas);}
+.brand{padding:16px 18px 14px;border-bottom:1px solid var(--hairline);}
+.brand .logo{font-weight:700;font-size:13px;letter-spacing:.06em;line-height:1.15;}
+.brand .sub{font-size:9px;letter-spacing:.18em;color:var(--muted);margin-top:1px;}
+.nav{flex:1;padding:8px 0;}
+.nav a{display:flex;align-items:center;gap:10px;padding:7px 18px;color:var(--text-secondary);text-decoration:none;font-size:12.5px;}
+.nav a .ico{width:14px;height:14px;display:inline-block;opacity:.85;}
+.nav a.active{background:var(--nav-active);color:var(--text);font-weight:600;box-shadow:inset 2px 0 0 var(--pos);}
+.nav a:hover{color:var(--text);}
+.usercard{border-top:1px solid var(--hairline);padding:12px 16px;display:flex;align-items:center;gap:10px;}
+.avatar{width:30px;height:30px;border-radius:4px;background:var(--raised);border:1px solid var(--hairline);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--text-secondary);}
+.usercard .uname{font-size:12px;font-weight:600;}
+.usercard .uview{font-size:10px;color:var(--muted);margin-top:1px;}
+
+/* MAIN */
+.main{display:flex;flex-direction:column;min-width:0;overflow:hidden;}
+.topbar{height:44px;border-bottom:1px solid var(--hairline);display:flex;align-items:center;gap:14px;padding:0 16px;flex-shrink:0;}
+.topbar .page{font-size:14px;font-weight:600;}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--pos);display:inline-block;margin-right:5px;vertical-align:middle;}
+.nominal{font-size:10px;letter-spacing:.12em;color:var(--pos);font-weight:600;}
+.idxchips{display:flex;gap:14px;font-size:11px;}
+.idxchips .ix b{color:var(--text);font-weight:600;margin-right:5px;}
+.idxchips .ix span{color:var(--text-secondary);}
+.spacer{flex:1;}
+.tb-meta{font-size:10px;letter-spacing:.08em;color:var(--muted);}
+.tb-meta b{color:var(--text-secondary);font-weight:600;margin-left:4px;}
+.sync{border:1px solid var(--hairline);border-radius:4px;padding:4px 10px;font-size:10px;letter-spacing:.08em;color:var(--text-secondary);display:flex;align-items:center;gap:6px;}
+.search{border:1px solid var(--hairline);border-radius:4px;padding:5px 10px;font-size:11px;color:var(--muted);width:180px;background:var(--canvas);}
+.icobtn{width:26px;height:26px;border:1px solid var(--hairline);border-radius:4px;display:flex;align-items:center;justify-content:center;color:var(--text-secondary);font-size:13px;}
+
+.content{flex:1;overflow:hidden;padding:0;}
+
+.section-label{font-size:10px;letter-spacing:.16em;color:var(--muted);padding:12px 20px 8px;}
+.section-label .car{margin-right:7px;color:var(--muted);}
+
+/* account cards */
+.cards{display:grid;grid-template-columns:repeat(4,1fr);}
+.cards .card{border-top:1px solid var(--hairline);border-right:1px solid var(--hairline);padding:14px 20px 16px;}
+.cards .card:first-child{border-left:none;}
+.card .clabel{font-size:10px;letter-spacing:.12em;color:var(--muted);}
+.card .cval{font-family:'IBM Plex Mono',monospace;font-size:25px;font-weight:500;margin-top:8px;letter-spacing:-.01em;}
+.card .csub{font-size:10px;letter-spacing:.08em;color:var(--muted);margin-top:10px;}
+.card .csub.acc{color:var(--pos);}
+
+/* collapsible rows */
+.crows{border-top:1px solid var(--hairline);}
+.crow{padding:9px 20px;border-bottom:1px solid var(--hairline);font-size:11px;letter-spacing:.12em;color:var(--text-secondary);}
+.crow .car{color:var(--muted);margin-right:8px;}
+
+/* today p&l band */
+.band{display:grid;grid-template-columns:repeat(3,1fr);border-bottom:1px solid var(--hairline);}
+.band .bcell{border-right:1px solid var(--hairline);padding:16px 20px 18px;}
+.band .bcell:last-child{border-right:none;}
+.bcell .blabel{font-size:10px;letter-spacing:.12em;color:var(--muted);}
+.bcell .bval{font-family:'IBM Plex Mono',monospace;font-size:23px;font-weight:500;margin-top:8px;}
+.bcell .bsub{font-size:10px;letter-spacing:.08em;color:var(--text-secondary);margin-top:9px;}
+
+/* positions table */
+.tablewrap{margin:0;border-top:1px solid var(--hairline);}
+.tbar{display:flex;align-items:center;gap:12px;padding:12px 20px;}
+.tbar .ttitle{font-size:12px;letter-spacing:.08em;font-weight:600;}
+.tbar .ico-i{color:var(--muted);font-size:11px;}
+.tbar .chip{border:1px solid var(--hairline);border-radius:4px;padding:4px 9px;font-size:10px;letter-spacing:.06em;color:var(--text-secondary);display:flex;align-items:center;gap:6px;}
+.tbar .filter{border:1px solid var(--hairline);border-radius:4px;padding:4px 10px;font-size:10px;color:var(--muted);width:160px;}
+.tbar .poschip{border:1px solid var(--pos);border-radius:4px;padding:4px 9px;font-size:10px;letter-spacing:.06em;color:var(--pos);font-weight:600;}
+
+table{width:100%;border-collapse:collapse;}
+thead th{font-size:9.5px;letter-spacing:.08em;color:var(--muted);font-weight:500;text-align:right;padding:8px 14px;border-top:1px solid var(--hairline);border-bottom:1px solid var(--hairline);white-space:nowrap;}
+thead th.l{text-align:left;}
+tbody td{font-size:12px;padding:13px 14px;text-align:right;border-bottom:1px solid var(--hairline);white-space:nowrap;}
+tbody td.l{text-align:left;}
+.tick{font-weight:700;font-size:13px;letter-spacing:.02em;}
+.struct .sname{font-size:12px;}
+.struct .stype{font-size:10px;color:var(--muted);}
+.pill{display:inline-block;border:1px solid var(--pos);color:var(--pos);border-radius:4px;padding:2px 8px;font-size:10px;letter-spacing:.06em;font-weight:600;}
+.pill.debit{border-color:var(--hairline);color:var(--text-secondary);}
+
+/* status bar */
+.statusbar{height:24px;border-top:1px solid var(--hairline);display:flex;align-items:center;gap:0;padding:0 16px;font-size:9.5px;letter-spacing:.1em;color:var(--muted);flex-shrink:0;}
+.statusbar .seg{padding:0 12px;border-right:1px solid var(--hairline);}
+.statusbar .seg:first-child{padding-left:0;}
+.statusbar .seg.dotseg::before{content:"";display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--pos);margin-right:6px;vertical-align:middle;}
+.statusbar .right{margin-left:auto;color:var(--text-secondary);font-weight:600;}
+svg{display:block;}
+</style>
+</head>
+<body>
+<div class="app">
+  <!-- SIDEBAR -->
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="logo">RADON</div>
+      <div class="sub">TERMINAL</div>
+    </div>
+    <nav class="nav">
+      <a href="#"><span class="ico">▦</span>Dashboard</a>
+      <a href="#" class="active"><span class="ico">◉</span>Portfolio</a>
+      <a href="#"><span class="ico">▤</span>Orders</a>
+      <a href="#"><span class="ico">◎</span>Scanner</a>
+      <a href="#"><span class="ico">✦</span>Discover</a>
+      <a href="#"><span class="ico">≋</span>Flow Analysis</a>
+      <a href="#"><span class="ico">▭</span>Journal</a>
+      <a href="#"><span class="ico">◴</span>Regime</a>
+      <a href="#"><span class="ico">▲</span>CTA</a>
+      <a href="#"><span class="ico">◌</span>Alerts</a>
+      <a href="#"><span class="ico">⌗</span>Workflow</a>
+      <a href="#"><span class="ico">⚙</span>Operator</a>
+    </nav>
+    <div class="usercard">
+      <div class="avatar">RA</div>
+      <div>
+        <div class="uname">radon-user</div>
+        <div class="uview">View profile</div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN -->
+  <div class="main">
+    <div class="topbar">
+      <div class="page">Portfolio</div>
+      <div class="nominal"><span class="dot"></span>NOMINAL</div>
+      <div class="idxchips">
+        <span class="ix"><b>ES</b><span>7457.25 +0.39%</span></span>
+        <span class="ix"><b>NQ</b><span>29981.00 +1.58%</span></span>
+        <span class="ix"><b>RTY</b><span>3013.80 +0.01%</span></span>
+      </div>
+      <div class="spacer"></div>
+      <div class="tb-meta">LAST SAMPLE<b>09:42:11</b></div>
+      <div class="sync">↻ SYNC NOW</div>
+      <input class="search" placeholder="MK to search instrume" disabled>
+      <div class="icobtn">⤢</div>
+      <div class="icobtn">↻</div>
+    </div>
+
+    <div class="content">
+      <div class="section-label"><span class="car">▾</span>ACCOUNT</div>
+      <div class="cards">
+        <div class="card">
+          <div class="clabel">NET LIQUIDATION</div>
+          <div class="cval">$1,432,630.33</div>
+          <div class="csub">BANKROLL</div>
+        </div>
+        <div class="card">
+          <div class="clabel">DAY P&L</div>
+          <div class="cval pos">+$18,281.90</div>
+          <div class="csub acc">+1.3% · TODAY</div>
+        </div>
+        <div class="card">
+          <div class="clabel">UNREALIZED P&L</div>
+          <div class="cval pos">+$248,193.47</div>
+          <div class="csub">OPEN POSITIONS</div>
+        </div>
+        <div class="card">
+          <div class="clabel">DIVIDENDS</div>
+          <div class="cval">$0.00</div>
+          <div class="csub">ACCRUED</div>
+        </div>
+      </div>
+
+      <div class="crows">
+        <div class="crow"><span class="car">›</span>RISK</div>
+        <div class="crow"><span class="car">›</span>MARGIN</div>
+        <div class="crow"><span class="car">›</span>CAPITAL</div>
+        <div class="crow"><span class="car">›</span>EXPOSURE</div>
+        <div class="crow"><span class="car">▾</span>TODAY'S P&L</div>
+      </div>
+
+      <div class="band">
+        <div class="bcell">
+          <div class="blabel">DAY MOVE</div>
+          <div class="bval pos">+$4,442</div>
+          <div class="bsub">10 OF 11 POSITIONS</div>
+        </div>
+        <div class="bcell">
+          <div class="blabel">REALIZED</div>
+          <div class="bval pos">+$60,785</div>
+          <div class="bsub">TODAY'S FILLS</div>
+        </div>
+        <div class="bcell">
+          <div class="blabel">TOTAL</div>
+          <div class="bval pos">+$65,227</div>
+          <div class="bsub">COMBINED</div>
+        </div>
+      </div>
+
+      <div class="tablewrap">
+        <div class="tbar">
+          <span class="ttitle">⊞ DEFINED RISK POSITIONS</span>
+          <span class="ico-i">ⓘ</span>
+          <div class="spacer"></div>
+          <div class="chip">▦ COLUMNS 12/15 ▾</div>
+          <div class="filter">⌕ Filter positions…</div>
+          <div class="poschip">4 POSITIONS</div>
+        </div>
+        <table>
+          <thead>
+            <tr>
+              <th class="l">TICKER</th>
+              <th class="l">STRUCTURE</th>
+              <th class="l">DIRECTION</th>
+              <th>UNDERLYING</th>
+              <th>AVG ENTRY</th>
+              <th>LAST PRICE</th>
+              <th>TODAY P&L</th>
+              <th>MARKET VALUE</th>
+              <th>INITIAL VALUE</th>
+              <th>P&L</th>
+              <th>P&L %</th>
+              <th class="l">EXPIRY</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="l tick">EWY</td>
+              <td class="l struct"><div class="sname">Long Put $180.0</div></td>
+              <td class="l"><span class="pill">LONG</span></td>
+              <td class="mono">$164.50</td>
+              <td class="mono">$13.35</td>
+              <td class="mono">$17.80</td>
+              <td class="mono pos">+$640</td>
+              <td class="mono">$8,900</td>
+              <td class="mono">$6,675</td>
+              <td class="mono pos">+$2,225</td>
+              <td class="mono pos">+33.3%</td>
+              <td class="l mono">2026-07-17</td>
+            </tr>
+            <tr>
+              <td class="l tick">KWEB</td>
+              <td class="l struct"><div class="sname">Long Call $31.0</div></td>
+              <td class="l"><span class="pill">LONG</span></td>
+              <td class="mono">$36.40</td>
+              <td class="mono">$4.10</td>
+              <td class="mono">$6.85</td>
+              <td class="mono pos">+$430</td>
+              <td class="mono">$6,850</td>
+              <td class="mono">$4,100</td>
+              <td class="mono pos">+$2,750</td>
+              <td class="mono pos">+67.1%</td>
+              <td class="l mono">2026-08-21</td>
+            </tr>
+            <tr>
+              <td class="l tick">SOFI</td>
+              <td class="l struct"><div class="sname">Long Call $14.0</div></td>
+              <td class="l"><span class="pill">LONG</span></td>
+              <td class="mono">$16.85</td>
+              <td class="mono">$1.95</td>
+              <td class="mono">$3.40</td>
+              <td class="mono pos">+$1,160</td>
+              <td class="mono">$13,600</td>
+              <td class="mono">$7,800</td>
+              <td class="mono pos">+$5,800</td>
+              <td class="mono pos">+74.4%</td>
+              <td class="l mono">2026-09-18</td>
+            </tr>
+            <tr>
+              <td class="l tick">SPY</td>
+              <td class="l struct"><div class="sname">Bull Call Spread</div><div class="stype">$620.0/$650.0</div></td>
+              <td class="l"><span class="pill debit">DEBIT</span></td>
+              <td class="mono">$648.30</td>
+              <td class="mono">$11.20</td>
+              <td class="mono">$18.60</td>
+              <td class="mono pos">+$2,980</td>
+              <td class="mono">$37,200</td>
+              <td class="mono">$22,400</td>
+              <td class="mono pos">+$14,800</td>
+              <td class="mono pos">+66.1%</td>
+              <td class="l mono">2026-07-17</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="statusbar">
+      <span class="seg dotseg">IB GATEWAY NOMINAL</span>
+      <span class="seg">FLEX TOKEN 238D REMAINING</span>
+      <span class="seg">SERVICES 32 OF 34 NOMINAL · 2 DEGRADED</span>
+      <span class="right">RADON TERMINAL</span>
+    </div>
+  </div>
+</div>
+<script>
+  try{var t=localStorage.getItem('radon-theme');if(t)document.documentElement.setAttribute('data-theme',t);}catch(e){}
+</script>
+</body>
+</html>
