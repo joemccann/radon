@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { useDismissablePopover } from "@/lib/useDismissablePopover";
+import { formatHoldDuration } from "@/lib/holdTime";
 
 export type SharePnlData = {
   description: string;
@@ -49,13 +50,16 @@ export function buildTweetText(
   pnlPct: number | null,
   showDollar: boolean,
   showPct: boolean,
+  holdTime?: string | null,
 ): string {
   const parts: string[] = [];
   if (showDollar) parts.push(fmtDollar(pnl));
   if (showPct && pnlPct != null && Number.isFinite(pnlPct)) parts.push(fmtPct(pnlPct));
   const pnlStr = parts.join(" ");
   const tagged = cashtagTicker(description);
-  return `💸 ${tagged} ${pnlStr}\n\nExecuted with Radon\n\nhttps://radon.run`;
+  // pnl and hold time join with " · "; either may be empty without a stray separator.
+  const metric = [pnlStr, holdTime ? `Held ${holdTime}` : ""].filter(Boolean).join(" · ");
+  return `💸 ${tagged} ${metric}\n\nExecuted with Radon\n\nhttps://radon.run`;
 }
 
 export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {
@@ -79,6 +83,8 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
     if (data.exitPrice != null) params.set("exitPrice", String(data.exitPrice));
     if (data.entryTime) params.set("entryTime", data.entryTime);
     if (data.exitTime) params.set("exitTime", data.exitTime);
+    const holdTime = formatHoldDuration(data.entryTime, data.exitTime);
+    if (holdTime) params.set("holdTime", holdTime);
     if (data.fillPrice != null && data.entryPrice == null && data.exitPrice == null) {
       params.set("fillPrice", String(data.fillPrice));
     }
@@ -117,7 +123,14 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
     try {
       const blob = await generateImage();
       await copyToClipboard(blob);
-      const text = buildTweetText(data.description, data.pnl, data.pnlPct, showDollar, showPct);
+      const text = buildTweetText(
+        data.description,
+        data.pnl,
+        data.pnlPct,
+        showDollar,
+        showPct,
+        formatHoldDuration(data.entryTime, data.exitTime),
+      );
       const tweetUrl = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}`;
       window.open(tweetUrl, "_blank", "noopener,noreferrer");
     } catch (err) {
