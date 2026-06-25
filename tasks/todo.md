@@ -1,3 +1,34 @@
+# Task: Operator Table Sorting
+
+## Dependency Graph
+
+- T1 depends_on: [] — Read UI guidance, admin scoped instructions, current worktree, and locate Operator page tables.
+- T2 depends_on: [T1] — Add Operator table sorting plan to `tasks/todo.md`.
+- T3 depends_on: [T2] — Add failing component tests for sortable Service Control and Writer Freshness tables.
+- T4 depends_on: [T3] — Wire admin tables to shared `useSort` and `SortTh` patterns.
+- T5 depends_on: [T4] — Run focused component tests and static checks.
+- T6 depends_on: [T5] — Run broader web verification, browser visual check, and document review.
+
+## Checklist
+
+- [x] T1 — Read UI guidance, admin instructions, current worktree, and table locations.
+- [x] T2 — Add task plan.
+- [x] T3 — Add sortable admin table regressions.
+- [x] T4 — Implement shared sorting behavior in Operator tables.
+- [x] T5 — Run focused tests and static checks.
+- [x] T6 — Run broader verification and document review.
+
+## Review
+
+- Added shared `useSort` / `SortTh` behavior to both semantic Operator data tables: Service Control and Writer Freshness. Service rows now sort by Status, Unit, and Activity; writer rows sort by Writer, State, Freshness, Last run, and Detail. The Controls column stays static because it is actions, not data.
+- Kept the IB gateway pool display unchanged because it is a compact status list, not a table with comparable columns. The actual `<table>` surfaces on `/admin` are now sortable.
+- Added component regressions for service-row sorting and writer-row sorting in `web/tests/admin-components.test.tsx`.
+- Added Playwright coverage on `/admin` that clicks the Operator table headers and verifies row order changes in the browser. The existing admin Playwright spec also had a stale gateway-stop selector; updated it to use the current Gateway Power button.
+- Verification passed: focused component suite `npx vitest run --config vitest.config.ts web/tests/admin-components.test.tsx web/tests/admin-redesign-components.test.tsx web/tests/admin-polling.test.tsx web/tests/sort-th-tooltip.test.tsx` - 52 passed; admin Playwright `PLAYWRIGHT_PORT=3052 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/admin-panel.spec.ts e2e/admin-visual-snapshot.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` - 6 passed; full web suite `npm test -- --reporter=dot` - 356 files, 3,494 passed, 26 skipped; `npm run lint` passed with 9 existing warnings; `git diff --check` passed; conflict-marker scan passed.
+- Verification blocker: `npm run typecheck` still fails before reaching this change because local `web/node_modules` is missing `@upstash/ratelimit` and `@upstash/redis` for `lib/demo/rateLimit.ts`. `npm ls @upstash/ratelimit @upstash/redis` returns empty.
+
+---
+
 # Task: Combo Strangle Straddle Labels
 
 ## Dependency Graph

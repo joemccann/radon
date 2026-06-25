@@ -14,8 +14,10 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import IbGatewayCard from "../components/admin/IbGatewayCard";
 import Ib2faControls from "../components/admin/Ib2faControls";
 import ServiceControlPanel from "../components/admin/ServiceControlPanel";
+import WriterFreshnessTable from "../components/admin/WriterFreshnessTable";
 import type {
   AdminHealthPayload,
+  ServiceHealthRow,
   ServicesListResponse,
 } from "../lib/adminTypes";
 
@@ -638,5 +640,114 @@ describe("<ServiceControlPanel />", () => {
     );
     const restartBtn = screen.getByTestId("service-restart-radon-api.service") as HTMLButtonElement;
     expect(restartBtn.disabled).toBe(true);
+  });
+
+  it("sorts visible service rows from sortable column headers", () => {
+    render(
+      <ServiceControlPanel
+        services={services({
+          units: [
+            {
+              unit: "radon-nextjs.service",
+              load_state: "loaded",
+              active_state: "active",
+              sub_state: "running",
+              description: "Next.js app",
+              can_control: true,
+            },
+            {
+              unit: "radon-api.service",
+              load_state: "loaded",
+              active_state: "active",
+              sub_state: "running",
+              description: "Radon FastAPI",
+              can_control: true,
+            },
+            {
+              unit: "radon-monitor.service",
+              load_state: "loaded",
+              active_state: "inactive",
+              sub_state: "dead",
+              description: "Monitor daemon",
+              can_control: true,
+            },
+          ],
+        })}
+        loading={false}
+        error={null}
+        onAction={vi.fn()}
+      />,
+    );
+
+    const rowUnits = () =>
+      Array.from(document.querySelectorAll("[data-testid^='service-row-']")).map((row) =>
+        row.getAttribute("data-testid")?.replace("service-row-", ""),
+      );
+
+    expect(rowUnits()).toEqual([
+      "radon-nextjs.service",
+      "radon-api.service",
+      "radon-monitor.service",
+    ]);
+
+    fireEvent.click(screen.getByRole("columnheader", { name: /unit/i }));
+
+    expect(rowUnits()).toEqual([
+      "radon-api.service",
+      "radon-monitor.service",
+      "radon-nextjs.service",
+    ]);
+  });
+});
+
+describe("<WriterFreshnessTable />", () => {
+  function writerRows(): ServiceHealthRow[] {
+    const now = new Date().toISOString();
+    return [
+      {
+        service: "portfolio-sync",
+        state: "ok",
+        updated_at: now,
+        last_attempt_finished_at: now,
+        last_error: null,
+      },
+      {
+        service: "cash-flow-sync",
+        state: "error",
+        updated_at: now,
+        last_attempt_finished_at: now,
+        last_error: "provider timeout",
+      },
+      {
+        service: "llm-token-index",
+        state: "warning",
+        updated_at: now,
+        last_attempt_finished_at: now,
+        last_error: null,
+      },
+    ];
+  }
+
+  it("sorts writer rows from sortable column headers", () => {
+    render(<WriterFreshnessTable rows={writerRows()} reachable loading={false} />);
+
+    const rowServices = () =>
+      Array.from(document.querySelectorAll("[data-testid^='writer-row-']")).map((row) =>
+        row.getAttribute("data-testid")?.replace("writer-row-", ""),
+      );
+
+    expect(rowServices()).toEqual([
+      "cash-flow-sync",
+      "llm-token-index",
+      "portfolio-sync",
+    ]);
+
+    fireEvent.click(screen.getByRole("columnheader", { name: /state/i }));
+
+    expect(rowServices()).toEqual([
+      "cash-flow-sync",
+      "portfolio-sync",
+      "llm-token-index",
+    ]);
   });
 });

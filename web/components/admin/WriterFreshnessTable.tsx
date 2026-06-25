@@ -1,8 +1,12 @@
 "use client";
 
-import { getMarketStateFromDate, isStale } from "@/lib/serviceHealthWindows";
+import { getMarketStateFromDate, isStale, type MarketState } from "@/lib/serviceHealthWindows";
 import { humanizeDetail } from "@/lib/adminFormat";
 import type { ServiceHealthRow } from "@/lib/adminTypes";
+import { useSort } from "@/lib/useSort";
+import SortTh from "../SortTh";
+
+type WriterSortKey = "service" | "state" | "freshness" | "lastRun" | "detail";
 
 /**
  * Per-writer freshness from the Turso service_health table (via /edge-health).
@@ -18,6 +22,14 @@ export default function WriterFreshnessTable({
   reachable: boolean;
   loading?: boolean;
 }) {
+  const market = getMarketStateFromDate();
+  const { sorted, sort, toggle } = useSort<ServiceHealthRow, WriterSortKey>(
+    rows,
+    (row, key) => writerSortValue(row, key, market),
+    "service",
+    "asc",
+  );
+
   return (
     <section className="admin-card" data-testid="writer-freshness">
       <header className="admin-card-header">
@@ -52,23 +64,38 @@ export default function WriterFreshnessTable({
         <table className="admin-services-table">
           <thead>
             <tr>
-              <th>Writer</th>
-              <th>State</th>
-              <th>Freshness</th>
-              <th>Last run</th>
-              <th>Detail</th>
+              <SortTh<WriterSortKey> label="Writer" sortKey="service" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<WriterSortKey> label="State" sortKey="state" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<WriterSortKey> label="Freshness" sortKey="freshness" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<WriterSortKey> label="Last run" sortKey="lastRun" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+              <SortTh<WriterSortKey> label="Detail" sortKey="detail" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             </tr>
           </thead>
           <tbody>
-            {[...rows]
-              .sort((a, b) => a.service.localeCompare(b.service))
-              .map((r) => <WriterRow key={r.service} row={r} />)}
+            {sorted.map((r) => <WriterRow key={r.service} row={r} />)}
           </tbody>
         </table>
         </div>
       )}
     </section>
   );
+}
+
+function writerSortValue(row: ServiceHealthRow, key: WriterSortKey, market: MarketState): string | number | null {
+  switch (key) {
+    case "service":
+      return row.service;
+    case "state":
+      return row.state;
+    case "freshness":
+      return isStale(row.service, row.updated_at ?? null, market) ? 1 : 0;
+    case "lastRun": {
+      const lastRun = row.last_attempt_finished_at ?? row.updated_at ?? null;
+      return lastRun ? Date.parse(lastRun) : null;
+    }
+    case "detail":
+      return humanizeDetail(row.last_error);
+  }
 }
 
 function WriterRow({ row }: { row: ServiceHealthRow }) {
