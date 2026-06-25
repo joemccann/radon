@@ -5189,10 +5189,11 @@ tr.leg-row td {
   display: grid;
   grid-template-columns: 1fr;
   gap: 12px;
+  align-items: start;
 }
 
 .modify-field-grid-combo {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 120px), 1fr));
 }
 
 .modify-field {
@@ -5213,11 +5214,20 @@ tr.leg-row td {
 .modify-price-input-row {
   display: flex;
   align-items: center;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   border: 1px solid var(--border-dim);
   background: var(--bg-base);
+  transition: border-color 150ms ease-in-out;
+}
+
+.modify-price-input-row:focus-within {
+  border-color: var(--border-focus);
 }
 
 .modify-price-prefix {
+  flex: 0 0 auto;
   font-family: var(--font-mono);
   font-size: 14px;
   color: var(--text-muted);
@@ -5226,6 +5236,9 @@ tr.leg-row td {
 
 .modify-price-input {
   flex: 1;
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
   background: transparent;
   border: none;
   color: var(--text-primary);
@@ -5236,7 +5249,7 @@ tr.leg-row td {
 }
 
 .modify-price-input:focus {
-  box-shadow: inset 0 0 0 1px var(--border-focus);
+  box-shadow: none;
 }
 
 .modify-price-input::-webkit-inner-spin-button,

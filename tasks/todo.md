@@ -1,3 +1,59 @@
+# Task: Modify Order Net Price UI Regression
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot modal symptom, scoped UI guidance, and likely modify-order files without touching unrelated dirty work.
+- T2 depends_on: [T1] — Identify the focus and grid sizing root cause in the modify-order pricing panel.
+- T3 depends_on: [T2] — Apply the smallest modal CSS fix and focused regression coverage, avoiding chat and unrelated backend files.
+- T4 depends_on: [T3] — Run focused UI checks plus shared web verification before commit/push.
+
+## Checklist
+
+- [x] T1 — Snapshot symptom, UI guidance, and candidate files.
+- [x] T2 — Identify focus and grid sizing root cause.
+- [x] T3 — Integrate UI fix and regression coverage.
+- [x] T4 — Verify and document.
+
+## Review
+
+- Root cause: `.modify-price-input:focus` drew an inset focus `box-shadow` on the borderless inner input. In the combo pricing panel, the input row/grid also lacked shrink constraints, so a focused "New Net Price" field could visually overrun its grid cell and read as a teal line breaking into adjacent fields.
+- Fixed the shared modify price field CSS so focus is contained on `.modify-price-input-row:focus-within` via the existing Radon `--border-focus` token, while the inner input no longer draws its own inset focus line.
+- Stabilized the combo field grid with `auto-fit` minmax columns plus `min-width: 0`, `width: 100%`, and `box-sizing: border-box` on the row/input. This keeps New Quantity and New Net Price from clipping or overlapping as the modal narrows.
+- Added `web/tests/modify-order-modal-layout.test.ts` to lock the focus containment and responsive sizing rules.
+- Verification passed: focused `npx vitest run --config vitest.config.ts web/tests/modify-order-modal-layout.test.ts web/tests/open-order-combo-modify.test.ts web/tests/modify-order-ticker-detail.test.ts` — 3 files, 18 tests. Combined focused chat/UI suite passed — 6 files, 56 tests. Browser verification passed: `PLAYWRIGHT_PORT=3050 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/modify-combo-order.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 1 test.
+- Full web suite passed from `web/`: `npm test` — 353 files, 3,475 passed, 26 skipped. `npm run typecheck` passed. `npm run lint` passed with 9 existing warnings. `git diff --check` passed.
+
+---
+
+# Task: Chat JSON Error Investigation
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot post-push worktree state and reproduce/locate the chat failure path without touching unrelated files.
+- T2 depends_on: [T1] — Delegate independent chat API/client investigation to a subagent and wait for findings.
+- T3 depends_on: [T1] — Trace `ChatPanel`, `lib/chat`, `/api/assistant`, and `/api/pi` handling for empty or non-JSON responses.
+- T4 depends_on: [T2, T3] — Identify root cause and implement the smallest durable fix with regression coverage.
+- T5 depends_on: [T4] — Run focused tests plus required full verification, update review, then commit/merge/push if code changes are made.
+
+## Checklist
+
+- [x] T1 — Snapshot and reproduce/locate chat failure path.
+- [x] T2 — Collect subagent findings.
+- [x] T3 — Trace chat API/client behavior.
+- [x] T4 — Implement durable fix and regression coverage.
+- [x] T5 — Verify, document, commit, merge, push.
+
+## Review
+
+- Root cause: natural-language prompts beginning with `analyze` were routed too broadly. `Analyze the best bullish risk reversal for MSFT expiring in mid July` became `/evaluate THE`, so the chat sent the prompt to PI instead of the assistant and discarded the actual request.
+- Fixed `routeToPiPrompt` to only auto-route exact `analyze TICKER` prompts. Complex analysis requests now stay on `/api/assistant`.
+- Hardened assistant and PI response parsing with guarded JSON reads. Empty or non-JSON HTTP responses no longer surface raw `Unexpected end of JSON input`; PI returns a controlled failure/no-output message.
+- Fixed the PI failure UI path so a rejected PI request updates the pending assistant row instead of leaving a stranded `No output.` placeholder plus a second fallback message.
+- Added regressions for the exact MSFT risk-reversal prompt, empty/non-JSON PI responses, and the ChatPanel pending-message failure path.
+- Verification passed: focused `npx vitest run --config vitest.config.ts web/tests/chat.test.ts web/tests/chat-advanced.test.ts web/tests/chat-order-confirm.test.tsx` — 3 files, 38 tests; combined focused chat/UI suite — 6 files, 56 tests. Full web suite passed from `web/`: `npm test` — 353 files, 3,475 passed, 26 skipped. `npm run typecheck` passed. `npm run lint` passed with 9 existing warnings. `git diff --check` passed.
+
+---
+
 # Task: Theta Harvester Info Bubbles
 
 ## Dependency Graph

@@ -43,11 +43,9 @@ export function routeToPiPrompt(raw: string): string | null {
     return alias;
   }
 
-  if (lower.startsWith("analyze ")) {
-    const tokenized = lower.replace(/^\s*analyze\s+/, "").trim().split(/\s+/)[0];
-    if (tokenized) {
-      return `/evaluate ${tokenized.toUpperCase()}`;
-    }
+  const analyzeTicker = normalized.match(/^analyze\s+\$?([A-Za-z][A-Za-z0-9.-]{0,9})\s*$/);
+  if (analyzeTicker) {
+    return `/evaluate ${analyzeTicker[1].toUpperCase()}`;
   }
 
   if (/\bportfolio\b/.test(lower) || /\bpositions?\b/.test(lower)) {
@@ -103,6 +101,27 @@ export function fallbackReply(input: string) {
   return "I can review any ticker, compare support/against groups, or walk through risk and Kelly logic for any position.";
 }
 
+async function readJsonBody<T>(response: Response): Promise<T | null> {
+  const textReader = (response as { text?: () => Promise<string> }).text;
+  if (typeof textReader === "function") {
+    try {
+      const raw = await textReader.call(response);
+      if (!raw.trim()) {
+        return null;
+      }
+      return JSON.parse(raw) as T;
+    } catch {
+      return null;
+    }
+  }
+
+  try {
+    return (await response.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 export async function requestAssistantReply(history: ApiMessage[], latestMessage: string): Promise<string> {
   const response = await fetch("/api/assistant", {
     method: "POST",
@@ -117,16 +136,16 @@ export async function requestAssistantReply(history: ApiMessage[], latestMessage
     }),
   });
 
-  const payload = (await response.json()) as AssistantResponse;
+  const payload = await readJsonBody<AssistantResponse>(response);
 
   if (!response.ok) {
-    if (payload.error) {
+    if (payload?.error) {
       return `Error: ${payload.error}`;
     }
     return "Assistant service returned an error.";
   }
 
-  if (typeof payload.content === "string" && payload.content.trim()) {
+  if (typeof payload?.content === "string" && payload.content.trim()) {
     return formatAssistantPayload(payload.content);
   }
 
@@ -156,19 +175,19 @@ export async function requestAssistantTurn(
     }),
   });
 
-  const payload = (await response.json()) as AssistantResponse;
+  const payload = await readJsonBody<AssistantResponse>(response);
 
   if (!response.ok) {
-    const message = payload.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
+    const message = payload?.error ? `Error: ${payload.error}` : "Assistant service returned an error.";
     return { content: message, proposal: null };
   }
 
   const content =
-    typeof payload.content === "string" && payload.content.trim()
+    typeof payload?.content === "string" && payload.content.trim()
       ? formatAssistantPayload(payload.content)
       : fallbackReply(latestMessage);
 
-  return { content, proposal: payload.proposal ?? null };
+  return { content, proposal: payload?.proposal ?? null };
 }
 
 /**
@@ -217,15 +236,19 @@ export async function requestPiReply(command: string): Promise<string> {
     body: JSON.stringify({ input: command }),
   });
 
-  const payload = (await response.json()) as PiResponse;
-  const normalized = normalizeTextLines(payload.output || "");
+  const payload = await readJsonBody<PiResponse>(response);
+  const normalized = normalizeTextLines(payload?.output || "");
   const canonicalCommand = command.trim().replace(/^\//, "").split(/\s+/)[0] ?? "";
 
   if (!response.ok) {
-    if (payload.error) {
+    if (payload?.error) {
       return `Error: ${payload.error}`;
     }
     return "PI command request failed.";
+  }
+
+  if (!payload) {
+    return "No output returned from PI command.";
   }
 
   if (payload.status === "error") {
