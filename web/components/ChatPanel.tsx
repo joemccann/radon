@@ -63,12 +63,15 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
     setBusy(true);
     setLastError("");
 
+    let pendingAssistantId: string | null = null;
+
     try {
       const piCommand = routeToPiPrompt(cleaned);
       const isCommand = Boolean(piCommand);
 
       if (isCommand) {
         const assistantId = `a-${Date.now()}-pi`;
+        pendingAssistantId = assistantId;
         const assistantMessage: Message = {
           id: assistantId,
           role: "assistant",
@@ -99,19 +102,28 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
       const errorMessage =
         error instanceof Error
           ? error.message
-          : isPiCommand
-            ? "Unexpected PI command error."
-            : "Unexpected assistant error.";
+            : isPiCommand
+              ? "Unexpected PI command error."
+              : "Unexpected assistant error.";
+      const fallbackContent = `${fallback}\n\nFallback note: ${errorMessage}`;
 
-      setMessages((current) => [
-        ...current,
-        {
-          id: `a-${Date.now()}`,
-          role: "assistant",
-          timestamp: createTimestamp(),
-          content: `${fallback}\n\nFallback note: ${errorMessage}`,
-        },
-      ]);
+      setMessages((current) => {
+        if (pendingAssistantId && current.some((message) => message.id === pendingAssistantId)) {
+          return current.map((message) =>
+            message.id === pendingAssistantId ? { ...message, content: fallbackContent } : message,
+          );
+        }
+
+        return [
+          ...current,
+          {
+            id: `a-${Date.now()}`,
+            role: "assistant",
+            timestamp: createTimestamp(),
+            content: fallbackContent,
+          },
+        ];
+      });
       setLastError(errorMessage);
     } finally {
       setBusy(false);

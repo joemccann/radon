@@ -52,6 +52,11 @@ test("routeToPiPrompt routes analyze to evaluate", () => {
   expect(routeToPiPrompt("analyze brze")).toBe("/evaluate BRZE");
 });
 
+test("routeToPiPrompt leaves natural language analysis requests for the assistant", () => {
+  expect(routeToPiPrompt("Analyze the best bullish risk reversal for MSFT expiring in mid July")).toBe(null);
+  expect(routeToPiPrompt("analyze MSFT risk reversal expiring in mid July")).toBe(null);
+});
+
 test("routeToPiPrompt routes keyword matches", () => {
   expect(routeToPiPrompt("show me the portfolio")).toBe("/portfolio");
   expect(routeToPiPrompt("check positions")).toBe("/portfolio");
