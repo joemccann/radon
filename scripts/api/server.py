@@ -111,6 +111,14 @@ IB_HEARTBEAT_INTERVAL_SECS = 15
 HEALTH_GATEWAY_PROBE_TIMEOUT_SECS = 2.5
 
 
+def _bounded_env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
+    try:
+        parsed = int(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
+
+
 # Pool-recovery escalation guard. Mirrors ib_gateway._auth_transition_state but
 # governs the LEVEL-triggered recover_stuck_pool path: the auth_state edge in
 # handle_auth_state_transition cannot fire while the pool is wedged because
@@ -1372,7 +1380,8 @@ async def admin_stack_restart():
 @app.post("/scan")
 async def scan():
     """Run watchlist scanner (scanner.py --top 25)."""
-    result = await run_script("scanner.py", ["--top", "25"], timeout=120)
+    workers = _bounded_env_int("RADON_SCANNER_WORKERS", 24)
+    result = await run_script("scanner.py", ["--top", "25", "--workers", str(workers)], timeout=120)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     _write_cache(DATA_DIR / "scanner.json", result.data)
@@ -2062,7 +2071,8 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
             if _theta_cache_matches_preset(cached, preset):
                 return cached
-        args = ["--json"]
+        workers = _bounded_env_int("RADON_THETA_SCANNER_WORKERS", 24)
+        args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.append(ticker)
         else:
@@ -2127,7 +2137,8 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
             cached = _read_cache(DATA_DIR / "strength_confirmation.json")
             if _strength_cache_matches_preset(cached, preset):
                 return cached
-        args = ["--json"]
+        workers = _bounded_env_int("RADON_STRENGTH_SCANNER_WORKERS", 24)
+        args = ["--json", "--workers", str(workers)]
         if is_ticker_scan:
             args.append(ticker)
         else:

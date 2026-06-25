@@ -11,9 +11,11 @@ Uses fetch_flow.py internally which calls:
 """
 import json
 import logging
+import os
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
+from pathlib import Path
 
 from clients.uw_client import UWRateLimitError
 from db.readers import read_portfolio_positions, read_watchlist_items
@@ -33,6 +35,26 @@ except Exception:  # pragma: no cover — alerts layer optional
 
 logger = logging.getLogger(__name__)
 
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_DIR = _SCRIPT_DIR.parent
+
+try:
+    from dotenv import load_dotenv  # type: ignore[import-untyped]
+    load_dotenv(_PROJECT_DIR / ".env")
+    load_dotenv(_PROJECT_DIR / "web" / ".env")
+except Exception:
+    pass
+
+DEFAULT_MAX_WORKERS = 24
+
+
+def _env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
+    try:
+        parsed = int(os.environ.get(name, ""))
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, parsed))
+
 def get_open_positions():
     """Get list of tickers with open positions."""
     return {
@@ -46,10 +68,24 @@ def get_watchlist_items() -> list[dict]:
     """Get watchlist rows from Turso."""
     return read_watchlist_items()
 
-def fetch_flow_data(ticker: str, days: int = 5) -> dict:
+def fetch_flow_data(
+    ticker: str,
+    days: int = 5,
+    *,
+    fetch_missing_history: bool = False,
+    retry_transient: bool = False,
+) -> dict:
     """Fetch flow data for a single ticker via the shared wrapper seam."""
     try:
-        return fetch_flow_module(ticker, lookback_days=days, skip_options_flow=True)
+        return fetch_flow_module(
+            ticker,
+            lookback_days=days,
+            skip_options_flow=True,
+            fetch_missing_history=fetch_missing_history,
+            retry_transient=retry_transient,
+        )
+    except UWRateLimitError:
+        raise
     except Exception as e:
         return {"error": str(e)}
 
@@ -145,7 +181,14 @@ def analyze_signal(flow_data: dict) -> dict:
         "recent_strength": recent_strength,
     }
 
-def _process_ticker(item: dict, client=None) -> dict:
+def _process_ticker(
+    item: dict,
+    client=None,
+    *,
+    fetch_missing_history: bool = False,
+    retry_transient: bool = False,
+    include_forecast: bool = False,
+) -> dict:
     """Process a single ticker: fetch flow and analyze signal.
 
     Returns a result dict or None on error.
@@ -159,7 +202,12 @@ def _process_ticker(item: dict, client=None) -> dict:
     try:
         # Use the wrapper seam so tests and callers can patch scanner.fetch_flow_data
         # without needing to know the internal fetch_flow import path.
-        flow = fetch_flow_data(ticker, days=5)
+        flow = fetch_flow_data(
+            ticker,
+            days=5,
+            fetch_missing_history=fetch_missing_history,
+            retry_transient=retry_transient,
+        )
         analysis = analyze_signal(flow)
         result = {
             "ticker": ticker,
@@ -173,12 +221,13 @@ def _process_ticker(item: dict, client=None) -> dict:
             record_daily_flow(ticker, today, result)
         except Exception as exc:  # best-effort accrual, never break the scan
             print(f"  {ticker} - flow-history accrual skipped ({exc})", file=sys.stderr)
-        try:
-            from forecasting import forecast_score as fs
+        if include_forecast:
+            try:
+                from forecasting import forecast_score as fs
 
-            fs.attach_forecast_score(ticker, result)
-        except Exception as exc:  # forecasting must never break the scan
-            print(f"  {ticker} - forecast scoring skipped ({exc})", file=sys.stderr)
+                fs.attach_forecast_score(ticker, result)
+            except Exception as exc:  # forecasting must never break the scan
+                print(f"  {ticker} - forecast scoring skipped ({exc})", file=sys.stderr)
         return result
     except UWRateLimitError:
         logger.warning("Rate limited on %s — skipping", ticker)
@@ -190,7 +239,15 @@ def _process_ticker(item: dict, client=None) -> dict:
         return None
 
 
-def scan(top_n: int = 20, min_score: float = 0, max_workers: int = 5):
+def scan(
+    top_n: int = 20,
+    min_score: float = 0,
+    max_workers: int = DEFAULT_MAX_WORKERS,
+    *,
+    fetch_missing_history: bool = False,
+    retry_transient: bool = False,
+    include_forecast: bool = False,
+):
     """Scan all watchlist tickers and rank by signal strength.
 
     Uses ThreadPoolExecutor to process tickers concurrently.
@@ -198,7 +255,15 @@ def scan(top_n: int = 20, min_score: float = 0, max_workers: int = 5):
     Args:
         top_n: Number of top signals to return.
         min_score: Minimum score threshold.
-        max_workers: Maximum concurrent workers (default 15).
+        max_workers: Maximum concurrent workers.
+        fetch_missing_history: Live-backfill prior closed days when the
+            dark-pool disk cache is cold. Disabled by default for interactive
+            scan speed and UW quota protection.
+        retry_transient: Retry UW 429/5xx responses. Disabled by default so
+            rate-limited names are skipped quickly in on-demand scans.
+        include_forecast: Attach optional Chronos forecast metadata. Disabled
+            by default because the core scan does not require it and the
+            forecasting package is not installed on lean hosts.
     """
     open_positions = get_open_positions()
     tickers = get_watchlist_items()
@@ -216,7 +281,16 @@ def scan(top_n: int = 20, min_score: float = 0, max_workers: int = 5):
 
     results = []
     with ThreadPoolExecutor(max_workers=max_workers) as pool:
-        futures = {pool.submit(_process_ticker, item): item for item in items_to_scan}
+        futures = {
+            pool.submit(
+                _process_ticker,
+                item,
+                fetch_missing_history=fetch_missing_history,
+                retry_transient=retry_transient,
+                include_forecast=include_forecast,
+            ): item
+            for item in items_to_scan
+        }
         done = 0
         for future in as_completed(futures):
             done += 1
@@ -258,7 +332,34 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Scan watchlist for flow signals")
     p.add_argument("--top", type=int, default=20, help="Number of top signals to show")
     p.add_argument("--min-score", type=float, default=0, help="Minimum score threshold")
-    p.add_argument("--workers", type=int, default=15, help="Max concurrent workers (default 15)")
+    p.add_argument(
+        "--workers",
+        type=int,
+        default=_env_int("RADON_SCANNER_WORKERS", DEFAULT_MAX_WORKERS),
+        help=f"Max concurrent workers (default {DEFAULT_MAX_WORKERS}; override RADON_SCANNER_WORKERS)",
+    )
+    p.add_argument(
+        "--backfill-history",
+        action="store_true",
+        help="Fetch missing closed-session dark-pool history live instead of using cache-only history.",
+    )
+    p.add_argument(
+        "--forecast",
+        action="store_true",
+        help="Attach optional Chronos forecast metadata to scanner rows.",
+    )
+    p.add_argument(
+        "--retry-transient",
+        action="store_true",
+        help="Retry UW 429/5xx responses instead of skipping transient failures quickly.",
+    )
     args = p.parse_args()
 
-    scan(top_n=args.top, min_score=args.min_score, max_workers=args.workers)
+    scan(
+        top_n=args.top,
+        min_score=args.min_score,
+        max_workers=args.workers,
+        fetch_missing_history=args.backfill_history,
+        retry_transient=args.retry_transient,
+        include_forecast=args.forecast,
+    )

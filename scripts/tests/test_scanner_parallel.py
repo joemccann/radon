@@ -46,7 +46,7 @@ class TestScannerParallelExecution:
         # Track which threads are used
         thread_ids = set()
 
-        def slow_fetch(ticker, days=5):
+        def slow_fetch(ticker, days=5, **_kwargs):
             thread_ids.add(threading.current_thread().ident)
             time.sleep(0.05)
             return _make_flow_data()
@@ -91,7 +91,7 @@ class TestScannerErrorHandling:
         tickers = ["AAPL", "FAIL", "GOOG"]
         watchlist_items = _make_watchlist(tickers)["tickers"]
 
-        def fetch_side_effect(ticker, days=5):
+        def fetch_side_effect(ticker, days=5, **_kwargs):
             if ticker == "FAIL":
                 raise UWRateLimitError("rate limited", status_code=429)
             return _make_flow_data()
@@ -111,7 +111,7 @@ class TestScannerErrorHandling:
         tickers = ["AAPL", "BOOM", "GOOG"]
         watchlist_items = _make_watchlist(tickers)["tickers"]
 
-        def fetch_side_effect(ticker, days=5):
+        def fetch_side_effect(ticker, days=5, **_kwargs):
             if ticker == "BOOM":
                 raise RuntimeError("unexpected crash")
             return _make_flow_data()

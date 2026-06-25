@@ -347,6 +347,20 @@ class TestUWRetryPolicy:
         assert result == [{"size": 100, "price": 50.0}]
         assert mock_client.get_darkpool_flow.call_count == 2
 
+    def test_darkpool_rate_limit_can_fail_fast_without_retry(self):
+        from clients.uw_client import UWRateLimitError
+        from fetch_flow import fetch_darkpool
+
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.side_effect = UWRateLimitError("429", status_code=429)
+
+        with patch("fetch_flow.time_module.sleep") as sleep_mock, \
+             pytest.raises(UWRateLimitError):
+            fetch_darkpool("EWY", date="2026-05-15", _client=mock_client, retry_transient=False)
+
+        sleep_mock.assert_not_called()
+        assert mock_client.get_darkpool_flow.call_count == 1
+
     def test_darkpool_rate_limit_persistent_raises(self):
         """If the retry ALSO 429s, propagate. The caller (flow_report)
         will surface this so server.py 502s the POST and the cache is

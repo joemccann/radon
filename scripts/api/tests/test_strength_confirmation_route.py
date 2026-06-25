@@ -38,7 +38,7 @@ def test_strength_confirmation_ticker_scan_bypasses_preset_cooldown(monkeypatch)
 
     assert response.status_code == 200
     assert response.json()["requested_tickers"] == ["MU"]
-    assert calls == [("strength_confirmation_scanner.py", ["--json", "MU"], 480)]
+    assert calls == [("strength_confirmation_scanner.py", ["--json", "--workers", "24", "MU"], 480)]
 
 
 def test_strength_confirmation_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
@@ -82,7 +82,7 @@ def test_strength_confirmation_preset_scan_ignores_explicit_ticker_cache(monkeyp
 
     assert response.status_code == 200
     assert response.json()["universe"] == "fallback:ndx100"
-    assert calls == [("strength_confirmation_scanner.py", ["--json", "--preset", "ndx100"], 480)]
+    assert calls == [("strength_confirmation_scanner.py", ["--json", "--workers", "24", "--preset", "ndx100"], 480)]
 
 
 def test_strength_confirmation_rejects_invalid_ticker(monkeypatch):
