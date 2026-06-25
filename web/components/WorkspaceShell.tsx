@@ -37,6 +37,7 @@ import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { assessMargin, rankOf, type MarginLevel } from "@/lib/marginWarning";
 import { useTheme } from "@/lib/ThemeContext";
+import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 
 type WorkspaceShellProps = {
   section?: WorkspaceSection;
@@ -45,6 +46,7 @@ type WorkspaceShellProps = {
 
 export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellProps) {
   const { theme: resolvedTheme, toggleTheme } = useTheme();
+  const getRealtimeToken = useRealtimeAuth();
   const [isFullscreen, setIsFullscreen] = useState(false);
   const pathname = usePathname();
   const { isMobile, hasMounted } = useViewport();
@@ -233,6 +235,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     ibConnected: rawIbConnected,
     ibIssue,
     ibStatusMessage,
+    error: priceError,
   } = usePrices({
     symbols: allSymbols,
     contracts: allContracts,
@@ -246,6 +249,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     // expiry decides which listed future the relay resolves under that key.
     // Null → relay falls back to front-month.
     depthExpiry: tickerDetail.depthFutureExpiry,
+    getToken: getRealtimeToken,
   });
 
   const missingIndexFallbackSymbols = useMemo(
@@ -341,6 +345,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   }, [portfolio?.account_summary, addToast]);
   const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
   const error = isOrdersPage ? ordersError : portfolioError;
+  const liveDataError = portfolioError ?? ordersError ?? priceError;
   const lastSync = isOrdersPage ? ordersLastSync : portfolioLastSync;
   const syncNow = isOrdersPage ? ordersSyncNow : portfolioSyncNow;
   const syncTarget = isOrdersPage ? "orders" : "portfolio";
@@ -452,6 +457,13 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
         </Header>
 
         <div className="content">
+          {liveDataError ? (
+            <div className="live-data-degraded" role="alert" data-testid="live-data-degraded">
+              <strong>Live data degraded</strong>
+              <span>{liveDataError}</span>
+            </div>
+          ) : null}
+
           {activeSection === "dashboard" ? (
             <DashboardSurface
               portfolio={portfolio}

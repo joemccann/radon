@@ -36,6 +36,13 @@ class MockWebSocket {
 let wsInstances: MockWebSocket[] = [];
 function latestWs(): MockWebSocket { return wsInstances[wsInstances.length - 1]; }
 
+async function flushSocketOpen() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   wsInstances = [];
   vi.useFakeTimers();
@@ -63,9 +70,10 @@ function makeSearchResults(results: Array<{ symbol: string; secType: string }>) 
 }
 
 describe("TickerSearch secType filter", () => {
-  it("STK results pass through filter", () => {
+  it("STK results pass through filter", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
+    await flushSocketOpen();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -79,9 +87,10 @@ describe("TickerSearch secType filter", () => {
     expect(screen.getByText("AAPL")).toBeDefined();
   });
 
-  it("IND results pass through filter", () => {
+  it("IND results pass through filter", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
+    await flushSocketOpen();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -95,9 +104,10 @@ describe("TickerSearch secType filter", () => {
     expect(screen.getByText("SPX")).toBeDefined();
   });
 
-  it("FUT results pass through filter", () => {
+  it("FUT results pass through filter", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
+    await flushSocketOpen();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -111,9 +121,10 @@ describe("TickerSearch secType filter", () => {
     expect(screen.getByText("ES")).toBeDefined();
   });
 
-  it("WAR and BOND are filtered out", () => {
+  it("WAR and BOND are filtered out", async () => {
     const onSelect = vi.fn();
     render(React.createElement(TickerSearch, { onSelect }));
+    await flushSocketOpen();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 

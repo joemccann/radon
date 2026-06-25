@@ -77,6 +77,7 @@ describe("wsTicket", () => {
     const [url, options] = mockFetch.mock.calls[0];
     expect(url).toContain("/ws-ticket");
     expect(options.method).toBe("POST");
+    expect(options.cache).toBe("no-store");
     expect(options.headers.Authorization).toBe("Bearer my-clerk-token");
   });
 

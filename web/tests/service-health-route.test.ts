@@ -112,14 +112,21 @@ describe("/api/service-health", () => {
     expect(body.failing).toHaveLength(0);
   });
 
-  it("returns warning + empty list when DB is unreachable", async () => {
+  it("returns a degraded provider row when DB is unreachable", async () => {
     mockDbThrows("connection refused");
     const { GET } = await import("../app/api/service-health/route");
     const res = await GET();
     expect(res.status).toBe(200); // graceful, not 500
     const body = await res.json();
-    expect(body.services).toEqual([]);
-    expect(body.failing).toEqual([]);
+    expect(body.services).toHaveLength(1);
+    expect(body.services[0]).toMatchObject({
+      service: "turso-db",
+      state: "error",
+      category: "scheduled",
+    });
+    expect(body.failing).toHaveLength(1);
+    expect(body.degraded_count).toBe(1);
+    expect(body.summary).toEqual({ total: 1, failing_count: 1 });
     expect(body.warning).toContain("connection refused");
   });
 

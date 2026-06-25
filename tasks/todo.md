@@ -1,3 +1,40 @@
+# Task: Production Live Data Regression
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot dirty worktree, scoped instructions, and production symptom boundaries without touching unrelated files.
+- T2 depends_on: [T1] — Reproduce missing live data across dashboard/routes with local authless browser checks and read-only production/API probes.
+- T3 depends_on: [T1] — Trace frontend data consumers for dashboard, shell ticker tape, portfolio, scanner, regime, and ticker routes.
+- T4 depends_on: [T1] — Trace Next API, FastAPI, websocket, cache, and deployment/runtime live-data paths for stale or missing upstream handling.
+- T5 depends_on: [T2, T3, T4] — Identify the root cause and implement a durable fix at the shared choke point rather than per-route patching.
+- T6 depends_on: [T5] — Add regressions that fail if routes silently render empty/stale data when the shared live-data source is unavailable.
+- T7 depends_on: [T6] — Run focused and full verification, browser visual checks, document lessons/review, then prepare for commit/push if requested.
+
+## Checklist
+
+- [x] T1 — Snapshot state and symptom boundaries.
+- [x] T2 — Reproduce the live-data failure.
+- [x] T3 — Trace frontend live-data consumers.
+- [x] T4 — Trace backend/runtime live-data providers.
+- [x] T5 — Implement shared durable fix.
+- [x] T6 — Add regressions.
+- [x] T7 — Verify and document.
+
+## Review
+
+- Root cause: this was not an IB market-data outage. Production `edge-health/status` showed the relay, API, Next, and IB Gateway up, while `service_health` timed out. Two shared failure modes could make every route look blank: browser realtime sockets could fall back to an unauthenticated or localhost relay URL in production, and DB-backed snapshot reads could hang long enough to block fresher fallback data.
+- Fixed realtime auth/URL routing by adding a shared realtime auth provider and socket URL helper. Production browsers now default to same-origin `/ws`, authenticated sockets require a FastAPI ticket, and failed ticket auth no longer falls back to an unauthenticated websocket.
+- Added DB read deadlines at shared chokepoints: `dbFirstRead`, portfolio reads, order snapshot reads, and service-health reads now fail boundedly instead of pinning loaders indefinitely. Service-health DB failures now return a synthetic `turso-db` degraded row rather than a healthy-looking empty service list.
+- Added a shared shell degraded banner for portfolio, orders, and price-stream failures so dashboard/routes show an explicit live-data failure instead of quiet empty placeholders.
+- Regression coverage added for DB-source timeouts, production same-origin websocket URL resolution, ticketed websocket auth, ws-ticket proxy auth forwarding/no-store, service-health degraded DB rows, and the shell degraded banner.
+- Focused verification passed: `npx vitest run --config vitest.config.ts web/tests/db-first-read.test.ts web/tests/service-health-route.test.ts web/tests/api-routes-smoke.test.ts web/tests/api-routes-smoke-misc.test.ts web/tests/ws-ticket-local.test.ts web/tests/auth-integration.test.ts web/tests/realtime-socket-auth.test.ts web/tests/use-prices-ws-stability.test.ts web/tests/live-data-degraded-banner.test.ts` — 9 files, 132 tests.
+- Full web suite passed after updating old async-socket test timing: `npm test` — 350 files, 3,454 passed, 26 skipped.
+- Static checks passed: `npm run typecheck`, `npm run lint` (9 existing warnings), and `git diff --check`.
+- Browser verification passed on local authless `/dashboard` with forced portfolio failure: desktop and mobile both rendered `data-testid="live-data-degraded"` with no mobile horizontal overflow. Screenshots: `/tmp/radon-live-data-degraded-dashboard.png`, `/tmp/radon-live-data-degraded-dashboard-mobile.png`.
+- Production build retry did not pass locally because `next/font/google` failed to fetch IBM Plex Sans/Mono from Google Fonts inside Turbopack, while a direct `curl` to the same endpoint returned 200. This is documented as a separate build-environment/font-fetch issue; no typography source changes were made in this live-data fix.
+
+---
+
 # Task: 7-Step Strength Factor Info Bubbles
 
 ## Dependency Graph

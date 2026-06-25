@@ -53,6 +53,7 @@ async function flush() {
   await act(async () => {
     await Promise.resolve();
     await Promise.resolve();
+    await Promise.resolve();
   });
 }
 // Advance fake timers (fires the reconnect timer → connect()) then drain the
@@ -154,6 +155,55 @@ describe("Idempotent connect", () => {
     expect(wsInstances).toHaveLength(1);
     act(() => latestWs().simulateOpen());
     expect(wsInstances).toHaveLength(1);
+  });
+});
+
+describe("Authenticated WebSocket URL", () => {
+  it("opens a ticketed realtime socket when Clerk token auth is available", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ticket: "ticket-abc" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderHook(() => usePrices({
+      symbols: ["AAPL"],
+      enabled: true,
+      getToken: async () => "clerk-token",
+    }));
+    await flush();
+
+    expect(wsInstances).toHaveLength(1);
+    expect(latestWs().url).toBe("ws://localhost:8765?ticket=ticket-abc");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/ib/ws-ticket",
+      expect.objectContaining({
+        method: "POST",
+        cache: "no-store",
+        headers: expect.objectContaining({
+          Authorization: "Bearer clerk-token",
+        }),
+      }),
+    );
+  });
+
+  it("does not fall back to an unauthenticated socket when ticket auth fails", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response("Unauthorized", { status: 401 }),
+    ));
+
+    const { result } = renderHook(() => usePrices({
+      symbols: ["AAPL"],
+      enabled: true,
+      getToken: async () => "clerk-token",
+    }));
+    await flush();
+
+    expect(wsInstances).toHaveLength(0);
+    expect(result.current.connected).toBe(false);
+    expect(result.current.error).toBe("Failed to obtain WS ticket: 401");
   });
 });
 

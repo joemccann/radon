@@ -12,11 +12,14 @@ import {
   type ServiceCategory,
 } from "@/lib/serviceHealthWindows";
 import { formatServiceHealthError } from "@/lib/serviceHealthError";
+import { withTimeout } from "@/lib/asyncTimeout";
 
 // Disable Next.js static caching: this handler reads live DB state.
 export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
+
+const DB_READ_TIMEOUT_MS = 3_000;
 
 export type ServiceHealthRow = {
   service: string;
@@ -85,15 +88,19 @@ export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
     const db = getDb();
-    const result = await db.execute({
-      sql: `
+    const result = await withTimeout(
+      db.execute({
+        sql: `
         SELECT service, state, last_attempt_started_at, last_attempt_finished_at,
                last_error, updated_at
           FROM service_health
          ORDER BY updated_at DESC
       `,
-      args: [],
-    });
+        args: [],
+      }),
+      DB_READ_TIMEOUT_MS,
+      `service_health read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    );
 
     const nowMs = Date.now();
     const rows: ServiceHealthRow[] = [];
@@ -139,16 +146,27 @@ export async function GET(): Promise<Response> {
     });
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {
-    // DB unreachable — return empty list instead of 500 so the banner
-    // doesn't itself become a noisy alarm during transient issues.
+    // DB unreachable — return a synthetic degraded provider row instead of
+    // hanging or shipping an empty healthy-looking service list.
     const message = error instanceof Error ? error.message : "service_health read failed";
     console.warn(`[service-health] ${message}`);
+    const updatedAt = new Date().toISOString();
+    const dbRow: ServiceHealthRow = {
+      service: "turso-db",
+      state: "error",
+      category: "scheduled",
+      last_attempt_started_at: null,
+      last_attempt_finished_at: null,
+      last_error: JSON.stringify({ message }),
+      error_summary: formatServiceHealthError(message),
+      updated_at: updatedAt,
+    };
     const response = NextResponse.json({
-      services: [],
-      failing: [],
-      degraded_count: 0,
+      services: [dbRow],
+      failing: [dbRow],
+      degraded_count: 1,
       dormant_count: 0,
-      summary: { total: 0, failing_count: 0 },
+      summary: { total: 1, failing_count: 1 },
       warning: message,
     });
     return setNoStoreResponseHeaders(response, requestId);

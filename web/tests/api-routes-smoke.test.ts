@@ -463,7 +463,7 @@ describe("GET /api/service-health", () => {
     expect((body.services as unknown[]).length).toBeGreaterThan(0);
   });
 
-  it("returns 200 with warning envelope when DB throws", async () => {
+  it("returns 200 with degraded provider row when DB throws", async () => {
     mockGetDb.mockReturnValueOnce({
       execute: vi.fn().mockRejectedValue(new Error("turso unreachable")),
     });
@@ -471,7 +471,10 @@ describe("GET /api/service-health", () => {
     const res = await GET();
     expect(res.status).toBe(200);
     const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.services).toEqual([]);
+    const services = body.services as Array<Record<string, unknown>>;
+    expect(services).toHaveLength(1);
+    expect(services[0]).toMatchObject({ service: "turso-db", state: "error" });
+    expect(body.degraded_count).toBe(1);
     expect(body.warning).toContain("turso");
   });
 });

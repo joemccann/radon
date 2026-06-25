@@ -33,6 +33,7 @@ beforeEach(() => {
 
 afterEach(() => {
   warn.mockRestore();
+  vi.useRealTimers();
 });
 
 describe("dbFirstRead — fresher-source selection", () => {
@@ -201,6 +202,50 @@ describe("dbFirstRead — failure handling", () => {
       },
     });
     expect(result).toEqual({ ok: false });
+  });
+});
+
+describe("dbFirstRead — source deadlines", () => {
+  it("serves disk when the DB read hangs past the source timeout", async () => {
+    vi.useFakeTimers();
+    const resultPromise = dbFirstRead({
+      ...baseOptions,
+      fromDb: () => new Promise(() => {}),
+      fromDisk: source({ v: "disk" }, NOW - 1 * MINUTE),
+      sourceTimeoutMs: 10,
+      label: "live-data",
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    const result = await resultPromise;
+
+    expect(result).toEqual({
+      ok: true,
+      source: "disk",
+      data: { v: "disk" },
+      timestampMs: NOW - 1 * MINUTE,
+      fresh: true,
+    });
+    expect(
+      warn.mock.calls.some((c: unknown[]) =>
+        String(c[0]).includes("live-data") &&
+        String(c[0]).includes("DB read timed out"),
+      ),
+    ).toBe(true);
+  });
+
+  it("returns ok=false when both live-data sources hang past their source timeout", async () => {
+    vi.useFakeTimers();
+    const resultPromise = dbFirstRead({
+      ...baseOptions,
+      fromDb: () => new Promise(() => {}),
+      fromDisk: () => new Promise(() => {}),
+      sourceTimeoutMs: 10,
+      label: "live-data",
+    });
+
+    await vi.advanceTimersByTimeAsync(10);
+    await expect(resultPromise).resolves.toEqual({ ok: false });
   });
 });
 

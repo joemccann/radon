@@ -92,8 +92,9 @@ describe("usePrices ping/pong", () => {
 });
 
 describe("IBStatusContext ping/pong", () => {
-  it("responds to ping message with pong", () => {
+  it("responds to ping message with pong", async () => {
     renderHook(() => useIBStatusContext(), { wrapper: ibWrapper });
+    await flush();
     const ws = latestWs();
     act(() => ws.simulateOpen());
     act(() => ws.simulateMessage({ type: "ping" }));
@@ -104,8 +105,9 @@ describe("IBStatusContext ping/pong", () => {
     expect(pongs).toHaveLength(1);
   });
 
-  it("force-reconnects after 60s of silence", () => {
+  it("force-reconnects after 60s of silence", async () => {
     renderHook(() => useIBStatusContext(), { wrapper: ibWrapper });
+    await flush();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 

@@ -17,6 +17,8 @@ import {
   parseOptionKey,
 } from "./pricesProtocol";
 import { createReconnectStrategy, type ReconnectState } from "./reconnectStrategy";
+import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "./realtimeSocketAuth";
+import type { RealtimeTokenGetter } from "./RealtimeAuthContext";
 
 export type PriceUpdate = {
   symbol: string;
@@ -54,7 +56,7 @@ export type UsePricesOptions = {
   /** Callback when connection status changes */
   onConnectionChange?: (connected: boolean) => void;
   /** Clerk getToken function for WebSocket auth */
-  getToken?: () => Promise<string | null>;
+  getToken?: RealtimeTokenGetter;
 };
 
 export type UsePricesReturn = {
@@ -205,10 +207,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   onConnectionChangeRef.current = onConnectionChange;
   getTokenRef.current = getToken;
 
-  const socketUrl =
-    process.env.NEXT_PUBLIC_IB_REALTIME_WS_URL ??
-    process.env.IB_REALTIME_WS_URL ??
-    "ws://localhost:8765";
+  const socketUrl = resolveRealtimeWebSocketUrl();
 
   // ---------------------------------------------------------------------------
   // Helpers
@@ -427,24 +426,6 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   }, []);
 
   // ---------------------------------------------------------------------------
-  // buildAuthenticatedUrl — append ticket query param for WS auth
-  // ---------------------------------------------------------------------------
-  const buildAuthenticatedUrl = useCallback(async (baseUrl: string): Promise<string> => {
-    if (!getTokenRef.current) return baseUrl;
-    try {
-      const token = await getTokenRef.current();
-      if (!token) return baseUrl;
-      const { getWsTicket } = await import("./wsTicket");
-      const ticket = await getWsTicket(token);
-      const separator = baseUrl.includes("?") ? "&" : "?";
-      return `${baseUrl}${separator}ticket=${ticket}`;
-    } catch (err) {
-      wsLog("Failed to get WS ticket, connecting without auth:", err);
-      return baseUrl;
-    }
-  }, []);
-
-  // ---------------------------------------------------------------------------
   // scheduleReconnect — ref-based to break circular dep with connect
   // ---------------------------------------------------------------------------
   const scheduleReconnectRef = useRef<() => void>(() => {});
@@ -478,7 +459,19 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     }
 
     (async () => {
-      const url = await buildAuthenticatedUrl(socketUrl);
+      let url: string;
+      try {
+        url = await buildAuthenticatedWebSocketUrl(socketUrl, getTokenRef.current);
+      } catch (err) {
+        if (gen !== socketGenRef.current || !mountedRef.current) return;
+        connStateRef.current = "closed";
+        setConnected(false);
+        const message = err instanceof Error ? err.message : "Realtime auth failed";
+        setError(message);
+        wsLog("Failed to authenticate realtime socket:", message);
+        scheduleReconnectRef.current();
+        return;
+      }
       if (gen !== socketGenRef.current) return; // stale connect attempt
 
       const ws = new WebSocket(url);
@@ -654,7 +647,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       ws.close();
     };
     })();
-  }, [enabled, socketUrl, clearReconnectTimer, clearStalenessTimer, syncSubscriptions, syncDepth, buildAuthenticatedUrl]);
+  }, [enabled, socketUrl, clearReconnectTimer, clearStalenessTimer, syncSubscriptions, syncDepth]);
 
   // Wire scheduleReconnect via ref to avoid circular dep
   const scheduleReconnect = useCallback(() => {
@@ -701,49 +694,61 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       }
 
       return new Promise<Record<string, PriceData>>((resolve, reject) => {
-        const ws = new WebSocket(socketUrl);
         const results: Record<string, PriceData> = {};
         const pending = new Set(symbolsToRequest);
+        let ws: WebSocket | null = null;
 
         const timeout = setTimeout(() => {
-          ws.close();
+          ws?.close();
           resolve(results);
         }, 5000);
 
-        ws.onopen = () => {
-          ws.send(
-            JSON.stringify({ action: "snapshot", symbols: symbolsToRequest }),
-          );
-        };
+        const wireSnapshotSocket = (socket: WebSocket) => {
+          socket.onopen = () => {
+            socket.send(
+              JSON.stringify({ action: "snapshot", symbols: symbolsToRequest }),
+            );
+          };
 
-        ws.onmessage = (event) => {
-          try {
-            const message = JSON.parse(event.data as string) as WSMessage;
-            if (message.type === "snapshot") {
-              const symbol = message.data.symbol.toUpperCase();
-              results[symbol] = message.data;
-              pending.delete(symbol);
+          socket.onmessage = (event) => {
+            try {
+              const message = JSON.parse(event.data as string) as WSMessage;
+              if (message.type === "snapshot") {
+                const symbol = message.data.symbol.toUpperCase();
+                results[symbol] = message.data;
+                pending.delete(symbol);
 
-              if (pending.size === 0) {
+                if (pending.size === 0) {
+                  clearTimeout(timeout);
+                  socket.close();
+                  resolve(results);
+                }
+              } else if (message.type === "error") {
                 clearTimeout(timeout);
-                ws.close();
-                resolve(results);
+                socket.close();
+                reject(new Error(message.message));
               }
-            } else if (message.type === "error") {
-              clearTimeout(timeout);
-              ws.close();
-              reject(new Error(message.message));
+            } catch (e) {
+              console.error("Failed to parse message:", e);
             }
-          } catch (e) {
-            console.error("Failed to parse message:", e);
-          }
+          };
+
+          socket.onerror = () => {
+            clearTimeout(timeout);
+            socket.close();
+            reject(new Error("Failed to connect to price server"));
+          };
         };
 
-        ws.onerror = () => {
-          clearTimeout(timeout);
-          ws.close();
-          reject(new Error("Failed to connect to price server"));
-        };
+        buildAuthenticatedWebSocketUrl(socketUrl, getTokenRef.current)
+          .then((url) => {
+            ws = new WebSocket(url);
+            wireSnapshotSocket(ws);
+          })
+          .catch((error_) => {
+            clearTimeout(timeout);
+            reject(error_);
+          });
       }).catch((error_) => {
         setError(
           error_ instanceof Error ? error_.message : "Failed to get snapshot",

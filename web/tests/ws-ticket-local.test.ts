@@ -28,8 +28,9 @@ describe("wsTicket local routing", () => {
     const ticket = await getWsTicket("test-clerk-token");
 
     expect(ticket).toBe("local-ticket-abc");
-    const [url] = mockFetch.mock.calls[0];
+    const [url, options] = mockFetch.mock.calls[0];
     expect(url).toBe("/api/ib/ws-ticket");
+    expect(options.cache).toBe("no-store");
   });
 
   it("does not use NEXT_PUBLIC_RADON_API_URL for ws-ticket", async () => {

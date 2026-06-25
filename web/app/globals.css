@@ -4480,6 +4480,42 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   color: var(--negative);
 }
 
+.live-data-degraded {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--negative) 44%, var(--border));
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--negative) 10%, var(--panel));
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.live-data-degraded strong {
+  color: var(--negative);
+  letter-spacing: 0;
+}
+
+.live-data-degraded span {
+  color: var(--text-muted);
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-transform: none;
+}
+
+@media (max-width: 640px) {
+  .live-data-degraded {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
+  }
+}
+
 .sync-button {
   display: inline-flex;
   align-items: center;
