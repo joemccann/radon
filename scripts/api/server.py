@@ -2635,7 +2635,15 @@ async def performance_background():
     return {"status": "accepted"}
 
 
-_EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 30.0
+_EQUITY_OPTIONS_CHAIN_TIMEOUT_S = 45.0
+
+
+def _options_chain_failure_status(error: Optional[str]) -> int:
+    if error and "timeout" in error.lower():
+        return 504
+    if error and "timed out" in error.lower():
+        return 504
+    return 502
 
 
 @app.get("/options/chain")
@@ -2648,24 +2656,38 @@ async def options_chain(symbol: str, expiry: Optional[str] = None):
         "ib_option_chain.py", args, timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S
     )
     if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
+        raise HTTPException(
+            status_code=_options_chain_failure_status(result.error),
+            detail=result.error,
+        )
     if result.data and result.data.get("error"):
-        raise HTTPException(status_code=502, detail=result.data["error"])
+        detail = str(result.data["error"])
+        raise HTTPException(
+            status_code=_options_chain_failure_status(detail),
+            detail=detail,
+        )
     return result.data
 
 
 @app.get("/options/expirations")
 async def options_expirations(symbol: str):
     """List option expirations for a symbol."""
-    result = await run_script(
+    result = await _run_ib_script_with_recovery(
         "ib_option_chain.py",
         ["--symbol", symbol.upper()],
         timeout=_EQUITY_OPTIONS_CHAIN_TIMEOUT_S,
     )
     if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
+        raise HTTPException(
+            status_code=_options_chain_failure_status(result.error),
+            detail=result.error,
+        )
     if result.data and result.data.get("error"):
-        raise HTTPException(status_code=502, detail=result.data["error"])
+        detail = str(result.data["error"])
+        raise HTTPException(
+            status_code=_options_chain_failure_status(detail),
+            detail=detail,
+        )
     return {"symbol": result.data.get("symbol"), "expirations": result.data.get("expirations")}
 
 

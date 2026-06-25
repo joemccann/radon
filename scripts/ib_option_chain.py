@@ -7,6 +7,7 @@ Usage:
 """
 
 import argparse
+import asyncio
 import json
 import sys
 from pathlib import Path
@@ -14,6 +15,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scripts.clients.ib_client import IBClient
+from scripts.utils.ib_preflight import IB_REQUEST_TIMEOUT_S
 
 
 def _normalize_expiry(expiry) -> str:
@@ -64,6 +66,37 @@ def _preferred_multiplier(chains) -> str:
     return str(getattr(chains[0], "multiplier", ""))
 
 
+def _set_ib_request_timeout(ib, timeout_s: float = IB_REQUEST_TIMEOUT_S) -> None:
+    """Bound sync ib_insync requests; default RequestTimeout can block forever."""
+    setattr(ib, "RequestTimeout", timeout_s)
+
+
+def _qualify_underlying(ib, underlying, timeout_s: float = IB_REQUEST_TIMEOUT_S) -> None:
+    _set_ib_request_timeout(ib, timeout_s)
+    try:
+        ib.qualifyContracts(underlying)
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        raise TimeoutError(
+            f"ib_insync qualifyContracts timed out after {timeout_s}s"
+        ) from exc
+
+
+def _request_option_chains(
+    ib,
+    symbol: str,
+    sec_type: str,
+    con_id: int,
+    timeout_s: float = IB_REQUEST_TIMEOUT_S,
+):
+    _set_ib_request_timeout(ib, timeout_s)
+    try:
+        return ib.reqSecDefOptParams(symbol, "", sec_type, con_id)
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        raise TimeoutError(
+            f"ib_insync reqSecDefOptParams timed out after {timeout_s}s"
+        ) from exc
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--symbol", required=True)
@@ -98,14 +131,14 @@ def main():
         )
 
         underlying = resolve_quote_contract(args.symbol)
-        client._ib.qualifyContracts(underlying)
+        _qualify_underlying(client._ib, underlying)
         if not underlying.conId:
             print(json.dumps({"error": f"Could not qualify {args.symbol}"}))
             return
 
         sec_type = "IND" if is_index_symbol(args.symbol) else "STK"
-        chains = client._ib.reqSecDefOptParams(
-            args.symbol, "", sec_type, underlying.conId
+        chains = _request_option_chains(
+            client._ib, args.symbol, sec_type, underlying.conId
         )
 
         if args.expiry:

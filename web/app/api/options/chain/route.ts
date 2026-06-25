@@ -1,6 +1,11 @@
-import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
+import {
+  OPTIONS_PROXY_TIMEOUT_MS,
+  optionsErrorResponse,
+  optionsJson,
+} from "../_shared";
 
+export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
@@ -9,7 +14,7 @@ export async function GET(request: Request): Promise<Response> {
   const expiry = searchParams.get("expiry");
 
   if (!symbol) {
-    return NextResponse.json({ error: "Required: symbol" }, { status: 400 });
+    return optionsJson({ error: "Required: symbol", code: "BAD_REQUEST" }, 400);
   }
 
   try {
@@ -18,12 +23,11 @@ export async function GET(request: Request): Promise<Response> {
 
     const data = await radonFetch<Record<string, unknown>>(
       `/options/chain?${params}`,
-      { timeout: 20_000 },
+      { timeout: OPTIONS_PROXY_TIMEOUT_MS },
     );
 
-    return NextResponse.json(data);
+    return optionsJson(data);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to fetch option chain";
-    return NextResponse.json({ error: message }, { status: 502 });
+    return optionsErrorResponse("Option chain unavailable", error);
   }
 }

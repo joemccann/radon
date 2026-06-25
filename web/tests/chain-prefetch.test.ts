@@ -77,6 +77,10 @@ describe("useChainPrefetch hook", () => {
     expect(hookSource).toContain("&expiry=");
   });
 
+  it("requests fresh option-chain responses", () => {
+    expect(hookSource).toContain('cache: "no-store"');
+  });
+
   it("handles failed fetches gracefully without crashing", () => {
     // Should have try/catch around fetch
     expect(hookSource).toMatch(/try\s*\{[^]*?fetch[^]*?catch/s);
@@ -101,6 +105,12 @@ describe("OptionsChainTab integration with prefetch", () => {
 
   it("calls cacheStrikes after successful strike fetch", () => {
     expect(tabSource).toContain("cacheStrikes");
+  });
+
+  it("requests fresh expirations and selected-expiry chain responses", () => {
+    expect(tabSource).toContain("/api/options/expirations?symbol=");
+    expect(tabSource).toContain("/api/options/chain?symbol=");
+    expect(tabSource).toMatch(/cache:\s*"no-store"/);
   });
 });
 
