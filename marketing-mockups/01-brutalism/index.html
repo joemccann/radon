@@ -1,0 +1,1236 @@
+<!DOCTYPE html>
+<html lang="en" class="theme-dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RADON // Market-Structure Reconstruction Terminal</title>
+<meta name="description" content="A single-operator institutional options terminal. Reconstruct market structure from dark-pool flow, score institutional accumulation before price moves, and force every contract through a four-gate, seven-milestone discipline. Flow signal or nothing." />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+<style>
+/* ============================================================
+   RADON // Bloomberg-Killer Brutalism
+   Single-file instrument-rack landing surface.
+   ============================================================ */
+
+:root {
+  /* spacing 8px grid */
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+  --s6: 32px; --s7: 48px; --s8: 64px; --s9: 96px;
+  --radius: 4px;
+  --hair: 1px;
+
+  --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+
+  --track: 0.03em;
+  --track-wide: 0.12em;
+}
+
+/* ---- DARK (default) ---- */
+.theme-dark {
+  --canvas: #0a0f14;
+  --panel: #0f1519;
+  --panel-raised: #151c22;
+  --hairline: #1e293b;
+  --hairline-soft: #16202b;
+  --text: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #475569;
+
+  --signal-core: #05AD98;
+  --signal-strong: #0FCFB5;
+  --signal-deep: #048A7A;
+  --dislocation: #D946A8;
+  --extreme: #8B5CF6;
+  --warn: #F5A623;
+  --fault: #E85D6C;
+
+  --grid-line: rgba(94, 234, 212, 0.045);
+  --proj-line: rgba(148, 163, 184, 0.06);
+  --signal-wash: rgba(5, 173, 152, 0.08);
+  --warn-wash: rgba(245, 166, 35, 0.10);
+  --fault-wash: rgba(232, 93, 108, 0.10);
+}
+
+/* ---- LIGHT ---- */
+.theme-light {
+  --canvas: #FFFFFF;
+  --panel: #FFFFFF;
+  --panel-raised: #F1F5F9;
+  --hairline: #BBBFBF;
+  --hairline-soft: #DCE0E0;
+  --text: #000000;
+  --text-secondary: #636363;
+  --text-muted: #94A3B8;
+
+  --signal-core: #05AD98;
+  --signal-strong: #048A7A;
+  --signal-deep: #036F62;
+  --dislocation: #C026A0;
+  --extreme: #7C3AED;
+  --warn: #B7791F;
+  --fault: #D4183D;
+
+  --grid-line: rgba(5, 138, 122, 0.05);
+  --proj-line: rgba(99, 99, 99, 0.07);
+  --signal-wash: rgba(5, 173, 152, 0.07);
+  --warn-wash: rgba(183, 121, 31, 0.10);
+  --fault-wash: rgba(212, 24, 61, 0.08);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+body {
+  background: var(--canvas);
+  color: var(--text);
+  font-family: var(--sans);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: hidden;
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+/* projection-geometry background grid */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(var(--grid-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
+  background-size: 48px 48px;
+}
+
+/* faint projection rays */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  background-image:
+    linear-gradient(115deg, transparent 49.9%, var(--proj-line) 50%, transparent 50.1%),
+    linear-gradient(-115deg, transparent 49.9%, var(--proj-line) 50%, transparent 50.1%);
+  background-size: 220px 100%, 280px 100%;
+}
+
+.wrap { position: relative; z-index: 1; max-width: 1240px; margin: 0 auto; padding: 0 var(--s5); }
+
+/* ---------- shared mono/label utilities ---------- */
+.mono { font-family: var(--mono); letter-spacing: var(--track); }
+.label {
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: var(--track-wide);
+  font-size: 10.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.num { font-family: var(--mono); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+
+.sig { color: var(--signal-core); }
+.sig-strong { color: var(--signal-strong); }
+.dis { color: var(--dislocation); }
+.ext { color: var(--extreme); }
+.warn-c { color: var(--warn); }
+.fault-c { color: var(--fault); }
+.dim { color: var(--text-secondary); }
+
+/* ---------- panel primitive (the device chassis) ---------- */
+.panel {
+  background: var(--panel);
+  border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius);
+}
+.panel-raised { background: var(--panel-raised); }
+
+.module-head {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-bottom: var(--hair) solid var(--hairline);
+  font-family: var(--mono);
+  text-transform: uppercase;
+  letter-spacing: var(--track);
+  font-size: 11px;
+}
+.module-head .mid { color: var(--signal-core); font-weight: 600; }
+.module-head .mname { color: var(--text); font-weight: 500; }
+.module-head .mrate {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 10px;
+  letter-spacing: var(--track-wide);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+.live-dot {
+  width: 6px; height: 6px; border-radius: 50%;
+  background: var(--signal-strong);
+  box-shadow: 0 0 0 0 var(--signal-strong);
+  animation: pulse 2.4s ease-out infinite;
+}
+@keyframes pulse {
+  0% { box-shadow: 0 0 0 0 var(--signal-wash); }
+  70% { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@media (prefers-reduced-motion: reduce) { .live-dot { animation: none; } }
+
+/* ============================================================
+   TOP RAIL
+   ============================================================ */
+.toprail {
+  position: sticky; top: 0; z-index: 50;
+  background: color-mix(in srgb, var(--canvas) 88%, transparent);
+  backdrop-filter: blur(8px);
+  border-bottom: var(--hair) solid var(--hairline);
+}
+.toprail-inner {
+  max-width: 1240px; margin: 0 auto;
+  display: flex; align-items: center; gap: var(--s5);
+  padding: var(--s3) var(--s5);
+}
+.wordmark {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: 19px;
+  letter-spacing: var(--track);
+  display: inline-flex; align-items: baseline; gap: var(--s2);
+}
+.wordmark .glyph { color: var(--signal-core); }
+.wordmark .ver { font-family: var(--mono); font-size: 10px; color: var(--text-muted); letter-spacing: var(--track-wide); }
+
+.toprail nav { display: flex; gap: var(--s5); margin-left: var(--s5); }
+.toprail nav a {
+  font-family: var(--mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: var(--track);
+  color: var(--text-secondary); text-decoration: none;
+  transition: color 0.15s;
+}
+.toprail nav a:hover { color: var(--signal-core); }
+.toprail .spacer { margin-left: auto; }
+
+.rail-stat {
+  font-family: var(--mono); font-size: 10.5px;
+  letter-spacing: var(--track); color: var(--text-muted);
+  display: inline-flex; align-items: center; gap: var(--s2);
+}
+.rail-stat b { color: var(--signal-core); font-weight: 600; }
+
+.toggle {
+  font-family: var(--mono); font-size: 10.5px;
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+  background: var(--panel-raised);
+  border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius);
+  color: var(--text-secondary);
+  padding: var(--s2) var(--s3);
+  cursor: pointer; display: inline-flex; align-items: center; gap: var(--s2);
+  transition: border-color 0.15s, color 0.15s;
+}
+.toggle:hover { border-color: var(--signal-deep); color: var(--text); }
+.toggle .sw {
+  width: 22px; height: 12px; border-radius: 7px;
+  background: var(--hairline); position: relative; transition: background 0.2s;
+}
+.toggle .sw::after {
+  content: ""; position: absolute; top: 1px; left: 1px;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: var(--signal-core); transition: left 0.2s;
+}
+.theme-light .toggle .sw::after { left: 11px; }
+
+/* ============================================================
+   HERO
+   ============================================================ */
+.hero { padding: var(--s8) 0 var(--s7); }
+.hero-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  gap: var(--s7);
+  align-items: center;
+}
+.hero-eyebrow {
+  display: inline-flex; align-items: center; gap: var(--s3);
+  font-family: var(--mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+  color: var(--text-secondary);
+  border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3);
+  margin-bottom: var(--s5);
+}
+.hero-eyebrow .live-dot { margin-right: 2px; }
+
+.hero h1 {
+  font-family: var(--sans);
+  font-weight: 700;
+  font-size: clamp(38px, 5.4vw, 62px);
+  line-height: 1.02;
+  letter-spacing: -0.015em;
+  margin-bottom: var(--s5);
+}
+.hero h1 .accent { color: var(--signal-core); }
+
+.hero .lede {
+  font-size: 17px; line-height: 1.55;
+  color: var(--text-secondary);
+  max-width: 46ch;
+  margin-bottom: var(--s6);
+}
+.hero .lede b { color: var(--text); font-weight: 500; }
+
+.hero-cta { display: flex; gap: var(--s3); flex-wrap: wrap; align-items: center; }
+.btn {
+  font-family: var(--mono); font-size: 12px;
+  text-transform: uppercase; letter-spacing: var(--track);
+  text-decoration: none;
+  padding: var(--s3) var(--s5);
+  border-radius: var(--radius);
+  border: var(--hair) solid var(--signal-deep);
+  display: inline-flex; align-items: center; gap: var(--s2);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.btn-primary { background: var(--signal-core); color: #05140f; font-weight: 600; }
+.theme-light .btn-primary { color: #ffffff; }
+.btn-primary:hover { background: var(--signal-strong); border-color: var(--signal-strong); }
+.btn-ghost { color: var(--text); border-color: var(--hairline); }
+.btn-ghost:hover { border-color: var(--signal-deep); color: var(--signal-core); }
+
+.hero-meta {
+  display: flex; gap: var(--s6); margin-top: var(--s7);
+  flex-wrap: wrap;
+}
+.hero-meta .stat .v {
+  font-family: var(--mono); font-size: 24px; font-weight: 600;
+  color: var(--text); font-variant-numeric: tabular-nums;
+}
+.hero-meta .stat .v .unit { color: var(--signal-core); font-size: 14px; }
+.hero-meta .stat .k {
+  font-family: var(--mono); font-size: 10px; text-transform: uppercase;
+  letter-spacing: var(--track-wide); color: var(--text-muted); margin-top: 2px;
+}
+
+/* ---- HERO INSTRUMENT PANEL ---- */
+.instrument { overflow: hidden; }
+.inst-body { padding: var(--s4); display: grid; gap: var(--s4); }
+
+.readout-row { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.readout {
+  border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius);
+  padding: var(--s3);
+  background: var(--panel-raised);
+}
+.readout .rk {
+  font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: var(--track-wide); color: var(--text-muted);
+  display: flex; justify-content: space-between;
+}
+.readout .rv {
+  font-family: var(--mono); font-size: 27px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1.1; margin-top: 6px;
+}
+.readout .rd { font-family: var(--mono); font-size: 10px; margin-top: 2px; }
+
+/* spectral bars */
+.spectral { display: flex; align-items: flex-end; gap: 3px; height: 56px; margin-top: var(--s2); }
+.spectral i {
+  flex: 1; display: block;
+  background: linear-gradient(180deg, var(--signal-strong), var(--signal-deep));
+  border-radius: 1px;
+  height: 30%;
+  animation: spec 1.9s ease-in-out infinite;
+  transform-origin: bottom;
+}
+.spectral i:nth-child(odd) { background: linear-gradient(180deg, var(--signal-core), var(--signal-deep)); }
+.spectral i:nth-child(7n) { background: linear-gradient(180deg, var(--dislocation), var(--signal-deep)); }
+@keyframes spec {
+  0%, 100% { transform: scaleY(0.35); opacity: 0.7; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) { .spectral i { animation: none; } }
+
+/* markov arc */
+.markov { padding: var(--s3); border: var(--hair) solid var(--hairline); border-radius: var(--radius); background: var(--panel-raised); }
+.markov svg { width: 100%; height: 84px; display: block; }
+.markov .node-l { font-family: var(--mono); font-size: 9px; letter-spacing: var(--track); }
+
+.arc-flow { stroke-dasharray: 4 5; animation: dash 1.6s linear infinite; }
+@keyframes dash { to { stroke-dashoffset: -18; } }
+@media (prefers-reduced-motion: reduce) { .arc-flow { animation: none; } }
+
+/* command prompt */
+.cmd {
+  font-family: var(--mono); font-size: 13px;
+  border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius);
+  background: var(--canvas);
+  padding: var(--s3) var(--s4);
+  display: flex; align-items: center; gap: var(--s2);
+  letter-spacing: var(--track);
+}
+.cmd .prompt-sym { color: var(--signal-core); font-weight: 600; }
+.cmd .typed { color: var(--text); }
+.cmd .cursor {
+  width: 8px; height: 16px; background: var(--signal-strong);
+  display: inline-block; animation: blink 1.05s step-end infinite;
+}
+@keyframes blink { 50% { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .cmd .cursor { animation: none; } }
+
+/* ============================================================
+   SECTION SHELL
+   ============================================================ */
+section.block { padding: var(--s9) 0 0; }
+.section-head { margin-bottom: var(--s6); max-width: 64ch; }
+.section-tag {
+  font-family: var(--mono); font-size: 11px;
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+  color: var(--signal-core); margin-bottom: var(--s3);
+  display: flex; align-items: center; gap: var(--s2);
+}
+.section-tag::before {
+  content: ""; width: 18px; height: 1px; background: var(--signal-deep);
+}
+.section-head h2 {
+  font-family: var(--sans); font-weight: 600;
+  font-size: clamp(26px, 3.4vw, 38px); line-height: 1.08;
+  letter-spacing: -0.01em; margin-bottom: var(--s3);
+}
+.section-head p {
+  color: var(--text-secondary); font-size: 16px; line-height: 1.55; max-width: 58ch;
+}
+.section-head p b { color: var(--text); font-weight: 500; }
+
+/* ============================================================
+   2. CHOKEPOINT  (order-risk gate)
+   ============================================================ */
+.chokepoint-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); align-items: start; }
+
+.gate-card { overflow: hidden; }
+.gate-body { padding: var(--s4); display: grid; gap: var(--s3); }
+
+.risk-line {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s3); border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius); background: var(--panel-raised);
+}
+.risk-line .rl-k { font-family: var(--mono); font-size: 11px; text-transform: uppercase; letter-spacing: var(--track); color: var(--text-secondary); }
+.risk-line .rl-v { font-family: var(--mono); font-size: 16px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.risk-line.pass { border-color: var(--signal-deep); background: var(--signal-wash); }
+.risk-line.flag { border-color: var(--warn); background: var(--warn-wash); }
+
+.gate-verdict {
+  display: flex; align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+  border-top: var(--hair) solid var(--hairline);
+}
+.verdict-badge {
+  font-family: var(--mono); font-size: 11px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+  padding: var(--s2) var(--s3); border-radius: var(--radius);
+}
+.verdict-badge.hold { background: var(--warn); color: #1a1206; }
+.gate-verdict .vmsg { font-family: var(--mono); font-size: 11px; color: var(--text-secondary); letter-spacing: var(--track); }
+
+.choke-note { display: grid; gap: var(--s4); }
+.choke-feature {
+  display: flex; gap: var(--s4); padding: var(--s4) 0;
+  border-top: var(--hair) solid var(--hairline-soft);
+}
+.choke-feature:first-child { border-top: none; padding-top: 0; }
+.choke-feature .ci {
+  font-family: var(--mono); font-size: 11px; color: var(--signal-core);
+  letter-spacing: var(--track-wide); min-width: 28px; padding-top: 2px;
+}
+.choke-feature h4 { font-family: var(--sans); font-size: 16px; font-weight: 600; margin-bottom: var(--s1); }
+.choke-feature p { font-size: 14px; color: var(--text-secondary); line-height: 1.5; }
+
+/* convexity bar */
+.convex {
+  border: var(--hair) solid var(--hairline); border-radius: var(--radius);
+  background: var(--panel-raised); padding: var(--s3);
+}
+.convex .clab { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: var(--track); color: var(--text-muted); margin-bottom: var(--s2); }
+.convex-track { height: 14px; border-radius: 2px; background: var(--canvas); border: var(--hair) solid var(--hairline); display: flex; overflow: hidden; }
+.convex-loss { width: 28%; background: var(--fault); }
+.convex-gain { width: 72%; background: linear-gradient(90deg, var(--signal-deep), var(--signal-core)); }
+.convex .cnums { display: flex; justify-content: space-between; font-family: var(--mono); font-size: 11px; font-weight: 600; margin-top: var(--s2); }
+
+/* ============================================================
+   3. FLOW RECONSTRUCTION (scanner)
+   ============================================================ */
+.scanner { overflow: hidden; }
+.scan-head-row, .scan-row {
+  display: grid;
+  grid-template-columns: 92px 1fr 130px 88px 96px 120px;
+  align-items: center; gap: var(--s3);
+  padding: var(--s3) var(--s4);
+}
+.scan-head-row {
+  border-bottom: var(--hair) solid var(--hairline);
+  font-family: var(--mono); font-size: 9.5px; text-transform: uppercase;
+  letter-spacing: var(--track-wide); color: var(--text-muted);
+}
+.scan-row { border-bottom: var(--hair) solid var(--hairline-soft); font-family: var(--mono); font-size: 13px; }
+.scan-row:last-child { border-bottom: none; }
+.scan-row:hover { background: var(--panel-raised); }
+.scan-row .tkr { font-weight: 600; font-size: 14px; letter-spacing: var(--track); }
+.scan-row .sig-tag { font-size: 10px; text-transform: uppercase; letter-spacing: var(--track); font-weight: 600; }
+.scan-row .sig-tag.bull { color: var(--signal-core); }
+.scan-row .sig-tag.dist { color: var(--fault); }
+.scan-row .sig-tag.dislo { color: var(--dislocation); }
+
+.score-cell { display: flex; align-items: center; gap: var(--s2); }
+.score-bar { flex: 1; height: 6px; background: var(--canvas); border: var(--hair) solid var(--hairline); border-radius: 2px; overflow: hidden; }
+.score-bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--signal-deep), var(--signal-strong)); }
+.score-bar i.warnfill { background: linear-gradient(90deg, var(--warn), var(--fault)); }
+.score-bar i.disfill { background: linear-gradient(90deg, var(--extreme), var(--dislocation)); }
+.score-cell .sv { font-weight: 600; min-width: 26px; text-align: right; }
+.num.pos { color: var(--signal-core); }
+.num.neg { color: var(--fault); }
+
+/* ============================================================
+   4. FOUR-MODEL REGIME RACK
+   ============================================================ */
+.rack { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s4); }
+.rack-module { display: flex; flex-direction: column; }
+.rack-body { padding: var(--s4); flex: 1; display: flex; flex-direction: column; gap: var(--s3); }
+.rack-big {
+  font-family: var(--mono); font-size: 34px; font-weight: 600;
+  font-variant-numeric: tabular-nums; line-height: 1;
+}
+.rack-sub { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: var(--track); color: var(--text-secondary); }
+.rack-state {
+  font-family: var(--mono); font-size: 10px; font-weight: 600;
+  text-transform: uppercase; letter-spacing: var(--track-wide);
+  padding: var(--s1) var(--s2); border-radius: 2px; align-self: flex-start;
+}
+.rack-state.elevated { background: var(--warn-wash); color: var(--warn); border: var(--hair) solid var(--warn); }
+.rack-state.neutral { background: var(--signal-wash); color: var(--signal-core); border: var(--hair) solid var(--signal-deep); }
+.rack-state.compressed { background: var(--fault-wash); color: var(--fault); border: var(--hair) solid var(--fault); }
+.rack-state.rotating { color: var(--dislocation); border: var(--hair) solid var(--dislocation); }
+
+/* sparkline */
+.spark { height: 34px; margin-top: auto; }
+.spark svg { width: 100%; height: 34px; display: block; }
+.rack-desc { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+
+/* ============================================================
+   5. STRUCTURE BUILDER  (mini chain + BAG combo)
+   ============================================================ */
+.builder-grid { display: grid; grid-template-columns: 1.1fr 1fr; gap: var(--s5); align-items: start; }
+.chain { overflow: hidden; }
+.chain-grid-head, .chain-row {
+  display: grid; grid-template-columns: 64px 60px 1fr 64px 64px;
+  align-items: center; gap: var(--s2);
+  padding: var(--s2) var(--s4); font-family: var(--mono); font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+.chain-grid-head {
+  border-bottom: var(--hair) solid var(--hairline);
+  font-size: 9.5px; text-transform: uppercase; letter-spacing: var(--track-wide); color: var(--text-muted);
+}
+.chain-row { border-bottom: var(--hair) solid var(--hairline-soft); }
+.chain-row .strike { text-align: center; color: var(--text-secondary); }
+.chain-row.atm { background: var(--panel-raised); }
+.chain-row.leg-buy { background: var(--signal-wash); }
+.chain-row.leg-sell { background: var(--warn-wash); }
+.leg-flag { font-size: 9px; font-weight: 600; letter-spacing: var(--track); text-transform: uppercase; text-align: center; }
+.leg-flag.buy { color: var(--signal-core); }
+.leg-flag.sell { color: var(--warn); }
+.chain-row .c-bid { color: var(--signal-core); text-align: right; }
+.chain-row .c-ask { color: var(--fault); text-align: right; }
+
+.combo-summary { display: grid; gap: var(--s3); }
+.combo-card { padding: var(--s4); display: grid; gap: var(--s3); }
+.combo-leg {
+  display: flex; align-items: center; justify-content: space-between;
+  font-family: var(--mono); font-size: 12px; padding: var(--s2) 0;
+  border-bottom: var(--hair) solid var(--hairline-soft);
+}
+.combo-leg:last-of-type { border-bottom: none; }
+.combo-leg .side { font-weight: 600; letter-spacing: var(--track); }
+.combo-leg .side.b { color: var(--signal-core); }
+.combo-leg .side.s { color: var(--warn); }
+.combo-net {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: var(--s3); border: var(--hair) solid var(--signal-deep);
+  background: var(--signal-wash); border-radius: var(--radius);
+  font-family: var(--mono);
+}
+.combo-net .nk { font-size: 11px; text-transform: uppercase; letter-spacing: var(--track); color: var(--text-secondary); }
+.combo-net .nv { font-size: 18px; font-weight: 600; color: var(--signal-core); }
+
+.struct-pills { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s4); }
+.struct-pills span {
+  font-family: var(--mono); font-size: 10.5px; letter-spacing: var(--track);
+  color: var(--text-secondary); border: var(--hair) solid var(--hairline);
+  border-radius: var(--radius); padding: 3px var(--s2);
+}
+.struct-pills .more { color: var(--signal-core); border-color: var(--signal-deep); }
+
+/* ============================================================
+   6. DISCIPLINE  (gates + milestones lattice)
+   ============================================================ */
+.gates-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s3); margin-bottom: var(--s5); }
+.gate-cell { padding: var(--s4); display: grid; gap: var(--s2); position: relative; }
+.gate-cell .gn { font-family: var(--mono); font-size: 10px; letter-spacing: var(--track-wide); color: var(--signal-core); }
+.gate-cell h4 { font-family: var(--sans); font-size: 16px; font-weight: 600; }
+.gate-cell p { font-size: 12.5px; color: var(--text-secondary); line-height: 1.45; }
+.gate-cell.disabled { opacity: 0.55; }
+.gate-cell.disabled .gn { color: var(--text-muted); }
+.gate-cell .strike-tag { font-family: var(--mono); font-size: 9px; letter-spacing: var(--track); color: var(--fault); text-transform: uppercase; }
+
+.milestones { padding: var(--s5); }
+.ms-lattice { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0; }
+.ms-step { padding: var(--s3) var(--s2); position: relative; }
+.ms-step:not(:last-child)::after {
+  content: ""; position: absolute; top: 28px; right: -1px; width: 1px; height: calc(100% - 28px);
+  background: var(--hairline);
+}
+.ms-node {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: var(--hair) solid var(--signal-deep);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--mono); font-size: 11px; font-weight: 600; color: var(--signal-core);
+  background: var(--signal-wash); margin-bottom: var(--s2);
+}
+.ms-step .ms-name { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: var(--track); color: var(--text); font-weight: 500; line-height: 1.3; }
+.ms-step .ms-desc { font-size: 11px; color: var(--text-secondary); margin-top: var(--s1); line-height: 1.4; }
+
+/* ============================================================
+   7. RESILIENCE (telemetry strip)
+   ============================================================ */
+.telemetry { padding: var(--s4) var(--s5); display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--s5); }
+.tel-cell { display: grid; gap: 6px; }
+.tel-cell .tk { font-family: var(--mono); font-size: 9.5px; text-transform: uppercase; letter-spacing: var(--track-wide); color: var(--text-muted); }
+.tel-cell .tv { font-family: var(--mono); font-size: 13px; font-weight: 600; display: flex; align-items: center; gap: var(--s2); letter-spacing: var(--track); }
+.tel-ok { color: var(--signal-core); }
+.tel-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--signal-strong); }
+.tel-cell .tsub { font-family: var(--mono); font-size: 10px; color: var(--text-secondary); letter-spacing: var(--track); }
+
+/* ============================================================
+   8. CTA
+   ============================================================ */
+.cta-block { padding: var(--s9) 0; }
+.cta-panel { padding: var(--s8) var(--s7); text-align: center; overflow: hidden; }
+.cta-panel h2 {
+  font-family: var(--sans); font-weight: 700; font-size: clamp(28px, 4vw, 44px);
+  letter-spacing: -0.015em; margin-bottom: var(--s4);
+}
+.cta-panel h2 .accent { color: var(--signal-core); }
+.cta-panel p { color: var(--text-secondary); font-size: 16px; max-width: 52ch; margin: 0 auto var(--s6); line-height: 1.55; }
+.cta-cmd {
+  font-family: var(--mono); font-size: 15px;
+  max-width: 520px; margin: 0 auto;
+  border: var(--hair) solid var(--signal-deep);
+  border-radius: var(--radius); background: var(--canvas);
+  padding: var(--s4) var(--s5);
+  display: flex; align-items: center; gap: var(--s3);
+  letter-spacing: var(--track); text-align: left;
+}
+.cta-cmd .prompt-sym { color: var(--signal-core); font-weight: 600; }
+.cta-cmd input {
+  flex: 1; background: transparent; border: none; outline: none;
+  font-family: var(--mono); font-size: 15px; color: var(--text); letter-spacing: var(--track);
+}
+.cta-cmd input::placeholder { color: var(--text-muted); }
+.cta-cmd button {
+  font-family: var(--mono); font-size: 12px; text-transform: uppercase; letter-spacing: var(--track);
+  background: var(--signal-core); color: #05140f; border: none; border-radius: 2px;
+  padding: var(--s2) var(--s4); cursor: pointer; font-weight: 600;
+}
+.theme-light .cta-cmd button { color: #fff; }
+.cta-cmd button:hover { background: var(--signal-strong); }
+
+/* ============================================================
+   FOOTER
+   ============================================================ */
+footer { border-top: var(--hair) solid var(--hairline); margin-top: var(--s9); padding: var(--s6) 0 var(--s8); }
+.footer-inner { display: flex; align-items: center; gap: var(--s5); flex-wrap: wrap; }
+.footer-inner .fnote { font-family: var(--mono); font-size: 10.5px; color: var(--text-muted); letter-spacing: var(--track); }
+.footer-inner .fnote b { color: var(--signal-core); font-weight: 600; }
+.footer-inner .spacer { margin-left: auto; }
+.footer-links { display: flex; gap: var(--s4); }
+.footer-links a { font-family: var(--mono); font-size: 10.5px; text-transform: uppercase; letter-spacing: var(--track); color: var(--text-secondary); text-decoration: none; }
+.footer-links a:hover { color: var(--signal-core); }
+
+/* ============================================================
+   RESPONSIVE
+   ============================================================ */
+@media (max-width: 980px) {
+  .hero-grid { grid-template-columns: 1fr; gap: var(--s6); }
+  .chokepoint-grid, .builder-grid { grid-template-columns: 1fr; }
+  .rack { grid-template-columns: 1fr 1fr; }
+  .ms-lattice { grid-template-columns: 1fr 1fr; }
+  .ms-step:not(:last-child)::after { display: none; }
+  .telemetry { grid-template-columns: 1fr 1fr; gap: var(--s4); }
+  .gates-row { grid-template-columns: 1fr 1fr; }
+  .toprail nav { display: none; }
+}
+@media (max-width: 620px) {
+  .wrap { padding: 0 var(--s4); }
+  .rack { grid-template-columns: 1fr; }
+  .ms-lattice { grid-template-columns: 1fr; }
+  .telemetry { grid-template-columns: 1fr; }
+  .gates-row { grid-template-columns: 1fr; }
+  .scan-head-row, .scan-row { grid-template-columns: 70px 1fr 72px; }
+  .scan-head-row .h-ratio, .scan-head-row .h-days, .scan-head-row .h-sig,
+  .scan-row .c-ratio, .scan-row .c-days, .scan-row .c-sig { display: none; }
+  .hero-meta { gap: var(--s5); }
+  .rail-stat { display: none; }
+  .toprail .spacer { margin-left: auto; }
+  .cta-cmd { flex-wrap: wrap; }
+  .chain-grid-head, .chain-row { grid-template-columns: 56px 48px 1fr 52px 52px; font-size: 11px; }
+}
+</style>
+</head>
+<body>
+
+<!-- ============================ TOP RAIL ============================ -->
+<header class="toprail">
+  <div class="toprail-inner">
+    <span class="wordmark"><span class="glyph">◢</span>RADON<span class="ver">v4.8</span></span>
+    <nav>
+      <a href="#chokepoint">Chokepoint</a>
+      <a href="#flow">Flow</a>
+      <a href="#regime">Regime</a>
+      <a href="#builder">Structures</a>
+      <a href="#discipline">Discipline</a>
+    </nav>
+    <span class="spacer"></span>
+    <span class="rail-stat"><span class="live-dot"></span> SESSION <b>RTH</b> · NYSE 14:32:08 ET</span>
+    <button class="toggle" id="themeToggle" aria-label="Toggle light and dark theme">
+      <span class="sw"></span><span id="themeLabel">DARK</span>
+    </button>
+  </div>
+</header>
+
+<!-- ============================ HERO ============================ -->
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div class="hero-copy">
+      <span class="hero-eyebrow"><span class="live-dot"></span> MARKET-STRUCTURE RECONSTRUCTION · LIVE</span>
+      <h1>See the institution <span class="accent">before</span> the print moves price.</h1>
+      <p class="lede">Radon is a single-operator institutional options terminal. It reconstructs market structure from <b>dark-pool and OTC flow</b>, scores accumulation before price reacts, and forces every contract through a <b>four-gate, seven-milestone discipline</b> before it routes. No chart-reading. No narrative. Flow signal or nothing.</p>
+      <div class="hero-cta">
+        <a href="#access" class="btn btn-primary">Request access ▸</a>
+        <a href="#chokepoint" class="btn btn-ghost">See the chokepoint</a>
+      </div>
+      <div class="hero-meta">
+        <div class="stat"><div class="v">4<span class="unit"> models</span></div><div class="k">Orthogonal regime read</div></div>
+        <div class="stat"><div class="v">58<span class="unit"> structures</span></div><div class="k">Defined-risk taxonomy</div></div>
+        <div class="stat"><div class="v">≥2.0<span class="unit">×</span></div><div class="k">Convexity floor, enforced</div></div>
+      </div>
+    </div>
+
+    <!-- HERO INSTRUMENT PANEL -->
+    <div class="panel instrument">
+      <div class="module-head">
+        <span class="mid">CRI-01</span><span class="mname">/ CRASH RISK INDEX</span>
+        <span class="mrate"><span class="live-dot"></span> 1s · LIVE</span>
+      </div>
+      <div class="inst-body">
+        <div class="readout-row">
+          <div class="readout">
+            <div class="rk"><span>CRI</span><span class="dim">σ 90D</span></div>
+            <div class="rv sig">38.4</div>
+            <div class="rd dim">NEUTRAL · ▼ 2.1 / 1h</div>
+          </div>
+          <div class="readout">
+            <div class="rk"><span>NET GEX</span><span class="dim">$Bn</span></div>
+            <div class="rv">+4.71</div>
+            <div class="rd sig">DEALERS LONG GAMMA</div>
+          </div>
+        </div>
+
+        <div class="readout">
+          <div class="rk"><span>SPECTRAL FLOW · DARK-POOL ACCUMULATION BAND</span><span class="sig">+0.62</span></div>
+          <div class="spectral">
+            <i style="--h:.5"></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+            <i></i><i></i><i></i><i></i><i></i><i></i><i></i>
+          </div>
+        </div>
+
+        <!-- Markov state-transition arc -->
+        <div class="markov">
+          <div class="rk" style="font-family:var(--mono);font-size:9.5px;text-transform:uppercase;letter-spacing:var(--track-wide);color:var(--text-muted);display:flex;justify-content:space-between;margin-bottom:6px;">
+            <span>REGIME MARKOV · STATE TRANSITION</span><span class="sig">P(compress→expand) 0.71</span>
+          </div>
+          <svg viewBox="0 0 360 84" preserveAspectRatio="none" aria-hidden="true">
+            <defs>
+              <marker id="arrow" markerWidth="7" markerHeight="7" refX="5" refY="3" orient="auto">
+                <path d="M0,0 L6,3 L0,6 Z" fill="var(--signal-core)"/>
+              </marker>
+            </defs>
+            <circle cx="44" cy="58" r="13" fill="var(--signal-wash)" stroke="var(--signal-deep)"/>
+            <circle cx="180" cy="26" r="13" fill="var(--warn-wash)" stroke="var(--warn)"/>
+            <circle cx="316" cy="58" r="13" fill="var(--signal-wash)" stroke="var(--signal-deep)"/>
+            <path class="arc-flow" d="M55,52 Q112,8 168,22" fill="none" stroke="var(--signal-core)" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <path class="arc-flow" d="M192,30 Q248,8 305,52" fill="none" stroke="var(--signal-core)" stroke-width="1.5" marker-end="url(#arrow)"/>
+            <text x="44" y="61" text-anchor="middle" class="node-l" fill="var(--signal-core)">CMP</text>
+            <text x="180" y="29" text-anchor="middle" class="node-l" fill="var(--warn)">TRN</text>
+            <text x="316" y="61" text-anchor="middle" class="node-l" fill="var(--signal-core)">EXP</text>
+          </svg>
+        </div>
+
+        <!-- command prompt -->
+        <div class="cmd">
+          <span class="prompt-sym">radon&gt;</span>
+          <span class="typed" id="cmdTyped"></span>
+          <span class="cursor"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 2. CHOKEPOINT ============================ -->
+<section class="block" id="chokepoint">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-tag">RISK-01 / PRE-TRADE CHOKEPOINT</div>
+      <h2>No contract routes until the math clears.</h2>
+      <p>Every order passes through a single mandatory gate. Radon computes <b>max loss, convexity, and margin impact</b> on the assembled combo, catches naked-short exposure, and refuses submit when the gain-to-loss ratio falls below the floor. The chokepoint is module-private. There is no path around it.</p>
+    </div>
+
+    <div class="chokepoint-grid">
+      <!-- ORDER RISK GATE CARD -->
+      <div class="panel gate-card">
+        <div class="module-head">
+          <span class="mid">ORG-04</span><span class="mname">/ ORDER RISK GATE</span>
+          <span class="mrate">AAPL · BEAR CALL SPREAD</span>
+        </div>
+        <div class="gate-body">
+          <div class="risk-line pass">
+            <span class="rl-k">Max Loss</span><span class="rl-v sig">−$1,180</span>
+          </div>
+          <div class="risk-line pass">
+            <span class="rl-k">Max Gain</span><span class="rl-v">+$3,320</span>
+          </div>
+          <div class="convex">
+            <div class="clab"><span>Convexity · gain ÷ loss</span><span class="sig">2.81× · PASS</span></div>
+            <div class="convex-track"><span class="convex-loss"></span><span class="convex-gain"></span></div>
+            <div class="cnums"><span class="fault-c">RISK 1.00</span><span class="sig">REWARD 2.81</span></div>
+          </div>
+          <div class="risk-line pass">
+            <span class="rl-k">Margin Impact</span><span class="rl-v">$1,180 · 0.94% BNK</span>
+          </div>
+          <div class="risk-line flag">
+            <span class="rl-k">Naked-Short Scan</span><span class="rl-v warn-c">1 UNCOVERED LEG</span>
+          </div>
+        </div>
+        <div class="gate-verdict">
+          <span class="verdict-badge hold">HOLD · REVIEW</span>
+          <span class="vmsg">Short 250C uncovered · Gate 3 cap 2.50% OK · awaiting operator confirm</span>
+        </div>
+      </div>
+
+      <!-- explanatory features -->
+      <div class="choke-note">
+        <div class="choke-feature">
+          <span class="ci">01</span>
+          <div><h4>Convexity floor, not a suggestion</h4>
+          <p>Gain must clear 2x defined max loss. Below the floor, the submit button does not exist. Asymmetry is structural, not aspirational.</p></div>
+        </div>
+        <div class="choke-feature">
+          <span class="ci">02</span>
+          <div><h4>Per-leg max-loss on real combos</h4>
+          <p>Risk reversals and short puts are priced as strike x 100 plus net premium, not net debit. The card reads the assembled IB BAG, leg by leg, the way the broker will fill it.</p></div>
+        </div>
+        <div class="choke-feature">
+          <span class="ci">03</span>
+          <div><h4>Naked-short detection catches the tail</h4>
+          <p>Uncovered short legs surface in amber before they reach the wire. Hard cap at 2.5% of bankroll per position. Fractional Kelly sizes the rest.</p></div>
+        </div>
+        <div class="choke-feature">
+          <span class="ci">04</span>
+          <div><h4>One chokepoint, every surface</h4>
+          <p>Chain builder, combo router, quick-fill. Each renders the same gate. There is no second code path that skips the math.</p></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 3. FLOW RECONSTRUCTION ============================ -->
+<section class="block" id="flow">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-tag">SCAN-02 / FLOW RECONSTRUCTION</div>
+      <h2>Read accumulation while it is still quiet.</h2>
+      <p>Radon ingests Interactive Brokers real-time tape and Unusual Whales dark-pool prints, then scores institutional <b>accumulation and distribution</b> per ticker before the move shows on the chart. Buy-side imbalance, days sustained, conviction score. The edge is the flow that has not yet repriced.</p>
+    </div>
+
+    <div class="panel scanner">
+      <div class="module-head">
+        <span class="mid">SCAN-02</span><span class="mname">/ DARK-POOL ACCUMULATION SCANNER</span>
+        <span class="mrate"><span class="live-dot"></span> 5s · 412 PRINTS</span>
+      </div>
+      <div class="scan-head-row">
+        <span>Ticker</span><span class="h-sig">Signal</span><span class="h-ratio">Conviction</span>
+        <span class="h-ratio">Buy Ratio</span><span class="h-days">Sustained</span><span>DP Volume</span>
+      </div>
+
+      <div class="scan-row">
+        <span class="tkr">NVDA</span>
+        <span class="sig-tag bull c-sig">Bullish accumulation</span>
+        <span class="score-cell c-ratio"><span class="score-bar"><i style="width:88%"></i></span><span class="sv sig">88</span></span>
+        <span class="num pos c-ratio">0.71</span><span class="dim c-days">6d</span><span class="num">$1.94B</span>
+      </div>
+      <div class="scan-row">
+        <span class="tkr">PLTR</span>
+        <span class="sig-tag bull c-sig">Bullish accumulation</span>
+        <span class="score-cell c-ratio"><span class="score-bar"><i style="width:79%"></i></span><span class="sv sig">79</span></span>
+        <span class="num pos c-ratio">0.66</span><span class="dim c-days">4d</span><span class="num">$612M</span>
+      </div>
+      <div class="scan-row">
+        <span class="tkr">AAPL</span>
+        <span class="sig-tag dislo c-sig">Dislocation · OTC bid</span>
+        <span class="score-cell c-ratio"><span class="score-bar"><i class="disfill" style="width:64%"></i></span><span class="sv dis">64</span></span>
+        <span class="num pos c-ratio">0.58</span><span class="dim c-days">3d</span><span class="num">$1.21B</span>
+      </div>
+      <div class="scan-row">
+        <span class="tkr">TSLA</span>
+        <span class="sig-tag dist c-sig">Distribution</span>
+        <span class="score-cell c-ratio"><span class="score-bar"><i class="warnfill" style="width:73%"></i></span><span class="sv fault-c">−73</span></span>
+        <span class="num neg c-ratio">0.34</span><span class="dim c-days">5d</span><span class="num">$988M</span>
+      </div>
+      <div class="scan-row">
+        <span class="tkr">WULF</span>
+        <span class="sig-tag bull c-sig">Bullish accumulation</span>
+        <span class="score-cell c-ratio"><span class="score-bar"><i style="width:71%"></i></span><span class="sv sig">71</span></span>
+        <span class="num pos c-ratio">0.63</span><span class="dim c-days">7d</span><span class="num">$84M</span>
+      </div>
+      <div class="scan-row">
+        <span class="tkr">SMCI</span>
+        <span class="sig-tag dist c-sig">Distribution</span>
+        <span class="score-cell c-ratio"><span class="score-bar"><i class="warnfill" style="width:57%"></i></span><span class="sv fault-c">−57</span></span>
+        <span class="num neg c-ratio">0.41</span><span class="dim c-days">2d</span><span class="num">$303M</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 4. FOUR-MODEL REGIME RACK ============================ -->
+<section class="block" id="regime">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-tag">REGIME / FOUR ORTHOGONAL MODELS</div>
+      <h2>One regime read, four independent angles.</h2>
+      <p>Crash risk, dealer gamma, vol-credit dislocation, and gamma rotation. Each model is mountable, each samples on its own cadence, and none of them agrees by construction. When they converge, the signal is real.</p>
+    </div>
+
+    <div class="rack">
+      <!-- CRI -->
+      <div class="panel rack-module">
+        <div class="module-head"><span class="mid">CRI</span><span class="mname">/ CRASH RISK</span></div>
+        <div class="rack-body">
+          <div class="rack-big sig">38.4</div>
+          <span class="rack-state neutral">Neutral</span>
+          <div class="rack-desc">Tail probability from skew, term structure, and dark-pool exit pressure.</div>
+          <div class="spark"><svg viewBox="0 0 120 34" preserveAspectRatio="none"><polyline points="0,22 15,20 30,24 45,18 60,21 75,16 90,19 105,14 120,17" fill="none" stroke="var(--signal-core)" stroke-width="1.5"/></svg></div>
+        </div>
+      </div>
+      <!-- GEX -->
+      <div class="panel rack-module">
+        <div class="module-head"><span class="mid">GEX</span><span class="mname">/ GAMMA EXP</span></div>
+        <div class="rack-body">
+          <div class="rack-big">+4.7<span style="font-size:16px;color:var(--text-muted)">B</span></div>
+          <span class="rack-state neutral">Stabilizing</span>
+          <div class="rack-desc">Net dealer gamma. Positive pins range; the flip level is the pivot to watch.</div>
+          <div class="spark"><svg viewBox="0 0 120 34" preserveAspectRatio="none"><polyline points="0,26 15,22 30,24 45,16 60,14 75,18 90,12 105,15 120,10" fill="none" stroke="var(--signal-core)" stroke-width="1.5"/></svg></div>
+        </div>
+      </div>
+      <!-- VCG -->
+      <div class="panel rack-module">
+        <div class="module-head"><span class="mid">VCG-R</span><span class="mname">/ VOL-CREDIT</span></div>
+        <div class="rack-body">
+          <div class="rack-big warn-c">2.6<span style="font-size:16px;color:var(--text-muted)">σ</span></div>
+          <span class="rack-state elevated">Elevated gap</span>
+          <div class="rack-desc">Implied vol vs credit-spread fair value. Wide gaps flag mispriced premium.</div>
+          <div class="spark"><svg viewBox="0 0 120 34" preserveAspectRatio="none"><polyline points="0,24 15,20 30,22 45,17 60,12 75,15 90,8 105,11 120,9" fill="none" stroke="var(--warn)" stroke-width="1.5"/></svg></div>
+        </div>
+      </div>
+      <!-- GRG -->
+      <div class="panel rack-module">
+        <div class="module-head"><span class="mid">GRG</span><span class="mname">/ GAMMA ROT</span></div>
+        <div class="rack-body">
+          <div class="rack-big dis">+0.41</div>
+          <span class="rack-state rotating">Rotating</span>
+          <div class="rack-desc">Gamma rotation between strikes. Detects the shift before dealers rehedge.</div>
+          <div class="spark"><svg viewBox="0 0 120 34" preserveAspectRatio="none"><polyline points="0,18 15,21 30,15 45,19 60,13 75,17 90,11 105,16 120,12" fill="none" stroke="var(--dislocation)" stroke-width="1.5"/></svg></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 5. STRUCTURE BUILDER ============================ -->
+<section class="block" id="builder">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-tag">BLD-05 / STRUCTURE BUILDER</div>
+      <h2>Fifty-eight defined-risk structures, one BAG router.</h2>
+      <p>Pick the structure the signal calls for, build it on the live chain, and route it as a single IB BAG combo. Spread direction lives on the leg; account direction lives on the order. Radon never double-reverses, and the net credit is what the broker sees.</p>
+    </div>
+
+    <div class="builder-grid">
+      <!-- MINI CHAIN -->
+      <div class="panel chain">
+        <div class="module-head">
+          <span class="mid">CHN</span><span class="mname">/ AAPL · 19 JUL · CALLS</span>
+          <span class="mrate">SPOT 241.30</span>
+        </div>
+        <div class="chain-grid-head">
+          <span>Bid</span><span>Ask</span><span style="text-align:center">Strike</span><span style="text-align:center">Δ</span><span style="text-align:center">Leg</span>
+        </div>
+        <div class="chain-row">
+          <span class="c-bid">3.85</span><span class="c-ask">3.95</span><span class="strike">237.5</span><span class="strike">.58</span><span class="leg-flag"></span>
+        </div>
+        <div class="chain-row atm">
+          <span class="c-bid">2.41</span><span class="c-ask">2.49</span><span class="strike">241.0</span><span class="strike">.50</span><span class="leg-flag dim">ATM</span>
+        </div>
+        <div class="chain-row leg-sell">
+          <span class="c-bid">1.62</span><span class="c-ask">1.70</span><span class="strike">245.0</span><span class="strike">.41</span><span class="leg-flag sell">Sell ×1</span>
+        </div>
+        <div class="chain-row">
+          <span class="c-bid">0.94</span><span class="c-ask">1.01</span><span class="strike">250.0</span><span class="strike">.29</span><span class="leg-flag"></span>
+        </div>
+        <div class="chain-row leg-buy">
+          <span class="c-bid">0.51</span><span class="c-ask">0.57</span><span class="strike">255.0</span><span class="strike">.19</span><span class="leg-flag buy">Buy ×1</span>
+        </div>
+      </div>
+
+      <!-- COMBO SUMMARY -->
+      <div class="combo-summary">
+        <div class="panel combo-card">
+          <div class="module-head" style="margin:calc(var(--s4) * -1) calc(var(--s4) * -1) 0;border-radius:0;">
+            <span class="mid">BAG</span><span class="mname">/ BEAR CALL SPREAD</span>
+            <span class="mrate">DEFINED RISK</span>
+          </div>
+          <div class="combo-leg"><span><span class="side s">SELL</span> 1 × AAPL 245C</span><span>@ 1.62</span></div>
+          <div class="combo-leg"><span><span class="side b">BUY</span> 1 × AAPL 255C</span><span>@ 0.57</span></div>
+          <div class="combo-net"><span class="nk">Net Credit</span><span class="nv">+$105 / spread</span></div>
+          <div class="risk-line pass" style="margin-top:var(--s2)"><span class="rl-k">Max Loss</span><span class="rl-v sig">−$895</span></div>
+        </div>
+        <div class="struct-pills">
+          <span>BEAR CALL</span><span>PUT DEBIT</span><span>RISK REVERSAL</span><span>IRON CONDOR</span>
+          <span>BROKEN-WING BFLY</span><span>CALENDAR</span><span>RATIO BACKSPREAD</span><span class="more">+51 more</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- SCREENSHOT SLOT: a real Structure Builder / chain capture can drop in here.
+         The page is intentionally complete without it. -->
+  </div>
+</section>
+
+<!-- ============================ 6. DISCIPLINE ============================ -->
+<section class="block" id="discipline">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-tag">DISC / FOUR GATES · SEVEN MILESTONES</div>
+      <h2>Discipline encoded, not remembered.</h2>
+      <p>Every trade is run through four sequential gates and a seven-milestone evaluation. Any gate fails, the trade stops and the gate is named. The rules live in the code path, so a bad setup cannot talk its way through at 3pm on a Friday.</p>
+    </div>
+
+    <div class="gates-row">
+      <div class="panel gate-cell">
+        <span class="gn">GATE 01</span><h4>Convexity</h4>
+        <p>Gain at least 2x defined loss. Defined-risk structures only.</p>
+      </div>
+      <div class="panel gate-cell">
+        <span class="gn">GATE 02</span><h4>Edge</h4>
+        <p>A specific, data-backed dark-pool or OTC signal that has not yet moved price.</p>
+      </div>
+      <div class="panel gate-cell">
+        <span class="gn">GATE 03</span><h4>Risk</h4>
+        <p>Fractional Kelly sizing. Hard cap 2.5% of bankroll per position.</p>
+      </div>
+      <div class="panel gate-cell disabled">
+        <span class="gn">GATE 04</span><h4>No naked shorts</h4>
+        <p>Logic preserved behind a flag. Re-enable is a documented one-line switch.</p>
+        <span class="strike-tag">Disabled 2026-04-30</span>
+      </div>
+    </div>
+
+    <div class="panel milestones">
+      <div class="module-head" style="margin:calc(var(--s5) * -1) calc(var(--s5) * -1) var(--s5);border-radius:0;">
+        <span class="mid">EVAL-07</span><span class="mname">/ SEVEN-MILESTONE PIPELINE</span>
+        <span class="mrate">SEQUENTIAL · NO SKIP</span>
+      </div>
+      <div class="ms-lattice">
+        <div class="ms-step"><div class="ms-node">1</div><div class="ms-name">Signal</div><div class="ms-desc">Flow detected, not yet priced in.</div></div>
+        <div class="ms-step"><div class="ms-node">2</div><div class="ms-name">Confirm</div><div class="ms-desc">Cross-source corroboration.</div></div>
+        <div class="ms-step"><div class="ms-node">3</div><div class="ms-name">Regime</div><div class="ms-desc">Four-model context check.</div></div>
+        <div class="ms-step"><div class="ms-node">4</div><div class="ms-name">Structure</div><div class="ms-desc">Match payoff to thesis.</div></div>
+        <div class="ms-step"><div class="ms-node">5</div><div class="ms-name">Size</div><div class="ms-desc">Fractional Kelly, capped.</div></div>
+        <div class="ms-step"><div class="ms-node">6</div><div class="ms-name">Gate</div><div class="ms-desc">Chokepoint math clears.</div></div>
+        <div class="ms-step"><div class="ms-node">7</div><div class="ms-name">Route</div><div class="ms-desc">BAG combo to IB.</div></div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 7. RESILIENCE ============================ -->
+<section class="block" id="resilience">
+  <div class="wrap">
+    <div class="section-head">
+      <div class="section-tag">INFRA / SELF-HEALING DATA PLANE</div>
+      <h2>The data plane does not die silently.</h2>
+      <p>A 2FA-aware recovery loop, an isolated stdlib health daemon, and a four-bucket watchdog keep the gateway authenticated and the tape live. When the farm drops, Radon raises the alert and heals itself instead of looping on stale ticks.</p>
+    </div>
+
+    <div class="panel telemetry">
+      <div class="tel-cell">
+        <span class="tk">IB Gateway</span>
+        <span class="tv tel-ok"><span class="tel-dot"></span> AUTHENTICATED</span>
+        <span class="tsub">port_listening · 2FA armed</span>
+      </div>
+      <div class="tel-cell">
+        <span class="tk">Watchdog · 4 buckets</span>
+        <span class="tv tel-ok"><span class="tel-dot"></span> OK</span>
+        <span class="tsub">no flood · last heal 0</span>
+      </div>
+      <div class="tel-cell">
+        <span class="tk">WS Relay</span>
+        <span class="tv tel-ok"><span class="tel-dot"></span> LIVE · 8765</span>
+        <span class="tsub">usopt + usfarm.nj up</span>
+      </div>
+      <div class="tel-cell">
+        <span class="tk">Health Daemon</span>
+        <span class="tv tel-ok"><span class="tel-dot"></span> /healthz 200</span>
+        <span class="tsub">stdlib · :8330 · never-502</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ 8. CTA ============================ -->
+<section class="cta-block" id="access">
+  <div class="wrap">
+    <div class="panel cta-panel">
+      <h2>Flow signal or nothing. <span class="accent">Convexity or no trade.</span></h2>
+      <p>Radon is a single-operator terminal. Access is granted deliberately. Type your address below and request a seat on the instrument rack.</p>
+      <form class="cta-cmd" id="accessForm" onsubmit="return false;">
+        <span class="prompt-sym">radon&gt;</span>
+        <input type="email" id="accessEmail" placeholder="request-access --email operator@firm.com" aria-label="Email for access request" />
+        <button type="submit" id="accessBtn">Submit ▸</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<!-- ============================ FOOTER ============================ -->
+<footer>
+  <div class="wrap footer-inner">
+    <span class="wordmark"><span class="glyph">◢</span>RADON</span>
+    <span class="fnote">MARKET-STRUCTURE RECONSTRUCTION · <b>FLOW SIGNAL OR NOTHING</b></span>
+    <span class="spacer"></span>
+    <div class="footer-links">
+      <a href="#chokepoint">Chokepoint</a>
+      <a href="#regime">Regime</a>
+      <a href="#discipline">Discipline</a>
+      <a href="#access">Access</a>
+    </div>
+  </div>
+  <div class="wrap" style="margin-top:var(--s4)">
+    <span class="fnote dim">DATA · INTERACTIVE BROKERS · UNUSUAL WHALES · NOT INVESTMENT ADVICE · DEFINED-RISK ONLY</span>
+  </div>
+</footer>
+
+<script>
+(function () {
+  "use strict";
+
+  /* ---------- theme toggle (persist via class on <html>) ---------- */
+  var root = document.documentElement;
+  var toggle = document.getElementById("themeToggle");
+  var label = document.getElementById("themeLabel");
+  var STORE_KEY = "radon-theme";
+
+  function applyTheme(theme) {
+    root.classList.remove("theme-dark", "theme-light");
+    root.classList.add(theme === "light" ? "theme-light" : "theme-dark");
+    label.textContent = theme === "light" ? "LIGHT" : "DARK";
+  }
+
+  var saved;
+  try { saved = localStorage.getItem(STORE_KEY); } catch (e) { saved = null; }
+  applyTheme(saved === "light" ? "light" : "dark");
+
+  toggle.addEventListener("click", function () {
+    var next = root.classList.contains("theme-light") ? "dark" : "light";
+    applyTheme(next);
+    try { localStorage.setItem(STORE_KEY, next); } catch (e) {}
+  });
+
+  /* ---------- hero command typing ---------- */
+  var prefersReduced = window.matchMedia &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  var typedEl = document.getElementById("cmdTyped");
+  var phrase = "reconstruct AAPL --flow --regime";
+
+  if (prefersReduced) {
+    typedEl.textContent = phrase;
+  } else {
+    var i = 0, hold = 0;
+    (function tick() {
+      if (i <= phrase.length) {
+        typedEl.textContent = phrase.slice(0, i);
+        i++;
+        setTimeout(tick, 85);
+      } else {
+        hold++;
+        if (hold > 28) { i = 0; hold = 0; }
+        setTimeout(tick, 120);
+      }
+    })();
+  }
+
+  /* ---------- spectral bar variance (subtle, staggered) ---------- */
+  if (!prefersReduced) {
+    var bars = document.querySelectorAll(".spectral i");
+    bars.forEach(function (b, idx) {
+      b.style.animationDelay = (idx * 0.06).toFixed(2) + "s";
+      b.style.animationDuration = (1.5 + (idx % 5) * 0.18).toFixed(2) + "s";
+    });
+  }
+
+  /* ---------- access form (mock confirmation, no network) ---------- */
+  var form = document.getElementById("accessForm");
+  var emailInput = document.getElementById("accessEmail");
+  var btn = document.getElementById("accessBtn");
+  form.addEventListener("submit", function () {
+    var v = (emailInput.value || "").trim();
+    if (v && v.indexOf("@") > 0) {
+      emailInput.value = "";
+      emailInput.placeholder = "request queued · " + v + " · operator will reply";
+      btn.textContent = "QUEUED ✓";
+      setTimeout(function () { btn.textContent = "Submit ▸"; }, 4000);
+    } else {
+      emailInput.placeholder = "valid address required · operator@firm.com";
+    }
+  });
+})();
+</script>
+</body>
+</html>
