@@ -65,6 +65,14 @@ const SERVICES = {
   supported: true,
   units: [
     {
+      unit: "radon-nextjs.service",
+      load_state: "loaded",
+      active_state: "active",
+      sub_state: "running",
+      description: "Next.js web app",
+      can_control: true,
+    },
+    {
       unit: "radon-api.service",
       load_state: "loaded",
       active_state: "active",
@@ -80,7 +88,45 @@ const SERVICES = {
       description: "IB Gateway container",
       can_control: true,
     },
+    {
+      unit: "radon-monitor.service",
+      load_state: "loaded",
+      active_state: "inactive",
+      sub_state: "dead",
+      description: "Monitor daemon",
+      can_control: true,
+    },
   ],
+};
+
+const EDGE_HEALTH = {
+  reachable: true,
+  service_health: {
+    state: "ok",
+    rows: [
+      {
+        service: "portfolio-sync",
+        state: "ok",
+        updated_at: "2026-06-24T18:00:00Z",
+        last_attempt_finished_at: "2026-06-24T18:00:00Z",
+        last_error: null,
+      },
+      {
+        service: "cash-flow-sync",
+        state: "error",
+        updated_at: "2026-06-24T18:00:00Z",
+        last_attempt_finished_at: "2026-06-24T18:00:00Z",
+        last_error: "provider timeout",
+      },
+      {
+        service: "llm-token-index",
+        state: "warning",
+        updated_at: "2026-06-24T18:00:00Z",
+        last_attempt_finished_at: "2026-06-24T18:00:00Z",
+        last_error: null,
+      },
+    ],
+  },
 };
 
 test.describe("admin panel", () => {
@@ -97,7 +143,48 @@ test.describe("admin panel", () => {
     await expect(page.getByTestId("admin-page")).toBeVisible();
     await expect(page.getByTestId("ib-auth-state")).toContainText("Authenticated");
     await expect(page.getByTestId("services-card")).toContainText("radon-api.service");
-    await expect(page.getByTestId("services-card")).toContainText("radon-ib-gateway.service");
+    await expect(page.getByTestId("ib-gateway-card")).toContainText("IB Gateway");
+  });
+
+  test("sorts Operator service and writer freshness tables from column headers", async ({ page }) => {
+    await page.route("**/api/admin/health", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(HEALTH_OK) }),
+    );
+    await page.route("**/api/admin/services", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(SERVICES) }),
+    );
+    await page.route("**/api/admin/edge-health", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(EDGE_HEALTH) }),
+    );
+    await page.route("**/api/admin/reliability", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ events: [] }) }),
+    );
+    await page.route("**/api/admin/host-metrics", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [] }) }),
+    );
+    await page.route("**/api/admin/slo", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ rows: [] }) }),
+    );
+
+    await page.goto("/admin");
+
+    const serviceRows = page.locator("[data-testid^='service-row-']");
+    await expect(serviceRows).toHaveCount(3);
+    await expect(serviceRows.nth(0)).toContainText("radon-nextjs.service");
+
+    await page.getByRole("columnheader", { name: /unit/i }).click();
+    await expect(serviceRows.nth(0)).toContainText("radon-api.service");
+    await expect(serviceRows.nth(1)).toContainText("radon-monitor.service");
+    await expect(serviceRows.nth(2)).toContainText("radon-nextjs.service");
+
+    const writerRows = page.locator("[data-testid^='writer-row-']");
+    await expect(writerRows).toHaveCount(3);
+    await expect(writerRows.nth(0)).toContainText("cash-flow-sync");
+
+    await page.getByRole("columnheader", { name: /state/i }).click();
+    await expect(writerRows.nth(0)).toContainText("cash-flow-sync");
+    await expect(writerRows.nth(1)).toContainText("portfolio-sync");
+    await expect(writerRows.nth(2)).toContainText("llm-token-index");
   });
 
   test("Force 2FA opens confirm modal before firing /api/admin/ib/restart", async ({ page }) => {
@@ -146,7 +233,7 @@ test.describe("admin panel", () => {
     await page.goto("/admin");
 
     // Open the destructive Stop dialog for the gateway unit (gated by type-to-confirm).
-    await page.getByTestId("service-stop-radon-ib-gateway.service").click();
+    await page.getByTestId("gateway-power-button").click();
     await expect(page.getByTestId("admin-confirm")).toBeVisible();
 
     const copy = page.getByTestId("admin-confirm-copy");

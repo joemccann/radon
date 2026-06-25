@@ -6,6 +6,7 @@ import type {
   ServicesListResponse,
   UnitStatus,
 } from "@/lib/adminTypes";
+import { useSort } from "@/lib/useSort";
 import {
   serviceControlDisabledReason,
   unitActivityLabel,
@@ -14,6 +15,7 @@ import {
 } from "@/lib/adminFormat";
 import type { FlashTarget } from "./AdminWorkspace";
 import ConfirmDialog from "./ConfirmDialog";
+import SortTh from "../SortTh";
 
 type ServiceControlPanelProps = {
   services: ServicesListResponse | null;
@@ -24,6 +26,7 @@ type ServiceControlPanelProps = {
 };
 
 type PendingAction = { unit: string; action: ServiceAction } | null;
+type ServiceSortKey = "status" | "unit" | "activity";
 
 // IB Gateway is managed in its own panel above; don't show it twice.
 const HIDDEN_FROM_TABLE = new Set(["radon-ib-gateway.service"]);
@@ -58,6 +61,12 @@ export default function ServiceControlPanel({
     if (action === "start") void runAction(unit, action);
     else setConfirm({ unit, action });
   };
+
+  const supported = services?.supported ?? false;
+  const units = (services?.units ?? []).filter((u) => !HIDDEN_FROM_TABLE.has(u.unit));
+  const { sorted: sortedUnits, sort, toggle } = useSort<UnitStatus, ServiceSortKey>(units, serviceSortValue);
+  const dependents = confirm?.action === "stop" ? unitDependents(confirm.unit) : [];
+  const stopNeedsTyped = dependents.length > 0;
 
   if (loading && !services) {
     return (
@@ -102,11 +111,6 @@ export default function ServiceControlPanel({
     );
   }
 
-  const supported = services?.supported ?? false;
-  const units = (services?.units ?? []).filter((u) => !HIDDEN_FROM_TABLE.has(u.unit));
-  const dependents = confirm?.action === "stop" ? unitDependents(confirm.unit) : [];
-  const stopNeedsTyped = dependents.length > 0;
-
   return (
     <section className="admin-card" data-testid="services-card">
       <header className="admin-card-header">
@@ -122,14 +126,14 @@ export default function ServiceControlPanel({
       <table className="admin-services-table">
         <thead>
           <tr>
-            <th>Status</th>
-            <th>Unit</th>
-            <th>Activity</th>
+            <SortTh<ServiceSortKey> label="Status" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<ServiceSortKey> label="Unit" sortKey="unit" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+            <SortTh<ServiceSortKey> label="Activity" sortKey="activity" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
             <th className="admin-col-controls">Controls</th>
           </tr>
         </thead>
         <tbody>
-          {units.map((unit) => (
+          {sortedUnits.map((unit) => (
             <ServiceRow
               key={unit.unit}
               unit={unit}
@@ -173,6 +177,17 @@ export default function ServiceControlPanel({
 
 function capitalize(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+function serviceSortValue(unit: UnitStatus, key: ServiceSortKey): string | number | null {
+  switch (key) {
+    case "status":
+      return unitVerdict(unit).label;
+    case "unit":
+      return unit.unit;
+    case "activity":
+      return unitActivityLabel(unit);
+  }
 }
 
 function ServiceRow({
