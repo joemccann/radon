@@ -204,9 +204,11 @@ function resolveOrderPriceData(
 
     if (!resolved) return null;
 
-    // Ensure bid < ask (natural market ordering)
-    const lo = Math.min(Math.abs(netBid), Math.abs(netAsk));
-    const hi = Math.max(Math.abs(netBid), Math.abs(netAsk));
+    // Preserve signed net prices. Risk reversals and other credit combos can
+    // have a negative natural market; taking abs() makes a credit look like a
+    // debit and blocks valid negative replacement limits.
+    const lo = Math.min(netBid, netAsk);
+    const hi = Math.max(netBid, netAsk);
 
     return {
       symbol: c.symbol,
@@ -286,11 +288,14 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
     if (!order) return null;
     const parsedNewLocal = parseFloat(newPrice);
     const parsedQtyLocal = Number.parseInt(newQuantity, 10);
-    if (!(parsedNewLocal > 0)) return null;
     if (!(Number.isInteger(parsedQtyLocal) && parsedQtyLocal > 0)) return null;
     const symbol = order.contract.symbol;
     const action: "BUY" | "SELL" = order.action === "SELL" ? "SELL" : "BUY";
     const isComboLocal = order.contract.secType === "BAG" && editableLegs.length >= 2;
+    const validPriceLocal = isComboLocal
+      ? Number.isFinite(parsedNewLocal) && parsedNewLocal !== 0
+      : parsedNewLocal > 0;
+    if (!validPriceLocal) return null;
 
     if (isComboLocal) {
       const chainLegs: ChainOrderLeg[] = [];
@@ -309,13 +314,12 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
         });
       }
       const totalCost = parsedNewLocal * parsedQtyLocal * 100;
-      const isCredit = action === "SELL";
       return {
         ticker: symbol,
         chainLegs,
-        netPremium: isCredit ? -Math.abs(parsedNewLocal) : Math.abs(parsedNewLocal),
+        netPremium: parsedNewLocal,
         description: `${action} ${parsedQtyLocal}x ${symbol} combo @ ${fmtPrice(parsedNewLocal)}`,
-        totalCost: isCredit ? -totalCost : totalCost,
+        totalCost,
         // FU7: net combo quote for net-of-cost risk on the post-modify shape.
         quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
       };
@@ -346,9 +350,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
   const currentQuantity = order.totalQuantity;
   const parsedNew = parseFloat(newPrice);
   const parsedQuantity = Number.parseInt(newQuantity, 10);
-  const isValidPrice = !Number.isNaN(parsedNew) && parsedNew > 0;
-  const isValidQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0;
   const isComboOrder = order.contract.secType === "BAG" && editableLegs.length >= 2;
+  const isValidPrice = isComboOrder
+    ? Number.isFinite(parsedNew) && parsedNew !== 0
+    : Number.isFinite(parsedNew) && parsedNew > 0;
+  const isValidQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0;
   const normalizedLegs = normalizeComboLegs(editableLegs);
   const originalLegsSnapshot = JSON.stringify(buildEditableComboLegs(order));
   const currentLegsSnapshot = JSON.stringify(editableLegs);
@@ -471,7 +477,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
                   mid,
                   ask,
                   spread: ask - bid,
-                  spreadPct: mid > 0 ? ((ask - bid) / mid) * 100 : null,
+                  spreadPct: Math.abs(mid) > 0 ? ((ask - bid) / Math.abs(mid)) * 100 : null,
                   available: true,
                 }}
                 compact
@@ -511,7 +517,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
                       className="modify-price-input"
                       type="number"
                       step="0.01"
-                      min="0.01"
+                      min={isComboOrder ? undefined : "0.01"}
                       value={newPrice}
                       onChange={(e) => setNewPrice(e.target.value)}
                       autoFocus
@@ -549,10 +555,10 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
                     disabled={impliedReference == null}
                     title="Black-Scholes implied value at current spot"
                     onClick={() =>
-                      impliedReference != null && setNewPrice(Math.abs(impliedReference).toFixed(2))
+                      impliedReference != null && setNewPrice(impliedReference.toFixed(2))
                     }
                   >
-                    IMPLIED{impliedReference != null ? ` ${Math.abs(impliedReference).toFixed(2)}` : ""}
+                    IMPLIED{impliedReference != null ? ` ${impliedReference.toFixed(2)}` : ""}
                   </button>
                 </div>
               </div>

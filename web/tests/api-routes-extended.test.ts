@@ -941,6 +941,52 @@ describe("POST /api/orders/modify — extended", () => {
     });
   });
 
+  it("allows negative signed combo replacement limit prices", async () => {
+    mockRadonFetch
+      .mockResolvedValueOnce({ status: "ok", message: "Order cancelled" })
+      .mockResolvedValueOnce({ status: "ok", message: "Replacement placed", orderId: 202, permId: 999 })
+      .mockResolvedValueOnce({});
+
+    const { POST } = await import("../app/api/orders/modify/route");
+    const res = await POST(
+      new Request("http://localhost/api/orders/modify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orderId: 77,
+          permId: 653611587,
+          replaceOrder: {
+            type: "combo",
+            symbol: "MSFT",
+            action: "BUY",
+            quantity: 25,
+            limitPrice: -3.4,
+            tif: "DAY",
+            legs: [
+              { expiry: "20260717", strike: 350, right: "P", action: "SELL", ratio: 1 },
+              { expiry: "20260717", strike: 375, right: "C", action: "BUY", ratio: 1 },
+            ],
+          },
+        }),
+      }),
+    );
+    expect(res.status).toBe(200);
+
+    expect(mockRadonFetch).toHaveBeenCalledTimes(3);
+    expect(mockRadonFetch.mock.calls[1][0]).toBe("/orders/place");
+    expect(JSON.parse(String(mockRadonFetch.mock.calls[1][1].body))).toMatchObject({
+      type: "combo",
+      symbol: "MSFT",
+      action: "BUY",
+      quantity: 25,
+      limitPrice: -3.4,
+      legs: [
+        { expiry: "20260717", strike: 350, right: "P", action: "SELL", ratio: 1 },
+        { expiry: "20260717", strike: 375, right: "C", action: "BUY", ratio: 1 },
+      ],
+    });
+  });
+
   it("returns 400 when modify fields are missing", async () => {
     const { POST } = await import("../app/api/orders/modify/route");
     const res = await POST(
