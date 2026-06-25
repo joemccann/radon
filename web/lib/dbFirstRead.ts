@@ -21,6 +21,7 @@
  */
 
 import { parseScanTime } from "./parseScanTime";
+import { withTimeout } from "./asyncTimeout";
 
 export type TimestampedRead<T> = {
   data: T;
@@ -52,7 +53,11 @@ export type DbFirstReadOptions<T> = {
   label?: string;
   /** Injectable clock for tests. */
   now?: () => number;
+  /** Per-source read deadline. Prevents a hung DB read from blocking disk fallback. */
+  sourceTimeoutMs?: number;
 };
+
+const DEFAULT_SOURCE_TIMEOUT_MS = 3_000;
 
 /** Epoch ms from a snapshot's content timestamp field (scan_time / taken_at / last_sync). */
 export function contentTimestampMs(value: unknown): number | null {
@@ -63,11 +68,11 @@ export function contentTimestampMs(value: unknown): number | null {
 export async function dbFirstRead<T>(
   options: DbFirstReadOptions<T>,
 ): Promise<DbFirstResult<T>> {
-  const { label, maxAgeMs, now = Date.now } = options;
+  const { label, maxAgeMs, now = Date.now, sourceTimeoutMs = DEFAULT_SOURCE_TIMEOUT_MS } = options;
 
   const [db, disk] = await Promise.all([
-    readSource(options.fromDb, "DB", label),
-    readSource(options.fromDisk, "disk", label),
+    readSource(options.fromDb, "DB", label, sourceTimeoutMs),
+    readSource(options.fromDisk, "disk", label, sourceTimeoutMs),
   ]);
   if (!db && !disk) return { ok: false };
 
@@ -107,9 +112,14 @@ async function readSource<T>(
   read: () => Promise<TimestampedRead<T> | null>,
   sourceName: "DB" | "disk",
   label: string | undefined,
+  timeoutMs: number,
 ): Promise<TimestampedRead<T> | null> {
   try {
-    return (await read()) ?? null;
+    return (await withTimeout(
+      read(),
+      timeoutMs,
+      `${sourceName} read timed out after ${timeoutMs}ms`,
+    )) ?? null;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     warnWithLabel(label, `${sourceName} read failed: ${message}`);

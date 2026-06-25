@@ -11,6 +11,7 @@ import {
 } from "react";
 import { useAuth } from "@clerk/nextjs";
 import { createReconnectStrategy, type ReconnectState } from "./reconnectStrategy";
+import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "./realtimeSocketAuth";
 
 /* ─── Types ───────────────────────────────────────────── */
 
@@ -227,10 +228,7 @@ function IBStatusCoreProvider({
     createReconnectStrategy({ maxAttempts: 0 }) // unlimited for status
   );
 
-  const socketUrl =
-    process.env.NEXT_PUBLIC_IB_REALTIME_WS_URL ??
-    process.env.IB_REALTIME_WS_URL ??
-    "ws://localhost:8765";
+  const socketUrl = resolveRealtimeWebSocketUrl();
 
   const clearReconnectTimer = useCallback(() => {
     if (reconnectTimerRef.current) {
@@ -248,21 +246,6 @@ function IBStatusCoreProvider({
 
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
-
-  const buildAuthenticatedUrl = useCallback(async (baseUrl: string): Promise<string> => {
-    if (!getTokenRef.current) return baseUrl;
-    try {
-      const token = await getTokenRef.current();
-      if (!token) return baseUrl;
-      const { getWsTicket } = await import("./wsTicket");
-      const ticket = await getWsTicket(token);
-      const separator = baseUrl.includes("?") ? "&" : "?";
-      return `${baseUrl}${separator}ticket=${ticket}`;
-    } catch (err) {
-      console.debug("[IBStatus] Failed to get WS ticket, connecting without auth:", err);
-      return baseUrl;
-    }
-  }, []);
 
   const socketGenRef = useRef(0);
 
@@ -352,17 +335,25 @@ function IBStatusCoreProvider({
     };
     };
 
-    if (!getTokenRef.current) {
-      openSocket(socketUrl);
-      return;
-    }
-
     (async () => {
-      const url = await buildAuthenticatedUrl(socketUrl);
-      if (gen !== socketGenRef.current) return; // stale connect attempt
-      openSocket(url);
+      try {
+        const url = await buildAuthenticatedWebSocketUrl(socketUrl, getTokenRef.current);
+        if (gen !== socketGenRef.current) return; // stale connect attempt
+        openSocket(url);
+      } catch {
+        if (gen !== socketGenRef.current || !mountedRef.current) return;
+        setWsConnected(false);
+        setIbConnected(false);
+        setDisconnectedSince((prev) => prev ?? Date.now());
+        if (strategyRef.current.canRetry()) {
+          const delay = strategyRef.current.nextDelay();
+          reconnectTimerRef.current = setTimeout(() => {
+            if (mountedRef.current) connect();
+          }, delay);
+        }
+      }
     })();
-  }, [socketUrl, clearReconnectTimer, clearStalenessTimer, buildAuthenticatedUrl]);
+  }, [socketUrl, clearReconnectTimer, clearStalenessTimer]);
 
   useEffect(() => {
     mountedRef.current = true;

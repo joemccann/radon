@@ -6,6 +6,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
+import { withTimeout } from "@/lib/asyncTimeout";
 
 // Disable Next.js static caching: this handler reads live Turso state.
 // Without this, the framework freezes the first response and serves stale
@@ -15,6 +16,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const CACHE_TTL_MS = 60_000; // 1 minute
+const DB_READ_TIMEOUT_MS = 3_000;
 
 type PortfolioSnapshot = {
   data: Record<string, unknown>;
@@ -31,10 +33,14 @@ function parseTimestampMs(value: unknown): number | null {
 /** Read the latest portfolio snapshot from Turso. */
 async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
   const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT taken_at, payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
-    args: [],
-  });
+  const result = await withTimeout(
+    db.execute({
+      sql: `SELECT taken_at, payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
+      args: [],
+    }),
+    DB_READ_TIMEOUT_MS,
+    `portfolio snapshot read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+  );
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { taken_at?: string; payload?: string };
   if (typeof row.payload !== "string") return null;
@@ -63,8 +69,9 @@ function isPortfolioSnapshotStale(snapshot: PortfolioSnapshot | null): boolean {
 async function loadTradeLogDates(): Promise<Record<string, string>> {
   try {
     const db = getDb();
-    const result = await db.execute({
-      sql: `
+    const result = await withTimeout(
+      db.execute({
+        sql: `
         SELECT
           json_extract(payload, '$.ticker') AS ticker,
           MAX(COALESCE(filled_at, json_extract(payload, '$.date'))) AS date
@@ -72,8 +79,11 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
         WHERE json_extract(payload, '$.ticker') IS NOT NULL
         GROUP BY json_extract(payload, '$.ticker')
       `,
-      args: [],
-    });
+        args: [],
+      }),
+      DB_READ_TIMEOUT_MS,
+      `portfolio trade-log date read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    );
     if (result.rows.length > 0) {
       const dates: Record<string, string> = {};
       for (const row of result.rows) {

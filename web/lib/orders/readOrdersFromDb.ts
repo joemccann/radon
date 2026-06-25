@@ -1,5 +1,6 @@
 import type { Static } from "@sinclair/typebox";
 import { getDb, syncDb } from "@/lib/db";
+import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 
 export type OrdersSnapshot = Static<typeof OrdersData>;
@@ -8,6 +9,7 @@ type Open = OrdersSnapshot["open_orders"][number];
 type Executed = OrdersSnapshot["executed_orders"][number];
 
 const EXECUTED_LOOKBACK_HOURS = 36;
+const DB_READ_TIMEOUT_MS = 3_000;
 
 export const EMPTY_ORDERS: OrdersSnapshot = {
   last_sync: "",
@@ -35,24 +37,36 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   // drift on every order state transition (PreSubmitted → Submitted at
   // market open, Submitted → Filled, etc.).
   try {
-    await syncDb();
+    await withTimeout(
+      syncDb(),
+      DB_READ_TIMEOUT_MS,
+      `orders replica sync timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    );
   } catch {
     // Best-effort: a sync failure (network blip, auth hiccup) just means
     // we read the slightly-older replica — same as the pre-sync world.
   }
 
-  const openResult = await db.execute({
-    sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
-    args: [],
-  });
+  const openResult = await withTimeout(
+    db.execute({
+      sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
+      args: [],
+    }),
+    DB_READ_TIMEOUT_MS,
+    `open orders read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+  );
 
   const cutoff = new Date(Date.now() - EXECUTED_LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
-  const execResult = await db.execute({
-    sql: `SELECT payload, fill_time FROM executed_orders
+  const execResult = await withTimeout(
+    db.execute({
+      sql: `SELECT payload, fill_time FROM executed_orders
             WHERE fill_time >= ?
             ORDER BY fill_time DESC`,
-    args: [cutoff],
-  });
+      args: [cutoff],
+    }),
+    DB_READ_TIMEOUT_MS,
+    `executed orders read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+  );
 
   const open: Open[] = [];
   let latestOpenSync = "";

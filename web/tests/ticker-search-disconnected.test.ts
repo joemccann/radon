@@ -34,6 +34,13 @@ class MockWebSocket {
 let wsInstances: MockWebSocket[] = [];
 function latestWs(): MockWebSocket { return wsInstances[wsInstances.length - 1]; }
 
+async function flushSocketOpen() {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+}
+
 beforeEach(() => {
   wsInstances = [];
   vi.useFakeTimers();
@@ -48,10 +55,11 @@ afterEach(() => {
 });
 
 describe("TickerSearch IB-disconnected handling", () => {
-  it("calls onSearchUnavailable when relay flags disconnected:true", () => {
+  it("calls onSearchUnavailable when relay flags disconnected:true", async () => {
     const onSelect = vi.fn();
     const onSearchUnavailable = vi.fn();
     render(React.createElement(TickerSearch, { onSelect, onSearchUnavailable }));
+    await flushSocketOpen();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 
@@ -69,10 +77,11 @@ describe("TickerSearch IB-disconnected handling", () => {
     expect(screen.getByText("No results")).toBeDefined();
   });
 
-  it("does NOT call onSearchUnavailable when IB is connected and just has no matches", () => {
+  it("does NOT call onSearchUnavailable when IB is connected and just has no matches", async () => {
     const onSelect = vi.fn();
     const onSearchUnavailable = vi.fn();
     render(React.createElement(TickerSearch, { onSelect, onSearchUnavailable }));
+    await flushSocketOpen();
     const ws = latestWs();
     act(() => ws.simulateOpen());
 

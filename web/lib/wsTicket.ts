@@ -12,6 +12,7 @@
 export async function getWsTicket(clerkToken: string): Promise<string> {
   const res = await fetch("/api/ib/ws-ticket", {
     method: "POST",
+    cache: "no-store",
     headers: {
       Authorization: `Bearer ${clerkToken}`,
       "Content-Type": "application/json",

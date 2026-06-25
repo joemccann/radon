@@ -399,6 +399,25 @@ describe("POST /api/ib/ws-ticket", () => {
     expect(res.status).toBe(200);
     const body = (await jsonOf(res)) as Record<string, unknown>;
     expect(body.ticket).toBe("abc123");
+    expect(res.headers.get("cache-control") || "").toMatch(/no-store/);
+    expect(mockRadonFetch).toHaveBeenCalledWith("/ws-ticket", {
+      method: "POST",
+      token: undefined,
+    });
+  });
+
+  it("forwards the Clerk bearer token to FastAPI", async () => {
+    mockRadonFetch.mockResolvedValueOnce({ ticket: "abc123" });
+    const { POST } = await import("../app/api/ib/ws-ticket/route");
+    const res = await POST(req("http://localhost/api/ib/ws-ticket", {
+      method: "POST",
+      headers: { Authorization: "Bearer clerk-token-123" },
+    }));
+    expect(res.status).toBe(200);
+    expect(mockRadonFetch).toHaveBeenCalledWith("/ws-ticket", {
+      method: "POST",
+      token: "clerk-token-123",
+    });
   });
 
   it("returns 500 envelope on FastAPI failure", async () => {
@@ -408,6 +427,7 @@ describe("POST /api/ib/ws-ticket", () => {
     expect(res.status).toBe(500);
     const body = (await jsonOf(res)) as Record<string, unknown>;
     expect(body.detail).toBeDefined();
+    expect(res.headers.get("cache-control") || "").toMatch(/no-store/);
   });
 });
 

@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-06-25
+
+- When all app routes lose live data but edge health says IB, relay, Next, and Gateway are up, check the shared Turso/libSQL read path before restarting IB. DB-backed fallback reads need hard per-source deadlines; a hung DB promise must never block a fresher disk fallback or leave the UI in a quiet empty state.
+- Browser realtime sockets in production must default to same-origin `/ws` plus a short-lived FastAPI ticket. Never let authenticated production clients fall back to `ws://localhost:8765` or to an unauthenticated socket after ticket failure.
+- A live-data outage should surface in the shared shell, not disappear into per-route placeholders. Portfolio, orders, and price-stream failures should render a visible degraded state so blank dashboards are diagnosable.
+
 ## 2026-06-24
 
 - Scanner mode navigation should read as a tab strip, not as nested segmented pills. When adding scanner modes, avoid combining an outer bordered control with inner bordered active states; use one visual boundary and verify the tab surface in the actual scanner layout.
