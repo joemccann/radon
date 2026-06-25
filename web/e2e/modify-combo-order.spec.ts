@@ -130,7 +130,7 @@ test.describe("Combo order modify flow", () => {
       });
     });
 
-    await page.goto("http://127.0.0.1:3000/orders");
+    await page.goto("/orders");
 
     const row = page.locator("tbody tr").filter({ hasText: "AAOI" }).first();
     await expect(row).toBeVisible({ timeout: 10_000 });
@@ -138,7 +138,7 @@ test.describe("Combo order modify flow", () => {
 
     const modal = page.locator(".modify-dialog");
     await expect(modal).toBeVisible();
-    await expect(modal.getByText("Combo Legs")).toBeVisible();
+    await expect(modal.getByText("Edit Legs")).toBeVisible();
 
     const modalContent = page.locator(".modal-content");
     const box = await modalContent.boundingBox();
@@ -149,6 +149,34 @@ test.describe("Combo order modify flow", () => {
       clientWidth: el.clientWidth,
     }));
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.clientWidth + 1);
+
+    await modal.locator("#modify-price-input").focus();
+    const focusedPriceLayout = await modal.locator("#modify-price-input").evaluate((input) => {
+      const row = input.closest(".modify-price-input-row");
+      const field = input.closest(".modify-field");
+      const primaryPanel = input.closest(".modify-primary-panel");
+      if (!row || !field || !primaryPanel) {
+        throw new Error("Missing modify order price field layout");
+      }
+      const rowBox = row.getBoundingClientRect();
+      const fieldBox = field.getBoundingClientRect();
+      const panel = primaryPanel as HTMLElement;
+      return {
+        rowLeft: rowBox.left,
+        rowRight: rowBox.right,
+        fieldLeft: fieldBox.left,
+        fieldRight: fieldBox.right,
+        inputBoxShadow: getComputedStyle(input).boxShadow,
+        rowFocusWithin: row.matches(":focus-within"),
+        panelScrollWidth: panel.scrollWidth,
+        panelClientWidth: panel.clientWidth,
+      };
+    });
+    expect(focusedPriceLayout.rowLeft).toBeGreaterThanOrEqual(focusedPriceLayout.fieldLeft - 1);
+    expect(focusedPriceLayout.rowRight).toBeLessThanOrEqual(focusedPriceLayout.fieldRight + 1);
+    expect(focusedPriceLayout.panelScrollWidth).toBeLessThanOrEqual(focusedPriceLayout.panelClientWidth + 1);
+    expect(focusedPriceLayout.inputBoxShadow).toBe("none");
+    expect(focusedPriceLayout.rowFocusWithin).toBe(true);
 
     await expect(modal.locator("#modify-quantity-input")).toHaveValue("50");
     await expect(modal.locator("#modify-leg-0-strike")).toHaveValue("90");

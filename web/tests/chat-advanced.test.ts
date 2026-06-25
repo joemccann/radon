@@ -232,6 +232,36 @@ describe("requestPiReply", () => {
     expect(result).toBe("PI command request failed.");
   });
 
+  it("returns a controlled error when the HTTP response body is empty", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      text: async () => "",
+      json: async () => {
+        throw new SyntaxError("Unexpected end of JSON input");
+      },
+    });
+
+    const result = await requestPiReply("/portfolio");
+
+    expect(result).toBe("PI command request failed.");
+    expect(result).not.toContain("Unexpected end of JSON input");
+  });
+
+  it("returns a controlled error when the HTTP response body is not JSON", async () => {
+    mockFetch.mockResolvedValue({
+      ok: false,
+      text: async () => "<html>bad gateway</html>",
+      json: async () => {
+        throw new SyntaxError("Unexpected token < in JSON");
+      },
+    });
+
+    const result = await requestPiReply("/portfolio");
+
+    expect(result).toBe("PI command request failed.");
+    expect(result).not.toContain("Unexpected token");
+  });
+
   it("returns no-output message when output is empty on success", async () => {
     mockFetch.mockResolvedValue({
       ok: true,

@@ -39,6 +39,22 @@ function mockFetchSequence(handlers: Record<string, () => unknown>) {
   return { calls, fetchMock };
 }
 
+function mockFetchResponses(handlers: Record<string, () => Response>) {
+  const calls: FetchCall[] = [];
+  const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+    calls.push({ url, init });
+    const key = Object.keys(handlers).find((k) => url.includes(k));
+    return key ? handlers[key]() : ({
+      ok: true,
+      status: 200,
+      json: async () => ({ content: "ok" }),
+    } as Response);
+  });
+  // @ts-expect-error test stub
+  global.fetch = fetchMock;
+  return { calls, fetchMock };
+}
+
 const PROPOSAL = {
   tool: "place_order",
   destructive: true as const,
@@ -129,5 +145,47 @@ describe("ChatPanel order-confirm card", () => {
       expect(screen.queryByText(PROPOSAL.summary)).toBeNull();
     });
     expect(calls.some((c) => c.url.includes("/api/orders/place"))).toBe(false);
+  });
+
+  it("renders a controlled PI error when a PI command response is malformed", async () => {
+    mockFetchResponses({
+      "/api/pi": () => ({
+        ok: false,
+        status: 502,
+        text: async () => "",
+        json: async () => {
+          throw new SyntaxError("Unexpected end of JSON input");
+        },
+      } as Response),
+    });
+
+    render(<ChatPanel activeSection="dashboard" />);
+    await sendNonCommandMessage("/portfolio");
+
+    await waitFor(() => {
+      expect(screen.getByText(/PI command request failed/i)).toBeTruthy();
+    });
+    expect(screen.queryByText("No output.")).toBeNull();
+    expect(screen.queryByText(/Unexpected end of JSON input/)).toBeNull();
+  });
+
+  it("updates the pending assistant row when a PI command request rejects", async () => {
+    const calls: FetchCall[] = [];
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      calls.push({ url, init });
+      throw new Error("network down");
+    });
+    // @ts-expect-error test stub
+    global.fetch = fetchMock;
+
+    render(<ChatPanel activeSection="dashboard" />);
+    await sendNonCommandMessage("/portfolio");
+
+    await waitFor(() => {
+      expect(screen.getByText(/PI command failed to run in this session/i)).toBeTruthy();
+    });
+    expect(screen.queryByText("No output.")).toBeNull();
+    expect(screen.queryAllByText(/PI command failed to run in this session/i)).toHaveLength(1);
+    expect(calls.some((c) => c.url.includes("/api/pi"))).toBe(true);
   });
 });
