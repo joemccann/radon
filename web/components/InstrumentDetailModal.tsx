@@ -173,13 +173,15 @@ function LegOrderForm({
       parsedQty <= leg.contracts;
     if (isClosingHeld) {
       const proceeds = action === "SELL" ? totalCost : -totalCost;
+      const basisMagnitude = parsedQty * Math.abs(leg.avg_cost);
+      const entryCostDollars = leg.direction === "SHORT" ? -basisMagnitude : basisMagnitude;
       return {
         ticker,
         chainLegs: [],
         netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
         description,
         totalCost: proceeds,
-        closeOut: { entryCostDollars: parsedQty * Math.abs(leg.avg_cost) },
+        closeOut: { entryCostDollars },
       };
     }
     return {

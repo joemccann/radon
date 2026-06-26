@@ -1273,7 +1273,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-defined" columnVisibility={definedCols.visible} />
+            <PositionTable positions={definedFilter.filtered} showUnderlying={true} prices={prices} portfolio={portfolio} tableId="positions-defined" columnVisibility={definedCols.visible} />
           </div>
         </div>
       )}
@@ -1304,7 +1304,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} tableId="positions-undefined" columnVisibility={undefinedCols.visible} />
+            <PositionTable positions={undefinedFilter.filtered} showUnderlying={true} prices={prices} portfolio={portfolio} tableId="positions-undefined" columnVisibility={undefinedCols.visible} />
           </div>
         </div>
       )}
@@ -1335,7 +1335,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
             </div>
           </div>
           <div className="section-body">
-            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} tableId="positions-equity" columnVisibility={equityCols.visible} />
+            <PositionTable positions={equityFilter.filtered} showExpiry={false} prices={prices} portfolio={portfolio} tableId="positions-equity" columnVisibility={equityCols.visible} />
           </div>
         </div>
       )}
