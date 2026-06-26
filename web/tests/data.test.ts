@@ -140,6 +140,14 @@ describe("navItems", () => {
     expect(routeMap.get("journal")).toBe("/journal");
   });
 
+  it("keeps Discover route metadata but hides it from primary navigation", () => {
+    const discover = navItems.find((n) => n.route === "discover");
+    expect(discover).toBeDefined();
+    expect(discover?.href).toBe("/discover");
+    expect(discover?.hidden).toBe(true);
+    expect(navItems.filter((n) => !n.hidden).map((n) => n.route)).not.toContain("discover");
+  });
+
   it("has unique routes", () => {
     const routes = navItems.map((n) => n.route);
     expect(new Set(routes).size).toBe(routes.length);
@@ -150,22 +158,20 @@ describe("navItems", () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
-  it("orders Flow Analysis directly below Discover", () => {
-    const routes = navItems.map((n) => n.route);
-    const discoverIdx = routes.indexOf("discover");
+  it("orders Flow Analysis directly below Scanner in the visible nav", () => {
+    const routes = navItems.filter((n) => !n.hidden).map((n) => n.route);
+    const scannerIdx = routes.indexOf("scanner");
     const flowIdx = routes.indexOf("flow-analysis");
-    expect(discoverIdx).toBeGreaterThanOrEqual(0);
-    expect(flowIdx).toBe(discoverIdx + 1);
+    expect(scannerIdx).toBeGreaterThanOrEqual(0);
+    expect(flowIdx).toBe(scannerIdx + 1);
   });
 
   it("locks the full visible-nav order", () => {
-    expect(navItems.map((n) => n.route)).toEqual([
+    expect(navItems.filter((n) => !n.hidden).map((n) => n.route)).toEqual([
       "dashboard",
       "portfolio",
-      "performance", // hidden: true, but still part of the canonical order
       "orders",
       "scanner",
-      "discover",
       "flow-analysis",
       "journal",
       "regime",
@@ -173,7 +179,6 @@ describe("navItems", () => {
       "alerts",
       "workflow",
       "admin",
-      "profile", // hidden: true, reached via the sidebar user card
     ]);
   });
 });

@@ -61,7 +61,7 @@ def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = 
     """
     if service not in SNAPSHOT_UPSERTS:
         raise ValueError(f"unknown scan service: {service}")
-    scan_iso = taken_at or (payload.get("scan_time") if isinstance(payload, dict) else None)
+    scan_iso = taken_at or _payload_timestamp(service, payload)
     try:
         from db import writer
     except ImportError:  # pragma: no cover — DB layer optional in stripped envs
@@ -88,3 +88,11 @@ def _today_et_str() -> str:
         return datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     except Exception:
         return datetime.now().strftime("%Y-%m-%d")
+
+
+def _payload_timestamp(service: str, payload: dict) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    if service == "discover":
+        return payload.get("discovery_time") or payload.get("scan_time")
+    return payload.get("scan_time")

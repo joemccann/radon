@@ -42,7 +42,7 @@ test.describe("MobileShell — phase 1 foundation", () => {
 
     await expect(page.getByTestId("mobile-drawer-journal")).toHaveAttribute("href", "/journal");
     await expect(page.getByTestId("mobile-drawer-performance")).toHaveAttribute("href", "/performance");
-    await expect(page.getByTestId("mobile-drawer-discover")).toHaveAttribute("href", "/discover");
+    await expect(page.getByTestId("mobile-drawer-discover")).toHaveCount(0);
     await expect(page.getByTestId("mobile-drawer-operator")).toHaveAttribute("href", "/admin");
 
     await page.getByTestId("mobile-drawer-close").click({ force: true });

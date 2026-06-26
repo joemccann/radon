@@ -9,11 +9,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import WorkspaceSections from "../components/WorkspaceSections";
 
 const replaceMock = vi.hoisted(() => vi.fn());
+const searchParamsMock = vi.hoisted(() => vi.fn(() => new URLSearchParams("")));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => "/scanner",
   useRouter: () => ({ replace: replaceMock }),
-  useSearchParams: () => new URLSearchParams(""),
+  useSearchParams: searchParamsMock,
 }));
 
 vi.mock("@/lib/useViewport", () => ({
@@ -52,6 +53,43 @@ vi.mock("@/lib/useScanner", () => ({
   }),
 }));
 
+vi.mock("@/lib/useDiscover", () => ({
+  useDiscover: () => ({
+    data: {
+      discovery_time: "2026-06-24T15:05:00Z",
+      alerts_analyzed: 7,
+      candidates_found: 1,
+      candidates: [
+        {
+          ticker: "MSFT",
+          score: 72.5,
+          score_breakdown: {},
+          alerts: 3,
+          total_premium: 1_250_000,
+          calls: 8,
+          puts: 1,
+          options_bias: "BULLISH",
+          sweeps: 2,
+          avg_vol_oi: 4.2,
+          sector: "Technology",
+          issue_type: "Common Stock",
+          dp_direction: "ACCUMULATION",
+          dp_strength: 64.1,
+          dp_buy_ratio: 0.68,
+          dp_sustained_days: 2,
+          dp_total_prints: 19,
+          confluence: true,
+        },
+      ],
+    },
+    loading: false,
+    syncing: false,
+    error: null,
+    lastSync: "2026-06-24T15:05:00Z",
+    syncNow: vi.fn(),
+  }),
+}));
+
 vi.mock("@/lib/useThetaHarvester", () => ({
   useThetaHarvester: () => ({
     data: null,
@@ -75,6 +113,7 @@ vi.mock("@/lib/useStrengthConfirmation", () => ({
 afterEach(() => {
   cleanup();
   vi.clearAllMocks();
+  searchParamsMock.mockReturnValue(new URLSearchParams(""));
 });
 
 describe("Scanner flow header tooltips", () => {
@@ -97,5 +136,20 @@ describe("Scanner flow header tooltips", () => {
       expect(screen.getByTestId(`scanner-header-tooltip-content-${key}`).textContent).toContain(expectedText);
       fireEvent.mouseLeave(trigger);
     }
+  });
+
+  it("renders discover candidates as a scanner mode", () => {
+    searchParamsMock.mockReturnValue(new URLSearchParams("mode=discover"));
+
+    render(<WorkspaceSections section="scanner" />);
+
+    expect(screen.getByRole("tab", { name: "Flow Signals" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Theta Harvester" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "7-Step Strength" })).toBeTruthy();
+    expect(screen.getByRole("tab", { name: "Discover" }).getAttribute("aria-selected")).toBe("true");
+    expect(screen.getByText("Discovery Candidates")).toBeTruthy();
+    expect(screen.getByText("MSFT")).toBeTruthy();
+    expect(screen.getByText("ACCUMULATION")).toBeTruthy();
+    expect(screen.getByText("BULLISH")).toBeTruthy();
   });
 });

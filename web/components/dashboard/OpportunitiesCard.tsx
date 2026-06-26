@@ -193,7 +193,7 @@ export function OpportunitiesCard() {
         ) : (
           <Link
             className="snapshot-card__see-all"
-            href={tab === "scanner" ? "/scanner" : "/discover"}
+            href={tab === "scanner" ? "/scanner" : "/scanner?mode=discover"}
           >
             {tab === "scanner" ? "All scanner →" : "All discover →"}
           </Link>
