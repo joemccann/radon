@@ -1279,6 +1279,10 @@ export default function OptionsChainTab({
         prices={prices}
         currentPrice={currentPrice}
         loading={loadingStrikes}
+        sideFilter={sideFilter}
+        onSideFilterChange={setSideFilter}
+        strikesPerSide={strikesPerSide}
+        onStrikesPerSideChange={setStrikesPerSide}
         orderLegs={orderLegs}
         riskFreeRate={riskFreeRate}
         onAddLeg={handleAddLeg}
