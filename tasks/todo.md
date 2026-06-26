@@ -5201,3 +5201,33 @@ verify search returns results on app.radon.run.
 - Verification passed: focused Vitest `npx vitest run --config vitest.config.ts web/tests/fastapi-migration.test.ts web/tests/api-routes-smoke.test.ts web/tests/api-routes-smoke-misc.test.ts web/tests/chain-prefetch.test.ts` — 116 passed; focused rerun after assertion update — 59 passed. Full web `npm test -- --reporter=dot` — 356 files, 3,492 passed, 26 skipped. `npm run lint` passed with 9 existing warnings. `git diff --check` passed.
 - Browser verification passed on local authless `http://127.0.0.1:3060/IWM?deck=c`: `/api/options/expirations` and `/api/options/chain` both returned 200, the page rendered expiry and strike rows, and the timeout text was absent. Screenshot: `/tmp/radon-iwm-chain-fixed.png`.
 - Verification blocker: `npm run typecheck` is still blocked by missing installed packages `@upstash/ratelimit` and `@upstash/redis` under `web/node_modules`; `npm ls @upstash/ratelimit @upstash/redis` returns empty. A targeted `npm install --no-audit --no-fund @upstash/ratelimit@^2.0.5 @upstash/redis@^1.34.3` produced no output for over two minutes and was interrupted without tracked-file changes. This local dependency issue predates this patch and is unrelated to the option-chain changes.
+## Session: Portfolio Short Call Buy-to-Cover Scope Bug (2026-06-26)
+
+### Dependency Graph
+- T103 (Snapshot current state, scoped web instructions, and lessons relevant to order-risk/portfolio wiring) depends_on: []
+- T104 (Trace the portfolio leg modal path and identify why OrderRiskGate receives no portfolio) depends_on: [T103]
+- T105 (Add focused regression coverage for portfolio-threading and short-leg buy-to-cover close-out basis) depends_on: [T104]
+- T106 (Implement the minimal portfolio wiring and close-out sign fix) depends_on: [T105]
+- T107 (Run focused Vitest and Playwright visual/browser verification for the modal flow) depends_on: [T106]
+- T108 (Run broader verification, hygiene checks, and document review) depends_on: [T107]
+
+### Checklist
+- [x] T103 Snapshot state and scoped guidance
+- [x] T104 Trace root cause
+- [x] T105 Regression coverage
+- [x] T106 Implementation
+- [x] T107 Focused browser verification
+- [x] T108 Broader verification and review
+
+### Notes
+- Root cause found: `PortfolioSections` has the live `portfolio`, but renders `PositionTable` without it. `PositionTable` then opens `InstrumentDetailModal` without `portfolio`, so `<OrderRiskGate>` receives `null` and renders `Coverage indeterminate — portfolio not in scope`.
+- Adjacent defect found in `InstrumentDetailModal`: BUY-to-close of a SHORT option uses `closeOut.entryCostDollars: +basis`; the shared contract requires `-basis` so realized P&L is `credit - debit`.
+
+### Review
+- Fixed the `/portfolio` leg modal wiring by adding an optional `portfolio` prop to `PositionTable`, threading it from all three portfolio sections, and passing it into `InstrumentDetailModal`.
+- Fixed the instrument modal close-out basis for BUY-to-cover of a SHORT option: the original credit is now passed as a negative `closeOut.entryCostDollars`, so close P&L is `credit - debit`.
+- Added component regressions in `web/tests/instrument-detail-buy-to-cover.test.tsx` proving both the direct modal P&L and the `PositionTable` portfolio-threading path. The tests fail on the old code with `-$6,855` P&L and `Coverage indeterminate — portfolio not in scope`.
+- Added Playwright regression coverage to `web/e2e/portfolio-leg-row-runtime.spec.ts`. It opens a MU short-call leg from `/portfolio`, enters a `$0.05` buy-to-cover limit, stops at review, and asserts `Close Debit: $25` plus `Est. Realized P&L: $6,805`. Visual screenshot: `/tmp/radon-buy-to-cover-modal.png`.
+- Verification passed: focused Vitest `npx vitest run --config vitest.config.ts web/tests/instrument-detail-buy-to-cover.test.tsx web/tests/position-trade.test.ts web/tests/position-tab-trade.test.tsx web/tests/order-risk-chokepoint.test.tsx web/tests/instrument-detail-spread-quantity.test.ts web/tests/order-ticket-spread-notional.test.ts` — 40 passed. Playwright `PLAYWRIGHT_PORT=3042 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/portfolio-leg-row-runtime.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 passed.
+- Broader verification passed: `cd web && npm test -- --reporter=dot` — 357 files, 3,496 passed, 26 skipped. `cd web && npm run lint` — passed with the existing 9 warnings. `git diff --check` and strict conflict-marker scan passed.
+- Verification blocker: `cd web && npm run typecheck` is still blocked by the pre-existing missing install/lock state for `@upstash/ratelimit` and `@upstash/redis`; `npm ls @upstash/ratelimit @upstash/redis` returns empty. A targeted `npm install --no-audit --no-fund @upstash/ratelimit@^2.0.5 @upstash/redis@^1.34.3` produced no output for about 90 seconds and was interrupted with no tracked dependency-file changes.
