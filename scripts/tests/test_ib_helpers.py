@@ -198,6 +198,26 @@ class TestDetectStructureType:
         assert name == "Risk Reversal"
         assert risk == "undefined"
 
+    def test_bearish_risk_reversal_bear_spread(self):
+        legs = [
+            {"secType": "OPT", "position": -20, "right": "C", "strike": 215},
+            {"secType": "OPT", "position": -20, "right": "P", "strike": 120},
+            {"secType": "OPT", "position": 20, "right": "P", "strike": 150},
+        ]
+        name, risk = detect_structure_type(legs)
+        assert name == "Bearish Risk Reversal Bear Spread"
+        assert risk == "undefined"
+
+    def test_bullish_risk_reversal_call_spread(self):
+        legs = [
+            {"secType": "OPT", "position": -20, "right": "P", "strike": 120},
+            {"secType": "OPT", "position": 20, "right": "C", "strike": 150},
+            {"secType": "OPT", "position": -20, "right": "C", "strike": 215},
+        ]
+        name, risk = detect_structure_type(legs)
+        assert name == "Bullish Risk Reversal Call Spread"
+        assert risk == "undefined"
+
     def test_long_straddle(self):
         legs = [
             {"secType": "OPT", "position": 1, "right": "P", "strike": 200},
@@ -255,6 +275,24 @@ class TestFormatStructureDescription:
         assert "P$180" in result
         assert "C$220" in result
 
+    def test_bearish_risk_reversal_bear_spread_with_strikes(self):
+        legs = [
+            {"secType": "OPT", "position": -20, "right": "C", "strike": 215, "structure": ""},
+            {"secType": "OPT", "position": -20, "right": "P", "strike": 120, "structure": ""},
+            {"secType": "OPT", "position": 20, "right": "P", "strike": 150, "structure": ""},
+        ]
+        result = format_structure_description("Bearish Risk Reversal Bear Spread", legs)
+        assert result == "Bearish Risk Reversal Bear Spread (P$120/$150/C$215)"
+
+    def test_bullish_risk_reversal_call_spread_with_strikes(self):
+        legs = [
+            {"secType": "OPT", "position": -20, "right": "P", "strike": 120, "structure": ""},
+            {"secType": "OPT", "position": 20, "right": "C", "strike": 150, "structure": ""},
+            {"secType": "OPT", "position": -20, "right": "C", "strike": 215, "structure": ""},
+        ]
+        result = format_structure_description("Bullish Risk Reversal Call Spread", legs)
+        assert result == "Bullish Risk Reversal Call Spread (P$120/C$150/$215)"
+
     def test_straddle_single_strike(self):
         legs = [
             {"secType": "OPT", "right": "P", "strike": 200, "structure": ""},
@@ -301,6 +339,49 @@ class TestFormatStructureDescription:
         assert position["structure"] == "Short Strangle $1125/$1250"
         assert position["risk_profile"] == "undefined"
         assert position["direction"] == "COMBO"
+
+    def test_collapse_bearish_risk_reversal_bear_spread_stays_undefined_combo(self):
+        positions = [
+            {
+                "symbol": "CBRS",
+                "secType": "OPT",
+                "position": -20,
+                "right": "C",
+                "strike": 215,
+                "expiry": "2026-07-17",
+                "entry_cost": 1000.0,
+                "avgCost": 50.0,
+                "marketValue": 900.0,
+            },
+            {
+                "symbol": "CBRS",
+                "secType": "OPT",
+                "position": -20,
+                "right": "P",
+                "strike": 120,
+                "expiry": "2026-07-17",
+                "entry_cost": 2000.0,
+                "avgCost": 100.0,
+                "marketValue": 1800.0,
+            },
+            {
+                "symbol": "CBRS",
+                "secType": "OPT",
+                "position": 20,
+                "right": "P",
+                "strike": 150,
+                "expiry": "2026-07-17",
+                "entry_cost": 4000.0,
+                "avgCost": 200.0,
+                "marketValue": 4100.0,
+            },
+        ]
+        [position] = collapse_positions(positions)
+        assert position["structure_type"] == "Bearish Risk Reversal Bear Spread"
+        assert position["structure"] == "Bearish Risk Reversal Bear Spread (P$120/$150/C$215)"
+        assert position["risk_profile"] == "undefined"
+        assert position["direction"] == "COMBO"
+        assert position["max_risk"] is None
 
     def test_single_leg_short_put_includes_strike(self):
         legs = [{"secType": "OPT", "right": "P", "strike": 85, "structure": ""}]

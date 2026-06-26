@@ -200,10 +200,29 @@ def detect_structure_type(legs: list) -> Tuple[str, str]:
     puts = [l for l in opt_legs if l.get('right') == 'P']
     long_legs = [l for l in opt_legs if l['position'] > 0]
     short_legs = [l for l in opt_legs if l['position'] < 0]
+    long_calls = [l for l in calls if l['position'] > 0]
+    short_calls = [l for l in calls if l['position'] < 0]
+    long_puts = [l for l in puts if l['position'] > 0]
+    short_puts = [l for l in puts if l['position'] < 0]
     
     # Helper: detect if leg contract counts differ (ratio position)
     def _is_ratio(leg_a, leg_b):
         return abs(leg_a['position']) != abs(leg_b['position'])
+
+    def _has_equal_contract_counts(candidate_legs):
+        return len({abs(l['position']) for l in candidate_legs}) == 1
+
+    # Three-leg risk reversal spreads:
+    # - Bearish: short call + long higher-strike put + short lower-strike put.
+    # - Bullish: short put + long lower-strike call + short higher-strike call.
+    if len(opt_legs) == 3 and not stk_legs and _has_equal_contract_counts(opt_legs):
+        if len(short_calls) == 1 and len(long_puts) == 1 and len(short_puts) == 1:
+            if long_puts[0].get('strike', 0) > short_puts[0].get('strike', 0):
+                return "Bearish Risk Reversal Bear Spread", "undefined"
+
+        if len(short_puts) == 1 and len(long_calls) == 1 and len(short_calls) == 1:
+            if long_calls[0].get('strike', 0) < short_calls[0].get('strike', 0):
+                return "Bullish Risk Reversal Call Spread", "undefined"
 
     # Synthetic or Risk Reversal: Short Put + Long Call (or vice versa)
     # Same strike = Synthetic Long/Short (behaves like stock)
@@ -322,6 +341,33 @@ def format_structure_description(structure_type: str, legs: list) -> str:
 
     ratio = _display_ratio_label(structure_type, opt_legs, legs)
     ratio_suffix = f" {ratio}" if ratio else ""
+
+    def _strike_text(value) -> str:
+        if isinstance(value, (int, float)) and not isinstance(value, bool):
+            return f"{value:g}"
+        return str(value)
+
+    if "Risk Reversal Bear Spread" in structure_type:
+        put_legs = sorted([l for l in opt_legs if l.get('right') == 'P'], key=lambda x: x.get('strike', 0))
+        call_leg = next((l for l in opt_legs if l.get('right') == 'C'), None)
+        if len(put_legs) == 2 and call_leg:
+            low_put, high_put = put_legs
+            return (
+                f"{structure_type}{ratio_suffix} "
+                f"(P${_strike_text(low_put.get('strike', '?'))}/${_strike_text(high_put.get('strike', '?'))}"
+                f"/C${_strike_text(call_leg.get('strike', '?'))})"
+            )
+
+    if "Risk Reversal Call Spread" in structure_type:
+        call_legs = sorted([l for l in opt_legs if l.get('right') == 'C'], key=lambda x: x.get('strike', 0))
+        put_leg = next((l for l in opt_legs if l.get('right') == 'P'), None)
+        if len(call_legs) == 2 and put_leg:
+            low_call, high_call = call_legs
+            return (
+                f"{structure_type}{ratio_suffix} "
+                f"(P${_strike_text(put_leg.get('strike', '?'))}"
+                f"/C${_strike_text(low_call.get('strike', '?'))}/${_strike_text(high_call.get('strike', '?'))})"
+            )
 
     if "Spread" in structure_type:
         strikes = [l.get('strike') for l in opt_legs]
@@ -479,7 +525,7 @@ def collapse_positions(positions: list) -> list:
         num_legs = len(legs)
         if structure_type == "Stock":
             direction = "LONG" if net_position > 0 else "SHORT"
-        elif "Spread" in structure_type:
+        elif "Spread" in structure_type and "Risk Reversal" not in structure_type:
             direction = "DEBIT" if total_entry_cost > 0 else "CREDIT"
         elif num_legs > 1 and risk_profile == "undefined":
             direction = "COMBO"
