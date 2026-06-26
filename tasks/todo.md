@@ -5231,3 +5231,77 @@ verify search returns results on app.radon.run.
 - Verification passed: focused Vitest `npx vitest run --config vitest.config.ts web/tests/instrument-detail-buy-to-cover.test.tsx web/tests/position-trade.test.ts web/tests/position-tab-trade.test.tsx web/tests/order-risk-chokepoint.test.tsx web/tests/instrument-detail-spread-quantity.test.ts web/tests/order-ticket-spread-notional.test.ts` — 40 passed. Playwright `PLAYWRIGHT_PORT=3042 RADON_AUTHLESS_TEST=1 NEXT_PUBLIC_RADON_AUTHLESS_TEST=1 npx playwright test e2e/portfolio-leg-row-runtime.spec.ts --config playwright.config.ts --project=chromium --timeout=30000` — 2 passed.
 - Broader verification passed: `cd web && npm test -- --reporter=dot` — 357 files, 3,496 passed, 26 skipped. `cd web && npm run lint` — passed with the existing 9 warnings. `git diff --check` and strict conflict-marker scan passed.
 - Verification blocker: `cd web && npm run typecheck` is still blocked by the pre-existing missing install/lock state for `@upstash/ratelimit` and `@upstash/redis`; `npm ls @upstash/ratelimit @upstash/redis` returns empty. A targeted `npm install --no-audit --no-fund @upstash/ratelimit@^2.0.5 @upstash/redis@^1.34.3` produced no output for about 90 seconds and was interrupted with no tracked dependency-file changes.
+
+---
+
+## Session: Discover vs Scanner Route Analysis (2026-06-26)
+
+### Dependency Graph
+- T109 (Snapshot current state, scoped route instructions, and route inventory) depends_on: []
+- T110 (Agent A maps `/discover` UI, API, data model, scripts, tests, and runtime semantics) depends_on: [T109]
+- T111 (Agent B maps `/scanner` UI, API, data model, scripts, tests, and runtime semantics) depends_on: [T109]
+- T112 (Agent C compares backend/data-source overlap and service-health/timer ownership) depends_on: [T109]
+- T113 (Main thread merges findings into route deltas, redundancy assessment, and consolidation plan) depends_on: [T110, T111, T112]
+- T114 (Document final recommendation, risks, acceptance criteria, and non-goals) depends_on: [T113]
+
+### Checklist
+- [x] T109 Snapshot state and scoped guidance
+- [x] T110 Discover route inventory
+- [x] T111 Scanner route inventory
+- [x] T112 Backend/data-source overlap comparison
+- [x] T113 Merge route deltas and redundancy assessment
+- [x] T114 Final recommendation and plan
+
+### Notes
+- User asked to use multiple agents and produce an analysis plan, route deltas, and consolidation recommendation. This is a read-only analysis unless explicitly redirected.
+
+### Review
+- Three agents mapped `/discover`, `/scanner`, and shared backend/data-source behavior. Main thread spot-checked the API routes, hooks, page dispatch, types, producer scripts, dashboard card, service-health windows, and scan mirror.
+- Conclusion: the routes overlap in UI intent and infrastructure but not in acquisition semantics. `/scanner` flow scans the Turso watchlist, excludes open portfolio positions, and ranks dark-pool signals. `/discover` scans market-wide or targeted UW options flow, excludes watchlist/portfolio names in market-wide mode, then validates candidates with dark-pool data.
+- Product architecture recommendation: consolidate the top-level user surface by making Discover a `/scanner?mode=discover` mode and redirecting `/discover`, but keep `scripts/discover.py`, `/api/discover`, `discover_snapshots`, and `service_health=discover` initially for compatibility/history.
+- Cleanup opportunities found: unify `useDiscover` with `useSyncHook`, factor duplicated scanner/discover Next route cache boilerplate, decide whether scanner/discover are scheduled or truly on-demand, add default flow/discover Playwright coverage, retire or rewire legacy `discover_sp500`, and fix discover mirror timestamping because `scan_mirror` looks for `payload.scan_time` while discover emits `discovery_time`.
+- Verification: read-only code audit; no test suite run because no production code was changed.
+
+---
+
+## Session: Discover Into Scanner Implementation (2026-06-26)
+
+### Dependency Graph
+- T115 (Snapshot dirty state, scoped instructions, and implementation surfaces) depends_on: []
+- T116 (Add regression tests for discover redirect, scanner discover mode, nav consolidation, and mirror timestamping) depends_on: [T115]
+- T117 (Move Discover UI into `/scanner?mode=discover` without deleting backend/data contracts) depends_on: [T116]
+- T118 (Redirect `/discover` and remove top-level Discover from primary/mobile nav) depends_on: [T117]
+- T119 (Unify discover sync hook with shared `useSyncHook`) depends_on: [T117]
+- T120 (Fix discover scan mirror timestamp selection from `discovery_time`) depends_on: [T116]
+- T121 (Run focused Python/Vitest/Playwright verification and visual browser check) depends_on: [T117, T118, T119, T120]
+- T122 (Run broader verification, document review, and summarize residual risks) depends_on: [T121]
+
+### Checklist
+- [x] T115 Snapshot state and scoped guidance
+- [x] T116 Regression tests
+- [x] T117 Scanner discover mode
+- [x] T118 Discover redirect and nav consolidation
+- [x] T119 Shared discover sync hook
+- [x] T120 Discover mirror timestamp fix
+- [x] T121 Focused verification
+- [x] T122 Broader verification and review
+
+### Notes
+- Minimum viable implementation: `/scanner?mode=discover` renders the existing discover table/cards; `/discover` redirects to that mode; backend `/api/discover`, `scripts/discover.py`, `discover_snapshots`, and `service_health=discover` stay intact.
+- Non-goal for this pass: deleting discover data tables, changing discovery scoring, merging Python scripts, or changing PI `/discover`.
+
+### Review
+- Implemented Discover as a Scanner mode: `/scanner?mode=discover` renders the existing discovery candidate table/cards inside the scanner tab strip alongside Flow, Theta Harvester, and 7-Step Strength.
+- Converted `/discover` into a redirect to `/scanner?mode=discover`; kept `WorkspaceSection: "discover"` metadata, `/api/discover`, PI `/discover`, `scripts/discover.py`, `discover_snapshots`, and `service_health=discover` intact for compatibility/history.
+- Hid Discover from primary desktop navigation and the mobile overflow drawer. Dashboard "All discover" now links to `/scanner?mode=discover`.
+- Replaced the hand-rolled `useDiscover` polling hook with the shared `useSyncHook` while preserving `/api/discover` and `discovery_time` timestamp extraction.
+- Fixed discover snapshot mirroring by teaching `scan_mirror` to use `payload.discovery_time` for `service_health.finished_at` and `upsert_discover_snapshot` keys.
+- Added regressions: scanner Discover mode component coverage, `/discover` redirect source contract, nav hidden-state coverage, mobile drawer coverage, Playwright redirect/render/mobile coverage, and Python mirror timestamp handoff coverage.
+- Verification passed: focused Python `PYTHONDONTWRITEBYTECODE=1 python3.13 -m pytest scripts/tests/test_scan_service_health.py::TestDiscoverWiring::test_records_ok_row scripts/tests/test_scan_service_health.py::TestMirrorScanSnapshot::test_ok_row_and_snapshot_on_success -q` — 2 passed.
+- Verification passed: full Python `PYTHONDONTWRITEBYTECODE=1 python3.13 -m pytest scripts -q` — 3,687 passed, 13 skipped, 90 deselected.
+- Verification passed: focused Vitest `npx vitest run --config vitest.config.ts web/tests/scanner-header-tooltips.test.tsx web/tests/data.test.ts web/tests/scanner-discover-route.test.ts web/tests/sidebar-navigation.test.ts web/tests/chat.test.ts --reporter=dot` — 46 passed.
+- Verification passed: full web `cd web && npm test -- --reporter=dot` — 358 files passed; 3,500 tests passed, 26 skipped.
+- Verification passed: Playwright desktop `scanner-discover.spec.ts` + `sidebar-performance-hidden.spec.ts` on chromium — 3 passed; Playwright mobile `mobile-shell.spec.ts` on mobile project — 8 passed.
+- Visual verification passed with screenshots: `/tmp/radon-scanner-discover-desktop.png` and `/tmp/radon-scanner-discover-mobile.png`.
+- Verification passed: `cd web && npm run lint` — 0 errors, 9 existing warnings. `git diff --check` and anchored conflict-marker scan passed.
+- Verification blocker remains pre-existing: `cd web && npm run typecheck` fails because `@upstash/ratelimit` and `@upstash/redis` are not installed; `npm ls @upstash/ratelimit @upstash/redis` returns empty.

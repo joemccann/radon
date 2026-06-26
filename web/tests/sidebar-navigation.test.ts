@@ -3,9 +3,13 @@
  */
 
 import { createElement } from "react";
-import { describe, expect, it } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import Sidebar from "../components/Sidebar";
+
+afterEach(() => {
+  cleanup();
+});
 
 describe("Sidebar navigation", () => {
   it("hides nav items marked hidden while keeping the rest of the sidebar visible", () => {
@@ -21,5 +25,6 @@ describe("Sidebar navigation", () => {
     expect(screen.getByRole("link", { name: /dashboard/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /portfolio/i })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /performance/i })).toBeNull();
+    expect(screen.queryByRole("link", { name: /discover/i })).toBeNull();
   });
 });

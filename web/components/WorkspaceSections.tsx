@@ -1352,7 +1352,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
 /* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
-type ScannerMode = "flow" | "theta" | "strength";
+type ScannerMode = "flow" | "discover" | "theta" | "strength";
 
 const SCANNER_HEADER_HELP = {
   signal: "Flow intensity bucket from dark-pool activity. STRONG means the flow score is high enough to review immediately.",
@@ -1401,16 +1401,19 @@ function scannerDirTone(dir: string): "pos" | "neg" | "mut" {
   return "mut";
 }
 
-function ScannerSections() {
+function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const queryModeParam = searchParams.get("mode");
-  const queryMode: ScannerMode = queryModeParam === "theta"
+  const parsedQueryMode: ScannerMode = queryModeParam === "discover"
+    ? "discover"
+    : queryModeParam === "theta"
     ? "theta"
     : queryModeParam === "strength"
       ? "strength"
       : "flow";
+  const queryMode = defaultMode ?? parsedQueryMode;
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
   const theta = useThetaHarvester(mode === "theta");
@@ -1502,6 +1505,15 @@ function ScannerSections() {
       <button
         type="button"
         role="tab"
+        aria-selected={mode === "discover"}
+        className={`scanner-mode-tab${mode === "discover" ? " scanner-mode-tab--active" : ""}`}
+        onClick={() => setMode("discover")}
+      >
+        Discover
+      </button>
+      <button
+        type="button"
+        role="tab"
         aria-selected={mode === "theta"}
         className={`scanner-mode-tab${mode === "theta" ? " scanner-mode-tab--active" : ""}`}
         onClick={() => setMode("theta")}
@@ -1569,6 +1581,15 @@ function ScannerSections() {
           onScan={() => { void runStrengthScan(); }}
           onTickerScan={(ticker) => { void runStrengthScan(ticker); }}
         />
+      </div>
+    );
+  }
+
+  if (mode === "discover") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <DiscoverSections />
       </div>
     );
   }
@@ -3363,7 +3384,7 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
     case "scanner":
       return <ScannerSections />;
     case "discover":
-      return <DiscoverSections />;
+      return <ScannerSections defaultMode="discover" />;
     case "journal":
       return <JournalSections />;
     case "regime":

@@ -200,10 +200,16 @@ class TestDiscoverWiring:
             discover.main()
 
     def test_records_ok_row(self, monkeypatch, writer_calls):
-        self._run(monkeypatch, {"discovery_time": "T", "candidates": []})
+        result = {"discovery_time": "2026-06-12T14:15:00Z", "candidates": []}
+        self._run(monkeypatch, result)
         [(service, _)] = _ok_rows(writer_calls)
         assert service == "discover"
-        assert writer_calls["upserts"][0][0] == "upsert_discover_snapshot"
+        assert writer_calls["upserts"] == [
+            ("upsert_discover_snapshot", ("2026-06-12T14:15:00Z", result))
+        ]
+        assert writer_calls["health"] == [
+            ("discover", "ok", {"finished_at": "2026-06-12T14:15:00Z"})
+        ]
 
     def test_records_error_row_when_upsert_fails(self, monkeypatch, writer_calls):
         _make_upsert_raise(monkeypatch, "upsert_discover_snapshot")
