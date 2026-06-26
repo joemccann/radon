@@ -43,9 +43,10 @@ const DYNAMIC_ROUTES = [
 // Next-data layers never serve a stale snapshot. Defense in depth alongside
 // the route-level dynamic export.
 //
-// `useSyncHook.ts` is the shared GET path for useVcg, useRegime, useBlotter,
-// useFlowAnalysis, useGex, usePerformance, useScanner — patching it once
-// covers all seven downstream hooks.
+// `useSyncHook.ts` is the shared GET/POST path for useVcg, useRegime,
+// useBlotter, useFlowAnalysis, useGex, usePerformance, useScanner, and
+// wrapper hooks such as useDiscover — patching it once covers every
+// downstream hook that delegates to it.
 const NO_STORE_HOOKS = [
   "lib/useMenthorqCta.ts",
   "lib/useSyncHook.ts",
@@ -75,7 +76,10 @@ describe("client hooks/components — every fetch must use cache: 'no-store'", (
     // (`fetch(endpoint, ...)`), the others fetch literal /api/ strings —
     // either way the same cache-policy rule applies.
     const fetchPositions = [...src.matchAll(/\bfetch\s*\(/g)];
-    expect(fetchPositions.length).toBeGreaterThan(0);
+    if (fetchPositions.length === 0) {
+      expect(src).toMatch(/\buseSyncHook\b/);
+      return;
+    }
 
     for (const match of fetchPositions) {
       const start = match.index!;

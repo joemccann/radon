@@ -1,5 +1,5 @@
-import WorkspaceShell from "@/components/WorkspaceShell";
+import { redirect } from "next/navigation";
 
 export default function DiscoverPage() {
-  return <WorkspaceShell section="discover" />;
+  redirect("/scanner?mode=discover");
 }
