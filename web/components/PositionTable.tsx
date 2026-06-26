@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
-import type { PortfolioLeg, PortfolioPosition } from "@/lib/types";
+import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import InstrumentDetailModal from "./InstrumentDetailModal";
 import { useSort } from "@/lib/useSort";
@@ -520,6 +520,7 @@ export default function PositionTable({
   showExpiry = true,
   showUnderlying = false,
   prices,
+  portfolio = null,
   tableId = "positions",
   columnVisibility: controlledVisibility,
 }: {
@@ -527,6 +528,7 @@ export default function PositionTable({
   showExpiry?: boolean;
   showUnderlying?: boolean;
   prices?: Record<string, PriceData>;
+  portfolio?: PortfolioData | null;
   tableId?: string;
   /** When provided, the table is "controlled" — the parent owns the column
    *  visibility state and renders the toggle widget itself (e.g. inside a
@@ -618,6 +620,7 @@ export default function PositionTable({
           ticker={activeInstrument.ticker}
           expiry={activeInstrument.expiry}
           prices={prices}
+          portfolio={portfolio}
           onClose={() => setActiveInstrument(null)}
         />
       )}

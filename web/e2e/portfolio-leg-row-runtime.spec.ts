@@ -51,6 +51,45 @@ const PORTFOLIO_MOCK = {
         },
       ],
     },
+    {
+      id: 202,
+      ticker: "MU",
+      structure: "Short Strangle $1125.0/$1250.0",
+      structure_type: "Short Strangle",
+      risk_profile: "undefined",
+      expiry: "2026-06-26",
+      contracts: 5,
+      direction: "COMBO",
+      entry_cost: -4_565,
+      max_risk: null,
+      market_value: -9_275,
+      kelly_optimal: null,
+      target: null,
+      stop: null,
+      entry_date: "2026-06-26",
+      legs: [
+        {
+          direction: "SHORT",
+          contracts: 5,
+          type: "Call",
+          strike: 1250,
+          entry_cost: -6_830,
+          avg_cost: -1_366,
+          market_price: 0.05,
+          market_value: -25,
+        },
+        {
+          direction: "LONG",
+          contracts: 5,
+          type: "Put",
+          strike: 1125,
+          entry_cost: 2_265,
+          avg_cost: 453,
+          market_price: 4.27,
+          market_value: 2_135,
+        },
+      ],
+    },
   ],
   exposure: {},
   violations: [],
@@ -182,4 +221,33 @@ test("portfolio spread legs expand without rtLast runtime errors", async ({ page
   await expect(page.locator("table tbody tr")).toContainText(["LONG 1x Call $80", "SHORT 1x Call $95"]);
   await expect(page.locator("table tbody tr")).toContainText(["$450", "$125"]);
   expect(pageErrors).not.toContain("rtLast is not defined");
+});
+
+test("portfolio leg modal buy-to-cover keeps portfolio scope and close debit P&L", async ({ page }) => {
+  await installMockWebSocket(page);
+  await stubApis(page);
+
+  await page.goto("/portfolio");
+
+  const muRow = page.locator("table tbody tr").filter({ hasText: "MU" }).first();
+  await expect(muRow).toBeVisible();
+
+  await muRow.getByLabel("Expand legs for MU").click();
+  await page.getByText("SHORT 5x Call $1250").click();
+
+  const dialog = page.getByRole("dialog", { name: /MU \$1250 Call 2026-06-26/i });
+  await expect(dialog).toBeVisible();
+
+  await dialog.locator(".modify-price-input").fill("0.05");
+  await dialog.getByRole("button", { name: /place order/i }).click();
+
+  const summary = dialog.locator(".order-confirm-summary");
+  await expect(summary).toBeVisible();
+  await expect(summary).not.toContainText("Coverage indeterminate");
+  await expect(summary).toContainText("Close Debit:");
+  await expect(summary).toContainText("$25");
+  await expect(summary).toContainText("Est. Realized P&L:");
+  await expect(summary).toContainText("$6,805");
+
+  await dialog.screenshot({ path: "/tmp/radon-buy-to-cover-modal.png" });
 });
