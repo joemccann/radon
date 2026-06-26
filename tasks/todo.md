@@ -5305,3 +5305,35 @@ verify search returns results on app.radon.run.
 - Visual verification passed with screenshots: `/tmp/radon-scanner-discover-desktop.png` and `/tmp/radon-scanner-discover-mobile.png`.
 - Verification passed: `cd web && npm run lint` — 0 errors, 9 existing warnings. `git diff --check` and anchored conflict-marker scan passed.
 - Verification blocker remains pre-existing: `cd web && npm run typecheck` fails because `@upstash/ratelimit` and `@upstash/redis` are not installed; `npm ls @upstash/ratelimit @upstash/redis` returns empty.
+
+---
+
+## Session: Three-Leg Risk Reversal Spread Labels (2026-06-26)
+
+### Dependency Graph
+- T123 (Snapshot current state and identify combo structure classifier) depends_on: []
+- T124 (Add regression coverage for bearish risk reversal bear spread and bullish risk reversal call spread) depends_on: [T123]
+- T125 (Implement minimal classifier and description formatting changes) depends_on: [T124]
+- T126 (Run focused Python verification and hygiene checks) depends_on: [T125]
+- T127 (Document review and residual risks) depends_on: [T126]
+
+### Checklist
+- [x] T123 Snapshot state and classifier search
+- [x] T124 Regression coverage
+- [x] T125 Classifier implementation
+- [x] T126 Verification
+- [x] T127 Review
+
+### Notes
+- User provided CBRS 3-leg combo: SHORT call $215, SHORT put $120, LONG put $150. Expected label: bearish risk reversal bear spread.
+- Symmetric bullish case: LONG call spread plus SHORT put. Expected label: bullish risk reversal call spread.
+
+### Review
+- Root cause: `scripts/ib_sync.py` only classified two-leg risk reversals and two-leg vertical spreads. The CBRS shape with short call + short lower-strike put + long higher-strike put therefore fell through to `Combo (3 legs)`.
+- Added equal-contract three-leg detection for `Bearish Risk Reversal Bear Spread` and the symmetric `Bullish Risk Reversal Call Spread`; both remain `risk_profile="undefined"` because the short call or short put still creates unbounded/naked-side exposure.
+- Added custom descriptions before the generic spread formatter so the middle spread strike is preserved: `Bearish Risk Reversal Bear Spread (P$120/$150/C$215)` and `Bullish Risk Reversal Call Spread (P$120/C$150/$215)`.
+- Guarded portfolio direction classification so risk-reversal spread labels do not get treated as plain `DEBIT`/`CREDIT` verticals; collapsed rows stay `direction="COMBO"` with `max_risk=None`.
+- Verification passed: initial focused regression failed with five expected failures; after the fix `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_ib_helpers.py -q` — 55 passed.
+- Verification passed: affected structure suite `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_ib_helpers.py scripts/tests/test_all_long_combo.py scripts/tests/test_ratio_detection.py scripts/tests/test_covered_call_detection.py -q` — 82 passed.
+- Verification passed: affected helper `python3.13 scripts/run_pytest_affected.py --files scripts/ib_sync.py scripts/tests/test_ib_helpers.py -- -q` — 124 passed.
+- Verification passed: full Python `python3.13 -m pytest scripts -q` — 3,692 passed, 13 skipped, 90 deselected. `git diff --check` passed; conflict-marker scan found no matches.
