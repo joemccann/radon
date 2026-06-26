@@ -111,4 +111,47 @@ test.describe("Mobile Options Chain ladder", () => {
     await expect(page.getByTestId("mobile-chain")).toBeVisible();
     await expect(page.locator(".chain-grid")).toHaveCount(0);
   });
+
+  test("side toggle and strikes selector reach desktop parity", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    stubApis(page);
+    await page.goto("/AAPL?tab=chain");
+
+    await expect(page.getByTestId("mobile-chain-side-toggle")).toBeVisible();
+    await expect(page.getByTestId("mobile-chain-strikes-select")).toBeVisible();
+
+    // Both sides render by default.
+    await expect(page.getByTestId("mobile-chain-call-200")).toBeVisible();
+    await expect(page.getByTestId("mobile-chain-put-200")).toBeVisible();
+
+    // CALLS hides the put column.
+    await page.getByTestId("mobile-chain-side-calls").click();
+    await expect(page.getByTestId("mobile-chain-call-200")).toBeVisible();
+    await expect(page.getByTestId("mobile-chain-put-200")).toHaveCount(0);
+    await expect(page.locator(".mobile-chain__ladder-head")).not.toContainText("PUTS");
+
+    // PUTS hides the call column.
+    await page.getByTestId("mobile-chain-side-puts").click();
+    await expect(page.getByTestId("mobile-chain-put-200")).toBeVisible();
+    await expect(page.getByTestId("mobile-chain-call-200")).toHaveCount(0);
+
+    // Back to ALL restores both.
+    await page.getByTestId("mobile-chain-side-both").click();
+    await expect(page.getByTestId("mobile-chain-call-200")).toBeVisible();
+    await expect(page.getByTestId("mobile-chain-put-200")).toBeVisible();
+  });
+
+  test("changing expiry chip swaps the active expiration", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    stubApis(page);
+    await page.goto("/AAPL?tab=chain");
+
+    const first = page.getByTestId("mobile-chain-expiry-20260320");
+    const second = page.getByTestId("mobile-chain-expiry-20260417");
+    await expect(first).toBeVisible();
+
+    await second.click();
+    await expect(second).toHaveAttribute("aria-pressed", "true");
+    await expect(first).toHaveAttribute("aria-pressed", "false");
+  });
 });

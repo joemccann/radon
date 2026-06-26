@@ -11587,6 +11587,20 @@ body[data-mobile="true"] .toast-container {
   min-height: 480px;
 }
 
+/* Inside the AssetCockpit deck the chain is the deck body's only child and must
+   fill it exactly: the ladder is then the sole scroll container. Without this
+   the deck body (overflow-y: auto) and the ladder both scroll, and the
+   auto-centred ATM row drags the sticky controls off-screen. */
+.cockpit--mobile .asset-deck-body:has(.mobile-chain) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.cockpit--mobile .mobile-chain {
+  height: 100%;
+  min-height: 0;
+}
+
 .mobile-chain__header {
   position: sticky;
   top: 0;
@@ -11664,6 +11678,117 @@ body[data-mobile="true"] .toast-container {
   color: var(--text-muted);
 }
 
+/* ── Controls bar (expiry / side / strikes) — desktop parity ── */
+.mobile-chain__control {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.mobile-chain__control-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 2px 4px 0;
+}
+
+.mobile-chain__control-label {
+  padding: 0 4px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+
+.mobile-chain__spot {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.mobile-chain__spot-val {
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.mobile-chain__filter-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 6px 4px 0;
+}
+
+.mobile-chain__side-toggle {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 2px;
+  padding: 2px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+}
+
+.mobile-chain__side-btn {
+  flex: 1 1 0;
+  min-height: 36px;
+  background: transparent;
+  border: none;
+  border-radius: 3px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  cursor: pointer;
+}
+
+.mobile-chain__side-btn--active {
+  background: color-mix(in srgb, var(--accent-bg) 18%, transparent);
+  color: var(--accent-bg);
+  font-weight: 600;
+}
+
+.mobile-chain__strikes {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 0 0 auto;
+}
+
+.mobile-chain__strikes-select {
+  min-height: 40px;
+  padding: 0 8px;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Ladder grid spines — shared by the ladder head and every row so the strike
+   column always neighbours the visible side(s). Selectors are doubled-up with
+   the base class so they outrank the base `grid-template-columns` regardless of
+   source order. */
+.mobile-chain__ladder-head.mc-grid-both,
+.mobile-chain__row.mc-grid-both {
+  grid-template-columns: 1fr 64px 1fr;
+}
+
+.mobile-chain__ladder-head.mc-grid-calls,
+.mobile-chain__row.mc-grid-calls {
+  grid-template-columns: 1fr 64px;
+}
+
+.mobile-chain__ladder-head.mc-grid-puts,
+.mobile-chain__row.mc-grid-puts {
+  grid-template-columns: 64px 1fr;
+}
+
 .mobile-chain__ladder-head {
   display: grid;
   grid-template-columns: 1fr 64px 1fr;
@@ -11688,7 +11813,8 @@ body[data-mobile="true"] .toast-container {
 }
 
 .mobile-chain__ladder {
-  flex: 1;
+  flex: 1 1 0;
+  min-height: 0;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
 }
@@ -11736,6 +11862,12 @@ body[data-mobile="true"] .toast-container {
 
 .mobile-chain__cell--put {
   border-left: 1px solid var(--border-dim);
+}
+
+/* Right-alignment is driven by the explicit `--right` modifier (the two-sided
+   layout's put column), not by `--put` — a single-side put ladder reads
+   left-aligned like the calls view. */
+.mobile-chain__cell--right {
   text-align: right;
   align-items: flex-end;
 }
@@ -11753,7 +11885,7 @@ body[data-mobile="true"] .toast-container {
   letter-spacing: 0.04em;
 }
 
-.mobile-chain__cell--put .mobile-chain__meta {
+.mobile-chain__cell--right .mobile-chain__meta {
   flex-direction: row-reverse;
 }
 

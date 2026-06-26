@@ -10,7 +10,9 @@ import {
   type OrderLeg,
   normalizeComboOrder,
   computeNetOptionQuote,
+  ALL_STRIKES,
 } from "@/lib/optionsChainUtils";
+import type { SideFilter } from "@/lib/useChainUrlState";
 import BottomSheet from "./BottomSheet";
 import MobileOrderTicket from "./MobileOrderTicket";
 import SpectralLoader from "@/components/SpectralLoader";
@@ -20,6 +22,22 @@ type Strike = {
   callKey: string;
   putKey: string;
 };
+
+/** Strikes-per-side options — mirrors the desktop chain selector. */
+const STRIKE_OPTIONS: { value: number; label: string }[] = [
+  { value: 10, label: "±10" },
+  { value: 15, label: "±15" },
+  { value: 25, label: "±25" },
+  { value: 50, label: "±50" },
+  { value: 100, label: "±100" },
+  { value: ALL_STRIKES, label: "All" },
+];
+
+const SIDE_OPTIONS: { value: SideFilter; label: string }[] = [
+  { value: "both", label: "ALL" },
+  { value: "calls", label: "CALLS" },
+  { value: "puts", label: "PUTS" },
+];
 
 type MobileChainLadderProps = {
   ticker: string;
@@ -31,6 +49,12 @@ type MobileChainLadderProps = {
   prices: Record<string, PriceData>;
   currentPrice: number | null;
   loading?: boolean;
+  /** Calls / puts / both filter — mirrors desktop, deep-linked via the URL. */
+  sideFilter: SideFilter;
+  onSideFilterChange: (side: SideFilter) => void;
+  /** Strikes-per-side window — mirrors desktop, deep-linked via the URL. */
+  strikesPerSide: number;
+  onStrikesPerSideChange: (strikes: number) => void;
   orderLegs?: OrderLeg[];
   riskFreeRate?: number;
   onAddLeg?: (strike: number, right: "C" | "P", action: "BUY" | "SELL") => void;
@@ -79,6 +103,43 @@ function fmtGreek(value: number | null | undefined, digits = 3): string {
   return value.toFixed(digits);
 }
 
+/** One option side rendered inside a ladder row. Compact in the two-sided
+ *  layout; surfaces Δ and Vol inline when a single side has the full width. */
+function SideCell({
+  right,
+  strike,
+  data,
+  align,
+  expanded,
+  onSelect,
+}: {
+  right: "C" | "P";
+  strike: number;
+  data: PriceData | null;
+  align: "left" | "right";
+  expanded: boolean;
+  onSelect: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`mobile-chain__cell mobile-chain__cell--${right === "C" ? "call" : "put"}${align === "right" ? " mobile-chain__cell--right" : ""}`}
+      onClick={onSelect}
+      data-testid={`mobile-chain-${right === "C" ? "call" : "put"}-${strike}`}
+      aria-label={`${right === "C" ? "Call" : "Put"} ${strike}`}
+    >
+      <span className="mobile-chain__last">{fmtLast(data?.last)}</span>
+      <span className="mobile-chain__bid-ask">{fmtBidAsk(data?.bid, data?.ask)}</span>
+      <span className="mobile-chain__meta">
+        <span>IV {fmtIv(data?.impliedVol)}</span>
+        {expanded ? <span>Δ {fmtGreek(data?.delta, 2)}</span> : null}
+        {expanded ? <span>V {fmtOi(data?.volume)}</span> : null}
+        <span>OI {fmtOi(data?.avgVolume)}</span>
+      </span>
+    </button>
+  );
+}
+
 export default function MobileChainLadder({
   ticker,
   expirations,
@@ -89,6 +150,10 @@ export default function MobileChainLadder({
   prices,
   currentPrice,
   loading,
+  sideFilter,
+  onSideFilterChange,
+  strikesPerSide,
+  onStrikesPerSideChange,
   orderLegs = [],
   riskFreeRate,
   onAddLeg,
@@ -109,15 +174,17 @@ export default function MobileChainLadder({
     if (!atmRowRef.current || !ladderRef.current) return;
     const atm = atmRowRef.current;
     const wrapper = ladderRef.current;
-    // Use scrollIntoView on first render (wrapper hasn't scrolled yet);
-    // manual offset centering for subsequent changes so the row lands in
-    // the middle of the visible window instead of flush to the edge.
-    const target = atm.offsetTop - wrapper.clientHeight / 2 + atm.clientHeight / 2;
-    if (wrapper.scrollTop === 0) {
-      atm.scrollIntoView({ block: "center", behavior: "instant" });
-    } else {
-      wrapper.scrollTop = Math.max(0, target);
-    }
+    // Center the ATM row WITHIN the ladder scroller only. scrollIntoView would
+    // bubble to scrollable ancestors (the deck body), dragging the sticky
+    // controls out of view — measure against the wrapper rect instead.
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const atmRect = atm.getBoundingClientRect();
+    const target =
+      wrapper.scrollTop +
+      (atmRect.top - wrapperRect.top) +
+      atmRect.height / 2 -
+      wrapper.clientHeight / 2;
+    wrapper.scrollTo({ top: Math.max(0, target), behavior: "instant" });
   }, [selectedExpiry, visibleStrikes.length, atmStrike]);
 
   // Compute live net mid for the pending strip so the operator can see the
@@ -131,39 +198,90 @@ export default function MobileChainLadder({
   }, [orderLegs, prices, ticker]);
 
   const expiryChips = useMemo(() => expirations.slice(0, 24), [expirations]);
+  const showCalls = sideFilter !== "puts";
+  const showPuts = sideFilter !== "calls";
+  const singleSide = showCalls !== showPuts;
+  // Grid column template differs by visible side(s): both keeps the centered
+  // strike spine; calls-only anchors the strike on the right, puts-only on the
+  // left, so the strike column always neighbours its side. Applied to the
+  // ladder head and every row so they stay aligned.
+  const gridClass = !singleSide ? "mc-grid-both" : showCalls ? "mc-grid-calls" : "mc-grid-puts";
 
   return (
     <div className="mobile-chain" data-testid="mobile-chain">
       <div className="mobile-chain__header">
-        <div className="mobile-chain__brand">
-          <span className="mobile-chain__ticker">{ticker.toUpperCase()}</span>
-          <span className="mobile-chain__price">
-            {currentPrice != null ? fmtPrice(currentPrice) : "—"}
-          </span>
+        <div className="mobile-chain__control" data-testid="mobile-chain-expiry-control">
+          <div className="mobile-chain__control-head">
+            <span className="mobile-chain__control-label">EXPIRY</span>
+            <span className="mobile-chain__spot">
+              {ticker.toUpperCase()}{" "}
+              <span className="mobile-chain__spot-val">
+                {currentPrice != null ? fmtPrice(currentPrice) : "—"}
+              </span>
+            </span>
+          </div>
+          <div className="mobile-chain__expiry-bar" data-testid="mobile-chain-expiry-bar">
+            {expiryChips.map((exp) => {
+              const active = exp === selectedExpiry;
+              return (
+                <button
+                  key={exp}
+                  type="button"
+                  className={`mobile-chain__expiry-chip${active ? " mobile-chain__expiry-chip--active" : ""}`}
+                  onClick={() => onSelectExpiry(exp)}
+                  aria-pressed={active}
+                  data-testid={`mobile-chain-expiry-${exp}`}
+                >
+                  <span className="mobile-chain__expiry-date">{formatExpiry(exp)}</span>
+                  <span className="mobile-chain__expiry-dte">{daysToExpiry(exp)}d</span>
+                </button>
+              );
+            })}
+          </div>
         </div>
-        <div className="mobile-chain__expiry-bar" data-testid="mobile-chain-expiry-bar">
-          {expiryChips.map((exp) => {
-            const active = exp === selectedExpiry;
-            return (
+
+        <div className="mobile-chain__filter-row">
+          <div
+            className="mobile-chain__side-toggle"
+            role="group"
+            aria-label="Option side"
+            data-testid="mobile-chain-side-toggle"
+          >
+            {SIDE_OPTIONS.map(({ value, label }) => (
               <button
-                key={exp}
+                key={value}
                 type="button"
-                className={`mobile-chain__expiry-chip${active ? " mobile-chain__expiry-chip--active" : ""}`}
-                onClick={() => onSelectExpiry(exp)}
-                data-testid={`mobile-chain-expiry-${exp}`}
+                className={`mobile-chain__side-btn${sideFilter === value ? " mobile-chain__side-btn--active" : ""}`}
+                onClick={() => onSideFilterChange(value)}
+                aria-pressed={sideFilter === value}
+                data-testid={`mobile-chain-side-${value}`}
               >
-                <span className="mobile-chain__expiry-date">{formatExpiry(exp)}</span>
-                <span className="mobile-chain__expiry-dte">{daysToExpiry(exp)}d</span>
+                {label}
               </button>
-            );
-          })}
+            ))}
+          </div>
+          <label className="mobile-chain__strikes">
+            <span className="mobile-chain__control-label">STRIKES</span>
+            <select
+              className="mobile-chain__strikes-select"
+              value={strikesPerSide}
+              onChange={(e) => onStrikesPerSideChange(Number(e.target.value))}
+              data-testid="mobile-chain-strikes-select"
+            >
+              {STRIKE_OPTIONS.map(({ value, label }) => (
+                <option key={value} value={value}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
       </div>
 
-      <div className="mobile-chain__ladder-head">
-        <div className="mobile-chain__side-label">CALLS</div>
+      <div className={`mobile-chain__ladder-head ${gridClass}`}>
+        {showCalls && <div className="mobile-chain__side-label">CALLS</div>}
         <div className="mobile-chain__strike-label">STRIKE</div>
-        <div className="mobile-chain__side-label">PUTS</div>
+        {showPuts && <div className="mobile-chain__side-label">PUTS</div>}
       </div>
 
       {loading ? (
@@ -180,7 +298,7 @@ export default function MobileChainLadder({
             const call = prices[callKey] ?? null;
             const put = prices[putKey] ?? null;
             const isAtm = atmStrike != null && strike === atmStrike;
-            const rowClass = `mobile-chain__row${isAtm ? " mobile-chain__row--atm" : ""}`;
+            const rowClass = `mobile-chain__row ${gridClass}${isAtm ? " mobile-chain__row--atm" : ""}`;
 
             return (
               <div
@@ -189,37 +307,29 @@ export default function MobileChainLadder({
                 ref={isAtm ? atmRowRef : undefined}
                 data-testid={`mobile-chain-row-${strike}`}
               >
-                <button
-                  type="button"
-                  className="mobile-chain__cell mobile-chain__cell--call"
-                  onClick={() => setSelected({ strike, right: "C", data: call })}
-                  data-testid={`mobile-chain-call-${strike}`}
-                  aria-label={`Call ${strike}`}
-                >
-                  <span className="mobile-chain__last">{fmtLast(call?.last)}</span>
-                  <span className="mobile-chain__bid-ask">{fmtBidAsk(call?.bid, call?.ask)}</span>
-                  <span className="mobile-chain__meta">
-                    <span>{fmtIv(call?.impliedVol)}</span>
-                    <span>OI {fmtOi(call?.avgVolume)}</span>
-                  </span>
-                </button>
+                {showCalls && (
+                  <SideCell
+                    right="C"
+                    strike={strike}
+                    data={call}
+                    align="left"
+                    expanded={singleSide}
+                    onSelect={() => setSelected({ strike, right: "C", data: call })}
+                  />
+                )}
 
                 <div className="mobile-chain__strike">{strike}</div>
 
-                <button
-                  type="button"
-                  className="mobile-chain__cell mobile-chain__cell--put"
-                  onClick={() => setSelected({ strike, right: "P", data: put })}
-                  data-testid={`mobile-chain-put-${strike}`}
-                  aria-label={`Put ${strike}`}
-                >
-                  <span className="mobile-chain__last">{fmtLast(put?.last)}</span>
-                  <span className="mobile-chain__bid-ask">{fmtBidAsk(put?.bid, put?.ask)}</span>
-                  <span className="mobile-chain__meta">
-                    <span>{fmtIv(put?.impliedVol)}</span>
-                    <span>OI {fmtOi(put?.avgVolume)}</span>
-                  </span>
-                </button>
+                {showPuts && (
+                  <SideCell
+                    right="P"
+                    strike={strike}
+                    data={put}
+                    align={singleSide ? "left" : "right"}
+                    expanded={singleSide}
+                    onSelect={() => setSelected({ strike, right: "P", data: put })}
+                  />
+                )}
               </div>
             );
           })}
