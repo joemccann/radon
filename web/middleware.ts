@@ -91,6 +91,42 @@ export function isApiPath(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
 }
 
+// Operator allowlist — the AUTHORIZATION layer on top of authentication.
+//
+// A valid Clerk session authenticates a user; it does NOT authorize them. The
+// data tables (portfolio/journal/orders) are global with no user_id, and the
+// FastAPI ALLOWED_USER_IDS allowlist is bypassed for trusted-local Next->API
+// calls — so without this gate ANY signed-in user in the production Clerk
+// instance could read the operator's real account (incident 2026-06-27).
+//
+// When ALLOWED_USER_IDS is set, only those Clerk user ids may proceed; every
+// other authenticated user gets 403 — including demo-role users, who belong on
+// demo.radon.run, not the operator app. Empty/unset => no enforcement, so local
+// dev, CI/tests, and the demo deployment (where ALLOWED_USER_IDS is absent and
+// the demo gate governs instead) are unaffected.
+//
+// Edge-safe: pure string ops, no node:* imports (the middleware runs in the
+// Edge runtime; see feedback_middleware_edge_runtime).
+export function parseAllowedUserIds(
+  raw: string | undefined = process.env.ALLOWED_USER_IDS,
+): Set<string> {
+  return new Set(
+    (raw ?? "")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
+}
+
+export function isAuthorizedUser(
+  userId: string,
+  raw: string | undefined = process.env.ALLOWED_USER_IDS,
+): boolean {
+  const allow = parseAllowedUserIds(raw);
+  if (allow.size === 0) return true; // no allowlist configured -> don't enforce
+  return allow.has(userId);
+}
+
 // Bearer-gated probe surface (DUR-16) — the Tier-3 off-box prober (GitHub
 // Actions, no Clerk session) authenticates with
 // `Authorization: Bearer ${RADON_PROBE_FRESHNESS_TOKEN}` instead of Clerk.
@@ -151,14 +187,18 @@ export default clerkMiddleware(async (auth, request) => {
 
   if (isPublicRoute(request)) return;
 
-  // API routes: return a JSON 401 with the same shape as every other API
-  // error response (see web/lib/apiContracts.ts). Clerk's default for a
-  // protected route is to redirect to /sign-in, which is meaningless for an
-  // API client and would also surface as a noisy 302 in the browser console
-  // when the cookie expires mid-session.
-  if (isApiPath(request.nextUrl.pathname)) {
-    const { userId, sessionClaims } = await auth();
-    if (!userId) {
+  const isApi = isApiPath(request.nextUrl.pathname);
+  const { userId, sessionClaims } = await auth();
+
+  // 1) Authentication — must have a Clerk session.
+  //
+  // API routes return a JSON 401 with the same shape as every other API error
+  // response (see web/lib/apiContracts.ts). Clerk's default for a protected
+  // route is to redirect to /sign-in, which is meaningless for an API client
+  // and would also surface as a noisy 302 in the browser console when the
+  // cookie expires mid-session. Page routes keep the standard redirect.
+  if (!userId) {
+    if (isApi) {
       const requestId = getRequestId();
       const response = jsonApiError({
         message: "Unauthorized",
@@ -168,27 +208,40 @@ export default clerkMiddleware(async (auth, request) => {
       });
       return setNoStoreResponseHeaders(response, requestId);
     }
-    // Demo trial gate (expiry + tiered rate-limit). No-ops for non-demo users.
-    const demoGate = await handleDemoGate({
-      userId,
-      metadata: sessionClaims?.metadata as DemoPublicMetadata | undefined,
-      request,
-    });
-    if (demoGate) return demoGate;
+    await auth.protect();
     return;
   }
 
-  // Page routes: keep Clerk's standard redirect-to-sign-in behavior.
-  await auth.protect();
-  const { userId, sessionClaims } = await auth();
-  if (userId) {
-    const demoGate = await handleDemoGate({
-      userId,
-      metadata: sessionClaims?.metadata as DemoPublicMetadata | undefined,
-      request,
-    });
-    if (demoGate) return demoGate;
+  // 2) Authorization — a Clerk session is necessary but NOT sufficient. When
+  // ALLOWED_USER_IDS is configured (production app.radon.run), only the
+  // operator id(s) pass; every other authenticated user is forbidden (403),
+  // including demo-role users (they belong on demo.radon.run). No allowlist =>
+  // no enforcement, so the demo gate below governs the demo deployment.
+  if (!isAuthorizedUser(userId)) {
+    const requestId = getRequestId();
+    if (isApi) {
+      const response = jsonApiError({
+        message: "Forbidden",
+        status: 403,
+        code: "FORBIDDEN",
+        requestId,
+      });
+      return setNoStoreResponseHeaders(response, requestId);
+    }
+    const response = new NextResponse(
+      "Not authorized. This account does not have access to Radon.",
+      { status: 403, headers: { "content-type": "text/plain; charset=utf-8" } },
+    );
+    return setNoStoreResponseHeaders(response, requestId);
   }
+
+  // 3) Demo trial gate (expiry + tiered rate-limit). No-ops for non-demo users.
+  const demoGate = await handleDemoGate({
+    userId,
+    metadata: sessionClaims?.metadata as DemoPublicMetadata | undefined,
+    request,
+  });
+  if (demoGate) return demoGate;
 });
 
 export const config = {
