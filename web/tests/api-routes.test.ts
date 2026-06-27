@@ -572,13 +572,14 @@ describe("GET /api/portfolio", () => {
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("returns 404 when no Turso snapshot exists", async () => {
+  it("returns 502 when no Turso snapshot exists and live sync is unavailable", async () => {
     mockPortfolioDb(null);
 
     const res = await GET();
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(502);
     const body = await res.json();
-    expect(body.error).toContain("not found");
+    expect(body.error).toContain("Turso portfolio snapshot unavailable");
+    expect(body.error).toContain("live IB sync failed");
   });
 });
 

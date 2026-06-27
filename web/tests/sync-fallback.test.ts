@@ -124,6 +124,47 @@ describe("POST /api/portfolio — sync failure fallback", () => {
   });
 });
 
+describe("GET /api/portfolio — live sync fallback", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    mockExecute.mockReset();
+    mockRadonFetch.mockReset();
+  });
+
+  it("serves live IB sync data when the Turso portfolio read fails", async () => {
+    const synced = makePortfolio("2026-03-13T15:30:00Z");
+    mockExecute.mockRejectedValue(new Error("portfolio snapshot read timed out after 3000ms"));
+    mockRadonFetch.mockResolvedValue(synced);
+
+    const { GET } = await import("../app/api/portfolio/route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.last_sync).toBe("2026-03-13T15:30:00Z");
+    expect(response.headers.get("X-Sync-Warning")).toContain("Turso portfolio read failed");
+    expect(response.headers.get("X-Portfolio-Source")).toBe("ib-live-fallback");
+    expect(mockRadonFetch).toHaveBeenCalledWith("/portfolio/sync", expect.objectContaining({ method: "POST" }));
+    expect(mockReadDataFile).not.toHaveBeenCalled();
+  });
+
+  it("serves live IB sync data when no Turso portfolio snapshot exists", async () => {
+    const synced = makePortfolio("2026-03-13T15:45:00Z");
+    mockPortfolioDb(null);
+    mockRadonFetch.mockResolvedValue(synced);
+
+    const { GET } = await import("../app/api/portfolio/route");
+    const response = await GET();
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.last_sync).toBe("2026-03-13T15:45:00Z");
+    expect(response.headers.get("X-Portfolio-Source")).toBe("ib-live-fallback");
+    expect(mockReadDataFile).not.toHaveBeenCalled();
+  });
+});
+
 describe("POST /api/orders — sync failure fallback", () => {
   beforeEach(() => {
     vi.resetModules();

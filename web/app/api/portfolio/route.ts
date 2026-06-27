@@ -17,6 +17,8 @@ export const runtime = "nodejs";
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const DB_READ_TIMEOUT_MS = 3_000;
+const LIVE_SYNC_TIMEOUT_MS = 35_000;
+const LIVE_FALLBACK_CACHE_TTL_MS = 30_000;
 
 type PortfolioSnapshot = {
   data: Record<string, unknown>;
@@ -58,6 +60,19 @@ function isPortfolioSnapshotStale(snapshot: PortfolioSnapshot | null): boolean {
     return true;
   }
   return Date.now() - snapshot.timestampMs > CACHE_TTL_MS;
+}
+
+function snapshotFromLiveSyncData(data: unknown): PortfolioSnapshot {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("Live portfolio sync returned invalid payload");
+  }
+  const portfolio = data as Record<string, unknown>;
+  const takenAt = typeof portfolio.last_sync === "string" ? portfolio.last_sync : new Date().toISOString();
+  return {
+    data: portfolio,
+    takenAt,
+    timestampMs: parseTimestampMs(portfolio.last_sync) ?? Date.now(),
+  };
 }
 
 /** Load ticker → latest trade date.
@@ -102,6 +117,9 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
 }
 
 let bgSyncInFlight = false;
+let liveFallbackInFlight: Promise<PortfolioSnapshot> | null = null;
+let liveFallbackSnapshot: PortfolioSnapshot | null = null;
+let liveFallbackCachedAtMs = 0;
 
 /** Fire-and-forget: call FastAPI background sync endpoint */
 function triggerBackgroundSync(): void {
@@ -121,39 +139,82 @@ function triggerBackgroundSync(): void {
     });
 }
 
-export async function GET(): Promise<Response> {
-  const requestId = getRequestId();
-  try {
-    const snapshot = await readPortfolioFromDb();
-    if (isPortfolioSnapshotStale(snapshot)) {
-      triggerBackgroundSync();
-    }
-    if (!snapshot) {
-      return setNoStoreResponseHeaders(
-        jsonApiError({
-          message: "Portfolio data not found",
-          status: 404,
-          code: "NOT_FOUND",
-          requestId,
-        }),
-        requestId,
-      );
-    }
+async function getLiveFallbackPortfolio(): Promise<PortfolioSnapshot> {
+  const now = Date.now();
+  if (liveFallbackSnapshot && now - liveFallbackCachedAtMs < LIVE_FALLBACK_CACHE_TTL_MS) {
+    return liveFallbackSnapshot;
+  }
 
-    const tradeLogDates = await loadTradeLogDates();
-    const response = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
-    return setNoStoreResponseHeaders(response, requestId);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Failed to read portfolio";
+  if (!liveFallbackInFlight) {
+    liveFallbackInFlight = radonFetch("/portfolio/sync", {
+      method: "POST",
+      timeout: LIVE_SYNC_TIMEOUT_MS,
+    })
+      .then((data) => {
+        const snapshot = snapshotFromLiveSyncData(data);
+        liveFallbackSnapshot = snapshot;
+        liveFallbackCachedAtMs = Date.now();
+        return snapshot;
+      })
+      .finally(() => {
+        liveFallbackInFlight = null;
+      });
+  }
+
+  return liveFallbackInFlight;
+}
+
+async function portfolioResponseFromSnapshot(
+  snapshot: PortfolioSnapshot,
+  requestId: string,
+  warning?: string,
+): Promise<Response> {
+  const tradeLogDates = await loadTradeLogDates();
+  const response = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
+  if (warning) {
+    response.headers.set("X-Sync-Warning", warning);
+    response.headers.set("X-Portfolio-Source", "ib-live-fallback");
+  }
+  return setNoStoreResponseHeaders(response, requestId);
+}
+
+async function serveLiveFallback(
+  requestId: string,
+  reason: string,
+  fallbackFailureStatus = 502,
+): Promise<Response> {
+  try {
+    const snapshot = await getLiveFallbackPortfolio();
+    return portfolioResponseFromSnapshot(snapshot, requestId, `${reason} - served live IB sync`);
+  } catch (fallbackError) {
+    const detail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
     return setNoStoreResponseHeaders(
       jsonApiError({
-        message,
-        status: 500,
-        code: "INTERNAL_ERROR",
+        message: `${reason}; live IB sync failed: ${detail}`,
+        status: fallbackFailureStatus,
+        code: "UPSTREAM_ERROR",
         requestId,
       }),
       requestId,
     );
+  }
+}
+
+export async function GET(): Promise<Response> {
+  const requestId = getRequestId();
+  try {
+    const snapshot = await readPortfolioFromDb();
+    if (!snapshot) {
+      return serveLiveFallback(requestId, "Turso portfolio snapshot unavailable");
+    }
+    if (isPortfolioSnapshotStale(snapshot)) {
+      triggerBackgroundSync();
+    }
+
+    return portfolioResponseFromSnapshot(snapshot, requestId);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to read portfolio";
+    return serveLiveFallback(requestId, `Turso portfolio read failed: ${message}`);
   }
 }
 

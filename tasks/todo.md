@@ -32,6 +32,38 @@
 
 ---
 
+# Task: Dashboard Sync Failure Regression
+
+## Dependency Graph
+
+- T1 depends_on: [] — Snapshot worktree, scoped instructions, lessons, and current production/local dashboard sync symptoms.
+- T2 depends_on: [T1] — Trace dashboard live-data consumers through Next portfolio/orders/shell routes and FastAPI sync endpoints.
+- T3 depends_on: [T1] — Probe production and local service health/API responses to identify the shared failure mode.
+- T4 depends_on: [T2, T3] — Add a regression that reproduces the shared sync failure without requiring live IB.
+- T5 depends_on: [T4] — Implement the minimal durable fix at the shared sync/read choke point.
+- T6 depends_on: [T5] — Run focused tests, broader affected suites, and browser/API verification; document results and lessons.
+
+## Checklist
+
+- [x] T1 — Snapshot worktree, scoped instructions, lessons, and current symptoms.
+- [x] T2 — Trace live-data consumers and sync routes.
+- [x] T3 — Probe production/local service health and API responses.
+- [x] T4 — Add failing regression for the root cause.
+- [x] T5 — Implement durable fix.
+- [x] T6 — Verify and document.
+
+## Review
+
+- Root cause: production `/api/service-health` reported `turso-db` degraded with `service_health read timed out after 3000ms`, and direct local Turso probes timed out for both `service_health` and `portfolio`. The dashboard failed because `GET /api/portfolio` converted a Turso read timeout into a hard error, and FastAPI `/portfolio/sync` ran a live IB sync but then required a second Turso read before responding.
+- Fixed the shared choke point rather than the visible card: `scripts/ib_sync.py` now supports `--json-output --db-optional`, FastAPI `/portfolio/sync` returns the live IB portfolio payload directly when present, and the Next portfolio route serves a bounded/coalesced live IB fallback when the Turso snapshot read fails or no snapshot exists. Turso persistence still runs and service health still reports degradation; the dashboard no longer blanks solely because Turso read-back is unavailable.
+- Kept the stale flat-file cache out of the recovery path. Regression tests assert neither `/api/portfolio` nor `/portfolio/sync` reads `data/portfolio.json`.
+- Added/updated regressions for Turso read failure, empty snapshot live fallback, live sync response without Turso reread, legacy raw sync fallback, and the revised no-snapshot status contract. Also fixed a date-sensitive short-strangle skew test fixture that expired on 2026-06-26.
+- Verification passed: focused Vitest `web/tests/api-routes.test.ts web/tests/short-strangle-skew-panel.test.tsx web/tests/sync-fallback.test.ts web/tests/portfolio-auto-sync.test.ts web/tests/fastapi-migration.test.ts` — 96 passed; no-cache/security Vitest — 131 passed; focused FastAPI source/no-secret tests — 12 passed; affected Python helper — 201 passed; full Python `python3.13 -m pytest scripts -q` — 3693 passed, 13 skipped, 90 deselected; full web `npm test -- --reporter=dot` — 358 files, 3502 passed, 26 skipped; portfolio fallback Playwright `e2e/sync-fallback.spec.ts --grep "portfolio page renders positions"` — 1 passed; `npm run lint` passed with 9 existing warnings; `git diff --check` passed.
+- Browser verification note: the full `e2e/sync-fallback.spec.ts` run passed the portfolio fallback case but failed an existing orders-page console-error assertion from two mocked 502s. The rerun was narrowed to the portfolio path touched by this fix.
+- Verification blocker: `npm run typecheck` still fails before reaching this patch because `web/node_modules` is missing declared dependencies `@upstash/ratelimit` and `@upstash/redis`. `npm install` was attempted and stopped after ~90s of no output; no package files were modified.
+
+---
+
 # Task: Operator Table Sorting
 
 ## Dependency Graph

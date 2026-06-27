@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-06-27
+
+- Portfolio sync endpoints must return the freshly reconstructed live IB payload directly; persistence to Turso is a separate best-effort step. Never make `/portfolio/sync` prove success by rereading Turso, because a DB read outage turns a successful IB sync into a dashboard blank.
+- For dashboard live-data regressions, the portfolio GET path needs a bounded live IB fallback when the Turso snapshot read times out or no snapshot exists. Service health should still report the DB degradation, but the dashboard should not show `Failed to fetch portfolio` while live IB data is reachable.
+
 ## 2026-06-25
 
 - Same-action call+put combos must carry direction in the structure label. A short call plus short put is `Short Strangle`/`Short Straddle`, not `Combo (2 legs)`, and long call+put pairs should be `Long Strangle`/`Long Straddle`; keep portfolio sync and order-builder classifiers aligned.
