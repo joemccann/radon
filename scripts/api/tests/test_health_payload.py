@@ -248,6 +248,9 @@ class TestHealthLite:
         #                         {"status":"ok"} only)
         #   /ws-ticket/validate — internal WS ticket validation
         #   /docs, /openapi.json — FastAPI docs surface
+        #   /demo/trial-expiry  — demo signup webhook helper; pure market-
+        #                         calendar math, secret-free + account-free,
+        #                         called server-to-server with no user JWT
         #
         # /health/lite must NEVER appear here — it would be world-readable
         # via Caddy /api/ib/health/lite (loopback daemon is covered by the
@@ -260,6 +263,7 @@ class TestHealthLite:
             "/ws-ticket/validate",
             "/docs",
             "/openapi.json",
+            "/demo/trial-expiry",
         }
         assert "/health/lite" not in AUTH_EXEMPT_PATHS
 
