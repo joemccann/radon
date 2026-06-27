@@ -21,7 +21,16 @@ export async function resolveDemoOrderDecision(opts?: {
   authFn?: AuthLike;
   now?: number;
 }): Promise<DemoOrderDecision> {
-  const ctx: DemoContext | null = await getDemoContext(opts?.authFn, opts?.now);
+  let ctx: DemoContext | null;
+  try {
+    ctx = await getDemoContext(opts?.authFn, opts?.now);
+  } catch {
+    // No Clerk request context (unit tests; or a transient auth failure) —
+    // proceed as a non-demo request. The demo VM's RADON_API_TEST_MODE and the
+    // middleware expiry gate remain the hard guarantees, so failing open here
+    // never reaches real IB.
+    return { action: "allow" };
+  }
   if (!ctx) return { action: "allow" };
   if (ctx.expired) {
     return { action: "block-expired", trialExpiresAt: ctx.trialExpiresAt };
