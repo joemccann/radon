@@ -11,7 +11,7 @@ A public, Clerk-gated demo of Radon that real users can self-serve try for **max
 | 3 | Demo data | **Separate Turso DB** (`radon-demo-*`) |
 | 4 | Rate limiting | **Upstash** Redis + `@upstash/ratelimit` |
 | 5 | Quote feed | **Realtime** (real entitled relay feed) |
-| 6 | AI keys | **Dedicated low-budget demo keys** (hard provider spend caps) |
+| 6 | AI keys | **Reuse the existing prod Anthropic/Cerebras/Exa keys** (revised 2026-06-27 — per-user `demo_ai_usage` quota + Upstash tier-D are the only spend guard; no separate provider cap) |
 | 7 | Signup gating | **Email-verify** required before a trial starts |
 
 ## Why a separate deployment (not a demo-mode flag)
@@ -37,7 +37,7 @@ FastAPI short-circuits auth on `is_trusted_local_request` (`scripts/api/auth.py:
 ## Guardrails (enforcement points)
 
 - **No real orders** — (backend) VM `RADON_API_TEST_MODE=1`; (UX) `web/app/api/orders/place/route.ts` detects `demoRole` via `auth()` and routes to `/paper/place` → `paper_fills`. Both present; neither load-bearing alone.
-- **AI quotas** — new `demo_ai_usage` table (PK user_id+endpoint+day_et); guard at the top of the 3 Next.js LLM routes (`assistant` 5/day, `ticker/seasonality` 10/day, `ticker/info` 20/day) where Clerk identity exists; 429 on exceed; reset 00:00 ET. Backstop: **demo-scoped keys with hard provider spend caps**.
+- **AI quotas** — new `demo_ai_usage` table (PK user_id+endpoint+day_et); guard at the top of the 3 Next.js LLM routes (`assistant` 5/day, `ticker/seasonality` 10/day, `ticker/info` 20/day) where Clerk identity exists; 429 on exceed; reset 00:00 ET. Backstop (revised 2026-06-27): demo **reuses the prod AI keys**, so the per-user quota + the Upstash tier-D limiter (5/day) are the only AI-spend guard — no separate provider cap.
 - **Rate-limit / DOS** — Cloudflare edge (IP limits, Bot Fight, OWASP WAF) + a **greenfield** app-layer tiered sliding-window limiter via `@upstash/ratelimit` keyed by Clerk userId (Tier A reads ~100/hr, B expensive ~10/hr, C mutations 5/day, D AI 5/day). No rate-limiting exists today.
 - **Write spam** — per-trial caps in demo DB (journal ≤1000 + 10KB/note + 1/5s; alerts/watchlist bounded).
 
@@ -49,6 +49,21 @@ Counted via the existing market calendar (`scripts/utils/market_calendar.py:get_
 
 - **Self-serve signup:** `demo.radon.run` landing → "Start 3-day demo" → standard Clerk `/sign-up` (email-verify) → `user.created` webhook sets metadata + inserts `demo_users`. No operator action to start a trial.
 - **Management:** new **`/admin/demo-users`** tab in the existing operator panel (gated by `ALLOWED_USER_IDS` like other `/api/admin/*`): LIST (email, started, expiry countdown, status, today's AI burn), INSPECT (paper fills + per-endpoint quota), REVOKE / EXTEND (write Clerk metadata + `demo_users`).
+
+## Environment variables (the demo's runtime dependency)
+
+The demo reads the vars below. They live in **two places**: `web/.env` (local dev) and the **`radon-demo` Vercel project** env (encrypted, all targets). **Prod must NOT carry `TURSO_DEMO_*` / `UPSTASH_*`** — their absence is what guarantees prod can never reach the demo DB (`web/lib/db.ts:getDemoDb()` throws when unset). Read paths: `getDemoDb()` (Turso), `web/lib/demo/demoGate.ts:demoRateLimit` (Upstash), the 3 LLM routes (AI keys).
+
+| Var(s) | Source | Status |
+|---|---|---|
+| `TURSO_DEMO_DB_URL` · `TURSO_DEMO_AUTH_TOKEN` | demo Turso DB `radon-demo` (aws-us-west-2, isolated from `radon-joemccann`) | ✅ provisioned + staged |
+| `UPSTASH_REDIS_REST_URL` · `UPSTASH_REDIS_REST_TOKEN` | Upstash Redis `radon-demo-ratelimit` (us-east-1, co-located with Vercel `iad1`) | ✅ provisioned + staged |
+| `ANTHROPIC_API_KEY` · `CEREBRAS_API_KEY` · `EXA_API_KEY` | **reused from prod `web/.env`** (decision 6 revised) | ✅ staged to Vercel |
+| `CLERK_WEBHOOK_SECRET` | Clerk `user.created` webhook signing secret (`whsec_…`) | ⏳ pending (Clerk step) |
+| `RADON_API_URL` | demo VM FastAPI over TLS (e.g. `demo-api.radon.run`) | ⏳ pending (VM) |
+| Clerk publishable / secret keys | same instance (decision 1) | ⏳ to stage |
+
+**Topology revised from the original plan (2026-06-27):** the **frontend runs on Vercel** (`demo.radon.run`, project `radon-demo`, root `web/`) behind **Vercel WAF + rate-limiting** (100 req/min/IP challenge, 1000 req/min/IP deny) — replacing the Cloudflare layer described above. Only **FastAPI + the relay** run on the Hetzner VM; the Vercel frontend calls the VM backend over the public internet via `RADON_API_URL`, so the backend authenticates the Clerk JWT (no localhost-trust bypass). The managed OWASP WAF ruleset is Enterprise-only and not enabled on Pro.
 
 ## Build phases
 
@@ -98,5 +113,5 @@ Tests: 55 new Vitest (10 files) + 2 extended perimeter pins + 4 new pytest, all 
 - **FastAPI per-user blindness** → never rely on FastAPI to gate per-user; VM `TEST_MODE` + Next.js `auth()` are the two guarantees.
 - **Clerk webhook failure** → a user could exist without `demoRole`/expiry → unlimited access. Add a reconciliation sweep + default-deny (no `demoRole` = no demo access).
 - **Realtime feed entitlement pressure** (decision 5) → monitor IB data-farm capacity; fall back to delayed feed if it pressures prod.
-- **Provider key exhaustion** → demo-scoped keys with hard caps are the real backstop behind the per-user quota.
+- **Prod AI-budget burn** (revised 2026-06-27) → demo reuses the prod Anthropic/Cerebras/Exa keys, so a demo quota bug spends the *prod* AI budget. The only guard is the `demo_ai_usage` per-user quota + Upstash tier-D (5/day); add a provider spend cap if abuse appears.
 - **Cost/ops** → second VM + Turso + Upstash + Cloudflare zone. No separate IB paper account needed (TEST_MODE).
