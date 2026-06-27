@@ -57,6 +57,7 @@ function LegsDisclosure({
         <span className="pos-legs-title">Legs ({position.legs.length})</span>
       </button>
       {expanded && (
+        <div className="pos-legs-table-wrap">
         <table className="pos-legs-table">
           <thead>
             <tr>
@@ -129,6 +130,7 @@ function LegsDisclosure({
             })}
           </tbody>
         </table>
+        </div>
       )}
     </div>
   );
