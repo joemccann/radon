@@ -1916,6 +1916,13 @@ body {
   z-index: 1;
 }
 
+/* Touch press feedback — desktop relies on :hover, which gives no cue on a
+   phone where these cards open a definition modal. Additive; desktop unchanged. */
+.metric-card:active {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
 .metric-label {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -6151,6 +6158,14 @@ tr.leg-row td {
 .position-legs { display: flex; flex-direction: column; gap: 8px; }
 .pos-legs-title { font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-muted); }
 .pos-legs-table { width: 100%; border: 1px solid var(--border-dim); }
+/* On the phone cockpit deck the 8-column legs table squishes BOOK/TRADE
+   buttons illegibly. Let it size to content and scroll horizontally instead,
+   keeping every column readable. Desktop (width:100%) is unaffected — the wrap
+   only scrolls when content exceeds the viewport. */
+.pos-legs-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.cockpit--mobile .pos-legs-table-wrap .pos-legs-table { min-width: max-content; }
+.cockpit--mobile .pos-legs-table-wrap .pos-legs-table th,
+.cockpit--mobile .pos-legs-table-wrap .pos-legs-table td { white-space: nowrap; }
 .pos-legs-table th { font-size: 9px; padding: 8px 10px; }
 .pos-legs-table td { font-size: 11px; padding: 6px 10px; }
 
@@ -9782,6 +9797,11 @@ tr {
   color: var(--text-primary);
   background: color-mix(in srgb, var(--text-primary) 4%, transparent);
   outline: none;
+}
+
+/* Touch press feedback for mode switching on mobile (tabs are shown on phone). */
+.scanner-mode-tab:active {
+  background: color-mix(in srgb, var(--signal-core) 14%, transparent);
 }
 
 .scanner-mode-tab:focus-visible {
