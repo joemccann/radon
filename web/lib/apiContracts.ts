@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 export type ErrorCode =
   | "BAD_REQUEST"
   | "UNAUTHORIZED"
+  | "FORBIDDEN"
   | "NOT_FOUND"
   | "CONFIG_ERROR"
   | "UPSTREAM_ERROR"
