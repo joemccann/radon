@@ -12,11 +12,11 @@ afterEach(cleanup);
 
 function leg(right: "C" | "P", strike: number): OrderLeg {
   return {
-    id: `MU_20260626_${strike}_${right}`,
+    id: `MU_20260717_${strike}_${right}`,
     action: "SELL",
     right,
     strike,
-    expiry: "20260626",
+    expiry: "20260717",
     quantity: 1,
     limitPrice: null,
   };
@@ -58,8 +58,8 @@ describe("ShortStrangleSkewPanel", () => {
         legs={[leg("P", 850), leg("C", 1250)]}
         spot={1050}
         prices={{
-          MU_20260626_850_P: pd({ symbol: "MU_20260626_850_P", impliedVol: 0.42, delta: -0.231 }),
-          MU_20260626_1250_C: pd({ symbol: "MU_20260626_1250_C", impliedVol: 0.30, delta: 0.184 }),
+          MU_20260717_850_P: pd({ symbol: "MU_20260717_850_P", impliedVol: 0.42, delta: -0.231 }),
+          MU_20260717_1250_C: pd({ symbol: "MU_20260717_1250_C", impliedVol: 0.30, delta: 0.184 }),
         }}
       />,
     );

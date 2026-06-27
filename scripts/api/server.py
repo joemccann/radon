@@ -1697,22 +1697,21 @@ async def attribution():
 
 @app.post("/portfolio/sync")
 async def portfolio_sync():
-    """Sync portfolio from IB, then return the latest Turso snapshot.
+    """Sync portfolio from IB and return the live payload.
 
     Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
-    # raw=True: ib_sync.py --sync persists portfolio_snapshots and emits
-    # human-readable status text on stdout. The default JSON-parsing
-    # runner crashes on the first '{' it finds in the status report —
-    # broken since the script grew its summary banner. See
-    # feedback_dont_cache_empty_results / journalctl ERROR
-    # "Invalid JSON output: Extra data".
     result = await _run_ib_script_with_recovery(
-        "ib_sync.py", ["--sync", "--port", str(DEFAULT_GATEWAY_PORT)], timeout=30, raw=True
+        "ib_sync.py",
+        ["--sync", "--json-output", "--db-optional", "--port", str(DEFAULT_GATEWAY_PORT)],
+        timeout=30,
+        raw=False,
     )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
+    if isinstance(result.data, dict) and result.data:
+        return result.data
     try:
         return await _read_latest_portfolio_snapshot_from_db()
     except Exception as e:

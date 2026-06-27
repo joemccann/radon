@@ -1332,6 +1332,12 @@ def main():
                         help="TWS/Gateway port (7497=paper, 7496=live, 4001=gateway)")
     parser.add_argument("--client-id", type=int, default=None, help="Client ID (omit for auto-allocation)")
     parser.add_argument("--sync", action="store_true", help="Sync to Turso portfolio_snapshots")
+    parser.add_argument("--json-output", action="store_true", help="Print final portfolio JSON to stdout")
+    parser.add_argument(
+        "--db-optional",
+        action="store_true",
+        help="Keep returning live portfolio JSON if the Turso snapshot write fails",
+    )
     parser.add_argument("--no-prices", action="store_true", help="Skip market price fetch")
     parser.add_argument("--skip-audit", action="store_true", help="Skip naked short audit after sync")
 
@@ -1472,11 +1478,23 @@ def main():
         undefined = len([p for p in collapsed if p['risk_profile'] != 'defined'])
         print(f"\n📋 SUMMARY: {len(collapsed)} positions ({defined} defined risk, {undefined} undefined)")
 
-        # Sync if requested
-        if args.sync:
+        portfolio = None
+        db_save_error = None
+
+        # Sync or emit JSON if requested
+        if args.sync or args.json_output:
             fill_dates = build_fill_dates(client)
             portfolio = convert_to_portfolio_format(account, collapsed, pnl_data, fill_dates=fill_dates)
-            save_portfolio(portfolio)
+
+        if args.sync and portfolio is not None:
+            try:
+                save_portfolio(portfolio)
+            except Exception as exc:
+                db_save_error = exc
+                if args.db_optional:
+                    print(f"  Warning: portfolio snapshot save failed: {exc}", file=sys.stderr)
+                else:
+                    raise
 
             # ── Naked Short Audit (post-sync) ──
             if not args.skip_audit:
@@ -1520,6 +1538,11 @@ def main():
             print("\n⚠️  Note: kelly_optimal, target, and stop fields need manual evaluation")
         else:
             print("\nRun with --sync to save to Turso")
+
+        if args.json_output and portfolio is not None:
+            if db_save_error is not None:
+                portfolio["_sync_warning"] = "portfolio snapshot save failed"
+            print(json.dumps(portfolio, separators=(",", ":"), default=str))
 
     finally:
         client.disconnect()
