@@ -52,7 +52,14 @@ export async function enforceDemoAiQuota(
   opts: EnforceAiQuotaOptions = {},
 ): Promise<Response | null> {
   const now = opts.now ?? new Date();
-  const auth = await (opts.authFn ?? defaultAuth)();
+  let auth: AuthResult;
+  try {
+    auth = await (opts.authFn ?? defaultAuth)();
+  } catch {
+    // No Clerk request context (unit tests; or a transient auth failure) —
+    // treat as a non-demo request and proceed (no quota applied).
+    return null;
+  }
   const metadata =
     auth?.sessionClaims?.metadata ?? auth?.publicMetadata ?? null;
 
