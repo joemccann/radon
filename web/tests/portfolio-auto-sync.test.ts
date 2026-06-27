@@ -86,16 +86,21 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("triggers background sync when no Turso snapshot exists", async () => {
+  it("serves live IB sync data when no Turso snapshot exists", async () => {
+    const livePortfolio = makePortfolio(new Date().toISOString());
     mockDbPortfolio(null);
+    mockRadonFetch.mockResolvedValue(livePortfolio);
 
     const { GET } = await import("../app/api/portfolio/route");
     const response = await GET();
+    const body = await response.json();
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(200);
+    expect(body.last_sync).toBe(livePortfolio.last_sync);
+    expect(response.headers.get("X-Portfolio-Source")).toBe("ib-live-fallback");
     expect(mockRadonFetch).toHaveBeenCalledOnce();
     const [path, options] = mockRadonFetch.mock.calls[0] as [string, Record<string, unknown>];
-    expect(path).toBe("/portfolio/background-sync");
+    expect(path).toBe("/portfolio/sync");
     expect(options).toMatchObject({ method: "POST" });
   });
 

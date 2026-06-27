@@ -1,4 +1,4 @@
-"""FastAPI source-of-truth routes must return Turso snapshots after sync."""
+"""FastAPI source-of-truth routes must avoid stale JSON mirrors."""
 
 from __future__ import annotations
 
@@ -24,12 +24,44 @@ def trusted_client(monkeypatch):
     return TestClient(server.app)
 
 
-def test_portfolio_sync_returns_turso_snapshot_not_portfolio_json(trusted_client, monkeypatch):
+def test_portfolio_sync_returns_live_payload_without_turso_reread(trusted_client, monkeypatch):
     from scripts.api import server
     from utils import atomic_io
 
     async def fake_run(*args, **kwargs):
-        return SimpleNamespace(ok=True, error=None)
+        return SimpleNamespace(
+            ok=True,
+            error=None,
+            data={
+                "bankroll": 125000,
+                "position_count": 1,
+                "positions": [{"ticker": "SPY", "structure": "Stock"}],
+            },
+        )
+
+    def fake_hrana_execute(sql, args=(), timeout=None):
+        raise AssertionError("/portfolio/sync must not require a Turso read-back after live IB sync")
+
+    def fail_disk_read(*args, **kwargs):
+        raise AssertionError("portfolio/sync must not read data/portfolio.json")
+
+    monkeypatch.setattr(server, "_run_ib_script_with_recovery", fake_run)
+    monkeypatch.setattr(server.db_http, "hrana_execute", fake_hrana_execute)
+    monkeypatch.setattr(atomic_io, "verified_load", fail_disk_read)
+
+    response = trusted_client.post("/portfolio/sync")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["bankroll"] == 125000
+    assert body["positions"][0]["ticker"] == "SPY"
+
+
+def test_portfolio_sync_falls_back_to_turso_snapshot_for_legacy_raw_sync(trusted_client, monkeypatch):
+    from scripts.api import server
+
+    async def fake_run(*args, **kwargs):
+        return SimpleNamespace(ok=True, error=None, data={})
 
     def fake_hrana_execute(sql, args=(), timeout=None):
         if "FROM portfolio_snapshots" in sql:
@@ -46,12 +78,8 @@ def test_portfolio_sync_returns_turso_snapshot_not_portfolio_json(trusted_client
             ]
         raise AssertionError(f"unexpected SQL: {sql}")
 
-    def fail_disk_read(*args, **kwargs):
-        raise AssertionError("portfolio/sync must not read data/portfolio.json")
-
     monkeypatch.setattr(server, "_run_ib_script_with_recovery", fake_run)
     monkeypatch.setattr(server.db_http, "hrana_execute", fake_hrana_execute)
-    monkeypatch.setattr(atomic_io, "verified_load", fail_disk_read)
 
     response = trusted_client.post("/portfolio/sync")
 
