@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect } from "react";
-import { X, BarChart3, LineChart, Wrench, Shield, Activity, Settings2, Sun, Moon } from "lucide-react";
+import { X, BarChart3, LineChart, Wrench, Shield, Activity, Settings2, Sun, Moon, Bell, Workflow } from "lucide-react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useTheme } from "@/lib/ThemeContext";
 import { useIBStatusContext } from "@/lib/IBStatusContext";
@@ -19,6 +19,8 @@ const OVERFLOW_LINKS: DrawerLink[] = [
   { label: "Journal", href: "/journal", icon: Wrench },
   { label: "Regime", href: "/regime/cri", icon: Shield },
   { label: "CTA", href: "/cta", icon: Activity },
+  { label: "Alerts", href: "/alerts", icon: Bell },
+  { label: "Workflow", href: "/workflow", icon: Workflow },
   { label: "Operator", href: "/admin", icon: Settings2 },
 ];
 
