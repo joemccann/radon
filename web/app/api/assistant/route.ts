@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { runAssistantLoop, type AssistantTurn } from "@/lib/assistant/loop";
+import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 
 type ChatRole = "user" | "assistant";
 
@@ -100,6 +101,11 @@ export async function POST(request: NextRequest): Promise<Response> {
   if (!mock && lastMessage.role !== "user") {
     return NextResponse.json({ error: "The last message must be from user." }, { status: 400 });
   }
+
+  // Demo AI quota (Phase 4) — no-op for non-demo users; 429 once a trial user
+  // exhausts the daily assistant budget, BEFORE the expensive LLM loop runs.
+  const quota = await enforceDemoAiQuota("assistant");
+  if (quota) return quota;
 
   try {
     const result = await runAssistantLoop(toTurns(messages), SYSTEM_PROMPT, bearerToken(request));

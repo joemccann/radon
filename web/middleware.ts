@@ -7,6 +7,8 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
+import { handleDemoGate } from "@/lib/demo/demoGate";
+import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 
 const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
@@ -54,6 +56,13 @@ export const PUBLIC_SHARE_API_ROUTES = [
   "/api/vcg/share/content",
 ] as const;
 
+// Inbound webhooks — verified by the SENDER's signature inside the route
+// handler (svix HMAC for Clerk), not by a Clerk session. EXPLICIT list with a
+// filesystem pin (web/tests/middleware-share-allowlist.test.ts), same
+// default-deny discipline as the share + probe scopes: a new webhook route
+// must be added here deliberately, never auto-published by a pattern.
+export const PUBLIC_WEBHOOK_API_ROUTES = ["/api/webhooks/clerk"] as const;
+
 // Public allowlist. Every other route — pages AND /api/* — requires a Clerk
 // session. The narrow exemptions:
 //
@@ -73,6 +82,7 @@ export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
   ...PUBLIC_SHARE_API_ROUTES,
+  ...PUBLIC_WEBHOOK_API_ROUTES,
   "/api/service-health",
   "/api/health",
 ]);
@@ -147,7 +157,7 @@ export default clerkMiddleware(async (auth, request) => {
   // API client and would also surface as a noisy 302 in the browser console
   // when the cookie expires mid-session.
   if (isApiPath(request.nextUrl.pathname)) {
-    const { userId } = await auth();
+    const { userId, sessionClaims } = await auth();
     if (!userId) {
       const requestId = getRequestId();
       const response = jsonApiError({
@@ -158,11 +168,27 @@ export default clerkMiddleware(async (auth, request) => {
       });
       return setNoStoreResponseHeaders(response, requestId);
     }
+    // Demo trial gate (expiry + tiered rate-limit). No-ops for non-demo users.
+    const demoGate = await handleDemoGate({
+      userId,
+      metadata: sessionClaims?.metadata as DemoPublicMetadata | undefined,
+      request,
+    });
+    if (demoGate) return demoGate;
     return;
   }
 
   // Page routes: keep Clerk's standard redirect-to-sign-in behavior.
   await auth.protect();
+  const { userId, sessionClaims } = await auth();
+  if (userId) {
+    const demoGate = await handleDemoGate({
+      userId,
+      metadata: sessionClaims?.metadata as DemoPublicMetadata | undefined,
+      request,
+    });
+    if (demoGate) return demoGate;
+  }
 });
 
 export const config = {

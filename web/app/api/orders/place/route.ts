@@ -14,6 +14,7 @@ import {
   normalizeOptionRight,
 } from "@/lib/placeOrderBodySchema";
 import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
+import { resolveDemoOrderDecision } from "@/lib/demo/orderBlockade";
 
 export const runtime = "nodejs";
 
@@ -98,6 +99,39 @@ export async function POST(request: Request): Promise<Response> {
 
     const body = parsed as PlaceBody;
     body.type = body.type ?? "stock";
+
+    // Demo blockade (Phase 3): a demo user's order never reaches the IB path —
+    // it is forwarded to the paper-fill engine. Active demo → paper; expired →
+    // 403 (the middleware also blocks expired demo users; this is defense in
+    // depth). Non-demo users fall straight through to the real path below.
+    const demoDecision = await resolveDemoOrderDecision();
+    if (demoDecision.action === "block-expired") {
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message: "Demo trial expired — order not placed.",
+          status: 403,
+          code: "UNAUTHORIZED",
+          requestId,
+        }),
+        requestId,
+      );
+    }
+    if (demoDecision.action === "paper") {
+      const paperResult = await radonFetch<Record<string, unknown>>(
+        "/paper/place",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          timeout: 30_000,
+        },
+      );
+      const orders = await readOrdersSnapshotBestEffort();
+      return setNoStoreResponseHeaders(
+        NextResponse.json({ ...paperResult, demo: true, paper: true, orders, requestId }),
+        requestId,
+      );
+    }
 
     // Chain UI sends CALL/PUT; IB + naked-short guard expect C/P
     if (body.type === "option" && body.right != null) {

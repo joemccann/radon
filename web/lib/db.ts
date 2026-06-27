@@ -53,6 +53,37 @@ export function getDb(): Client {
   return cached;
 }
 
+let cachedDemo: Client | null = null;
+
+/**
+ * libSQL client for the SEPARATE demo Turso DB (demo.radon.run).
+ *
+ * Reads `TURSO_DEMO_DB_URL` / `TURSO_DEMO_AUTH_TOKEN` — never the prod
+ * `TURSO_DB_URL`. The whole point of the demo environment is physical data
+ * isolation (plan §Isolation): the operator's real positions live in a
+ * different database that is simply absent here, so a forgotten WHERE clause
+ * can never leak them. Direct-to-cloud only; demo has no replica.
+ *
+ * Matches the env names already consumed by `scripts/db/demo_seed.py` and
+ * `scripts/ci/check_demo_isolation.py`.
+ */
+export function getDemoDb(): Client {
+  if (cachedDemo) return cachedDemo;
+
+  const url = process.env.TURSO_DEMO_DB_URL;
+  const authToken = process.env.TURSO_DEMO_AUTH_TOKEN;
+
+  if (!url) {
+    throw new Error(
+      "getDemoDb: TURSO_DEMO_DB_URL is not set. This is the SEPARATE demo DB, " +
+        "not the prod TURSO_DB_URL. See docs/demo-environment.md §Isolation.",
+    );
+  }
+
+  cachedDemo = createClient({ url, authToken });
+  return cachedDemo;
+}
+
 // Legacy convenience for explicit replica opt-in callers.
 export async function syncDb(): Promise<void> {
   const db = getDb();
@@ -64,10 +95,16 @@ export async function syncDb(): Promise<void> {
 // Test seam — drop the cached client between vitest tests.
 export function __resetDbForTests(): void {
   cached = null;
+  cachedDemo = null;
 }
 
 // Test seam — inject a libSQL client (typically in-memory) so route
 // handlers can be tested hermetically.
 export function __setDbForTests(client: Client): void {
   cached = client;
+}
+
+// Test seam — inject the demo libSQL client.
+export function __setDemoDbForTests(client: Client): void {
+  cachedDemo = client;
 }

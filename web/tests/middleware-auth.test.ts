@@ -60,6 +60,10 @@ function collectApiRoutesFromFilesystem(): string[] {
 const REVIEWED_PUBLIC_NON_SHARE_API_ROUTES = [
   "/api/service-health",
   "/api/health",
+  // Clerk webhook (demo.radon.run trial provisioning). NOT Clerk-session-
+  // gated — it has no session; it is verified by the svix HMAC signature
+  // INSIDE the handler (lib/demo/svixVerify.ts). Reviewed-public deliberately.
+  "/api/webhooks/clerk",
 ] as const;
 
 // Full reviewed public allowlist: share previews + the two above. Bearer-gated
