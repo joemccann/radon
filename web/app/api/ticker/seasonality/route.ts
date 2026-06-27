@@ -7,6 +7,7 @@ import {
   setCacheResponseHeaders,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
+import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 
 export const runtime = "nodejs";
 
@@ -174,6 +175,11 @@ export async function GET(request: Request): Promise<Response> {
       tags: [`ticker-seasonality.${symbol}`],
     });
   }
+
+  // Demo AI quota (Phase 4) — charged only on a cache MISS (real LLM work);
+  // no-op for non-demo users.
+  const quota = await enforceDemoAiQuota("ticker/seasonality");
+  if (quota) return quota;
 
   const token = process.env.UW_TOKEN;
   if (!token) {

@@ -27,6 +27,7 @@ import ReliabilityStrip from "./ReliabilityStrip";
 import SloStrip from "./SloStrip";
 import HostMetricsStrip from "./HostMetricsStrip";
 import WriterFreshnessTable from "./WriterFreshnessTable";
+import DemoUsersTable from "./DemoUsersTable";
 
 type EdgePayload = (EdgeHealthStatus & { reachable?: boolean }) | null;
 
@@ -496,6 +497,7 @@ export default function AdminWorkspace() {
             loading={edgeFirstLoading}
           />
           <RestartLog entries={log} />
+          <DemoUsersTable />
         </div>
       </main>
     </div>

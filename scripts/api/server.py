@@ -382,7 +382,16 @@ app.add_middleware(
 )
 
 # Auth middleware — protect all routes except /health and internal ticket validation
-AUTH_EXEMPT_PATHS = {"/health", "/ws-ticket/validate", "/docs", "/openapi.json"}
+AUTH_EXEMPT_PATHS = {
+    "/health",
+    "/ws-ticket/validate",
+    "/docs",
+    "/openapi.json",
+    # Pure market-calendar math for the demo signup webhook (demo.radon.run).
+    # Carries no secrets and no account data; the Next.js webhook calls it
+    # server-to-server with no user JWT, so it cannot depend on Clerk auth.
+    "/demo/trial-expiry",
+}
 
 
 @app.middleware("http")
@@ -1296,6 +1305,33 @@ async def validate_ws_ticket(request: Request):
     if not user_id:
         raise HTTPException(status_code=401, detail="Invalid or expired ticket")
     return {"user_id": user_id}
+
+
+@app.post("/demo/trial-expiry")
+async def demo_trial_expiry(request: Request):
+    """Compute the 3-trading-day demo trial window (demo.radon.run).
+
+    Auth-exempt + secret-free: the Next.js user.created webhook posts a signup
+    timestamp and gets back the ISO-ET start + 16:00-ET expiry of the Nth
+    trading day, computed via the shared market calendar (weekends + US
+    holidays + IBKR closures excluded). The calendar logic is Python-only, so
+    the webhook delegates here rather than re-implementing it in TypeScript.
+    """
+    from utils.demo_trial import trial_expiry_handler
+
+    body = await request.json()
+    start_iso_et = body.get("start_iso_et")
+    if not start_iso_et:
+        raise HTTPException(status_code=400, detail="start_iso_et is required")
+    trading_days = body.get("trading_days", 3)
+    try:
+        trading_days = int(trading_days)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail="trading_days must be an integer")
+    try:
+        return trial_expiry_handler(start_iso_et, trading_days)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @app.post("/ib/restart")

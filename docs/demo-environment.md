@@ -61,13 +61,35 @@ Counted via the existing market calendar (`scripts/utils/market_calendar.py:get_
 - **Clerk** — enable email-verify; configure the `user.created` webhook endpoint; confirm same-instance `demoRole` metadata.
 
 **Code (I build, in-repo, testable ahead of infra):**
-0. Isolation skeleton + the **CI isolation guard** (reject demo deploy with prod Turso / reachable IB).
-1. Demo DB migrations (`demo_users`, `demo_ai_usage`) + `demo_seed.py` (synthetic dataset).
-2. Clerk `user.created` webhook route + the trial-expiry helper + middleware expiry gate.
-3. Order blockade (demo `orders/place` → `paper/place`) at the OrderRiskGate placement resolver.
-4. AI quota guard module + wire into the 3 LLM routes.
-5. App-layer Upstash tiered rate-limiter + write-spam caps.
-6. `/admin/demo-users` panel + the list/inspect/revoke/extend admin API.
+0. ✅ Isolation skeleton + the **CI isolation guard** (reject demo deploy with prod Turso / reachable IB).
+1. ✅ Demo DB migrations (`demo_users`, `demo_ai_usage`) + `demo_seed.py` (synthetic dataset).
+2. ✅ Clerk `user.created` webhook route + the trial-expiry helper + middleware expiry gate.
+3. ✅ Order blockade (demo `orders/place` → `paper/place`).
+4. ✅ AI quota guard module + wire into the 3 LLM routes.
+5. ✅ App-layer Upstash tiered rate-limiter (middleware gate). Per-table write-spam caps deferred.
+6. ✅ `/admin/demo-users` panel + the list/revoke/extend admin API.
+
+### Build status (Phases 2–6 shipped — code only, infra-gated)
+
+All inert on the prod app: every demo path no-ops for non-demo users
+(`resolveDemoContext → null`) and the demo DB is constructed only after a demo
+identity is confirmed, so prod (no `TURSO_DEMO_DB_URL`) never touches it.
+
+- **Phase 2** — `POST /demo/trial-expiry` (FastAPI, auth-exempt); `getDemoDb()`;
+  `lib/demo/{demoUsers,svixVerify,trialExpiry,provisionTrial}.ts`;
+  `app/api/webhooks/clerk/route.ts` (svix-verified, allowlisted + filesystem-pinned);
+  middleware expiry gate (`lib/demo/demoGate.ts`).
+- **Phase 3** — `lib/demo/orderBlockade.ts` + `orders/place` redirect to `/paper/place`.
+- **Phase 4** — `lib/demo/enforceAiQuota.ts` wired into `assistant`, `ticker/seasonality`, `ticker/info` (charged on cache-miss only).
+- **Phase 5** — `lib/demo/rateTier.ts` + middleware Upstash tiered limiter (`/api/*` only; no-ops without Upstash env).
+- **Phase 6** — `lib/demo/{adminAuth,adminActions,demoUsersView}.ts`, `app/api/admin/demo-users/route.ts` (404s cleanly when demo unconfigured), `components/admin/DemoUsersTable.tsx`.
+
+Tests: 55 new Vitest (10 files) + 2 extended perimeter pins + 4 new pytest, all green; `tsc --noEmit` clean.
+
+**Env this introduces** (set on the demo deployment only): `TURSO_DEMO_DB_URL`,
+`TURSO_DEMO_AUTH_TOKEN`, `CLERK_WEBHOOK_SECRET`, `UPSTASH_REDIS_REST_URL`,
+`UPSTASH_REDIS_REST_TOKEN`, `ALLOWED_USER_IDS`. The demo sign-up page must set
+`unsafeMetadata.demo = true` so the webhook provisions a trial.
 
 ## Risks + mitigations
 

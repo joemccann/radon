@@ -32,6 +32,7 @@ import {
   isPublicRoute,
   PROBE_BEARER_API_ROUTES,
   PUBLIC_SHARE_API_ROUTES,
+  PUBLIC_WEBHOOK_API_ROUTES,
 } from "../middleware";
 
 function reqFor(pathname: string): NextRequest {
@@ -62,6 +63,10 @@ function collectShareRoutesFromFilesystem(): string[] {
 
 function collectProbeRoutesFromFilesystem(): string[] {
   return collectRoutesFromFilesystem((urlPath) => urlPath.startsWith("/api/probe/") || urlPath === "/api/probe");
+}
+
+function collectWebhookRoutesFromFilesystem(): string[] {
+  return collectRoutesFromFilesystem((urlPath) => urlPath.startsWith("/api/webhooks/"));
 }
 
 describe("PUBLIC_SHARE_API_ROUTES — explicit share allowlist", () => {
@@ -105,5 +110,18 @@ describe("PROBE_BEARER_API_ROUTES — explicit bearer-gated probe allowlist (DUR
   it("allowlist matches the probe route files on disk exactly", () => {
     const onDisk = collectProbeRoutesFromFilesystem();
     expect([...PROBE_BEARER_API_ROUTES].sort()).toEqual(onDisk);
+  });
+});
+
+describe("PUBLIC_WEBHOOK_API_ROUTES — explicit signature-gated webhook allowlist", () => {
+  it("every enumerated webhook route is public (signature-verified in-handler)", () => {
+    for (const route of PUBLIC_WEBHOOK_API_ROUTES) {
+      expect(isPublicRoute(reqFor(route)), route).toBe(true);
+    }
+  });
+
+  it("allowlist matches the webhook route files on disk exactly", () => {
+    const onDisk = collectWebhookRoutesFromFilesystem();
+    expect([...PUBLIC_WEBHOOK_API_ROUTES].sort()).toEqual(onDisk);
   });
 });

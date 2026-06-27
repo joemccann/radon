@@ -7,6 +7,7 @@ import {
   setCacheResponseHeaders,
 } from "@/lib/apiContracts";
 import { canReuseUwInfo, hasAnyTickerData, isPopulated, pickUwInfo } from "@/lib/tickerInfoCache";
+import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
 
 export const runtime = "nodejs";
 
@@ -256,6 +257,11 @@ export async function GET(request: Request): Promise<Response> {
       requestId,
     });
   }
+
+  // Demo AI quota (Phase 4) — charged only on a cache MISS (the expensive
+  // UW/Exa/Yahoo fan-out below); no-op for non-demo users.
+  const quota = await enforceDemoAiQuota("ticker/info");
+  if (quota) return quota;
 
   try {
     // 2. Fetch UW data (always fresh for stock-state).
