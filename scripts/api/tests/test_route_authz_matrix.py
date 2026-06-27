@@ -163,6 +163,10 @@ class TestExemptPathsPinned:
         "/ws-ticket/validate",  # internal ticket validation, loopback daemon
         "/docs",              # Swagger UI
         "/openapi.json",      # schema for the docs UI
+        # Demo signup webhook helper (demo.radon.run). Pure market-calendar math,
+        # secret-free + account-free; the Next.js user.created webhook calls it
+        # server-to-server with no user JWT, so it cannot depend on Clerk auth.
+        "/demo/trial-expiry",
     }
 
     def test_exempt_set_matches_reviewed_allowlist(self):
