@@ -12,7 +12,7 @@ const mockRadonFetch = vi.fn();
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
 const mockGetDb = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: mockGetDb }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
 function mockDbSnapshots({
   performance = null,

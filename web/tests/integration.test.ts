@@ -6,7 +6,7 @@ import { NextRequest } from "next/server";
 import { buildEvaluateCommand, __resolvePiInput, __normalizeScanArgs } from "../app/api/pi/route";
 
 const mockExecute = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 function mockPiDb() {
   mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {

@@ -5,8 +5,8 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { getDb } from "@/lib/db";
-import { withTimeout } from "@/lib/asyncTimeout";
+import { resetDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 
 // Disable Next.js static caching: this handler reads live Turso state.
 // Without this, the framework freezes the first response and serves stale
@@ -34,15 +34,10 @@ function parseTimestampMs(value: unknown): number | null {
 
 /** Read the latest portfolio snapshot from Turso. */
 async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
-  const db = getDb();
-  const result = await withTimeout(
-    db.execute({
-      sql: `SELECT taken_at, payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
-      args: [],
-    }),
-    DB_READ_TIMEOUT_MS,
-    `portfolio snapshot read timed out after ${DB_READ_TIMEOUT_MS}ms`,
-  );
+  const result = await dbExecute({
+    sql: `SELECT taken_at, payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
+    args: [],
+  }, { label: "portfolio snapshot", timeoutMs: DB_READ_TIMEOUT_MS });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { taken_at?: string; payload?: string };
   if (typeof row.payload !== "string") return null;
@@ -83,10 +78,8 @@ function snapshotFromLiveSyncData(data: unknown): PortfolioSnapshot {
  */
 async function loadTradeLogDates(): Promise<Record<string, string>> {
   try {
-    const db = getDb();
-    const result = await withTimeout(
-      db.execute({
-        sql: `
+    const result = await dbExecute({
+      sql: `
         SELECT
           json_extract(payload, '$.ticker') AS ticker,
           MAX(COALESCE(filled_at, json_extract(payload, '$.date'))) AS date
@@ -94,11 +87,8 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
         WHERE json_extract(payload, '$.ticker') IS NOT NULL
         GROUP BY json_extract(payload, '$.ticker')
       `,
-        args: [],
-      }),
-      DB_READ_TIMEOUT_MS,
-      `portfolio trade-log date read timed out after ${DB_READ_TIMEOUT_MS}ms`,
-    );
+      args: [],
+    }, { label: "portfolio trade-log date", timeoutMs: DB_READ_TIMEOUT_MS });
     if (result.rows.length > 0) {
       const dates: Record<string, string> = {};
       for (const row of result.rows) {
@@ -117,14 +107,22 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
 }
 
 let bgSyncInFlight = false;
+let bgSyncLastTriggeredMs = 0;
+const BG_SYNC_MIN_INTERVAL_MS = 60_000;
 let liveFallbackInFlight: Promise<PortfolioSnapshot> | null = null;
 let liveFallbackSnapshot: PortfolioSnapshot | null = null;
 let liveFallbackCachedAtMs = 0;
 
-/** Fire-and-forget: call FastAPI background sync endpoint */
+/** Fire-and-forget: call FastAPI background sync endpoint.
+ *
+ * FastAPI returns 202 in ~50ms so `bgSyncInFlight` clears almost immediately —
+ * which on its own gives no rate limit when every stale GET fires this. The
+ * wall-clock guard caps it to one trigger per minute regardless. */
 function triggerBackgroundSync(): void {
   if (bgSyncInFlight) return;
+  if (Date.now() - bgSyncLastTriggeredMs < BG_SYNC_MIN_INTERVAL_MS) return;
   bgSyncInFlight = true;
+  bgSyncLastTriggeredMs = Date.now();
 
   console.log("[Portfolio] Background sync triggered via FastAPI");
   radonFetch("/portfolio/background-sync", { method: "POST", timeout: 5_000 })
@@ -213,6 +211,18 @@ export async function GET(): Promise<Response> {
 
     return portfolioResponseFromSnapshot(snapshot, requestId);
   } catch (error) {
+    // A read timeout almost always means the cached libsql client's pool went
+    // stale. Drop it, then RETRY the read once with the fresh pool before
+    // spending up to 35s on a live IB sync — a valid (even stale) snapshot
+    // reads in <200ms on the new client, so a transient blip never lights the
+    // "LIVE DATA DEGRADED" banner when good data exists in Turso.
+    resetDb();
+    try {
+      const retry = await readPortfolioFromDb();
+      if (retry) return portfolioResponseFromSnapshot(retry, requestId);
+    } catch {
+      // fall through to the live IB fallback below
+    }
     const message = error instanceof Error ? error.message : "Failed to read portfolio";
     return serveLiveFallback(requestId, `Turso portfolio read failed: ${message}`);
   }

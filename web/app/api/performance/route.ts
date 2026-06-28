@@ -4,7 +4,7 @@ import { join } from "path";
 import { isPerformanceBehindPortfolioSync, isPortfolioBehindCurrentEtSession } from "@/lib/performanceFreshness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -65,11 +65,10 @@ function triggerBackgroundRebuild(): void {
 
 /** Phase 2.3 — latest Turso snapshot, timestamped by the taken_at row key. */
 async function readPerformanceFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const db = getDb();
-  const result = await db.execute({
+  const result = await dbExecute({
     sql: `SELECT taken_at, payload FROM performance_snapshots ORDER BY taken_at DESC LIMIT 1`,
     args: [],
-  });
+  }, { label: "performance" });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { taken_at: string; payload: string };
   return {
@@ -80,11 +79,10 @@ async function readPerformanceFromDb(): Promise<TimestampedRead<Record<string, u
 
 async function readPortfolioFromDb(): Promise<Record<string, unknown> | null> {
   try {
-    const db = getDb();
-    const result = await db.execute({
+    const result = await dbExecute({
       sql: `SELECT payload FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1`,
       args: [],
-    });
+    }, { label: "performance-portfolio" });
     if (result.rows.length === 0) return null;
     const row = result.rows[0] as unknown as { payload?: unknown };
     if (typeof row.payload !== "string") return null;

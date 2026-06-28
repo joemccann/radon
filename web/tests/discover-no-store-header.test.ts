@@ -18,7 +18,7 @@ vi.mock("fs/promises", () => ({
   readFile: vi.fn(),
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: () => ({
     execute: vi.fn().mockResolvedValue({ rows: [] }),
   }),

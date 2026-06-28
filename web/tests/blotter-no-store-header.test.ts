@@ -6,7 +6,7 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from "vitest";
 
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: () => ({
     execute: mockExecute,
   }),

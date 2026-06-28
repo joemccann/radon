@@ -51,7 +51,7 @@ vi.mock("fs", () => ({
 
 const mockGetDb = vi.fn();
 const mockSyncDb = vi.fn().mockResolvedValue(undefined);
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: mockGetDb,
   syncDb: mockSyncDb,
 }));

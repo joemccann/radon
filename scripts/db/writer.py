@@ -110,6 +110,39 @@ def upsert_gamma_rotation_snapshot(scan_time: str, payload: dict[str, Any]) -> N
     db.commit()
 
 
+# Only the newest row is ever read (ORDER BY taken_at DESC LIMIT 1). Keep a
+# small buffer for safety/diagnostics and prune the rest so the table can't grow
+# unbounded — it had reached ~82k rows (~800MB, 25-min nightly backups) before
+# this was added. taken_at is the ISO-timestamp PK, so the cutoff DELETE is an
+# indexed range scan.
+PORTFOLIO_SNAPSHOT_RETENTION = 2000
+
+
+def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> int:
+    """Delete all but the newest ``retention`` portfolio_snapshots rows.
+
+    Returns rows deleted (0 when the driver doesn't report a rowcount). Best
+    effort: callers should swallow errors so a prune hiccup never fails the
+    snapshot write that just succeeded.
+    """
+    db = get_db()
+    cursor = db.execute(
+        """
+        DELETE FROM portfolio_snapshots
+        WHERE taken_at < (
+            SELECT MIN(taken_at) FROM (
+                SELECT taken_at FROM portfolio_snapshots
+                ORDER BY taken_at DESC LIMIT ?
+            )
+        )
+        """,
+        (retention,),
+    )
+    db.commit()
+    deleted = getattr(cursor, "rowcount", None)
+    return deleted if isinstance(deleted, int) and deleted >= 0 else 0
+
+
 def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
     db = get_db()
     db.execute(
@@ -120,6 +153,10 @@ def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
         (taken_at, json.dumps(payload)),
     )
     db.commit()
+    try:
+        prune_portfolio_snapshots()
+    except Exception as exc:  # noqa: BLE001 — hygiene must never fail the write
+        print(f"  Warning: portfolio_snapshots prune failed: {exc}")
 
 
 def upsert_cash_flow(

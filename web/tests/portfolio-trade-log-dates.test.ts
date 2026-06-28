@@ -16,7 +16,7 @@ const mockRadonFetch = vi.fn().mockResolvedValue({ ok: true });
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
 const mockExecute = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 function makePortfolio(lastSync = "2026-05-07T12:00:00Z") {
   return {

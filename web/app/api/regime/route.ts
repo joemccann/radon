@@ -6,7 +6,7 @@ import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCa
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -214,22 +214,17 @@ async function readLatestCri(): Promise<{ data: object; path: string } | null> {
 
   async function readLatestDbCri(): Promise<CriCacheCandidate | null> {
     try {
-      const db = getDb();
-      // Bound the libsql read: the @libsql/client query can stall for MINUTES
+      // Bound the libsql read: a stale cached HTTP client can stall for MINUTES
       // even when the Turso endpoint is reachable (raw HTTPS 200 in ~190ms while
-      // a `SELECT 1` hangs past 40s). The route awaits this FIRST, and a hang is
-      // not a rejection, so without a timeout the disk fallback (data/cri.json)
-      // is never reached and /regime/cri spins on the loader forever. Race a
-      // timeout that rejects → the catch returns null → disk fallback runs.
-      const result = await Promise.race([
-        db.execute({
-          sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
-          args: [],
-        }),
-        new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error("cri_snapshots read timed out")), DB_READ_TIMEOUT_MS),
-        ),
-      ]);
+      // a `SELECT 1` hangs past 40s — the stale-undici-pool wedge). The route
+      // awaits this FIRST, and a hang is not a rejection, so without a bound the
+      // disk fallback (data/cri.json) is never reached and /regime/cri spins
+      // forever. dbExecute caps the read AND drops the wedged client so the next
+      // request heals (replaces the old hand-rolled Promise.race band-aid).
+      const result = await dbExecute({
+        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
+        args: [],
+      }, { label: "regime-cri", timeoutMs: DB_READ_TIMEOUT_MS });
       if (result.rows.length === 0) return null;
       const row = result.rows[0] as unknown as { taken_at: string; payload: string };
       const mtimeMs = Date.parse(row.taken_at);

@@ -7,7 +7,7 @@ const mockReadFile = vi.fn();
 vi.mock("fs/promises", () => ({ readFile: mockReadFile }));
 
 const mockGetDb = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: mockGetDb }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
 function dbStub(rows: Array<Record<string, unknown>>) {
   return {
