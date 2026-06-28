@@ -5,6 +5,7 @@ import { isGexDataStale } from "@/lib/gexStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
+import { cachedRead } from "@/lib/dbCache";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -147,9 +148,16 @@ function triggerBackgroundScan(): void {
     .finally(() => { bgScanInFlight = false; });
 }
 
+// Coalesce the polled GET reads (DB round trip + disk) into one per window.
+// staleWhileError keeps GEX rendering through a brief Turso stall. The POST
+// path stays uncached so a user-triggered rescan always reads the freshest.
+const GEX_CACHE_TTL_MS = 5_000;
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const cached = await readCachedGex();
+  const cached = await cachedRead("gex:SPX", GEX_CACHE_TTL_MS, readCachedGex, {
+    staleWhileError: true,
+  });
   const data = normalizeGexPayload(cached ?? {});
   const currentMarketOpen = isMarketOpenNow();
 
