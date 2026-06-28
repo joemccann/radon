@@ -20,7 +20,7 @@ vi.mock("child_process", () => ({
   })),
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: () => ({
     execute: vi.fn().mockResolvedValue({ rows: [] }),
   }),

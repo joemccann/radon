@@ -54,7 +54,7 @@ vi.mock("@/lib/orders/readOrdersFromDb", () => ({
 }));
 
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 // Mock @tools/schemas/ib-orders and ib-sync (TypeBox schemas)
 vi.mock("@tools/schemas/ib-orders", () => ({ OrdersData: {} }));

@@ -11,7 +11,7 @@ const mockReadFile = vi.fn();
 const mockRadonFetch = vi.fn();
 
 vi.mock("fs/promises", () => ({ readFile: mockReadFile }));
-vi.mock("@/lib/db", () => ({ getDb: () => mockGetDb() }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mockGetDb() }));
 vi.mock("@/lib/radonApi", () => ({ radonFetch: mockRadonFetch }));
 
 function dbReturning(payload: Record<string, unknown> | null) {

@@ -58,7 +58,7 @@ vi.mock("@tools/data-reader", () => ({
 }));
 
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 const emptyOrdersSnapshot = {
   last_sync: "2026-03-14T15:00:00Z",

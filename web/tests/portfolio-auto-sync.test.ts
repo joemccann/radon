@@ -13,7 +13,7 @@ const mockReadDataFile = vi.fn();
 vi.mock("@tools/data-reader", () => ({ readDataFile: mockReadDataFile }));
 
 const mockExecute = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => ({ execute: mockExecute }) }));
 
 function makePortfolio(lastSync: string) {
   return {

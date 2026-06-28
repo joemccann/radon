@@ -22,6 +22,7 @@
 
 import { parseScanTime } from "./parseScanTime";
 import { withTimeout } from "./asyncTimeout";
+import { resetDb } from "./db";
 
 export type TimestampedRead<T> = {
   data: T;
@@ -121,6 +122,11 @@ async function readSource<T>(
       `${sourceName} read timed out after ${timeoutMs}ms`,
     )) ?? null;
   } catch (err) {
+    // A DB-source timeout is the stale-pool wedge: drop the cached client so
+    // the NEXT request rebuilds a fresh pool instead of waiting for the 12s
+    // stall ceiling. The disk read still serves this request. Never reset on a
+    // disk-source error — that has nothing to do with the libsql client.
+    if (sourceName === "DB") resetDb();
     const message = err instanceof Error ? err.message : String(err);
     warnWithLabel(label, `${sourceName} read failed: ${message}`);
     return null;

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
@@ -82,11 +82,10 @@ function isMarketOpenNow(): boolean {
 
 async function readCachedGammaRotationFromDb(): Promise<Record<string, unknown> | null> {
   try {
-    const db = getDb();
-    const result = await db.execute({
+    const result = await dbExecute({
       sql: `SELECT payload FROM gamma_rotation_snapshots ORDER BY scan_time DESC LIMIT 1`,
       args: [],
-    });
+    }, { label: "gamma-rotation" });
     if (result.rows.length === 0) return null;
     const row = result.rows[0] as unknown as { payload: string };
     return JSON.parse(row.payload) as Record<string, unknown>;

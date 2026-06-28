@@ -24,7 +24,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 let db: Client;
 const mockGetDb = vi.fn(() => db);
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: mockGetDb,
 }));
 

@@ -46,7 +46,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 const leakyExecute = vi.fn(async () => {
   throw new Error(SECRET_BLOB);
 });
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: vi.fn(() => ({ execute: leakyExecute })),
 }));
 

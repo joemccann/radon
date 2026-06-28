@@ -15,7 +15,7 @@ vi.mock("@clerk/nextjs/server", () => ({
 
 let db: Client;
 const mockGetDb = vi.fn(() => db);
-vi.mock("@/lib/db", () => ({ getDb: mockGetDb }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
 async function seedSchema(client: Client): Promise<void> {
   await client.execute(`CREATE TABLE workflow_graphs (

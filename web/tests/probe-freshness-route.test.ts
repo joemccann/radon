@@ -10,7 +10,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetDb = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: mockGetDb }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
 // Wednesday 2026-06-10 11:00 ET — RTH.
 const OPEN_NOW = Date.parse("2026-06-10T15:00:00Z");

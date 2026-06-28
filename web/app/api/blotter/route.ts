@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 import {
   journalRowsToBlotter,
   type BlotterPayload,
@@ -14,11 +14,12 @@ export const runtime = "nodejs";
 
 async function readJournalRows(): Promise<JournalRow[] | null> {
   try {
-    const db = getDb();
-    const result = await db.execute({
+    // 5000-row scan can legitimately run past the default 3s; give it more
+    // headroom but still bound it so a stalled pool can't hang the blotter.
+    const result = await dbExecute({
       sql: `SELECT payload, filled_at FROM journal ORDER BY filled_at DESC LIMIT 5000`,
       args: [],
-    });
+    }, { label: "blotter", timeoutMs: 6_000 });
     if (result.rows.length === 0) return null;
     return result.rows.map((r) => {
       const row = r as unknown as { payload: string; filled_at: string | null };

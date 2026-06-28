@@ -5,6 +5,11 @@ import type { PortfolioData } from "./types";
 
 const BASE_INTERVAL_MS = 30_000;
 const MAX_INTERVAL_MS = 300_000; // 5 min cap on backoff
+// Client-side fetch ceilings so a slow/stalled server never spins the spinner
+// forever. GET is server-capped (3s Turso + 3s retry); POST drives a live IB
+// sync (server radonFetch timeout 35s) so the client allows headroom.
+const GET_FETCH_TIMEOUT_MS = 12_000;
+const POST_FETCH_TIMEOUT_MS = 42_000;
 
 type UsePortfolioReturn = {
   data: PortfolioData | null;
@@ -31,7 +36,10 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
 
   const fetchPortfolio = useCallback(async () => {
     try {
-      const res = await fetch("/api/portfolio", { cache: "no-store" });
+      const res = await fetch("/api/portfolio", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
+      });
       if (!res.ok) throw new Error("Failed to fetch portfolio");
       const json = (await res.json()) as PortfolioData;
       setData(json);
@@ -58,7 +66,11 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
     syncingRef.current = true;
     setSyncing(true);
     try {
-      const res = await fetch("/api/portfolio", { method: "POST", cache: "no-store" });
+      const res = await fetch("/api/portfolio", {
+        method: "POST",
+        cache: "no-store",
+        signal: AbortSignal.timeout(POST_FETCH_TIMEOUT_MS),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");
@@ -83,9 +95,12 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
 
   const syncNow = useCallback(() => {
     backoffRef.current = BASE_INTERVAL_MS;
-    syncLoopArmedRef.current = true;
+    // Only arm the auto-sync loop when the market is active. Arming it from a
+    // manual "Sync Now" while inactive (e.g. a weekend) would make the
+    // becomes-active effect short-circuit on Monday and never start polling.
+    if (active) syncLoopArmedRef.current = true;
     void doSync();
-  }, [doSync]);
+  }, [doSync, active]);
 
   // Always read the cached portfolio once on mount. `active=false` only disables
   // polling and background sync so closed-market routes can still render.
@@ -136,19 +151,23 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
   // pushed backoff to 5 min.
   useEffect(() => {
     const onVisible = () => {
-      if (document.visibilityState === "visible" && active) {
+      if (document.visibilityState !== "visible") return;
+      if (active) {
         backoffRef.current = BASE_INTERVAL_MS;
         if (!syncingRef.current) {
           syncLoopArmedRef.current = true;
           scheduleNext(500);
         }
+      } else {
+        // Market closed: the poll loop never runs, so a failed initial GET
+        // would otherwise latch the banner until a full reload. Refocusing the
+        // tab re-reads the cached snapshot and clears a transient failure.
+        void fetchPortfolio();
       }
     };
-    if (active) {
-      document.addEventListener("visibilitychange", onVisible);
-      return () => document.removeEventListener("visibilitychange", onVisible);
-    }
-  }, [scheduleNext, active]);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [scheduleNext, active, fetchPortfolio]);
 
   return { data, loading, syncing, error, lastSync, syncNow };
 }
