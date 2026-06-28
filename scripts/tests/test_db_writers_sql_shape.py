@@ -457,3 +457,23 @@ class TestPortfolioSnapshotRetention:
             "SELECT taken_at FROM portfolio_snapshots ORDER BY taken_at"
         ).fetchall()
         assert remaining == [("2026-06-15T00:00:00Z",)]
+
+    def test_delete_before_loops_across_batches(self, writer, db_with_schema):
+        for i in range(1, 6):
+            db_with_schema.execute(
+                "INSERT INTO portfolio_snapshots (taken_at, payload) VALUES (?, ?)",
+                (f"2026-05-0{i}T00:00:00Z", "{}"),
+            )
+        db_with_schema.execute(
+            "INSERT INTO portfolio_snapshots (taken_at, payload) VALUES (?, ?)",
+            ("2026-07-01T00:00:00Z", "{}"),
+        )
+        db_with_schema.commit()
+
+        deleted = writer.delete_portfolio_snapshots_before("2026-06-01T00:00:00Z", batch_size=2)
+
+        assert deleted == 5  # 3 batches (2 + 2 + 1)
+        remaining = db_with_schema.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots"
+        ).fetchone()[0]
+        assert remaining == 1
