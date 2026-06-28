@@ -89,13 +89,22 @@ class FlexTokenCheck(BaseHandler):
         the sync subprocess SIGKILL'd during a Turso write-degradation window.
         Runs here in the daily 24/7 slot instead, mirroring the
         service_health_events sweep above.
+
+        Unlike the service_health_events sweep, a failure here is swallowed
+        (logged, returns None): this is secondary hygiene and must never fail
+        the flex-token handler or latch its service_health row. Next daily
+        cycle retries.
         """
         try:
             from db.writer import prune_portfolio_snapshots
         except Exception as exc:  # pragma: no cover — hosts without libsql
             logger.warning("portfolio_snapshots prune unavailable: %s", exc)
             return None
-        return prune_portfolio_snapshots()
+        try:
+            return prune_portfolio_snapshots()
+        except Exception as exc:
+            logger.warning("portfolio_snapshots prune failed: %s", exc)
+            return None
 
     def _execute_inner(self) -> Dict[str, Any]:
         if not CONFIG_PATH.exists():
