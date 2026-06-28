@@ -61,6 +61,7 @@ class FlexTokenCheck(BaseHandler):
         # DB errors here propagate so the BaseHandler contract retries next
         # cycle (and writes the structural error row) instead of latching.
         result["events_pruned"] = self._prune_service_health_events()
+        result["portfolio_snapshots_pruned"] = self._prune_portfolio_snapshots()
         return result
 
     @staticmethod
@@ -78,6 +79,23 @@ class FlexTokenCheck(BaseHandler):
             logger.warning("service_health_events prune unavailable: %s", exc)
             return None
         return prune_service_health_events()
+
+    @staticmethod
+    def _prune_portfolio_snapshots() -> int | None:
+        """Daily retention sweep of portfolio_snapshots (keep newest N).
+
+        Deliberately OFF the per-sync write path: the libsql client has no
+        timeout, so a big DELETE inline in save_portfolio could hang and get
+        the sync subprocess SIGKILL'd during a Turso write-degradation window.
+        Runs here in the daily 24/7 slot instead, mirroring the
+        service_health_events sweep above.
+        """
+        try:
+            from db.writer import prune_portfolio_snapshots
+        except Exception as exc:  # pragma: no cover — hosts without libsql
+            logger.warning("portfolio_snapshots prune unavailable: %s", exc)
+            return None
+        return prune_portfolio_snapshots()
 
     def _execute_inner(self) -> Dict[str, Any]:
         if not CONFIG_PATH.exists():

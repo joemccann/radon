@@ -400,9 +400,18 @@ class TestPortfolioSnapshotRetention:
         assert len(rows) == 1
         assert json.loads(rows[0][1])["bankroll"] == 100
 
-    def test_upsert_prunes_to_retention_cap(self, writer, db_with_schema):
-        # Seed more rows than the retention cap with sortable ISO timestamps,
-        # then one more upsert should leave exactly `retention` newest rows.
+    def test_upsert_does_not_prune_inline(self, writer, db_with_schema):
+        # The prune is a daily off-path sweep, NOT inline in the write path
+        # (the libsql client has no timeout; a big inline DELETE could hang the
+        # sync subprocess during a Turso degradation window).
+        for i in range(10):
+            writer.upsert_portfolio_snapshot(f"2026-06-28T{i:06d}Z", {"i": i})
+        count = db_with_schema.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots"
+        ).fetchone()[0]
+        assert count == 10
+
+    def test_prune_keeps_newest_retention_rows(self, writer, db_with_schema):
         cap = writer.PORTFOLIO_SNAPSHOT_RETENTION
         for i in range(cap + 25):
             db_with_schema.execute(
@@ -411,17 +420,17 @@ class TestPortfolioSnapshotRetention:
             )
         db_with_schema.commit()
 
-        writer.upsert_portfolio_snapshot("2026-06-28T999999Z", {"bankroll": 1})
+        deleted = writer.prune_portfolio_snapshots()
 
+        assert deleted == 25
         count = db_with_schema.execute(
             "SELECT COUNT(*) FROM portfolio_snapshots"
         ).fetchone()[0]
         assert count == cap
-        # The newest row (the one just written) must survive.
         newest = db_with_schema.execute(
             "SELECT taken_at FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1"
         ).fetchone()[0]
-        assert newest == "2026-06-28T999999Z"
+        assert newest == f"2026-06-28T{cap + 24:06d}Z"
 
     def test_prune_is_noop_below_cap(self, writer, db_with_schema):
         writer.upsert_portfolio_snapshot("2026-06-28T000001Z", {"x": 1})

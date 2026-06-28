@@ -121,9 +121,11 @@ PORTFOLIO_SNAPSHOT_RETENTION = 2000
 def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> int:
     """Delete all but the newest ``retention`` portfolio_snapshots rows.
 
-    Returns rows deleted (0 when the driver doesn't report a rowcount). Best
-    effort: callers should swallow errors so a prune hiccup never fails the
-    snapshot write that just succeeded.
+    Returns rows deleted (0 when the driver doesn't report a rowcount). Call
+    from the daily monitor-daemon slot (flex_token_check) — NOT inline in the
+    per-sync write path: the libsql client has no timeout, so a large DELETE
+    during a Turso write-degradation window could hang save_portfolio and get
+    the sync subprocess SIGKILL'd.
     """
     db = get_db()
     cursor = db.execute(
@@ -153,10 +155,6 @@ def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
         (taken_at, json.dumps(payload)),
     )
     db.commit()
-    try:
-        prune_portfolio_snapshots()
-    except Exception as exc:  # noqa: BLE001 — hygiene must never fail the write
-        print(f"  Warning: portfolio_snapshots prune failed: {exc}")
 
 
 def upsert_cash_flow(
