@@ -47,3 +47,9 @@ libsql-experimental>=0.0.55
 # launchd/systemd timers — without it `python -m fetch_menthorq_cta`
 # fails with `No module named httpx` on a fresh provision.
 httpx>=0.28.0
+
+# boto3 is the S3-compatible client for the portfolio_snapshots cold archive
+# (scripts/archive_portfolio_snapshots.py) uploading monthly partitions to
+# off-box object storage (Cloudflare R2 / Backblaze B2). Lazy-imported, so it
+# is only needed on the host that runs the archive timer.
+boto3>=1.34.0
