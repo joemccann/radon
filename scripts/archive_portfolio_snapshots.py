@@ -373,15 +373,25 @@ def main(argv: list[str] | None = None) -> int:
     db = get_db()
 
     if args.dry_run:
-        rows = list(fetch_archivable_rows(db, cutoff, args.batch_size))
-        grouped = group_by_month(rows)
+        # Cheap indexed aggregate — never materialize the (fat) payloads.
+        counts = _fetch_rows(
+            db.execute(
+                """
+                SELECT substr(taken_at, 1, 7) AS m, COUNT(*)
+                FROM portfolio_snapshots WHERE taken_at < ?
+                GROUP BY m ORDER BY m
+                """,
+                (cutoff,),
+            )
+        )
+        months = {m: c for m, c in counts}
         print(
             json.dumps(
                 {
                     "dry_run": True,
                     "cutoff": cutoff,
-                    "archivable": len(rows),
-                    "months": {m: len(v) for m, v in sorted(grouped.items())},
+                    "archivable": sum(months.values()),
+                    "months": months,
                     "s3_configured": s3_config_from_env() is not None,
                 },
                 indent=2,
