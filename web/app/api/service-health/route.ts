@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb, resetDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
 import {
   getRequestId,
   jsonApiError,
@@ -20,6 +21,29 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const DB_READ_TIMEOUT_MS = 3_000;
+// Server-side coalescing cache. The banner polls this every ~60s from every
+// open tab; a short TTL collapses those into one Turso round trip per window
+// while the per-request staleness gate still runs with a fresh clock below.
+// No staleWhileError: a true outage past the TTL must surface the degraded row.
+const SERVICE_HEALTH_CACHE_TTL_MS = 3_000;
+
+async function readServiceHealthRows() {
+  const db = getDb();
+  const result = await withTimeout(
+    db.execute({
+      sql: `
+        SELECT service, state, last_attempt_started_at, last_attempt_finished_at,
+               last_error, updated_at
+          FROM service_health
+         ORDER BY updated_at DESC
+      `,
+      args: [],
+    }),
+    DB_READ_TIMEOUT_MS,
+    `service_health read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+  );
+  return result.rows;
+}
 
 export type ServiceHealthRow = {
   service: string;
@@ -87,24 +111,15 @@ function applyStalenessGate(row: ServiceHealthRow, nowMs: number): ServiceHealth
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
-    const db = getDb();
-    const result = await withTimeout(
-      db.execute({
-        sql: `
-        SELECT service, state, last_attempt_started_at, last_attempt_finished_at,
-               last_error, updated_at
-          FROM service_health
-         ORDER BY updated_at DESC
-      `,
-        args: [],
-      }),
-      DB_READ_TIMEOUT_MS,
-      `service_health read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    const cachedRows = await cachedRead(
+      "service_health:rows",
+      SERVICE_HEALTH_CACHE_TTL_MS,
+      readServiceHealthRows,
     );
 
     const nowMs = Date.now();
     const rows: ServiceHealthRow[] = [];
-    for (const row of result.rows) {
+    for (const row of cachedRows) {
       const r = row as unknown as Record<string, unknown>;
       const lastErrorRaw = (r.last_error ?? null) as string | null;
       const service = String(r.service ?? "");
