@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
+import { getDb, resetDb } from "@/lib/db";
 import {
   getRequestId,
   jsonApiError,
@@ -147,7 +147,10 @@ export async function GET(): Promise<Response> {
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {
     // DB unreachable — return a synthetic degraded provider row instead of
-    // hanging or shipping an empty healthy-looking service list.
+    // hanging or shipping an empty healthy-looking service list. Drop the
+    // cached libsql client first: a read timeout here is the same wedged-socket
+    // failure that fires the "1 DEGRADED" banner, so let the next poll rebuild.
+    resetDb();
     const message = error instanceof Error ? error.message : "service_health read failed";
     console.warn(`[service-health] ${message}`);
     const updatedAt = new Date().toISOString();

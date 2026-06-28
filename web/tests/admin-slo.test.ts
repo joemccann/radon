@@ -15,7 +15,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockGetDb = vi.fn();
-vi.mock("@/lib/db", () => ({ getDb: mockGetDb }));
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: mockGetDb }));
 
 import {
   SLO_DEFINITIONS,

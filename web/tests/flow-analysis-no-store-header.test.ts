@@ -29,7 +29,7 @@ vi.mock("fs/promises", () => ({
   mkdir: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: () => ({
     execute: vi.fn().mockResolvedValue({ rows: [] }),
   }),

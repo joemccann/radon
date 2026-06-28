@@ -31,8 +31,9 @@ describe("getDb direct-cloud default", () => {
 
     db.getDb();
 
+    // Transport normalised to stateless HTTP — no wedge-able WebSocket singleton.
     expect(createClientMock).toHaveBeenCalledWith({
-      url: "libsql://example.turso.io",
+      url: "https://example.turso.io",
       authToken: "token",
     });
   });
@@ -45,7 +46,7 @@ describe("getDb direct-cloud default", () => {
     db.getDb();
 
     expect(createClientMock).toHaveBeenCalledWith(expect.objectContaining({
-      syncUrl: "libsql://example.turso.io",
+      syncUrl: "https://example.turso.io",
       authToken: "token",
     }));
   });
@@ -58,8 +59,62 @@ describe("getDb direct-cloud default", () => {
     db.getDb();
 
     expect(createClientMock).toHaveBeenCalledWith({
-      url: "libsql://example.turso.io",
+      url: "https://example.turso.io",
       authToken: "token",
     });
+  });
+
+  it("normalises wss:// and leaves https:// / http:// untouched", async () => {
+    const db = await import("../lib/db");
+    expect(db.toHttpTransportUrl("libsql://x.turso.io")).toBe("https://x.turso.io");
+    expect(db.toHttpTransportUrl("wss://x.turso.io")).toBe("https://x.turso.io");
+    expect(db.toHttpTransportUrl("ws://x.turso.io")).toBe("http://x.turso.io");
+    expect(db.toHttpTransportUrl("https://x.turso.io")).toBe("https://x.turso.io");
+    expect(db.toHttpTransportUrl("http://localhost:8080")).toBe("http://localhost:8080");
+  });
+});
+
+describe("getDb self-heal", () => {
+  it("drops the cached client when an execute rejects, so the next call rebuilds", async () => {
+    vi.resetModules();
+    createClientMock.mockClear();
+    delete process.env.RADON_DB_USE_REPLICA;
+    delete process.env.RADON_DB_NO_REPLICA;
+    process.env.TURSO_DB_URL = "libsql://example.turso.io";
+    process.env.TURSO_AUTH_TOKEN = "token";
+
+    createClientMock.mockImplementation(() => ({
+      execute: vi.fn().mockRejectedValue(new Error("connection wedged")),
+      batch: vi.fn(),
+    }));
+
+    const db = await import("../lib/db");
+    const first = db.getDb();
+    db.getDb(); // cached — no new client yet
+    expect(createClientMock).toHaveBeenCalledTimes(1);
+
+    await expect(first.execute("SELECT 1")).rejects.toThrow("connection wedged");
+    // allow the rejection handler to run
+    await Promise.resolve();
+    await Promise.resolve();
+
+    db.getDb(); // cache was invalidated → rebuild
+    expect(createClientMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("resetDb() forces a rebuild on the next getDb()", async () => {
+    vi.resetModules();
+    createClientMock.mockClear();
+    createClientMock.mockImplementation((config: unknown) => ({ config, execute: vi.fn() }));
+    process.env.TURSO_DB_URL = "libsql://example.turso.io";
+    process.env.TURSO_AUTH_TOKEN = "token";
+
+    const db = await import("../lib/db");
+    db.getDb();
+    db.getDb();
+    expect(createClientMock).toHaveBeenCalledTimes(1);
+    db.resetDb();
+    db.getDb();
+    expect(createClientMock).toHaveBeenCalledTimes(2);
   });
 });

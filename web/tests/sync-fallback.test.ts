@@ -20,7 +20,7 @@ vi.mock("@/lib/orders/readOrdersFromDb", () => ({
 }));
 
 const mockExecute = vi.fn().mockResolvedValue({ rows: [] });
-vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }) }));
+vi.mock("@/lib/db", () => ({ getDb: () => ({ execute: mockExecute }), resetDb: () => {} }));
 
 function mockPortfolioDb(portfolio: Record<string, unknown> | null) {
   mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {

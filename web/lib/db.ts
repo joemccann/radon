@@ -7,11 +7,100 @@
 //
 // One singleton per process. The schema is compiled to a no-op when
 // TURSO_DB_URL is unset (tests can mock the module).
+//
+// ── Why reads wedge in bursts, and the self-heal (2026-06-28) ────────────
+// In the Node runtime `@libsql/client` (v0.17.x) resolves BOTH `libsql://` and
+// `https://` to an HTTP client (`preferHttp=true`); only `wss://` is a true
+// WebSocket. So the long-lived Next.js process holds a cached HTTP client whose
+// undici keep-alive POOL can go stale — half-open sockets after an idle/NAT/edge
+// drop. undici then reuses a dead socket and the request hangs until its own
+// ~300s body timeout. Nothing recreates the pool, so once it rots EVERY route
+// sharing the singleton times out at its 3000ms caller-side deadline AT ONCE,
+// until the process restarts. Production signature: portfolio/service-health/gex
+// reads all timing out in bursts while a FRESH connection on the same host read
+// in 64ms (the "SYNC FAILED / 1 DEGRADED" banner + stuck "SAMPLING" chart).
+//
+// The operative fix is `selfHealing()` + `resetDb()`: drop the cached client on
+// any stalled/failed call so the next caller builds a fresh pool. The URL is
+// also pinned to `https://` (`toHttpTransportUrl`) — belt-and-suspenders so the
+// transport stays stateless HTTP even in an Edge/web runtime or if a future
+// @libsql default flips `preferHttp`. Reads MUST go through `dbExecute()`
+// (`./dbExecute`) so a stalled pool is bounded at 3s and healed, never left to
+// undici's 300s ceiling. See `feedback_libsql_http_transport_no_wss_singleton`.
 
 import { createClient, type Client } from "@libsql/client";
 import path from "node:path";
 
 let cached: Client | null = null;
+
+// A stalled HTTP request still has to settle before its pooled socket frees up.
+// If a call has not resolved within this ceiling we proactively drop the cached
+// client so the NEXT caller rebuilds a fresh pool rather than queueing behind
+// the stalled one. Larger than every caller-side read timeout (hot reads use
+// 3000ms) so it only fires on a genuine stall.
+const STALL_CEILING_MS = 12_000;
+
+/** Rewrite a Turso URL onto the stateless HTTP transport.
+ *
+ * `libsql://`/`wss://` → `https://`, `ws://` → `http://`. `https://`,
+ * `http://`, and `file:` URLs pass through untouched. In Node `libsql://`
+ * already resolves to HTTP; this guarantees it regardless of runtime. */
+export function toHttpTransportUrl(url: string): string {
+  if (url.startsWith("libsql://")) return `https://${url.slice("libsql://".length)}`;
+  if (url.startsWith("wss://")) return `https://${url.slice("wss://".length)}`;
+  if (url.startsWith("ws://")) return `http://${url.slice("ws://".length)}`;
+  return url;
+}
+
+/** Drop the cached primary client so the next getDb() opens a fresh pool.
+ *
+ * Public so route catch-blocks can recover promptly from a read timeout
+ * instead of waiting for the in-flight request to hit undici's ceiling.
+ * Idempotent. */
+export function resetDb(): void {
+  cached = null;
+}
+
+/** Drop the cached demo client so the next getDemoDb() opens a fresh pool. */
+export function resetDemoDb(): void {
+  cachedDemo = null;
+}
+
+/** Wrap a client so any failed or stalled `execute`/`batch` invokes `onHeal`,
+ * which drops the cached singleton. Defence-in-depth: a client that lands in a
+ * bad state (DNS, rotated token, stale undici pool) self-heals on the next call
+ * instead of poisoning the process. `onHeal` is passed in (rather than closing
+ * over `cached`) so the same wrapper protects the primary AND the demo client,
+ * each resetting its own cache slot. */
+function selfHealing(client: Client, onHeal: () => void): Client {
+  const healOn = (settled: Promise<unknown>): void => {
+    const timer = setTimeout(onHeal, STALL_CEILING_MS);
+    timer.unref?.();
+    settled.then(
+      () => clearTimeout(timer),
+      () => {
+        clearTimeout(timer);
+        onHeal();
+      },
+    );
+  };
+
+  return new Proxy(client, {
+    get(target, prop, receiver) {
+      const value = Reflect.get(target, prop, receiver);
+      if (prop === "execute" || prop === "batch") {
+        return (...args: unknown[]) => {
+          const result = (value as (...a: unknown[]) => unknown).apply(target, args);
+          if (result && typeof (result as Promise<unknown>).then === "function") {
+            healOn(result as Promise<unknown>);
+          }
+          return result;
+        };
+      }
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+}
 
 function projectRoot(): string {
   // Resolve relative to the calling Next.js process. `process.cwd()` is
@@ -39,17 +128,18 @@ export function getDb(): Client {
     process.env.RADON_DB_NO_REPLICA !== "1"
   );
 
-  cached = createClient(
+  const raw = createClient(
     useReplica
       ? {
           url: `file:${path.join(projectRoot(), "replica.db")}`,
-          syncUrl: url,
+          syncUrl: toHttpTransportUrl(url),
           authToken,
           syncInterval: 60, // background pull every 60s; writes are pushed immediately
         }
-      : { url, authToken },
+      : { url: toHttpTransportUrl(url), authToken },
   );
 
+  cached = selfHealing(raw, () => { cached = null; });
   return cached;
 }
 
@@ -80,7 +170,10 @@ export function getDemoDb(): Client {
     );
   }
 
-  cachedDemo = createClient({ url, authToken });
+  cachedDemo = selfHealing(
+    createClient({ url: toHttpTransportUrl(url), authToken }),
+    () => { cachedDemo = null; },
+  );
   return cachedDemo;
 }
 

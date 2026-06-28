@@ -4,7 +4,7 @@ import { join } from "path";
 import { isGexDataStale } from "@/lib/gexStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
-import { getDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -72,11 +72,10 @@ function todayET(): string {
 
 async function readCachedGexFromDb(): Promise<Record<string, unknown> | null> {
   try {
-    const db = getDb();
-    const result = await db.execute({
+    const result = await dbExecute({
       sql: `SELECT payload FROM gex_snapshots WHERE ticker = 'SPX' ORDER BY scan_time DESC LIMIT 1`,
       args: [],
-    });
+    }, { label: "gex" });
     if (result.rows.length === 0) return null;
     const row = result.rows[0] as unknown as { payload: string };
     return JSON.parse(row.payload) as Record<string, unknown>;

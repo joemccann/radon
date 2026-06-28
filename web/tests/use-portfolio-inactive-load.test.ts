@@ -56,7 +56,11 @@ describe("usePortfolio inactive initial load", () => {
 
     expect(result.current.data?.bankroll).toBe(100_000);
     expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/portfolio", { cache: "no-store" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/portfolio",
+      expect.objectContaining({ cache: "no-store" }),
+    );
   });
 
   it("triggers the first sync when a previously inactive portfolio hook becomes active", async () => {
@@ -87,6 +91,10 @@ describe("usePortfolio inactive initial load", () => {
     rerender({ active: true });
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/portfolio", { method: "POST", cache: "no-store" });
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/portfolio",
+      expect.objectContaining({ method: "POST", cache: "no-store" }),
+    );
   });
 });

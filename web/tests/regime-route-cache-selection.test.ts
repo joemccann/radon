@@ -20,7 +20,7 @@ vi.mock("child_process", () => ({
   spawn: mockSpawn,
 }));
 
-vi.mock("@/lib/db", () => ({
+vi.mock("@/lib/db", () => ({ resetDb: () => {},
   getDb: () => mockGetDb(),
 }));
 

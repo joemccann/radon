@@ -387,3 +387,48 @@ class TestUpsertOiChanges:
         writer.upsert_oi_changes(_now(), payload)
         raw = db_with_schema.execute("SELECT payload FROM oi_changes").fetchone()[0]
         assert json.loads(raw) == payload
+
+
+# ── portfolio_snapshots retention ─────────────────────────────────────
+
+class TestPortfolioSnapshotRetention:
+    def test_upsert_inserts_a_row(self, writer, db_with_schema):
+        writer.upsert_portfolio_snapshot("2026-06-28T00:00:00Z", {"bankroll": 100})
+        rows = db_with_schema.execute(
+            "SELECT taken_at, payload FROM portfolio_snapshots"
+        ).fetchall()
+        assert len(rows) == 1
+        assert json.loads(rows[0][1])["bankroll"] == 100
+
+    def test_upsert_prunes_to_retention_cap(self, writer, db_with_schema):
+        # Seed more rows than the retention cap with sortable ISO timestamps,
+        # then one more upsert should leave exactly `retention` newest rows.
+        cap = writer.PORTFOLIO_SNAPSHOT_RETENTION
+        for i in range(cap + 25):
+            db_with_schema.execute(
+                "INSERT INTO portfolio_snapshots (taken_at, payload) VALUES (?, ?)",
+                (f"2026-06-28T{i:06d}Z", "{}"),
+            )
+        db_with_schema.commit()
+
+        writer.upsert_portfolio_snapshot("2026-06-28T999999Z", {"bankroll": 1})
+
+        count = db_with_schema.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots"
+        ).fetchone()[0]
+        assert count == cap
+        # The newest row (the one just written) must survive.
+        newest = db_with_schema.execute(
+            "SELECT taken_at FROM portfolio_snapshots ORDER BY taken_at DESC LIMIT 1"
+        ).fetchone()[0]
+        assert newest == "2026-06-28T999999Z"
+
+    def test_prune_is_noop_below_cap(self, writer, db_with_schema):
+        writer.upsert_portfolio_snapshot("2026-06-28T000001Z", {"x": 1})
+        writer.upsert_portfolio_snapshot("2026-06-28T000002Z", {"x": 2})
+        deleted = writer.prune_portfolio_snapshots()
+        assert deleted == 0
+        count = db_with_schema.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots"
+        ).fetchone()[0]
+        assert count == 2

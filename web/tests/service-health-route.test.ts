@@ -13,6 +13,7 @@ function mockGetDb(rows: MockRow[]): void {
     getDb: () => ({
       execute: vi.fn().mockResolvedValue({ rows }),
     }),
+    resetDb: () => {},
   }));
 }
 
@@ -21,6 +22,7 @@ function mockDbThrows(message: string): void {
     getDb: () => ({
       execute: vi.fn().mockRejectedValue(new Error(message)),
     }),
+    resetDb: () => {},
   }));
 }
 
