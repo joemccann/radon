@@ -145,23 +145,40 @@ def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> 
     return deleted if isinstance(deleted, int) and deleted >= 0 else 0
 
 
-def delete_portfolio_snapshots_before(cutoff: str) -> int:
-    """Delete portfolio_snapshots rows with ``taken_at < cutoff``.
+PORTFOLIO_DELETE_BATCH = 2000
+
+
+def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_DELETE_BATCH) -> int:
+    """Delete portfolio_snapshots rows with ``taken_at < cutoff``, in committed
+    batches.
 
     Time-based deletion owned by the archive pipeline
-    (scripts/archive_portfolio_snapshots.py), which exports + uploads rows
-    off-box BEFORE calling this. ``cutoff`` is an ISO-8601 string in the same
-    format as the ``taken_at`` PK, so the DELETE is an indexed range scan.
-    Returns rows deleted (0 when the driver doesn't report a rowcount).
+    (scripts/archive_portfolio_snapshots.py), which exports rows off-box BEFORE
+    calling this. ``cutoff`` is an ISO-8601 string in the same format as the
+    ``taken_at`` PK (indexed range). Batched + COUNT-driven because the libsql
+    client has no timeout: a single huge DELETE of fat rows can run long enough
+    for an unattended runner to kill it mid-transaction (which then rolls back
+    and never makes progress). Each batch is its own small transaction, so the
+    job is resumable. Returns total rows deleted.
     """
     db = get_db()
-    cursor = db.execute(
-        "DELETE FROM portfolio_snapshots WHERE taken_at < ?",
-        (cutoff,),
-    )
-    db.commit()
-    deleted = getattr(cursor, "rowcount", None)
-    return deleted if isinstance(deleted, int) and deleted >= 0 else 0
+    total = 0
+    while True:
+        remaining = db.execute(
+            "SELECT COUNT(*) FROM portfolio_snapshots WHERE taken_at < ?",
+            (cutoff,),
+        ).fetchone()[0]
+        if not remaining:
+            break
+        db.execute(
+            "DELETE FROM portfolio_snapshots WHERE taken_at IN ("
+            "SELECT taken_at FROM portfolio_snapshots WHERE taken_at < ? "
+            "ORDER BY taken_at LIMIT ?)",
+            (cutoff, batch_size),
+        )
+        db.commit()
+        total += min(batch_size, remaining)
+    return total
 
 
 def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
