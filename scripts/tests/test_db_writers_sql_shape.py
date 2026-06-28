@@ -441,3 +441,19 @@ class TestPortfolioSnapshotRetention:
             "SELECT COUNT(*) FROM portfolio_snapshots"
         ).fetchone()[0]
         assert count == 2
+
+    def test_delete_before_removes_only_older_rows(self, writer, db_with_schema):
+        for ta in ("2026-05-01T00:00:00Z", "2026-05-31T00:00:00Z", "2026-06-15T00:00:00Z"):
+            db_with_schema.execute(
+                "INSERT INTO portfolio_snapshots (taken_at, payload) VALUES (?, ?)",
+                (ta, "{}"),
+            )
+        db_with_schema.commit()
+
+        deleted = writer.delete_portfolio_snapshots_before("2026-06-01T00:00:00Z")
+
+        assert deleted == 2
+        remaining = db_with_schema.execute(
+            "SELECT taken_at FROM portfolio_snapshots ORDER BY taken_at"
+        ).fetchall()
+        assert remaining == [("2026-06-15T00:00:00Z",)]
