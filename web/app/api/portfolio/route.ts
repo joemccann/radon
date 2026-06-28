@@ -7,6 +7,7 @@ import {
 } from "@/lib/apiContracts";
 import { resetDb } from "@/lib/db";
 import { dbExecute } from "@/lib/dbExecute";
+import { cachedRead } from "@/lib/dbCache";
 
 // Disable Next.js static caching: this handler reads live Turso state.
 // Without this, the framework freezes the first response and serves stale
@@ -19,6 +20,13 @@ const CACHE_TTL_MS = 60_000; // 1 minute
 const DB_READ_TIMEOUT_MS = 3_000;
 const LIVE_SYNC_TIMEOUT_MS = 35_000;
 const LIVE_FALLBACK_CACHE_TTL_MS = 30_000;
+// Server-side coalescing of the polled GET reads. The snapshot is the hot one;
+// staleWhileError serves the last good portfolio through a brief Turso stall
+// (longer outages exceed maxStale and fall through to the live-IB fallback).
+// Trade-log dates are day-granularity, so a longer TTL is invisible.
+const SNAPSHOT_CACHE_TTL_MS = 3_000;
+const SNAPSHOT_MAX_STALE_MS = 60_000;
+const TRADE_LOG_DATES_CACHE_TTL_MS = 10_000;
 
 type PortfolioSnapshot = {
   data: Record<string, unknown>;
@@ -167,7 +175,11 @@ async function portfolioResponseFromSnapshot(
   requestId: string,
   warning?: string,
 ): Promise<Response> {
-  const tradeLogDates = await loadTradeLogDates();
+  const tradeLogDates = await cachedRead(
+    "portfolio:tradeLogDates",
+    TRADE_LOG_DATES_CACHE_TTL_MS,
+    loadTradeLogDates,
+  );
   const response = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
   if (warning) {
     response.headers.set("X-Sync-Warning", warning);
@@ -201,7 +213,12 @@ async function serveLiveFallback(
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
-    const snapshot = await readPortfolioFromDb();
+    const snapshot = await cachedRead(
+      "portfolio:snapshot",
+      SNAPSHOT_CACHE_TTL_MS,
+      readPortfolioFromDb,
+      { staleWhileError: true, maxStaleMs: SNAPSHOT_MAX_STALE_MS },
+    );
     if (!snapshot) {
       return serveLiveFallback(requestId, "Turso portfolio snapshot unavailable");
     }
