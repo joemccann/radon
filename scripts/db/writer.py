@@ -145,6 +145,25 @@ def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> 
     return deleted if isinstance(deleted, int) and deleted >= 0 else 0
 
 
+def delete_portfolio_snapshots_before(cutoff: str) -> int:
+    """Delete portfolio_snapshots rows with ``taken_at < cutoff``.
+
+    Time-based deletion owned by the archive pipeline
+    (scripts/archive_portfolio_snapshots.py), which exports + uploads rows
+    off-box BEFORE calling this. ``cutoff`` is an ISO-8601 string in the same
+    format as the ``taken_at`` PK, so the DELETE is an indexed range scan.
+    Returns rows deleted (0 when the driver doesn't report a rowcount).
+    """
+    db = get_db()
+    cursor = db.execute(
+        "DELETE FROM portfolio_snapshots WHERE taken_at < ?",
+        (cutoff,),
+    )
+    db.commit()
+    deleted = getattr(cursor, "rowcount", None)
+    return deleted if isinstance(deleted, int) and deleted >= 0 else 0
+
+
 def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
     db = get_db()
     db.execute(
