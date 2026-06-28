@@ -61,7 +61,10 @@ class FlexTokenCheck(BaseHandler):
         # DB errors here propagate so the BaseHandler contract retries next
         # cycle (and writes the structural error row) instead of latching.
         result["events_pruned"] = self._prune_service_health_events()
-        result["portfolio_snapshots_pruned"] = self._prune_portfolio_snapshots()
+        # portfolio_snapshots are NOT pruned here: deletion is owned by the
+        # archive pipeline (scripts/archive_portfolio_snapshots.py), which
+        # exports + uploads rows off-box BEFORE removing them. An unconditional
+        # row-count prune here would destroy history that has not been archived.
         return result
 
     @staticmethod
@@ -79,32 +82,6 @@ class FlexTokenCheck(BaseHandler):
             logger.warning("service_health_events prune unavailable: %s", exc)
             return None
         return prune_service_health_events()
-
-    @staticmethod
-    def _prune_portfolio_snapshots() -> int | None:
-        """Daily retention sweep of portfolio_snapshots (keep newest N).
-
-        Deliberately OFF the per-sync write path: the libsql client has no
-        timeout, so a big DELETE inline in save_portfolio could hang and get
-        the sync subprocess SIGKILL'd during a Turso write-degradation window.
-        Runs here in the daily 24/7 slot instead, mirroring the
-        service_health_events sweep above.
-
-        Unlike the service_health_events sweep, a failure here is swallowed
-        (logged, returns None): this is secondary hygiene and must never fail
-        the flex-token handler or latch its service_health row. Next daily
-        cycle retries.
-        """
-        try:
-            from db.writer import prune_portfolio_snapshots
-        except Exception as exc:  # pragma: no cover — hosts without libsql
-            logger.warning("portfolio_snapshots prune unavailable: %s", exc)
-            return None
-        try:
-            return prune_portfolio_snapshots()
-        except Exception as exc:
-            logger.warning("portfolio_snapshots prune failed: %s", exc)
-            return None
 
     def _execute_inner(self) -> Dict[str, Any]:
         if not CONFIG_PATH.exists():

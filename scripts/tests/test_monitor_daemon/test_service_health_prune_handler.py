@@ -68,37 +68,20 @@ class TestPruneWiring:
 
     def test_missing_prune_symbol_skips_gracefully(self, handler, writer, monkeypatch):
         monkeypatch.delattr(writer, "prune_service_health_events", raising=False)
-        monkeypatch.setattr(
-            writer, "prune_portfolio_snapshots", MagicMock(return_value=0), raising=False,
-        )
         result = handler.execute()
         assert result["events_pruned"] is None
 
-    def test_portfolio_snapshots_prune_reports_count(self, handler, writer, monkeypatch):
+    def test_portfolio_snapshots_are_not_pruned_here(self, handler, writer, monkeypatch):
+        # Deletion is owned by the archive pipeline (it exports off-box first).
+        # The daily flex-token slot must NOT delete portfolio_snapshots.
         monkeypatch.setattr(
             writer, "prune_service_health_events", MagicMock(return_value=0), raising=False,
         )
-        monkeypatch.setattr(
-            writer, "prune_portfolio_snapshots", MagicMock(return_value=7), raising=False,
-        )
+        boom = MagicMock(side_effect=AssertionError("prune_portfolio_snapshots must not be called"))
+        monkeypatch.setattr(writer, "prune_portfolio_snapshots", boom, raising=False)
         result = handler.execute()
-        assert result["portfolio_snapshots_pruned"] == 7
-
-    def test_portfolio_snapshots_prune_failure_is_swallowed(self, handler, writer, monkeypatch):
-        # Secondary hygiene: a portfolio prune error must NOT fail the handler
-        # (unlike the service_health_events prune which propagates for retry).
-        monkeypatch.setattr(
-            writer, "prune_service_health_events", MagicMock(return_value=0), raising=False,
-        )
-        monkeypatch.setattr(
-            writer,
-            "prune_portfolio_snapshots",
-            MagicMock(side_effect=RuntimeError("no such table: portfolio_snapshots")),
-            raising=False,
-        )
-        result = handler.execute()
-        assert result["portfolio_snapshots_pruned"] is None
-        assert result["events_pruned"] == 0
+        boom.assert_not_called()
+        assert "portfolio_snapshots_pruned" not in result
 
     def test_handler_remains_daily_and_off_hours(self, handler):
         assert handler.interval_seconds == 86400
