@@ -15,8 +15,27 @@ import {
 } from "@/lib/placeOrderBodySchema";
 import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 import { resolveDemoOrderDecision } from "@/lib/demo/orderBlockade";
+import {
+  runIdempotentOrder,
+  contentKey,
+  CONTENT_HASH_TTL_MS,
+  CLIENT_KEY_TTL_MS,
+} from "@/lib/orders/orderIdempotency";
 
 export const runtime = "nodejs";
+
+/** Raised inside the idempotent placement when IB silently rejects the order, so
+ *  the key is cleared (rejection is retryable) and the outer handler renders the
+ *  502 envelope. */
+class OrderRejectedError extends Error {
+  constructor(
+    readonly result: Record<string, unknown>,
+    readonly initialStatus: string,
+  ) {
+    super(`Order rejected by IB: ${initialStatus}`);
+    this.name = "OrderRejectedError";
+  }
+}
 
 type ComboLeg = {
   expiry: string;
@@ -44,6 +63,8 @@ type PlaceBody = {
   /** Futures: caller passes IB conId (preferred — from /futures/chain) or expiry+exchange. */
   conId?: number;
   exchange?: string;
+  /** Optional client idempotency key (see placeOrderBodySchema). */
+  idempotencyKey?: string;
 };
 
 async function readOrdersSnapshotBestEffort() {
@@ -261,36 +282,58 @@ export async function POST(request: Request): Promise<Response> {
         : {}),
     };
 
-    const orderResult = await radonFetch<Record<string, unknown>>("/orders/place", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(orderPayload),
-      // 30s = 25s FastAPI script budget + 5s network/transport slack.
-      // ib_place_order.py polls IB up to 12s for combo confirmation
-      // before returning either ok-with-permId or the explicit
-      // "stuck-in-PendingSubmit" error. Setting this below the
-      // script timeout would abort before the error could surface.
-      timeout: 30_000,
-    });
+    // Idempotency: an explicit client key (precise, long TTL) or a content hash
+    // of the order payload (short TTL) dedups double-clicks / client retries so
+    // the same real-money order is never placed twice. See orderIdempotency.ts.
+    const clientKey =
+      typeof body.idempotencyKey === "string" && body.idempotencyKey.trim()
+        ? body.idempotencyKey.trim().slice(0, 200)
+        : null;
+    const idemKey = clientKey ? `k:${clientKey}` : contentKey(orderPayload);
+    const idemTtl = clientKey ? CLIENT_KEY_TTL_MS : CONTENT_HASH_TTL_MS;
 
-    // IB silent rejection: order was submitted but immediately cancelled/inactive.
-    const REJECTED_STATUSES = new Set(["Cancelled", "ApiCancelled", "Inactive", "Unknown"]);
-    const initialStatus = orderResult.initialStatus as string | undefined;
-    if (initialStatus && REJECTED_STATUSES.has(initialStatus)) {
-      const reason = initialStatus === "Unknown"
-        ? `no acknowledgement (${initialStatus}) — order may not have reached IB`
-        : initialStatus;
-      return setNoStoreResponseHeaders(
-        jsonApiError({
-          message: `Order rejected by IB: ${reason}`,
-          status: 502,
-          code: "UPSTREAM_ERROR",
-          detail: JSON.stringify(orderResult),
+    let placement;
+    try {
+      placement = await runIdempotentOrder(idemKey, idemTtl, async () => {
+        const result = await radonFetch<Record<string, unknown>>("/orders/place", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(orderPayload),
+          // 30s = 25s FastAPI script budget + 5s network/transport slack.
+          // ib_place_order.py polls IB up to 12s for combo confirmation before
+          // returning either ok-with-permId or the explicit
+          // "stuck-in-PendingSubmit" error. Below the script timeout would abort
+          // before the error could surface.
+          timeout: 30_000,
+        });
+        // IB silent rejection: submitted but immediately cancelled/inactive.
+        const REJECTED_STATUSES = new Set(["Cancelled", "ApiCancelled", "Inactive", "Unknown"]);
+        const status = result.initialStatus as string | undefined;
+        if (status && REJECTED_STATUSES.has(status)) {
+          throw new OrderRejectedError(result, status);
+        }
+        return result;
+      });
+    } catch (placeErr) {
+      if (placeErr instanceof OrderRejectedError) {
+        const reason =
+          placeErr.initialStatus === "Unknown"
+            ? `no acknowledgement (${placeErr.initialStatus}) — order may not have reached IB`
+            : placeErr.initialStatus;
+        return setNoStoreResponseHeaders(
+          jsonApiError({
+            message: `Order rejected by IB: ${reason}`,
+            status: 502,
+            code: "UPSTREAM_ERROR",
+            detail: JSON.stringify(placeErr.result),
+            requestId,
+          }),
           requestId,
-        }),
-        requestId,
-      );
+        );
+      }
+      throw placeErr; // RadonApiError / others → outer catch
     }
+    const orderResult = placement.value;
 
     // Refresh orders after placement
     try {
@@ -308,6 +351,9 @@ export async function POST(request: Request): Promise<Response> {
       message: orderResult.message,
       orders,
       requestId,
+      // Flag suppressed duplicates so the UI/operator can see a double-submit was
+      // collapsed rather than silently dropped.
+      ...(placement.deduplicated ? { deduplicated: true } : {}),
     });
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {

@@ -42,6 +42,11 @@ export const PlaceOrderBodySchema = Type.Object({
   /** Futures: caller can pass IB conId directly (preferred — from /futures/chain) OR expiry. */
   conId: Type.Optional(Type.Number()),
   exchange: Type.Optional(Type.String()),
+  /** Optional client-generated idempotency key: a retry/double-submit of one
+   *  user intent reuses the same key so the order is placed once. Distinct
+   *  intents send distinct keys and are never deduped. Absent → the route falls
+   *  back to a short-window content hash. */
+  idempotencyKey: Type.Optional(Type.String()),
 });
 
 export type PlaceOrderBodyValidated = Static<typeof PlaceOrderBodySchema>;
