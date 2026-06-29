@@ -292,6 +292,20 @@ def upsert_scanner_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
     db.commit()
 
 
+def upsert_theta_harvester_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
+    """Mirror the Theta Harvester scan into Turso so every host reads the same
+    latest scan (the file cache is host-local; there is no theta auto-timer)."""
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO theta_harvester_snapshots (scan_time, payload)
+        VALUES (?, ?)
+        """,
+        (scan_time, json.dumps(payload)),
+    )
+    db.commit()
+
+
 def upsert_flow_analysis_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
     """Phase 2.2 — flow_analysis.py output (intraday dark-pool interp)."""
     db = get_db()
