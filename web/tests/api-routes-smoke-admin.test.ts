@@ -27,9 +27,20 @@ vi.mock("@/lib/radonApi", () => ({
   },
 }));
 
+// The high-impact ops admin routes (stack/ib restart, service control) are
+// operator-gated fail-closed via requireDemoAdmin(). Default to authorized so
+// the proxy-contract tests below exercise the happy/sad paths; the dedicated
+// fail-closed block flips it to null.
+const mockRequireDemoAdmin = vi.fn();
+vi.mock("@/lib/demo/adminAuth", () => ({
+  requireDemoAdmin: mockRequireDemoAdmin,
+}));
+
 beforeEach(() => {
   vi.resetModules();
   mockRadonFetch.mockReset();
+  mockRequireDemoAdmin.mockReset();
+  mockRequireDemoAdmin.mockResolvedValue("operator-user-id");
 });
 
 afterEach(() => {
@@ -186,5 +197,50 @@ describe("POST /api/admin/stack/restart", () => {
     const { POST } = await import("../app/api/admin/stack/restart/route");
     const res = await POST(req("http://localhost/api/admin/stack/restart") as never);
     expect(res.status).toBe(502);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Fail-closed operator gate (2026-06-29 audit): when requireDemoAdmin() denies
+// (e.g. ALLOWED_USER_IDS unset, or caller not the operator), the high-impact
+// ops routes must 403 and NEVER reach the FastAPI proxy. Regression guard for
+// the middleware isAuthorizedUser fail-open default.
+// ---------------------------------------------------------------------------
+describe("admin ops routes fail closed when unauthorized", () => {
+  beforeEach(() => {
+    mockRequireDemoAdmin.mockResolvedValue(null); // deny
+  });
+
+  it("POST /api/admin/stack/restart → 403, no proxy call", async () => {
+    const { POST } = await import("../app/api/admin/stack/restart/route");
+    const res = await POST(req("http://localhost/api/admin/stack/restart") as never);
+    expect(res.status).toBe(403);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/admin/ib/restart → 403, no proxy call", async () => {
+    const { POST } = await import("../app/api/admin/ib/restart/route");
+    const res = await POST();
+    expect(res.status).toBe(403);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/admin/ib/reset-backoff → 403, no proxy call", async () => {
+    const { POST } = await import("../app/api/admin/ib/reset-backoff/route");
+    const res = await POST();
+    expect(res.status).toBe(403);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+
+  it("POST /api/admin/services/[unit]/[action] → 403 before unit validation", async () => {
+    const { POST } = await import(
+      "../app/api/admin/services/[unit]/[action]/route"
+    );
+    const res = await POST(
+      req("http://localhost/api/admin/services/radon-api.service/restart") as never,
+      { params: Promise.resolve({ unit: "radon-api.service", action: "restart" }) },
+    );
+    expect(res.status).toBe(403);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 });
