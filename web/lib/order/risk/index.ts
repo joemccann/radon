@@ -19,6 +19,10 @@ export type {
 } from "./useOrderRisk";
 export { OrderRiskGate } from "./OrderRiskGate";
 export type { OrderRiskGateProps } from "./OrderRiskGate";
+// Phase-2 IB what-if margin (async layer over the sync chokepoint).
+export { useWhatIfMargin } from "./useWhatIfMargin";
+export type { WhatIfMarginResult, WhatIfMarginStatus } from "./useWhatIfMargin";
+export { mergeWhatIfMargin } from "./mergeWhatIfMargin";
 // Paper-mode routing (F13): single source of truth for IB vs shadow engine.
 export { resolvePlacementTarget } from "./paperMode";
 export type { PlacementTarget } from "./paperMode";
