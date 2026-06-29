@@ -469,6 +469,8 @@ const executeSync = (args: string[], paths: Paths): Promise<ScriptResult> => {
 
 const executeLeapScan = (args: string[], paths: Paths): Promise<ScriptResult> => {
   const commandArgs = ["scripts/leap_scanner_uw.py"];
+  let hasPreset = false;
+  let hasTicker = false;
 
   for (let i = 0; i < args.length; i += 1) {
     const token = args[i];
@@ -477,6 +479,7 @@ const executeLeapScan = (args: string[], paths: Paths): Promise<ScriptResult> =>
         throw new Error(`Invalid ticker: ${token}`);
       }
       commandArgs.push(token);
+      hasTicker = true;
       continue;
     }
 
@@ -489,6 +492,7 @@ const executeLeapScan = (args: string[], paths: Paths): Promise<ScriptResult> =>
         throw new Error(`Invalid preset: ${preset}`);
       }
       commandArgs.push("--preset", preset);
+      hasPreset = true;
       i += 1;
       continue;
     }
@@ -507,6 +511,13 @@ const executeLeapScan = (args: string[], paths: Paths): Promise<ScriptResult> =>
       continue;
     }
     throw new Error(`Unknown flag for leap-scan: ${token}`);
+  }
+
+  // The scanner requires a ticker group; a bare `/leap-scan` (no preset, no
+  // ticker) would exit 1 with a usage error. Default to the mag7 megacap
+  // preset so the command always produces a scan.
+  if (!hasPreset && !hasTicker) {
+    commandArgs.push("--preset", "mag7");
   }
 
   return runPythonScript(commandArgs[0], commandArgs.slice(1), paths.cwd);

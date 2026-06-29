@@ -8,8 +8,11 @@ type MarkdownRendererProps = {
 
 export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
   const normalized = normalizeTextLines(content);
+  // Empty input renders nothing. The decision of what to show for an in-flight
+  // or empty assistant turn belongs to ChatPanel (typing indicator), not here —
+  // inventing "No output." copy was the source of the streaming flash.
   if (!normalized) {
-    return <span className="chat-empty">No output.</span>;
+    return null;
   }
 
   return (

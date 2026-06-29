@@ -65,6 +65,32 @@ test("routeToPiPrompt routes keyword matches", () => {
   expect(routeToPiPrompt("let me discover opportunities")).toBe("/discover");
 });
 
+test("routeToPiPrompt routes leap-scan requests to /leap-scan, never the flow /scan", () => {
+  // The exact bug report: 'leap scan' was being swallowed by the \\bscan\\b
+  // branch and run as a flow scan. It must reach the LEAP scanner instead.
+  expect(routeToPiPrompt("run a leap scan for mag7")).toBe("/leap-scan --preset mag7");
+  expect(routeToPiPrompt("leap scan semis")).toBe("/leap-scan --preset semis");
+  expect(routeToPiPrompt("run a leap scan for mag7")).not.toBe("/scan");
+});
+
+test("routeToPiPrompt maps natural-language leap preset keywords", () => {
+  expect(routeToPiPrompt("leap scan on semiconductors")).toBe("/leap-scan --preset semis");
+  expect(routeToPiPrompt("leap scan the sectors")).toBe("/leap-scan --preset sectors");
+  expect(routeToPiPrompt("leap scan emerging markets")).toBe("/leap-scan --preset emerging");
+  expect(routeToPiPrompt("leap scan chinese names")).toBe("/leap-scan --preset china");
+});
+
+test("routeToPiPrompt defaults an unrecognized leap target (ndx 100) to a real preset, not /scan", () => {
+  const routed = routeToPiPrompt("run a leap scan against the ndx 100");
+  expect(routed).toBe("/leap-scan --preset mag7");
+  expect(routed).not.toBe("/scan");
+});
+
+test("routeToPiPrompt leaves an explicit /leap-scan slash command intact", () => {
+  expect(routeToPiPrompt("/leap-scan --preset china")).toBe("/leap-scan --preset china");
+  expect(routeToPiPrompt("leap-scan --preset semis")).toBe("/leap-scan --preset semis");
+});
+
 test("routeToPiPrompt returns null for unrecognized input", () => {
   expect(routeToPiPrompt("hello world")).toBe(null);
   expect(routeToPiPrompt("what is the weather")).toBe(null);

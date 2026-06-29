@@ -60,11 +60,42 @@ export function routeToPiPrompt(raw: string): string | null {
     return "/journal";
   }
 
+  // Leap-scan MUST be matched before the generic `\bscan\b` branch — otherwise
+  // "run a leap scan for mag7" is swallowed by the flow scanner. The LEAP
+  // scanner requires a ticker group, so an unrecognized target falls back to
+  // the mag7 megacap preset rather than erroring on a bare `/leap-scan`.
+  if (/\bleap\b/.test(lower)) {
+    return `/leap-scan --preset ${detectLeapPreset(lower)}`;
+  }
+
   if (/\bscan\b/.test(lower)) {
     return `/scan`;
   }
 
   return null;
+}
+
+/**
+ * Map natural-language phrasing to one of the LEAP scanner's whitelisted
+ * presets (sectors, mag7, semis, emerging, china — see `executeLeapScan` in
+ * `app/api/pi/route.ts`). Defaults to `mag7` (megacaps) when no group is named,
+ * so the command always runs against a real ticker set.
+ */
+const LEAP_PRESET_PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
+  [/\bsemi(?:conductor)?s?\b|\bchips?\b|\bsox\b/, "semis"],
+  [/\bsectors?\b/, "sectors"],
+  [/\bemerging\b|\bem\b/, "emerging"],
+  [/\bchina\b|\bchinese\b/, "china"],
+  [/\bmag\s?7\b|\bmagnificent\b/, "mag7"],
+];
+
+function detectLeapPreset(lower: string): string {
+  for (const [pattern, preset] of LEAP_PRESET_PATTERNS) {
+    if (pattern.test(lower)) {
+      return preset;
+    }
+  }
+  return "mag7";
 }
 
 export function fallbackReply(input: string) {
