@@ -599,6 +599,34 @@ class IBClient:
         except Exception as exc:
             raise IBOrderError(f"Failed to place order: {exc}") from exc
 
+    def what_if_order(self, contract: Any, order: Any, timeout: float = 8.0) -> Any:
+        """Read-only IB what-if margin preview — returns the ``OrderState`` from
+        IB's pre-trade risk engine WITHOUT routing the order (no transmit, no
+        permId).
+
+        Bounded with ``asyncio.wait_for`` because ib_insync has no per-request
+        timeout: ``whatIfOrderAsync`` blocks forever on a gateway that is logged
+        in but awaiting 2FA (see ``feedback_ib_insync_no_request_timeouts``).
+
+        Raises:
+            asyncio.TimeoutError: if IB does not answer within ``timeout``.
+            IBOrderError: on any other failure.
+        """
+        self._require_connection()
+        import asyncio
+
+        async def _run() -> Any:
+            return await asyncio.wait_for(
+                self._ib.whatIfOrderAsync(contract, order), timeout=timeout
+            )
+
+        try:
+            return self._ib.run(_run())
+        except asyncio.TimeoutError:
+            raise
+        except Exception as exc:
+            raise IBOrderError(f"Failed what-if margin preview: {exc}") from exc
+
     def place_bracket_order(
         self,
         contract: Any,

@@ -1856,6 +1856,49 @@ async def orders_place(request: Request):
     return result.data
 
 
+@app.post("/orders/whatif")
+async def orders_whatif(request: Request):
+    """Read-only IB margin preview (whatIfOrder, no transmit).
+
+    Hits IB's pre-trade risk engine for the real initMargin of an order —
+    including undefined-risk multi-leg combos where the client-side Reg-T
+    estimate is unavailable — WITHOUT routing it. Authenticated (NOT
+    auth-exempt): it clears middleware via is_trusted_local_request on the
+    server-to-server hop; a public caller through Caddy correctly 401s.
+    """
+    body = await request.json()
+    if test_mode:
+        return {
+            "status": "ok",
+            "whatIf": True,
+            "initMargin": 1234.56,
+            "maintMargin": 1234.56,
+            "equityWithLoanChange": -1234.56,
+            "commission": 1.50,
+            "commissionCurrency": "USD",
+            "warning": None,
+            "source": "ib",
+            "echo": body,
+        }
+
+    order_json = json.dumps(body)
+    # No confirm-poll: connect (~3s) + qualify (~2s) + whatIf (~2-4s). 12s ample.
+    result = await _run_ib_script_with_recovery(
+        "ib_place_order.py", ["--json", order_json, "--whatif"], timeout=12
+    )
+    if not result.ok:
+        logger.warning(
+            "orders/whatif infra error for %s %s: %s",
+            body.get("symbol", "?"),
+            body.get("action", "?"),
+            result.error,
+        )
+        raise HTTPException(status_code=502, detail=result.error)
+    if result.data and result.data.get("status") == "error":
+        raise HTTPException(status_code=502, detail=result.data)
+    return result.data
+
+
 @app.post("/orders/cancel")
 async def orders_cancel(request: Request):
     """Cancel an open order via subprocess.

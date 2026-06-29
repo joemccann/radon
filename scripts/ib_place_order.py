@@ -10,6 +10,7 @@ Usage:
   python3 scripts/ib_place_order.py --json '{"type":"option","symbol":"GOOG","action":"BUY","quantity":10,"limitPrice":9.00,"tif":"GTC","expiry":"20260417","strike":315,"right":"C"}'
 """
 
+import asyncio
 import json
 import sys
 import time
@@ -116,11 +117,59 @@ def _build_terminal_error(status: str, order_id: int, perm_id: int,
     }
 
 
-def place_order(params: dict, _clock=time.time) -> dict:
+# IB reports OrderState margins as strings; an unset / withheld field is '' or
+# the double-max sentinel. Either must become None so the UI shows "unavailable"
+# rather than 0 or a 1.79e308 garbage number.
+_MARGIN_SENTINEL = 1.7976931348623157e+308
+
+
+def _margin(value) -> "float | None":
+    """Coerce an IB OrderState margin field to a float, or None when unset."""
+    if value is None or value == "":
+        return None
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError):
+        return None
+    if abs(parsed) >= _MARGIN_SENTINEL:
+        return None
+    return parsed
+
+
+def _whatif_result(state) -> dict:
+    """Shape an IB ``OrderState`` into the what-if margin JSON contract.
+
+    Prefers IB's reported ``initMarginChange`` (the requirement delta); falls
+    back to ``initMarginAfter - initMarginBefore`` only when the change field
+    is withheld.
+    """
+    init_change = _margin(getattr(state, "initMarginChange", None))
+    if init_change is None:
+        before = _margin(getattr(state, "initMarginBefore", None))
+        after = _margin(getattr(state, "initMarginAfter", None))
+        if before is not None and after is not None:
+            init_change = after - before
+    return {
+        "status": "ok",
+        "whatIf": True,
+        "initMargin": init_change,
+        "maintMargin": _margin(getattr(state, "maintMarginChange", None)),
+        "equityWithLoanChange": _margin(getattr(state, "equityWithLoanChange", None)),
+        "commission": _margin(getattr(state, "commission", None)),
+        "commissionCurrency": getattr(state, "commissionCurrency", None) or None,
+        "warning": (getattr(state, "warningText", None) or None),
+        "source": "ib",
+    }
+
+
+def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     """Place a limit order and return result as dict.
 
     _clock: zero-arg callable returning current time in seconds (injectable
     for tests; defaults to time.time preserving production behaviour).
+    what_if: when True, hit IB's pre-trade risk engine via ``whatIfOrder`` for
+    the real initMargin and return WITHOUT routing the order (no transmit, no
+    permId, no confirm-poll). The finally still disconnects.
     """
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
@@ -296,6 +345,20 @@ def place_order(params: dict, _clock=time.time) -> dict:
                 file=sys.stderr,
             )
 
+        # What-if margin preview: hit IB's pre-trade risk engine for the real
+        # initMargin WITHOUT routing the order. No permId, no confirm-poll — the
+        # finally still disconnects. The await is bounded inside what_if_order so
+        # an awaiting-2FA gateway can't hang the subprocess.
+        if what_if:
+            try:
+                state = client.what_if_order(contract, order)
+            except asyncio.TimeoutError:
+                return {
+                    "status": "error",
+                    "message": "IB what-if timed out — gateway may be awaiting 2FA or unreachable.",
+                }
+            return _whatif_result(state)
+
         # Place
         trade = client.place_order(contract, order)
 
@@ -451,7 +514,8 @@ def main():
                 print(json.dumps({"status": "error", "message": f"Leg {i} missing: {', '.join(leg_missing)}"}))
                 sys.exit(1)
 
-    result = place_order(params)
+    what_if = "--whatif" in sys.argv
+    result = place_order(params, what_if=what_if)
     print(json.dumps(result))
 
 

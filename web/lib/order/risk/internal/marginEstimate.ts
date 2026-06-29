@@ -21,7 +21,9 @@
  * from app code. Tests reach it via `lib/order/risk/__test_only__.ts`.
  */
 
-export type MarginEstimateSource = "exact-maxloss" | "regt-estimate";
+// "ib-whatif" is set ONLY by the Phase-2 async merge (mergeWhatIfMargin), never
+// by this synchronous estimator — what-if bypasses the estimator entirely.
+export type MarginEstimateSource = "exact-maxloss" | "regt-estimate" | "ib-whatif";
 
 export interface MarginEstimate {
   /** Dollar initial-margin requirement, or null when not estimable. */
