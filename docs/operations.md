@@ -13,6 +13,8 @@ EXA_API_KEY=
 CEREBRAS_API_KEY=                       # optional, newsfeed text tagger
 
 # Clerk authentication
+# MFA (multi-factor authentication) is REQUIRED on the production instance (clerk.radon.run, pk_live).
+# All users signing in to app.radon.run and demo.radon.run must complete a second factor.
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
 CLERK_SECRET_KEY=sk_...
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in

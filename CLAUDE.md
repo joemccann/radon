@@ -80,6 +80,8 @@ Never skip to Yahoo / web without trying IB → UW first. Clients live in `scrip
 | `.env.ib-mode` (root, gitignored) | overlayed after `.env` | `IB_GATEWAY_MODE`, `IB_GATEWAY_HOST` — toggled by `scripts/ib mode local\|cloud` |
 | `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY`, Clerk keys |
 
+**Clerk MFA:** The production Clerk instance (clerk.radon.run, `pk_live`) requires MFA for all users. Every sign-in to app.radon.run must complete a second factor (TOTP or SMS). The same instance backs demo.radon.run, so demo trial users are also prompted for MFA at sign-in. Clerk enforces this server-side and only mints a complete session JWT post-second-factor, so the Next.js middleware and FastAPI Bearer auth need no MFA-specific code.
+
 **IB Flex env (Hetzner `/home/radon/radon-cloud/.env`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1497709` (CashTransactions — don't repurpose for trade pulls), `IB_GATEWAY_MODE=docker`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon-cloud` (required; in-tree default is wrong on VPS). Journal rehydrate uses query `1442520` via `IB_FLEX_QUERY_ID` at runtime.
 
 **`.env` values with `$` need single-quoting.** Bash `set -a; . file; set +a` shell-expands `$VAR` under `set -u` and aborts silently from systemd. Single-quote (`PASS='RX$abc!xyz'`) or use systemd `EnvironmentFile=` / `python-dotenv`. See `feedback_env_file_shell_expansion.md`.
