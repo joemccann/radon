@@ -4,6 +4,7 @@ import { cachedRead } from "@/lib/dbCache";
 import {
   getRequestId,
   jsonApiError,
+  scrubSecrets,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import {
@@ -121,7 +122,11 @@ export async function GET(): Promise<Response> {
     const rows: ServiceHealthRow[] = [];
     for (const row of cachedRows) {
       const r = row as unknown as Record<string, unknown>;
-      const lastErrorRaw = (r.last_error ?? null) as string | null;
+      // This endpoint is PUBLIC (no Clerk session). Scrub any secret-shaped
+      // substrings (Turso/libsql URLs, auth tokens, JWTs, IB account ids) out of
+      // writer-supplied error strings before they reach an anonymous caller.
+      const lastErrorRawUnscrubbed = (r.last_error ?? null) as string | null;
+      const lastErrorRaw = lastErrorRawUnscrubbed == null ? null : scrubSecrets(lastErrorRawUnscrubbed);
       const service = String(r.service ?? "");
       const raw: ServiceHealthRow = {
         service,
@@ -166,7 +171,9 @@ export async function GET(): Promise<Response> {
     // cached libsql client first: a read timeout here is the same wedged-socket
     // failure that fires the "1 DEGRADED" banner, so let the next poll rebuild.
     resetDb();
-    const message = error instanceof Error ? error.message : "service_health read failed";
+    const message = scrubSecrets(
+      error instanceof Error ? error.message : "service_health read failed",
+    );
     console.warn(`[service-health] ${message}`);
     const updatedAt = new Date().toISOString();
     const dbRow: ServiceHealthRow = {

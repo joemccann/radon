@@ -161,8 +161,9 @@ class TestExemptPathsPinned:
     _REVIEWED_EXEMPT = {
         "/health",            # liveness probe; trust-scoped payload (no acct IDs to public)
         "/ws-ticket/validate",  # internal ticket validation, loopback daemon
-        "/docs",              # Swagger UI
-        "/openapi.json",      # schema for the docs UI
+        # /docs + /openapi.json are intentionally NOT exempt: they stay reachable
+        # from loopback/tailnet via the trusted-local bypass but return 401 to a
+        # public caller via Caddy /api/ib/* (was leaking the full endpoint map).
         # Demo signup webhook helper (demo.radon.run). Pure market-calendar math,
         # secret-free + account-free; the Next.js user.created webhook calls it
         # server-to-server with no user JWT, so it cannot depend on Clerk auth.

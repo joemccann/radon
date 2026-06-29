@@ -163,6 +163,17 @@ export async function GET(request: Request): Promise<Response> {
 
   const symbol = ticker.toUpperCase();
 
+  // Reject anything that isn't a plain ticker before it reaches a cache file
+  // path (defense-in-depth path-traversal guard; mirrors flow-analysis route).
+  if (!/^[A-Z0-9.]{1,10}$/.test(symbol)) {
+    return jsonApiError({
+      message: "invalid ticker",
+      status: 400,
+      code: "BAD_REQUEST",
+      requestId,
+    });
+  }
+
   // 1. Check cache
   const cached = await readCache(symbol);
   if (cached) {

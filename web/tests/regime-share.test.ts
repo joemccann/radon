@@ -90,13 +90,15 @@ describe("Next.js /api/regime/share routes", () => {
     await expect(readFile(routePath, "utf-8")).resolves.toContain("GET");
   });
 
-  it("content route is sandboxed to reports directory", async () => {
+  it("content route is restricted to public share cards", async () => {
+    // Hardened 2026-06-28: serves only tweet-regime-* cards via the shared
+    // validator, not arbitrary files under reports/.
     const routePath = path.join(
       PROJECT_ROOT, "web", "app", "api", "regime", "share", "content", "route.ts"
     );
     const content = await readFile(routePath, "utf-8");
-    expect(content).toContain("REPORTS_DIR");
-    expect(content).toContain("startsWith");
+    expect(content).toContain("isAllowedShareCardPath");
+    expect(content).toContain('"regime"');
   });
 });
 
@@ -123,13 +125,15 @@ describe("Next.js /api/internals/share routes", () => {
     await expect(readFile(routePath, "utf-8")).resolves.toContain("GET");
   });
 
-  it("content route is sandboxed to reports directory", async () => {
+  it("content route is restricted to public share cards", async () => {
+    // Hardened 2026-06-28: serves only tweet-internals-* cards via the shared
+    // validator, not arbitrary files under reports/.
     const routePath = path.join(
       PROJECT_ROOT, "web", "app", "api", "internals", "share", "content", "route.ts"
     );
     const content = await readFile(routePath, "utf-8");
-    expect(content).toContain("REPORTS_DIR");
-    expect(content).toContain("startsWith");
+    expect(content).toContain("isAllowedShareCardPath");
+    expect(content).toContain('"internals"');
   });
 });
 
