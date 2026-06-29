@@ -37,6 +37,7 @@ UPSERT_NAMES = [
     "upsert_performance_snapshot",
     "upsert_oi_changes",
     "upsert_theta_harvester_snapshot",
+    "upsert_strength_confirmation_snapshot",
 ]
 
 
@@ -150,6 +151,19 @@ class TestMirrorScanSnapshot:
             ("upsert_theta_harvester_snapshot", ("T3", payload))
         ]
         assert writer_calls["health"] == [("theta-harvester", "ok", {"finished_at": "T3"})]
+
+    def test_strength_confirmation_mirrors_snapshot_to_turso(self, writer_calls):
+        # Same fix as theta: the 7-step strength scan must persist to the shared
+        # Turso table, not only host-local disk.
+        from db.scan_mirror import mirror_scan_snapshot
+
+        payload = {"scan_time": "T4", "universe": "explicit", "results": []}
+        mirror_scan_snapshot("strength-confirmation", payload)
+
+        assert writer_calls["upserts"] == [
+            ("upsert_strength_confirmation_snapshot", ("T4", payload))
+        ]
+        assert writer_calls["health"] == [("strength-confirmation", "ok", {"finished_at": "T4"})]
 
     def test_unknown_service_is_a_programmer_error(self, writer_calls):
         from db.scan_mirror import mirror_scan_snapshot

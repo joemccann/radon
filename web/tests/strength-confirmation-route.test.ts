@@ -4,6 +4,7 @@ const mocks = vi.hoisted(() => ({
   readFile: vi.fn(),
   statSync: vi.fn(),
   radonFetch: vi.fn(),
+  getDb: vi.fn(),
 }));
 
 vi.mock("fs/promises", () => ({
@@ -17,6 +18,13 @@ vi.mock("fs", async (importOriginal) => {
     statSync: mocks.statSync,
   };
 });
+
+vi.mock("@/lib/db", () => ({ resetDb: () => {}, getDb: () => mocks.getDb() }));
+
+/** A stub libsql client whose strength snapshot query returns `rows`. */
+function dbReturning(rows: Array<{ scan_time: string; payload: string }>) {
+  return { execute: async () => ({ rows }) };
+}
 
 vi.mock("@/lib/radonApi", () => ({
   radonFetch: mocks.radonFetch,
@@ -59,8 +67,11 @@ beforeEach(() => {
   mocks.readFile.mockReset();
   mocks.statSync.mockReset();
   mocks.radonFetch.mockReset();
+  mocks.getDb.mockReset();
   mocks.statSync.mockReturnValue({ mtime: new Date("2026-06-24T15:01:00Z") });
   mocks.readFile.mockResolvedValue(JSON.stringify(strengthPayload));
+  // Default: no Turso row → GET falls back to the disk cache.
+  mocks.getDb.mockReturnValue(dbReturning([]));
 });
 
 afterEach(() => {
@@ -95,6 +106,34 @@ describe("GET /api/scanner/strength", () => {
     expect(noStoreHeader(res)).toContain("no-store");
     expect(body.results).toEqual([]);
     expect(body.cache_meta.is_stale).toBe(true);
+  });
+
+  it("prefers the fresher Turso snapshot over a staler host-local disk cache", async () => {
+    // Disk has the old NDX scan (AAPL @ 2026-06-24); Turso carries a newer
+    // single-ticker scan (NVDA @ 2026-06-25). Prod split-brain: the scan ran on
+    // another host and is only visible via the shared DB.
+    mocks.getDb.mockReturnValue(
+      dbReturning([
+        {
+          scan_time: "2026-06-25T15:00:00Z",
+          payload: JSON.stringify({
+            ...strengthPayload,
+            scan_time: "2026-06-25T15:00:00Z",
+            universe: "explicit",
+            requested_tickers: ["NVDA"],
+            results: [{ ...strengthPayload.results[0], ticker: "NVDA" }],
+          }),
+        },
+      ]),
+    );
+    const { GET } = await import("../app/api/scanner/strength/route");
+
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.results[0].ticker).toBe("NVDA");
+    expect(body.universe).toBe("explicit");
   });
 });
 
