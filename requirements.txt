@@ -1,55 +1,55 @@
 # Radon Dependencies
 
 # Interactive Brokers API
-ib_insync>=0.9.86
+ib_insync==0.9.86
 
 # HTTP server
-fastapi>=0.115.0
-uvicorn>=0.34.0
+fastapi==0.135.2
+uvicorn==0.42.0
 
 # Auth
-PyJWT>=2.9.0
-cryptography>=43.0.0
+PyJWT==2.12.1
+cryptography==46.0.6
 
 # HTTP requests
-requests>=2.28.0
+requests==2.33.0
 
 # Data analysis
-pandas>=1.5.0
-numpy>=1.26.0
+pandas==3.0.1
+numpy==2.4.4
 # scipy.optimize.least_squares powers the SVI vol-surface fit (scripts/vol_surface.py),
 # which core scanners leap_iv_scanner.py + risk_reversal.py import. It must be a MAIN
 # dependency, not forecasting-host-only, or those scanners fail to import on the fleet.
-scipy>=1.11.0
+scipy==1.18.0
 
 # Environment and utilities
-python-dotenv>=1.0.0
-pytz>=2024.1
+python-dotenv==1.2.2
+pytz==2026.1.post1
 # Python tzdata fallback — Ubuntu 24's system tzdata excludes legacy zone
 # aliases like "US/Eastern" (which IBKR's TWS API sends in execution
 # timestamps). Without this, ib_insync's parse_execution() raises
 # LookupError on every fill and the fill is silently dropped before
 # reaching journal_sync. See incident 2026-05-04 (AMD risk reversal
 # closes on 5/4 didn't surface to /orders until tzdata was installed).
-tzdata>=2024.1
+tzdata==2026.2
 
 # Browser automation (MenthorQ CTA scraping)
-playwright>=1.48.0
+playwright==1.58.0
 
 
 # libSQL client for the Turso-backed two-mode architecture (plan §0).
 # `libsql-experimental` is the supported SDK with embedded-replica
 # support; the older `libsql-client` package does not have it.
-libsql-experimental>=0.0.55
+libsql-experimental==0.0.55
 
 # httpx is used by fetch_menthorq_cta.py for the MenthorQ API client.
 # Required by scripts/cash_flow_sync.py-style writers and the cta-sync
 # launchd/systemd timers — without it `python -m fetch_menthorq_cta`
 # fails with `No module named httpx` on a fresh provision.
-httpx>=0.28.0
+httpx==0.28.1
 
 # boto3 is the S3-compatible client for the portfolio_snapshots cold archive
 # (scripts/archive_portfolio_snapshots.py) uploading monthly partitions to
 # off-box object storage (Cloudflare R2 / Backblaze B2). Lazy-imported, so it
 # is only needed on the host that runs the archive timer.
-boto3>=1.34.0
+boto3==1.43.36
