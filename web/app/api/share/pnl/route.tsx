@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { loadFonts } from "@/lib/og-fonts";
 import { OG } from "@/lib/og-theme";
+import { rateLimit, clientIp, SHARE_PNL_LIMIT, SHARE_WINDOW_MS } from "@/lib/rateLimit";
 
 export const runtime = "nodejs";
 
@@ -42,6 +43,14 @@ function fmtTimePST(isoTime: string): string {
 }
 
 export async function GET(request: Request) {
+  const limit = rateLimit(clientIp(request), { limit: SHARE_PNL_LIMIT, windowMs: SHARE_WINDOW_MS });
+  if (!limit.ok) {
+    return new Response("Too Many Requests", {
+      status: 429,
+      headers: { "Retry-After": String(limit.retryAfterSec) },
+    });
+  }
+
   try {
     const { searchParams } = new URL(request.url);
     const description = searchParams.get("description") ?? "";

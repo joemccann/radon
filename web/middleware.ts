@@ -16,6 +16,81 @@ function isLocalHost(url: URL): boolean {
   return LOCAL_HOSTS.has(url.hostname);
 }
 
+// ── Enforced Content-Security-Policy (per-request nonce) ────────────────────
+//
+// Was a Report-Only header in next.config.mjs. Now ENFORCED and owned here so
+// each HTML response carries a fresh nonce.
+//
+// script-src = 'self' + per-request nonce + the Clerk host allowlist. The nonce
+// covers Next.js's inline + framework <script> tags and our own inline
+// ThemeBootstrap. Clerk renders its loader (clerk.browser.js) as a STATIC
+// <script src> WITHOUT a nonce and does not propagate the request nonce to it,
+// so it must be admitted by host. We deliberately do NOT use 'strict-dynamic'
+// here: strict-dynamic makes host allowlists inert and would BLOCK Clerk's
+// unnonced loader, breaking sign-in (verified 2026-06-29). nonce + tight host
+// allowlist still removes 'unsafe-inline' and 'unsafe-eval' — the actual audit
+// finding. (Future hardening: pass `nonce` to <ClerkProvider> so Clerk nonces
+// its loader, then strict-dynamic becomes possible.)
+//
+// 'unsafe-eval': intentionally OMITTED. Next.js (App Router, production) and the
+// modern Clerk SDK do not require eval at runtime; local dev (HMR, which does
+// eval) bypasses CSP entirely below. If a violation surfaces a genuine eval
+// need, set CSP_ALLOW_UNSAFE_EVAL = true to re-admit it.
+//
+// Edge-safe: btoa + Web Crypto only, no node:* (see feedback_middleware_edge_runtime).
+const CSP_ALLOW_UNSAFE_EVAL = false;
+const CLERK_HOSTS =
+  "https://clerk.radon.run https://*.clerk.accounts.dev https://clerk.accounts.dev";
+
+export function generateNonce(): string {
+  return btoa(crypto.randomUUID());
+}
+
+export function buildCspWithNonce(nonce: string): string {
+  const scriptSrc = [
+    "script-src 'self'",
+    `'nonce-${nonce}'`,
+    CLERK_HOSTS,
+    CSP_ALLOW_UNSAFE_EVAL ? "'unsafe-eval'" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return [
+    "default-src 'self'",
+    scriptSrc,
+    "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+    "font-src 'self' https://fonts.gstatic.com data:",
+    "img-src 'self' https: data: blob:",
+    "connect-src 'self' wss: https:",
+    // Clerk's clerk-js spawns a same-origin blob: Web Worker (bot/telemetry);
+    // worker-src falls back to script-src, which would block it without this.
+    "worker-src 'self' blob:",
+    `frame-src 'self' ${CLERK_HOSTS}`,
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    `form-action 'self' ${CLERK_HOSTS}`,
+  ].join("; ");
+}
+
+// Build the pass-through response for an HTML route: forward the nonce to the
+// app (so ThemeBootstrap's inline <script nonce> and Next.js's own framework
+// scripts pick it up) AND set the matching enforced CSP on the response. The
+// nonce header and the CSP header ALWAYS travel together; any path that does
+// not call this emits no CSP, so it can never white-screen for a missing nonce.
+export function withNonceCsp(request: NextRequest): NextResponse {
+  const nonce = generateNonce();
+  const csp = buildCspWithNonce(nonce);
+  const requestHeaders = new Headers(request.headers);
+  requestHeaders.set("x-nonce", nonce);
+  // Next.js reads the nonce from the CSP request header to nonce its own
+  // framework <script> tags; x-nonce is what our own components read.
+  requestHeaders.set("Content-Security-Policy", csp);
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set("Content-Security-Policy", csp);
+  return response;
+}
+
 // Explicit test-flag override (used by Playwright via RADON_AUTHLESS_TEST=1).
 // Kept for parity with FastAPI's own bypass and to allow CI-driven authless runs.
 export function isLocalAuthlessTestBypassEnabled(url: URL, flag = process.env.RADON_AUTHLESS_TEST): boolean {
@@ -185,7 +260,11 @@ export default clerkMiddleware(async (auth, request) => {
     return NextResponse.next();
   }
 
-  if (isPublicRoute(request)) return;
+  // Public HTML auth pages (/sign-in, /sign-up) still render through the root
+  // layout + ThemeBootstrap, so they need the nonce + enforced CSP too. The
+  // enumerated public *API* routes (share/webhook) return JSON with no inline
+  // scripts — emitting CSP on them is harmless and keeps one code path.
+  if (isPublicRoute(request)) return withNonceCsp(request);
 
   const isApi = isApiPath(request.nextUrl.pathname);
   const { userId, sessionClaims } = await auth();
@@ -242,6 +321,10 @@ export default clerkMiddleware(async (auth, request) => {
     request,
   });
   if (demoGate) return demoGate;
+
+  // Authenticated + authorized: render the page with a fresh nonce + enforced
+  // CSP. This is the former implicit `return;` (NextResponse.next) fall-through.
+  return withNonceCsp(request);
 });
 
 export const config = {
