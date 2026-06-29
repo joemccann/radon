@@ -1,7 +1,7 @@
 "use client";
 
-import { type FormEvent, useEffect, useRef, useState } from "react";
-import { Bot, Send } from "lucide-react";
+import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
+import { Bot, Send, ArrowDown, Copy, Check } from "lucide-react";
 import type { ApiMessage, AssistantOrderProposal, Message, WorkspaceSection } from "@/lib/types";
 import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
@@ -19,21 +19,83 @@ type ChatPanelProps = {
   activeSection: WorkspaceSection;
 };
 
+/**
+ * Request lifecycle as a named union, not scattered booleans. Each state maps
+ * to exactly one visual treatment: `submitted` → typing dots, `streaming` →
+ * tokens + cursor, `done`/`error` → settled bubble. Kills the "No output."
+ * flash that the old `isBusy` boolean produced.
+ */
+type ChatStatus = "idle" | "submitted" | "streaming" | "done" | "error";
+
+const STICK_THRESHOLD_PX = 80;
+
+function TypingIndicator() {
+  return (
+    <div className="chat-typing" aria-hidden="true">
+      <span className="chat-typing-dot" />
+      <span className="chat-typing-dot" />
+      <span className="chat-typing-dot" />
+    </div>
+  );
+}
+
+function CopyButton({ content }: { content: string }) {
+  const [copied, setCopied] = useState(false);
+  const onCopy = useCallback(() => {
+    void navigator.clipboard?.writeText(content).then(() => {
+      setCopied(true);
+      window.setTimeout(() => setCopied(false), 1500);
+    });
+  }, [content]);
+  return (
+    <button type="button" className="chat-action-btn" onClick={onCopy} aria-label="Copy message">
+      {copied ? <Check size={11} /> : <Copy size={11} />}
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
+
 export default function ChatPanel({ activeSection }: ChatPanelProps) {
   const [query, setQuery] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
-  const [isBusy, setBusy] = useState(false);
+  const [status, setStatus] = useState<ChatStatus>("idle");
   const [lastError, setLastError] = useState("");
   const [proposal, setProposal] = useState<AssistantOrderProposal | null>(null);
   const [isPlacing, setPlacing] = useState(false);
+  const [showJump, setShowJump] = useState(false);
+
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const atBottomRef = useRef(true);
+  const composingRef = useRef(false);
   const sectionPrompts = quickPromptsBySection[activeSection];
+  const isBusy = status === "submitted" || status === "streaming";
+
+  // Stick-to-bottom: only auto-scroll while the user is already pinned to the
+  // bottom. Reading layout in an effect keyed on messages keeps the hot path
+  // out of React state — streamMessage mutates content many times per turn.
+  const scrollToBottom = useCallback(() => {
+    const el = messagesRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, []);
 
   useEffect(() => {
-    if (messagesRef.current) {
-      messagesRef.current.scrollTop = messagesRef.current.scrollHeight;
-    }
-  }, [messages]);
+    if (atBottomRef.current) scrollToBottom();
+  }, [messages, scrollToBottom]);
+
+  const onTranscriptScroll = useCallback(() => {
+    const el = messagesRef.current;
+    if (!el) return;
+    const gap = el.scrollHeight - el.scrollTop - el.clientHeight;
+    const atBottom = gap < STICK_THRESHOLD_PX;
+    atBottomRef.current = atBottom;
+    setShowJump(!atBottom);
+  }, []);
+
+  const jumpToBottom = useCallback(() => {
+    atBottomRef.current = true;
+    setShowJump(false);
+    scrollToBottom();
+  }, [scrollToBottom]);
 
   const sendMessage = async (eventOrPrompt: FormEvent<HTMLFormElement> | string) => {
     if (typeof eventOrPrompt !== "string") {
@@ -42,7 +104,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
 
     const nextPrompt = typeof eventOrPrompt === "string" ? eventOrPrompt : query;
     const cleaned = nextPrompt.trim();
-    if (!cleaned) {
+    if (!cleaned || isBusy) {
       return;
     }
 
@@ -58,75 +120,59 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
       content: message.content,
     }));
 
-    setMessages((current) => [...current, userMessage]);
-    setQuery("");
-    setBusy(true);
-    setLastError("");
+    // A new turn always re-pins to the bottom so a prior scroll-up can't wedge
+    // auto-scroll off for the rest of the session.
+    atBottomRef.current = true;
+    setShowJump(false);
 
-    let pendingAssistantId: string | null = null;
+    const assistantId = `a-${Date.now()}`;
+    const assistantMessage: Message = {
+      id: assistantId,
+      role: "assistant",
+      timestamp: createTimestamp(),
+      content: "",
+    };
+
+    setMessages((current) => [...current, userMessage, assistantMessage]);
+    setQuery("");
+    setStatus("submitted");
+    setLastError("");
 
     try {
       const piCommand = routeToPiPrompt(cleaned);
-      const isCommand = Boolean(piCommand);
-
-      if (isCommand) {
-        const assistantId = `a-${Date.now()}-pi`;
-        pendingAssistantId = assistantId;
-        const assistantMessage: Message = {
-          id: assistantId,
-          role: "assistant",
-          timestamp: createTimestamp(),
-          content: "",
-        };
-        setMessages((current) => [...current, assistantMessage]);
-        const assistantContent = await requestPiReply(piCommand || cleaned);
+      if (piCommand) {
+        const assistantContent = await requestPiReply(piCommand);
+        setStatus("streaming");
         await streamMessage(assistantId, assistantContent, setMessages);
       } else {
         const turn = await requestAssistantTurn(conversation, cleaned);
-        const assistantMessage: Message = {
-          id: `a-${Date.now()}`,
-          role: "assistant",
-          timestamp: createTimestamp(),
-          content: turn.content,
-        };
-        setMessages((current) => [...current, assistantMessage]);
+        setStatus("streaming");
+        await streamMessage(assistantId, turn.content, setMessages);
         // F7: never auto-execute. A destructive order proposal is surfaced as
         // a confirm card the operator must explicitly accept.
         if (turn.proposal) {
           setProposal(turn.proposal);
         }
       }
+      setStatus("done");
     } catch (error) {
       const isPiCommand = Boolean(routeToPiPrompt(cleaned));
       const fallback = isPiCommand ? "PI command failed to run in this session." : fallbackReply(cleaned);
       const errorMessage =
         error instanceof Error
           ? error.message
-            : isPiCommand
-              ? "Unexpected PI command error."
-              : "Unexpected assistant error.";
+          : isPiCommand
+            ? "Unexpected PI command error."
+            : "Unexpected assistant error.";
       const fallbackContent = `${fallback}\n\nFallback note: ${errorMessage}`;
 
-      setMessages((current) => {
-        if (pendingAssistantId && current.some((message) => message.id === pendingAssistantId)) {
-          return current.map((message) =>
-            message.id === pendingAssistantId ? { ...message, content: fallbackContent } : message,
-          );
-        }
-
-        return [
-          ...current,
-          {
-            id: `a-${Date.now()}`,
-            role: "assistant",
-            timestamp: createTimestamp(),
-            content: fallbackContent,
-          },
-        ];
-      });
+      setMessages((current) =>
+        current.map((message) =>
+          message.id === assistantId ? { ...message, content: fallbackContent } : message,
+        ),
+      );
       setLastError(errorMessage);
-    } finally {
-      setBusy(false);
+      setStatus("error");
     }
   };
 
@@ -160,8 +206,22 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
     setProposal(null);
   };
 
+  const onComposerKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !composingRef.current &&
+      !event.nativeEvent.isComposing
+    ) {
+      event.preventDefault();
+      void sendMessage(query);
+    }
+  };
+
+  const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
+
   return (
-    <div className={`section chat-panel ${activeSection === "dashboard" ? "dashboard-chat-panel" : ""}`}>
+    <div className="section chat-panel">
       <div className="section-header">
         <div className="section-title">
           <Bot size={14} />
@@ -171,46 +231,86 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
       </div>
       <div className="section-body">
         <div className="chat-shell">
-          <form suppressHydrationWarning className="chat-input-row" onSubmit={sendMessage}>
-            <textarea
-              suppressHydrationWarning
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="Ask Pi for flow analysis, risk checks, action items..."
-              className="chat-textarea"
-              aria-label="Message Pi assistant"
-              rows={6}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && !event.shiftKey) {
-                  event.preventDefault();
-                  sendMessage(query);
-                }
-              }}
-              maxLength={400}
-            />
-            <button
-              suppressHydrationWarning
-              className="chat-send"
-              type="submit"
-              disabled={!query.trim()}
-              title="Send (Enter)"
-              aria-label="Send message"
-            >
-              <Send size={14} />
-            </button>
-          </form>
-
-          <div className="chat-pills">
-            {sectionPrompts.map((prompt) => (
-              <button
-                type="button"
-                key={prompt}
-                onClick={() => sendMessage(prompt)}
-                className="pill-chip"
+          <div className="chat-transcript-wrap">
+            {messages.length === 0 ? (
+              <div className="chat-empty-state">
+                <div className="chat-empty-state__title">Ask Radon</div>
+                <p className="chat-empty-state__copy">
+                  Flow analysis, scans, risk checks and journal queries. Type a request or pick one.
+                </p>
+                <div className="chat-empty-state__cards">
+                  {sectionPrompts.map((prompt) => (
+                    <button
+                      type="button"
+                      key={prompt}
+                      className="chat-empty-card"
+                      onClick={() => sendMessage(prompt)}
+                    >
+                      <span className="chat-empty-card__slash">/</span>
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div
+                ref={messagesRef}
+                className="chat-messages"
+                role="log"
+                aria-live="polite"
+                aria-atomic="false"
+                aria-busy={status === "streaming" || status === "submitted"}
+                onScroll={onTranscriptScroll}
               >
-                / {prompt}
-              </button>
-            ))}
+                {messages.map((message) => {
+                  const isAssistant = message.role === "assistant";
+                  const isPending = isAssistant && !message.content;
+                  const isStreamingThis =
+                    isAssistant && message.id === lastAssistantId && status === "streaming";
+                  const canCopy = isAssistant && message.content && !isStreamingThis;
+                  return (
+                    <div
+                      key={message.id}
+                      className={`chat-message ${message.role}${isStreamingThis ? " streaming" : ""}`}
+                    >
+                      <div className="chat-meta">
+                        <span className="chat-role">{isAssistant ? "Pi" : "You"}</span>
+                        <span className="chat-time">{message.timestamp}</span>
+                      </div>
+                      <div className="chat-message-body">
+                        {isPending ? (
+                          <TypingIndicator />
+                        ) : (
+                          <>
+                            <MarkdownRenderer content={message.content} />
+                            {isStreamingThis ? (
+                              <span className="chat-cursor" aria-hidden="true" />
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                      {canCopy ? (
+                        <div className="chat-actions">
+                          <CopyButton content={message.content} />
+                        </div>
+                      ) : null}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            <button
+              type="button"
+              className="chat-jump-btn"
+              data-hidden={!showJump}
+              onClick={jumpToBottom}
+              aria-label="Scroll to latest"
+              tabIndex={showJump ? 0 : -1}
+            >
+              <ArrowDown size={11} />
+              Latest
+            </button>
           </div>
 
           {lastError ? <div className="chat-error">{lastError}</div> : null}
@@ -219,9 +319,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
             <div className="chat-order-confirm" role="group" aria-label="Order confirmation">
               <div className="chat-order-confirm-header">CONFIRM ORDER</div>
               <div className="chat-order-confirm-summary">{proposal.summary}</div>
-              <div className="chat-order-confirm-note">
-                This order is not sent until you confirm.
-              </div>
+              <div className="chat-order-confirm-note">This order is not sent until you confirm.</div>
               <div className="chat-order-confirm-actions">
                 <button
                   type="button"
@@ -243,39 +341,51 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
             </div>
           ) : null}
 
-          {messages.length ? (
-            <div ref={messagesRef} className="chat-messages" aria-live="polite">
-              {messages.map((message) => (
-                <div
-                  key={message.id}
-                  className={`chat-message ${message.role}${
-                    message.role === "assistant" && !message.content ? " streaming" : ""
-                  }`}
-                >
-                  <div className="chat-meta">
-                    <span className="chat-role">{message.role === "assistant" ? "Pi" : "You"}</span>
-                    <span className="chat-time">{message.timestamp}</span>
-                  </div>
-                  <div className="chat-message-body">
-                    <MarkdownRenderer content={message.content} />
-                  </div>
-                </div>
-              ))}
-              {isBusy ? (
-                <div className="chat-message assistant streaming">
-                  <div className="chat-meta">
-                    <span className="chat-role">Pi</span>
-                    <span className="chat-time">processing...</span>
-                  </div>
-                  <div className="chat-message-body">
-                    <div className="chat-content">
-                      <div className="chat-line">Analyzing flow, structure, and risk context...</div>
-                    </div>
-                  </div>
-                </div>
-              ) : null}
-            </div>
-          ) : null}
+          <div className="chat-composer">
+            {messages.length ? (
+              <div className="chat-pills">
+                {sectionPrompts.map((prompt) => (
+                  <button
+                    type="button"
+                    key={prompt}
+                    onClick={() => sendMessage(prompt)}
+                    className="pill-chip"
+                  >
+                    / {prompt}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <form suppressHydrationWarning className="chat-input-row" onSubmit={sendMessage}>
+              <textarea
+                suppressHydrationWarning
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                onKeyDown={onComposerKeyDown}
+                onCompositionStart={() => {
+                  composingRef.current = true;
+                }}
+                onCompositionEnd={() => {
+                  composingRef.current = false;
+                }}
+                placeholder="Ask Pi for flow analysis, risk checks, action items..."
+                className="chat-textarea"
+                aria-label="Message Pi assistant"
+                rows={1}
+                maxLength={1000}
+              />
+              <button
+                suppressHydrationWarning
+                className="chat-send"
+                type="submit"
+                disabled={!query.trim() || isBusy}
+                title="Send (Enter)"
+                aria-label="Send message"
+              >
+                <Send size={14} />
+              </button>
+            </form>
+          </div>
         </div>
       </div>
     </div>
