@@ -5,6 +5,7 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
+import { requireDemoAdmin } from "@/lib/demo/adminAuth";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -17,6 +18,20 @@ const PROXY_TIMEOUT_MS = 5_000;
 
 export async function POST(_req: NextRequest): Promise<Response> {
   const requestId = getRequestId();
+  // Operator-only, fail CLOSED. Unlike middleware's isAuthorizedUser (which
+  // fails open when ALLOWED_USER_IDS is unset), these high-impact ops routes
+  // (full stack restart) must DENY when no allowlist is configured.
+  if (!(await requireDemoAdmin())) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({
+        message: "Operator authorization required",
+        status: 403,
+        code: "FORBIDDEN",
+        requestId,
+      }),
+      requestId,
+    );
+  }
   try {
     const data = await radonFetch("/admin/stack/restart", {
       method: "POST",

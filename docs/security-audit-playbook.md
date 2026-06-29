@@ -68,6 +68,21 @@ line here whenever you ship a security fix.**
   (service-health runs `scrubSecrets`).
   (`feedback_health_endpoint_public_leak_and_trust_chokepoint`)
 - **No Next.js spawn with user args**; subprocess + PI exec allowlists intact.
+- **CSP enforced (not Report-Only)** — `web/middleware.ts:buildCspWithNonce` ships a
+  per-request nonce with NO `'unsafe-inline'`/`'unsafe-eval'` in `script-src`, and
+  `next.config.mjs` emits NO CSP header. Must keep `worker-src 'self' blob:` and the
+  Clerk host allowlist (NOT `'strict-dynamic'`, which blocks Clerk's loader).
+  (`feedback_csp_strict_dynamic_breaks_clerk_loader`, `web/tests/csp-nonce.test.ts`)
+- **Public unauth routes rate-limited** — the 5 `*/share` POST generators + GET
+  `/api/share/pnl` call `rateLimit()` (`web/lib/rateLimit.ts`) before any heavy work.
+  (`web/tests/rate-limit.test.ts`)
+- **Ops admin routes fail CLOSED** — `/api/admin/{stack/restart,ib/restart,
+  ib/reset-backoff,services/[unit]/[action]}` call `requireDemoAdmin()` and 403 when
+  the allowlist is empty (middleware `isAuthorizedUser` fails OPEN by design; these
+  must not inherit that). (`web/tests/api-routes-smoke-admin.test.ts`)
+- **CI supply chain** — third-party GitHub Actions SHA-pinned; the gitleaks binary
+  download is SHA256-verified; `requirements.txt` pinned to the VPS's running
+  versions. (`feedback_pin_requirements_to_vps_not_laptop`)
 
 ## Triage & patch policy
 
@@ -90,3 +105,4 @@ line here whenever you ship a security fix.**
 | Date | Dimensions | Raw → Confirmed (exploitable) | FP | Report | Notes |
 |---|---|---|---|---|---|
 | 2026-06-28 | 10 + critic | 58 → 48 (8) | 12 | `docs/security-audit-2026-06-28.html` | 8 fixes shipped (WS relay bypass, share-content disclosure, ws bump, /docs gate, service-health scrub, path guards, CI hardening, HSTS). Deferred next/@clerk bumps + VPS config. `tasks/security-audit-2026-06-28.md`. |
+| 2026-06-29 | 11 + critic | 58 → 26 (**0**) | 34 | `docs/security-audit-2026-06-29.html` | Re-audit after the lower-priority block landed (CSP enforce, rate-limit, Actions SHA-pin, deps pin, media HSTS). **Zero exploitable** (24 info, 2 low). Critic confirmed all prior fixes intact. Closed the 2 lows + stale repo HSTS: gitleaks SHA256 check, admin routes fail-closed, `docker/caddy/Caddyfile` media HSTS. |
