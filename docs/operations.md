@@ -13,8 +13,10 @@ EXA_API_KEY=
 CEREBRAS_API_KEY=                       # optional, newsfeed text tagger
 
 # Clerk authentication
-# MFA (multi-factor authentication) is REQUIRED on the production instance (clerk.radon.run, pk_live).
-# All users signing in to app.radon.run and demo.radon.run must complete a second factor.
+# MFA is scoped to the operator account (Clerk policy "optional" + operator has TOTP enrolled),
+# NOT required instance-wide. Clerk challenges any user with an enrolled factor, so the operator
+# is MFA-gated while demo users (same instance, no enrolled factor) stay frictionless.
+# Do NOT set the Clerk policy to "required for all users" — it would force MFA on every demo signup.
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_...
 CLERK_SECRET_KEY=sk_...
 NEXT_PUBLIC_CLERK_SIGN_IN_URL=/sign-in

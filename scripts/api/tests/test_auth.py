@@ -82,6 +82,7 @@ from api.auth import (
     API_KEY_ALLOWED_PATHS,
     is_local_or_tailnet,
     is_trusted_local_request,
+    is_trusted_service_request,
     verify_api_key,
     verify_clerk_jwt,
 )
@@ -208,6 +209,70 @@ class TestIsTrustedLocalRequest:
 
     def test_no_client_not_trusted(self):
         assert is_trusted_local_request(_FakeRequest(host=None)) is False
+
+
+class TestIsTrustedServiceRequest:
+    """Approach A — the demo frontend (Vercel) authenticates to the demo VM
+    FastAPI over the public proxy with the shared RADON_SERVICE_TOKEN, since
+    loopback/tailnet trust can't apply across the public internet. The gate
+    MUST be a strict secret match and MUST be inert (False) wherever the token
+    is unset — that is what keeps it a no-op on prod.
+    """
+
+    _SVC = "svc-secret-token-xyz"
+
+    def _env(self, token=_SVC):
+        if token is None:
+            env = {}
+        else:
+            env = {"RADON_SERVICE_TOKEN": token}
+        return patch.dict(os.environ, env, clear=False)
+
+    def test_unset_token_is_never_trusted(self):
+        # Prod: RADON_SERVICE_TOKEN absent -> even a matching-looking header fails.
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("RADON_SERVICE_TOKEN", None)
+            req = _FakeRequest(extra_headers={"X-Radon-Service-Token": self._SVC})
+            assert is_trusted_service_request(req) is False
+
+    def test_correct_token_is_trusted(self):
+        with self._env():
+            req = _FakeRequest(extra_headers={"X-Radon-Service-Token": self._SVC})
+            assert is_trusted_service_request(req) is True
+
+    def test_correct_token_lowercase_header_is_trusted(self):
+        with self._env():
+            req = _FakeRequest(extra_headers={"x-radon-service-token": self._SVC})
+            assert is_trusted_service_request(req) is True
+
+    def test_wrong_token_not_trusted(self):
+        with self._env():
+            req = _FakeRequest(extra_headers={"X-Radon-Service-Token": "nope"})
+            assert is_trusted_service_request(req) is False
+
+    def test_missing_header_not_trusted(self):
+        with self._env():
+            assert is_trusted_service_request(_FakeRequest()) is False
+
+    @pytest.mark.asyncio
+    async def test_verify_clerk_jwt_bypasses_with_service_token(self):
+        # Public client (Vercel egress IP), no JWT, but valid service token ->
+        # treated as the trusted demo frontend.
+        with self._env():
+            req = _FakeRequest(
+                host="8.8.8.8",
+                extra_headers={"X-Radon-Service-Token": self._SVC},
+            )
+            result = await verify_clerk_jwt(req)
+        assert result == {"sub": "demo-frontend", "service": True}
+
+    @pytest.mark.asyncio
+    async def test_verify_clerk_jwt_wrong_service_token_still_requires_jwt(self):
+        with self._env():
+            req = _FakeRequest(host="8.8.8.8", extra_headers={"X-Radon-Service-Token": "nope"})
+            with pytest.raises(HTTPException) as exc:
+                await verify_clerk_jwt(req)
+        assert exc.value.status_code == 401
 
 
 class TestVerifyClerkJwt:

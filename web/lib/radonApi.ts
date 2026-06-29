@@ -43,6 +43,14 @@ export async function radonFetch<T = Record<string, unknown>>(
   if (token) {
     headers.set("Authorization", `Bearer ${token}`);
   }
+  // Demo topology: the frontend (Vercel) and the demo VM FastAPI are not on a
+  // shared loopback/tailnet, so the backend can't trust us by origin. We
+  // authenticate as a trusted service with the shared token instead of
+  // forwarding a per-user JWT. Unset on prod (loopback-trusted) -> no header.
+  const serviceToken = process.env.RADON_SERVICE_TOKEN;
+  if (serviceToken) {
+    headers.set("X-Radon-Service-Token", serviceToken);
+  }
   const res = await fetch(`${RADON_API}${path}`, {
     ...fetchOpts,
     headers,
