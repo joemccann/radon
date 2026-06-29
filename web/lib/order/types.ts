@@ -106,7 +106,7 @@ export interface OrderPresentationSummary {
     availableBefore: number | null;
     availableAfter: number | null;
     baselineLabel: string;
-    source: "exact-maxloss" | "regt-estimate";
+    source: "exact-maxloss" | "regt-estimate" | "ib-whatif";
     approximate: boolean;
   } | null;
 }

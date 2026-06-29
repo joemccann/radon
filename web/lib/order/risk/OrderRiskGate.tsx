@@ -22,6 +22,13 @@ import { PaperModeToggle } from "../components/PaperModeToggle";
 import { useOrderRisk, type OrderRiskInput, type OrderRiskState } from "./useOrderRisk";
 import { useRecordOrderRiskTrace } from "./telemetry";
 import { useShortAvailability } from "../hooks/useShortAvailability";
+import { useWhatIfMargin } from "./useWhatIfMargin";
+import { mergeWhatIfMargin } from "./mergeWhatIfMargin";
+
+// Phase-2 IB what-if margin. Ships OFF: the backend (endpoint + script branch)
+// is inert until this flag is set, after live verification on an authenticated
+// gateway during market hours. See tasks/ib-whatif-margin-plan.md.
+const WHATIF_MARGIN_ENABLED = process.env.NEXT_PUBLIC_WHATIF_MARGIN_ENABLED === "1";
 
 export interface OrderRiskGateProps {
   /**
@@ -117,9 +124,26 @@ export function OrderRiskGate({
     locateEnabled,
   );
 
+  // Phase-2: real IB margin for undefined-risk combos whose Reg-T estimate was
+  // null. Hook is always called (hooks rule) but stays idle unless the flag is
+  // on AND the gate predicate holds. Informational only — never flips submit.
+  const whatIf = useWhatIfMargin(input, state, WHATIF_MARGIN_ENABLED);
+
   if (state == null) return null;
 
   const showLocateChip = locateEnabled && locateStatus != null && locateData != null;
+
+  const summaryForRender =
+    whatIf.status === "success" && whatIf.initMargin != null
+      ? mergeWhatIfMargin(state.summary, whatIf.initMargin)
+      : state.summary;
+
+  const marginWhatIf =
+    whatIf.status === "loading"
+      ? ({ status: "loading" } as const)
+      : whatIf.status === "error"
+        ? ({ status: "error" } as const)
+        : undefined;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
@@ -129,9 +153,10 @@ export function OrderRiskGate({
         </div>
       )}
       <OrderConfirmSummary
-        summary={state.summary}
+        summary={summaryForRender}
         variant={variant}
         className={className}
+        marginWhatIf={marginWhatIf}
       />
       {showLocateChip && (
         <LocateFeeChip status={locateStatus} data={locateData} />

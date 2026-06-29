@@ -30,6 +30,14 @@ interface OrderConfirmSummaryProps {
   variant?: "info" | "neutral";
   /** Custom class name */
   className?: string;
+  /**
+   * Phase-2 IB what-if state (from `useWhatIfMargin` via `OrderRiskGate`). When
+   * `loading`, the otherwise-UNAVAILABLE margin row shows a "Calculating IB
+   * margin…" placeholder; `error` (or absent) keeps today's UNAVAILABLE text.
+   * The resolved number itself arrives merged into `summary.marginImpact` with
+   * `source: "ib-whatif"`.
+   */
+  marginWhatIf?: { status: "loading" | "error" };
 }
 
 function formatCurrency(value: number | null | undefined): string {
@@ -51,6 +59,7 @@ export function OrderConfirmSummary({
   summary,
   variant = "info",
   className = "",
+  marginWhatIf,
 }: OrderConfirmSummaryProps) {
   // Dev-mode brand check. Catches an `as AugmentedOrderSummary` cast that
   // smuggles a hand-built literal past TypeScript. Production builds skip
@@ -127,14 +136,18 @@ export function OrderConfirmSummary({
                 style={marginRequirementUnavailable ? { color: "var(--warning)" } : undefined}
               >
                 {marginRequirementUnavailable ? (
-                  <>
-                    UNAVAILABLE
-                    <span
-                      style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
-                    >
-                      IB what-if required
-                    </span>
-                  </>
+                  marginWhatIf?.status === "loading" ? (
+                    <span style={{ color: "var(--text-muted)" }}>Calculating IB margin&hellip;</span>
+                  ) : (
+                    <>
+                      UNAVAILABLE
+                      <span
+                        style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
+                      >
+                        IB what-if required
+                      </span>
+                    </>
+                  )
                 ) : (
                   <>
                     {marginImpact.approximate ? "~" : ""}
@@ -144,6 +157,13 @@ export function OrderConfirmSummary({
                         style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
                       >
                         est. Reg-T
+                      </span>
+                    )}
+                    {marginImpact.source === "ib-whatif" && (
+                      <span
+                        style={{ marginLeft: "6px", fontSize: "0.85em", color: "var(--text-muted)" }}
+                      >
+                        IB margin
                       </span>
                     )}
                   </>
