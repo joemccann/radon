@@ -3150,32 +3150,34 @@ td.last-price-cell {
   display: flex;
   flex-direction: column;
   min-height: 0;
-  gap: 10px;
+  gap: 12px;
 }
 
+/* ChatPanel renders overlay-only (ChatLauncher). The full flex-height chain is
+   always on so .chat-messages has a bounded parent and SCROLLS instead of
+   growing the panel. Every link needs min-height:0 — a flex child defaults to
+   min-height:auto and refuses to shrink below content, which is exactly why
+   overflow:auto never engaged before. */
 .chat-panel {
   position: static;
   z-index: 3;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin-bottom: 0;
 }
 
-.dashboard-chat-panel {
+.chat-panel .section-body {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-height: 0;
 }
 
-.dashboard-chat-panel .section-body {
-  display: flex;
-  flex-direction: column;
+.chat-panel .chat-shell {
   flex: 1;
   min-height: 0;
-}
-
-.dashboard-chat-panel .chat-shell {
-  flex: 1;
-  min-height: 0;
-  padding-bottom: 16px;
 }
 
 .dashboard-grid {
@@ -4005,14 +4007,207 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   gap: 12px;
 }
 
+.chat-transcript-wrap {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 .chat-messages {
   flex: 1;
-  min-height: 220px;
-  overflow: auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid var(--border-dim);
   background: var(--bg-base);
   padding: 12px;
-  margin-bottom: 12px;
+}
+
+/* Empty / first-run state — clickable domain prompts instead of a blank box. */
+.chat-empty-state {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+  padding: 24px 16px;
+  border: 1px solid var(--border-dim);
+  background: var(--bg-base);
+}
+
+.chat-empty-state__title {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--signal-core);
+}
+
+.chat-empty-state__copy {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  max-width: 46ch;
+}
+
+.chat-empty-state__cards {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.chat-empty-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 10px 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.chat-empty-card:hover {
+  border-color: var(--signal-core);
+  background: var(--bg-hover);
+}
+
+.chat-empty-card__slash {
+  color: var(--text-muted);
+}
+
+/* Floating jump-to-latest, shown only when the user has scrolled up. Always
+   mounted; toggled via opacity/pointer-events so it never causes reflow. */
+.chat-jump-btn {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 26px;
+  padding: 0 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--bg-panel) 88%, transparent);
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  transition: opacity 160ms ease, transform 160ms ease;
+}
+
+.chat-jump-btn:hover {
+  border-color: var(--signal-core);
+  color: var(--signal-core);
+}
+
+.chat-jump-btn[data-hidden="true"] {
+  opacity: 0;
+  transform: translateX(-50%) scale(0.9);
+  pointer-events: none;
+}
+
+/* Typing dots (before first token) + streaming block cursor (during tokens). */
+.chat-typing {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px 0;
+}
+
+.chat-typing-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--signal-core);
+  animation: chat-dot-pulse 1.2s infinite ease-in-out;
+}
+
+.chat-typing-dot:nth-child(2) { animation-delay: 0.16s; }
+.chat-typing-dot:nth-child(3) { animation-delay: 0.32s; }
+
+@keyframes chat-dot-pulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 1; }
+}
+
+.chat-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  background: var(--signal-core);
+  animation: chat-blink 1s steps(1) infinite;
+}
+
+@keyframes chat-blink { 50% { opacity: 0; } }
+
+/* Per-message actions (copy). Hover-reveal on desktop, always-on for touch. */
+.chat-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+
+.chat-message:hover .chat-actions {
+  opacity: 1;
+}
+
+@media (pointer: coarse) {
+  .chat-actions { opacity: 1; }
+}
+
+.chat-action-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  padding: 3px 8px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease;
+}
+
+.chat-action-btn:hover {
+  color: var(--signal-core);
+  border-color: var(--signal-core);
+}
+
+.chat-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chat-typing-dot,
+  .chat-cursor {
+    animation: none;
+  }
+  .chat-typing-dot { opacity: 0.6; }
 }
 
 .chat-message {
@@ -4060,10 +4255,13 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   display: flex;
   flex-direction: column;
   gap: 6px;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 
 .chat-markdown p {
   white-space: pre-wrap;
+  overflow-wrap: break-word;
   font-size: 12px;
   line-height: 1.45;
   margin: 0;
@@ -4121,6 +4319,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   color: inherit;
   text-decoration: underline;
   text-underline-offset: 2px;
+  overflow-wrap: anywhere;
 }
 
 .chat-markdown-link:hover {
@@ -4236,18 +4435,15 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   letter-spacing: 0.06em;
 }
 
-.chat-empty {
-  color: var(--text-muted);
-  font-style: italic;
-}
-
 .chat-table-wrap {
   margin: 6px 0;
   border: 1px solid var(--border-dim);
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
 }
 
 .chat-table {
-  width: 100%;
+  min-width: 100%;
   border-collapse: collapse;
 }
 
@@ -4268,6 +4464,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   padding: 8px 10px;
   border-bottom: 1px solid var(--border-dim);
   vertical-align: top;
+  white-space: nowrap;
 }
 
 .chat-table tbody tr:last-child td {
@@ -4331,21 +4528,23 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   grid-template-columns: 1fr auto;
   gap: 8px;
   align-items: end;
-  margin-bottom: 10px;
+  margin: 0;
 }
 
 .chat-textarea {
   width: 100%;
-  min-height: 108px;
-  height: 108px;
+  field-sizing: content;
+  min-height: 44px;
+  max-height: 160px;
   background: var(--bg-base);
   border: 1px solid var(--border-dim);
   color: var(--text-primary);
-  padding: 8px 10px;
+  padding: 10px 12px;
   font-family: var(--font-mono);
   font-size: 12px;
+  line-height: 1.5;
   outline: none;
-  resize: vertical;
+  resize: none;
   transition: border-color 200ms ease-in-out;
 }
 
