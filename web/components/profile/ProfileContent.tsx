@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 import { useProfile } from "@/lib/useProfile";
 import { useBookmarks, type Bookmark } from "@/lib/useBookmarks";
 import { useWatchlist, type WatchlistEntry } from "@/lib/useWatchlist";
@@ -88,6 +88,7 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
 
   const { profile, saveProfile } = useProfile();
   const { user } = useUser();
+  const { signOut } = useClerk();
   const { bookmarks, isLoading: bookmarksLoading, toggleBookmark } = useBookmarks();
   const { watchlist, isLoading: watchlistLoading, toggleWatch } = useWatchlist();
 
@@ -262,6 +263,14 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
           >
             {photoBusy ? "Processing..." : "Change photo"}
           </button>
+          <button
+            type="button"
+            className="mobile-drawer__signout"
+            style={{ width: "100%", marginTop: 8 }}
+            onClick={() => signOut({ redirectUrl: "/sign-in" })}
+          >
+            Sign out
+          </button>
         </div>
       </div>
     );
@@ -312,6 +321,13 @@ export default function ProfileContent({ prices }: { prices?: Record<string, Pri
                 disabled={photoBusy}
               >
                 {photoBusy ? "Processing..." : "Change photo"}
+              </button>
+              <button
+                type="button"
+                className="profile-photo-btn"
+                onClick={() => signOut({ redirectUrl: "/sign-in" })}
+              >
+                Sign out
               </button>
               {photoError ? <span className="profile-field__error">{photoError}</span> : null}
             </div>
