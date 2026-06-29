@@ -122,11 +122,15 @@ describe("Next.js /api/gex/share/content GET route", () => {
     await expect(readFile(p, "utf-8")).resolves.toContain("GET");
   });
 
-  it("is sandboxed to REPORTS_DIR", async () => {
+  it("is restricted to public share cards via the shared validator", async () => {
+    // Hardened 2026-06-28: the route no longer serves arbitrary files under
+    // reports/ (that leaked portfolio/evaluation reports to anonymous callers).
+    // It now allows ONLY tweet-gex-* share cards via isAllowedShareCardPath.
     const p = path.join(PROJECT_ROOT, "web", "app", "api", "gex", "share", "content", "route.ts");
     const content = await readFile(p, "utf-8");
-    expect(content).toContain("REPORTS_DIR");
-    expect(content).toContain("startsWith");
+    expect(content).toContain("isAllowedShareCardPath");
+    expect(content).toContain('"gex"');
+    expect(content).not.toContain("readFile"); // raw file reads moved into the validator
   });
 
   it("returns 403 for paths outside reports dir", async () => {

@@ -247,7 +247,6 @@ class TestHealthLite:
         #                         trust-scoped (untrusted callers get
         #                         {"status":"ok"} only)
         #   /ws-ticket/validate — internal WS ticket validation
-        #   /docs, /openapi.json — FastAPI docs surface
         #   /demo/trial-expiry  — demo signup webhook helper; pure market-
         #                         calendar math, secret-free + account-free,
         #                         called server-to-server with no user JWT
@@ -261,11 +260,14 @@ class TestHealthLite:
         assert AUTH_EXEMPT_PATHS == {
             "/health",
             "/ws-ticket/validate",
-            "/docs",
-            "/openapi.json",
             "/demo/trial-expiry",
         }
         assert "/health/lite" not in AUTH_EXEMPT_PATHS
+        # /docs + /openapi.json must NOT be exempt — they would otherwise be
+        # world-readable via Caddy /api/ib/*, leaking the full endpoint map. They
+        # stay reachable from loopback/tailnet via the trusted-local bypass.
+        assert "/docs" not in AUTH_EXEMPT_PATHS
+        assert "/openapi.json" not in AUTH_EXEMPT_PATHS
 
 
 class TestIbRecoveryHeartbeat:

@@ -210,6 +210,18 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   const symbol = ticker.toUpperCase();
+
+  // Defense-in-depth path-traversal guard before the symbol reaches a cache
+  // file path (mirrors flow-analysis route).
+  if (!/^[A-Z0-9.]{1,10}$/.test(symbol)) {
+    return jsonApiError({
+      message: "invalid ticker",
+      status: 400,
+      code: "BAD_REQUEST",
+      requestId,
+    });
+  }
+
   const token = process.env.UW_TOKEN;
 
   // 1. Check cache
