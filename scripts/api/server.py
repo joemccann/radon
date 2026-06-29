@@ -374,9 +374,25 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
 app.include_router(historical_router)
 
+# Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
+# wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale
+# host would have passed CORS. We control every legitimate origin, so an explicit
+# list is more auditable and removes that bypass surface. allow_credentials stays
+# False (default) — API auth is Bearer-JWT / trusted-local, never cookie-based.
+# Extend RADON_CORS_EXTRA_ORIGINS (comma-separated) for new first-party apps.
+_CORS_ALLOWED_ORIGINS = [
+    "https://app.radon.run",
+    "https://demo.radon.run",
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+] + [
+    origin.strip()
+    for origin in os.environ.get("RADON_CORS_EXTRA_ORIGINS", "").split(",")
+    if origin.strip()
+]
 app.add_middleware(
     CORSMiddleware,
-    allow_origin_regex=r"https://.*\.radon\.run|http://localhost:3000|http://127\.0\.0\.1:3000",
+    allow_origins=_CORS_ALLOWED_ORIGINS,
     allow_methods=["*"],
     allow_headers=["*"],
 )
