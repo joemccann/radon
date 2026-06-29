@@ -83,6 +83,14 @@ line here whenever you ship a security fix.**
 - **CI supply chain** — third-party GitHub Actions SHA-pinned; the gitleaks binary
   download is SHA256-verified; `requirements.txt` pinned to the VPS's running
   versions. (`feedback_pin_requirements_to_vps_not_laptop`)
+- **CORS explicit allowlist** — FastAPI CORS uses `allow_origins=[...]` (explicit
+  hosts), NOT a `https://.*\.radon\.run` wildcard regex (which a subdomain
+  takeover could ride). `allow_credentials` stays False.
+  (`scripts/api/tests/test_cors_allowlist.py`)
+- **Order idempotency** — `/api/orders/place` dedups concurrent/just-repeated
+  identical placements (in-flight + short-TTL content hash, or an explicit
+  client `idempotencyKey`) so a double-click never doubles a real-money position.
+  (`web/lib/orders/orderIdempotency.ts`, `web/tests/order-place-idempotency-route.test.ts`)
 
 ## Triage & patch policy
 
