@@ -13,7 +13,7 @@ export default function ClerkThemeBridge({ children }: { children: React.ReactNo
     return <>{children}</>;
   }
   return (
-    <ClerkProvider appearance={{ baseTheme: theme === "dark" ? dark : undefined }}>
+    <ClerkProvider appearance={{ theme: theme === "dark" ? dark : undefined }}>
       {children}
     </ClerkProvider>
   );
