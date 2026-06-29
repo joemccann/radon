@@ -47,7 +47,7 @@ SNAPSHOT_UPSERTS: dict[str, Optional[str]] = {
     "leap-scan": None,
     "garch-scan": None,
     "theta-harvester": "upsert_theta_harvester_snapshot",
-    "strength-confirmation": None,
+    "strength-confirmation": "upsert_strength_confirmation_snapshot",
 }
 
 
