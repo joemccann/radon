@@ -68,6 +68,32 @@ def is_trusted_local_request(request) -> bool:
         return False
     return not _arrived_via_proxy(request)
 
+
+def is_trusted_service_request(request) -> bool:
+    """True for a trusted service caller presenting the shared service token.
+
+    The demo frontend (Vercel, demo.radon.run) calls the demo VM's FastAPI over
+    the public reverse proxy, where loopback/tailnet trust does not apply. The
+    frontend has already authenticated the Clerk user and applied the demo gate,
+    so it authenticates to the backend with the shared ``RADON_SERVICE_TOKEN``
+    header rather than forwarding a per-user JWT. Returns False (no-op) when
+    RADON_SERVICE_TOKEN is unset — i.e. on prod, where it is never configured,
+    so prod trust behavior is unchanged.
+    """
+    expected = os.environ.get("RADON_SERVICE_TOKEN")
+    if not expected:
+        return False
+    headers = getattr(request, "headers", None) or {}
+    provided = (
+        headers.get("X-Radon-Service-Token")
+        or headers.get("x-radon-service-token")
+        or ""
+    )
+    if not provided:
+        return False
+    return hmac.compare_digest(provided.encode(), expected.encode())
+
+
 _jwks_client = None
 _algorithms = ["RS256"]
 
@@ -109,6 +135,13 @@ async def verify_clerk_jwt(request: Request) -> dict:
     # is_trusted_local_request.
     if is_trusted_local_request(request):
         return {"sub": "localhost", "local": True}
+
+    # Demo frontend (Vercel) -> demo VM FastAPI over the public proxy. The
+    # frontend has already authenticated the Clerk user and applied the demo
+    # gate; it presents the shared RADON_SERVICE_TOKEN instead of a per-user
+    # JWT. Inert on prod, where RADON_SERVICE_TOKEN is unset.
+    if is_trusted_service_request(request):
+        return {"sub": "demo-frontend", "service": True}
 
     import jwt as pyjwt
 
