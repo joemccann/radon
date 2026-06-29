@@ -6,7 +6,7 @@ A public, Clerk-gated demo of Radon that real users can self-serve try for **max
 
 | # | Decision | Choice |
 |---|---|---|
-| 1 | Clerk | **Same instance**, demo users gated by `publicMetadata.demoRole='trial'` |
+| 1 | Clerk | **Same instance**, demo users gated by `publicMetadata.demoRole='trial'`. MFA is required on this instance, so demo users will be prompted to enroll in a second factor at sign-in (UX consideration — see Risks). |
 | 2 | Host | **New Hetzner VM** (hard physical isolation from prod) |
 | 3 | Demo data | **Separate Turso DB** (`radon-demo-*`) |
 | 4 | Rate limiting | **Upstash** Redis + `@upstash/ratelimit` |
@@ -73,7 +73,7 @@ The demo reads the vars below. They live in **two places**: `web/.env` (local de
 - **Turso** — `radon-demo-*` DB + read-mostly auth token.
 - **Upstash** — Redis instance + token.
 - **AI keys** — demo-scoped Anthropic/Cerebras/Exa keys with hard caps.
-- **Clerk** — enable email-verify; configure the `user.created` webhook endpoint; confirm same-instance `demoRole` metadata.
+- **Clerk** — enable email-verify; configure the `user.created` webhook endpoint; confirm same-instance `demoRole` metadata. Note: MFA is now required on this Clerk instance for all users (enabled in the dashboard on the production instance). Demo users sign up through the same instance and must enroll in a second factor before completing sign-in — this adds friction to the "frictionless" demo promise and is an operator product decision (accept it, scope MFA to the operator account only, or move demo.radon.run to a separate instance).
 
 **Code (I build, in-repo, testable ahead of infra):**
 0. ✅ Isolation skeleton + the **CI isolation guard** (reject demo deploy with prod Turso / reachable IB).
