@@ -26,19 +26,17 @@ positives. No SQLi, no command injection, no committed/hardcoded secrets.
 - [x] **CI**: `permissions: contents: read` + `appleboy/ssh-action` pinned to v1.2.5 SHA.
 - [x] **Caddyfile (in-repo)**: HSTS added.
 
-## Deferred — operator action required (need env-specific verification)
-- [ ] **next 16.1.6 → >=16.2.6** — advisory HIGH but NOT exploitable here (api matcher always
-      runs; pages are thin shells). Needs `bun run build` on `--experimental-build-mode=compile`
-      + perimeter-smoke before deploy. `cd web && bun add next@latest`.
-- [ ] **@clerk/nextjs 7.0.7 → >=7.5.9** — advisory CRITICAL but NOT exploitable (default-deny
-      pattern is the safe one per the advisory). `cd web && bun add @clerk/nextjs@latest`; verify build.
-- [ ] **Relay loopback bind on VPS** — set `WS_BIND_HOST=127.0.0.1` in radon-cloud relay env.
-- [ ] **Sync HSTS + headers to live VPS Caddy** (radon-cloud repo — not this tree).
-- [ ] **CSP Report-Only → enforced** — needs ThemeBootstrap inline-script nonce first.
-- [ ] **Edge rate-limiting** on public `/api/share/pnl` + `*/share` generators.
-- [ ] **Pin remaining Actions to SHA** (`oven-sh/setup-bun@v2`, `actions/*`); pin `requirements.txt`.
+## Deferred — ALL CLOSED by 2026-06-29 (see `tasks/security-audit-2026-06-29.md`)
+- [x] **next 16.1.6 → >=16.2.6** — bumped to 16.2.9 (commit 72cb6230); CI green incl. build.
+- [x] **@clerk/nextjs 7.0.7 → >=7.5.9** — bumped; fixed `baseTheme`→`theme` rename.
+- [x] **Relay loopback bind on VPS** — `WS_BIND_HOST=127.0.0.1` in radon-cloud relay env.
+- [x] **Sync HSTS + headers to live VPS Caddy** — app + media blocks (radon-cloud 779405e, ac106e6).
+- [x] **CSP Report-Only → enforced** — per-request nonce; ThemeBootstrap nonce'd. (9133edf7)
+- [x] **Edge rate-limiting** on public `/api/share/pnl` + `*/share` generators. (9133edf7)
+- [x] **Pin remaining Actions to SHA** + `requirements.txt` (to VPS versions). (9133edf7)
 - [ ] **Pre-existing flaky web vitest** (~17 order-dependent failures; pass in isolation) — not
-      security, but erodes CI signal. Isolate shared WS/DB state.
+      security, but erodes CI signal. CI already excludes the worst offenders
+      (`data-reader`, `kelly`, `runner`); full shared-state isolation still open.
 
 ## Durable invariants (do not regress)
 1. The WS relay must NOT trust `socket.remoteAddress` alone — Caddy makes every public client

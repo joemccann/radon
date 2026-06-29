@@ -41,10 +41,58 @@ code{background:#0c131a;padding:1px 5px;border-radius:3px;font-size:12px;color:#
   <div class="card"><div class="n">26</div><div class="l">confirmed real</div></div>
   <div class="card"><div class="n">0</div><div class="l">exploitable</div></div>
   <div class="card"><div class="n">34</div><div class="l">false positives</div></div>
-  <div class="card"><div class="n">0</div><div class="l">fixes shipped</div></div>
+  <div class="card"><div class="n">8</div><div class="l">fixes shipped</div></div>
 </div>
 <div class="legend">Confirmed by revised severity: low: 2, info: 24.</div>
-
+<h2>Fixes Implemented &amp; Verified</h2><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#3a7ca5">LOW</span> <span class="fixid">LP-1</span> <span class="fixtitle">CSP Report-Only → ENFORCED (per-request nonce)</span></div>
+  <div class="fixrow"><b>Finding:</b> CSP shipped Report-Only with &#x27;unsafe-inline&#x27;/&#x27;unsafe-eval&#x27; in script-src.</div>
+  <div class="fixrow"><b>Fix:</b> Middleware-owned per-request nonce; script-src drops unsafe-inline/unsafe-eval; Clerk admitted by host allowlist (NOT strict-dynamic, which blocks Clerk&#x27;s unnonced loader) + worker-src &#x27;self&#x27; blob:. next.config emits no CSP.</div>
+  <div class="fixrow"><b>Files:</b> <code>web/middleware.ts, web/next.config.mjs, web/components/ThemeBootstrap.tsx</code></div>
+  <div class="fixrow ok"><b>Verification:</b> csp-nonce.test.ts (8); prod-build browser check: Clerk loads, 0 CSP violations; live header on app.radon.run.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#3a7ca5">LOW</span> <span class="fixid">LP-2</span> <span class="fixtitle">Rate-limit public unauthenticated routes</span></div>
+  <div class="fixrow"><b>Finding:</b> 5 share-card POST generators + GET /api/share/pnl had no abuse throttle.</div>
+  <div class="fixrow"><b>Fix:</b> Per-IP in-memory fixed-window limiter (30/60s share, 60/60s OG image); Caddy/CDN is the durable layer.</div>
+  <div class="fixrow"><b>Files:</b> <code>web/lib/rateLimit.ts, web/app/api/*/share/route.ts, web/app/api/share/pnl/route.tsx</code></div>
+  <div class="fixrow ok"><b>Verification:</b> rate-limit.test.ts (11); share smoke 51/0.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#3a7ca5">LOW</span> <span class="fixid">LP-3</span> <span class="fixtitle">SHA-pin GitHub Actions + verify gitleaks binary</span></div>
+  <div class="fixrow"><b>Finding:</b> Third-party Actions on mutable tags; gitleaks binary downloaded without checksum.</div>
+  <div class="fixrow"><b>Fix:</b> checkout/setup-bun/setup-python pinned to commit SHAs; gitleaks tarball SHA256-verified before extraction.</div>
+  <div class="fixrow"><b>Files:</b> <code>.github/workflows/ci.yml, .github/workflows/external-health-probe.yml</code></div>
+  <div class="fixrow ok"><b>Verification:</b> CI green executing the pinned SHAs + checksum step.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#5a6570">INFO</span> <span class="fixid">LP-4</span> <span class="fixtitle">Pin requirements.txt to VPS versions</span></div>
+  <div class="fixrow"><b>Finding:</b> Python deps used &gt;= floors; deploy.sh pip-installs them.</div>
+  <div class="fixrow"><b>Fix:</b> Pinned to the VPS&#x27;s running versions so the deploy install is a no-op (no surprise cryptography 46→48 / scipy downgrade).</div>
+  <div class="fixrow"><b>Files:</b> <code>requirements.txt</code></div>
+  <div class="fixrow ok"><b>Verification:</b> CI pytest green on the pinned set; deploy succeeded.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#5a6570">INFO</span> <span class="fixid">LP-5</span> <span class="fixtitle">HSTS on media.radon.run</span></div>
+  <div class="fixrow"><b>Finding:</b> media vhost lacked Strict-Transport-Security.</div>
+  <div class="fixrow"><b>Fix:</b> Added HSTS to the live Caddy media block (radon-cloud) and the in-repo reference Caddyfile.</div>
+  <div class="fixrow"><b>Files:</b> <code>docker/caddy/Caddyfile</code></div>
+  <div class="fixrow ok"><b>Verification:</b> Live header confirmed on media.radon.run.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#3a7ca5">LOW</span> <span class="fixid">RA-1</span> <span class="fixtitle">Admin ops routes fail CLOSED</span></div>
+  <div class="fixrow"><b>Finding:</b> stack/ib restart + service-control routes inherited middleware isAuthorizedUser fail-open (true when ALLOWED_USER_IDS unset).</div>
+  <div class="fixrow"><b>Fix:</b> Each route now calls requireDemoAdmin() and 403s when the allowlist is empty; never reaches the FastAPI proxy.</div>
+  <div class="fixrow"><b>Files:</b> <code>web/app/api/admin/stack/restart/route.ts, web/app/api/admin/ib/restart/route.ts, web/app/api/admin/ib/reset-backoff/route.ts, web/app/api/admin/services/[unit]/[action]/route.ts</code></div>
+  <div class="fixrow ok"><b>Verification:</b> api-routes-smoke-admin.test.ts fail-closed block (4) + 13 existing.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#3a7ca5">LOW</span> <span class="fixid">RA-2</span> <span class="fixtitle">CORS explicit origin allowlist</span></div>
+  <div class="fixrow"><b>Finding:</b> FastAPI CORS used a https://.*.radon.run wildcard regex — a subdomain takeover would pass CORS.</div>
+  <div class="fixrow"><b>Fix:</b> Explicit allow_origins list (app/demo.radon.run + localhost; RADON_CORS_EXTRA_ORIGINS extends); allow_credentials stays False.</div>
+  <div class="fixrow"><b>Files:</b> <code>scripts/api/server.py</code></div>
+  <div class="fixrow ok"><b>Verification:</b> test_cors_allowlist.py (3); live: app.radon.run gets ACAO, evil.radon.run does not.</div>
+</div><div class="fix">
+  <div class="fixhdr"><span class="sevtag" style="background:#5a6570">INFO</span> <span class="fixid">RA-3</span> <span class="fixtitle">Order placement idempotency</span></div>
+  <div class="fixrow"><b>Finding:</b> /api/orders/place had no dedup — a double-click/retry could double a real-money position.</div>
+  <div class="fixrow"><b>Fix:</b> Next-route in-flight + short-TTL content-hash dedup (or explicit client idempotencyKey); deduped responses flagged; IB rejection clears the key.</div>
+  <div class="fixrow"><b>Files:</b> <code>web/lib/orders/orderIdempotency.ts, web/app/api/orders/place/route.ts, web/lib/placeOrderBodySchema.ts</code></div>
+  <div class="fixrow ok"><b>Verification:</b> order-idempotency.test.ts + route test (13); 138 existing order tests pass.</div>
+</div>
 <h2>Confirmed Findings (26)</h2>
 <p class="sub">Sorted by verifier-revised severity, exploitable first. "EXPLOITABLE" = a concrete production attack path was established; "defense-in-depth" = real weakness, no concrete exploit.</p>
 <table><thead><tr><th>#</th><th>Severity</th><th>Finding</th><th>Location</th><th>Detail &amp; verifier verdict</th></tr></thead><tbody><tr class="sev-low">
