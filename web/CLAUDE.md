@@ -218,7 +218,8 @@ cushion = excess_liquidity / net_liquidation
 
 - **Middleware** at `web/middleware.ts` enforces Clerk JWT. Localhost auto-bypass when `NODE_ENV !== "production"`. `RADON_AUTHLESS_TEST=1` for Playwright.
 - **WebSocket auth** via `scripts/api/ws_ticket.py` (30s TTL).
-- **Auth-exempt at FastAPI** (also reachable from Next.js): `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`, all `*/share` routes.
+- **Auth-exempt at FastAPI** (also reachable from Next.js): `/health`, `/ws-ticket/validate`, `/demo/trial-expiry`, all `*/share` routes. (`/docs` + `/openapi.json` are trusted-local only since the 2026-06-28 audit — public callers get 401.)
+- **Public `*/share/content` routes serve ONLY `tweet-<type>-<date>[-card-N].html` from directly inside `reports/`** (validator `web/lib/shareReportPath.ts`). They are unauthenticated (link-preview exemption) and used to serve any file under `reports/`, leaking portfolio/eval reports. Never widen to arbitrary paths.
 - The middleware runs in Edge runtime — no `node:*` imports. Vitest passes in Node and won't catch it. See `feedback_middleware_edge_runtime.md` for the regression that pulled `node:crypto` in and crashed production with "Native module not found".
 
 ---

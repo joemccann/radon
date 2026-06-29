@@ -385,8 +385,11 @@ app.add_middleware(
 AUTH_EXEMPT_PATHS = {
     "/health",
     "/ws-ticket/validate",
-    "/docs",
-    "/openapi.json",
+    # NOTE: /docs + /openapi.json are deliberately NOT exempt. They remain
+    # reachable from loopback/tailnet via the trusted-local bypass below (open
+    # Swagger over an SSH tunnel), but a public caller through the Caddy
+    # `handle_path /api/ib/*` mount now gets 401 instead of a full map of the
+    # admin/exec/order endpoint surface (CWE-200 recon hardening).
     # Pure market-calendar math for the demo signup webhook (demo.radon.run).
     # Carries no secrets and no account data; the Next.js webhook calls it
     # server-to-server with no user JWT, so it cannot depend on Clerk auth.

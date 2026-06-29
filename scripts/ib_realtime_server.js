@@ -43,6 +43,7 @@ import {
   STALE_CHECK_INTERVAL_MS,
 } from "./lib/staleDataMachine.js";
 import { isMarketOpen } from "./lib/marketCalendar.js";
+import { shouldSkipTicketValidation } from "./lib/wsTrust.js";
 
 const DEFAULT_WS_PORT = 8765;
 const DEFAULT_IB_HOST = process.env.IB_GATEWAY_HOST || "127.0.0.1";
@@ -204,7 +205,11 @@ function parseActionMessage(raw) {
 }
 
 const cli = parseArgs(process.argv.slice(2));
-const WS_HOST = "0.0.0.0";
+// Bind host. Defaults to 0.0.0.0 for backward compatibility (laptop cloud-thin
+// dev may connect to the relay directly over Tailscale). On the production VPS,
+// where Caddy is the only legitimate entry point, set WS_BIND_HOST=127.0.0.1 so
+// port 8765 is never directly reachable even if the firewall is misconfigured.
+const WS_HOST = process.env.WS_BIND_HOST || "0.0.0.0";
 const wsUrl = `ws://${WS_HOST}:${cli.port}`;
 
 function verbose(...args) {
@@ -294,12 +299,19 @@ const httpServer = http.createServer((_req, res) => {
 const wss = new WebSocketServer({ noServer: true });
 
 httpServer.on("upgrade", async (req, socket, head) => {
-  // Skip ticket validation if Clerk is not configured (local dev)
-  // or if the connection is from localhost (server-to-server / local browser)
+  // Skip ticket validation ONLY for local dev (no Clerk) or genuine loopback
+  // server-to-server calls that did NOT arrive through Caddy. Trusting the peer
+  // address alone was a full auth bypass: Caddy reverse-proxies /ws* to
+  // localhost:8765, so every internet client appears as 127.0.0.1. The
+  // forwarding-header check (mirrors scripts/api/auth.py:is_trusted_local_request)
+  // forces every proxied/public connection through ticket validation.
   const remoteAddr = socket.remoteAddress || "";
-  const isLocalhost = !process.env.CLERK_JWKS_URL ||
-    remoteAddr === "127.0.0.1" || remoteAddr === "::1" || remoteAddr === "::ffff:127.0.0.1";
-  if (isLocalhost) {
+  const skipTicket = shouldSkipTicketValidation({
+    clerkConfigured: Boolean(process.env.CLERK_JWKS_URL),
+    remoteAddr,
+    headers: req.headers,
+  });
+  if (skipTicket) {
     wss.handleUpgrade(req, socket, head, (ws) => {
       wss.emit("connection", ws, req);
     });

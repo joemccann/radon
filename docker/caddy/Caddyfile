@@ -2,6 +2,9 @@
     encode zstd gzip
 
     header {
+        # Caddy serves HTTPS-only (auto Let's Encrypt), so pin HTTPS for a year
+        # to close the SSL-stripping window on the first/return visit.
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
         X-Content-Type-Options nosniff
         X-Frame-Options DENY
         Referrer-Policy strict-origin-when-cross-origin

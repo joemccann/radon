@@ -59,6 +59,16 @@ export async function GET(request: Request): Promise<Response> {
 
   const symbolUpper = symbol.toUpperCase();
 
+  // Defense-in-depth: the symbol is interpolated into a disk cache filename
+  // (futures_chain_<SYMBOL>.json) on the fallback path, so reject anything that
+  // isn't a plain futures root before it can traverse.
+  if (!/^[A-Z0-9.]{1,10}$/.test(symbolUpper)) {
+    return setNoStoreResponseHeaders(
+      NextResponse.json({ error: "invalid symbol", code: "BAD_REQUEST" }, { status: 400 }),
+      requestId,
+    );
+  }
+
   try {
     const data = await radonFetch<Record<string, unknown>>(
       `/futures/chain?symbol=${encodeURIComponent(symbolUpper)}`,

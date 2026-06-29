@@ -7,17 +7,28 @@ const __dirname = resolve(fileURLToPath(import.meta.url), "..");
 const webDir = resolve(__dirname, "..");
 const projectRoot = resolve(webDir, "..");
 const source = readFileSync(resolve(projectRoot, "scripts", "ib_realtime_server.js"), "utf8");
+const wsTrust = readFileSync(resolve(projectRoot, "scripts", "lib", "wsTrust.js"), "utf8");
 
-describe("ib_realtime_server.js localhost auth bypass", () => {
-  it("skips ticket validation for localhost connections", () => {
-    // The upgrade handler must bypass auth for localhost remoteAddress
-    expect(source).toContain('remoteAddr === "127.0.0.1"');
-    expect(source).toContain('remoteAddr === "::1"');
-    expect(source).toContain('remoteAddr === "::ffff:127.0.0.1"');
+describe("ib_realtime_server.js WebSocket auth", () => {
+  it("delegates the upgrade trust decision to the shared wsTrust helper", () => {
+    // Hardened 2026-06-28: the relay no longer trusts socket.remoteAddress
+    // alone. Caddy reverse-proxies /ws* to localhost:8765, so every internet
+    // client appeared as 127.0.0.1 and ticket auth was silently skipped for all
+    // production traffic. The gate now lives in scripts/lib/wsTrust.js.
+    expect(source).toContain("shouldSkipTicketValidation");
+    expect(source).toContain("./lib/wsTrust.js");
   });
 
-  it("still validates tickets for non-localhost when CLERK_JWKS_URL is set", () => {
-    // Ticket validation block must exist after the localhost bypass
+  it("wsTrust requires a ticket for proxied (X-Forwarded-*) connections", () => {
+    // The loopback bypass must be denied when forwarding headers are present.
+    expect(wsTrust).toContain("x-forwarded-for");
+    expect(wsTrust).toContain('"127.0.0.1"');
+    expect(wsTrust).toContain('"::1"');
+    expect(wsTrust).toContain('"::ffff:127.0.0.1"');
+    expect(wsTrust).toContain("arrivedViaProxy");
+  });
+
+  it("still validates tickets for non-trusted connections when CLERK_JWKS_URL is set", () => {
     expect(source).toContain('const ticket = url.searchParams.get("ticket")');
     expect(source).toContain("TICKET_VALIDATE_URL");
     expect(source).toContain("401 Unauthorized");

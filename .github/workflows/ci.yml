@@ -9,6 +9,12 @@ on:
   push:
     branches: [main]
 
+# Least privilege: this workflow only runs tests and deploys over SSH (the SSH
+# key is a secret, not the GITHUB_TOKEN). No job needs to write to the repo, so
+# default the GITHUB_TOKEN to read-only. Grant write per-job if ever needed.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref so a rapid push doesn't deploy twice.
 concurrency:
   group: ci-${{ github.ref }}
@@ -242,7 +248,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1
+        # Pinned to the v1.2.5 commit SHA (was the mutable `@v1` tag). This step
+        # receives the VPS SSH key + deploy secrets, so a hijacked tag would be a
+        # supply-chain RCE on the production host. Bump deliberately.
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1.2.5
         with:
           host: ${{ secrets.VPS_HOST }}
           username: radon
