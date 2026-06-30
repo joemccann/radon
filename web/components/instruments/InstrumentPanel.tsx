@@ -1,6 +1,6 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /**
  * InstrumentPanel — the production-grade primitive every hero / signal-summary
@@ -50,8 +50,13 @@ export type InstrumentPanelProps = {
   metricLabel: string;
   /** Meta-rail rows along the bottom. Convention: lowercased.dotted keys. */
   meta: InstrumentPanelMetaRow[];
-  /** Color of the 2px left edge trace. Defaults to "core". */
+  /** Color of the left edge gauge / trace. Defaults to "core". */
   trace?: PanelTone;
+  /**
+   * 0–100 gauge fill — the metric's normalized magnitude. Fills the calibrated
+   * edge gutter and shows the cap marker. Omit for a resting (unfilled) gutter.
+   */
+  level?: number;
   /** Force the metric to a muted "awaiting feed" rendering. */
   awaiting?: boolean;
 };
@@ -68,12 +73,20 @@ export function InstrumentPanel({
   metricLabel,
   meta,
   trace = "core",
+  level,
   awaiting = false,
 }: InstrumentPanelProps) {
+  const hasLevel = typeof level === "number";
+  const clamped = hasLevel ? Math.max(0, Math.min(100, level)) : 0;
   return (
     <section className="instrument-panel">
       <span
         className={`panel-edge-trace ${toneClass("panel-edge-trace", trace)}`}
+        style={
+          hasLevel
+            ? ({ ["--edge-level"]: `${clamped}%` } as CSSProperties)
+            : undefined
+        }
         aria-hidden
       />
       <header className="instrument-panel__header">
