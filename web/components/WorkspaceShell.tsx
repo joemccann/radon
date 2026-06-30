@@ -317,6 +317,9 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
 
   const prevIbConnectedRef = useRef<boolean | null>(null);
   useEffect(() => {
+    // Demo deployment has no IB uplink by design — don't surface the alarming
+    // "uplink lost" / "uplink restored" toasts that the missing relay triggers.
+    if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") return;
     if (prevIbConnectedRef.current !== null && prevIbConnectedRef.current !== ibConnected) {
       if (ibConnected) {
         addToast("success", "IB Gateway · uplink restored", 4000);
@@ -345,7 +348,11 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   }, [portfolio?.account_summary, addToast]);
   const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
   const error = isOrdersPage ? ordersError : portfolioError;
-  const liveDataError = portfolioError ?? ordersError ?? priceError;
+  // Demo deployment is seed-data only (no IB gateway, no realtime relay), so the
+  // connection-derived "Live data degraded" banner would always be on and read
+  // as broken. Suppress it in demo; production (flag unset) is unchanged.
+  const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
+  const liveDataError = isDemoMode ? null : (portfolioError ?? ordersError ?? priceError);
   const lastSync = isOrdersPage ? ordersLastSync : portfolioLastSync;
   const syncNow = isOrdersPage ? ordersSyncNow : portfolioSyncNow;
   const syncTarget = isOrdersPage ? "orders" : "portfolio";

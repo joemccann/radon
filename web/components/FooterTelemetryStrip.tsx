@@ -15,7 +15,7 @@ type FlexTokenStatus = {
   token_masked: string;
 };
 
-type ChipTone = "ok" | "warn" | "dead";
+type ChipTone = "ok" | "warn" | "dead" | "demo";
 
 function ibChipFor(status: IBDisplayStatus): { text: string; cls: ChipTone } {
   switch (status) {
@@ -31,6 +31,8 @@ function ibChipFor(status: IBDisplayStatus): { text: string; cls: ChipTone } {
       return { text: "Offline", cls: "dead" };
     case "relay_offline":
       return { text: "Relay offline", cls: "dead" };
+    case "demo":
+      return { text: "Sample data", cls: "demo" };
   }
 }
 

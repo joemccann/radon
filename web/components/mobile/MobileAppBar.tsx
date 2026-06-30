@@ -26,7 +26,7 @@ function monogramFor(name: string | null, email: string | null): string {
 
 function mobileStatusChip(status: IBDisplayStatus): {
   text: string;
-  cls: "live" | "warn" | "offline";
+  cls: "live" | "warn" | "offline" | "demo";
   aria: string;
 } {
   switch (status) {
@@ -36,6 +36,8 @@ function mobileStatusChip(status: IBDisplayStatus): {
       return { text: "2FA", cls: "warn", aria: "IB Gateway awaiting 2FA approval" };
     case "unhealthy":
       return { text: "DEG", cls: "warn", aria: "IB Gateway degraded" };
+    case "demo":
+      return { text: "DEMO", cls: "demo", aria: "Demo mode showing sample data" };
     case "unreachable":
     case "ib_offline":
     case "relay_offline":
