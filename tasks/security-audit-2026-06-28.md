@@ -34,9 +34,18 @@ positives. No SQLi, no command injection, no committed/hardcoded secrets.
 - [x] **CSP Report-Only → enforced** — per-request nonce; ThemeBootstrap nonce'd. (9133edf7)
 - [x] **Edge rate-limiting** on public `/api/share/pnl` + `*/share` generators. (9133edf7)
 - [x] **Pin remaining Actions to SHA** + `requirements.txt` (to VPS versions). (9133edf7)
-- [ ] **Pre-existing flaky web vitest** (~17 order-dependent failures; pass in isolation) — not
-      security, but erodes CI signal. CI already excludes the worst offenders
-      (`data-reader`, `kelly`, `runner`); full shared-state isolation still open.
+- [x] **"Flaky" web vitest** — RESOLVED 2026-06-30. Not genuine flakiness; three
+      deterministic causes masked by invocation: (1) an ambient shell
+      `NODE_ENV=development` overrode vitest's default `test`, flipping
+      `IBStatusContext`'s Clerk-bypass branch (`ib-status-context`/`ws-keepalive`
+      threw `useAuth must be within ClerkProvider`) → forced `env:{NODE_ENV:"test"}`
+      in `vitest.config.ts`; (2) `data-reader` wrote fixtures cwd-relative but read
+      via `resolveProjectRoot()`, so it 404'd from a non-root cwd → writes under
+      project root now (cwd-independent, un-excluded from CI); (3) the
+      `live-data-degraded-banner` source-grep broke on the demo refactor (the only
+      real CI-red) → assertion loosened to the fallback chain. Full suite green +
+      order-independent (`--sequence.shuffle`). `runner`/`kelly`/`integration` stay
+      excluded (they spawn `python3.13`, absent in the Bun-only CI job).
 
 ## Durable invariants (do not regress)
 1. The WS relay must NOT trust `socket.remoteAddress` alone — Caddy makes every public client

@@ -20,6 +20,14 @@ export default defineConfig({
       "web/tests/**/*.test.tsx",
     ],
     environment: "node",
+    // Pin NODE_ENV=test for every run. Vitest defaults to "test", but an ambient
+    // shell `NODE_ENV=development` (common in a dev session) leaks through and
+    // overrides it — silently flipping code paths that branch on NODE_ENV (e.g.
+    // IBStatusContext skips Clerk's useAuth only under "test", so a "development"
+    // shell makes ib-status-context/ws-keepalive throw "useAuth must be within
+    // ClerkProvider"). Forcing it makes the suite deterministic regardless of the
+    // developer's environment.
+    env: { NODE_ENV: "test" },
     // Global @testing-library cleanup so jsdom components (and their leaked
     // effects/timers/WebSocket handlers) can't bleed into the next test — the
     // cross-test leak that made `vitest --coverage` throw window-undefined.
