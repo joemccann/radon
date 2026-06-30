@@ -42,6 +42,12 @@ const CSP_ALLOW_UNSAFE_EVAL = false;
 const CLERK_HOSTS =
   "https://clerk.radon.run https://*.clerk.accounts.dev https://clerk.accounts.dev";
 
+// Cloudflare Turnstile CAPTCHA — Clerk loads its bot-protection challenge from
+// this origin as both an unnonced <script src> and a sandboxed <iframe>.
+// Must appear in script-src AND frame-src; connect-src / img-src / worker-src
+// are already open via their https: / wss: / blob: wildcards.
+const CAPTCHA_HOSTS = "https://challenges.cloudflare.com";
+
 export function generateNonce(): string {
   return btoa(crypto.randomUUID());
 }
@@ -51,6 +57,7 @@ export function buildCspWithNonce(nonce: string): string {
     "script-src 'self'",
     `'nonce-${nonce}'`,
     CLERK_HOSTS,
+    CAPTCHA_HOSTS,
     CSP_ALLOW_UNSAFE_EVAL ? "'unsafe-eval'" : "",
   ]
     .filter(Boolean)
@@ -65,7 +72,7 @@ export function buildCspWithNonce(nonce: string): string {
     // Clerk's clerk-js spawns a same-origin blob: Web Worker (bot/telemetry);
     // worker-src falls back to script-src, which would block it without this.
     "worker-src 'self' blob:",
-    `frame-src 'self' ${CLERK_HOSTS}`,
+    `frame-src 'self' ${CLERK_HOSTS} ${CAPTCHA_HOSTS}`,
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",

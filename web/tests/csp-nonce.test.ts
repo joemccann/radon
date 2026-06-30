@@ -37,9 +37,24 @@ describe("buildCspWithNonce — enforced, nonce'd, Clerk-host-allowlisted", () =
     // Clerk's loader is a static unnonced <script src> → admitted by host, NOT
     // strict-dynamic (which would block it). See middleware comment.
     expect(scriptSrc).toContain("https://*.clerk.accounts.dev");
+    // Clerk loads the Cloudflare Turnstile CAPTCHA as an unnonced <script src>
+    // from this origin during sign-up; it must be admitted by host.
+    expect(scriptSrc).toContain("https://challenges.cloudflare.com");
     expect(scriptSrc).not.toContain("'strict-dynamic'");
     expect(scriptSrc).not.toContain("'unsafe-inline'");
     expect(scriptSrc).not.toContain("'unsafe-eval'");
+  });
+
+  it("frame-src admits the Clerk hosts and the Turnstile CAPTCHA iframe", () => {
+    const csp = buildCspWithNonce("ABC123");
+    const frameSrc = csp
+      .split(";")
+      .map((d) => d.trim())
+      .find((d) => d.startsWith("frame-src"));
+
+    expect(frameSrc).toBeDefined();
+    expect(frameSrc).toContain("https://*.clerk.accounts.dev");
+    expect(frameSrc).toContain("https://challenges.cloudflare.com");
   });
 
   it("does NOT include 'unsafe-eval' by default", () => {
