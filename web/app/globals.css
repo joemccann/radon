@@ -916,7 +916,14 @@ body {
   letter-spacing: 0;
   color: var(--text-primary);
   text-transform: none;
-  flex-shrink: 0;
+  /* The page label is the shrink-absorber: under the now-wider live futures
+   *  strip the rail can be squeezed, and the integrity status (e.g. SAMPLE DATA)
+   *  must never clip. Let "Dashboard" ellipsis first; the status always wins. */
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex-shrink: 1;
 }
 
 .rail-sep {
@@ -1012,6 +1019,22 @@ body {
 
 .futures-chg {
   font-variant-numeric: tabular-nums;
+}
+
+/* "DELAYED" badge — shown when the strip is fed by the free Yahoo fallback
+ *  (~15 min delayed) instead of the live relay, so the prices never read as
+ *  real-time. Calm info treatment, ties to the demo's SAMPLE DATA semantics. */
+.futures-delayed {
+  flex-shrink: 0;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--info);
+  border: 1px solid color-mix(in srgb, var(--info) 35%, transparent);
+  border-radius: 3px;
+  padding: 1px 5px;
+  line-height: 1.5;
 }
 
 /* Priority-based header collapse. Order: keep page + integrity + futures ticker

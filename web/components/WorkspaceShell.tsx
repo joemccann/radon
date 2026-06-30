@@ -308,6 +308,12 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     });
   }, [globexOpen, prices]);
 
+  // The strip is "delayed" when every root is filled by the Yahoo fallback
+  // (always on the demo; relay-down in prod). A live relay quote => not delayed.
+  const futuresDelayed =
+    futuresQuotes.length > 0 &&
+    missingFuturesFallbackSymbols.length === HEADER_FUTURES.length;
+
   // Realized P&L derived from today's session fills (executed_orders), not IB account summary.
   // IB's reqPnL().realizedPnL can include non-trade events and diverges from fill-level data.
   const executedOrders = useMemo(() => orders?.executed_orders ?? [], [orders]);
@@ -458,7 +464,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           onToggleFullscreen={toggleFullscreen}
           onToggleTheme={toggleTheme}
           theme={resolvedTheme}
-          futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} /> : null}
+          futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} delayed={futuresDelayed} /> : null}
           onSearchUnavailable={handleSearchUnavailable}
           lastSync={lastSync}
         >
