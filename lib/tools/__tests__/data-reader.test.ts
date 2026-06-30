@@ -1,19 +1,24 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { Type } from "@sinclair/typebox";
 import { readDataFile } from "../data-reader";
+import { resolveProjectRoot } from "../runner";
 
+// readDataFile resolves paths against resolveProjectRoot(), so fixtures MUST be
+// written under that root — NOT a `process.cwd()`-relative path. When the suite
+// runs from a non-root cwd (e.g. `web/`) the two diverge and every read 404s.
 const TEST_DIR = "tmp/data-reader-tests";
+const ABS_TEST_DIR = join(resolveProjectRoot(), TEST_DIR);
 
 async function writeJsonFixture(name: string, data: unknown): Promise<string> {
-  await mkdir(TEST_DIR, { recursive: true });
-  const path = `${TEST_DIR}/${name}`;
-  await writeFile(path, JSON.stringify(data), "utf8");
-  return path;
+  await mkdir(ABS_TEST_DIR, { recursive: true });
+  await writeFile(join(ABS_TEST_DIR, name), JSON.stringify(data), "utf8");
+  return `${TEST_DIR}/${name}`; // root-relative path, as readDataFile expects
 }
 
 afterEach(async () => {
-  await rm(TEST_DIR, { recursive: true, force: true });
+  await rm(ABS_TEST_DIR, { recursive: true, force: true });
 });
 
 describe("readDataFile", () => {
@@ -70,11 +75,10 @@ describe("readDataFile", () => {
   });
 
   it("returns error for file with invalid JSON", async () => {
-    await mkdir(TEST_DIR, { recursive: true });
-    const path = `${TEST_DIR}/invalid-json.json`;
-    await writeFile(path, "{not-json", "utf8");
+    await mkdir(ABS_TEST_DIR, { recursive: true });
+    await writeFile(join(ABS_TEST_DIR, "invalid-json.json"), "{not-json", "utf8");
 
-    const result = await readDataFile(path);
+    const result = await readDataFile(`${TEST_DIR}/invalid-json.json`);
 
     expect(result.ok).toBe(false);
     if (!result.ok) {

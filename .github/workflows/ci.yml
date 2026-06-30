@@ -81,10 +81,15 @@ jobs:
       # config resolve from root node_modules; web/tests files resolve their
       # imports from web/node_modules.
       #
-      # Exclude the integration tests: these spawn `python3.13` and/or read
-      # gitignored data/*.json runtime caches, so they can't run in this
-      # Bun-only, data-less unit job (this mirrors pytest's `-m 'not
-      # integration'`). They still run locally where Python + data exist.
+      # Exclude only the integration tests that spawn `python3.13` (via
+      # runScript): integration.test.ts, kelly.test.ts (kelly wrapper →
+      # scripts/kelly.py), and runner.test.ts (runScript → scripts/*.py). The
+      # Bun-only job has no Python, so these ENOENT here; they run locally where
+      # Python exists (this mirrors pytest's `-m 'not integration'`).
+      # NOTE: data-reader.test.ts is NO LONGER excluded — it was failing only
+      # from a non-root cwd (fixtures written cwd-relative while readDataFile
+      # reads from resolveProjectRoot()); the test now writes under the project
+      # root, so it is cwd-independent and runs in CI.
       #
       # --coverage enforces the vitest.config.ts thresholds (lines/funcs/
       # branches) as a non-regressing ratchet — symmetric with the pytest
@@ -94,7 +99,6 @@ jobs:
           --exclude '**/web/tests/integration.test.ts'
           --exclude '**/lib/tools/__tests__/kelly.test.ts'
           --exclude '**/lib/tools/__tests__/runner.test.ts'
-          --exclude '**/lib/tools/__tests__/data-reader.test.ts'
 
   py-tests:
     name: pytest (unit, no integration)
