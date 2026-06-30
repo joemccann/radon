@@ -909,7 +909,12 @@ body {
   letter-spacing: 0.04em;
   color: var(--text-secondary);
   white-space: nowrap;
-  overflow: hidden;
+  /* overflow:visible (not hidden) is load-bearing: a flex item with
+   *  overflow!=visible gets an automatic minimum size of 0, which would let
+   *  this rail collapse past the integrity status and clip it. With visible,
+   *  the rail's flex floor is its min-content (full status); the .rail-section
+   *  label owns its own overflow:hidden+ellipsis, so nothing actually spills. */
+  overflow: visible;
 }
 
 .rail-section {
