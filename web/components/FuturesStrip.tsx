@@ -14,7 +14,15 @@ export type FuturesQuote = {
  * weekend/maintenance prices. Color + mono styling mirror the regime strip;
  * all colors come from brand tokens (no raw hex).
  */
-export default function FuturesStrip({ quotes }: { quotes: FuturesQuote[] }) {
+export default function FuturesStrip({
+  quotes,
+  delayed = false,
+}: {
+  quotes: FuturesQuote[];
+  /** Quotes are from the free Yahoo fallback (~15 min delayed), not the live
+   *  relay — surface a DELAYED badge so they never read as real-time. */
+  delayed?: boolean;
+}) {
   if (quotes.length === 0) return null;
 
   return (
@@ -40,6 +48,11 @@ export default function FuturesStrip({ quotes }: { quotes: FuturesQuote[] }) {
           </div>
         );
       })}
+      {delayed ? (
+        <span className="futures-delayed" title="Index futures delayed ~15 min">
+          Delayed
+        </span>
+      ) : null}
     </div>
   );
 }
