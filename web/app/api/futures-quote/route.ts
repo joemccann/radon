@@ -1,26 +1,26 @@
 import { NextResponse } from "next/server";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
-import { isIndexSymbol } from "@/lib/indexSymbols";
 import { fetchYahooChartQuote } from "@/lib/yahooQuote";
 import type { PriceData } from "@/lib/pricesProtocol";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-const YAHOO_INDEX_SYMBOLS: Record<string, string> = {
-  VIX: "^VIX",
-  VXN: "^VXN",
-  VVIX: "^VVIX",
-  SPX: "^GSPC",
-  NDX: "^NDX",
-  RUT: "^RUT",
-  DJX: "^DJI",
-  OEX: "^OEX",
-  XSP: "^XSP",
+/**
+ * Delayed-quote fallback for the ES/NQ/RTY header strip. Mirrors
+ * `/api/index-quote`: maps a Radon futures root to its Yahoo continuous-front
+ * symbol (`=F`) and returns the same PriceData shape. Used when the realtime
+ * relay is not streaming these roots (always on the isolated demo, and a
+ * relay-down fallback in prod).
+ */
+const YAHOO_FUTURES_SYMBOLS: Record<string, string> = {
+  ES: "ES=F",
+  NQ: "NQ=F",
+  RTY: "RTY=F",
 };
 
-async function fetchYahooIndexQuote(symbol: string): Promise<PriceData | null> {
-  const yahooSymbol = YAHOO_INDEX_SYMBOLS[symbol];
+async function fetchYahooFuturesQuote(symbol: string): Promise<PriceData | null> {
+  const yahooSymbol = YAHOO_FUTURES_SYMBOLS[symbol];
   if (!yahooSymbol) return null;
   return fetchYahooChartQuote(symbol, yahooSymbol);
 }
@@ -39,9 +39,9 @@ export async function GET(request: Request): Promise<Response> {
     });
   }
 
-  if (!isIndexSymbol(symbol)) {
+  if (!(symbol in YAHOO_FUTURES_SYMBOLS)) {
     return jsonApiError({
-      message: "symbol is not a supported index",
+      message: "symbol is not a supported index future",
       status: 400,
       code: "BAD_REQUEST",
       requestId,
@@ -49,7 +49,7 @@ export async function GET(request: Request): Promise<Response> {
   }
 
   try {
-    const price = await fetchYahooIndexQuote(symbol);
+    const price = await fetchYahooFuturesQuote(symbol);
     const response = NextResponse.json({
       price,
       source: price ? "yahoo" : "none",
@@ -57,7 +57,7 @@ export async function GET(request: Request): Promise<Response> {
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {
     return jsonApiError({
-      message: "index quote fallback failed",
+      message: "futures quote fallback failed",
       status: 502,
       code: "UPSTREAM_ERROR",
       detail: error instanceof Error ? error.message : String(error),
