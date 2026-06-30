@@ -1232,7 +1232,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
   border-radius: 4px;
-  padding: 18px 20px 18px;
+  padding: 18px 20px 18px 30px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -2126,21 +2126,66 @@ body {
      .panel-meta-rail   — bottom telemetry rail (engine / basis / confidence)
    The classes are independent so panels can adopt them piecemeal.
    ─────────────────────────────────────────────────────────── */
+/* Calibrated gauge gutter — the global edge marker (brand-identity § 4).
+   Upgrades the former 2px signal stripe into an inset, tick-calibrated
+   instrument channel. Every .panel-edge-trace in the app inherits this with
+   no markup change.
+     • Resting (no --edge-level): ticks + faint tone wash + zero-baseline mark.
+     • Metered: a panel sets `--edge-level: <pct>%` inline and the accent fills
+       to that height, capped by a bright marker.
+   Tone modifiers set the accent color. Uses only existing tokens + color-mix. */
 .panel-edge-trace {
   position: absolute;
   left: 0;
   top: 0;
   bottom: 0;
-  width: 2px;
-  background: linear-gradient(180deg, var(--signal-core), transparent 80%);
+  width: 14px;
   pointer-events: none;
   z-index: 1;
+  background-color: var(--bg-canvas);
+  border-right: 1px solid var(--line-grid);
+  /* fine ticks every 8px (full width) + major ticks every 32px (outer 5px) */
+  background-image:
+    repeating-linear-gradient(to top, transparent 0 7px,
+      color-mix(in srgb, var(--text-muted) 55%, transparent) 7px 8px),
+    repeating-linear-gradient(to top, transparent 0 31px,
+      color-mix(in srgb, var(--text-muted) 80%, transparent) 31px 32px);
+  background-repeat: no-repeat;
+  background-size: 100% 100%, 5px 100%;
+  background-position: left, left;
+  --edge-acc: var(--signal-core);
 }
 
-.panel-edge-trace-warn { background: linear-gradient(180deg, var(--warn), transparent 80%); }
-.panel-edge-trace-fault { background: linear-gradient(180deg, var(--fault), transparent 80%); }
-.panel-edge-trace-dislocation { background: linear-gradient(180deg, var(--dislocation), transparent 80%); }
-.panel-edge-trace-extreme { background: linear-gradient(180deg, var(--extreme), transparent 80%); }
+.panel-edge-trace-warn        { --edge-acc: var(--warn); }
+.panel-edge-trace-fault       { --edge-acc: var(--fault); }
+.panel-edge-trace-dislocation { --edge-acc: var(--dislocation); }
+.panel-edge-trace-extreme     { --edge-acc: var(--extreme); }
+.panel-edge-trace-neutral     { --edge-acc: var(--neutral); }
+
+/* faint full-height tone wash so resting gutters still carry the panel's tone */
+.panel-edge-trace::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(to top,
+    color-mix(in srgb, var(--edge-acc) 16%, transparent), transparent 72%);
+}
+
+/* measured accent fill from the baseline to --edge-level; the top border is the
+   bright cap marker. With no --edge-level the height is 0, leaving just the 2px
+   zero-baseline mark at the foot. */
+.panel-edge-trace::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--edge-level, 0%);
+  background: linear-gradient(to top, var(--edge-acc),
+    color-mix(in srgb, var(--edge-acc) 35%, transparent));
+  border-top: 2px solid var(--edge-acc);
+  box-shadow: 0 0 6px var(--edge-acc);
+}
 
 .panel-eyebrow {
   font-family: var(--font-mono);
@@ -2205,7 +2250,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
   border-radius: 4px;
-  padding: 20px 22px 18px;
+  padding: 20px 22px 18px 30px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
