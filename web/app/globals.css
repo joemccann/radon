@@ -897,9 +897,12 @@ body {
   display: flex;
   align-items: center;
   gap: 14px;
-  min-width: 0;
-  /* Size to content (can shrink + clip); the futures strip + actions claim the
-   *  rest. The SAMPLE/FEED meta pairs drop on narrower viewports (below). */
+  /* No min-width:0 here on purpose: this rail is a flex ITEM of the header, and
+   *  min-width:0 would let it shrink BELOW its content, clipping the integrity
+   *  status (flex-shrink:0) off the right edge. Without it the rail floors at
+   *  min-content, so the status is always fully visible; the page label
+   *  (.rail-section, min-width:0) is the only thing that ellipsis-truncates when
+   *  space is tight. The SAMPLE/FEED meta pairs still drop on narrow viewports. */
   flex: 0 1 auto;
   font-family: var(--font-mono);
   font-size: 11px;
