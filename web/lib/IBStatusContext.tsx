@@ -40,7 +40,11 @@ export type IBDisplayStatus =
   | "unhealthy"
   | "unreachable"
   | "ib_offline"
-  | "relay_offline";
+  | "relay_offline"
+  /** Seed-data demo deployment (NEXT_PUBLIC_RADON_DEMO=1): no IB gateway, no
+   *  realtime relay by design. Renders a calm "DEMO / SAMPLE DATA" indicator
+   *  instead of the alarming offline treatment. */
+  | "demo";
 
 export type IBStatusState = {
   /** WebSocket to our realtime server is open */
@@ -168,6 +172,29 @@ export function parseIbHealth(
 /* ─── Provider ────────────────────────────────────────── */
 
 export function IBStatusProvider({ children }: { children: ReactNode }) {
+  // Demo deployment is seed-data only — there is no IB gateway and no realtime
+  // relay by design. Short-circuit with a static neutral "demo" context so we
+  // never open the WS or poll /health (which 404s on /edge-health/status) and
+  // every status surface reads as a calm "DEMO / SAMPLE DATA" indicator instead
+  // of a red "RELAY OFFLINE". Production (flag unset) keeps the live providers.
+  if (process.env.NEXT_PUBLIC_RADON_DEMO === "1") {
+    return (
+      <IBStatusContext.Provider
+        value={{
+          wsConnected: false,
+          ibConnected: false,
+          disconnectedSince: null,
+          connectionState: "connected",
+          authState: null,
+          serviceState: null,
+          upstreamDead: null,
+          displayStatus: "demo",
+        }}
+      >
+        {children}
+      </IBStatusContext.Provider>
+    );
+  }
   if (
     process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
     process.env.RADON_AUTHLESS_TEST === "1"

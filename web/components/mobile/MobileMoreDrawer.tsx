@@ -87,6 +87,7 @@ function MobileMoreDrawerView({
 }) {
   const { theme, toggleTheme } = useTheme();
   const { displayStatus } = useIBStatusContext();
+  const isDemo = displayStatus === "demo";
   const feedConnected = displayStatus !== "relay_offline" && displayStatus !== "unreachable";
   const syncTime = lastSync ? new Date(lastSync).toLocaleTimeString() : "—";
 
@@ -148,9 +149,13 @@ function MobileMoreDrawerView({
         <div className="mobile-drawer__footer">
           <div className="mobile-drawer__status">
             <span>IB Gateway</span>
-            <span className={`mobile-drawer__status-pill ${ibConnected ? "mobile-drawer__status-pill--live" : "mobile-drawer__status-pill--offline"}`}>
-              {ibConnected ? "CONNECTED" : "OFFLINE"}
-            </span>
+            {isDemo ? (
+              <span className="mobile-drawer__status-pill mobile-drawer__status-pill--demo">DEMO</span>
+            ) : (
+              <span className={`mobile-drawer__status-pill ${ibConnected ? "mobile-drawer__status-pill--live" : "mobile-drawer__status-pill--offline"}`}>
+                {ibConnected ? "CONNECTED" : "OFFLINE"}
+              </span>
+            )}
           </div>
           <div className="mobile-drawer__status">
             <span>Last sync</span>
@@ -158,9 +163,13 @@ function MobileMoreDrawerView({
           </div>
           <div className="mobile-drawer__status">
             <span>Data feed</span>
-            <span className={`mobile-drawer__status-pill ${feedConnected ? "mobile-drawer__status-pill--live" : "mobile-drawer__status-pill--offline"}`}>
-              {feedConnected ? "LIVE" : "OFFLINE"}
-            </span>
+            {isDemo ? (
+              <span className="mobile-drawer__status-pill mobile-drawer__status-pill--demo">SAMPLE DATA</span>
+            ) : (
+              <span className={`mobile-drawer__status-pill ${feedConnected ? "mobile-drawer__status-pill--live" : "mobile-drawer__status-pill--offline"}`}>
+                {feedConnected ? "LIVE" : "OFFLINE"}
+              </span>
+            )}
           </div>
           {BUILD_VERSION ? (
             <div className="mobile-drawer__status">
