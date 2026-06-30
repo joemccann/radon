@@ -35,6 +35,7 @@ export function CriCompositeCard({ data }: { data: CriData | null }) {
       title="CRI Composite"
       badge={cri ? { text: cri.level, tone } : undefined}
       trace={tone}
+      level={cri ? cri.score : undefined}
       metric={cri ? cri.score.toFixed(1) : "—"}
       metricLabel="Composite stress"
       awaiting={!cri}
@@ -103,12 +104,16 @@ export function VolDislocationCard({ data }: { data: VcgData | null }) {
   const ratio = data && data.signal.vix > 0
     ? data.signal.vvix / data.signal.vix
     : null;
+  const sigma = signal?.residual ?? signal?.vcg_adj ?? null;
+  const level = sigma != null && Number.isFinite(sigma)
+    ? Math.min(100, (Math.abs(sigma) / 3) * 100) : undefined;
   return (
     <InstrumentPanel
       eyebrow="Surface State / 02"
       title="Vol-Credit Gap"
       badge={signal ? { text: vcgBadgeLabel(signal.interpretation), tone } : undefined}
       trace={tone}
+      level={level}
       metric={formatZ(signal?.residual ?? signal?.vcg_adj ?? null)}
       metricLabel="20-session baseline deviation"
       awaiting={!signal}
@@ -160,6 +165,9 @@ export function MarkovStateCard({ state }: { state: MarkovStateOutput }) {
   const arrow = state.currentBand && state.nextLikelyBand
     ? `${bandIndex(state.currentBand)} → ${bandIndex(state.nextLikelyBand)}`
     : "—";
+  const level = state.pCurrent != null
+    ? state.pCurrent * 100
+    : state.currentBand ? Number(bandIndex(state.currentBand)) * 25 : undefined;
   return (
     <InstrumentPanel
       eyebrow="Regime Path / 03"
@@ -170,6 +178,7 @@ export function MarkovStateCard({ state }: { state: MarkovStateOutput }) {
           : undefined
       }
       trace={tone}
+      level={level}
       metric={arrow}
       metricLabel="Transition bias"
       awaiting={state.currentBand == null}
@@ -265,6 +274,8 @@ export function PortfolioConvexityCard({
 
   const tone = gammaTone(netGamma);
   const ready = portfolio != null && netGamma != null;
+  const level = netGamma != null
+    ? Math.min(100, (Math.abs(netGamma) / 2) * 100) : undefined;
   return (
     <InstrumentPanel
       eyebrow="Exposure / 04"
@@ -278,6 +289,7 @@ export function PortfolioConvexityCard({
           : undefined
       }
       trace={tone}
+      level={level}
       metric={formatSigned(netGamma)}
       metricLabel="Net gamma"
       awaiting={!ready}
