@@ -18,7 +18,9 @@ type SidebarProps = {
 
 /** Footer label per derived display status. Keep tight — overflowing the
  *  sidebar reflows the status row. */
-function statusLabel(status: IBDisplayStatus): { text: string; cls: "live" | "warn" | "dead" } {
+function statusLabel(
+  status: IBDisplayStatus,
+): { text: string; cls: "live" | "warn" | "dead" | "demo" } {
   switch (status) {
     case "connected":
       return { text: "NOMINAL", cls: "live" };
@@ -32,6 +34,8 @@ function statusLabel(status: IBDisplayStatus): { text: string; cls: "live" | "wa
       return { text: "OFFLINE", cls: "dead" };
     case "relay_offline":
       return { text: "RELAY OFFLINE", cls: "dead" };
+    case "demo":
+      return { text: "DEMO", cls: "demo" };
   }
 }
 
@@ -48,7 +52,13 @@ export default function Sidebar({ activeSection, actionTone, lastSync }: Sidebar
   const { displayStatus } = useIBStatusContext();
   const { text, cls } = statusLabel(displayStatus);
   const dotClass =
-    cls === "live" ? "status-dot-live" : cls === "warn" ? "status-dot-warn" : "status-dot-dead";
+    cls === "live"
+      ? "status-dot-live"
+      : cls === "warn"
+        ? "status-dot-warn"
+        : cls === "demo"
+          ? "status-dot-demo"
+          : "status-dot-dead";
   const syncTime = lastSync ? new Date(lastSync).toLocaleTimeString() : "—";
 
   // Sidebar identity comes from our own profile store (fetch-based, no Clerk

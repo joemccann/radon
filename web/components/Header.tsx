@@ -23,7 +23,7 @@ type HeaderProps = {
   lastSync?: string | null;
 };
 
-type IntegrityClass = "ok" | "warn" | "dead";
+type IntegrityClass = "ok" | "warn" | "dead" | "demo";
 
 function formatSampleTime(lastSync: string | null | undefined): string {
   if (!lastSync) return "---";
@@ -49,6 +49,8 @@ function integrityFor(status: IBDisplayStatus): { text: string; cls: IntegrityCl
       return { text: "Gateway offline", cls: "dead" };
     case "relay_offline":
       return { text: "Relay offline", cls: "dead" };
+    case "demo":
+      return { text: "Sample data", cls: "demo" };
   }
 }
 

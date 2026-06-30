@@ -331,6 +331,12 @@ body {
   animation: pulse 2s ease-in-out infinite;
 }
 
+/* Demo deployment: calm, neutral info treatment — never the red dead dot. */
+.status-dot-demo {
+  background: var(--info);
+  animation: none;
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -949,6 +955,7 @@ body {
 .rail-integrity-ok   { color: var(--signal-core); }
 .rail-integrity-warn { color: var(--warn); }
 .rail-integrity-dead { color: var(--fault); }
+.rail-integrity-demo { color: var(--info); }
 
 .rail-integrity-dot {
   width: 6px;
@@ -960,6 +967,7 @@ body {
 .rail-integrity-dot-ok   { background: var(--signal-core); animation: pulse 2.4s ease-in-out infinite; }
 .rail-integrity-dot-warn { background: var(--warn);        animation: pulse 2.4s ease-in-out infinite; }
 .rail-integrity-dot-dead { background: var(--fault);       animation: none; }
+.rail-integrity-dot-demo { background: var(--info);        animation: none; }
 
 /* Index-futures quote strip (ES/NQ/RTY) — centered header slot. */
 .futures-strip {
@@ -1813,6 +1821,7 @@ body {
 .footer-strip__dot--ok   { background: var(--signal-core); animation: pulse 2.4s ease-in-out infinite; }
 .footer-strip__dot--warn { background: var(--warn);        animation: pulse 2.4s ease-in-out infinite; }
 .footer-strip__dot--dead { background: var(--fault);       animation: none; }
+.footer-strip__dot--demo { background: var(--info);        animation: none; }
 
 .footer-strip__k {
   text-transform: uppercase;
@@ -1828,6 +1837,7 @@ body {
 
 .footer-strip__chip--warn .footer-strip__v { color: var(--warn); }
 .footer-strip__chip--dead .footer-strip__v { color: var(--fault); }
+.footer-strip__chip--demo .footer-strip__v { color: var(--info); }
 
 .footer-strip__sep {
   color: var(--text-muted);
@@ -11300,6 +11310,10 @@ body[data-mobile="true"] .toast-container {
   color: var(--warning);
 }
 
+.mobile-app-bar__status--demo {
+  color: var(--info);
+}
+
 .mobile-app-bar__search {
   width: 44px;
   height: 44px;
@@ -11522,6 +11536,11 @@ body[data-mobile="true"] .toast-container {
 .mobile-drawer__status-pill--offline {
   color: var(--negative);
   border-color: var(--negative);
+}
+
+.mobile-drawer__status-pill--demo {
+  color: var(--info);
+  border-color: var(--info);
 }
 
 .mobile-drawer__user {
