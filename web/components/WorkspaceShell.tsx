@@ -14,6 +14,7 @@ import { useToast } from "@/lib/useToast";
 import { useOrderActions } from "@/lib/OrderActionsContext";
 import { usePrices } from "@/lib/usePrices";
 import { hasUsableIndexPrice, mergeIndexFallbackPrices, useIndexQuoteFallback } from "@/lib/useIndexQuoteFallback";
+import { useFuturesQuoteFallback } from "@/lib/useFuturesQuoteFallback";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
 import { usePreviousClose } from "@/lib/usePreviousClose";
 import { useGlobexOpen, HEADER_FUTURES } from "@/lib/futuresSession";
@@ -264,6 +265,20 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     [rawPrices, indexFallbackPrices],
   );
 
+  // Yahoo delayed-quote fallback for the ES/NQ/RTY header strip — fires when the
+  // relay isn't streaming these roots (always on the demo, relay-down in prod).
+  const missingFuturesFallbackSymbols = useMemo(
+    () => HEADER_FUTURES
+      .map((f) => f.symbol)
+      .filter((symbol) => !hasUsableIndexPrice(rawPricesWithIndexFallback[symbol])),
+    [rawPricesWithIndexFallback],
+  );
+  const futuresFallbackPrices = useFuturesQuoteFallback(missingFuturesFallbackSymbols);
+  const rawPricesWithFallback = useMemo(
+    () => mergeIndexFallbackPrices(rawPricesWithIndexFallback, futuresFallbackPrices),
+    [rawPricesWithIndexFallback, futuresFallbackPrices],
+  );
+
   // Debounce ibConnected: disconnections must persist >2s before surfacing to UI.
   // IB farm connectivity checks fire brief disconnected→connected sequences that
   // would otherwise flash the banner/toast every few seconds.
@@ -282,7 +297,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   }, [rawIbConnected]);
 
   // Backfill missing previous-close from Yahoo Finance / UW for day-change calc
-  const prices = usePreviousClose(rawPricesWithIndexFallback);
+  const prices = usePreviousClose(rawPricesWithFallback);
 
   // Header index-futures strip: ES/NQ/RTY last + prior-close, gated on Globex.
   const futuresQuotes = useMemo<FuturesQuote[]>(() => {
