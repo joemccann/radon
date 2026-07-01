@@ -72,7 +72,10 @@ export function buildCspWithNonce(nonce: string): string {
     // Clerk's clerk-js spawns a same-origin blob: Web Worker (bot/telemetry);
     // worker-src falls back to script-src, which would block it without this.
     "worker-src 'self' blob:",
-    `frame-src 'self' ${CLERK_HOSTS} ${CAPTCHA_HOSTS}`,
+    // blob: — the "Share to X" modal (ShareReportModal.tsx) previews the report
+    // card in an <iframe src={URL.createObjectURL(blob)}>. Without blob: here the
+    // frame is refused ("This content is blocked"). Same-origin, app-generated.
+    `frame-src 'self' blob: ${CLERK_HOSTS} ${CAPTCHA_HOSTS}`,
     "frame-ancestors 'none'",
     "object-src 'none'",
     "base-uri 'self'",
