@@ -117,11 +117,20 @@ export function getAvgEntry(pos: PortfolioPosition): number {
   const raw = resolveEntryCost(pos);
   const denom = Math.abs(pos.contracts) * mult;
   // A multi-leg combo carries the net credit/debit sign (credit → negative),
-  // per the "credits negative" convention. A single-leg / stock avg entry is a
-  // per-instrument PRICE and is always positive (daca786: a short stock at
-  // $1,134.97/sh shows +$1,134.97, not −). `Math.abs(pos.contracts)` keeps a
-  // short's negative contract count from re-flipping the premium sign.
-  return pos.legs.length > 1 ? raw / denom : Math.abs(raw) / denom;
+  // per the "credits negative" convention. `Math.abs(pos.contracts)` keeps a
+  // short's contract count from re-flipping the premium sign.
+  if (pos.legs.length > 1) return raw / denom;
+
+  // Single-leg. A SHORT option's entry is a premium CREDIT → negative, matching
+  // the signed LAST PRICE mark (a short META $625 call at $1.74 shows −$1.74).
+  // A stock avg entry is a per-instrument PRICE and stays positive regardless of
+  // direction (daca786: a short stock at $1,134.97/sh shows +$1,134.97, not −).
+  const magnitude = Math.abs(raw) / denom;
+  const onlyLeg = pos.legs[0];
+  const isStock = pos.structure_type === "Stock" || onlyLeg?.type === "Stock";
+  if (isStock) return magnitude;
+  const isShort = (onlyLeg?.direction ?? pos.direction) === "SHORT";
+  return isShort ? -magnitude : magnitude;
 }
 
 export function getLastPrice(pos: PortfolioPosition): number | null {
