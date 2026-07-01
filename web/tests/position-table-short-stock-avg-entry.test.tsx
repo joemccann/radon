@@ -121,6 +121,32 @@ const AMD_LONG_PUT: PortfolioPosition = {
   ],
 };
 
+// SHORT 25 META $625 CALLs @ $1.74/share premium received → a CREDIT, so the
+// per-contract avg entry reads NEGATIVE (−$1.74), matching the signed LAST PRICE
+// mark. Distinct from short STOCK, whose avg entry is a positive per-share price.
+// pos.contracts is POSITIVE for a short option (unlike short stock); direction
+// carries the sign.
+const META_SHORT_CALL: PortfolioPosition = {
+  id: 203,
+  ticker: "META",
+  structure: "Short Call $625.0",
+  structure_type: "Short Call",
+  risk_profile: "undefined",
+  expiry,
+  contracts: 25,
+  direction: "SHORT",
+  entry_cost: 4350,
+  max_risk: null,
+  market_value: null,
+  kelly_optimal: null,
+  target: null, stop: null,
+  entry_date: "2026-06-20",
+  legs: [
+    { direction: "SHORT", contracts: 25, type: "Call", strike: 625,
+      entry_cost: 4350, avg_cost: 1.74, market_price: null, market_value: null },
+  ],
+};
+
 /* ─── getAvgEntry unit ─────────────────────────────────── */
 
 describe("getAvgEntry — pure", () => {
@@ -134,6 +160,10 @@ describe("getAvgEntry — pure", () => {
 
   it("single-leg option returns the per-contract (per-share) entry, no 100× double-count", () => {
     expect(getAvgEntry(AMD_LONG_PUT)).toBeCloseTo(3.0, 2);
+  });
+
+  it("SHORT single-leg option returns a NEGATIVE per-contract entry (premium is a credit)", () => {
+    expect(getAvgEntry(META_SHORT_CALL)).toBeCloseTo(-1.74, 2);
   });
 });
 
@@ -173,5 +203,16 @@ describe("PositionTable — Avg Entry never negative for SHORT stock", () => {
       />,
     );
     expect(avgEntryCellText("AMD")).toBe("$3.00");
+  });
+
+  it("renders a NEGATIVE avg entry for a SHORT option (credit received)", () => {
+    render(
+      <PositionTable
+        positions={[META_SHORT_CALL]}
+        prices={{}}
+        columnVisibility={makeVisibility({ avg_entry: true })}
+      />,
+    );
+    expect(avgEntryCellText("META")).toBe("$-1.74");
   });
 });
