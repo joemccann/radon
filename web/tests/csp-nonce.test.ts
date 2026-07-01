@@ -55,6 +55,8 @@ describe("buildCspWithNonce — enforced, nonce'd, Clerk-host-allowlisted", () =
     expect(frameSrc).toBeDefined();
     expect(frameSrc).toContain("https://*.clerk.accounts.dev");
     expect(frameSrc).toContain("https://challenges.cloudflare.com");
+    // Share-to-X modal previews the report card in an <iframe src=blob:...>.
+    expect(frameSrc).toContain("blob:");
   });
 
   it("does NOT include 'unsafe-eval' by default", () => {
