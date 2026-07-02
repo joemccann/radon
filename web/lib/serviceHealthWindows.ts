@@ -143,9 +143,6 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``breadth-scan`` writes when a user POSTs /breadth/scan — NYSE A/D +
   // TICK internals sampled from IB index feeds, so requires_ib=true.
   "breadth-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: true },
-  // ``breadth-scan`` writes when a user POSTs /breadth/scan — NYSE A/D +
-  // TICK internals sampled from IB index feeds, so requires_ib=true.
-  "breadth-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: true },
   // ``vcg-scan`` has an autonomous 5-min cadence during market hours
   // (radon-vcg-refresh.timer / com.radon.vcg-refresh). The 15-min open
   // window tolerates 3 missed cycles before flagging — long enough to
@@ -196,6 +193,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``flow-surprise`` only writes when a user POSTs /flow-surprise (Feature 2
   // residual scan, scripts/flow_surprise.py). DB-only like its UW-scan siblings.
   "flow-surprise": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``informed-flow`` only writes when a user hits FastAPI
+  // GET /informed-flow/{ticker} — the subprocess bridge runs
+  // scripts/fetch_informed_flow.py on demand (congress + insider +
+  // institutional). UW-only: the script imports clients.uw_client and
+  // never touches IB, so requires_ib=false. Same window as its UW-scan
+  // siblings above.
+  "informed-flow": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
   // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
   // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
   // Mon morning) without flipping stale; the on-demand button can
@@ -305,6 +309,17 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // — no IB dependency. 26h window = daily cadence + timer jitter; weekends
   // are normal run days so no wide closed window is needed.
   "journal-reconcile": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
+  // (scripts/archive_portfolio_snapshots.py) — heartbeats ok/error on
+  // every completed run. Triggered by the laptop launchd job
+  // run.radon.archive (weekly Sun 03:00), which only fires while the
+  // laptop is awake, so real gaps stretch to ~monthly in practice
+  // (2026-06-28 run archived the 2026-05 month). Uniform 35-day window =
+  // the observed monthly gap + drift, so the banner never fires between
+  // runs but still catches a job dead for over a month. Turso HTTP +
+  // local disk + rsync only — no IB dependency.
+  "portfolio-archive": { open: 35 * DAY, extended: 35 * DAY, closed: 35 * DAY, category: "scheduled", requires_ib: false },
 };
 
 const DEFAULT_WINDOW: Window = {
