@@ -635,6 +635,91 @@ describe("positionGroupShareData", () => {
     expect(data.exitTime).toBe("2026-04-10T15:00:00+00:00");
   });
 
+  it("does not fabricate an intra-day hold when tradeLogDates only has the close day (prior-day open, closed today)", () => {
+    // Production repro (MSFT 7/17 Short $350 Put, 2026-07-02): position opened
+    // on an earlier day and fully closed today. The opening fills are outside
+    // the executed-orders lookback and the position is gone from the
+    // portfolio, so the last fallback is trade_log_dates — a per-ticker
+    // LATEST journal date map whose value for a just-closed trade is the
+    // close date itself. Parsed as local midnight, that fabricated
+    // "Held 7 hours" for a 7-day hold.
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localDateOnly = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const exitTime = `${localDateOnly(now)}T07:04:52`; // local-time close this morning
+
+    const group: PositionFillGroup = {
+      id: "close-msft",
+      symbol: "MSFT",
+      description: "Closed MSFT (Short $350 Put)",
+      isClosing: true,
+      totalQuantity: 25,
+      netPrice: 1.00,
+      totalCommission: -5.00,
+      totalPnL: 19782.59,
+      time: exitTime,
+      fills: [
+        makeOptionFill({
+          execId: "close-msft",
+          symbol: "MSFT",
+          side: "BOT",
+          quantity: 25,
+          avgPrice: 1.00,
+          realizedPNL: 19782.59,
+          time: exitTime,
+          contract: { conId: 9001, symbol: "MSFT", secType: "OPT", strike: 350, right: "P", expiry: "2026-07-17" },
+        }),
+      ],
+    };
+
+    const data = positionGroupShareData(group, [group], [], { MSFT: localDateOnly(now) });
+
+    // The close-day date cannot be the entry; it must not surface as one.
+    expect(data.entryTime).toBeNull();
+    const hold = formatHoldDuration(data.entryTime, data.exitTime);
+    expect(hold).toBeNull();
+    const text = buildTweetText(data.description, data.pnl, data.pnlPct, false, true, hold);
+    expect(text).not.toContain("Held");
+  });
+
+  it("keeps a whole-day hold when tradeLogDates carries a real earlier open day", () => {
+    const now = new Date();
+    const pad = (n: number) => String(n).padStart(2, "0");
+    const localDateOnly = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+    const openDay = new Date(now);
+    openDay.setDate(openDay.getDate() - 7);
+    const exitTime = `${localDateOnly(now)}T07:04:52`;
+
+    const group: PositionFillGroup = {
+      id: "close-msft-7d",
+      symbol: "MSFT",
+      description: "Closed MSFT (Short $350 Put)",
+      isClosing: true,
+      totalQuantity: 25,
+      netPrice: 1.00,
+      totalCommission: -5.00,
+      totalPnL: 19782.59,
+      time: exitTime,
+      fills: [
+        makeOptionFill({
+          execId: "close-msft-7d",
+          symbol: "MSFT",
+          side: "BOT",
+          quantity: 25,
+          avgPrice: 1.00,
+          realizedPNL: 19782.59,
+          time: exitTime,
+          contract: { conId: 9001, symbol: "MSFT", secType: "OPT", strike: 350, right: "P", expiry: "2026-07-17" },
+        }),
+      ],
+    };
+
+    const data = positionGroupShareData(group, [group], [], { MSFT: localDateOnly(openDay) });
+
+    expect(data.entryTime).toBe(localDateOnly(openDay));
+    expect(formatHoldDuration(data.entryTime, data.exitTime)).toBe("7 days");
+  });
+
   // ─── closedGroupReturnPct identity ─────────────────────────────
   // Verify the P&L identity helper matches the share-card result across
   // both debit-long and credit-short closed groups.
@@ -1039,6 +1124,21 @@ describe("formatHoldDuration", () => {
   it("treats date-only timestamps as local midnight (no tz day-shift)", () => {
     expect(formatHoldDuration("2026-03-17", "2026-03-18")).toBe("1 day");
     expect(formatHoldDuration("2026-03-17", "2026-03-19")).toBe("2 days");
+  });
+
+  it("returns null for a date-only entry on the exit's own local day (no fabricated intra-day hold)", () => {
+    // A day-precision entry carries no intra-day information: measuring from
+    // local midnight to a same-day exit fabricated "Held 7 hours" for a
+    // multi-day hold whose entry fallback resolved to the close date.
+    expect(formatHoldDuration("2026-07-02", "2026-07-02T07:04:52")).toBeNull();
+  });
+
+  it("returns null when entry and exit are the same date-only day", () => {
+    expect(formatHoldDuration("2026-07-02", "2026-07-02")).toBeNull();
+  });
+
+  it("still measures intra-day holds when the entry has a real timestamp", () => {
+    expect(formatHoldDuration("2026-07-02T05:00:00", "2026-07-02T07:04:52")).toBe("2 hours");
   });
 
   it("returns null when a timestamp is missing or unparseable", () => {
