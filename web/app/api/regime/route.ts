@@ -7,6 +7,7 @@ import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regim
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
+import { cachedRead, invalidateCache } from "@/lib/dbCache";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -178,9 +179,17 @@ function normalizeCriPayload(raw: Record<string, unknown>): Record<string, unkno
 
 let bgScanInFlight = false;
 
+// Coalesces every client tab's ~60s poll into one source read per window
+// (contract: tests/db-read-cache-contract.test.ts).
+const READ_CACHE_TTL_MS = 5_000;
+
 /** Read the latest CRI JSON — scheduled dir first, then legacy cri.json.
  *  Iterates newest→oldest, skipping corrupt files (e.g. stderr mixed in). */
 async function readLatestCri(): Promise<{ data: object; path: string } | null> {
+  return cachedRead("regime:cri", READ_CACHE_TTL_MS, readLatestCriUncached);
+}
+
+async function readLatestCriUncached(): Promise<{ data: object; path: string } | null> {
   async function readCriCandidate(filePath: string): Promise<CriCacheCandidate | null> {
     try {
       const raw = await readFile(filePath, "utf-8");
@@ -314,6 +323,7 @@ export async function POST(): Promise<Response> {
       method: "POST",
       timeout: 130_000,
     });
+    invalidateCache("regime:cri");
     const data = normalizeCriPayload(rawData);
     return NextResponse.json(data);
   } catch (error) {
