@@ -136,7 +136,7 @@ describe("BreadthPanel — content", () => {
     renderPanel(hookState({ data: buildBreadthData() }));
     expect(screen.getByText("NET A/D")).toBeTruthy();
     expect(screen.getByText("TICK")).toBeTruthy();
-    expect(screen.getByText("CUM A/D 20D")).toBeTruthy();
+    expect(screen.getByText("NET BREADTH 20D")).toBeTruthy();
     expect(screen.getByText("SESSIONS POSITIVE")).toBeTruthy();
     expect(screen.getByText("DIVERGENCE")).toBeTruthy();
     expect(screen.getByText("13/20")).toBeTruthy();
