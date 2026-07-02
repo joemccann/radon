@@ -88,14 +88,14 @@ describe("/api/orders", () => {
     expect(body).toEqual(emptyOrders);
   });
 
-  it("GET returns 500 when the Turso read fails", async () => {
+  it("GET returns 503 (transient, keep-last-good) when the Turso read fails", async () => {
     mockReadOrdersSnapshotFromDb.mockRejectedValue(new Error("database unavailable"));
 
     const { GET } = await import("../app/api/orders/route");
     const res = await GET();
     const body = await res.json();
 
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(503);
     expect(body.error).toContain("database unavailable");
   });
 

@@ -15,8 +15,10 @@ export async function GET(): Promise<Response> {
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to read orders";
+    // 503, not 500: a Turso outage is transient — useOrders keeps last-good
+    // client state on any !res.ok and retries on its poll cadence.
     return setNoStoreResponseHeaders(
-      NextResponse.json({ error: message }, { status: 500 }),
+      NextResponse.json({ error: message }, { status: 503 }),
       requestId,
     );
   }

@@ -23,6 +23,7 @@
 import { parseScanTime } from "./parseScanTime";
 import { withTimeout } from "./asyncTimeout";
 import { resetDb } from "./db";
+import { describeDbError } from "./dbExecute";
 
 export type TimestampedRead<T> = {
   data: T;
@@ -127,8 +128,7 @@ async function readSource<T>(
     // stall ceiling. The disk read still serves this request. Never reset on a
     // disk-source error — that has nothing to do with the libsql client.
     if (sourceName === "DB") resetDb();
-    const message = err instanceof Error ? err.message : String(err);
-    warnWithLabel(label, `${sourceName} read failed: ${message}`);
+    warnWithLabel(label, `${sourceName} read failed: ${describeDbError(err)}`);
     return null;
   }
 }

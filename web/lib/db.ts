@@ -50,8 +50,20 @@ export const DB_POOL_MAX_CONNECTIONS = 8;
 // ABOVE the 3s `dbKeepAlive` heartbeat interval so the heartbeat keeps one
 // socket on the warm path (~12ms) between 60s polls.
 export const DB_POOL_KEEP_ALIVE_TIMEOUT_MS = 10_000;
+// ── Destroy cooldown (2026-07-02 incident, second wave) ──────────────────
+// Agent.destroy() aborts every in-flight request on the shared pool; each
+// aborted request rejects TypeError('fetch failed') and its catch calls
+// resetDb() again, destroying the freshly rebuilt Agent under the next wave
+// of traffic (3s heartbeat + parallel SWR polls) — a self-sustaining destroy
+// storm that only a process restart cleared. Rate-limiting the destroy HERE
+// (the one chokepoint all six reset callers funnel through) lets the first
+// failure tear down a genuinely wedged pool while collateral failures inside
+// the window leave the replacement Agent alive. Must exceed the 3s heartbeat
+// so the metronome cannot re-trigger within the same storm.
+export const DB_POOL_DESTROY_COOLDOWN_MS = 5_000;
 
 let cachedAgent: Agent | null = null;
+let lastAgentDestroyAtMs = Number.NEGATIVE_INFINITY;
 
 function getPoolAgent(): Agent {
   if (!cachedAgent) {
@@ -66,8 +78,16 @@ function getPoolAgent(): Agent {
 /** Abort every socket in the bounded pool. Fire-and-forget: the next request
  * lazily builds a fresh Agent. Shared by the primary and demo clients — a
  * reset on either aborts both origins' sockets, which is acceptable (the
- * other side re-handshakes once) and keeps one teardown path. */
-function destroyPoolAgent(): void {
+ * other side re-handshakes once) and keeps one teardown path.
+ *
+ * Rate-limited: inside the cooldown window the call is a no-op and the
+ * current Agent stays in place — nulling without destroying would leak the
+ * old pool's sockets (the original per-IP exhaustion disease), and
+ * destroying again is the storm. `force` is the test seam. */
+function destroyPoolAgent(force = false): void {
+  const now = Date.now();
+  if (!force && now - lastAgentDestroyAtMs < DB_POOL_DESTROY_COOLDOWN_MS) return;
+  lastAgentDestroyAtMs = now;
   const agent = cachedAgent;
   cachedAgent = null;
   agent?.destroy().catch(() => {});
@@ -87,13 +107,16 @@ export async function pooledDbFetch(
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> {
-  const dispatcher = getPoolAgent();
   if (typeof input === "object" && input !== null && "url" in input) {
     const request = input as Request;
     const body =
       request.method === "GET" || request.method === "HEAD"
         ? undefined
         : new Uint8Array(await request.arrayBuffer());
+    // Resolve the dispatcher AFTER the body await: a resetDb() landing in
+    // that microtask gap would otherwise route this request onto the
+    // already-destroyed Agent (instant ClientDestroyedError).
+    const dispatcher = getPoolAgent();
     return (await undiciFetch(request.url, {
       method: request.method,
       headers: request.headers,
@@ -104,7 +127,7 @@ export async function pooledDbFetch(
   }
   return (await undiciFetch(input as string | URL, {
     ...init,
-    dispatcher,
+    dispatcher: getPoolAgent(),
   } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
 }
 
@@ -269,10 +292,12 @@ export async function syncDb(): Promise<void> {
 }
 
 // Test seam — drop the cached clients + pool between vitest tests.
+// Bypasses AND rearms the destroy cooldown so each test starts deterministic.
 export function __resetDbForTests(): void {
   cached = null;
   cachedDemo = null;
-  destroyPoolAgent();
+  destroyPoolAgent(true);
+  lastAgentDestroyAtMs = Number.NEGATIVE_INFINITY;
 }
 
 // Test seam — inject a libSQL client (typically in-memory) so route

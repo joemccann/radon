@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -32,20 +32,23 @@ export async function GET(): Promise<Response> {
     );
   }
   try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT id, symbol, sector, added_at
+    const result = await dbExecute(
+      {
+        sql: `SELECT id, symbol, sector, added_at
             FROM user_watchlist
             WHERE user_id = ?
             ORDER BY added_at DESC`,
-      args: [userId],
-    });
+        args: [userId],
+      },
+      { label: "watchlist" },
+    );
     const watchlist = result.rows.map((r) => rowToWatch(r as unknown as WatchlistRow));
     return setNoStoreResponseHeaders(NextResponse.json({ watchlist }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // 503, not 500: a DB outage is transient and the client hook keeps its
+    // last-good watchlist on any !res.ok.
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to read watchlist", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Watchlist store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
@@ -84,17 +87,18 @@ export async function POST(req: Request): Promise<Response> {
     : null;
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `INSERT OR IGNORE INTO user_watchlist (id, user_id, symbol, sector, added_at)
+    await dbExecute(
+      {
+        sql: `INSERT OR IGNORE INTO user_watchlist (id, user_id, symbol, sector, added_at)
             VALUES (?, ?, ?, ?, datetime('now'))`,
-      args: [crypto.randomUUID(), userId, symbol, sector],
-    });
+        args: [crypto.randomUUID(), userId, symbol, sector],
+      },
+      { label: "watchlist" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true, watched: true }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to add to watchlist", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Watchlist store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }

@@ -19,6 +19,19 @@ import { withTimeout } from "./asyncTimeout";
 /** Default per-read deadline. */
 export const DEFAULT_DB_READ_TIMEOUT_MS = 3_000;
 
+/** Undici buries the discriminator (ECONNRESET vs ClientDestroyedError vs
+ * SocketError) in `err.cause` — sometimes in `.code`, sometimes only in the
+ * name/message — and a bare "fetch failed" in journald is undiagnosable. */
+export function describeDbError(err: unknown): string {
+  const message = err instanceof Error ? err.message : String(err);
+  const cause = err instanceof Error ? (err.cause as { code?: string; name?: string; message?: string } | undefined) : undefined;
+  if (!cause) return message;
+  const discriminator = [cause.code, cause.name, cause.message]
+    .filter((part) => typeof part === "string" && part.length > 0)
+    .join(" ");
+  return discriminator ? `${message} (cause: ${discriminator})` : message;
+}
+
 export async function dbExecute(
   stmt: InStatement,
   opts: { timeoutMs?: number; label?: string } = {},
@@ -31,6 +44,7 @@ export async function dbExecute(
       `${label} read timed out after ${timeoutMs}ms`,
     );
   } catch (err) {
+    console.warn(`[dbExecute:${label}] ${describeDbError(err)}`);
     resetDb();
     throw err;
   }
