@@ -10105,7 +10105,7 @@ tr {
   display: flex;
   align-items: center;
   align-self: flex-start;
-  gap: 0;
+  gap: 6px;
   padding: 0;
   border-bottom: 1px solid var(--line-grid);
   background: transparent;
