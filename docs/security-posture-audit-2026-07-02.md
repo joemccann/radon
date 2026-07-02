@@ -79,11 +79,15 @@ The canonical trade journal + `portfolio_snapshots` (real net-liq/P&L/cash, ~1.4
 **Remediate:**
 ```bash
 # read-only for read-mostly consumers (health probe, dashboards, laptop dev):
-turso db tokens create radon-joemccann --read-only --expiration 720h
+turso db tokens create radon-joemccann --read-only
 # distinct write token for writers (monitor daemon, ib_sync, journal writers), per host:
-turso db tokens create radon-joemccann --expiration 720h
+turso db tokens create radon-joemccann
 ```
-Give the external-health-probe its own read-only token. Keep laptop and VPS on **distinct** tokens so either can be revoked without downing the other. Set expiry so they self-rotate. Stop shipping the `eyJ...`-shaped placeholder in `.env.example` — use `<read-only-token>`/`<write-token>` labels so a real token is never pasted over a realistic-looking dummy.
+Give the external-health-probe its own read-only token. Keep laptop and VPS on **distinct** tokens so either can be revoked without downing the other.
+
+**Do NOT set `--expiration` in this step.** The risk reduction here is *scoping* (a read-only token can't forge/DROP the `journal`) and *per-host revocation* — not expiry. With one shared token and **no rotation automation** (L13), a set expiry means every Radon process (laptop, VPS, CI) loses the DB simultaneously the moment it lapses — trading a low-probability leak for a *certain* self-inflicted outage on a live-trading system, possibly mid-session. Expiry belongs in a *later* step, gated on the `rotate-turso.sh` one-command rotation (L13): automate rotation first, then adopt a short cadence matched to it (verify the accepted duration unit via `turso db tokens create --help`; the CLI default is no expiry). 
+
+Also stop shipping the `eyJ...`-shaped placeholder in `.env.example` — use `<read-only-token>`/`<write-token>` labels so a real token is never pasted over a realistic-looking dummy.
 **Effort: M.**
 
 **M3 — `git push origin main` = RCE as `radon` on the live-trading host; branch protection unverified.** *(idx 26)*
@@ -230,7 +234,7 @@ ls -l docker/ib-gateway/secrets/ib_password.txt data/db_backups/   # perms; plan
 5. **`PermitRootLogin prohibit-password` + `fail2ban` + a dedicated CI deploy key** (L2). Bind uvicorn/next to loopback (L10). Strip fingerprint headers, add HSTS to media/demo-api, remove `/ws-ticket/validate` from exempt paths (Info batch).
 
 **Medium projects (this month):**
-6. **Scoped-token rollout + one-command rotation script** (M2 full + L13): read-only for read consumers, per-host write tokens, expiry, `rotate-turso.sh`.
+6. **Scoped-token rollout + one-command rotation script** (M2 full + L13): read-only for read consumers, per-host write tokens (no `--expiration` yet), then build `rotate-turso.sh` and only THEN adopt a short expiry cadence matched to it — expiry before automation is a scheduled outage on a shared token.
 7. **Firewall public :22 to CI egress + operator, force all other admin over Tailscale; add Tailscale ACLs + IB Trusted-IP allowlist** (L2, L9).
 8. **Bring `deploy.sh` under review + host-key pinning for CI/pull SSH** (L7, L8).
 9. **Encrypt off-box DB backups at rest** (L11); **rotate the IB password to a long random secret** (L6).
