@@ -95,6 +95,23 @@ describe("/api/newsfeed/posts", () => {
     expect(data).toEqual([]);
   });
 
+  it("returns 503 when the DB read fails (never a blank 200)", async () => {
+    const failing = {
+      execute: async () => {
+        throw new Error("turso unreachable");
+      },
+    } as unknown as Client;
+    const dbModule = await import("../lib/db");
+    dbModule.__setDbForTests(failing);
+
+    const { GET } = await import("../app/api/newsfeed/posts/route");
+    const response = await GET();
+
+    expect(response.status).toBe(503);
+    const data = await response.json();
+    expect(data.error).toContain("newsfeed read failed");
+  });
+
   it("safely handles malformed JSON in array columns", async () => {
     await db.execute({
       sql: "INSERT INTO posts VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",

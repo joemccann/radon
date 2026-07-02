@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import {
   SLO_WINDOW_MS,
@@ -24,32 +25,40 @@ function numberOrNull(value: unknown): number | null {
   return value == null ? null : Number(value);
 }
 
+// The prober writes every few minutes; a short TTL coalesces the admin
+// workspace's polling into one Turso read per window
+// (contract: tests/db-read-cache-contract.test.ts).
+const READ_CACHE_TTL_MS = 10_000;
+
+async function readSloPayload(): Promise<SloPayload> {
+  const since = new Date(Date.now() - SLO_WINDOW_MS).toISOString();
+  const result = await getDb().execute({
+    sql: `SELECT run_at, edge_ok, user_path_ok, freshness_ok,
+                 tick_fresh, scan_fresh, latency_ms
+          FROM external_probe_runs
+          WHERE run_at >= ?
+          ORDER BY run_at ASC
+          LIMIT ?`,
+    args: [since, MAX_RUN_ROWS],
+  });
+
+  const rows: ExternalProbeRunRow[] = result.rows.map((row) => ({
+    run_at: String(row.run_at),
+    edge_ok: numberOrNull(row.edge_ok),
+    user_path_ok: numberOrNull(row.user_path_ok),
+    freshness_ok: numberOrNull(row.freshness_ok),
+    tick_fresh: numberOrNull(row.tick_fresh),
+    scan_fresh: numberOrNull(row.scan_fresh),
+    latency_ms: numberOrNull(row.latency_ms),
+  }));
+
+  return { window_ms: SLO_WINDOW_MS, since, rows };
+}
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const since = new Date(Date.now() - SLO_WINDOW_MS).toISOString();
   try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT run_at, edge_ok, user_path_ok, freshness_ok,
-                   tick_fresh, scan_fresh, latency_ms
-            FROM external_probe_runs
-            WHERE run_at >= ?
-            ORDER BY run_at ASC
-            LIMIT ?`,
-      args: [since, MAX_RUN_ROWS],
-    });
-
-    const rows: ExternalProbeRunRow[] = result.rows.map((row) => ({
-      run_at: String(row.run_at),
-      edge_ok: numberOrNull(row.edge_ok),
-      user_path_ok: numberOrNull(row.user_path_ok),
-      freshness_ok: numberOrNull(row.freshness_ok),
-      tick_fresh: numberOrNull(row.tick_fresh),
-      scan_fresh: numberOrNull(row.scan_fresh),
-      latency_ms: numberOrNull(row.latency_ms),
-    }));
-
-    const payload: SloPayload = { window_ms: SLO_WINDOW_MS, since, rows };
+    const payload = await cachedRead("admin:slo", READ_CACHE_TTL_MS, readSloPayload);
     return setNoStoreResponseHeaders(NextResponse.json(payload), requestId);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
@@ -57,7 +66,7 @@ export async function GET(): Promise<Response> {
     // legitimate pending state — 200 + flag, never 4xx console noise.
     const payload: SloPayload = {
       window_ms: SLO_WINDOW_MS,
-      since,
+      since: new Date(Date.now() - SLO_WINDOW_MS).toISOString(),
       rows: [],
       missing: true,
     };

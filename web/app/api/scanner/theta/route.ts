@@ -3,6 +3,7 @@ import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
 import { getDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
@@ -11,6 +12,9 @@ export const runtime = "nodejs";
 
 const CACHE_PATH = join(process.cwd(), "..", "data", "theta_harvester.json");
 const STALE_THRESHOLD_SECONDS = 6 * 60 * 60;
+// Coalesces polling tabs into one source read per window
+// (contract: tests/db-read-cache-contract.test.ts).
+const READ_CACHE_TTL_MS = 10_000;
 
 type CacheMeta = {
   last_refresh: string | null;
@@ -84,12 +88,14 @@ export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const cache_meta = buildCacheMeta(CACHE_PATH);
   // Fresher of the shared Turso snapshot and the host-local disk JSON.
-  const result = await dbFirstRead({
-    fromDb: readThetaFromDb,
-    fromDisk: readThetaFromDisk,
-    maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
-    label: "theta-harvester",
-  });
+  const result = await cachedRead("scanner:theta", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readThetaFromDb,
+      fromDisk: readThetaFromDisk,
+      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+      label: "theta-harvester",
+    }),
+  );
   if (result.ok) {
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...result.data, cache_meta }),
