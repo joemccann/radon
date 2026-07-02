@@ -116,6 +116,19 @@ def _get_allowed_users() -> set[str]:
     return {uid.strip() for uid in raw.split(",") if uid.strip()}
 
 
+def _require_operator_allowlist() -> bool:
+    """Whether an EMPTY ALLOWED_USER_IDS should fail CLOSED (deny) rather than
+    open.
+
+    Set ``RADON_REQUIRE_OPERATOR_ALLOWLIST=1`` on production (the app.radon.run
+    radon-api env) so a blanked/typo'd allowlist cannot silently admit a
+    non-operator JWT caller through the public Caddy ``/api/ib/*`` mount. Unset
+    everywhere else (dev, CI, demo VM), so behavior there is unchanged. Mirrors
+    the Next.js ``isAuthorizedUser`` interlock in ``web/middleware.ts``.
+    """
+    return os.environ.get("RADON_REQUIRE_OPERATOR_ALLOWLIST") == "1"
+
+
 def _get_issuer() -> str:
     """Get Clerk issuer URL from env."""
     return os.environ.get("CLERK_ISSUER", "")
@@ -172,7 +185,21 @@ async def verify_clerk_jwt(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Invalid token")
 
     allowed = _get_allowed_users()
-    if allowed and payload.get("sub") not in allowed:
+    if not allowed:
+        # No operator allowlist configured. Default (dev, CI, demo VM): don't
+        # enforce. Production sets RADON_REQUIRE_OPERATOR_ALLOWLIST=1 so a
+        # blanked/typo'd ALLOWED_USER_IDS fails CLOSED — this untrusted JWT
+        # caller (public via Caddy /api/ib/*) is denied rather than admitted to
+        # the operator surface. Mirrors web/middleware.ts:isAuthorizedUser.
+        if _require_operator_allowlist():
+            logger.error(
+                "RADON_REQUIRE_OPERATOR_ALLOWLIST=1 but ALLOWED_USER_IDS is empty "
+                "— denying user %s (fail-closed operator interlock)",
+                payload.get("sub"),
+            )
+            raise HTTPException(status_code=403, detail="Not authorized")
+        return payload
+    if payload.get("sub") not in allowed:
         logger.warning("Access denied for user %s", payload.get("sub"))
         raise HTTPException(status_code=403, detail="Not authorized")
 

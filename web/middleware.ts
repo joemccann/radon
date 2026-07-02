@@ -203,12 +203,32 @@ export function parseAllowedUserIds(
   );
 }
 
+// Production interlock. When RADON_REQUIRE_OPERATOR_ALLOWLIST=1 (set ONLY in the
+// Hetzner radon-nextjs env), an EMPTY allowlist fails CLOSED instead of open —
+// see isAuthorizedUser. Absent everywhere else (dev, CI, and demo.radon.run's
+// Vercel env), so it changes nothing until the operator opts in on prod.
+export function requiresOperatorAllowlist(
+  flag: string | undefined = process.env.RADON_REQUIRE_OPERATOR_ALLOWLIST,
+): boolean {
+  return flag === "1";
+}
+
 export function isAuthorizedUser(
   userId: string,
   raw: string | undefined = process.env.ALLOWED_USER_IDS,
+  requireAllowlist: boolean = requiresOperatorAllowlist(),
 ): boolean {
   const allow = parseAllowedUserIds(raw);
-  if (allow.size === 0) return true; // no allowlist configured -> don't enforce
+  if (allow.size === 0) {
+    // No allowlist configured. Default (dev, CI, demo.radon.run): fail OPEN —
+    // the demo gate governs the demo deployment and local dev must not wall
+    // itself off. Production sets RADON_REQUIRE_OPERATOR_ALLOWLIST=1 so a
+    // blanked/typo'd ALLOWED_USER_IDS fails CLOSED (deny EVERY authenticated
+    // user, operator included) rather than silently re-opening the operator app
+    // to any signed-in demo user on the shared Clerk instance (the 2026-06-27
+    // incident class). Better locked-out-and-loud than world-open-and-silent.
+    return !requireAllowlist;
+  }
   return allow.has(userId);
 }
 
