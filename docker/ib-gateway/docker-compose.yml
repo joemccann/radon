@@ -2,8 +2,6 @@ services:
   ib-gateway:
     image: ghcr.io/gnzsnz/ib-gateway@sha256:22d5bf5e6699b3c28cb806c21e2cc46c6337df3599f758d9ae685ad3aa9eb0d5
     restart: unless-stopped
-    labels:
-      - "autoheal=true"
     environment:
       TWS_USERID: ${TWS_USERID}
       TWS_PASSWORD_FILE: /run/secrets/ib_password
@@ -19,9 +17,9 @@ services:
       # only one 2FA push is ever in flight at a time. Letting IBC
       # ALSO relogin on its own would bypass the lock.
       # `exit` makes IBC quit on 2FA timeout; the container's
-      # `restart: unless-stopped` + our autoheal label still recover,
-      # but go through a fresh container boot rather than an IBC
-      # in-container restart that the radon stack can't see.
+      # `restart: unless-stopped` recovers via a fresh container boot
+      # rather than an IBC in-container restart the radon stack can't
+      # see. (No autoheal sidecar — see the note below the healthcheck.)
       TWOFA_TIMEOUT_ACTION: exit
       RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
       EXISTING_SESSION_DETECTED_ACTION: primary
@@ -54,19 +52,16 @@ services:
       retries: 5
       start_period: 120s
 
-  # Auto-restart unhealthy containers.
-  # Docker's restart: unless-stopped only restarts on exit, not on
-  # unhealthy status. Autoheal watches healthcheck and restarts
-  # containers labeled autoheal=true when they go unhealthy.
-  autoheal:
-    image: willfarrell/autoheal
-    restart: unless-stopped
-    environment:
-      AUTOHEAL_CONTAINER_LABEL: "autoheal"
-      AUTOHEAL_INTERVAL: 30
-      AUTOHEAL_START_PERIOD: 180
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
+  # NOTE: no autoheal sidecar. A blind `docker restart` on an unhealthy gateway
+  # bypasses the cross-process 2FA push lock (scripts/utils/ib_2fa_lock.py) and
+  # stacks IBKR Mobile pushes — IBKR's backend then rejects EVERY approval the
+  # operator taps, locking them out of the live brokerage session. The unhealthy
+  # case (API listener wedged while the process stays alive) is handled instead
+  # by scripts/ib_watchdog.py, which acquires the push lock before restarting.
+  # Autoheal also required a read-write /var/run/docker.sock mount = host-root on
+  # the live-trading box, from an unpinned willfarrell/autoheal image. Removed
+  # 2026-07-02 (security posture audit M1). See feedback_watchdog_works_dont_
+  # deploy_autoheal + docs/ib-gateway-recovery.md (RELOGIN must stay "no").
 
 secrets:
   ib_password:
