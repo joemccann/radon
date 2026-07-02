@@ -342,6 +342,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
   it.each<[string, boolean]>([
     ["vcg-scan", true],
     ["cri-scan", true],
+    ["breadth-scan", true],
     ["orders-sync", true],
     ["portfolio-sync", true],
     ["fill-monitor", true],
@@ -377,6 +378,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     const expected = new Set([
       "vcg-scan",
       "cri-scan",
+      "breadth-scan",
       "orders-sync",
       "portfolio-sync",
       "fill-monitor",

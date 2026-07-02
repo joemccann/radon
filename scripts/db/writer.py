@@ -74,6 +74,18 @@ def upsert_cri_snapshot(date_str: str, taken_at: str, payload: dict[str, Any]) -
     db.commit()
 
 
+def upsert_breadth_snapshot(date_str: str, taken_at: str, payload: dict[str, Any]) -> None:
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO breadth_snapshots (date, taken_at, payload)
+        VALUES (?, ?, ?)
+        """,
+        (date_str, taken_at, json.dumps(payload)),
+    )
+    db.commit()
+
+
 def upsert_gex_snapshot(ticker: str, scan_time: str, payload: dict[str, Any]) -> None:
     db = get_db()
     db.execute(
