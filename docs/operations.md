@@ -60,7 +60,7 @@ Three deployment modes selected by `IB_GATEWAY_MODE`:
 
 | Mode | Description |
 |------|-------------|
-| `docker` (default; Hetzner production) | `ghcr.io/gnzsnz/ib-gateway` via Docker Compose, `restart: unless-stopped`, healthcheck, autoheal sidecar. |
+| `docker` (default; Hetzner production) | `ghcr.io/gnzsnz/ib-gateway` via Docker Compose, `restart: unless-stopped`, healthcheck. Unhealthy/API-wedge recovery is handled by `scripts/ib_watchdog.py` (lock-respectful restart), NOT an autoheal sidecar — removed 2026-07-02, it bypassed the 2FA push lock and required a root `docker.sock` mount. |
 | `cloud` (laptop dev) | Gateway on the Hetzner VM at `ib-gateway:4001` over Tailscale MagicDNS. Health check is a TCP port probe; local restart returns 503. |
 | `launchd` (legacy) | IBC under macOS launchd. |
 

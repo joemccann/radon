@@ -103,7 +103,7 @@ Docker's built-in healthcheck runs every 30s:
 bash -c 'echo > /dev/tcp/localhost/4001'
 ```
 
-**Important:** Uses bash `/dev/tcp` builtin, NOT `nc`/`netcat` — the `gnzsnz/ib-gateway` image doesn't include netcat. Using `nc` causes the healthcheck to always fail, making the container permanently unhealthy and triggering autoheal restart loops.
+**Important:** Uses bash `/dev/tcp` builtin, NOT `nc`/`netcat` — the `gnzsnz/ib-gateway` image doesn't include netcat. Using `nc` causes the healthcheck to always fail, making the container permanently unhealthy.
 
 - **healthy**: IB Gateway API is accepting connections
 - **unhealthy**: API not responding (2FA pending, login failed, or Gateway crashed)
@@ -111,23 +111,16 @@ bash -c 'echo > /dev/tcp/localhost/4001'
 
 Check via: `scripts/docker_ib_gateway.sh status` or `curl localhost:8321/health`
 
-## Autoheal (Automatic Unhealthy Restart)
+## Unhealthy-container recovery (NO autoheal sidecar)
 
-Docker's `restart: unless-stopped` only restarts containers that **exit**. When IB Gateway's API becomes unresponsive (session drop, 2FA expiry), the Java process stays alive but the healthcheck fails — the container goes `unhealthy` but never exits.
+Docker's `restart: unless-stopped` only restarts containers that **exit**. When IB Gateway's API becomes unresponsive (session drop, 2FA expiry) the Java process stays alive but the healthcheck fails — the container goes `unhealthy` but never exits.
 
-The `autoheal` sidecar container watches for this and restarts unhealthy containers automatically:
+**This is NOT handled by an autoheal sidecar.** The `willfarrell/autoheal` container was removed 2026-07-02 (security posture audit M1) for two reasons:
 
-- Checks every 30s for containers labeled `autoheal=true`
-- 180s grace period after container start (allows for IB's slow startup + 2FA)
-- When unhealthy detected: `docker restart` the container
-- IB Gateway re-authenticates on restart (`RELOGIN_AFTER_TWOFA_TIMEOUT: yes`)
+1. **It bypasses the 2FA push lock.** A blind `docker restart` on an unhealthy gateway fires a fresh IBKR Mobile 2FA push without acquiring `scripts/utils/ib_2fa_lock.py`. Stacked pushes make IBKR reject every approval the operator taps (see `feedback_watchdog_works_dont_deploy_autoheal` + `docs/ib-gateway-recovery.md` — `RELOGIN_AFTER_TWOFA_TIMEOUT` MUST stay `"no"`).
+2. **It required a root-equivalent `docker.sock` mount** on the live-trading host, from an unpinned image — a supply-chain path to host takeover + live-order capability.
 
-This eliminates the infinite 502 loop where the API keeps trying to connect to an unresponsive Gateway.
-
-**Autoheal logs:**
-```bash
-docker logs ib-gateway-autoheal-1
-```
+The unhealthy/API-wedge case is handled instead by **`scripts/ib_watchdog.py`** (`is_api_hang()` / `is_stuck_awaiting_2fa()`): it detects the wedge, **acquires the push lock**, and restarts `radon-ib-gateway.service` lock-respectfully after a debounce. See `docs/ib-gateway-recovery.md` and `scripts/api/CLAUDE.md` (2FA-Aware Restart).
 
 ## Credential Security
 
