@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb, resetDb } from "@/lib/db";
+import { resetDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
 import {
   getRequestId,
@@ -14,7 +15,6 @@ import {
   type ServiceCategory,
 } from "@/lib/serviceHealthWindows";
 import { formatServiceHealthError } from "@/lib/serviceHealthError";
-import { withTimeout } from "@/lib/asyncTimeout";
 
 // Disable Next.js static caching: this handler reads live DB state.
 export const dynamic = "force-dynamic";
@@ -29,9 +29,9 @@ const DB_READ_TIMEOUT_MS = 3_000;
 const SERVICE_HEALTH_CACHE_TTL_MS = 3_000;
 
 async function readServiceHealthRows() {
-  const db = getDb();
-  const result = await withTimeout(
-    db.execute({
+  // dbExecute bounds the read AND drops the wedged client on timeout.
+  const result = await dbExecute(
+    {
       sql: `
         SELECT service, state, last_attempt_started_at, last_attempt_finished_at,
                last_error, updated_at
@@ -39,9 +39,8 @@ async function readServiceHealthRows() {
          ORDER BY updated_at DESC
       `,
       args: [],
-    }),
-    DB_READ_TIMEOUT_MS,
-    `service_health read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    },
+    { timeoutMs: DB_READ_TIMEOUT_MS, label: "service_health" },
   );
   return result.rows;
 }

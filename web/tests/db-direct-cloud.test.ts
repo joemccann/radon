@@ -31,10 +31,12 @@ describe("getDb direct-cloud default", () => {
 
     db.getDb();
 
-    // Transport normalised to stateless HTTP — no wedge-able WebSocket singleton.
+    // Transport normalised to stateless HTTP — no wedge-able WebSocket
+    // singleton — and every request routed through the bounded-pool fetch.
     expect(createClientMock).toHaveBeenCalledWith({
       url: "https://example.turso.io",
       authToken: "token",
+      fetch: expect.any(Function),
     });
   });
 
@@ -61,6 +63,7 @@ describe("getDb direct-cloud default", () => {
     expect(createClientMock).toHaveBeenCalledWith({
       url: "https://example.turso.io",
       authToken: "token",
+      fetch: expect.any(Function),
     });
   });
 
