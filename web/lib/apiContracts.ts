@@ -8,6 +8,7 @@ export type ErrorCode =
   | "CONFIG_ERROR"
   | "UPSTREAM_ERROR"
   | "VALIDATION_ERROR"
+  | "DB_UNAVAILABLE"
   | "INTERNAL_ERROR";
 
 export type CacheState = "HIT" | "MISS" | "STALE" | "BYPASS";

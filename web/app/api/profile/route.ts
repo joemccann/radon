@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -38,11 +38,13 @@ function validateAvatarUrl(raw: unknown): { value: string | null } | { error: st
 }
 
 async function readProfile(userId: string): Promise<ProfileRow> {
-  const db = getDb();
-  const result = await db.execute({
-    sql: `SELECT username, avatar_url FROM user_profiles WHERE user_id = ? LIMIT 1`,
-    args: [userId],
-  });
+  const result = await dbExecute(
+    {
+      sql: `SELECT username, avatar_url FROM user_profiles WHERE user_id = ? LIMIT 1`,
+      args: [userId],
+    },
+    { label: "profile" },
+  );
   if (result.rows.length === 0) return { username: null, avatar_url: null };
   const row = result.rows[0] as unknown as ProfileRow;
   return { username: row.username ?? null, avatar_url: row.avatar_url ?? null };
@@ -61,9 +63,10 @@ export async function GET(): Promise<Response> {
     const profile = await readProfile(userId);
     return setNoStoreResponseHeaders(NextResponse.json(profile), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    // 503, not 500: transient DB outage — useProfile keeps its client-side
+    // fallback on any !res.ok instead of freezing a blank profile.
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to read profile", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Profile store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
@@ -120,25 +123,26 @@ export async function PUT(req: Request): Promise<Response> {
   }
 
   try {
-    const db = getDb();
     const current = await readProfile(userId);
     const username = hasUsername ? nextUsername : current.username;
     const avatarUrl = hasAvatar ? nextAvatar : current.avatar_url;
-    await db.execute({
-      sql: `INSERT INTO user_profiles (user_id, username, avatar_url, updated_at)
+    await dbExecute(
+      {
+        sql: `INSERT INTO user_profiles (user_id, username, avatar_url, updated_at)
             VALUES (?, ?, ?, datetime('now'))
             ON CONFLICT(user_id) DO UPDATE SET
               username = excluded.username,
               avatar_url = excluded.avatar_url,
               updated_at = excluded.updated_at`,
-      args: [userId, username, avatarUrl],
-    });
+        args: [userId, username, avatarUrl],
+      },
+      { label: "profile" },
+    );
     const saved = await readProfile(userId);
     return setNoStoreResponseHeaders(NextResponse.json(saved), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to save profile", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Profile store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }

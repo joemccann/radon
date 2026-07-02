@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -23,16 +23,17 @@ export async function DELETE(
   const normalized = decodeURIComponent(symbol).trim().toUpperCase();
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `DELETE FROM user_watchlist WHERE user_id = ? AND symbol = ?`,
-      args: [userId, normalized],
-    });
+    await dbExecute(
+      {
+        sql: `DELETE FROM user_watchlist WHERE user_id = ? AND symbol = ?`,
+        args: [userId, normalized],
+      },
+      { label: "watchlist" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true, watched: false }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to remove from watchlist", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Watchlist store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
