@@ -18,7 +18,7 @@ import { fmtPrice } from "@/lib/positionUtils";
 import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
 import BuySellRow from "./BuySellRow";
 import BottomSheet from "./BottomSheet";
-import ShortStrangleSkewPanel from "@/components/ShortStrangleSkewPanel";
+import ComboSkewPanel from "@/components/ComboSkewPanel";
 
 type MobileOrderTicketProps = {
   open: boolean;
@@ -356,7 +356,7 @@ export default function MobileOrderTicket({
             <span className="mobile-ticket__quote-value">{signedQuote.ask != null ? fmtPrice(Math.abs(signedQuote.ask)) : "—"}</span>
           </div>
 
-          <ShortStrangleSkewPanel
+          <ComboSkewPanel
             ticker={ticker}
             legs={legs}
             prices={prices}

@@ -38,7 +38,7 @@ import {
 } from "@/lib/order";
 import { useViewport } from "@/lib/useViewport";
 import MobileChainLadder from "@/components/mobile/MobileChainLadder";
-import ShortStrangleSkewPanel from "@/components/ShortStrangleSkewPanel";
+import ComboSkewPanel from "@/components/ComboSkewPanel";
 
 /* ─── Types ─── */
 
@@ -612,7 +612,7 @@ function OrderBuilder({
         <OrderPriceStrip prices={stripPrices} />
       )}
 
-      <ShortStrangleSkewPanel
+      <ComboSkewPanel
         ticker={ticker}
         legs={legs}
         prices={prices}
