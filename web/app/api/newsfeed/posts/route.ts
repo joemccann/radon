@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server";
-import { getDb, syncDb } from "@/lib/db";
+import { getDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
+
+// Heaviest single read in the app (500 wide rows). The scraper writes every
+// ~120s, so a 30s TTL loses nothing while collapsing every dashboard tab's
+// poll into one Turso read per window. staleWhileError keeps the feed up
+// through a brief Turso blip (contract: tests/db-read-cache-contract.test.ts).
+const POSTS_CACHE_TTL_MS = 30_000;
 
 type PostRow = {
   id: string;
@@ -44,32 +51,22 @@ function rowToPost(row: PostRow) {
   };
 }
 
+async function fetchPosts() {
+  const result = await getDb().execute({
+    sql: `SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at
+          FROM posts
+          ORDER BY timestamp DESC
+          LIMIT 500`,
+    args: [],
+  });
+  return result.rows.map((r) => rowToPost(r as unknown as PostRow));
+}
+
 export async function GET() {
   try {
-    const db = getDb();
-    // Force a replica pull before SELECT. The newsfeed scraper writes
-    // direct-to-cloud (the default — embedded replica is opt-in only)
-    // and Next.js reads from the embedded replica — when the replica's
-    // background `syncInterval: 60` worker silently stalls, the dashboard
-    // serves rows that are hours behind Turso. Observed on Hetzner
-    // 2026-05-20 with an 11h drift. Failure here is non-fatal: a network
-    // blip must not blank the feed, so we fall through to the cached
-    // replica rows.
-    try {
-      await syncDb();
-    } catch (syncErr) {
-      const message = syncErr instanceof Error ? syncErr.message : String(syncErr);
-      console.warn(`[newsfeed/posts] replica sync non-fatal: ${message}`);
-    }
-    const result = await db.execute({
-      sql: `SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at
-            FROM posts
-            ORDER BY timestamp DESC
-            LIMIT 500`,
-      args: [],
+    const posts = await cachedRead("newsfeed:posts", POSTS_CACHE_TTL_MS, fetchPosts, {
+      staleWhileError: true,
     });
-
-    const posts = result.rows.map((r) => rowToPost(r as unknown as PostRow));
     return NextResponse.json(posts, {
       headers: { "cache-control": "no-store" },
     });

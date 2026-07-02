@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
 import { dbExecute } from "@/lib/dbExecute";
+import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
@@ -105,8 +106,14 @@ async function readCachedGammaRotationFromDisk(): Promise<Record<string, unknown
   }
 }
 
+// Coalesces every client tab's ~60s poll into one source read per window
+// (contract: tests/db-read-cache-contract.test.ts).
+const READ_CACHE_TTL_MS = 5_000;
+
 async function readCachedGammaRotation(): Promise<Record<string, unknown> | null> {
-  return (await readCachedGammaRotationFromDb()) ?? (await readCachedGammaRotationFromDisk());
+  return cachedRead("gamma-rotation:snapshot", READ_CACHE_TTL_MS, async () =>
+    (await readCachedGammaRotationFromDb()) ?? (await readCachedGammaRotationFromDisk()),
+  );
 }
 
 function normalizeAsset(raw: unknown, ticker: "SPY" | "TLT"): Record<string, unknown> {
@@ -178,6 +185,7 @@ export async function GET(): Promise<Response> {
 export async function POST(): Promise<Response> {
   try {
     const rawData = await radonFetch<Record<string, unknown>>("/gamma-rotation/scan", { method: "POST", timeout: 130_000 });
+    invalidateCache("gamma-rotation:snapshot");
     return NextResponse.json(normalizeGammaRotationPayload(rawData));
   } catch (error) {
     const message = error instanceof Error ? error.message : "Gamma Rotation Gap scan failed";

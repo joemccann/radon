@@ -4,6 +4,7 @@ import { statSync } from "fs";
 import { join } from "path";
 import { radonFetch } from "@/lib/radonApi";
 import { getDb } from "@/lib/db";
+import { cachedRead, invalidateCache } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 // Disable Next.js static caching: this handler reads live disk state
@@ -15,6 +16,9 @@ export const runtime = "nodejs";
 
 const DISCOVER_CACHE_PATH = join(process.cwd(), "..", "data", "discover.json");
 const STALE_THRESHOLD_SECONDS = 600;
+// Coalesces polling tabs into one source read per window
+// (contract: tests/db-read-cache-contract.test.ts).
+const READ_CACHE_TTL_MS = 10_000;
 
 interface CacheMeta {
   last_refresh: string | null;
@@ -82,12 +86,14 @@ export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   // Fresher of DB row and disk JSON, so a stalled writer on either side
   // can never freeze the panel.
-  const result = await dbFirstRead({
-    fromDb: readDiscoverFromDb,
-    fromDisk: readDiscoverFromDisk,
-    maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
-    label: "discover",
-  });
+  const result = await cachedRead("discover:snapshot", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readDiscoverFromDb,
+      fromDisk: readDiscoverFromDisk,
+      maxAgeMs: STALE_THRESHOLD_SECONDS * 1000,
+      label: "discover",
+    }),
+  );
   if (result.ok) {
     const cache_meta =
       result.source === "db"
@@ -115,6 +121,7 @@ export async function POST(): Promise<Response> {
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/discover", { method: "POST", timeout: 130_000 });
+    invalidateCache("discover:snapshot");
     const cache_meta = buildCacheMeta(DISCOVER_CACHE_PATH);
     return setNoStoreResponseHeaders(
       NextResponse.json({ ...data, cache_meta }),

@@ -5,6 +5,7 @@ import { isVcgDataStale } from "@/lib/vcgStaleness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
+import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
@@ -72,14 +73,20 @@ async function readVcgFromDisk(): Promise<TimestampedRead<Record<string, unknown
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+// Coalesces every client tab's ~60s poll into one source read per window
+// (contract: tests/db-read-cache-contract.test.ts).
+const READ_CACHE_TTL_MS = 5_000;
+
 /** Fresher of the Turso row and data/vcg.json — a frozen writer on either side never wins. */
 async function readCachedVcg(): Promise<Record<string, unknown> | null> {
-  const result = await dbFirstRead({
-    fromDb: readVcgFromDb,
-    fromDisk: readVcgFromDisk,
-    maxAgeMs: VCG_MAX_AGE_MS,
-    label: "vcg",
-  });
+  const result = await cachedRead("vcg:snapshot", READ_CACHE_TTL_MS, () =>
+    dbFirstRead({
+      fromDb: readVcgFromDb,
+      fromDisk: readVcgFromDisk,
+      maxAgeMs: VCG_MAX_AGE_MS,
+      label: "vcg",
+    }),
+  );
   return result.ok ? result.data : null;
 }
 
