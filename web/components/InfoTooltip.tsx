@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 
 /**
  * Inline hover tooltip — renders a small "?" circle that, on hover,
@@ -33,7 +33,9 @@ function useCoarsePointer() {
 
 export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTestId }: InfoTooltipProps) {
   const [rect, setRect] = useState<DOMRect | null>(null);
+  const [popupHeight, setPopupHeight] = useState<number | null>(null);
   const ref = useRef<HTMLSpanElement>(null);
+  const popupRef = useRef<HTMLSpanElement>(null);
   const isCoarse = useCoarsePointer();
   const isOpen = rect !== null;
 
@@ -67,8 +69,24 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [isOpen]);
 
-  // Determine whether to flip below: if trigger is within 120px of viewport top
-  const flipBelow = rect ? rect.top < 120 : false;
+  // Measure the rendered popup before paint so the flip decision uses its
+  // real height — a fixed threshold clips long tooltips near the top.
+  useLayoutEffect(() => {
+    if (!rect) {
+      setPopupHeight(null);
+      return;
+    }
+    const el = popupRef.current;
+    if (el) setPopupHeight(el.getBoundingClientRect().height);
+  }, [rect, text]);
+
+  const flipBelow = (() => {
+    if (!rect || popupHeight === null) return false;
+    const needed = popupHeight + 14;
+    if (rect.top >= needed) return false;
+    const spaceBelow = (typeof window !== "undefined" ? window.innerHeight : 0) - rect.bottom;
+    return spaceBelow >= needed || spaceBelow > rect.top;
+  })();
 
   return (
     <span
@@ -128,9 +146,11 @@ export default function InfoTooltip({ text, ariaLabel, triggerTestId, contentTes
       </button>
       {rect && (
         <span
+          ref={popupRef}
           data-testid={contentTestId}
           style={{
             position: "fixed",
+            visibility: popupHeight === null ? "hidden" : undefined,
             ...(flipBelow
               ? { top: rect.bottom + 6 }
               : { top: rect.top - 6, transform: "translateY(-100%)" }),
