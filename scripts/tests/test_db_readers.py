@@ -25,6 +25,7 @@ if "libsql_experimental" not in sys.modules:
 _MIGRATIONS = [
     _SCRIPTS_DIR / "db" / "migrations" / "0001_init.sql",
     _SCRIPTS_DIR / "db" / "migrations" / "0004_orders_and_ephemeral.sql",
+    _SCRIPTS_DIR / "db" / "migrations" / "0025_journal_effective_at_index.sql",
 ]
 
 
@@ -170,6 +171,41 @@ def test_next_journal_numeric_id_comes_from_journal_payloads(readers, conn):
     conn.commit()
 
     assert readers.read_next_journal_numeric_id(conn) == 8
+
+
+def test_next_journal_numeric_id_does_not_materialize_payloads(readers, conn, monkeypatch):
+    """The next-id read must be a SQL aggregate, not a full journal
+    deserialization — read_journal_trades is O(rows) and grows forever."""
+    for idx in [2, 7]:
+        conn.execute(
+            "INSERT INTO journal (trade_id, payload, filled_at, written_at) VALUES (?, ?, ?, ?)",
+            (f"trade-{idx}", json.dumps({"id": idx}), "2026-06-23", "2026-06-23T10:00:00Z"),
+        )
+    conn.commit()
+
+    def _boom(*_args, **_kwargs):
+        raise AssertionError("read_next_journal_numeric_id must not read every journal payload")
+
+    monkeypatch.setattr(readers, "read_journal_trades", _boom)
+
+    assert readers.read_next_journal_numeric_id(conn) == 8
+
+    conn.execute("DELETE FROM journal")
+    conn.commit()
+    assert readers.read_next_journal_numeric_id(conn) == 1
+
+
+def test_journal_effective_order_rides_expression_index(readers, conn):
+    """ORDER BY COALESCE(filled_at, written_at) must walk
+    idx_journal_effective_at (migration 0025) instead of a full-scan +
+    temp-B-tree sort that grows with trade history."""
+    plan_rows = conn.execute(
+        "EXPLAIN QUERY PLAN SELECT payload FROM journal "
+        f"ORDER BY {readers.JOURNAL_EFFECTIVE_ORDER_SQL}"
+    ).fetchall()
+    plan = " ".join(str(row[-1]) for row in plan_rows)
+    assert "idx_journal_effective_at" in plan
+    assert "TEMP B-TREE" not in plan
 
 
 def test_reads_watchlist_tickers_from_table(readers, conn):
