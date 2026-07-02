@@ -296,6 +296,82 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
   });
 });
 
+/**
+ * Regression (2026-07-02): ``informed-flow`` and ``portfolio-archive``
+ * both wrote service_health heartbeats but were never registered in the
+ * windows table, so they silently inherited the 1h scheduled default and
+ * flipped the footer to degraded whenever quiet for an hour.
+ *
+ *  - ``informed-flow`` (scripts/fetch_informed_flow.py) only writes when
+ *    a user hits FastAPI ``GET /informed-flow/{ticker}`` — the subprocess
+ *    bridge runs the script on demand. UW-only (UWClient), no IB. Same
+ *    profile as its UW-scan siblings (scanner / discover / theta-harvester):
+ *    on-demand, 30m open/extended, 3d closed.
+ *
+ *  - ``portfolio-archive`` (scripts/archive_portfolio_snapshots.py) is the
+ *    cold-archive oneshot triggered by the laptop launchd job
+ *    ``run.radon.archive`` (weekly Sun 03:00, fires only when the laptop is
+ *    awake — real gaps stretch to ~monthly; last run 2026-06-28 archived
+ *    the 2026-05 month). Scheduled, uniform 35-day window so it never
+ *    fires between runs. Turso HTTP + disk + rsync only — no IB.
+ */
+describe("unregistered-writer regression — informed-flow and portfolio-archive", () => {
+  const MIN = 60_000;
+  const HOUR = 60 * MIN;
+  const DAY = 24 * HOUR;
+
+  it("informed-flow is registered as on-demand", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["informed-flow"]).toBeDefined();
+    expect(getServiceCategory("informed-flow")).toBe("on-demand");
+  });
+
+  it("informed-flow windows match its UW-scan siblings (30m/30m/3d)", () => {
+    expect(getFreshnessWindowMs("informed-flow", "open")).toBe(30 * MIN);
+    expect(getFreshnessWindowMs("informed-flow", "extended")).toBe(30 * MIN);
+    expect(getFreshnessWindowMs("informed-flow", "closed")).toBe(3 * DAY);
+    // Byte-for-byte the same window as scanner — the sibling family.
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("informed-flow", state)).toBe(
+        getFreshnessWindowMs("scanner", state),
+      );
+    }
+  });
+
+  it("informed-flow is UW-only — requires_ib = false", () => {
+    expect(requiresIb("informed-flow")).toBe(false);
+  });
+
+  it("portfolio-archive is registered as scheduled", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["portfolio-archive"]).toBeDefined();
+    expect(getServiceCategory("portfolio-archive")).toBe("scheduled");
+  });
+
+  it("portfolio-archive has a uniform 35-day window", () => {
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("portfolio-archive", state)).toBe(35 * DAY);
+    }
+  });
+
+  it("portfolio-archive: a run 30 days ago does not flip to stale in any market state", () => {
+    // 2026-06-28 run checked on 2026-07-28 — the observed ~monthly gap.
+    const NOW = Date.parse("2026-07-28T10:00:00Z");
+    const monthAgo = new Date(NOW - 30 * DAY).toISOString();
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(isStale("portfolio-archive", monthAgo, state, NOW)).toBe(false);
+    }
+  });
+
+  it("portfolio-archive: still fires once silence exceeds the 35-day window", () => {
+    const NOW = Date.parse("2026-07-28T10:00:00Z");
+    const overWindow = new Date(NOW - 36 * DAY).toISOString();
+    expect(isStale("portfolio-archive", overWindow, "closed", NOW)).toBe(true);
+  });
+
+  it("portfolio-archive has no IB dependency — requires_ib = false", () => {
+    expect(requiresIb("portfolio-archive")).toBe(false);
+  });
+});
+
 describe("getServiceCategory", () => {
   it("returns the configured category for a known scheduled service", () => {
     expect(getServiceCategory("newsfeed-scraper")).toBe("scheduled");
