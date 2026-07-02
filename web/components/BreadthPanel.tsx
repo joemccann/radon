@@ -33,11 +33,6 @@ type BreadthPanelProps = {
 
 /* ─── Helpers ─────────────────────────────────────────── */
 
-function fmtNum(v: number | null | undefined, decimals = 0): string {
-  if (v == null || !Number.isFinite(v)) return "---";
-  return v.toFixed(decimals);
-}
-
 function fmtSigned(v: number | null | undefined, decimals = 0): string {
   if (v == null || !Number.isFinite(v)) return "---";
   return `${v >= 0 ? "+" : ""}${v.toFixed(decimals)}`;
@@ -321,7 +316,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
           <div className="section-title">
             <Activity size={14} />
             NYSE Breadth
-            <InfoTooltip text="Market breadth from NYSE internals: net advance/decline (AD-NYSE), TICK-NYSE, and the cumulative A/D line vs SPY. A 20-session divergence between the A/D line and SPY flags participation thinning under a rising tape (bearish) or improving under a falling tape (bullish)." />
+            <InfoTooltip text="Market breadth from NYSE internals: net advance/decline (AD-NYSE), TICK-NYSE, and the cumulative A/D line vs SPY. NET BREADTH 20D sums the last 20 daily net A/D readings (advancers minus decliners), which equals the 20-session change in the cumulative A/D line. DIVERGENCE flags BEARISH when SPY is up over 1% in 20 sessions while that sum is negative (fewer stocks rising than falling under a rising tape), and BULLISH on the mirror image." />
           </div>
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
@@ -339,7 +334,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
             <div className="m-regime-grid2x2" data-testid="breadth-mobile-grid">
               <MetricCell label="NET A/D" value={fmtSigned(latest.net_ad)} tone={signTone(latest.net_ad)} />
               <MetricCell label="TICK" value={fmtSigned(latest.tick)} tone={signTone(latest.tick)} />
-              <MetricCell label="CUM A/D 20D" value={fmtSigned(latest.cum_ad_change_20d)} tone={signTone(latest.cum_ad_change_20d)} />
+              <MetricCell label="NET BREADTH 20D" value={fmtSigned(latest.cum_ad_change_20d)} tone={signTone(latest.cum_ad_change_20d)} />
               <MetricCell
                 label="SESSIONS POS"
                 value={latest.sessions_positive_20 != null ? `${latest.sessions_positive_20}/20` : "---"}
@@ -363,13 +358,13 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
             />
             <RegimeStripCell
               testId="breadth-strip-cum-ad-20d"
-              label="CUM A/D 20D"
+              label="NET BREADTH 20D"
               value={
                 <span style={{ color: signColor(latest.cum_ad_change_20d) }}>
                   {fmtSigned(latest.cum_ad_change_20d)}
                 </span>
               }
-              sub={<>CUM A/D {fmtNum(latest.cum_ad)}</>}
+              sub={<>SUM OF DAILY NET A/D, 20 SESSIONS</>}
             />
             <RegimeStripCell
               testId="breadth-strip-sessions-positive"
@@ -381,7 +376,7 @@ export default function BreadthPanel({ marketState }: BreadthPanelProps) {
               testId="breadth-strip-divergence"
               label="DIVERGENCE"
               value={divergenceChip}
-              sub={<>A/D LINE VS SPY, 20 SESSIONS</>}
+              sub={<>SPY 20D VS 20-SESSION NET BREADTH</>}
             />
           </RegimeStrip>
         )}
