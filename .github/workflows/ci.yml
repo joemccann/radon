@@ -256,6 +256,22 @@ jobs:
     needs: [secret-scan, web-tests, py-tests, perimeter-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Bind the deploy to a GitHub Environment so a REQUIRED REVIEWER can gate it.
+    # `git push origin main` runs `deploy.sh` over SSH as `radon` on the box that
+    # owns the live IB Gateway (:4001) — i.e. push-to-main == code execution on
+    # the trading host (security posture audit M3, threat T3). An Environment
+    # with a required reviewer turns that into a human-gated release.
+    #
+    # ACTIVATION (one-time, GitHub UI — this YAML alone is a no-op until then):
+    #   Settings > Environments > New environment "production" >
+    #   Required reviewers: add the operator. Optionally restrict deployment
+    #   branches to `main`. Until a protection rule is added, the environment
+    #   auto-creates with NO gate, so merging this changes nothing operationally.
+    # Pair with branch protection on `main` (see the audit's verify-on-host list:
+    #   gh api repos/:owner/:repo/branches/main/protection).
+    environment:
+      name: production
+      url: https://app.radon.run
     steps:
       - name: Deploy via SSH
         # Pinned to the v1.2.5 commit SHA (was the mutable `@v1` tag). This step
