@@ -29,9 +29,84 @@
 // undici's 300s ceiling. See `feedback_libsql_http_transport_no_wss_singleton`.
 
 import { createClient, type Client } from "@libsql/client";
+import { Agent, fetch as undiciFetch } from "undici";
 import path from "node:path";
 
 let cached: Client | null = null;
+
+// ── Bounded undici pool (2026-07-02 incident) ─────────────────────────────
+// The long-lived Next.js process accumulated 59 ESTABLISHED sockets to Turso;
+// Turso then stopped servicing NEW requests from that IP — fresh connections
+// completed TCP+TLS but responses never arrived — so every DB-backed route hit
+// its 3s deadline until `systemctl restart radon-nextjs` dropped the sockets
+// (523 such bursts since Jun 26). Two structural fixes:
+//   1. Every Turso HTTP request dispatches through ONE undici Agent with a
+//      small per-origin connection cap, so the pool can never grow unbounded.
+//   2. `resetDb()` DESTROYS that Agent (aborting its sockets), so the
+//      timeout self-heal actually drops wedged connections instead of
+//      orphaning them behind a fresh client.
+export const DB_POOL_MAX_CONNECTIONS = 8;
+// Idle sockets are reaped after this window instead of accumulating. Must stay
+// ABOVE the 3s `dbKeepAlive` heartbeat interval so the heartbeat keeps one
+// socket on the warm path (~12ms) between 60s polls.
+export const DB_POOL_KEEP_ALIVE_TIMEOUT_MS = 10_000;
+
+let cachedAgent: Agent | null = null;
+
+function getPoolAgent(): Agent {
+  if (!cachedAgent) {
+    cachedAgent = new Agent({
+      connections: DB_POOL_MAX_CONNECTIONS,
+      keepAliveTimeout: DB_POOL_KEEP_ALIVE_TIMEOUT_MS,
+    });
+  }
+  return cachedAgent;
+}
+
+/** Abort every socket in the bounded pool. Fire-and-forget: the next request
+ * lazily builds a fresh Agent. Shared by the primary and demo clients — a
+ * reset on either aborts both origins' sockets, which is acceptable (the
+ * other side re-handshakes once) and keeps one teardown path. */
+function destroyPoolAgent(): void {
+  const agent = cachedAgent;
+  cachedAgent = null;
+  agent?.destroy().catch(() => {});
+}
+
+/** `fetch` pinned to the bounded pool — passed to `createClient` so every
+ * Turso HTTP request the app makes goes through the capped Agent.
+ *
+ * Uses undici's OWN fetch (not `globalThis.fetch`): Node's bundled fetch
+ * rejects an Agent from a different undici major ("invalid onRequestStart
+ * method"), so same-realm dispatch is the only version-proof pairing. The
+ * hrana client passes global `Request` objects, which undici's fetch
+ * brand-checks and refuses — translate them to (url, init). hrana bodies are
+ * strings/bytes and it never sets an AbortSignal, so the translation is
+ * lossless. */
+export async function pooledDbFetch(
+  input: string | URL | Request,
+  init?: RequestInit,
+): Promise<Response> {
+  const dispatcher = getPoolAgent();
+  if (typeof input === "object" && input !== null && "url" in input) {
+    const request = input as Request;
+    const body =
+      request.method === "GET" || request.method === "HEAD"
+        ? undefined
+        : new Uint8Array(await request.arrayBuffer());
+    return (await undiciFetch(request.url, {
+      method: request.method,
+      headers: request.headers,
+      body,
+      ...init,
+      dispatcher,
+    } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+  }
+  return (await undiciFetch(input as string | URL, {
+    ...init,
+    dispatcher,
+  } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+}
 
 // A stalled HTTP request still has to settle before its pooled socket frees up.
 // If a call has not resolved within this ceiling we proactively drop the cached
@@ -52,18 +127,23 @@ export function toHttpTransportUrl(url: string): string {
   return url;
 }
 
-/** Drop the cached primary client so the next getDb() opens a fresh pool.
+/** Drop the cached primary client AND destroy the bounded undici pool so the
+ * next getDb() opens fresh sockets.
  *
  * Public so route catch-blocks can recover promptly from a read timeout
  * instead of waiting for the in-flight request to hit undici's ceiling.
+ * Destroying the Agent is the load-bearing half: without it a wedged pool's
+ * sockets survive the client swap and keep pinning Turso's per-IP limit.
  * Idempotent. */
 export function resetDb(): void {
   cached = null;
+  destroyPoolAgent();
 }
 
 /** Drop the cached demo client so the next getDemoDb() opens a fresh pool. */
 export function resetDemoDb(): void {
   cachedDemo = null;
+  destroyPoolAgent();
 }
 
 /** Wrap a client so any failed or stalled `execute`/`batch` invokes `onHeal`,
@@ -135,11 +215,14 @@ export function getDb(): Client {
           syncUrl: toHttpTransportUrl(url),
           authToken,
           syncInterval: 60, // background pull every 60s; writes are pushed immediately
+          fetch: pooledDbFetch,
         }
-      : { url: toHttpTransportUrl(url), authToken },
+      : { url: toHttpTransportUrl(url), authToken, fetch: pooledDbFetch },
   );
 
-  cached = selfHealing(raw, () => { cached = null; });
+  // Heal through resetDb (not a bare `cached = null`) so the wedged pool's
+  // sockets are destroyed along with the client.
+  cached = selfHealing(raw, resetDb);
   return cached;
 }
 
@@ -171,8 +254,8 @@ export function getDemoDb(): Client {
   }
 
   cachedDemo = selfHealing(
-    createClient({ url: toHttpTransportUrl(url), authToken }),
-    () => { cachedDemo = null; },
+    createClient({ url: toHttpTransportUrl(url), authToken, fetch: pooledDbFetch }),
+    resetDemoDb,
   );
   return cachedDemo;
 }
@@ -185,10 +268,11 @@ export async function syncDb(): Promise<void> {
   }
 }
 
-// Test seam — drop the cached client between vitest tests.
+// Test seam — drop the cached clients + pool between vitest tests.
 export function __resetDbForTests(): void {
   cached = null;
   cachedDemo = null;
+  destroyPoolAgent();
 }
 
 // Test seam — inject a libSQL client (typically in-memory) so route
