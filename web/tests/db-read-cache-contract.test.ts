@@ -25,6 +25,10 @@ const CACHED_READ_ROUTES: { path: string; key: string }[] = [
   { path: "app/api/admin/host-metrics/route.ts", key: "admin:host-metrics" },
   { path: "app/api/admin/reliability/route.ts", key: "admin:reliability" },
   { path: "app/api/admin/slo/route.ts", key: "admin:slo" },
+  { path: "app/api/catalysts/route.ts", key: "catalysts:snapshot" },
+  { path: "app/api/leap/route.ts", key: "leap:snapshot" },
+  { path: "app/api/garch-convergence/route.ts", key: "garch:snapshot" },
+  { path: "app/api/flow-surprise/route.ts", key: "flow-surprise:snapshot" },
 ];
 
 function stripComments(src: string): string {

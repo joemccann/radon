@@ -9,6 +9,7 @@ import { selectPreferredCriCandidate, type CriCacheCandidate } from "@/lib/criCa
 import { backfillRealizedVolHistory, type RegimeHistoryEntry } from "@/lib/regimeHistory";
 import { radonFetch } from "@/lib/radonApi";
 import { isSkewCacheFresh } from "@/lib/internalsSkewCache";
+import { dbExecute } from "@/lib/dbExecute";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 // Disable Next.js static caching: this handler reads live disk state
@@ -518,16 +519,60 @@ async function readLatestCri(): Promise<{ data: object; path: string } | null> {
     return null;
   }
 
+  async function readLatestDbCri(): Promise<CriCacheCandidate | null> {
+    try {
+      // Same bounded read as the regime route: dbExecute caps the read and
+      // drops a wedged client so the disk fallback still serves this request.
+      const result = await dbExecute({
+        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
+        args: [],
+      }, { label: "internals-cri", timeoutMs: 2500 });
+      if (result.rows.length === 0) return null;
+      const row = result.rows[0] as unknown as { taken_at: string; payload: string };
+      const mtimeMs = Date.parse(row.taken_at);
+      return {
+        path: `db:cri_snapshots/${row.taken_at}`,
+        mtimeMs: Number.isFinite(mtimeMs) ? mtimeMs : Date.now(),
+        data: JSON.parse(row.payload) as Record<string, unknown>,
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  const dbCandidate = await readLatestDbCri();
   const selected = selectPreferredCriCandidate(
-    await readLatestScheduledCri(),
+    dbCandidate ?? (await readLatestScheduledCri()),
     await readCriCandidate(CACHE_PATH),
   );
 
   return selected ? { data: selected.data, path: selected.path } : null;
 }
 
-/** Read latest Menthorq CTA cache (raw table payload). */
+/** Latest Menthorq CTA payload from Turso — shared across hosts. Only used
+ *  when the row actually carries tables; otherwise the disk cache serves. */
+async function readLatestMenthorqCacheFromDb(): Promise<Record<string, unknown> | null> {
+  try {
+    const result = await dbExecute({
+      sql: `SELECT payload FROM menthorq_cta ORDER BY date DESC LIMIT 1`,
+      args: [],
+    }, { label: "internals-menthorq", timeoutMs: 2500 });
+    if (result.rows.length === 0) return null;
+    const payload = JSON.parse(
+      String((result.rows[0] as unknown as { payload: string }).payload),
+    ) as Record<string, unknown>;
+    return payload.tables && typeof payload.tables === "object" ? payload : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Read latest Menthorq CTA cache — Turso first, disk dir fallback. */
 async function readLatestMenthorqCache(): Promise<Record<string, unknown> | null> {
+  return (await readLatestMenthorqCacheFromDb()) ?? readLatestMenthorqCacheFromDisk();
+}
+
+async function readLatestMenthorqCacheFromDisk(): Promise<Record<string, unknown> | null> {
   try {
     const files = await readdir(MENTHORQ_DIR);
     const ctaFiles = files
@@ -554,6 +599,12 @@ async function readLatestMenthorqCache(): Promise<Record<string, unknown> | null
 /** Check if the latest cached data is stale (market-hours aware). */
 async function isCacheStale(filePath: string, data: Record<string, unknown>): Promise<boolean> {
   try {
+    if (filePath.startsWith("db:cri_snapshots/")) {
+      const takenAtIso = filePath.slice("db:cri_snapshots/".length);
+      const mtimeMs = Date.parse(takenAtIso);
+      if (!Number.isFinite(mtimeMs)) return true;
+      return isCriDataStale(data, mtimeMs, todayET(), isMarketOpenNow());
+    }
     const s = await stat(filePath);
     return isCriDataStale(data, s.mtimeMs, todayET(), isMarketOpenNow());
   } catch {

@@ -231,6 +231,13 @@ def _write_db_cache(rows: list[dict[str, Any]], scan_time: str) -> None:
             "INSERT OR REPLACE INTO catalysts (scan_time, payload) VALUES (?, ?)",
             (scan_time, json.dumps(rows)),
         )
+        db.execute(
+            """
+            DELETE FROM catalysts WHERE scan_time NOT IN (
+              SELECT scan_time FROM catalysts ORDER BY scan_time DESC LIMIT 30
+            )
+            """
+        )
         db.commit()
         writer.record_service_health("catalysts", "ok", finished_at=scan_time)
     except Exception as exc:  # noqa: BLE001 — best-effort mirror

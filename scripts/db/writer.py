@@ -291,6 +291,36 @@ def upsert_oi_changes(scan_time: str, payload: dict[str, Any]) -> None:
     db.commit()
 
 
+SCAN_SNAPSHOT_KEEP = 30
+
+
+def upsert_scan_snapshot(service: str, scan_time: str, payload: dict[str, Any]) -> None:
+    """Generic latest-scan mirror for whole-file scans (scan_snapshots table:
+    leap-scan, garch-scan, flow-surprise). Prunes to the newest
+    SCAN_SNAPSHOT_KEEP rows per service so the table stays bounded."""
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO scan_snapshots (service, scan_time, payload)
+        VALUES (?, ?, ?)
+        """,
+        (service, scan_time, json.dumps(payload)),
+    )
+    db.execute(
+        """
+        DELETE FROM scan_snapshots
+        WHERE service = ? AND scan_time NOT IN (
+          SELECT scan_time FROM scan_snapshots
+          WHERE service = ?
+          ORDER BY scan_time DESC
+          LIMIT ?
+        )
+        """,
+        (service, service, SCAN_SNAPSHOT_KEEP),
+    )
+    db.commit()
+
+
 def upsert_scanner_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
     """Phase 2.1 — store the watchlist signal snapshot from scanner.py."""
     db = get_db()

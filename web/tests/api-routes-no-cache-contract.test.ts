@@ -119,7 +119,24 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   // cash-flows reads via FastAPI proxy which queries Turso server-side
   { path: "app/api/cash-flows/route.ts", dbHelperPattern: /radonFetch\s*\(\s*[`"']\/cash-flows/ },
   { path: "app/api/service-health/route.ts", dbHelperPattern: /\bdbExecute\s*\(/ },
+  // Formerly disk-only routes (2026-07-02 SOT sweep): producers mirror to
+  // Turso (catalysts table / generic scan_snapshots / cri_snapshots +
+  // menthorq_cta), routes read DB-first with the data/ JSON as fallback.
+  { path: "app/api/catalysts/route.ts", dbHelperPattern: /readCatalystsFromDb\s*\(/ },
+  { path: "app/api/leap/route.ts", dbHelperPattern: /readLeapFromDb\s*\(/ },
+  { path: "app/api/garch-convergence/route.ts", dbHelperPattern: /readGarchFromDb\s*\(/ },
+  { path: "app/api/flow-surprise/route.ts", dbHelperPattern: /readFlowSurpriseFromDb\s*\(/ },
+  { path: "app/api/internals/route.ts", dbHelperPattern: /readLatestDbCri\s*\(/ },
 ];
+
+// Deliberately NOT DB-first (re-confirmed 2026-07-02) — do not "fix" these:
+// - informed-flow/[ticker] + futures/chain: proxy-first to FastAPI, which
+//   runs on the same host as the producer/cache; the proxy already bridges
+//   hosts and the disk read is a last-resort fallback.
+// - ticker/seasonality + ticker/info: web-tier TTL caches of EXTERNAL API
+//   data (UW/Exa/Anthropic) — losable, regenerated on demand, written and
+//   read by the same Next.js process. Turso is the source of truth for
+//   Radon-generated data, not third-party cache material.
 
 describe("Turso source-of-truth — routes must invoke a DB read", () => {
   it.each(DB_FIRST_ROUTES)(
