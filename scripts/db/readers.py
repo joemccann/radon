@@ -20,6 +20,12 @@ def _db(db: Optional[Any] = None) -> Any:
     return db if db is not None else get_db()
 
 
+# Effective-time ordering for journal reads. Must stay textually identical to
+# the idx_journal_effective_at expression (migration 0025) or the reads regress
+# to a full scan + filesort that grows with trade history.
+JOURNAL_EFFECTIVE_ORDER_SQL = "COALESCE(filled_at, written_at) ASC, trade_id ASC"
+
+
 def _cell(row: Any, idx: int, name: str | None = None) -> Any:
     if isinstance(row, dict):
         if name and name in row:
@@ -118,11 +124,7 @@ def read_executed_orders(db: Optional[Any] = None) -> list[dict[str, Any]]:
 
 def read_journal_trades(db: Optional[Any] = None) -> list[dict[str, Any]]:
     rows = _db(db).execute(
-        """
-        SELECT payload
-        FROM journal
-        ORDER BY COALESCE(filled_at, written_at) ASC, trade_id ASC
-        """
+        f"SELECT payload FROM journal ORDER BY {JOURNAL_EFFECTIVE_ORDER_SQL}"
     ).fetchall()
     trades: list[dict[str, Any]] = []
     for row in rows:
@@ -133,13 +135,19 @@ def read_journal_trades(db: Optional[Any] = None) -> list[dict[str, Any]]:
 
 
 def read_next_journal_numeric_id(db: Optional[Any] = None) -> int:
-    next_id = 1
-    for trade in read_journal_trades(db):
-        try:
-            next_id = max(next_id, int(trade.get("id", 0)) + 1)
-        except (TypeError, ValueError):
-            continue
-    return next_id
+    """Next numeric journal id as a SQL aggregate — never a full payload read.
+
+    CAST mirrors the legacy Python semantics: non-numeric ids collapse to 0
+    and are ignored by MAX; an empty journal yields 1.
+    """
+    rows = _db(db).execute(
+        "SELECT MAX(CAST(json_extract(payload, '$.id') AS INTEGER)) FROM journal"
+    ).fetchall()
+    max_id = _cell(rows[0], 0) if rows else None
+    try:
+        return max(1, int(max_id) + 1) if max_id is not None else 1
+    except (TypeError, ValueError):
+        return 1
 
 
 def read_journal_entry_date_maps(
@@ -154,11 +162,7 @@ def read_journal_entry_date_maps(
     invariant for multi-leg options.
     """
     rows = _db(db).execute(
-        """
-        SELECT payload, filled_at
-        FROM journal
-        ORDER BY COALESCE(filled_at, written_at) ASC, trade_id ASC
-        """
+        f"SELECT payload, filled_at FROM journal ORDER BY {JOURNAL_EFFECTIVE_ORDER_SQL}"
     ).fetchall()
     structure_dates: dict[str, str] = {}
     contract_dates: dict[str, str] = {}
