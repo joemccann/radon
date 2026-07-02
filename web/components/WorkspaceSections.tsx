@@ -34,6 +34,7 @@ import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
+import { isEarlierLocalDay } from "@/lib/holdTime";
 import CashFlowsSection from "@/components/CashFlowsSection";
 import { useSort } from "@/lib/useSort";
 import { useTableFilter } from "@/lib/useTableFilter";
@@ -403,13 +404,19 @@ export function positionGroupShareData(
     }
   }
 
-  // Fallback entry time from trade_log for fully-closed positions
-  if (entryTime == null && tradeLogDates?.[group.symbol]) {
-    entryTime = tradeLogDates[group.symbol];
-  }
-
   // Exit time is the closing group's time
   const exitTime = group.isClosing ? group.time : null;
+
+  // Fallback entry time from trade_log for fully-closed positions. The map
+  // holds each ticker's LATEST journal date, so once the closing fill is
+  // journaled the value is the close date itself — only a date from an
+  // earlier day can be a real entry.
+  if (entryTime == null && tradeLogDates?.[group.symbol]) {
+    const candidate = tradeLogDates[group.symbol];
+    if (exitTime == null || isEarlierLocalDay(candidate, exitTime)) {
+      entryTime = candidate;
+    }
+  }
 
   return {
     description: group.description,
