@@ -5,17 +5,27 @@ import { detectStructure, normalizeComboOrder, type OrderLeg } from "./optionsCh
 
 type VolSource = "stream" | "mid" | "last" | "close";
 
-export type ShortStrangleSkewLeg = {
+export type ComboSkewStructure = "Short Strangle" | "Long Strangle" | "Risk Reversal";
+
+const SKEW_STRUCTURES: ReadonlySet<string> = new Set([
+  "Short Strangle",
+  "Long Strangle",
+  "Risk Reversal",
+]);
+
+export type ComboSkewLeg = {
   strike: number;
+  action: "BUY" | "SELL";
   iv: number;
   delta: number;
   source: VolSource;
 };
 
-export type ShortStrangleSkewReady = {
+export type ComboSkewReady = {
   status: "ready";
-  call: ShortStrangleSkewLeg;
-  put: ShortStrangleSkewLeg;
+  structure: ComboSkewStructure;
+  call: ComboSkewLeg;
+  put: ComboSkewLeg;
   spot: number;
   expiry: string;
   quantity: number;
@@ -26,14 +36,15 @@ export type ShortStrangleSkewReady = {
   deltaSharesTotal: number;
 };
 
-export type ShortStrangleSkewUnavailable = {
+export type ComboSkewUnavailable = {
   status: "unavailable";
+  structure: ComboSkewStructure;
   reason: "missing-spot" | "missing-vol";
 };
 
-export type ShortStrangleSkewResult = ShortStrangleSkewReady | ShortStrangleSkewUnavailable;
+export type ComboSkewResult = ComboSkewReady | ComboSkewUnavailable;
 
-export type ShortStrangleSkewInput = {
+export type ComboSkewInput = {
   ticker: string;
   legs: OrderLeg[];
   prices: Record<string, PriceData>;
@@ -65,7 +76,7 @@ function observedPrice(pd: PriceData | null | undefined): { price: number; sourc
   return null;
 }
 
-function resolveSpot(input: ShortStrangleSkewInput, expiry: string): number | null {
+function resolveSpot(input: ComboSkewInput, expiry: string): number | null {
   if (positive(input.spot)) return input.spot;
   const tickerPd = input.prices[input.ticker.toUpperCase()];
   const expiryKey = expiry.replace(/\D/g, "").slice(0, 8);
@@ -87,6 +98,10 @@ function optionDelta(right: "C" | "P", spot: number, strike: number, T: number, 
   return right === "C" ? callDelta : callDelta - 1;
 }
 
+function legDirectionSign(action: "BUY" | "SELL"): number {
+  return action === "BUY" ? 1 : -1;
+}
+
 function resolveLeg(
   ticker: string,
   leg: OrderLeg,
@@ -95,7 +110,7 @@ function resolveLeg(
   spot: number,
   T: number,
   r: number,
-): ShortStrangleSkewLeg | null {
+): ComboSkewLeg | null {
   if (!positive(spot) || !positive(leg.strike) || T <= 0) return null;
 
   let iv: number | null = null;
@@ -136,27 +151,30 @@ function resolveLeg(
 
   return {
     strike: leg.strike,
+    action: leg.action,
     iv,
     delta,
     source,
   };
 }
 
-export function computeShortStrangleSkew(input: ShortStrangleSkewInput): ShortStrangleSkewResult | null {
-  if (detectStructure(input.legs) !== "Short Strangle") return null;
+export function computeComboSkew(input: ComboSkewInput): ComboSkewResult | null {
+  const structure = detectStructure(input.legs);
+  if (!SKEW_STRUCTURES.has(structure)) return null;
 
   const normalized = normalizeComboOrder(input.legs);
-  const callLeg = normalized.legs.find((leg) => leg.right === "C" && leg.action === "SELL");
-  const putLeg = normalized.legs.find((leg) => leg.right === "P" && leg.action === "SELL");
+  const callLeg = normalized.legs.find((leg) => leg.right === "C");
+  const putLeg = normalized.legs.find((leg) => leg.right === "P");
   if (!callLeg || !putLeg || callLeg.expiry !== putLeg.expiry || callLeg.strike === putLeg.strike) return null;
 
+  const skewStructure = structure as ComboSkewStructure;
   const expiry = callLeg.expiry;
   const spot = resolveSpot(input, expiry);
-  if (!spot) return { status: "unavailable", reason: "missing-spot" };
+  if (!spot) return { status: "unavailable", structure: skewStructure, reason: "missing-spot" };
 
   const now = input.now ?? new Date();
   const T = yearsToExpiry(expiry, now);
-  if (T == null || T <= 0) return { status: "unavailable", reason: "missing-vol" };
+  if (T == null || T <= 0) return { status: "unavailable", structure: skewStructure, reason: "missing-vol" };
   const r = input.riskFreeRate ?? RISK_FREE_RATE_DEFAULT;
 
   const callPd = input.prices[optionKey({ symbol: input.ticker, expiry: callLeg.expiry, strike: callLeg.strike, right: "C" })];
@@ -164,15 +182,18 @@ export function computeShortStrangleSkew(input: ShortStrangleSkewInput): ShortSt
   const tickerPd = input.prices[input.ticker.toUpperCase()];
   const call = resolveLeg(input.ticker, callLeg, callPd, tickerPd, spot, T, r);
   const put = resolveLeg(input.ticker, putLeg, putPd, tickerPd, spot, T, r);
-  if (!call || !put) return { status: "unavailable", reason: "missing-vol" };
+  if (!call || !put) return { status: "unavailable", structure: skewStructure, reason: "missing-vol" };
 
   const quantity = normalized.quantity;
   const skewVolPts = (put.iv - call.iv) * 100;
-  const netDeltaPerCombo = (-call.delta * callLeg.quantity) + (-put.delta * putLeg.quantity);
+  const netDeltaPerCombo =
+    legDirectionSign(callLeg.action) * call.delta * callLeg.quantity +
+    legDirectionSign(putLeg.action) * put.delta * putLeg.quantity;
   const deltaSharesPerCombo = netDeltaPerCombo * 100;
 
   return {
     status: "ready",
+    structure: skewStructure,
     call,
     put,
     spot,

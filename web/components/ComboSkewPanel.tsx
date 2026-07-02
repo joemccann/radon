@@ -2,9 +2,9 @@
 
 import type { OrderLeg } from "@/lib/optionsChainUtils";
 import type { PriceData } from "@/lib/pricesProtocol";
-import { computeShortStrangleSkew } from "@/lib/shortStrangleSkew";
+import { computeComboSkew, type ComboSkewLeg, type ComboSkewStructure } from "@/lib/comboSkew";
 
-type ShortStrangleSkewPanelProps = {
+type ComboSkewPanelProps = {
   ticker: string;
   legs: OrderLeg[];
   prices: Record<string, PriceData>;
@@ -40,22 +40,39 @@ function fmtSource(source: "stream" | "mid" | "last" | "close"): string {
   return "CLOSE BS";
 }
 
-export default function ShortStrangleSkewPanel({
+function panelTitle(structure: ComboSkewStructure): string {
+  return structure === "Risk Reversal" ? "RISK REVERSAL SKEW" : "STRANGLE SKEW";
+}
+
+function positionDelta(leg: ComboSkewLeg): number {
+  return leg.action === "BUY" ? leg.delta : -leg.delta;
+}
+
+function legSubLabel(leg: ComboSkewLeg): string {
+  return leg.action === "BUY" ? "LONG LEG" : "SHORT LEG";
+}
+
+function deltaToneClass(value: number): string {
+  if (Math.abs(value) < 1e-9) return "neutral";
+  return value > 0 ? "positive" : "negative";
+}
+
+export default function ComboSkewPanel({
   ticker,
   legs,
   prices,
   spot = null,
   riskFreeRate,
   compact = false,
-}: ShortStrangleSkewPanelProps) {
-  const skew = computeShortStrangleSkew({ ticker, legs, prices, spot, riskFreeRate });
+}: ComboSkewPanelProps) {
+  const skew = computeComboSkew({ ticker, legs, prices, spot, riskFreeRate });
   if (skew == null) return null;
 
   if (skew.status === "unavailable") {
     return (
       <div className={`short-strangle-skew${compact ? " short-strangle-skew--compact" : ""}`} data-testid="short-strangle-skew-panel">
         <div className="short-strangle-skew__header">
-          <span>STRANGLE SKEW</span>
+          <span>{panelTitle(skew.structure)}</span>
           <span>WAITING FOR WING MARKS</span>
         </div>
         <div className="short-strangle-skew__unavailable">
@@ -66,8 +83,8 @@ export default function ShortStrangleSkewPanel({
   }
 
   const netDeltaShares = skew.deltaSharesTotal;
-  const shortCallDelta = -skew.call.delta;
-  const shortPutDelta = -skew.put.delta;
+  const callPositionDelta = positionDelta(skew.call);
+  const putPositionDelta = positionDelta(skew.put);
   const deltaTone =
     Math.abs(netDeltaShares) < 0.5
       ? "neutral"
@@ -86,7 +103,7 @@ export default function ShortStrangleSkewPanel({
   return (
     <div className={`short-strangle-skew${compact ? " short-strangle-skew--compact" : ""}`} data-testid="short-strangle-skew-panel">
       <div className="short-strangle-skew__header">
-        <span>STRANGLE SKEW</span>
+        <span>{panelTitle(skew.structure)}</span>
         <span>{sourceLabel}</span>
       </div>
       <div className="short-strangle-skew__grid">
@@ -109,17 +126,17 @@ export default function ShortStrangleSkewPanel({
         </div>
         <div className="short-strangle-skew__metric">
           <span className="short-strangle-skew__label">CALL Δ</span>
-          <span className="short-strangle-skew__value short-strangle-skew__value--negative">
-            {fmtDelta(shortCallDelta)}
+          <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaToneClass(callPositionDelta)}`}>
+            {fmtDelta(callPositionDelta)}
           </span>
-          <span className="short-strangle-skew__sub">SHORT LEG</span>
+          <span className="short-strangle-skew__sub">{legSubLabel(skew.call)}</span>
         </div>
         <div className="short-strangle-skew__metric">
           <span className="short-strangle-skew__label">PUT Δ</span>
-          <span className="short-strangle-skew__value short-strangle-skew__value--positive">
-            {fmtDelta(shortPutDelta)}
+          <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaToneClass(putPositionDelta)}`}>
+            {fmtDelta(putPositionDelta)}
           </span>
-          <span className="short-strangle-skew__sub">SHORT LEG</span>
+          <span className="short-strangle-skew__sub">{legSubLabel(skew.put)}</span>
         </div>
         <div className="short-strangle-skew__metric">
           <span className="short-strangle-skew__label">NET Δ</span>
