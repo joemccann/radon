@@ -17,7 +17,11 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { isAuthorizedUser, parseAllowedUserIds } from "../middleware";
+import {
+  isAuthorizedUser,
+  parseAllowedUserIds,
+  requiresOperatorAllowlist,
+} from "../middleware";
 
 describe("operator allowlist — authorization layer", () => {
   it("fails open when ALLOWED_USER_IDS is unset/empty (dev, CI, demo)", () => {
@@ -47,5 +51,37 @@ describe("operator allowlist — authorization layer", () => {
     expect(parseAllowedUserIds("a, b ,c,")).toEqual(new Set(["a", "b", "c"]));
     expect(parseAllowedUserIds(" ")).toEqual(new Set());
     expect(parseAllowedUserIds(undefined).size).toBe(0);
+  });
+});
+
+// The production fail-closed interlock. Default behavior (interlock OFF) is the
+// existing fail-open; production sets RADON_REQUIRE_OPERATOR_ALLOWLIST=1 so a
+// blanked ALLOWED_USER_IDS denies everyone instead of re-opening the app.
+describe("operator allowlist — production fail-closed interlock", () => {
+  it("requiresOperatorAllowlist is true only for the literal '1'", () => {
+    expect(requiresOperatorAllowlist("1")).toBe(true);
+    expect(requiresOperatorAllowlist("0")).toBe(false);
+    expect(requiresOperatorAllowlist("true")).toBe(false);
+    expect(requiresOperatorAllowlist(undefined)).toBe(false);
+    expect(requiresOperatorAllowlist("")).toBe(false);
+  });
+
+  it("interlock OFF (default) keeps failing OPEN on an empty allowlist", () => {
+    expect(isAuthorizedUser("user_anything", "", false)).toBe(true);
+    expect(isAuthorizedUser("user_anything", undefined, false)).toBe(true);
+    expect(isAuthorizedUser("user_anything", "  ", false)).toBe(true);
+  });
+
+  it("interlock ON fails CLOSED on an empty allowlist — denies EVERY user incl. the operator", () => {
+    expect(isAuthorizedUser("user_operator", "", true)).toBe(false);
+    expect(isAuthorizedUser("user_operator", undefined, true)).toBe(false);
+    expect(isAuthorizedUser("user_operator", "   ", true)).toBe(false);
+  });
+
+  it("interlock ON is a no-op once the allowlist IS populated (operator passes, intruder denied)", () => {
+    const raw = "user_operator1, user_operator2";
+    expect(isAuthorizedUser("user_operator1", raw, true)).toBe(true);
+    expect(isAuthorizedUser("user_operator2", raw, true)).toBe(true);
+    expect(isAuthorizedUser("user_intruder", raw, true)).toBe(false);
   });
 });

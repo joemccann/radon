@@ -348,6 +348,39 @@ class TestVerifyClerkJwt:
         assert payload["sub"] == "anyone"
 
     @pytest.mark.asyncio
+    async def test_empty_allowlist_denies_when_prod_interlock_on(self):
+        # RADON_REQUIRE_OPERATOR_ALLOWLIST=1 + empty ALLOWED_USER_IDS must fail
+        # CLOSED: a valid JWT that would otherwise sail through the fail-open
+        # branch is denied 403 (the production misconfiguration guard).
+        req = _FakeRequest(host="8.8.8.8", auth_header="Bearer " + _make_token(sub="anyone"))
+        env = {
+            "CLERK_ISSUER": _ISSUER,
+            "ALLOWED_USER_IDS": "",
+            "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
+        }
+        with self._patch_jwks(), patch.dict(os.environ, env):
+            with pytest.raises(HTTPException) as exc:
+                await verify_clerk_jwt(req)
+        assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
+    async def test_populated_allowlist_unaffected_by_prod_interlock(self):
+        # Interlock ON but the allowlist IS set: the operator still passes and a
+        # non-operator is still denied — the flag only changes the EMPTY case.
+        env = {
+            "CLERK_ISSUER": _ISSUER,
+            "ALLOWED_USER_IDS": "user_ok",
+            "RADON_REQUIRE_OPERATOR_ALLOWLIST": "1",
+        }
+        ok = _FakeRequest(host="8.8.8.8", auth_header="Bearer " + _make_token(sub="user_ok"))
+        intruder = _FakeRequest(host="8.8.8.8", auth_header="Bearer " + _make_token(sub="intruder"))
+        with self._patch_jwks(), patch.dict(os.environ, env):
+            assert (await verify_clerk_jwt(ok))["sub"] == "user_ok"
+            with pytest.raises(HTTPException) as exc:
+                await verify_clerk_jwt(intruder)
+        assert exc.value.status_code == 403
+
+    @pytest.mark.asyncio
     async def test_missing_bearer_401(self):
         req = _FakeRequest(host="8.8.8.8")  # no Authorization header
         with self._patch_jwks(), self._env():
