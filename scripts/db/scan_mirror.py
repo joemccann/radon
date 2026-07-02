@@ -44,8 +44,8 @@ SNAPSHOT_UPSERTS: dict[str, Optional[str]] = {
     "flow-analysis": "upsert_flow_analysis_snapshot",
     "performance": "upsert_performance_snapshot",
     "oi-changes": "upsert_oi_changes",
-    "leap-scan": None,
-    "garch-scan": None,
+    "leap-scan": "upsert_scan_snapshot",
+    "garch-scan": "upsert_scan_snapshot",
     "theta-harvester": "upsert_theta_harvester_snapshot",
     "strength-confirmation": "upsert_strength_confirmation_snapshot",
     "breadth-scan": "upsert_breadth_snapshot",
@@ -55,6 +55,10 @@ SNAPSHOT_UPSERTS: dict[str, Optional[str]] = {
 # takes (date_str, taken_at, payload) instead of the (scan_time, payload)
 # arity every other mirror-fed upsert uses.
 DATE_KEYED_UPSERTS = {"upsert_breadth_snapshot"}
+
+# The generic scan_snapshots upsert is (service, scan_time, payload)-keyed —
+# multiple services share the one table.
+SERVICE_KEYED_UPSERTS = {"upsert_scan_snapshot"}
 
 
 def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = None) -> None:
@@ -81,6 +85,8 @@ def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = 
                 scan_iso or _today_et_str(),
                 payload,
             )
+        elif upsert_name in SERVICE_KEYED_UPSERTS:
+            getattr(writer, upsert_name)(service, scan_iso or _today_et_str(), payload)
         elif upsert_name:
             getattr(writer, upsert_name)(scan_iso or _today_et_str(), payload)
         writer.record_service_health(service, "ok", finished_at=scan_iso)

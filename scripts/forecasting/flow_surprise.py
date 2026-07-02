@@ -47,6 +47,24 @@ def write_cache(payload: dict) -> None:
         os.replace(tmp_path, CACHE_PATH)
     except Exception as exc:  # noqa: BLE001 — cache write must not affect the payload
         print(f"[flow-surprise] cache write failed: {exc}", file=sys.stderr)
+    _mirror_to_db(payload)
+
+
+def _mirror_to_db(payload: dict) -> None:
+    """Best-effort Turso mirror (scan_snapshots) so prod reads never depend on
+    the producer and the Next.js reader sharing a filesystem."""
+    try:
+        from datetime import datetime, timezone
+
+        from db import writer as db_writer
+
+        db_writer.ensure_no_replica_for_writers()
+        scan_time = str(payload.get("scan_time") or "") or (
+            datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        )
+        db_writer.upsert_scan_snapshot("flow-surprise", scan_time, payload)
+    except Exception as exc:  # noqa: BLE001 — mirror must not affect the payload
+        print(f"[flow-surprise] db mirror non-fatal: {exc}", file=sys.stderr)
 
 
 def _pick_forecaster():

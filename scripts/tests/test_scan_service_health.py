@@ -38,6 +38,7 @@ UPSERT_NAMES = [
     "upsert_oi_changes",
     "upsert_theta_harvester_snapshot",
     "upsert_strength_confirmation_snapshot",
+    "upsert_scan_snapshot",
 ]
 
 
@@ -126,13 +127,19 @@ class TestMirrorScanSnapshot:
         monkeypatch.setattr(writer, "record_service_health", boom)
         mirror_scan_snapshot("leap-scan", {"scan_time": "T"})  # must not raise
 
-    def test_heartbeat_only_services_skip_snapshot(self, writer_calls):
+    def test_leap_and_garch_mirror_to_scan_snapshots(self, writer_calls):
+        # Formerly heartbeat-only (file cache canonical). Since migration 0026
+        # both mirror into the generic service-keyed scan_snapshots table so
+        # prod reads never depend on sharing a filesystem with the producer.
         from db.scan_mirror import mirror_scan_snapshot
 
         mirror_scan_snapshot("leap-scan", {"scan_time": "T1"})
         mirror_scan_snapshot("garch-scan", {"scan_time": "T2"})
 
-        assert writer_calls["upserts"] == []
+        assert [(name, args[0], args[1]) for name, args in writer_calls["upserts"]] == [
+            ("upsert_scan_snapshot", "leap-scan", "T1"),
+            ("upsert_scan_snapshot", "garch-scan", "T2"),
+        ]
         assert writer_calls["health"] == [
             ("leap-scan", "ok", {"finished_at": "T1"}),
             ("garch-scan", "ok", {"finished_at": "T2"}),
@@ -373,7 +380,8 @@ class TestLeapWiring:
         with redirect_stdout(io.StringIO()):
             leap_scanner_uw.main()
 
-        assert writer_calls["upserts"] == []  # no leap table — file cache is canonical
+        [(upsert_name, upsert_args)] = writer_calls["upserts"]
+        assert (upsert_name, upsert_args[0]) == ("upsert_scan_snapshot", "leap-scan")
         [(service, _)] = _ok_rows(writer_calls)
         assert service == "leap-scan"
         assert json.loads((tmp_path / "leap.json").read_text())["results"][0]["ticker"] == "AAPL"
@@ -403,6 +411,7 @@ class TestGarchWiring:
         with redirect_stdout(io.StringIO()):
             garch_convergence.main()
 
-        assert writer_calls["upserts"] == []  # no garch table — file cache is canonical
+        [(upsert_name, upsert_args)] = writer_calls["upserts"]
+        assert (upsert_name, upsert_args[0]) == ("upsert_scan_snapshot", "garch-scan")
         [(service, _)] = _ok_rows(writer_calls)
         assert service == "garch-scan"

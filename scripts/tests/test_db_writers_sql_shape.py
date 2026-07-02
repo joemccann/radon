@@ -26,6 +26,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 _MIGRATIONS = [
     _SCRIPTS_DIR / "db" / "migrations" / "0001_init.sql",
     _SCRIPTS_DIR / "db" / "migrations" / "0002_cash_flows.sql",
+    _SCRIPTS_DIR / "db" / "migrations" / "0026_scan_snapshots.sql",
 ]
 
 
@@ -477,3 +478,62 @@ class TestPortfolioSnapshotRetention:
             "SELECT COUNT(*) FROM portfolio_snapshots"
         ).fetchone()[0]
         assert remaining == 1
+
+
+class TestUpsertScanSnapshot:
+    """Generic latest-scan mirror (scan_snapshots) for whole-file scans whose
+    JSON caches were disk-only: leap-scan, garch-scan, flow-surprise."""
+
+    def test_inserts_row_keyed_by_service(self, writer, db_with_schema):
+        writer.upsert_scan_snapshot("leap-scan", "2026-07-02T10:00:00Z", {"results": [1]})
+        writer.upsert_scan_snapshot("garch-scan", "2026-07-02T10:00:00Z", {"pairs": []})
+
+        rows = db_with_schema.execute(
+            "SELECT service, scan_time, payload FROM scan_snapshots ORDER BY service"
+        ).fetchall()
+        assert [r[0] for r in rows] == ["garch-scan", "leap-scan"]
+        assert json.loads(rows[1][2]) == {"results": [1]}
+
+    def test_prunes_to_newest_rows_per_service(self, writer, db_with_schema):
+        for i in range(writer.SCAN_SNAPSHOT_KEEP + 5):
+            writer.upsert_scan_snapshot("leap-scan", f"2026-07-02T10:{i:02d}:00Z", {"i": i})
+        writer.upsert_scan_snapshot("garch-scan", "2026-07-02T10:00:00Z", {})
+
+        kept = db_with_schema.execute(
+            "SELECT COUNT(*) FROM scan_snapshots WHERE service = 'leap-scan'"
+        ).fetchone()[0]
+        assert kept == writer.SCAN_SNAPSHOT_KEEP
+        newest = db_with_schema.execute(
+            "SELECT MAX(scan_time) FROM scan_snapshots WHERE service = 'leap-scan'"
+        ).fetchone()[0]
+        assert newest == f"2026-07-02T10:{writer.SCAN_SNAPSHOT_KEEP + 4:02d}:00Z"
+        assert db_with_schema.execute(
+            "SELECT COUNT(*) FROM scan_snapshots WHERE service = 'garch-scan'"
+        ).fetchone()[0] == 1
+
+    def test_scan_mirror_routes_leap_and_garch_payloads_here(self, writer, db_with_schema):
+        from db import scan_mirror
+
+        assert scan_mirror.SNAPSHOT_UPSERTS["leap-scan"] == "upsert_scan_snapshot"
+        assert scan_mirror.SNAPSHOT_UPSERTS["garch-scan"] == "upsert_scan_snapshot"
+
+        scan_mirror.mirror_scan_snapshot(
+            "leap-scan", {"scan_time": "2026-07-02T11:00:00Z", "results": []}
+        )
+        row = db_with_schema.execute(
+            "SELECT service, scan_time FROM scan_snapshots"
+        ).fetchone()
+        assert row == ("leap-scan", "2026-07-02T11:00:00Z")
+
+    def test_flow_surprise_write_cache_mirrors_here(
+        self, writer, db_with_schema, tmp_path, monkeypatch
+    ):
+        from forecasting import flow_surprise
+
+        monkeypatch.setattr(flow_surprise, "CACHE_PATH", tmp_path / "flow_surprise.json")
+        flow_surprise.write_cache({"scan_time": "2026-07-02T09:00:00Z", "results": []})
+
+        row = db_with_schema.execute(
+            "SELECT service, scan_time FROM scan_snapshots"
+        ).fetchone()
+        assert row == ("flow-surprise", "2026-07-02T09:00:00Z")
