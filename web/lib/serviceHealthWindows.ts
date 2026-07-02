@@ -143,6 +143,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``breadth-scan`` writes when a user POSTs /breadth/scan — NYSE A/D +
   // TICK internals sampled from IB index feeds, so requires_ib=true.
   "breadth-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: true },
+  // ``breadth-scan`` writes when a user POSTs /breadth/scan — NYSE A/D +
+  // TICK internals sampled from IB index feeds, so requires_ib=true.
+  "breadth-scan": { open: 30 * MIN, extended: 30 * MIN, closed: 1 * DAY, category: "on-demand", requires_ib: true },
   // ``vcg-scan`` has an autonomous 5-min cadence during market hours
   // (radon-vcg-refresh.timer / com.radon.vcg-refresh). The 15-min open
   // window tolerates 3 missed cycles before flagging — long enough to

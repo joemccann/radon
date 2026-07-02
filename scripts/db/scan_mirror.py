@@ -48,7 +48,13 @@ SNAPSHOT_UPSERTS: dict[str, Optional[str]] = {
     "garch-scan": None,
     "theta-harvester": "upsert_theta_harvester_snapshot",
     "strength-confirmation": "upsert_strength_confirmation_snapshot",
+    "breadth-scan": "upsert_breadth_snapshot",
 }
+
+# breadth_snapshots is (date, taken_at)-keyed like cri_snapshots; its upsert
+# takes (date_str, taken_at, payload) instead of the (scan_time, payload)
+# arity every other mirror-fed upsert uses.
+DATE_KEYED_UPSERTS = {"upsert_breadth_snapshot"}
 
 
 def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = None) -> None:
@@ -69,7 +75,13 @@ def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = 
     try:
         writer.ensure_no_replica_for_writers()
         upsert_name = SNAPSHOT_UPSERTS[service]
-        if upsert_name:
+        if upsert_name in DATE_KEYED_UPSERTS:
+            getattr(writer, upsert_name)(
+                _payload_session_date(payload) or _today_et_str(),
+                scan_iso or _today_et_str(),
+                payload,
+            )
+        elif upsert_name:
             getattr(writer, upsert_name)(scan_iso or _today_et_str(), payload)
         writer.record_service_health(service, "ok", finished_at=scan_iso)
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
@@ -88,6 +100,17 @@ def _today_et_str() -> str:
         return datetime.now(timezone.utc).astimezone(ZoneInfo("America/New_York")).strftime("%Y-%m-%d")
     except Exception:
         return datetime.now().strftime("%Y-%m-%d")
+
+
+def _payload_session_date(payload: dict) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    latest = payload.get("latest")
+    if isinstance(latest, dict):
+        session_date = latest.get("session_date")
+        if isinstance(session_date, str) and session_date:
+            return session_date
+    return None
 
 
 def _payload_timestamp(service: str, payload: dict) -> Optional[str]:

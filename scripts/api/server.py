@@ -2043,6 +2043,41 @@ async def regime_scan():
     return result.data
 
 
+_breadth_last_scan: float = 0.0
+_breadth_scan_lock: Optional[asyncio.Lock] = None
+BREADTH_COOLDOWN_S = 60
+
+
+@app.post("/breadth/scan")
+async def breadth_scan():
+    """Run NYSE breadth scan (breadth_scan.py --json). 60s cooldown between scans.
+
+    No --force: the script's off-hours cache gate serves the fresh cache
+    without touching IB, so mount-time auto-syncs outside market hours cost
+    zero IB quota. The script writes data/breadth.json atomically and mirrors
+    its own Turso snapshot + service_health row; empty payloads are never
+    cached, so the route returns stdout JSON without re-writing the cache here.
+    """
+    global _breadth_last_scan, _breadth_scan_lock
+    import time as _time
+    if _breadth_scan_lock is None:
+        _breadth_scan_lock = asyncio.Lock()
+    if _time.monotonic() - _breadth_last_scan < BREADTH_COOLDOWN_S:
+        cached = _read_cache(DATA_DIR / "breadth.json")
+        if cached:
+            return cached
+    async with _breadth_scan_lock:
+        if _time.monotonic() - _breadth_last_scan < BREADTH_COOLDOWN_S:
+            cached = _read_cache(DATA_DIR / "breadth.json")
+            if cached:
+                return cached
+        result = await run_script("breadth_scan.py", ["--json"], timeout=120)
+        if not result.ok:
+            raise HTTPException(status_code=502, detail=result.error)
+        _breadth_last_scan = _time.monotonic()
+        return result.data
+
+
 # ── VCG (Volatility-Credit Gap) ─────────────────────────────────────
 
 _vcg_last_scan: float = 0.0
