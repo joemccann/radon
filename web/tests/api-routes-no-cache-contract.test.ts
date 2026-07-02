@@ -118,7 +118,7 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/journal/route.ts", dbHelperPattern: /readJournalFromDb\s*\(/ },
   // cash-flows reads via FastAPI proxy which queries Turso server-side
   { path: "app/api/cash-flows/route.ts", dbHelperPattern: /radonFetch\s*\(\s*[`"']\/cash-flows/ },
-  { path: "app/api/service-health/route.ts", dbHelperPattern: /\bgetDb\s*\(/ },
+  { path: "app/api/service-health/route.ts", dbHelperPattern: /\bdbExecute\s*\(/ },
 ];
 
 describe("Turso source-of-truth — routes must invoke a DB read", () => {

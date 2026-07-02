@@ -20,6 +20,7 @@ function mockGetDb(openRows: MockRow[], execRows: MockRow[]): { syncCalls: numbe
     syncDb: vi.fn().mockImplementation(async () => {
       counters.syncCalls += 1;
     }),
+    resetDb: vi.fn(),
   }));
   return counters;
 }

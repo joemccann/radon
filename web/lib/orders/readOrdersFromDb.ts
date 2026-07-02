@@ -1,5 +1,6 @@
 import type { Static } from "@sinclair/typebox";
-import { getDb, syncDb } from "@/lib/db";
+import { resetDb, syncDb } from "@/lib/db";
+import { dbExecute } from "@/lib/dbExecute";
 import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 
@@ -29,8 +30,6 @@ function safeParse<T>(text: unknown): T | null {
 }
 
 export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
-  const db = getDb();
-
   // Pull the freshest cloud-DB state into the embedded replica before
   // reading. Without this we lag the disk JSON by up to 60s (the
   // background sync interval), which surfaces as transient `status`
@@ -45,27 +44,28 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   } catch {
     // Best-effort: a sync failure (network blip, auth hiccup) just means
     // we read the slightly-older replica — same as the pre-sync world.
+    // Still drop the cached client: a hung sync is the same wedged-pool
+    // signature the reads below would hit; let them rebuild fresh.
+    resetDb();
   }
 
-  const openResult = await withTimeout(
-    db.execute({
+  const openResult = await dbExecute(
+    {
       sql: `SELECT payload, updated_at FROM open_orders ORDER BY updated_at DESC`,
       args: [],
-    }),
-    DB_READ_TIMEOUT_MS,
-    `open orders read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    },
+    { timeoutMs: DB_READ_TIMEOUT_MS, label: "open orders" },
   );
 
   const cutoff = new Date(Date.now() - EXECUTED_LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
-  const execResult = await withTimeout(
-    db.execute({
+  const execResult = await dbExecute(
+    {
       sql: `SELECT payload, fill_time FROM executed_orders
             WHERE fill_time >= ?
             ORDER BY fill_time DESC`,
       args: [cutoff],
-    }),
-    DB_READ_TIMEOUT_MS,
-    `executed orders read timed out after ${DB_READ_TIMEOUT_MS}ms`,
+    },
+    { timeoutMs: DB_READ_TIMEOUT_MS, label: "executed orders" },
   );
 
   const open: Open[] = [];
