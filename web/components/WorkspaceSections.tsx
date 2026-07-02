@@ -32,6 +32,8 @@ import { useFlowAnalysis } from "@/lib/useFlowAnalysis";
 import { useScanner } from "@/lib/useScanner";
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
+import { useLeap } from "@/lib/useLeap";
+import { useGarchConvergence } from "@/lib/useGarchConvergence";
 import { useBlotter } from "@/lib/useBlotter";
 import { formatTradeDate } from "@/lib/blotter/formatTradeDate";
 import { isEarlierLocalDay } from "@/lib/holdTime";
@@ -82,6 +84,8 @@ import TickerWorkspace from "./TickerWorkspace";
 import TickerFlowReport from "./flow-analysis/TickerFlowReport";
 import ThetaHarvesterScanner from "./ThetaHarvesterScanner";
 import StrengthConfirmationScanner from "./StrengthConfirmationScanner";
+import LeapScanner from "./LeapScanner";
+import GarchConvergenceScanner from "./GarchConvergenceScanner";
 import FlowAnalysisTickerInput from "./flow-analysis/FlowAnalysisTickerInput";
 import { InformedFlowPanel } from "./flow-analysis/InformedFlowPanel";
 import { AlertsPanel } from "./alerts/AlertsPanel";
@@ -1359,7 +1363,7 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
 /* ─── Scanner table ─────────────────────────────────────── */
 
 type ScannerSortKey = "ticker" | "signal" | "direction" | "score" | "strength" | "buy_ratio" | "sustained_days" | "num_prints";
-type ScannerMode = "flow" | "discover" | "theta" | "strength";
+type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch";
 
 const SCANNER_HEADER_HELP = {
   signal: "Flow intensity bucket from dark-pool activity. STRONG means the flow score is high enough to review immediately.",
@@ -1419,16 +1423,26 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
     ? "theta"
     : queryModeParam === "strength"
       ? "strength"
-      : "flow";
+      : queryModeParam === "leap"
+        ? "leap"
+        : queryModeParam === "garch"
+          ? "garch"
+          : "flow";
   const queryMode = defaultMode ?? parsedQueryMode;
   const [mode, setModeState] = useState<ScannerMode>(queryMode);
   const { data, syncing, error, lastSync, syncNow } = useScanner(mode === "flow");
   const theta = useThetaHarvester(mode === "theta");
   const strength = useStrengthConfirmation(mode === "strength");
+  const leap = useLeap(mode === "leap");
+  const garch = useGarchConvergence(mode === "garch");
   const [thetaScanning, setThetaScanning] = useState(false);
   const [thetaScanError, setThetaScanError] = useState<string | null>(null);
   const [strengthScanning, setStrengthScanning] = useState(false);
   const [strengthScanError, setStrengthScanError] = useState<string | null>(null);
+  const [leapScanning, setLeapScanning] = useState(false);
+  const [leapScanError, setLeapScanError] = useState<string | null>(null);
+  const [garchScanning, setGarchScanning] = useState(false);
+  const [garchScanError, setGarchScanError] = useState<string | null>(null);
   const signals = data?.top_signals ?? [];
   const { sorted, sort, toggle } = useSort(signals, scannerSigExtract);
   const { isMobile, hasMounted } = useViewport();
@@ -1498,6 +1512,52 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
     }
   };
 
+  const runLeapScan = async () => {
+    if (leapScanning) return;
+    setLeapScanError(null);
+    setLeapScanning(true);
+    try {
+      const res = await fetch("/api/leap/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset: "mag7" }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `LEAP scan failed (${res.status})`);
+      }
+      leap.syncNow();
+    } catch (err) {
+      setLeapScanError(err instanceof Error ? err.message : "LEAP scan failed");
+    } finally {
+      setLeapScanning(false);
+    }
+  };
+
+  const runGarchScan = async () => {
+    if (garchScanning) return;
+    setGarchScanError(null);
+    setGarchScanning(true);
+    try {
+      const res = await fetch("/api/garch-convergence/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ preset: "mega-tech" }),
+        cache: "no-store",
+      });
+      if (!res.ok) {
+        const text = await res.text().catch(() => "");
+        throw new Error(text || `GARCH scan failed (${res.status})`);
+      }
+      garch.syncNow();
+    } catch (err) {
+      setGarchScanError(err instanceof Error ? err.message : "GARCH scan failed");
+    } finally {
+      setGarchScanning(false);
+    }
+  };
+
   const modeTabs = (
     <div className="scanner-mode-tabs" role="tablist" aria-label="Scanner mode">
       <button
@@ -1535,6 +1595,24 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
         onClick={() => setMode("strength")}
       >
         7-Step Strength
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "leap"}
+        className={`scanner-mode-tab${mode === "leap" ? " scanner-mode-tab--active" : ""}`}
+        onClick={() => setMode("leap")}
+      >
+        LEAP
+      </button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected={mode === "garch"}
+        className={`scanner-mode-tab${mode === "garch" ? " scanner-mode-tab--active" : ""}`}
+        onClick={() => setMode("garch")}
+      >
+        GARCH
       </button>
     </div>
   );
@@ -1587,6 +1665,38 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           lastSync={strength.lastSync}
           onScan={() => { void runStrengthScan(); }}
           onTickerScan={(ticker) => { void runStrengthScan(ticker); }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "leap") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <LeapScanner
+          data={leap.data ?? null}
+          loading={leap.loading}
+          scanning={leapScanning}
+          error={leapScanError || leap.error}
+          lastSync={leap.lastSync}
+          onScan={() => { void runLeapScan(); }}
+        />
+      </div>
+    );
+  }
+
+  if (mode === "garch") {
+    return (
+      <div className="scanner-page-shell">
+        {modeTabs}
+        <GarchConvergenceScanner
+          data={garch.data ?? null}
+          loading={garch.loading}
+          scanning={garchScanning}
+          error={garchScanError || garch.error}
+          lastSync={garch.lastSync}
+          onScan={() => { void runGarchScan(); }}
         />
       </div>
     );
