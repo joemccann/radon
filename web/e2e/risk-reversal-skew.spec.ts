@@ -1,10 +1,22 @@
-import { expect, test, type Locator, type Page } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const EXPIRY = "20260717";
 
-async function tapJs(locator: Locator) {
-  await locator.evaluate((el) => (el as HTMLElement).click());
-}
+const PORTFOLIO = {
+  bankroll: 100_000,
+  peak_value: 100_000,
+  last_sync: new Date().toISOString(),
+  total_deployed_pct: 0,
+  total_deployed_dollars: 0,
+  remaining_capacity_pct: 100,
+  position_count: 0,
+  defined_risk_count: 0,
+  undefined_risk_count: 0,
+  avg_kelly_optimal: null,
+  exposure: {},
+  violations: [],
+  positions: [],
+};
 
 function priceData(symbol: string, last: number, bid: number, ask: number, overrides: Record<string, unknown> = {}) {
   return {
@@ -37,7 +49,7 @@ function priceData(symbol: string, last: number, bid: number, ask: number, overr
 async function stubApis(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.route("**/api/portfolio", (route) =>
-    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ positions: [], last_sync: new Date().toISOString(), bankroll: 0, peak_value: 0, total_deployed_pct: 0, total_deployed_dollars: 0, remaining_capacity_pct: 100, position_count: 0, defined_risk_count: 0, undefined_risk_count: 0, avg_kelly_optimal: null, exposure: {}, violations: [] }) }),
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
   await page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ open_orders: [], executed_orders: [], open_count: 0, executed_count: 0, last_sync: new Date().toISOString() }) }),
@@ -57,7 +69,7 @@ async function stubApis(page: Page) {
   await page.route("**/api/options/chain*", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ symbol: "AAPL", expiry: EXPIRY, exchange: "SMART", strikes: [100, 105, 110, 115, 120], multiplier: "100" }) }),
   );
-  await page.route("**/api/prices**", (route) => route.abort());
+  await page.route("**/api/prices", (route) => route.abort());
 }
 
 async function installMockWebSocket(page: Page) {
@@ -74,6 +86,7 @@ async function installMockWebSocket(page: Page) {
       onopen: ((event?: unknown) => void) | null = null;
       onmessage: ((event: { data: string }) => void) | null = null;
       onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
 
       constructor() {
         setTimeout(() => {
@@ -89,6 +102,7 @@ async function installMockWebSocket(page: Page) {
           contracts?: Array<{ symbol: string; expiry: string; strike: number; right: "C" | "P" }>;
         };
         if (message.action !== "subscribe") return;
+
         const updates: Record<string, unknown> = {};
         for (const symbol of message.symbols ?? []) {
           if (priceFixtures[symbol]) updates[symbol] = priceFixtures[symbol];
@@ -122,49 +136,29 @@ async function installMockWebSocket(page: Page) {
   }, fixtures);
 }
 
-test("mobile short strangle ticket shows skew telemetry", async ({ page }) => {
+test("risk reversal proposals show skew and signed delta telemetry", async ({ page }) => {
   await stubApis(page);
   await installMockWebSocket(page);
+
   await page.goto("/AAPL?tab=chain");
+  const detail = page.locator(".ticker-detail-page").last();
+  await detail.waitFor({ timeout: 5_000 });
+  await detail.locator(".chain-grid").waitFor();
 
-  await tapJs(page.getByTestId("mobile-chain-put-105"));
-  await tapJs(page.getByTestId("mobile-chain-detail-sell"));
+  // Bullish risk reversal: SELL $105 put (put bid), BUY $115 call (call ask)
+  await detail.getByRole("row", { name: /\$105\.00/ }).first().locator(".chain-bid.chain-clickable").last().click();
+  await detail.getByRole("row", { name: /\$115\.00/ }).first().locator(".chain-ask.chain-clickable").first().click();
 
-  await tapJs(page.getByTestId("mobile-chain-call-115"));
-  await tapJs(page.getByTestId("mobile-chain-detail-sell"));
-
-  await tapJs(page.getByTestId("mobile-chain-pending-strip"));
-  await expect(page.getByTestId("mobile-order-ticket")).toBeVisible();
-
-  const panel = page.getByTestId("short-strangle-skew-panel");
-  await expect(panel).toBeVisible();
-  await expect(panel).toContainText("STRANGLE SKEW");
-  await expect(panel).toContainText("IV SKEW");
-  await expect(panel).toContainText("+12.0 pt");
-  await expect(panel).toContainText("NET Δ");
-  await expect(panel).toContainText("+5 sh");
-});
-
-test("mobile risk reversal ticket shows skew telemetry", async ({ page }) => {
-  await stubApis(page);
-  await installMockWebSocket(page);
-  await page.goto("/AAPL?tab=chain");
-
-  await tapJs(page.getByTestId("mobile-chain-put-105"));
-  await tapJs(page.getByTestId("mobile-chain-detail-sell"));
-
-  await tapJs(page.getByTestId("mobile-chain-call-115"));
-  await tapJs(page.getByTestId("mobile-chain-detail-buy"));
-
-  await tapJs(page.getByTestId("mobile-chain-pending-strip"));
-  await expect(page.getByTestId("mobile-order-ticket")).toBeVisible();
-
-  const panel = page.getByTestId("short-strangle-skew-panel");
+  const panel = detail.getByTestId("short-strangle-skew-panel");
   await expect(panel).toBeVisible();
   await expect(panel).toContainText("RISK REVERSAL SKEW");
   await expect(panel).toContainText("IV SKEW");
   await expect(panel).toContainText("+12.0 pt");
+  await expect(panel).toContainText("CALL Δ");
+  await expect(panel).toContainText("+0.184");
   await expect(panel).toContainText("LONG LEG");
+  await expect(panel).toContainText("PUT Δ");
+  await expect(panel).toContainText("+0.231");
   await expect(panel).toContainText("SHORT LEG");
   await expect(panel).toContainText("NET Δ");
   await expect(panel).toContainText("+42 sh");

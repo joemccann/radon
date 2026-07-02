@@ -123,8 +123,16 @@ async function installMockWebSocket(page: Page) {
       }
     }
 
-    // @ts-expect-error test-only replacement
-    window.WebSocket = MockWebSocket;
+    // Only the Radon relay socket is mocked; Turbopack HMR and any other
+    // sockets pass through to the real implementation.
+    const NativeWebSocket = window.WebSocket;
+    const RelayAwareWebSocket = function (url: string | URL, protocols?: string | string[]) {
+      return String(url).includes("localhost:8765")
+        ? (new MockWebSocket() as unknown as WebSocket)
+        : new NativeWebSocket(url, protocols);
+    } as unknown as typeof WebSocket;
+    Object.assign(RelayAwareWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    window.WebSocket = RelayAwareWebSocket;
   }, fixtures);
 }
 
