@@ -112,6 +112,7 @@ class MarketContext:
     sectors_positive_ratio: Optional[float]
     sectors_call_premium_ratio: Optional[float]
     notes: List[str]
+    net_breadth_20d: Optional[float] = None
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -418,6 +419,35 @@ def _read_latest_cri() -> Dict[str, Any]:
     return {}
 
 
+# A/D data older than a holiday-extended week is worse than the momentum
+# proxy — a stale "measured" reading would carry false authority.
+_BREADTH_FRESHNESS_DAYS = 5
+
+
+def _read_latest_breadth(now: Optional[datetime] = None) -> Optional[float]:
+    """20-session net breadth (sum of daily net A/D) from breadth-scan's
+    disk cache, or None when missing/stale/malformed."""
+    try:
+        parsed = json.loads((_DATA_DIR / "breadth.json").read_text())
+    except Exception:
+        return None
+    latest = parsed.get("latest") if isinstance(parsed, dict) else None
+    if not isinstance(latest, dict):
+        return None
+    value = _to_float(latest.get("cum_ad_change_20d"))
+    session_date = latest.get("session_date")
+    if value is None or not isinstance(session_date, str):
+        return None
+    try:
+        session = datetime.strptime(session_date, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return None
+    reference = now or datetime.now(timezone.utc)
+    if (reference - session).days > _BREADTH_FRESHNESS_DAYS:
+        return None
+    return value
+
+
 def _sector_stats(client: Any) -> Tuple[Optional[float], Optional[float], List[str]]:
     try:
         rows = _as_rows(client.get_sector_etfs())
@@ -472,6 +502,9 @@ def build_market_context(client: Any) -> MarketContext:
 
     sectors_positive_ratio, sectors_call_premium_ratio, sector_notes = _sector_stats(client)
     notes.extend(sector_notes)
+    net_breadth_20d = _read_latest_breadth()
+    if net_breadth_20d is None:
+        notes.append("NYSE breadth cache missing or stale; advancing-stocks check uses momentum proxy")
     return MarketContext(
         vix_front=vix_front,
         vix_back=vix_back,
@@ -483,6 +516,7 @@ def build_market_context(client: Any) -> MarketContext:
         sectors_positive_ratio=sectors_positive_ratio,
         sectors_call_premium_ratio=sectors_call_premium_ratio,
         notes=notes,
+        net_breadth_20d=net_breadth_20d,
     )
 
 
@@ -687,7 +721,18 @@ def analyze_systematic_positioning(market_context: MarketContext) -> FactorAsses
 def analyze_market_breadth(market_context: MarketContext, prices: Sequence[float]) -> FactorAssessment:
     trend_20d = _pct_change(prices, 20) or 0.0
     sectors_participating = market_context.sectors_positive_ratio is not None and market_context.sectors_positive_ratio >= 0.55
-    advancers_expanding = sectors_participating and trend_20d > 0
+    if market_context.net_breadth_20d is not None:
+        advancing_check = FactorCheck(
+            "Advancing stocks expanding",
+            market_context.net_breadth_20d > 0,
+            round(market_context.net_breadth_20d, 2),
+            "> 0 (20-session sum of daily net A/D)",
+            "NYSE advance/decline from breadth-scan",
+            "IB",
+        )
+    else:
+        advancers_expanding = sectors_participating and trend_20d > 0
+        advancing_check = FactorCheck("Advancing stocks expanding", advancers_expanding, trend_20d, "> 0 and broad sectors green", "Ticker momentum plus sector participation proxy", "APPROX")
     green_box = (
         sectors_participating
         and (market_context.sectors_call_premium_ratio is None or market_context.sectors_call_premium_ratio >= 0.52)
@@ -697,7 +742,7 @@ def analyze_market_breadth(market_context: MarketContext, prices: Sequence[float
         "MARKET BREADTH",
         [
             FactorCheck("Sectors participating", sectors_participating, market_context.sectors_positive_ratio, ">= 55%", "Positive SPDR sector ETF share", source),
-            FactorCheck("Advancing stocks expanding", advancers_expanding, trend_20d, "> 0 and broad sectors green", "Ticker momentum plus sector participation proxy", "APPROX"),
+            advancing_check,
             FactorCheck("Green box breadth indicator", green_box, market_context.sectors_call_premium_ratio, ">= 52% sector call premium", "Sector options breadth proxy", source),
         ],
         source,

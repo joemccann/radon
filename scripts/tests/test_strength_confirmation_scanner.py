@@ -1,7 +1,8 @@
 """Regression tests for strength_confirmation_scanner.py."""
 from __future__ import annotations
 
-from datetime import datetime, timezone
+import json
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 import pytest
@@ -215,3 +216,99 @@ def test_scan_ticker_returns_watchlist_when_one_group_fails() -> None:
     assert candidate.verdict == "WATCHLIST"
     assert candidate.groups_passed == 6
     assert {factor.group: factor for factor in candidate.factors}["TERM STRUCTURE"].passed is False
+
+
+# ── measured breadth wiring (data/breadth.json → MARKET BREADTH) ──
+
+
+def _market_context(**overrides):
+    base = dict(
+        vix_front=17.0,
+        vix_back=19.5,
+        vix_front_prev=18.0,
+        vix_back_prev=19.7,
+        cta_exposure_pct=130.0,
+        cta_forced_reduction_pct=0.0,
+        spx_distance_pct=2.0,
+        sectors_positive_ratio=0.75,
+        sectors_call_premium_ratio=0.67,
+        notes=[],
+    )
+    base.update(overrides)
+    return strength.MarketContext(**base)
+
+
+def test_analyze_market_breadth_uses_measured_net_breadth_when_present() -> None:
+    factor = strength.analyze_market_breadth(
+        _market_context(net_breadth_20d=3250.0), prices=[100.0] * 30
+    )
+
+    check = {c.label: c for c in factor.checks}["Advancing stocks expanding"]
+    assert check.passed is True
+    assert check.value == pytest.approx(3250.0)
+    assert check.source == "IB"
+
+
+def test_analyze_market_breadth_measured_negative_overrides_passing_proxy() -> None:
+    rising = [100.0 + i for i in range(30)]
+
+    factor = strength.analyze_market_breadth(
+        _market_context(net_breadth_20d=-1200.0), prices=rising
+    )
+
+    check = {c.label: c for c in factor.checks}["Advancing stocks expanding"]
+    assert check.passed is False
+    assert check.source == "IB"
+
+
+def test_analyze_market_breadth_falls_back_to_proxy_without_breadth() -> None:
+    rising = [100.0 + i for i in range(30)]
+
+    factor = strength.analyze_market_breadth(_market_context(), prices=rising)
+
+    check = {c.label: c for c in factor.checks}["Advancing stocks expanding"]
+    assert check.passed is True
+    assert check.source == "APPROX"
+
+
+def test_read_latest_breadth_serves_fresh_and_rejects_stale(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(strength, "_DATA_DIR", tmp_path)
+    now = datetime.now(timezone.utc)
+
+    fresh_date = (now - timedelta(days=1)).strftime("%Y-%m-%d")
+    (tmp_path / "breadth.json").write_text(
+        json.dumps({"latest": {"session_date": fresh_date, "cum_ad_change_20d": 1500.0}})
+    )
+    assert strength._read_latest_breadth(now) == pytest.approx(1500.0)
+
+    stale_date = (now - timedelta(days=10)).strftime("%Y-%m-%d")
+    (tmp_path / "breadth.json").write_text(
+        json.dumps({"latest": {"session_date": stale_date, "cum_ad_change_20d": 1500.0}})
+    )
+    assert strength._read_latest_breadth(now) is None
+
+
+def test_read_latest_breadth_none_when_missing_or_malformed(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(strength, "_DATA_DIR", tmp_path)
+    now = datetime.now(timezone.utc)
+
+    assert strength._read_latest_breadth(now) is None
+
+    (tmp_path / "breadth.json").write_text("not json")
+    assert strength._read_latest_breadth(now) is None
+
+    (tmp_path / "breadth.json").write_text(json.dumps({"latest": {"session_date": "bad", "cum_ad_change_20d": 1.0}}))
+    assert strength._read_latest_breadth(now) is None
+
+
+def test_build_market_context_populates_net_breadth(monkeypatch) -> None:
+    monkeypatch.setattr(strength, "_read_latest_cri", lambda: {})
+    monkeypatch.setattr(strength, "_read_latest_breadth", lambda now=None: 2100.0)
+
+    class SectorClient:
+        def get_sector_etfs(self):
+            return {"data": []}
+
+    context = strength.build_market_context(SectorClient())
+
+    assert context.net_breadth_20d == pytest.approx(2100.0)
