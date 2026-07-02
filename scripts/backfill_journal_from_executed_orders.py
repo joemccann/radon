@@ -433,13 +433,20 @@ def _get_prior_qty_for_eo_row(
 
     Seeds from the journal DB on first encounter, then uses in-run accumulated
     state for subsequent fills of the same contract within this backfill run.
+
+    The DB seed is bounded to journal rows STRICTLY BEFORE the fill's own
+    date (``before=`` cutoff): a retroactive backfill must reconstruct the
+    position AS OF the fill, and an unbounded sum counts LATER closing rows
+    already in the journal, flipping the action label (2026-07-02 incident:
+    2026-06-25 opening sells read the 2026-06-26 closing buys as prior +5
+    and would have written SELL_OPTION instead of SELL_TO_OPEN).
     """
     key = _eo_contract_key(eo_row)
     if key is None:
         return 0.0
     if key in prior_state:
         return prior_state[key]
-    # Seed from journal DB.
+    # Seed from journal DB, bounded at this fill's timestamp.
     payload = eo_row.get("payload", eo_row)
     contract = payload.get("contract", {})
     symbol = str(contract.get("symbol") or payload.get("symbol") or "").strip().upper()
@@ -447,8 +454,17 @@ def _get_prior_qty_for_eo_row(
     strike = contract.get("strike")
     right = contract.get("right")
     expiry = contract.get("lastTradeDateOrContractMonth") or contract.get("expiry")
+    fill_time = eo_row.get("fill_time") or payload.get("time")
     try:
-        qty = prior_net_qty_fn(db, ticker=symbol, sec_type=sec_type, strike=strike, right=right, expiry=expiry)
+        qty = prior_net_qty_fn(
+            db,
+            ticker=symbol,
+            sec_type=sec_type,
+            strike=strike,
+            right=right,
+            expiry=expiry,
+            before=str(fill_time) if fill_time else None,
+        )
     except Exception:  # noqa: BLE001
         qty = 0.0
     prior_state[key] = qty

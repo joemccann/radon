@@ -14,7 +14,10 @@ SCRIPTS_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS_DIR))
 
 import ib_sync  # noqa: E402
-from clients.journal_basis import compute_open_basis_for_ticker  # noqa: E402
+from clients.journal_basis import (  # noqa: E402
+    compute_open_basis_for_ticker,
+    prior_net_qty_for_contract,
+)
 
 
 class _FakeCursor:
@@ -184,6 +187,104 @@ def test_compute_open_basis_for_ticker_matches_remaining_aaoi_risk_reversal_basi
 
     assert avg_entry_per_contract == pytest.approx(0.0, abs=0.01)
     assert abs(net_entry_cost) < 5
+
+
+class TestPriorNetQtyCutoff:
+    """Retroactive-backfill time bound (2026-07-02 mislabel incident).
+
+    Without a cutoff, prior_net_qty_for_contract sums ALL journal rows, so
+    backfilling a 2026-06-25 opening sell while the 2026-06-26 closing buys
+    already sat in the journal read prior qty +5 and flipped the label to
+    SELL_OPTION. ``before`` bounds the scan to rows strictly earlier than
+    the fill's DATE (10-char prefix): journal filled_at is date-only, so
+    same-day rows are ambiguous and excluded by design — prior-day rows
+    count, same-day-and-later rows do not.
+    """
+
+    _META_CONTRACT = {
+        "ticker": "META",
+        "sec_type": "OPT",
+        "strike": 625.0,
+        "right": "C",
+        "expiry": "20260626",
+    }
+
+    def _closing_buy_row(self, filled_at: str) -> tuple:
+        return _journal_row(
+            {
+                "ticker": "META",
+                "action": "BUY_OPTION",
+                "contracts": 5,
+                "total_cost": 870.0,
+                "right": "C",
+                "strike": 625.0,
+                "expiry": "20260626",
+            },
+            filled_at,
+        )
+
+    def test_no_cutoff_default_sums_all_rows_unchanged(self):
+        db = _FakeDb([self._closing_buy_row("2026-06-26")])
+
+        net = prior_net_qty_for_contract(db, **self._META_CONTRACT)
+
+        assert net == pytest.approx(5.0)
+
+    def test_cutoff_excludes_rows_filled_after_the_fill_date(self):
+        db = _FakeDb([self._closing_buy_row("2026-06-26")])
+
+        net = prior_net_qty_for_contract(
+            db, before="2026-06-25T19:59:31Z", **self._META_CONTRACT
+        )
+
+        assert net == pytest.approx(0.0)
+
+    def test_cutoff_includes_prior_day_date_only_rows(self):
+        db = _FakeDb([self._closing_buy_row("2026-06-24")])
+
+        net = prior_net_qty_for_contract(
+            db, before="2026-06-25T19:59:31Z", **self._META_CONTRACT
+        )
+
+        assert net == pytest.approx(5.0)
+
+    def test_cutoff_excludes_ambiguous_same_day_date_only_rows(self):
+        # A date-only row on the fill's own day carries no intra-day order;
+        # it is EXCLUDED — same-day sequencing is the backfill run's in-run
+        # prior_state accumulation's job, not the DB seed's.
+        db = _FakeDb([self._closing_buy_row("2026-06-25")])
+
+        net = prior_net_qty_for_contract(
+            db, before="2026-06-25T19:59:31Z", **self._META_CONTRACT
+        )
+
+        assert net == pytest.approx(0.0)
+
+    def test_cutoff_mixed_rows_counts_only_strictly_earlier_days(self):
+        db = _FakeDb(
+            [
+                self._closing_buy_row("2026-06-23"),
+                self._closing_buy_row("2026-06-25"),
+                self._closing_buy_row("2026-06-26"),
+            ]
+        )
+
+        net = prior_net_qty_for_contract(
+            db, before="2026-06-25T19:59:31Z", **self._META_CONTRACT
+        )
+
+        assert net == pytest.approx(5.0)
+
+    def test_cutoff_excludes_rows_with_no_timestamp_at_all(self):
+        # COALESCE(filled_at, written_at) is NULL: the row cannot be proven
+        # prior to the fill, so a bounded scan leaves it out.
+        db = _FakeDb([self._closing_buy_row(None)])
+
+        net = prior_net_qty_for_contract(
+            db, before="2026-06-25T19:59:31Z", **self._META_CONTRACT
+        )
+
+        assert net == pytest.approx(0.0)
 
 
 def test_fetch_positions_and_collapse_positions_use_journal_basis_for_combo_entry_cost():

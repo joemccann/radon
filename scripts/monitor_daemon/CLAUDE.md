@@ -10,6 +10,8 @@ Real-time fill / order / journal handlers. Loaded automatically when cwd is unde
 
 Handlers that run 24/7 (cash-flow-sync, flex-token-check, journal-sync via the rehydrate-style importer) set `requires_market_hours=False`. Real-time fill-monitor / exit-orders / portfolio-sync are gated on.
 
+**Post-close grace (opt-in):** `BaseHandler.post_close_grace_minutes` (default 0) lets a market-hours handler keep cycling for a bounded window after the close. The gate answers "was the market open N minutes ago?" via `utils.market_calendar.market_state` (the calendar SoT), so weekends/holidays never gain a window and any calendar error fails closed. Only `journal_sync` opts in (15 min = two more 300s cycles): its per-cycle IB session only covers the current day, so a fill in the session's final seconds was otherwise never journaled (15:59:52 / 15:58:04 incidents). Tests: `scripts/tests/test_monitor_daemon/test_post_close_grace.py`.
+
 ---
 
 ## Handler Conventions

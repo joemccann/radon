@@ -9,7 +9,7 @@ Supports state persistence and market hours awareness.
 import json
 import logging
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Dict, Any, List, Optional
 
@@ -111,7 +111,34 @@ class MonitorDaemon:
         if market_hours is None:
             market_hours = self.is_market_hours()
 
-        return market_hours or not getattr(handler, "requires_market_hours", True)
+        if market_hours or not getattr(handler, "requires_market_hours", True):
+            return True
+
+        return self._market_was_open_within_grace(handler)
+
+    def _market_was_open_within_grace(self, handler: BaseHandler) -> bool:
+        """True when the handler opted into a post-close grace window and the
+        market-calendar source of truth says the session was still open
+        ``post_close_grace_minutes`` ago.
+
+        The probe instant (now - grace) routes through
+        ``utils.market_calendar.market_state`` rather than a parallel clock
+        computation, so weekends and holidays stay closed — grace can only
+        extend a session that actually happened. Fails closed: any
+        calendar/zoneinfo error reverts to the hard-close gate.
+        """
+        try:
+            grace_minutes = getattr(handler, "post_close_grace_minutes", 0) or 0
+            if grace_minutes <= 0:
+                return False
+
+            from zoneinfo import ZoneInfo
+            from utils.market_calendar import market_state
+
+            probe = datetime.now(ZoneInfo("America/New_York")) - timedelta(minutes=grace_minutes)
+            return bool(market_state(probe)["is_open"])
+        except Exception:
+            return False
     
     def run_once(self, market_hours: Optional[bool] = None) -> Dict[str, Any]:
         """

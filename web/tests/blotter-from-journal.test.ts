@@ -262,6 +262,59 @@ describe("journalRowsToBlotter", () => {
     expect(out.summary.realized_pnl).toBeCloseTo(50, 4);
   });
 
+  it("lot-matches an ISO-expiry open against a compact-expiry close (2026-07-02 split-position bug)", () => {
+    // Journal rows must carry compact "20260626", but a live path emitted
+    // ISO "2026-06-26" (22 rows hand-normalized in prod on 2026-07-02).
+    // The group key must normalize the stray so the position lot-matches
+    // instead of silently splitting into a phantom open + a P&L-less close.
+    const openIso = {
+      id: 1,
+      ticker: "META",
+      structure: "Long Call $625 2026-06-26",
+      action: "BUY_OPTION",
+      fill_price: 2.0,
+      total_cost: 1001,
+      contracts: 5,
+      commission: 1.0,
+      ib_exec_id: "meta-open-1",
+      right: "C",
+      strike: 625,
+      expiry: "2026-06-26", // ISO stray
+    };
+    const closeCompact = {
+      id: 2,
+      ticker: "META",
+      structure: "Closed Call $625 2026-06-26",
+      action: "SELL_OPTION",
+      fill_price: 3.0,
+      total_cost: 1499,
+      contracts: 5,
+      commission: 1.0,
+      ib_exec_id: "meta-close-1",
+      right: "C",
+      strike: 625,
+      expiry: "20260626",
+    };
+    const mixed = journalRowsToBlotter([
+      row(openIso, "2026-06-25"),
+      row(closeCompact, "2026-06-26"),
+    ]);
+
+    // Lot-matched round trip: 5 × (3.00 − 2.00) × 100 − 2 commission = 498.
+    expect(mixed.summary.realized_pnl).toBeCloseTo(498, 4);
+    const closed = mixed.closed_trades.find((t) => t.symbol === "META");
+    expect(closed?.realized_pnl).toBeCloseTo(498, 4);
+    expect(closed?.realized_quantity).toBe(5);
+
+    // Degrades identically to the all-compact journal — the ISO stray must
+    // not change the derived payload at all.
+    const allCompact = journalRowsToBlotter([
+      row({ ...openIso, expiry: "20260626" }, "2026-06-25"),
+      row(closeCompact, "2026-06-26"),
+    ]);
+    expect(mixed).toEqual(allCompact);
+  });
+
   /* ─── Live-session scenario coverage ───────────────────────────── */
 
   it("Scenario A — picks up a fresh mid-session fill in the next /api/blotter response", () => {

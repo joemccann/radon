@@ -261,11 +261,19 @@ interface LotPnl {
   proceeds: number;
 }
 
+function compactExpiry(expiry: JournalTradePayload["expiry"]): string {
+  // Journal rows must carry compact "YYYYMMDD" (the Python writers enforce
+  // it), but tolerate an ISO stray so a "2026-06-26" row still lot-matches
+  // its "20260626" counterpart instead of silently splitting the position.
+  const raw = (expiry ?? "").toString();
+  return /^\d{4}-\d{2}-\d{2}$/.test(raw) ? raw.replace(/-/g, "") : raw;
+}
+
 function contractGroupKey(p: JournalTradePayload): string | null {
   const ticker = resolveTicker(p);
   if (!ticker) return null;
   if (p.contracts != null || p.strike != null || p.right || p.expiry) {
-    return `${ticker}|OPT|${p.strike ?? ""}|${p.expiry ?? ""}|${p.right ?? ""}`;
+    return `${ticker}|OPT|${p.strike ?? ""}|${compactExpiry(p.expiry)}|${p.right ?? ""}`;
   }
   if (p.shares != null) return `${ticker}|STK`;
   return null;

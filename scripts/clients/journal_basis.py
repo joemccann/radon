@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any, Optional
 
 
@@ -50,6 +51,24 @@ def _normalize_expiry(value: Any) -> str:
     return ""
 
 
+_ISO_EXPIRY = re.compile(r"\d{4}-\d{2}-\d{2}")
+
+
+def normalize_expiry_compact(value: Any) -> Any:
+    """Return an ISO ``YYYY-MM-DD`` expiry as journal-canonical ``YYYYMMDD``.
+
+    Journal option rows must carry compact expiries: the web lot-matcher
+    (web/lib/blotter/fromJournal.ts) keys on the raw expiry string, so an
+    ISO row silently splits a position into two non-matching groups
+    (22 rows hand-normalized in prod on 2026-07-02). Anything that is not
+    exactly ISO — already-compact strings, ``None``, futures contract
+    months — passes through unchanged.
+    """
+    if isinstance(value, str) and _ISO_EXPIRY.fullmatch(value):
+        return value.replace("-", "")
+    return value
+
+
 def _normalize_right(value: Any) -> str:
     right = str(value or "").strip().upper()
     return right[:1] if right[:1] in {"C", "P"} else ""
@@ -83,6 +102,13 @@ def _bucket_key(payload: dict[str, Any]) -> Optional[str]:
     return f"{ticker}|{expiry}|{right}|{strike}"
 
 
+def _row_is_before_cutoff(row: Any, before: str) -> bool:
+    timestamp = _row_value(row, "filled_at") or _row_value(row, "written_at")
+    if not timestamp:
+        return False
+    return str(timestamp)[:10] < str(before)[:10]
+
+
 def prior_net_qty_for_contract(
     db,
     *,
@@ -91,6 +117,7 @@ def prior_net_qty_for_contract(
     strike: Any = None,
     right: Any = None,
     expiry: Any = None,
+    before: Optional[str] = None,
 ) -> float:
     """Return signed net qty for one contract from already-imported journal rows.
 
@@ -102,6 +129,18 @@ def prior_net_qty_for_contract(
 
     STK rows are matched on ticker alone (strike/right/expiry ignored).
     OPT/BAG rows require all four to normalise to non-empty values.
+
+    ``before`` bounds the scan for RETROACTIVE backfills (default ``None``
+    keeps the live fill writer's unbounded behaviour). Only rows whose
+    date — the first 10 chars of ``COALESCE(filled_at, written_at)`` — is
+    STRICTLY EARLIER than ``before``'s date are counted. The journal's
+    ``filled_at`` convention is date-only ("2026-06-25"), so a row dated
+    the fill's own day carries no intra-day order: it is ambiguous and
+    EXCLUDED by design (the 2026-07-02 incident needed prior-day rows in
+    and same-day-and-later closing rows out; the backfill run sequences
+    same-day fills through its in-run prior-state accumulation instead).
+    Rows with no timestamp at all are likewise excluded when ``before``
+    is given.
     """
 
     normalized_ticker = _normalize_ticker(ticker)
@@ -139,6 +178,9 @@ def prior_net_qty_for_contract(
 
     net_qty = 0.0
     for row in result.fetchall():
+        if before is not None and not _row_is_before_cutoff(row, before):
+            continue
+
         payload = _payload_from_row(row)
         if _normalize_ticker(payload.get("ticker") or payload.get("symbol")) != normalized_ticker:
             continue
