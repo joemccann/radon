@@ -13,6 +13,30 @@ function parseLocal(input: string | null | undefined): Date | null {
   return Number.isNaN(d.getTime()) ? null : d;
 }
 
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/**
+ * True when `candidate` parses to an earlier LOCAL calendar day than
+ * `reference`. Used to reject fallback entry dates that cannot precede the
+ * exit they are paired with. False when either side is unparseable.
+ */
+export function isEarlierLocalDay(
+  candidate: string | null | undefined,
+  reference: string | null | undefined,
+): boolean {
+  const a = parseLocal(candidate);
+  const b = parseLocal(reference);
+  if (!a || !b) return false;
+  const dayNumber = (d: Date) => d.getFullYear() * 10_000 + d.getMonth() * 100 + d.getDate();
+  return dayNumber(a) < dayNumber(b);
+}
+
 const MINUTE = 60_000;
 const HOUR = 60 * MINUTE;
 const DAY = 24 * HOUR;
@@ -31,6 +55,13 @@ export function formatHoldDuration(
   const entry = parseLocal(entryTime);
   const exit = parseLocal(exitTime);
   if (!entry || !exit) return null;
+
+  // A date-only entry carries no intra-day information: when it falls on the
+  // exit's own local day, the only measurable span is "since local midnight",
+  // which fabricates an hours-scale hold. Omit the field instead.
+  if (entryTime != null && DATE_ONLY_RE.test(entryTime) && isSameLocalDay(entry, exit)) {
+    return null;
+  }
 
   const elapsedMs = exit.getTime() - entry.getTime();
   if (elapsedMs < 0) return null;
