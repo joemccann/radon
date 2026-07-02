@@ -31,7 +31,7 @@ from typing import Any, Dict, List, Optional
 
 from .base import BaseHandler
 from clients.ib_client import IBClient, DEFAULT_HOST
-from clients.journal_basis import prior_net_qty_for_contract
+from clients.journal_basis import normalize_expiry_compact, prior_net_qty_for_contract
 from utils.atomic_io import atomic_save, verified_load
 
 try:
@@ -66,6 +66,12 @@ class JournalSyncHandler(BaseHandler):
     name = "journal_sync"
     interval_seconds = 300
     requires_market_hours = True
+    # Two more 300s cycles after the 16:00 ET close sweep fills that land in
+    # the session's final seconds. The per-cycle IB connection only sees the
+    # current day's executions, so without grace a fill between the last
+    # in-hours cycle and the close is never journaled (15:59:52 / 15:58:04
+    # incidents). Consumed by the daemon gate via market_state().
+    post_close_grace_minutes = 15
     service_name = "journal-sync"  # structural heartbeat via BaseHandler.run()
 
     def __init__(
@@ -620,6 +626,9 @@ class JournalSyncHandler(BaseHandler):
         strike = getattr(contract, "strike", None) if sec_type in ("OPT", "BAG") else None
         right = getattr(contract, "right", None) if sec_type in ("OPT", "BAG") else None
         expiry = getattr(contract, "lastTradeDateOrContractMonth", None) if sec_type in ("OPT", "BAG") else None
+        # executed_orders-sourced fills (the backfill shim) carry ISO expiry;
+        # journal rows must be compact or fromJournal.ts lot-matching splits.
+        expiry = normalize_expiry_compact(expiry)
 
         structure = self._structure_label(action, sec_type, strike, right, expiry)
 

@@ -693,6 +693,56 @@ class TestSellCloseLabeling:
         assert actions == {"SELL-A": "SELL_OPTION", "SELL-B": "SELL_OPTION"}
 
 
+class TestExpiryNormalization:
+    """Journal option rows must carry compact YYYYMMDD expiry.
+
+    fromJournal.ts keys lot-matching on the raw expiry string, so an ISO
+    "2026-06-26" row silently splits a position from its "20260626"
+    counterpart. 22 ISO rows were hand-normalized in prod on 2026-07-02;
+    _fill_to_entry is the ingest chokepoint that must compact them.
+    """
+
+    def test_fill_to_entry_normalizes_iso_expiry_to_compact(self, trade_log_path):
+        fill = _mock_fill(
+            exec_id="ISO-EXPIRY",
+            symbol="META",
+            side="SLD",
+            shares=5,
+            price=1.74,
+            sec_type="OPT",
+            strike=625.0,
+            right="C",
+            expiry="2026-06-26",
+            when=datetime(2026, 6, 25, 15, 59, 0),
+        )
+
+        handler = JournalSyncHandler(trade_log_path=trade_log_path)
+        entry = handler._fill_to_entry(fill, next_id=1, prior_qty=0.0)
+
+        assert entry is not None
+        assert entry["expiry"] == "20260626"
+
+    def test_fill_to_entry_keeps_compact_expiry_unchanged(self, trade_log_path):
+        fill = _mock_fill(
+            exec_id="COMPACT-EXPIRY",
+            symbol="META",
+            side="SLD",
+            shares=5,
+            price=1.74,
+            sec_type="OPT",
+            strike=625.0,
+            right="C",
+            expiry="20260626",
+            when=datetime(2026, 6, 25, 15, 59, 0),
+        )
+
+        handler = JournalSyncHandler(trade_log_path=trade_log_path)
+        entry = handler._fill_to_entry(fill, next_id=1, prior_qty=0.0)
+
+        assert entry is not None
+        assert entry["expiry"] == "20260626"
+
+
 class TestReconcileDbMissing:
     """JRN-02: disk-on-DB reconciliation — re-attempts failed Turso upserts.
 

@@ -71,6 +71,16 @@ class BaseHandler(ABC):
     interval_seconds: int = 60
     requires_market_hours: bool = True
 
+    # Minutes past the close during which a market-hours handler may still
+    # run. Consulted by the daemon gate only when the market is closed and
+    # routed through utils.market_calendar.market_state (the calendar SoT),
+    # so weekends/holidays never gain a window — grace only extends a
+    # session that actually happened. Default 0 = hard close. journal_sync
+    # opts in: its per-cycle IB session only covers the current day, so a
+    # fill landing between the last in-hours cycle and 16:00 ET was never
+    # journaled (15:59:52 / 15:58:04 production incidents).
+    post_close_grace_minutes: int = 0
+
     # Kebab-case service_health row this handler owns. When set, ``run()``
     # guarantees a heartbeat on EVERY cycle (DUR-14): ``ok`` after a
     # successful execute, ``error`` when execute raises / soft-fails /

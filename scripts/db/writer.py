@@ -20,6 +20,7 @@ try:
     # When imported as `scripts.db.writer` from project root.
     from .client import get_db
     from .service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
+    from ..clients.journal_basis import normalize_expiry_compact
 except ImportError:  # pragma: no cover
     # When imported flat after sys.path.insert(scripts/) like the existing
     # services do (cta_sync_service.py et al).
@@ -28,6 +29,7 @@ except ImportError:  # pragma: no cover
         SERVICE_HEALTH_UPSERT_SQL,
         service_health_upsert_args,
     )
+    from clients.journal_basis import normalize_expiry_compact  # type: ignore[no-redef]
 
 
 def ensure_no_replica_for_writers() -> None:
@@ -239,7 +241,22 @@ def upsert_cash_flow(
     db.commit()
 
 
+def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, Any]:
+    """Journal option rows must persist compact ``YYYYMMDD`` expiry.
+
+    Writer-level chokepoint covering every Python emitter (journal_sync,
+    journal_rehydrate, fill_monitor, ib_execute, the backfill script) — an
+    ISO ``YYYY-MM-DD`` row does not lot-match in fromJournal.ts.
+    """
+    expiry = payload.get("expiry")
+    compact = normalize_expiry_compact(expiry)
+    if compact == expiry:
+        return payload
+    return {**payload, "expiry": compact}
+
+
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
+    payload = _journal_payload_with_compact_expiry(payload)
     db = get_db()
     db.execute(
         """

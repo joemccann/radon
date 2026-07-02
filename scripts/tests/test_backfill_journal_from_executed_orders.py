@@ -447,6 +447,79 @@ class TestExecutedOrderPayloadCoverage:
         assert "2026-06-16" in structure
 
 
+class TestRetroactiveBackfillTimeBound:
+    """2026-07-02 incident: backfilling 2026-06-25 opening sells while the
+    2026-06-26 closing buys already sat in the journal read an unbounded
+    prior qty of +5 and mislabeled the opens SELL_OPTION. The prior-qty
+    seed must be bounded to journal rows strictly before the fill's date.
+    """
+
+    META_EXEC_ID = "0003aaaa.6a3f0001.01.01"
+    META_FILL_TIME = "2026-06-25T19:59:31Z"
+    META_EO_PAYLOAD = {
+        "execId": META_EXEC_ID,
+        "contract": {
+            "conId": 900000001,
+            "symbol": "META",
+            "secType": "OPT",
+            "strike": 625.0,
+            "right": "C",
+            "expiry": "2026-06-26",
+        },
+        "side": "SLD",
+        "quantity": 5.0,
+        "avgPrice": 1.74,
+        "commission": 3.25,
+        "time": META_FILL_TIME,
+        "exchange": "PHLX",
+    }
+
+    def test_retroactive_open_before_existing_close_labels_sell_to_open(self, monkeypatch):
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_executed_order(conn, self.META_EXEC_ID, self.META_EO_PAYLOAD, self.META_FILL_TIME)
+        # The NEXT-DAY closing buys are already in the journal.
+        _insert_journal(
+            conn,
+            "0003aaaa.6a405555.01.01",
+            {
+                "ticker": "META",
+                "action": "BUY_OPTION",
+                "contracts": 5,
+                "strike": 625.0,
+                "right": "C",
+                "expiry": "20260626",
+                "ib_exec_id": "0003aaaa.6a405555.01.01",
+            },
+            "2026-06-26",
+        )
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[self.META_EXEC_ID], dry_run=True)
+        payload = actions[0]["payload"]
+
+        assert payload["action"] == "SELL_TO_OPEN", (
+            "Retroactive backfill must not count NEXT-DAY closing rows as "
+            "prior position — that flips the opening sell to SELL_OPTION."
+        )
+        assert payload["contracts"] == 5
+
+    def test_backfill_normalizes_iso_contract_expiry_to_compact(self, monkeypatch):
+        # executed_orders payloads carry ISO expiry (ib_orders.py
+        # serialize_contract converts YYYYMMDD -> YYYY-MM-DD); journal rows
+        # must carry compact YYYYMMDD or fromJournal.ts lot-matching splits
+        # the position.
+        conn = _fresh_db()
+        _patch_db(conn, monkeypatch)
+        _insert_executed_order(conn, MU_EXEC_ID, MU_EXEC_PAYLOAD, MU_FILL_TIME)
+
+        mod = _import_backfill()
+        actions = mod.backfill(conn, exec_ids=[MU_EXEC_ID], dry_run=True)
+        payload = actions[0]["payload"]
+
+        assert payload["expiry"] == "20260612"
+
+
 class TestPytestGuard:
     def test_raises_under_pytest_current_test_without_override(self, monkeypatch):
         monkeypatch.delenv("RADON_DB_TEST_WRITE_OK", raising=False)
