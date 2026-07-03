@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import time
 
+import pytest
 from fastapi.testclient import TestClient
 
 from api import auth, server
 from api.subprocess import ScriptResult
+
+
+@pytest.fixture(autouse=True)
+def force_live_mode(monkeypatch):
+    """Pin test_mode False — RADON_API_TEST_MODE leaks process-wide from
+    test_demo_trial_expiry_route's import-time env set, and these tests
+    exercise the real subprocess path (the demo guard would hijack it)."""
+    monkeypatch.setattr(server, "test_mode", False)
+    yield
 
 
 def test_theta_harvester_ticker_scan_bypasses_preset_cooldown(monkeypatch):
