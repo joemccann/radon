@@ -71,6 +71,56 @@ afterEach(() => {
   delete process.env.TURSO_AUTH_TOKEN;
 });
 
+describe("isolated failures do not tear down the pool", () => {
+  // 2026-07-03 diagnosis: the ~hourly triggers are genuine Turso tail-latency
+  // events (external monitor: fresh-connection p95 582ms, max ~1s — the tail
+  // exists off-pool), NOT socket rot. A single timed-out read used to destroy
+  // the Agent and abort 5-18 concurrent siblings. A genuine wedge produces
+  // CLUSTERED failures within seconds; an isolated one is just a slow query.
+  it("one resetDb leaves the Agent alive (tail-latency timeout, not a wedge)", async () => {
+    const db = await freshDbModule();
+    db.getDb();
+    const boundedFetch = createClientMock.mock.calls[0][0].fetch as typeof db.pooledDbFetch;
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+    expect(agents).toHaveLength(1);
+
+    db.resetDb();
+    expect(totalDestroys()).toBe(0);
+
+    // Subsequent traffic keeps using the SAME healthy pool.
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+    expect(agents).toHaveLength(1);
+    expect(agents[0].destroyed).toBe(false);
+  });
+
+  it("a second failure inside the cluster window destroys (genuine wedge detection)", async () => {
+    const db = await freshDbModule();
+    db.getDb();
+    const boundedFetch = createClientMock.mock.calls[0][0].fetch as typeof db.pooledDbFetch;
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+
+    db.resetDb();
+    db.resetDb();
+    expect(totalDestroys()).toBe(1);
+  });
+
+  it("two isolated failures far apart never destroy", async () => {
+    const nowSpy = vi.spyOn(Date, "now");
+    let t = 1_000_000;
+    nowSpy.mockImplementation(() => t);
+
+    const db = await freshDbModule();
+    db.getDb();
+    const boundedFetch = createClientMock.mock.calls[0][0].fetch as typeof db.pooledDbFetch;
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+
+    db.resetDb();
+    t += db.DB_POOL_FAILURE_CLUSTER_WINDOW_MS + 1;
+    db.resetDb();
+    expect(totalDestroys()).toBe(0);
+  });
+});
+
 describe("destroy cooldown breaks the reset feedback loop", () => {
   it("a burst of resetDb calls destroys the Agent at most once per cooldown window", async () => {
     const db = await freshDbModule();
@@ -79,12 +129,13 @@ describe("destroy cooldown breaks the reset feedback loop", () => {
     await boundedFetch("https://example.turso.io/v2/pipeline");
     expect(agents).toHaveLength(1);
 
-    // Incident topology: one genuine failure resets; steady traffic (3s
-    // heartbeat, SWR polls) rebuilds the Agent; the collateral 'fetch failed'
-    // catches then reset AGAIN milliseconds later, destroying the fresh
-    // Agent under the next wave — repeat forever. The fix: within the
-    // cooldown window only the FIRST reset tears the pool down.
-    db.resetDb();
+    // Incident topology: clustered failures reset; the destroy aborts
+    // in-flight siblings whose 'fetch failed' catches reset AGAIN
+    // milliseconds later, destroying the fresh Agent under the next wave —
+    // repeat forever. The fix: within the cooldown window only the FIRST
+    // clustered reset tears the pool down.
+    db.resetDb(); // failure 1 — isolated, arms the cluster window
+    db.resetDb(); // failure 2 — clustered → destroy #1
     await boundedFetch("https://example.turso.io/v2/pipeline"); // rebuilds agent
     db.resetDb(); // collateral straggler — must NOT destroy the fresh agent
     await boundedFetch("https://example.turso.io/v2/pipeline");
@@ -108,11 +159,13 @@ describe("destroy cooldown breaks the reset feedback loop", () => {
     await boundedFetch("https://example.turso.io/v2/pipeline");
 
     db.resetDb();
+    db.resetDb(); // clustered → destroy #1
     expect(totalDestroys()).toBe(1);
 
     await boundedFetch("https://example.turso.io/v2/pipeline");
-    t += db.DB_POOL_DESTROY_COOLDOWN_MS + 1;
+    t += Math.max(db.DB_POOL_DESTROY_COOLDOWN_MS, db.DB_POOL_FAILURE_CLUSTER_WINDOW_MS) + 1;
     db.resetDb();
+    db.resetDb(); // fresh cluster after cooldown → destroy #2
     expect(totalDestroys()).toBe(2);
   });
 
@@ -128,12 +181,13 @@ describe("destroy cooldown breaks the reset feedback loop", () => {
     await boundedFetch("https://example.turso.io/v2/pipeline");
 
     db.resetDb();
-    db.__resetDbForTests();
+    db.resetDb(); // clustered → destroy; cooldown + cluster state now armed
+    db.__resetDbForTests(); // must fully rearm both gates
     await boundedFetch("https://example.turso.io/v2/pipeline");
     db.resetDb();
-    // resetDb → 1 destroy; __resetDbForTests forced 1 more on the same agent
-    // (already-destroyed no-op is fine) or a later one; the final resetDb must
-    // have destroyed the post-bypass agent rather than being swallowed.
+    db.resetDb();
+    // Post-bypass, a fresh cluster must destroy the fresh agent immediately —
+    // no leftover cooldown from before the bypass may swallow it.
     expect(agents.at(-1)!.destroyed).toBe(true);
   });
 });

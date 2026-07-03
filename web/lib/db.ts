@@ -56,14 +56,25 @@ export const DB_POOL_KEEP_ALIVE_TIMEOUT_MS = 10_000;
 // resetDb() again, destroying the freshly rebuilt Agent under the next wave
 // of traffic (3s heartbeat + parallel SWR polls) — a self-sustaining destroy
 // storm that only a process restart cleared. Rate-limiting the destroy HERE
-// (the one chokepoint all six reset callers funnel through) lets the first
-// failure tear down a genuinely wedged pool while collateral failures inside
-// the window leave the replacement Agent alive. Must exceed the 3s heartbeat
-// so the metronome cannot re-trigger within the same storm.
+// (the one chokepoint all six reset callers funnel through) lets a genuinely
+// wedged pool be torn down while collateral failures inside the window leave
+// the replacement Agent alive. Must exceed the 3s heartbeat so the metronome
+// cannot re-trigger within the same storm.
 export const DB_POOL_DESTROY_COOLDOWN_MS = 5_000;
+// ── Failure-cluster gate (2026-07-03 diagnosis) ──────────────────────────
+// The ~hourly reset triggers are genuine Turso tail-latency events, not
+// socket rot: a 35-min external monitor on the VPS measured p95 582ms /
+// max ~1s on FRESH connections (the tail exists off-pool), and the
+// watchdog's Python canary reads Turso fine in the same minute the app
+// times out. An isolated >3s read is a slow query — destroying the Agent
+// for it aborted 5-18 healthy concurrent reads every time. A genuine wedge
+// fails EVERY read, so a second reset lands within seconds; only then is
+// teardown warranted.
+export const DB_POOL_FAILURE_CLUSTER_WINDOW_MS = 10_000;
 
 let cachedAgent: Agent | null = null;
 let lastAgentDestroyAtMs = Number.NEGATIVE_INFINITY;
+let lastResetAttemptAtMs = Number.NEGATIVE_INFINITY;
 
 function getPoolAgent(): Agent {
   if (!cachedAgent) {
@@ -80,13 +91,21 @@ function getPoolAgent(): Agent {
  * reset on either aborts both origins' sockets, which is acceptable (the
  * other side re-handshakes once) and keeps one teardown path.
  *
- * Rate-limited: inside the cooldown window the call is a no-op and the
- * current Agent stays in place — nulling without destroying would leak the
- * old pool's sockets (the original per-IP exhaustion disease), and
- * destroying again is the storm. `force` is the test seam. */
+ * Twice gated, and on a skip the current Agent stays in place — nulling
+ * without destroying would leak the old pool's sockets (the original
+ * per-IP exhaustion disease):
+ *   1. Cluster gate: only a SECOND failure inside the cluster window
+ *      destroys — an isolated failure is Turso tail latency, not a wedge.
+ *   2. Cooldown: destroying again within the window is the storm.
+ * `force` is the test seam. */
 function destroyPoolAgent(force = false): void {
   const now = Date.now();
-  if (!force && now - lastAgentDestroyAtMs < DB_POOL_DESTROY_COOLDOWN_MS) return;
+  if (!force) {
+    const clustered = now - lastResetAttemptAtMs <= DB_POOL_FAILURE_CLUSTER_WINDOW_MS;
+    lastResetAttemptAtMs = now;
+    if (!clustered) return;
+    if (now - lastAgentDestroyAtMs < DB_POOL_DESTROY_COOLDOWN_MS) return;
+  }
   lastAgentDestroyAtMs = now;
   const agent = cachedAgent;
   cachedAgent = null;
@@ -304,12 +323,13 @@ export async function syncDb(): Promise<void> {
 }
 
 // Test seam — drop the cached clients + pool between vitest tests.
-// Bypasses AND rearms the destroy cooldown so each test starts deterministic.
+// Bypasses AND rearms both destroy gates so each test starts deterministic.
 export function __resetDbForTests(): void {
   cached = null;
   cachedDemo = null;
   destroyPoolAgent(true);
   lastAgentDestroyAtMs = Number.NEGATIVE_INFINITY;
+  lastResetAttemptAtMs = Number.NEGATIVE_INFINITY;
 }
 
 // Test seam — inject a libSQL client (typically in-memory) so route
