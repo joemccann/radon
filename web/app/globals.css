@@ -988,15 +988,17 @@ body {
 .futures-strip {
   display: flex;
   align-items: center;
-  gap: 18px;
+  gap: 12px;
   min-width: 0;
   /* Never shrink — a half-clipped cell reads as broken. The strip shows in full
-   *  or hides as a unit below 1400px (media query below). */
+   *  or hides as a unit below 1400px (media query below). Gap/padding are
+   *  budgeted tight: the DELAYED badge widened the strip and the 1400–1560px
+   *  band only fits with the search wrapper shrunk to its floor. */
   flex: 0 0 auto;
   /* Hairline dividers + padding mark the ticker as its own zone, distinct from
    *  the NOMINAL status chip on the left and the sync/search controls on the
    *  right — the single biggest legibility win at crowded widths. */
-  padding: 0 22px;
+  padding: 0 14px;
   border-left: 1px solid var(--border-dim);
   border-right: 1px solid var(--border-dim);
   font-family: var(--font-mono);
@@ -1059,11 +1061,11 @@ body {
 }
 
 @media (max-width: 1500px) {
-  .search-input { width: 200px; }
+  .search-input-wrapper { flex-basis: 200px; }
 }
 
 @media (max-width: 1280px) {
-  .search-input { width: 150px; }
+  .search-input-wrapper { flex-basis: 150px; }
 }
 
 @media (max-width: 1400px) {
@@ -1079,15 +1081,35 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
-  /* Natural width, pinned to the right edge by the header's space-between.
-   *  Not flex:1 — forcing it to half-width would clip the search / overflow
-   *  the controls into the futures strip. */
-  flex: 0 0 auto;
+  /* Shrinkable (basis = natural width) so the header can NEVER push the
+   *  toggles past the viewport edge: when the three zones don't fit, the
+   *  search wrapper inside absorbs the deficit down to its min-width while
+   *  the buttons stay rigid. flex:0 0 auto here overflowed the right edge
+   *  whenever rail + futures strip + actions exceeded the header box
+   *  (regression: the DELAYED badge widened the strip past the 1400–1560px
+   *  collapse band's budget). */
+  flex: 0 1 auto;
   min-width: 0;
 }
 
+/* Search sizing lives on the WRAPPER (flex-basis + shrink floor); the input
+ *  fills it. A fixed-width input can't give up space, and it was the only
+ *  flexible candidate in the actions zone. */
+.search-input-wrapper {
+  flex: 0 1 256px;
+  min-width: 140px;
+}
+
+.sync-controls,
+.fullscreen-toggle,
+.theme-toggle {
+  /* Controls never collapse — the search wrapper is the designated shock
+   *  absorber for header width pressure. */
+  flex-shrink: 0;
+}
+
 .search-input {
-  width: 256px;
+  width: 100%;
   height: 28px;
   background: var(--bg-base);
   border: 1px solid var(--border-dim);
