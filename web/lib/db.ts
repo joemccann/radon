@@ -150,6 +150,18 @@ export function toHttpTransportUrl(url: string): string {
   return url;
 }
 
+/** Per-origin snapshot of the bounded Agent's connection stats
+ * (connected/free/pending/queued/running/size), or null before any pooled
+ * request. Logged by dbExecute on failure: queued>0 at a read timeout means
+ * the 8-conn cap is saturating; an idle pool points at a stale socket or a
+ * blocked event loop instead. */
+export function getPoolStats(): Record<string, unknown> | null {
+  if (!cachedAgent) return null;
+  const stats = (cachedAgent as { stats?: Record<string, unknown> }).stats;
+  if (!stats || Object.keys(stats).length === 0) return null;
+  return JSON.parse(JSON.stringify(stats));
+}
+
 /** Drop the cached primary client AND destroy the bounded undici pool so the
  * next getDb() opens fresh sockets.
  *

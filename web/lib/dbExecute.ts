@@ -13,7 +13,7 @@
 // See `feedback_libsql_http_transport_no_wss_singleton`.
 
 import type { InStatement, ResultSet } from "@libsql/client";
-import { getDb, resetDb } from "./db";
+import { getDb, resetDb, getPoolStats } from "./db";
 import { withTimeout } from "./asyncTimeout";
 
 /** Default per-read deadline. */
@@ -44,8 +44,20 @@ export async function dbExecute(
       `${label} read timed out after ${timeoutMs}ms`,
     );
   } catch (err) {
-    console.warn(`[dbExecute:${label}] ${describeDbError(err)}`);
+    console.warn(`[dbExecute:${label}] ${describeDbError(err)}${poolStatsSuffix()}`);
     resetDb();
     throw err;
+  }
+}
+
+/** Best-effort — route tests mock @/lib/db wholesale without getPoolStats,
+ * and vitest's mock proxy THROWS on missing-export access, so this must
+ * never let diagnostics break the failure path. */
+function poolStatsSuffix(): string {
+  try {
+    const stats = getPoolStats();
+    return stats ? ` pool=${JSON.stringify(stats)}` : "";
+  } catch {
+    return "";
   }
 }
