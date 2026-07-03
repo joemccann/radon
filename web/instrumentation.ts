@@ -13,4 +13,10 @@ export async function register() {
     // Never let instrumentation crash server boot.
     console.warn("[instrumentation] db keep-alive failed to start:", err);
   }
+  try {
+    const { startLoopLagMonitor } = await import("@/lib/loopLagMonitor");
+    startLoopLagMonitor();
+  } catch (err) {
+    console.warn("[instrumentation] loop-lag monitor failed to start:", err);
+  }
 }
