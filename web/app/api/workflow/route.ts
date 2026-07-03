@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -47,14 +47,16 @@ export async function GET(): Promise<Response> {
   if (!userId) return unauthorized(requestId);
 
   try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT id, name, graph, updated_at, last_run_ok, last_run_at
+    const result = await dbExecute(
+      {
+        sql: `SELECT id, name, graph, updated_at, last_run_ok, last_run_at
             FROM workflow_graphs
             WHERE user_id = ?
             ORDER BY updated_at DESC`,
-      args: [userId],
-    });
+        args: [userId],
+      },
+      { label: "workflow" },
+    );
     const graphs = result.rows.map((r) => {
       const row = r as unknown as WorkflowRow;
       return {
@@ -68,9 +70,8 @@ export async function GET(): Promise<Response> {
     });
     return setNoStoreResponseHeaders(NextResponse.json({ graphs }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to read workflows", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Workflow store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
@@ -104,21 +105,22 @@ export async function POST(req: Request): Promise<Response> {
   const graphJson = JSON.stringify(body.graph);
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `INSERT INTO workflow_graphs (id, user_id, name, graph, created_at, updated_at)
+    await dbExecute(
+      {
+        sql: `INSERT INTO workflow_graphs (id, user_id, name, graph, created_at, updated_at)
             VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))
             ON CONFLICT(id) DO UPDATE SET
               name = excluded.name,
               graph = excluded.graph,
               updated_at = excluded.updated_at`,
-      args: [id, userId, name, graphJson],
-    });
+        args: [id, userId, name, graphJson],
+      },
+      { label: "workflow" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true, id }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to save workflow", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Workflow store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }

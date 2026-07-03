@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -23,16 +23,17 @@ export async function DELETE(
   const postId = decodeURIComponent(post_id).trim();
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `DELETE FROM bookmarks WHERE user_id = ? AND post_id = ?`,
-      args: [userId, postId],
-    });
+    await dbExecute(
+      {
+        sql: `DELETE FROM bookmarks WHERE user_id = ? AND post_id = ?`,
+        args: [userId, postId],
+      },
+      { label: "bookmarks" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true, bookmarked: false }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to remove bookmark", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Bookmark store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }

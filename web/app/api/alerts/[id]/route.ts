@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -23,16 +23,17 @@ export async function DELETE(
   const ruleId = decodeURIComponent(id).trim();
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `DELETE FROM alert_rules WHERE id = ? AND user_id = ?`,
-      args: [ruleId, userId],
-    });
+    await dbExecute(
+      {
+        sql: `DELETE FROM alert_rules WHERE id = ? AND user_id = ?`,
+        args: [ruleId, userId],
+      },
+      { label: "alerts" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to delete alert rule", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Alert store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }

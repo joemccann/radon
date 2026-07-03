@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -54,20 +54,21 @@ export async function GET(): Promise<Response> {
   if (!userId) return unauthorized(requestId);
 
   try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT id, ticker, metric, op, threshold, channel, created_at, last_fired_at
+    const result = await dbExecute(
+      {
+        sql: `SELECT id, ticker, metric, op, threshold, channel, created_at, last_fired_at
             FROM alert_rules
             WHERE user_id = ?
             ORDER BY created_at DESC`,
-      args: [userId],
-    });
+        args: [userId],
+      },
+      { label: "alerts" },
+    );
     const rules = result.rows.map((r) => rowToRule(r as unknown as AlertRuleRow));
     return setNoStoreResponseHeaders(NextResponse.json({ rules }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to read alert rules", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Alert store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
@@ -119,17 +120,18 @@ export async function POST(req: Request): Promise<Response> {
   }
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `INSERT INTO alert_rules (id, user_id, ticker, metric, op, threshold, channel, created_at)
+    await dbExecute(
+      {
+        sql: `INSERT INTO alert_rules (id, user_id, ticker, metric, op, threshold, channel, created_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, datetime('now'))`,
-      args: [crypto.randomUUID(), userId, ticker, metric, body.op, threshold, channel],
-    });
+        args: [crypto.randomUUID(), userId, ticker, metric, body.op, threshold, channel],
+      },
+      { label: "alerts" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to create alert rule", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Alert store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
