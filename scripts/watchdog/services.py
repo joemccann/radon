@@ -80,9 +80,13 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     #    UW-only. 26h open covers a weekend, 3d closed the long gap.
     #  * garch-scan      — on-demand dashboard refresh (+ optional timer, not
     #    yet shipped); UW-only. Same daily windows as leap-scan.
+    #  * catalysts      — radon-catalysts.timer, Mon-Fri 10:30 UTC; heartbeats
+    #    ok on holiday skips (run_catalysts.sh), so the longest legit gap is
+    #    the Fri→Mon weekend. UW-only, no IB.
     "llm-token-index":  {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
+    "catalysts":        {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # ib-watchdog polls FastAPI /health every 60s and heartbeats a row each
     # cycle; 5-min window catches a dead watchdog process within minutes.
     # It MONITORS IB but does not depend on IB being healthy to run, so
@@ -179,6 +183,7 @@ BUCKETS: dict[str, list[str]] = {
         "llm-token-index",
         "leap-scan",
         "garch-scan",
+        "catalysts",
         # Daily drift audit on the VPS — hourly check surfaces a missed
         # run within 1h of the 26h window expiring.
         "config-drift",

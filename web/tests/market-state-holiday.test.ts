@@ -12,6 +12,8 @@ import { describe, it, expect } from "vitest";
 import {
   getMarketStateFromDate,
   getMarketPhaseFromDate,
+  getFreshnessWindowMs,
+  getServiceCategory,
 } from "../lib/serviceHealthWindows";
 import holidays from "../../scripts/config/market_holidays.json";
 
@@ -40,6 +42,14 @@ describe("holiday awareness", () => {
   it("market phase mirrors the holiday gate", () => {
     expect(getMarketPhaseFromDate(etDate("2026-07-03T15:00:00Z"))).toBe("closed");
     expect(getMarketPhaseFromDate(etDate("2026-07-02T15:00:00Z"))).toBe("open");
+  });
+
+  it("catalysts is registered with weekend-bridging windows (unregistered = 1h default = evening noise)", () => {
+    // radon-catalysts.timer fires Mon-Fri 10:30 UTC and heartbeats on
+    // holiday skips; the longest legitimate gap is the Fri→Mon weekend.
+    expect(getServiceCategory("catalysts")).toBe("scheduled");
+    expect(getFreshnessWindowMs("catalysts", "open")).toBeGreaterThanOrEqual(25 * 60 * 60_000);
+    expect(getFreshnessWindowMs("catalysts", "closed")).toBeGreaterThanOrEqual(3 * 24 * 60 * 60_000);
   });
 
   it("every static-table year covers Christmas (sanity: table wired, not a stub)", () => {

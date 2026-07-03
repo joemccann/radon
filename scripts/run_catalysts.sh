@@ -26,6 +26,8 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
+mkdir -p logs
+
 IS_TRADING=$("$PYTHON_BIN" -c "
 import sys; sys.path.insert(0, 'scripts')
 from utils.market_calendar import _is_trading_day
@@ -35,10 +37,18 @@ print('yes' if _is_trading_day(datetime.now()) else 'no')
 
 if [ "$IS_TRADING" = "no" ]; then
     echo "$(date): Market holiday — skipping catalyst fetch"
+    # Heartbeat the skip: the writer ran and correctly decided not to fetch.
+    # Without this the row ages through the holiday and flags stale
+    # (see feedback_service_health_heartbeat — ok every cycle, or rows latch).
+    "$PYTHON_BIN" -c "
+import sys; sys.path.insert(0, 'scripts')
+from datetime import datetime, timezone
+from db import writer
+writer.record_service_health('catalysts', 'ok', finished_at=datetime.now(timezone.utc).isoformat())
+" 2>>"logs/catalysts.err.log" || echo "$(date): Holiday heartbeat write failed (non-fatal)"
     exit 0
 fi
 
-mkdir -p logs
 echo "$(date): Fetching catalysts..."
 "$PYTHON_BIN" scripts/fetch_catalysts.py >/dev/null 2>>"logs/catalysts.err.log"
 EXIT_CODE=$?
