@@ -102,6 +102,71 @@ describe("profile routes: Turso down → 503, not 500", () => {
   });
 });
 
+describe("bookmarks routes: Turso down → 503, not 500", () => {
+  it("GET /api/bookmarks returns 503 DB_UNAVAILABLE", async () => {
+    const { GET } = await import("../app/api/bookmarks/route");
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect((await jsonOf(res)).code).toBe("DB_UNAVAILABLE");
+  });
+
+  it("POST /api/bookmarks returns 503", async () => {
+    const { POST } = await import("../app/api/bookmarks/route");
+    const res = await POST(
+      new Request("http://localhost/api/bookmarks", {
+        method: "POST",
+        body: JSON.stringify({ post_id: "p1" }),
+      }),
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("DELETE /api/bookmarks/[post_id] returns 503", async () => {
+    const { DELETE } = await import("../app/api/bookmarks/[post_id]/route");
+    const res = await DELETE(new Request("http://localhost/api/bookmarks/p1", { method: "DELETE" }), {
+      params: Promise.resolve({ post_id: "p1" }),
+    });
+    expect(res.status).toBe(503);
+  });
+});
+
+describe("alerts routes: Turso down → 503, not 500", () => {
+  it("GET /api/alerts returns 503 DB_UNAVAILABLE", async () => {
+    const { GET } = await import("../app/api/alerts/route");
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect((await jsonOf(res)).code).toBe("DB_UNAVAILABLE");
+  });
+
+  it("POST /api/alerts returns 503", async () => {
+    const { POST } = await import("../app/api/alerts/route");
+    const res = await POST(
+      new Request("http://localhost/api/alerts", {
+        method: "POST",
+        body: JSON.stringify({ ticker: "MU", metric: "score", op: ">", threshold: 50 }),
+      }),
+    );
+    expect(res.status).toBe(503);
+  });
+
+  it("DELETE /api/alerts/[id] returns 503", async () => {
+    const { DELETE } = await import("../app/api/alerts/[id]/route");
+    const res = await DELETE(new Request("http://localhost/api/alerts/a1", { method: "DELETE" }), {
+      params: Promise.resolve({ id: "a1" }),
+    });
+    expect(res.status).toBe(503);
+  });
+});
+
+describe("workflow routes: Turso down → 503, not 500", () => {
+  it("GET /api/workflow returns 503 DB_UNAVAILABLE", async () => {
+    const { GET } = await import("../app/api/workflow/route");
+    const res = await GET();
+    expect(res.status).toBe(503);
+    expect((await jsonOf(res)).code).toBe("DB_UNAVAILABLE");
+  });
+});
+
 describe("orders route: Turso down → 503, not 500", () => {
   it("GET /api/orders returns 503 when the snapshot read fails", async () => {
     vi.doMock("@/lib/orders/readOrdersFromDb", () => ({

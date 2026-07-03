@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getDb } from "@/lib/db";
+import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
 export const dynamic = "force-dynamic";
@@ -41,20 +41,21 @@ export async function GET(): Promise<Response> {
     );
   }
   try {
-    const db = getDb();
-    const result = await db.execute({
-      sql: `SELECT id, post_id, snapshot, saved_at
+    const result = await dbExecute(
+      {
+        sql: `SELECT id, post_id, snapshot, saved_at
             FROM bookmarks
             WHERE user_id = ?
             ORDER BY saved_at DESC`,
-      args: [userId],
-    });
+        args: [userId],
+      },
+      { label: "bookmarks" },
+    );
     const bookmarks = result.rows.map((r) => rowToBookmark(r as unknown as BookmarkRow));
     return setNoStoreResponseHeaders(NextResponse.json({ bookmarks }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to read bookmarks", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Bookmark store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
@@ -93,17 +94,18 @@ export async function POST(req: Request): Promise<Response> {
     : JSON.stringify(body.snapshot);
 
   try {
-    const db = getDb();
-    await db.execute({
-      sql: `INSERT OR IGNORE INTO bookmarks (id, user_id, post_id, snapshot, saved_at)
+    await dbExecute(
+      {
+        sql: `INSERT OR IGNORE INTO bookmarks (id, user_id, post_id, snapshot, saved_at)
             VALUES (?, ?, ?, ?, datetime('now'))`,
-      args: [crypto.randomUUID(), userId, postId, snapshot],
-    });
+        args: [crypto.randomUUID(), userId, postId, snapshot],
+      },
+      { label: "bookmarks" },
+    );
     return setNoStoreResponseHeaders(NextResponse.json({ ok: true, bookmarked: true }), requestId);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
     return setNoStoreResponseHeaders(
-      jsonApiError({ status: 500, code: "INTERNAL_ERROR", message: "Failed to save bookmark", detail: message, requestId }),
+      jsonApiError({ status: 503, code: "DB_UNAVAILABLE", message: "Bookmark store temporarily unavailable", detail: describeDbError(err), requestId }),
       requestId,
     );
   }
