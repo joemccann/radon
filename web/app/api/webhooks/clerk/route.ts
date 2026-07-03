@@ -1,7 +1,7 @@
 // Clerk webhook — demo trial provisioning (demo.radon.run, Phase 2).
 //
 // Verifies the svix signature (Web Crypto, no svix dep), then on `user.created`
-// provisions a 3-trading-day trial: writes Clerk publicMetadata + a demo_users
+// provisions a 2-trading-day trial: writes Clerk publicMetadata + a demo_users
 // row. Idempotent on retry. All business logic lives in lib/demo/* so this file
 // is just transport.
 
@@ -73,6 +73,10 @@ export async function POST(request: Request): Promise<Response> {
       computeExpiry: (startIsoEt) => computeTrialExpiry(startIsoEt),
       setClerkMetadata,
       allowedUserIds: parseAllowedUserIds(process.env.ALLOWED_USER_IDS),
+      // On the demo deployment every non-operator signup is a trial — OAuth
+      // signups through the sign-in page's social buttons never carry the
+      // unsafe_metadata.demo marker the /sign-up page stamps.
+      assumeDemo: process.env.NEXT_PUBLIC_RADON_DEMO === "1",
     });
     return ok({ ...result, requestId });
   } catch (error) {

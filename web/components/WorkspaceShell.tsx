@@ -28,6 +28,7 @@ import MetricCards from "@/components/MetricCards";
 import ToastContainer from "@/components/Toast";
 import DashboardSurface from "@/components/dashboard/DashboardSurface";
 import ChatLauncher from "@/components/ChatLauncher";
+import DemoWelcomeModal from "@/components/DemoWelcomeModal";
 import MobileShell from "@/components/mobile/MobileShell";
 import { useViewport } from "@/lib/useViewport";
 
@@ -521,6 +522,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
 
       <ToastContainer toasts={toasts} onDismiss={removeToast} />
       <ChatLauncher activeSection={activeSection} />
+      <DemoWelcomeModal />
     </div>
   );
 }

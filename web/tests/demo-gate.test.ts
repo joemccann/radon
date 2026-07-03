@@ -44,12 +44,12 @@ describe("handleDemoGate", () => {
     expect(body.code).toBe("DEMO_TRIAL_EXPIRED");
   });
 
-  it("expired demo user is redirected to sign-in on a page path", async () => {
+  it("expired demo user is redirected to the trial-expired page on a page path", async () => {
     const res = await handleDemoGate(
       { userId: "u", metadata: expiredMeta, request: new NextRequest("https://demo.radon.run/portfolio") },
       { now: NOW, rateLimiter: async () => allow },
     );
-    expect(res?.headers.get("location")).toContain("/sign-in");
+    expect(res?.headers.get("location")).toContain("/trial-expired");
   });
 
   it("rate-limited demo API request gets 429 + Retry-After", async () => {
