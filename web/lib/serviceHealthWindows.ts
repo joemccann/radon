@@ -202,6 +202,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // never touches IB, so requires_ib=false. Same window as its UW-scan
   // siblings above.
   "informed-flow": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``catalysts`` runs Mon-Fri 10:30 UTC (radon-catalysts.timer) and
+  // heartbeats ok on holiday skips (run_catalysts.sh), so the longest
+  // legitimate quiet gap is the Fri 10:30 → Mon 10:30 weekend (~72h).
+  // UW-only (fetch_catalysts.py imports clients.uw_client) — no IB.
+  // Shipped 2026-07-02 without registration and inherited the 1h default,
+  // flagging stale every afternoon.
+  "catalysts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
   // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
   // Mon morning) without flipping stale; the on-demand button can
