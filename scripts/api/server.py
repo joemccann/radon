@@ -40,6 +40,7 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from api.ib_pool import IBPool
 from api import db_http
+from api.demo_scan import demo_disabled_payload, demo_scan_response
 from api.subprocess import run_script, run_module, run_script_raw, ScriptResult
 from api.ib_gateway import (
     check_ib_gateway,
@@ -1435,6 +1436,8 @@ async def admin_stack_restart():
 @app.post("/scan")
 async def scan():
     """Run watchlist scanner (scanner.py --top 25)."""
+    if test_mode:
+        return await demo_scan_response("scanner", {"scan_time": "", "results": []})
     workers = _bounded_env_int("RADON_SCANNER_WORKERS", 24)
     result = await run_script("scanner.py", ["--top", "25", "--workers", str(workers)], timeout=120)
     if not result.ok:
@@ -1446,6 +1449,8 @@ async def scan():
 @app.post("/discover")
 async def discover():
     """Run market-wide discovery (discover.py --min-alerts 1)."""
+    if test_mode:
+        return await demo_scan_response("discover", {"scan_time": "", "results": []})
     result = await run_script("discover.py", ["--min-alerts", "1"], timeout=120)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
@@ -1458,6 +1463,8 @@ async def discover():
 @app.post("/forecast/chronos")
 async def forecast_chronos(request: Request):
     """Chronos-2 quantile forecast for a ticker flow-history metric."""
+    if test_mode:
+        return demo_disabled_payload("Chronos forecasting")
     body = await request.json()
     ticker = str(body.get("ticker", "")).upper()
     metric = str(body.get("metric", "flow_strength"))
@@ -1609,6 +1616,8 @@ def _load_latest_backtest_run(strategy: str):
 @app.post("/flow-surprise")
 async def flow_surprise(request: Request):
     """Flow-surprise residual: ranked watchlist, or one ticker if provided."""
+    if test_mode:
+        return demo_disabled_payload("Flow surprise")
     body = await request.json()
     metric = str(body.get("metric", "flow_strength"))
     top = int(body.get("top", 20))
@@ -1626,6 +1635,8 @@ async def flow_surprise(request: Request):
 @app.post("/flow-analysis")
 async def flow_analysis():
     """Run portfolio flow analysis (flow_analysis.py)."""
+    if test_mode:
+        return await demo_scan_response("flow-analysis", {"scan_time": "", "results": []})
     result = await run_script("flow_analysis.py", timeout=120)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
@@ -1664,6 +1675,15 @@ async def run_flow_report(ticker: str):
     upper = ticker.upper()
     if not _TICKER_RE.match(upper):
         raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    if test_mode:
+        cache_path = _FLOW_REPORTS_DIR / f"{upper}.json"
+        if cache_path.exists():
+            try:
+                return json.loads(cache_path.read_text())
+            except Exception:
+                pass
+        return demo_disabled_payload(f"Live flow analysis for {upper}")
 
     result = await run_script("flow_report.py", [upper], timeout=120)
     if not result.ok:
@@ -2036,6 +2056,8 @@ async def journal_rehydrate(days: int = 365):
 @app.post("/regime/scan")
 async def regime_scan():
     """Run CRI scan (cri_scan.py --json). 120s timeout."""
+    if test_mode:
+        return await demo_scan_response("regime", {"scan_time": ""})
     result = await run_script("cri_scan.py", ["--json"], timeout=120)
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
@@ -2058,6 +2080,8 @@ async def breadth_scan():
     its own Turso snapshot + service_health row; empty payloads are never
     cached, so the route returns stdout JSON without re-writing the cache here.
     """
+    if test_mode:
+        return await demo_scan_response("breadth-scan", {"scan_time": ""})
     global _breadth_last_scan, _breadth_scan_lock
     import time as _time
     if _breadth_scan_lock is None:
@@ -2088,6 +2112,8 @@ VCG_COOLDOWN_S = 60
 @app.post("/vcg/scan")
 async def vcg_scan():
     """Run VCG scan (vcg_scan.py --json). 60s cooldown between scans."""
+    if test_mode:
+        return await demo_scan_response("vcg-scan", {"scan_time": ""})
     global _vcg_last_scan, _vcg_scan_lock
     import time as _time
     if _vcg_scan_lock is None:
@@ -2135,6 +2161,10 @@ async def leap_scan(preset: str = "mag7", min_gap: float = 10.0):
     the cache file after the subprocess completes. 600s cooldown stops
     accidental thrash on the Unusual Whales API.
     """
+    if test_mode:
+        return await demo_scan_response(
+            "leap-scan", {"scan_time": "", "min_gap": min_gap, "results": []}
+        )
     global _leap_last_scan, _leap_scan_lock
     import time as _time
     if _leap_scan_lock is None:
@@ -2190,6 +2220,20 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    if test_mode:
+        return await demo_scan_response(
+            "theta-harvester",
+            {
+                "scan_time": "",
+                "source": "Unusual Whales",
+                "universe": f"preset:{preset}",
+                "requested_tickers": [],
+                "tickers_scanned": 0,
+                "candidates_found": 0,
+                "theta_harvest_count": 0,
+                "results": [],
+            },
+        )
     if _theta_scan_lock is None:
         _theta_scan_lock = asyncio.Lock()
     now = _time.monotonic()
@@ -2256,6 +2300,20 @@ async def strength_confirmation_scan(preset: str = "ndx100", limit: int = 0, tic
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    if test_mode:
+        return await demo_scan_response(
+            "strength-confirmation",
+            {
+                "scan_time": "",
+                "source": "Unusual Whales + Radon regime caches",
+                "universe": f"preset:{preset}",
+                "requested_tickers": [],
+                "tickers_scanned": 0,
+                "candidates_found": 0,
+                "confirmed_strength_count": 0,
+                "results": [],
+            },
+        )
     if _strength_scan_lock is None:
         _strength_scan_lock = asyncio.Lock()
     now = _time.monotonic()
@@ -2478,6 +2536,10 @@ async def garch_convergence_scan(preset: str = "mega-tech"):
     Built-in presets: semis, mega-tech, energy, china-etf, all. File
     presets (data/presets/) also accepted.
     """
+    if test_mode:
+        return await demo_scan_response(
+            "garch-scan", {"scan_time": "", "tickers": {}, "pairs": []}
+        )
     global _garch_last_scan, _garch_scan_lock
     import time as _time
     if _garch_scan_lock is None:
@@ -2523,6 +2585,8 @@ async def gex_share():
 @app.post("/gex/scan")
 async def gex_scan(ticker: str = "SPX"):
     """Run GEX scan (gex_scan.py --json --ticker X). 60s cooldown between scans."""
+    if test_mode:
+        return await demo_scan_response("gex-scan", {"scan_time": ""})
     global _gex_last_scan, _gex_scan_lock
     import time as _time
     if _gex_scan_lock is None:
@@ -2557,6 +2621,8 @@ GAMMA_ROTATION_COOLDOWN_S = 60
 @app.post("/gamma-rotation/scan")
 async def gamma_rotation_scan():
     """Run SPY/TLT Gamma Rotation Gap scan."""
+    if test_mode:
+        return await demo_scan_response("gamma-rotation", {"scan_time": ""})
     global _gamma_rotation_last_scan, _gamma_rotation_scan_lock
     import time as _time
     if _gamma_rotation_scan_lock is None:

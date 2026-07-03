@@ -25,6 +25,10 @@ def localhost_bypass(monkeypatch):
     from scripts.api import server, auth
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    # Pin test_mode False — RADON_API_TEST_MODE leaks process-wide from
+    # test_demo_trial_expiry_route's import-time env set, and these tests
+    # exercise the real subprocess path (the demo guard would hijack it).
+    monkeypatch.setattr(server, "test_mode", False)
     yield
 
 
