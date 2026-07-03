@@ -11,6 +11,8 @@
  * services is normal so the closed-hour window is intentionally loose.
  */
 
+import staticHolidays from "../../scripts/config/market_holidays.json";
+
 export type MarketState = "open" | "extended" | "closed";
 
 /**
@@ -386,17 +388,33 @@ export function isStale(
   return nowMs - ts > window;
 }
 
+/** ET calendar date ("YYYY-MM-DD") is a full-closure US market holiday per
+ * the static table (scripts/config/market_holidays.json — the same SoT the
+ * relay's marketCalendar.js consults). Early-close half-days are NOT here;
+ * they only make afternoon windows conservatively tight, never noisy-wide.
+ * Years missing from the table fall back to weekday-only (pre-2026-07-03
+ * behavior) rather than guessing. */
+function isUsMarketHoliday(et: Date): boolean {
+  const isoDate = `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, "0")}-${String(et.getDate()).padStart(2, "0")}`;
+  const year = String(et.getFullYear());
+  const dates = (staticHolidays as Record<string, string[]>)[year];
+  return Array.isArray(dates) && dates.includes(isoDate);
+}
+
 /**
  * Server-side market-state derivation, mirrored from
  * web/lib/useMarketHours.ts but pure (no React, no setInterval).
  *
- * Returns the current MarketState in America/New_York. Holidays are
- * ignored — they're rare (~10/yr) and not worth a calendar dependency.
+ * Returns the current MarketState in America/New_York. Full-closure
+ * holidays read as "closed" all day (an observed holiday that computed
+ * as "open" applied the tight RTH windows to scan writers that correctly
+ * did not run — 6-7 stale rows of footer noise on 2026-07-03).
  */
 export function getMarketStateFromDate(now: Date = new Date()): MarketState {
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   const day = et.getDay(); // 0=Sun, 6=Sat
   if (day === 0 || day === 6) return "closed";
+  if (isUsMarketHoliday(et)) return "closed";
 
   const minutes = et.getHours() * 60 + et.getMinutes();
   if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return "open";
@@ -421,6 +439,7 @@ export function getMarketPhaseFromDate(now: Date = new Date()): MarketPhase {
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   const day = et.getDay(); // 0=Sun, 6=Sat
   if (day === 0 || day === 6) return "closed";
+  if (isUsMarketHoliday(et)) return "closed";
 
   const minutes = et.getHours() * 60 + et.getMinutes();
   if (minutes >= 9 * 60 + 30 && minutes <= 16 * 60) return "open";
