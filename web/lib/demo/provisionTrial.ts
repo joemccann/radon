@@ -8,8 +8,11 @@
 // who becomes a trial:
 //   1. NEVER provision an operator (ALLOWED_USER_IDS) — isolation guarantee 3:
 //      a demo session must never carry an operator identity.
-//   2. Only provision when the signup carries the demo marker
-//      (unsafe_metadata.demo === true), set by the demo.radon.run sign-up page.
+//   2. Provision when the signup carries the demo marker
+//      (unsafe_metadata.demo === true, set by the demo.radon.run sign-up page)
+//      OR when `assumeDemo` is set: an OAuth signup through the SIGN-IN page's
+//      social buttons auto-creates the user WITHOUT the marker, so the demo
+//      deployment treats every non-operator user.created as a trial.
 
 import { upsertDemoUser, type DemoDbClient } from "./demoUsers";
 import type { DemoPublicMetadata } from "./demoRole";
@@ -30,6 +33,8 @@ export type ProvisionDeps = {
     publicMetadata: DemoPublicMetadata,
   ) => Promise<void>;
   allowedUserIds?: Set<string>;
+  /** Treat every non-operator signup as a demo trial (demo deployment only). */
+  assumeDemo?: boolean;
   now?: Date;
 };
 
@@ -60,7 +65,7 @@ export async function provisionDemoTrial(
   if (deps.allowedUserIds?.has(userId)) {
     return { provisioned: false, reason: "operator (allowlisted) — never a trial" };
   }
-  if (!isDemoSignup(data)) {
+  if (!deps.assumeDemo && !isDemoSignup(data)) {
     return { provisioned: false, reason: "not a demo signup (no demo marker)" };
   }
 

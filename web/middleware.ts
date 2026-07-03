@@ -166,6 +166,9 @@ export const PUBLIC_WEBHOOK_API_ROUTES = ["/api/webhooks/clerk"] as const;
 export const isPublicRoute = createRouteMatcher([
   "/sign-in(.*)",
   "/sign-up(.*)",
+  // Expired-demo landing page — the demo gate redirects signed-in expired
+  // trial users here; it must bypass auth or the gate would loop on itself.
+  "/trial-expired",
   ...PUBLIC_SHARE_API_ROUTES,
   ...PUBLIC_WEBHOOK_API_ROUTES,
   "/api/service-health",

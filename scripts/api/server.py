@@ -1337,13 +1337,13 @@ async def demo_trial_expiry(request: Request):
     holidays + IBKR closures excluded). The calendar logic is Python-only, so
     the webhook delegates here rather than re-implementing it in TypeScript.
     """
-    from utils.demo_trial import trial_expiry_handler
+    from utils.demo_trial import DEFAULT_TRADING_DAYS, trial_expiry_handler
 
     body = await request.json()
     start_iso_et = body.get("start_iso_et")
     if not start_iso_et:
         raise HTTPException(status_code=400, detail="start_iso_et is required")
-    trading_days = body.get("trading_days", 3)
+    trading_days = body.get("trading_days", DEFAULT_TRADING_DAYS)
     try:
         trading_days = int(trading_days)
     except (TypeError, ValueError):

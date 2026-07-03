@@ -1,13 +1,13 @@
 """Demo trial-expiry math (demo.radon.run).
 
-Pure, unit-testable helpers for the 3-trading-day demo window. Trading days
+Pure, unit-testable helpers for the 2-trading-day demo window. Trading days
 exclude weekends + US holidays + IBKR ad-hoc closures via the shared market
 calendar (``scripts.utils.market_calendar._is_trading_day``).
 
 The trial clock starts at signup (``start_iso_et``). The window spans N
 trading days INCLUSIVE of the start day when the start day is itself a
-trading day: a Wednesday signup expires at 16:00 ET on Friday (Wed=1, Thu=2,
-Fri=3). A weekend/holiday signup rolls forward to the next trading day as
+trading day: a Wednesday signup expires at 16:00 ET on Thursday (Wed=1,
+Thu=2). A weekend/holiday signup rolls forward to the next trading day as
 day 1. Expiry is always 16:00 ET (market close) of the Nth trading day.
 
 Phase 2 will call ``trial_expiry_handler`` from a small FastAPI route (the
@@ -24,7 +24,7 @@ from utils.market_calendar import _is_trading_day
 
 _ET = ZoneInfo("America/New_York")
 _MARKET_CLOSE = time(16, 0)
-DEFAULT_TRADING_DAYS = 3
+DEFAULT_TRADING_DAYS = 2
 # Guard against a misconfigured calendar marking everything a holiday.
 _MAX_SCAN_DAYS = 60
 
@@ -53,7 +53,7 @@ def compute_trial_expiry(
 
     Args:
         start_iso_et: ISO-8601 signup timestamp (naive treated as ET).
-        trading_days: Number of trading days in the window (default 3).
+        trading_days: Number of trading days in the window (default 2).
 
     Returns:
         ISO-8601 string in ``America/New_York`` (with offset) at 16:00 ET.

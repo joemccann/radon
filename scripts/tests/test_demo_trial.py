@@ -1,4 +1,4 @@
-"""Tests for scripts/utils/demo_trial.py — 3-trading-day demo window math."""
+"""Tests for scripts/utils/demo_trial.py — demo trial window math (default 2 trading days)."""
 
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -6,12 +6,21 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from utils.demo_trial import (
+    DEFAULT_TRADING_DAYS,
     compute_trial_expiry,
     is_trial_active,
     trial_expiry_handler,
 )
 
 ET = ZoneInfo("America/New_York")
+
+
+def test_default_trial_is_two_trading_days():
+    assert DEFAULT_TRADING_DAYS == 2
+    # Tue 2026-06-16 start, default window: Day1=Tue, Day2=Wed 06-17.
+    out = trial_expiry_handler("2026-06-16T09:05:00")
+    assert out["trading_days"] == 2
+    assert datetime.fromisoformat(out["expires_at"]).date().isoformat() == "2026-06-17"
 
 
 def test_three_trading_days_across_a_weekend():

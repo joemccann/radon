@@ -2,6 +2,10 @@ import { describe, it, expect, vi } from "vitest";
 import { computeTrialExpiry, DEFAULT_DEMO_TRADING_DAYS } from "@/lib/demo/trialExpiry";
 
 describe("computeTrialExpiry (client)", () => {
+  it("demo trials default to 2 trading days", () => {
+    expect(DEFAULT_DEMO_TRADING_DAYS).toBe(2);
+  });
+
   it("delegates to the injected fetcher and maps the response", async () => {
     const fetcher = vi.fn().mockResolvedValue({
       started_at: "2026-06-25T09:30:00-04:00",

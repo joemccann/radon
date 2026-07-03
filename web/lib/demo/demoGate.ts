@@ -6,7 +6,8 @@
 // through untouched (resolveDemoContext → null):
 //
 //   1. Trial expiry — an expired demo user is blocked everywhere (403 JSON for
-//      /api/*, redirect to sign-in for pages).
+//      /api/*, redirect to the public /trial-expired page which forwards on
+//      to radon.run).
 //   2. Tiered rate-limit — Upstash sliding-window per Clerk userId, applied to
 //      /api/* only (page navigation isn't the DOS surface, and tier-A budgets
 //      would catch ordinary clicking). No-ops when Upstash is unconfigured.
@@ -63,7 +64,9 @@ export async function handleDemoGate(
         ),
       );
     }
-    const url = new URL("/sign-in?demo_expired=1", request.url);
+    // Public page (middleware isPublicRoute) — sign-in itself bounces
+    // signed-in users back to /portfolio, which would loop forever here.
+    const url = new URL("/trial-expired", request.url);
     return NextResponse.redirect(url);
   }
 

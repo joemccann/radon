@@ -1,6 +1,6 @@
 // Trial-expiry resolution for the demo webhook + operator EXTEND (Phase 2/6).
 //
-// The 3-trading-day window depends on the US market calendar (weekends +
+// The 2-trading-day window depends on the US market calendar (weekends +
 // holidays + IBKR closures), which lives only in Python
 // (scripts/utils/demo_trial.py). So the Next.js side delegates the computation
 // to the FastAPI `/demo/trial-expiry` helper rather than re-implementing — and
@@ -25,7 +25,7 @@ export type TrialExpiryFetcher = (
   active: boolean;
 }>;
 
-export const DEFAULT_DEMO_TRADING_DAYS = 3;
+export const DEFAULT_DEMO_TRADING_DAYS = 2;
 
 // Default transport: POST the start timestamp to the FastAPI helper.
 const radonFetcher: TrialExpiryFetcher = async (startIsoEt, tradingDays) => {

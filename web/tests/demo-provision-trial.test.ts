@@ -68,6 +68,20 @@ describe("provisionDemoTrial", () => {
     expect(d.computeExpiry).not.toHaveBeenCalled();
   });
 
+  it("assumeDemo provisions an UNMARKED signup (OAuth via the sign-in page)", async () => {
+    const d = deps({ assumeDemo: true });
+    const result = await provisionDemoTrial(demoUser({ unsafe_metadata: {} }), d);
+    expect(result.provisioned).toBe(true);
+    expect(d.setClerkMetadata).toHaveBeenCalled();
+  });
+
+  it("assumeDemo still NEVER provisions an operator", async () => {
+    const d = deps({ assumeDemo: true, allowedUserIds: new Set(["user_demo"]) });
+    const result = await provisionDemoTrial(demoUser({ unsafe_metadata: {} }), d);
+    expect(result.provisioned).toBe(false);
+    expect(d.setClerkMetadata).not.toHaveBeenCalled();
+  });
+
   it("writes the DB row BEFORE the Clerk metadata (no access without a row)", async () => {
     const order: string[] = [];
     const db = makeFakeDemoDb();

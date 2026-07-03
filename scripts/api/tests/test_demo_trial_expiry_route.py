@@ -31,15 +31,15 @@ def client():
 
 
 def test_trial_expiry_returns_window(client):
-    # A Wednesday signup → expires 16:00 ET Friday (Wed=1, Thu=2, Fri=3).
+    # A Wednesday signup → expires 16:00 ET Thursday (Wed=1, Thu=2).
     resp = client.post(
         "/demo/trial-expiry",
         json={"start_iso_et": "2026-06-24T09:30:00-04:00"},
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
-    assert body["trading_days"] == 3
-    assert body["expires_at"].startswith("2026-06-26T16:00:00")
+    assert body["trading_days"] == 2
+    assert body["expires_at"].startswith("2026-06-25T16:00:00")
     assert "started_at" in body and "active" in body
 
 
