@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import Modal from "@/components/Modal";
-import { resolveDemoContext, type DemoPublicMetadata } from "@/lib/demo/demoRole";
+// demoContext, NOT demoRole — demoRole pulls @clerk/nextjs/server (server-only)
+// which Turbopack refuses inside a Client Component graph.
+import { resolveDemoContext, type DemoPublicMetadata } from "@/lib/demo/demoContext";
 
 const SEEN_KEY_PREFIX = "radon:demo-welcome:";
 
