@@ -136,13 +136,18 @@ describe("bounded pool wiring", () => {
 });
 
 describe("pool teardown on reset", () => {
-  it("resetDb destroys the pooled agent so wedged sockets are dropped", async () => {
+  it("clustered resetDb calls destroy the pooled agent so wedged sockets are dropped", async () => {
     const db = await freshDbModule();
     db.getDb();
     const boundedFetch = clientConfig().fetch as typeof db.pooledDbFetch;
     await boundedFetch("https://example.turso.io/v2/pipeline");
     expect(agents).toHaveLength(1);
 
+    // A genuine wedge fails every read: the second failure inside the
+    // cluster window tears the pool down (an isolated failure is just
+    // Turso tail latency and leaves the Agent alive — see
+    // db-destroy-storm.test.ts).
+    db.resetDb();
     db.resetDb();
     expect(agents[0].destroy).toHaveBeenCalledTimes(1);
 
@@ -151,7 +156,7 @@ describe("pool teardown on reset", () => {
     expect(agents).toHaveLength(2);
   });
 
-  it("a failed execute self-heals the agent too, not just the client cache", async () => {
+  it("clustered failed executes self-heal the agent too, not just the client cache", async () => {
     createClientMock.mockImplementationOnce((config: Record<string, unknown>) => ({
       config,
       execute: vi.fn().mockRejectedValue(new Error("connection wedged")),
@@ -163,6 +168,7 @@ describe("pool teardown on reset", () => {
     await boundedFetch("https://example.turso.io/v2/pipeline");
     expect(agents).toHaveLength(1);
 
+    await expect(client.execute("SELECT 1")).rejects.toThrow("connection wedged");
     await expect(client.execute("SELECT 1")).rejects.toThrow("connection wedged");
     await Promise.resolve();
     await Promise.resolve();
