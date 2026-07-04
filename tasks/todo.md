@@ -45,28 +45,38 @@ Exa available for retrieval).
       seam rows null; sources tagged. (Note: full-history upsert ≈ 90s over Turso HTTP — fine for a
       monthly timer, revisit only if it ever runs hot)
 
-## Phase 3 — API
-- [ ] FastAPI `GET /margin-debt/history` per `/internals/skew-history` pattern (`scripts/api/server.py:2568-2631`),
-      7-day TTL, stale-on-failure, 200 + `{missing:true}` for empty; stays auth-gated (no AUTH_EXEMPT_PATHS change)
-- [ ] `web/app/api/margin-debt/route.ts` via `radonFetch()`, force-dynamic, nodejs runtime
-- [ ] curl-test both routes before calling done
+## Phase 3 — API ✅ (design simplified: no FastAPI route needed)
+- [x] Timer runs `fetch_margin_debt.py` directly (llm-index precedent); full payload mirrored to
+      `scan_snapshots` (service `margin-debt`) so reads are Turso-first — no FastAPI hop
+- [x] `web/app/api/margin-debt/route.ts`: GET-only `dbFirstRead` (Turso snapshot → `data/margin_debt.json`),
+      48h max age, 200 + `{missing:true}` contract; 5 vitest green
+- [x] S&P 500 overlay attached at ingestion: Shiller composite 1959-1984 (committed
+      `data/spx_monthly_legacy.csv` — Yahoo now caps ^GSPC at ~1985) + Yahoo monthly 1985+; 809/809 coverage
 
-## Phase 4 — Frontend (regime tab)
-- [ ] Extend `CriHistoryChart.tsx` with per-series `scaleType: "log" | "linear"` (SPX left axis must be log)
-- [ ] `MarginDebtPanel.tsx`: ChartPanel + BrushMinimap + SpectralLoader, 0% reference line,
-      optional +50/60% / −20% bands; toggles: net view, CPI-deflated, %-of-GDP, 3mo MA smoothing
-- [ ] Wire tab: `RegimeTab` union + `REGIME_TAB_VALUES` + `tabFromPathname` regex in
-      `web/components/RegimePanel.tsx:29-41`
-- [ ] Tokens only, no raw hex; 4px radius; no em dashes in copy
-- [ ] Red/green vitest for YoY/net/normalization helpers; chrome-cdp E2E of the tab
+## Phase 4 — Frontend (regime tab) ✅
+- [x] `CriHistoryChart.tsx`: per-series `scaleType: "log" | "linear"` (positive-domain guard, geometric
+      log ticks) + `xTickFormat` prop; existing call sites byte-identical
+- [x] `MarginDebtPanel.tsx`: RegimeStrip header (YoY froth-colored: warn ≥ +50%), range chips
+      1Y/5Y/10Y/All, view chips YOY%/LEVEL/NET/%GDP/REAL (CPI+GDP gated on normalization.available),
+      3MO MA toggle, BrushMinimap, splice footnote, SpectralLoader/SectionEmptyState
+- [x] `lib/marginDebt.ts` + `lib/useMarginDebt.ts`; tab wired in RegimePanel (`margin`) +
+      `app/regime/margin/page.tsx`
+- [x] Tokens only, no raw hex, existing chip classes, no em dashes
+- [x] Tests: 34 vitest (margin-debt-panel) + regime-tab-routes additions; full web suite 3840 green;
+      tsc clean. E2E: `web/e2e/margin-debt-tab.spec.ts` 5/5 green (Playwright — chrome-cdp needs
+      Tailscale/cloud.sh which was down); live-browser screenshot vs real 809-month payload verified
+      (log SPX axis + YoY line + froth-amber +53.7%)
 
-## Phase 5 — Scheduling + deploy
-- [ ] `scripts/run_margin_debt_refresh.sh` (per `run_catalysts.sh`), no holiday gate
-- [ ] Local launchd plist `config/com.radon.margin-debt-refresh.plist` (daily; conditional GET no-ops)
-- [ ] Hetzner `radon-margin-debt-refresh.{service,timer}` on the VPS (edit-on-box, radon-cloud),
-      `OnCalendar=*-*-15..28 09:00`, `RADON_DB_NO_REPLICA=1`, EnvironmentFile
-- [ ] Optional `service_health` heartbeat via scan mirror
-- [ ] Full test suite green → commit → gated Production approval → verify on app.radon.run
+## Phase 5 — Scheduling + deploy ✅
+- [x] `scripts/run_margin_debt_refresh.sh` (no holiday gate) + `config/com.radon.margin-debt-refresh.plist`
+      (daily 07:10 local)
+- [x] Hetzner `radon-margin-debt.{service,timer}` installed + enabled (oneshot venv python, daily
+      13:10 UTC, Persistent=true, RANDOMIZED 300s, `RADON_DB_NO_REPLICA=1`); first manual run OK (44s);
+      `FRED_API_KEY` added to VPS `/home/radon/radon-cloud/.env`
+- [x] service_health `margin-debt` registered in `scripts/watchdog/services.py` (daily bucket, 26h) +
+      `web/lib/serviceHealthWindows.ts` (26h uniform); watchdog 141 + windows 96 tests green
+- [ ] Post-deploy: delete stray `margin_debt` (underscore) service_health row written by the
+      pre-rename VPS run; confirm `margin-debt` row appears after next timer fire
 
 ## Notes
 - SPX monthly history back to 1959: Yahoo ^GSPC monthly (1950+) via existing fallback path;

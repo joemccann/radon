@@ -51,6 +51,7 @@ describe.each([
   ["gex", "app/regime/gex/page.tsx"],
   ["grg", "app/regime/grg/page.tsx"],
   ["breadth", "app/regime/breadth/page.tsx"],
+  ["margin", "app/regime/margin/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -87,6 +88,9 @@ vi.mock("../components/GammaRotationPanel", () => ({
 }));
 vi.mock("../components/BreadthPanel", () => ({
   default: () => <div data-testid="breadth-panel-stub" />,
+}));
+vi.mock("../components/MarginDebtPanel", () => ({
+  default: () => <div data-testid="margin-panel-stub" />,
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
@@ -178,6 +182,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^BREADTH$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/breadth");
+  });
+
+  it("renders the Margin panel when pathname is /regime/margin", () => {
+    mockedPathname = "/regime/margin";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("margin-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("breadth-panel-stub")).toBeNull();
+  });
+
+  it("clicking MARGIN tab pushes /regime/margin", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^MARGIN$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/margin");
   });
 
   it("clicking CRI from VCG pushes /regime/cri", () => {

@@ -130,6 +130,11 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // missed weekday run quickly during trading hours. Pulls AA only — no IB.
   "llm-token-index": { open: 25 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
 
+  // ``margin-debt`` — run_margin_debt_refresh.sh fires daily every calendar
+  // day (FINRA monthly source; conditional GET no-ops unchanged days but the
+  // snapshot + heartbeat still write). Uniform 26h window: no weekend gap.
+  "margin-debt": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // cri-scan + vcg-scan run on Mon-Fri-only systemd timers (see CLAUDE.md
   // autonomous timers table). Closed-hour window must cover the
   // Fri-end → Mon-open gap (~65h) or a quiet weekend flips the banner.

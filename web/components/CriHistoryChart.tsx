@@ -26,6 +26,8 @@ export interface ChartSeries<T = CriHistoryEntry> {
   color: string;
   axis: "left" | "right";
   format?: (v: number) => string;
+  /** Y-scale for this series; log domains clamp to the smallest positive value. */
+  scaleType?: "log" | "linear";
 }
 
 interface TooltipState<T> {
@@ -41,6 +43,8 @@ interface CriHistoryChartProps<T extends { date: string }> {
   title: string;
   /** Override for today's live values — keys match the entry type fields */
   liveValues?: Partial<Record<keyof T, number>>;
+  /** X-axis tick label override; defaults to "%b %-d" (e.g. "Mar 5"). */
+  xTickFormat?: (d: Date) => string;
 }
 
 const MARGIN = { top: 20, right: 56, bottom: 44, left: 48 };
@@ -82,6 +86,7 @@ export default function CriHistoryChart<T extends { date: string }>({
   series,
   title,
   liveValues,
+  xTickFormat,
 }: CriHistoryChartProps<T>) {
   const svgRef = useRef<SVGSVGElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -147,22 +152,46 @@ export default function CriHistoryChart<T extends { date: string }>({
       .domain(d3.extent(dates) as [Date, Date])
       .range([0, innerW]);
 
+    // A value is plottable on a series' scale — log scales reject <= 0.
+    function isPlottable(s: ChartSeries<T>, v: number | null | undefined): v is number {
+      if (v == null || !Number.isFinite(v)) return false;
+      return s.scaleType !== "log" || v > 0;
+    }
+
     // Helper: build Y scale for a series
-    function buildYScale(s: ChartSeries<T>) {
+    function buildYScale(s: ChartSeries<T>): d3.ScaleContinuousNumeric<number, number> {
       const vals = chartData
         .map((d) => d[s.key] as number | null | undefined)
-        .filter((v): v is number => v != null && Number.isFinite(v));
+        .filter((v): v is number => isPlottable(s, v));
       if (vals.length === 0) return d3.scaleLinear().domain([0, 100]).range([innerH, 0]);
       const ext = d3.extent(vals) as [number, number];
+      if (s.scaleType === "log") {
+        // `vals` is clamped to strictly positive, so ext[0] is the smallest
+        // positive value; multiplicative padding keeps the domain positive.
+        return d3.scaleLog().domain([ext[0] / 1.1, ext[1] * 1.1]).range([innerH, 0]);
+      }
       const pad = (ext[1] - ext[0]) * 0.15 || 2;
       return d3.scaleLinear().domain([ext[0] - pad, ext[1] + pad]).range([innerH, 0]);
     }
 
+    // Axis/grid tick values — d3's log ticks explode into every mantissa step
+    // across multi-decade domains, so use five geometric stops instead.
+    function buildYTickValues(
+      s: ChartSeries<T>,
+      scale: d3.ScaleContinuousNumeric<number, number>,
+    ): number[] {
+      if (s.scaleType !== "log") return scale.ticks(5);
+      const [lo, hi] = scale.domain();
+      return d3.range(5).map((i) => lo * Math.pow(hi / lo, i / 4));
+    }
+
     const yLeft = buildYScale(leftSeries);
     const yRight = buildYScale(rightSeries);
+    const leftTickValues = buildYTickValues(leftSeries, yLeft);
+    const rightTickValues = buildYTickValues(rightSeries, yRight);
 
     // Grid lines (based on left axis)
-    const gridLines = yLeft.ticks(5);
+    const gridLines = leftTickValues;
     g.append("g")
       .selectAll("line")
       .data(gridLines)
@@ -178,10 +207,10 @@ export default function CriHistoryChart<T extends { date: string }>({
     // Draw a line series
     function drawLine(
       s: ChartSeries<T>,
-      yScale: d3.ScaleLinear<number, number>,
+      yScale: d3.ScaleContinuousNumeric<number, number>,
     ) {
-      const validData = chartData.filter(
-        (d) => d[s.key] != null && Number.isFinite(d[s.key] as number),
+      const validData = chartData.filter((d) =>
+        isPlottable(s, d[s.key] as number | null | undefined),
       );
       if (validData.length < 2) return;
 
@@ -234,7 +263,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .call(
         d3
           .axisLeft(yLeft)
-          .ticks(5)
+          .tickValues(leftTickValues)
           .tickFormat((d) => leftFormat(d as number)),
       )
       .call((axis) => {
@@ -254,7 +283,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .call(
         d3
           .axisRight(yRight)
-          .ticks(5)
+          .tickValues(rightTickValues)
           .tickFormat((d) => rightFormat(d as number)),
       )
       .call((axis) => {
@@ -273,7 +302,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     const xAxis = d3
       .axisBottom(xScale)
       .tickValues(xTickValues)
-      .tickFormat((d) => d3.timeFormat("%b %-d")(d as Date));
+      .tickFormat((d) => (xTickFormat ?? d3.timeFormat("%b %-d"))(d as Date));
 
     g.append("g")
       .attr("transform", `translate(0,${innerH})`)
@@ -334,7 +363,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
-  }, [chartData, width, series, liveValues, leftSeries, rightSeries]);
+  }, [chartData, width, series, liveValues, leftSeries, rightSeries, xTickFormat]);
 
   const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =

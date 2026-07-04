@@ -327,7 +327,7 @@ def _write_db_cache(
         if rows_changed:
             writer.upsert_margin_debt_rows(payload["series"], recorded_at=scan_time)
         writer.upsert_scan_snapshot("margin-debt", scan_time, payload)
-        writer.record_service_health("margin_debt", "ok", finished_at=scan_time)
+        writer.record_service_health("margin-debt", "ok", finished_at=scan_time)
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
         print(f"[margin-debt] db cache non-fatal: {exc}", file=sys.stderr)
 
