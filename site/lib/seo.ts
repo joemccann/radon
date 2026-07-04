@@ -4,9 +4,14 @@ import { faqStructuredData } from "./faq-content";
 export const DEFAULT_SITE_URL = "https://radon.run";
 export const DEMO_APP_URL = "https://demo.radon.run";
 export const SITE_NAME = "Radon Terminal";
-export const SITE_TITLE = "Radon Terminal | Market-Structure Reconstruction";
+export const SITE_TITLE =
+  "Radon Terminal | Dark Pool Flow, GEX & Defined-Risk Options";
 export const SITE_DESCRIPTION =
-  "Radon scores institutional dark-pool flow from Unusual Whales, maps dealer gamma (GEX), and routes defined-risk options through Interactive Brokers.";
+  "Radon scores institutional dark-pool flow from Unusual Whales, maps dealer gamma (GEX), and routes defined-risk options through Interactive Brokers. Free demo.";
+
+// Frozen content date for sitemap lastmod. Update when the page copy or
+// structure meaningfully changes; a request-time stamp gets ignored by Google.
+export const SITE_CONTENT_LAST_MODIFIED = "2026-07-03";
 export const SITE_KEYWORDS = [
   "Radon Terminal",
   "market structure",
@@ -21,9 +26,10 @@ export const SITE_KEYWORDS = [
 ];
 export const SOCIAL_IMAGE_PATH = "/og-image.png";
 export const SOCIAL_IMAGE_ALT =
-  "Radon Terminal marketing card showing strategy discovery, execution discipline, and market-structure reconstruction.";
+  "Radon Terminal marketing card: serif headline reading Institutions finish buying before the chart moves, over the editorial research-journal canvas with the radon.run source rail.";
 export const APPLE_ICON_PATH = "/apple-touch-icon.png";
 export const GITHUB_URL = "https://github.com/joemccann/radon";
+export const X_PROFILE_URL = "https://x.com/joemccann";
 
 function normalizeSiteUrl(value: string): string {
   return value.endsWith("/") ? value.slice(0, -1) : value;
@@ -117,7 +123,13 @@ export const siteStructuredData = [
     name: "Radon",
     url: siteUrl,
     logo: `${siteUrl}/brand/radon-app-icon.svg`,
-    sameAs: [GITHUB_URL],
+    sameAs: [GITHUB_URL, X_PROFILE_URL],
+    founder: {
+      "@type": "Person",
+      name: "Joe McCann",
+      url: GITHUB_URL,
+      sameAs: [GITHUB_URL, X_PROFILE_URL],
+    },
   },
   {
     "@context": "https://schema.org",

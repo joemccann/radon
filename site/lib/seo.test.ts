@@ -5,9 +5,11 @@ import sitemap from "../app/sitemap";
 import { faqEntries } from "./faq-content";
 import {
   DEFAULT_SITE_URL,
+  SITE_CONTENT_LAST_MODIFIED,
   SITE_DESCRIPTION,
   SITE_NAME,
   SITE_TITLE,
+  X_PROFILE_URL,
   siteMetadata,
   siteStructuredData,
   siteUrl,
@@ -35,6 +37,14 @@ describe("site SEO contract", () => {
     expect(siteViewport.themeColor).toBe("#0a0f14");
   });
 
+  it("spends the title keyword slot on persona queries, not internal jargon", () => {
+    expect(SITE_TITLE.startsWith("Radon Terminal | ")).toBe(true);
+    expect(SITE_TITLE.length).toBeLessThanOrEqual(60);
+    for (const entity of ["Dark Pool Flow", "GEX", "Options"]) {
+      expect(SITE_TITLE).toContain(entity);
+    }
+  });
+
   it("keeps the meta description entity-rich and snippet-sized", () => {
     expect(SITE_DESCRIPTION.length).toBeLessThanOrEqual(160);
     for (const entity of [
@@ -60,6 +70,22 @@ describe("site SEO contract", () => {
       "@context": "https://schema.org",
       "@type": "WebSite",
       url: siteUrl,
+    });
+  });
+
+  it("connects the operator identity across Organization sameAs and founder", () => {
+    const organization = siteStructuredData.find(
+      (item) => item["@type"] === "Organization",
+    ) as Record<string, unknown>;
+    expect(organization.sameAs).toEqual(
+      expect.arrayContaining([
+        "https://github.com/joemccann/radon",
+        X_PROFILE_URL,
+      ]),
+    );
+    expect(organization.founder).toMatchObject({
+      "@type": "Person",
+      name: "Joe McCann",
     });
   });
 
@@ -136,9 +162,12 @@ describe("site SEO contract", () => {
       changeFrequency: "weekly",
       priority: 1,
     });
-    // lastModified is stamped at build time (new Date()), not a frozen literal.
-    expect(routes[0].lastModified).toBeInstanceOf(Date);
-    expect(Number.isNaN(new Date(routes[0].lastModified!).getTime())).toBe(false);
+    // lastmod must be a frozen content date, never stamped at request time:
+    // Google ignores lastmod when it always equals "now".
+    expect(routes[0].lastModified).toEqual(new Date(SITE_CONTENT_LAST_MODIFIED));
+    const lastModified = new Date(routes[0].lastModified!);
+    expect(Number.isNaN(lastModified.getTime())).toBe(false);
+    expect(lastModified.getTime()).toBeLessThanOrEqual(Date.now());
 
     expect(manifest()).toMatchObject({
       name: SITE_NAME,

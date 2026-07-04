@@ -12,6 +12,8 @@ export const editorialNavLinks: EditorialNavLink[] = [
   { label: "Regime", href: "#regime" },
   { label: "Method", href: "#pipeline" },
   { label: "Registry", href: "#registry" },
+  { label: "Evidence", href: "#evidence" },
+  { label: "FAQ", href: "#faq" },
 ];
 
 // The one product destination on the page: the free demo instance
@@ -48,7 +50,7 @@ export const flowArgumentSteps: ArgumentStep[] = [
   {
     stage: "Source",
     body:
-      "Off-exchange and OTC prints from Unusual Whales, reconciled against Interactive Brokers realtime tape.",
+      "Off-exchange and OTC prints, sweeps, and options flow from Unusual Whales, reconciled against Interactive Brokers realtime tape.",
   },
   {
     stage: "Mechanism",

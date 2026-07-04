@@ -10,9 +10,9 @@ export function ConvexitySection() {
         <SectionHeading no="Thesis 02" label="Convexity · The Four Gates" />
 
         <RevealOnScroll className="mb-[42px] max-w-[66ch]">
-          <p className="editorial-pull">
+          <h2 className="editorial-pull">
             A signal is permission to look. Convexity is permission to trade.
-          </p>
+          </h2>
           <p className="mt-6 text-secondary">
             Every candidate is forced through four sequential gates before a contract is
             built. The gates are ordered. A failure at any gate stops the trade and names

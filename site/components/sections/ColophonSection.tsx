@@ -30,7 +30,7 @@ export function ColophonSection() {
         </RevealOnScroll>
 
         <RevealOnScroll
-          as="p"
+          as="h2"
           className="editorial-pull mb-[34px] max-w-[22ch] border-0 p-0"
         >
           For operators who want the method, not the noise.

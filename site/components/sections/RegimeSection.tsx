@@ -32,9 +32,9 @@ export function RegimeSection() {
             figNo="Plate 4"
             figTitle="GEX · dealer gamma by strike · live session"
             shot="regime-gex"
-            lightAlt="Gamma Exposure panel: dealer net gamma plotted by strike, with walls and magnets marked and a directional bias read."
-            darkAlt="Gamma Exposure panel, dark theme: dealer net gamma by strike, with walls, magnets, and bias."
-            caption="The Gamma Exposure model rendered as a real exhibit. Dealer net gamma by strike resolves into the walls and magnets that the method note describes as price levels."
+            lightAlt="Radon GEX panel: dealer gamma exposure plotted by strike, with walls and magnets marked and a directional bias read."
+            darkAlt="Radon GEX panel, dark theme: dealer gamma exposure by strike, with walls, magnets, and bias."
+            caption="The Gamma Exposure model rendered as a real exhibit. Dealer net gamma by strike resolves into the gamma exposure levels the method note describes: walls and magnets."
           />
           <ProductPlate
             figNo="Plate 5"

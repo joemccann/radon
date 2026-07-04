@@ -8,7 +8,8 @@
   --color-focus: #05AD98;
   --color-primary: #e2e8f0;
   --color-secondary: #94a3b8;
-  --color-muted: #475569;
+  /* WCAG AA: >=4.5:1 for small text on canvas, panel, panel-raised, figure-bg. */
+  --color-muted: #72859c;
   --color-accent: #05AD98;
   --color-signal-strong: #0FCFB5;
   --color-signal-deep: #048A7A;

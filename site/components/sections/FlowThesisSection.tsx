@@ -47,7 +47,7 @@ export function FlowThesisSection() {
           <RevealOnScroll>
             <PlateFrame
               figNo="Exhibit 3"
-              figTitle="Scanner · institutional accumulation score"
+              figTitle="Dark-pool flow scanner · institutional accumulation score"
               source="UW"
               confidence="High"
               caption="Scores above the accumulation threshold with a positive lead are candidates. The scanner ranks by lead-adjusted conviction, not raw volume."
