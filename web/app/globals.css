@@ -6540,6 +6540,23 @@ tr.leg-row td {
   flex-basis: 100%;
   border-bottom: none;
 }
+/* Book legibility on phones: desktop montage type (9px colheads, 12px rows)
+   is squint-grade at arm's length. The stacked full-width montage has the
+   room, so bump one step; desktop keeps its denser scale. */
+.cockpit--mobile .book-colhead {
+  font-size: 10px;
+}
+.cockpit--mobile .book-row {
+  font-size: 13px;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+.cockpit--mobile .book-row .book-mkt {
+  font-size: 12px;
+}
+.cockpit--mobile .book-montage-note {
+  font-size: 11px;
+}
 .asset-deck-hd {
   display: flex;
   align-items: center;
@@ -11486,6 +11503,35 @@ body[data-mobile="true"] .header {
 
 body[data-mobile="true"] .content {
   padding: 12px;
+}
+
+/* Ticker-detail cockpit fill (mobile). On mobile `.app-shell` is display:block
+   and `.main` only carries `min-height:100dvh`, so it is free to GROW: `.content`
+   (flex:1) expands to its own content height, the cockpit's height:100% chain
+   never gets a definite anchor, and the document scrolls — stranding the short
+   content above the fixed bottom nav with a dead gap.
+
+   Cap `.main` to the viewport for the cockpit page only (via :has), so the book
+   region scrolls internally (`.main` is already overflow:hidden) instead of
+   growing the document. Long scrollable sections (dashboard, scanner, orders)
+   have no `.cockpit-host`, keep `min-height` + normal body scroll, and are
+   untouched. `.content` then fills that definite height and the cockpit chain
+   resolves, so the content meets the nav with no gap. */
+body[data-mobile="true"] .main:has(.cockpit-host) {
+  height: 100dvh;
+}
+
+body[data-mobile="true"] .content:has(> .ticker-detail-page .cockpit-host),
+body[data-mobile="true"] .content:has(> .cockpit-host) {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+body[data-mobile="true"] .ticker-detail-page:has(.cockpit-host) {
+  flex: 1 1 auto;
+  min-height: 0;
 }
 
 body[data-mobile="true"] button,
