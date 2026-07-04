@@ -117,4 +117,37 @@ test.describe("Mobile P2 polish", () => {
     await page.getByTestId("mobile-flow-sparkline-svg").first().tap();
     await expect(caption).toContainText("%");
   });
+
+  test("workflow canvas: add node + drag works at 393px, no page overflow", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await page.route("**/api/workflow", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ graphs: [] }) }),
+    );
+    await page.route("**/api/prices**", (route) => route.abort());
+    await page.goto("/workflow", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
+
+    await page.getByRole("button", { name: "Scanner", exact: true }).tap();
+    const node = page.locator(".react-flow__node").first();
+    await expect(node).toBeVisible();
+
+    const before = await node.boundingBox();
+    expect(before).not.toBeNull();
+    const cx = before!.x + before!.width / 2;
+    const cy = before!.y + before!.height / 2;
+    await page.mouse.move(cx, cy);
+    await page.mouse.down();
+    await page.mouse.move(cx + 70, cy + 50, { steps: 8 });
+    await page.mouse.up();
+
+    const after = await node.boundingBox();
+    expect(after).not.toBeNull();
+    const moved = Math.hypot(after!.x - before!.x, after!.y - before!.y);
+    expect(moved).toBeGreaterThan(30);
+
+    const overflow = await page.evaluate(
+      () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
+    );
+    expect(overflow).toBeLessThanOrEqual(0);
+  });
 });
