@@ -6,6 +6,7 @@ import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
 import { EditorialHeroSection } from "@/components/sections/EditorialHeroSection";
 import { EvidenceSection } from "@/components/sections/EvidenceSection";
+import { FaqSection } from "@/components/sections/FaqSection";
 import { FlowThesisSection } from "@/components/sections/FlowThesisSection";
 import { PipelineSection } from "@/components/sections/PipelineSection";
 import { RegimeSection } from "@/components/sections/RegimeSection";
@@ -36,6 +37,8 @@ export default function LandingPage() {
         <RegistrySection />
         <SectionRule />
         <EvidenceSection />
+        <SectionRule />
+        <FaqSection />
         <ColophonSection />
         <EditorialFooter />
       </main>
