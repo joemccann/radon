@@ -5369,3 +5369,25 @@ verify search returns results on app.radon.run.
 - Verification passed: affected structure suite `PYTHONPATH=scripts python3.13 -m pytest scripts/tests/test_ib_helpers.py scripts/tests/test_all_long_combo.py scripts/tests/test_ratio_detection.py scripts/tests/test_covered_call_detection.py -q` — 82 passed.
 - Verification passed: affected helper `python3.13 scripts/run_pytest_affected.py --files scripts/ib_sync.py scripts/tests/test_ib_helpers.py -- -q` — 124 passed.
 - Verification passed: full Python `python3.13 -m pytest scripts -q` — 3,692 passed, 13 skipped, 90 deselected. `git diff --check` passed; conflict-marker scan found no matches.
+
+## 2026-07-03 — Reliability: destroy-storm root cause + hardening sweep
+
+### Checklist
+- [x] Root-cause app.radon.run 500s (watchlist/orders/profile) via 23-agent workflow + live VPS repro
+- [x] P0 destroy-storm cooldown + P1 route 503s (fceaa253)
+- [x] Stall diagnostics: pool stats on failure + loop-lag sentinel (5d47005e)
+- [x] Failure-cluster gate — isolated tail-latency timeouts no longer destroy the pool (038f6fa7)
+- [x] Holiday-aware market state for staleness windows (5556d6b3)
+- [x] bookmarks/alerts/workflow → dbExecute + 503 (1edf2cff)
+- [x] catalysts registered TS+Py + holiday-skip heartbeat (e7ca6538)
+- [x] radon-nextjs-db-watchdog timer + heartbeat fix (radon-cloud f8dbc35, ee30bcd)
+- [x] Killed 5-day wedged portfolio_snapshots prune; cleared latched radon-cta-sync failed state
+- [x] Docs: CLAUDE.md deploy gate, watchdog buckets, cloud-services (deep probe + gated deploys)
+
+### Review
+- Root cause: 23b47212 made resetDb() destroy the shared undici Agent on EVERY failure from six call sites; Agent.destroy() aborts all in-flight reads ("fetch failed", cause UND_ERR_DESTROYED — reproduced 10/10 on the VPS), each rejection re-triggers the reset → self-sustaining storm cleared only by restart. Three prior bursts (88/30/111 min) in 14 days, none self-recovered.
+- Trigger diagnosis: 35-min external monitor measured Turso p95 ~600ms / max ~1s on FRESH connections — the ~hourly 3s timeouts are upstream latency tail, not socket rot. Cluster gate (destroy only on 2nd failure within 10s) removes the per-event collateral (5-18 aborted sibling reads).
+- Detection gap closed: TCP-liveness probes were blind; nextjs-db-watchdog does a real body-judged Turso read through the app + Python canary + solo restart ladder.
+- Footer: degraded 6-7 → 0 after holiday windows + catalysts registration.
+- Verification: pytest 3452 passed; vitest 3876 passed; prod build green; deployed (Production-gate approved via API per operator) and confirmed live on VPS (e7ca653).
+- Open: portfolio_snapshots bounded prune re-run + S3 creds (operator); radon-demo-mirror.service MODULE_NOT_FOUND (other session's new unit).

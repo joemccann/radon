@@ -129,7 +129,12 @@ From the laptop: `ssh root@ib-gateway radon stop`. Useful for off-hours shutdown
 
 ### Day-to-day deploys
 
-CI runs `bash scripts/deploy.sh` (from `radon-cloud`) on every push to `main`:
+Since 2026-07-03 the deploy job is bound to the gated **`Production` GitHub
+Environment**: a green push waits for manual approval (Actions UI, or
+`gh api -X POST .../actions/runs/<RUN>/pending_deployments -f state=approved
+-F "environment_ids[]=<ENV_ID>"`). A newer push cancels a run still waiting
+at the gate, so only the latest push deploys. Once approved, CI runs
+`bash scripts/deploy.sh` (from `radon-cloud`):
 
 1. `git fetch origin main && git reset --hard origin/main` → applies repo changes.
 2. `pip install -r requirements.txt` → picks up new Python deps (e.g. `libsql-experimental`).
@@ -243,6 +248,22 @@ ssh radon@ib-gateway 'journalctl -u radon-api --since "1 hour ago"'
 ```
 
 Service health for every dual-writing scheduler lands in the `service_health` table; the dashboard's status strip can render this without scraping logs.
+
+### Next.js DB-read deep probe (2026-07-03)
+
+The health daemon's `radon-nextjs` probe is TCP-liveness only, so a process
+that is alive but cannot read Turso (the 2026-07-02 destroy-storm class)
+looked healthy to every monitoring layer. `radon-nextjs-db-watchdog.timer`
+(radon-cloud `services/`, 60s, 24/7) closes the gap: it curls
+`localhost:3000/api/service-health` — a real Turso read through the Next.js
+process — and judges the **body** (the route returns HTTP 200 with a
+synthetic `turso-db` error row when its DB read fails). K=3 consecutive
+wedge cycles plus a Python-side canary read (proving Turso itself is fine,
+so a restart will actually help) → solo `systemctl restart radon-nextjs`
+(no PartOf/BindsTo — no cascade), 10 min restart cooldown. Heartbeats the
+`nextjs-db-read` service_health row every clean cycle; state in
+`radon-cloud/state/nextjs-db-watchdog.json`. Script:
+`radon-cloud/scripts/nextjs_db_watchdog.py`.
 
 ### Host metrics (DUR-12)
 
