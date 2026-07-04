@@ -7,6 +7,11 @@ type RevealOnScrollProps = {
   as?: ElementType;
   className?: string;
   id?: string;
+  /**
+   * Render already revealed (`reveal in`) on the server. Use for above-the-fold
+   * content so paint (and LCP) never waits on hydration + IntersectionObserver.
+   */
+  initiallyShown?: boolean;
 };
 
 // Adds the editorial `.reveal` -> `.reveal.in` transition via IntersectionObserver,
@@ -17,12 +22,14 @@ export function RevealOnScroll({
   as,
   className,
   id,
+  initiallyShown = false,
 }: RevealOnScrollProps) {
   const Tag = as ?? "div";
   const ref = useRef<HTMLElement | null>(null);
-  const [shown, setShown] = useState(false);
+  const [shown, setShown] = useState(initiallyShown);
 
   useEffect(() => {
+    if (initiallyShown) return;
     const node = ref.current;
     if (!node) return;
 
@@ -49,7 +56,7 @@ export function RevealOnScroll({
 
     observer.observe(node);
     return () => observer.disconnect();
-  }, []);
+  }, [initiallyShown]);
 
   return (
     <Tag

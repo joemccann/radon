@@ -10,6 +10,9 @@ export function PipelineSection() {
         <SectionHeading no="Method" label="The Pipeline · Seven Milestones" />
 
         <RevealOnScroll className="mb-10 max-w-[66ch]">
+          <h2 className="editorial-thesis mb-5 text-primary">
+            From dark-pool signal to routed order: seven milestones.
+          </h2>
           <p className="text-[1.32rem] leading-[1.5] text-primary">
             A candidate is not a trade. Between the first flow score and a routed contract
             sit seven milestones, run in order. Each is a checkpoint with a pass condition.

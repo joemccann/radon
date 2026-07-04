@@ -1,4 +1,7 @@
 import { editorialNavLinks, DEMO_URL } from "@/lib/editorial-content";
+import { GITHUB_URL, X_PROFILE_URL } from "@/lib/seo";
+
+const footerLink = "text-secondary transition-colors hover:text-signal-deep";
 
 export function EditorialFooter() {
   return (
@@ -7,11 +10,7 @@ export function EditorialFooter() {
         <span>RADON · market-structure reconstruction · flow signal or nothing</span>
         <span className="flex flex-wrap gap-[22px]">
           {editorialNavLinks.map((link) => (
-            <a
-              key={link.href}
-              href={link.href}
-              className="text-secondary transition-colors hover:text-signal-deep"
-            >
+            <a key={link.href} href={link.href} className={footerLink}>
               {link.label}
             </a>
           ))}
@@ -22,6 +21,27 @@ export function EditorialFooter() {
             Free demo
           </a>
         </span>
+      </div>
+      <div className="mx-auto mt-5 flex max-w-[1140px] flex-wrap items-baseline gap-[10px]">
+        <span>Built by Joe McCann</span>
+        <span aria-hidden="true">·</span>
+        <a
+          href={GITHUB_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={footerLink}
+        >
+          GitHub
+        </a>
+        <span aria-hidden="true">·</span>
+        <a
+          href={X_PROFILE_URL}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={footerLink}
+        >
+          @joemccann
+        </a>
       </div>
     </footer>
   );

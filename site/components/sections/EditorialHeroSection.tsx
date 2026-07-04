@@ -30,15 +30,20 @@ export function EditorialHeroSection() {
       </svg>
 
       <div className="relative z-10 mx-auto max-w-[1140px]">
-        <RevealOnScroll className="mb-[26px]">
+        <RevealOnScroll initiallyShown className="mb-[26px]">
           <EditorialEyebrow>Market-Structure Reconstruction</EditorialEyebrow>
         </RevealOnScroll>
 
-        <RevealOnScroll as="h1" className="editorial-display mb-7 max-w-[15ch] text-primary">
+        <RevealOnScroll
+          initiallyShown
+          as="h1"
+          className="editorial-display mb-7 max-w-[15ch] text-primary"
+        >
           Institutions finish buying <em>before</em> the chart moves.
         </RevealOnScroll>
 
         <RevealOnScroll
+          initiallyShown
           as="p"
           className="max-w-[52ch] text-[1.22rem] leading-[1.52] text-secondary"
         >
@@ -49,7 +54,12 @@ export function EditorialHeroSection() {
             Interactive Brokers
           </a>{" "}
           and{" "}
-          <a href={UW_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
+          <a
+            href={UW_URL}
+            target="_blank"
+            rel="sponsored noopener noreferrer"
+            className={sourceLink}
+          >
             Unusual Whales
           </a>{" "}
           data, not a model that guesses.
@@ -58,7 +68,10 @@ export function EditorialHeroSection() {
           testable mechanism.
         </RevealOnScroll>
 
-        <RevealOnScroll className="mt-[34px] flex flex-wrap gap-7 font-mono text-[12px] tracking-[0.03em] text-muted">
+        <RevealOnScroll
+          initiallyShown
+          className="mt-[34px] flex flex-wrap gap-7 font-mono text-[12px] tracking-[0.03em] text-muted"
+        >
           <span>
             Inputs{" "}
             <a href={IB_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
@@ -67,7 +80,12 @@ export function EditorialHeroSection() {
             realtime
           </span>
           <span>
-            <a href={UW_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
+            <a
+              href={UW_URL}
+              target="_blank"
+              rel="sponsored noopener noreferrer"
+              className={sourceLink}
+            >
               <b className="font-medium text-primary">Unusual Whales</b>
             </a>{" "}
             dark-pool prints
