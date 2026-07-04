@@ -6,14 +6,17 @@ export type EditorialNavLink = {
   href: string;
 };
 
+// "/#section" (not "#section") so the links resolve from the cluster
+// subpages as well as the homepage; the header and footer render them on
+// every route.
 export const editorialNavLinks: EditorialNavLink[] = [
-  { label: "Flow", href: "#flow" },
-  { label: "Convexity", href: "#convexity" },
-  { label: "Regime", href: "#regime" },
-  { label: "Method", href: "#pipeline" },
-  { label: "Registry", href: "#registry" },
-  { label: "Evidence", href: "#evidence" },
-  { label: "FAQ", href: "#faq" },
+  { label: "Flow", href: "/#flow" },
+  { label: "Convexity", href: "/#convexity" },
+  { label: "Regime", href: "/#regime" },
+  { label: "Method", href: "/#pipeline" },
+  { label: "Registry", href: "/#registry" },
+  { label: "Evidence", href: "/#evidence" },
+  { label: "FAQ", href: "/#faq" },
 ];
 
 // The one product destination on the page: the free demo instance
@@ -117,7 +120,7 @@ export const regimeModels: RegimeModel[] = [
     reads: "reads · tail risk",
     name: "Crash Risk Index",
     method:
-      "Composite of skew steepness, term-structure inversion, and realized-implied gap. Calibrated to historical drawdown onsets. Rises before the tape acknowledges stress.",
+      "Four components, each scored 0 to 25: VIX level and rate of change, VVIX and its ratio to VIX, COR1M implied correlation, and SPX distance from its 100-day average. Published weights and thresholds. Reads the regime that forces systematic selling.",
   },
   {
     code: "GEX",

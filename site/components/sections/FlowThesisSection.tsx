@@ -20,6 +20,9 @@ export function FlowThesisSection() {
               By the time size prints on the exchange, the position is built. Radon
               reconstructs that activity from the print stream and scores it as
               accumulation or distribution before the move appears on a chart.
+              Radon calls this market-structure reconstruction: rebuilding what
+              institutions did off-exchange from the prints they could not
+              hide.
             </p>
             <p className="mb-[1.05em] text-secondary">
               The lead is measured, not assumed. Accumulation shows up in the print
@@ -42,6 +45,18 @@ export function FlowThesisSection() {
                 </div>
               ))}
             </div>
+
+            <p className="mt-5 text-[1.02rem] leading-[1.55] text-secondary">
+              The wiring from Unusual Whales prints to Interactive Brokers
+              orders is documented end to end in{" "}
+              <a
+                href="/unusual-whales-interactive-brokers"
+                className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
+              >
+                the integration dossier
+              </a>
+              .
+            </p>
           </RevealOnScroll>
 
           <RevealOnScroll>

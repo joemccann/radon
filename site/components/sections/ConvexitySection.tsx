@@ -16,7 +16,15 @@ export function ConvexitySection() {
           <p className="mt-6 text-secondary">
             Every candidate is forced through four sequential gates before a contract is
             built. The gates are ordered. A failure at any gate stops the trade and names
-            itself. There is no override that lets conviction outrank structure.
+            itself. There is no override that lets conviction outrank structure. Every
+            structure the gates admit is catalogued, with a per-structure risk verdict, in{" "}
+            <a
+              href="/defined-risk-options-structures"
+              className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
+            >
+              the defined-risk structure catalog
+            </a>
+            .
           </p>
         </RevealOnScroll>
 

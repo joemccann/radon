@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { faqStructuredData } from "./faq-content";
 
 export const DEFAULT_SITE_URL = "https://radon.run";
 export const DEMO_APP_URL = "https://demo.radon.run";
@@ -108,6 +107,10 @@ export const siteViewport: Viewport = {
   colorScheme: "dark",
 };
 
+// Site-scoped entities only (WebSite, Organization, SoftwareApplication):
+// the root layout injects these on every route. Page-scoped entities, like
+// the homepage FAQPage, are emitted by their own page so subpages never
+// carry a second FAQPage describing content that is not visible there.
 export const siteStructuredData = [
   {
     "@context": "https://schema.org",
@@ -176,5 +179,4 @@ export const siteStructuredData = [
       url: siteUrl,
     },
   },
-  faqStructuredData(),
 ] as const;
