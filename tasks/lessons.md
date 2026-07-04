@@ -305,3 +305,13 @@ Test-suite audit (a "improve coverage" request that turned up a live auth hole):
 - Registering a new scheduled writer means FOUR places in the same change: `web/lib/serviceHealthWindows.ts`, `scripts/watchdog/services.py` SCHEDULED_SERVICES (CI contract test pins bidirectional parity), the right watchdog BUCKET, and a heartbeat on every run INCLUDING skip paths (`catalysts` holiday-skip aged silently).
 - Vitest mock-module proxies THROW on access to an undefined export — `typeof maybeFn === "function"` does not protect against a wholesale `vi.mock("@/lib/db")` that lacks the new export; only try/catch around the access does.
 - `git push origin main` no longer deploys by itself: the deploy job waits on the gated `Production` GitHub Environment (added 2026-07-03). Approve via Actions UI or `gh api -X POST .../pending_deployments`; a newer push cancels a run still waiting at the gate.
+
+## 2026-07-03 — never `git stash pop` in the shared working tree
+A red/green toggle via `git stash push -- <file>` + `git stash pop` popped ANOTHER
+session's stash (stash is repo-global, branch-agnostic) when my push errored on a
+malformed pathspec — merge conflicts in files I never touched. Rules:
+- Toggle red/green with `git show HEAD:<file> > tmp` + swap, never stash, when other
+  sessions may be active.
+- If stash is unavoidable: `git stash push` → capture the printed stash ref → `git stash
+  apply <ref>` + `git stash drop <ref>`, never bare `pop`.
+- After any failed git plumbing, run `git status` BEFORE the next command.
