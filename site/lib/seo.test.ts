@@ -3,6 +3,7 @@ import manifest from "../app/manifest";
 import robots, { AI_ANSWER_ENGINE_BOTS } from "../app/robots";
 import sitemap from "../app/sitemap";
 import { clusterPages } from "./cluster-pages";
+import { legalPages } from "./legal-pages";
 import {
   DEFAULT_SITE_URL,
   SITE_CONTENT_LAST_MODIFIED,
@@ -137,8 +138,8 @@ describe("site SEO contract", () => {
     );
 
     const routes = sitemap();
-    expect(routes).toHaveLength(7);
-    expect(routes).toHaveLength(1 + clusterPages.length);
+    expect(routes).toHaveLength(9);
+    expect(routes).toHaveLength(1 + clusterPages.length + legalPages.length);
     expect(routes[0]).toMatchObject({
       url: siteUrl,
       changeFrequency: "weekly",
@@ -156,6 +157,15 @@ describe("site SEO contract", () => {
       expect(routes[index + 1].lastModified).toEqual(
         new Date(page.lastModified),
       );
+    });
+    legalPages.forEach((page, index) => {
+      const route = routes[1 + clusterPages.length + index];
+      expect(route).toMatchObject({
+        url: `${siteUrl}/${page.slug}`,
+        changeFrequency: "yearly",
+        priority: 0.3,
+      });
+      expect(route.lastModified).toEqual(new Date(page.lastModified));
     });
     for (const route of routes) {
       const lastModified = new Date(route.lastModified!);
