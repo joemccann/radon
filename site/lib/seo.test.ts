@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import manifest from "../app/manifest";
-import robots from "../app/robots";
+import robots, { AI_ANSWER_ENGINE_BOTS } from "../app/robots";
 import sitemap from "../app/sitemap";
+import { faqEntries } from "./faq-content";
 import {
   DEFAULT_SITE_URL,
   SITE_DESCRIPTION,
@@ -34,9 +35,27 @@ describe("site SEO contract", () => {
     expect(siteViewport.themeColor).toBe("#0a0f14");
   });
 
-  it("publishes structured data for website, organization, and software", () => {
+  it("keeps the meta description entity-rich and snippet-sized", () => {
+    expect(SITE_DESCRIPTION.length).toBeLessThanOrEqual(160);
+    for (const entity of [
+      "dark-pool",
+      "Interactive Brokers",
+      "Unusual Whales",
+      "GEX",
+      "options",
+    ]) {
+      expect(SITE_DESCRIPTION).toContain(entity);
+    }
+  });
+
+  it("publishes structured data for website, organization, software, and FAQ", () => {
     const types = siteStructuredData.map((item) => item["@type"]);
-    expect(types).toEqual(["WebSite", "Organization", "SoftwareApplication"]);
+    expect(types).toEqual([
+      "WebSite",
+      "Organization",
+      "SoftwareApplication",
+      "FAQPage",
+    ]);
     expect(siteStructuredData[0]).toMatchObject({
       "@context": "https://schema.org",
       "@type": "WebSite",
@@ -44,15 +63,71 @@ describe("site SEO contract", () => {
     });
   });
 
+  it("enriches the software application entry for answer engines", () => {
+    const software = siteStructuredData.find(
+      (item) => item["@type"] === "SoftwareApplication",
+    ) as Record<string, unknown>;
+    expect(software).toMatchObject({
+      applicationCategory: "FinanceApplication",
+      operatingSystem: "Web",
+      isAccessibleForFree: true,
+      offers: {
+        "@type": "Offer",
+        price: "0",
+        priceCurrency: "USD",
+        url: "https://demo.radon.run",
+      },
+    });
+    const featureList = software.featureList as string[];
+    expect(featureList.join(" ")).toContain("Crash Risk Index");
+    expect(featureList.length).toBeGreaterThanOrEqual(6);
+    const audience = software.audience as { audienceType: string[] };
+    expect(audience.audienceType).toContain("options traders");
+  });
+
+  it("mirrors the FAQPage schema from the visible FAQ content", () => {
+    const faq = siteStructuredData.find(
+      (item) => item["@type"] === "FAQPage",
+    ) as { mainEntity: Array<Record<string, unknown>> };
+    expect(faq.mainEntity).toHaveLength(faqEntries.length);
+    faq.mainEntity.forEach((question, index) => {
+      expect(question).toEqual({
+        "@type": "Question",
+        name: faqEntries[index].question,
+        acceptedAnswer: {
+          "@type": "Answer",
+          text: faqEntries[index].answer,
+        },
+      });
+    });
+  });
+
   it("publishes crawl routes and manifest metadata", () => {
     expect(robots()).toEqual({
-      rules: {
-        userAgent: "*",
-        allow: "/",
-      },
+      rules: [
+        {
+          userAgent: "*",
+          allow: "/",
+        },
+        {
+          userAgent: AI_ANSWER_ENGINE_BOTS,
+          allow: "/",
+        },
+      ],
       sitemap: `${siteUrl}/sitemap.xml`,
       host: siteUrl,
     });
+    expect(AI_ANSWER_ENGINE_BOTS).toEqual(
+      expect.arrayContaining([
+        "OAI-SearchBot",
+        "ChatGPT-User",
+        "Claude-SearchBot",
+        "Claude-User",
+        "PerplexityBot",
+        "Perplexity-User",
+        "Applebot",
+      ]),
+    );
 
     const routes = sitemap();
     expect(routes).toHaveLength(1);

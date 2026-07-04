@@ -1,10 +1,12 @@
 import type { Metadata, Viewport } from "next";
+import { faqStructuredData } from "./faq-content";
 
 export const DEFAULT_SITE_URL = "https://radon.run";
+export const DEMO_APP_URL = "https://demo.radon.run";
 export const SITE_NAME = "Radon Terminal";
 export const SITE_TITLE = "Radon Terminal | Market-Structure Reconstruction";
 export const SITE_DESCRIPTION =
-  "A research instrument for reconstructing market structure from dark-pool and OTC flow. Radon scores institutional accumulation before the lit price moves, then routes only what clears four gates and seven milestones. Convexity or no trade.";
+  "Radon scores institutional dark-pool flow from Unusual Whales, maps dealer gamma (GEX), and routes defined-risk options through Interactive Brokers.";
 export const SITE_KEYWORDS = [
   "Radon Terminal",
   "market structure",
@@ -126,10 +128,41 @@ export const siteStructuredData = [
     url: siteUrl,
     description: SITE_DESCRIPTION,
     isAccessibleForFree: true,
+    featureList: [
+      "Dark-pool and OTC flow scoring with per-ticker lead windows",
+      "Crash Risk Index (CRI) tail-risk regime model",
+      "Dealer gamma exposure (GEX) walls and magnets",
+      "Volatility-Credit Gap (VCG-R) panic detection",
+      "Gamma Rotation Gap (GRG) sector rotation model",
+      "Four-gate execution discipline with fractional Kelly sizing",
+      "Trade journal with full decision chain and lot-matched P&L",
+    ],
+    audience: {
+      "@type": "Audience",
+      audienceType: [
+        "options traders",
+        "flow traders",
+        "gamma exposure traders",
+        "day traders",
+        "swing traders",
+        "retail investors",
+        "professional investors",
+        "Interactive Brokers users",
+        "Unusual Whales subscribers",
+      ],
+    },
+    offers: {
+      "@type": "Offer",
+      price: "0",
+      priceCurrency: "USD",
+      url: DEMO_APP_URL,
+      description: "Free demo instance with seeded data.",
+    },
     publisher: {
       "@type": "Organization",
       name: "Radon",
       url: siteUrl,
     },
   },
+  faqStructuredData(),
 ] as const;
