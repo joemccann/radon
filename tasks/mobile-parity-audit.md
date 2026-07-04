@@ -88,8 +88,10 @@ Key lesson: the app is already heavily mobile-optimized (mobile variant componen
 | /scanner, /discover, /flow-analysis, /cta | tables | mobile card variants (SignalCard/FlowMobileCards/MobileCtaSection) |
 | /[ticker] order/book/glyph decks | order entry, click-to-fill, deck nav | mobile-adapted (MobileOrderTicket, MobileQuoteRow, horizontal glyph rail, o-deck) |
 
+### P2 fixed (2026-07-03 loop)
+- RRV brush-handle hit area: ~36px invisible hit halo on `.regime-spread-brush-handle` + `.brush-minimap-handle` (`::after`, max-width 640 / coarse pointer); visual unchanged. Verified via Playwright mobile (393×852, elementFromPoint probe) in `e2e/mobile-p2-polish.spec.ts`.
+
 ### Deferred P2 (genuine, low-impact polish — not blocking parity)
-- RRV brush-handle hit area (~4px scaled) small for touch; whole-window drag still works
 - Flow sparklines small on mobile + desktop hover-tooltip not reproduced on touch
 - Mobile sort chips = subset of desktop sort keys (orders/journal/cta/discover)
 - L2 book montage 9px text legibility at ~186px columns

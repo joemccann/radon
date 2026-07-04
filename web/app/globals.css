@@ -9251,6 +9251,22 @@ tr {
   /* handles are styled identically; reserved for future variant tweaks */
 }
 
+/* Touch targets: the 8px visual handle is too small for fingers. Extend the
+   hit area (not the visual) to ~36px on phones and coarse pointers. The
+   pseudo-element hit-tests as its origin element, so pointerdown anywhere in
+   the halo starts the same resize drag. */
+@media (max-width: 640px), (any-pointer: coarse) {
+  .regime-spread-brush-handle::after,
+  .brush-minimap-handle::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: -14px;
+    right: -14px;
+  }
+}
+
 /* Generic range-brush minimap (components/BrushMinimap.tsx). Same treatment as
    the CRI spread brush above, reusable across history charts (VCG, etc.). */
 .brush-minimap {
