@@ -431,6 +431,44 @@ def upsert_twr_history(date_str: str, twr: float) -> None:
     db.commit()
 
 
+MARGIN_DEBT_UPSERT_SQL = """
+INSERT INTO margin_debt_history
+  (date, level, level_yoy_pct, free_credit_cash, free_credit_margin, source, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  level              = excluded.level,
+  level_yoy_pct      = excluded.level_yoy_pct,
+  free_credit_cash   = excluded.free_credit_cash,
+  free_credit_margin = excluded.free_credit_margin,
+  source             = excluded.source,
+  recorded_at        = excluded.recorded_at
+"""
+
+
+def upsert_margin_debt_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Margin Debt indicator — one row per calendar month, idempotent on date.
+
+    Rows carry the RAW published level ($ millions) plus a source tag
+    ('nyse_legacy' | 'finra'); display splice-adjustment stays out of the DB.
+    """
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for row in rows:
+        db.execute(
+            MARGIN_DEBT_UPSERT_SQL,
+            (
+                row["date"],
+                float(row["level"]),
+                row.get("level_yoy_pct"),
+                row.get("free_credit_cash"),
+                row.get("free_credit_margin"),
+                row["source"],
+                stamp,
+            ),
+        )
+    db.commit()
+
+
 def upsert_option_close(
     symbol: str,
     expiry: str,
