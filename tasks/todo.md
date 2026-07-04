@@ -98,3 +98,23 @@ Deferred / follow-ups:
 - operator-session browser check on app.radon.run (localhost + mocked E2E done; prod is
   Clerk-gated so needs the operator's browser)
 - optional chart niceties skipped by design: shaded +50/−20 bands, per-month tooltip parity
+
+## PENDING — Beta-first promotion flow (beta.radon.run → app.radon.run)
+
+Purpose (operator, 2026-07-04): new features deploy to beta first, get tested, then promote to production. Same-commit promotion via the existing gated `Production` GitHub Environment — never a beta branch (commit-to-main convention holds; beta and prod diverge only in time, not code).
+
+### Checklist
+- [ ] Prereqs from the beta plan (block the CI work until done):
+  - [ ] Build memory safety on the 2-vCPU/0-swap VPS: swap + `MemoryMax`/`CPUQuota` on build, or build off-box — a second concurrent `next build` for beta can OOM-kill prod
+  - [ ] DNS: repoint `beta.radon.run` A → 5.78.148.38 (currently Vercel anycast) + detach from Vercel project; add `beta.radon.run {}` Caddy block → :3001
+  - [ ] sudoers/polkit coverage for `radon-beta-*` units (deploy + admin panel restarts)
+  - [ ] Seed/refresh the separate beta Turso DB (dump→restore from prod; never the prod DB URL)
+  - [ ] Commit `radon-beta-*` unit files to radon-cloud once shapes settle (drop the drift-audit `known-untracked` allowlist entries)
+- [ ] CI: add `deploy-beta` job to `.github/workflows/ci.yml` — after the test gate, BEFORE the gated `Deploy to VPS`; SSHes to VPS and runs a parameterized `deploy-beta.sh` (RADON_DIR=/home/radon/radon-beta, restarts radon-beta-* only, own post-deploy gate hitting :8331/:3001)
+- [ ] Promotion = approve the `Production` gate on the run already validated on beta (UI or `gh api -X POST .../pending_deployments`)
+- [ ] Post-beta-deploy smoke: beta health daemon (:8331) + a body-judged `/api/service-health` read on :3001 (mirror the nextjs-db-watchdog probe semantics)
+- [ ] Docs: update CLAUDE.md deploy paragraph + docs/cloud-services.md "Day-to-day deploys" to describe push → beta → test → approve-gate → prod
+
+### Notes
+- Beta posture per locked decisions: no IB auth (`RADON_BETA_NO_IB_AUTH=1`), no relay, no order path, Clerk satellite domain, separate Turso DB — blast radius of an auto-deploy to beta is near zero, which is what justifies beta deploying WITHOUT approval while prod keeps the gate.
+- A newer push cancels a run waiting at the Production gate (concurrency group) — under beta-first flow that means "the beta you were testing got superseded"; the deploy-beta job should stamp the deployed SHA somewhere visible on beta (footer/env) so testers know which commit they're validating.
