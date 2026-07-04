@@ -1961,6 +1961,19 @@ function discoverBiasTone(bias: string): "pos" | "neg" | "warn" | "mut" {
   return "mut";
 }
 
+export const DISCOVER_MOBILE_SORT_KEYS: { key: DiscoverSortKey; label: string }[] = [
+  { key: "score", label: "Score" },
+  { key: "dp_buy_ratio", label: "Buy %" },
+  { key: "total_premium", label: "Premium" },
+  { key: "sweeps", label: "Sweeps" },
+  { key: "alerts", label: "Alerts" },
+  { key: "ticker", label: "Ticker" },
+  { key: "dp_strength", label: "Strength" },
+  { key: "dp_direction", label: "DP Dir" },
+  { key: "options_bias", label: "Bias" },
+  { key: "sector", label: "Sector" },
+];
+
 function DiscoverSections() {
   const { data, syncing, error, lastSync } = useDiscover(true);
   const candidates = data?.candidates ?? [];
@@ -1992,13 +2005,7 @@ function DiscoverSections() {
     return "bearish";
   };
 
-  const discoverMobileSortKeys: { key: DiscoverSortKey; label: string }[] = [
-    { key: "score", label: "Score" },
-    { key: "dp_buy_ratio", label: "Buy %" },
-    { key: "total_premium", label: "Premium" },
-    { key: "sweeps", label: "Sweeps" },
-    { key: "alerts", label: "Alerts" },
-  ];
+  const discoverMobileSortKeys = DISCOVER_MOBILE_SORT_KEYS;
 
   if (hasMounted && isMobile) {
     const mobileSortedCandidates = [...candidates].sort((a, b) => {

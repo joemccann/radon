@@ -130,10 +130,14 @@ function flagForRow(r: CtaRow): { kind: "short" | "long"; tooltip: string } | nu
 
 type MobileSortOption = { key: CtaSortKey; label: string };
 
-const MOBILE_SORT_OPTIONS: MobileSortOption[] = [
+export const MOBILE_SORT_OPTIONS: MobileSortOption[] = [
   { key: "position_today", label: "Today" },
   { key: "z_score_3m", label: "Z-score" },
-  { key: "percentile_3m", label: "%ile" },
+  { key: "percentile_3m", label: "3M %ile" },
+  { key: "position_yesterday", label: "Yday" },
+  { key: "position_1m_ago", label: "1M Ago" },
+  { key: "percentile_1m", label: "1M %ile" },
+  { key: "percentile_1y", label: "1Y %ile" },
 ];
 
 function flagDotColor(kind: "short" | "long"): string {

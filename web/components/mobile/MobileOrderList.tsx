@@ -61,6 +61,42 @@ function pendingFor(row: OpenOrderDisplayRow, cancels: HasPermId, modifies: HasP
   };
 }
 
+type OrderSortKey = "default" | "symbol" | "totalQuantity" | "limitPrice" | "status";
+
+export const ORDER_SORT_CHIPS: { key: OrderSortKey; label: string }[] = [
+  { key: "default", label: "Default" },
+  { key: "symbol", label: "Symbol" },
+  { key: "totalQuantity", label: "Qty" },
+  { key: "limitPrice", label: "Limit" },
+  { key: "status", label: "Status" },
+];
+
+function rowSortValue(row: OpenOrderDisplayRow, key: OrderSortKey): string | number {
+  if (row.kind === "combo") {
+    if (key === "symbol") return row.symbol;
+    if (key === "totalQuantity") return row.totalQuantity;
+    if (key === "limitPrice") return row.limitPrice ?? -Infinity;
+    if (key === "status") return row.status ?? "";
+  } else {
+    const o = row.order;
+    if (key === "symbol") return o.contract.symbol;
+    if (key === "totalQuantity") return o.totalQuantity;
+    if (key === "limitPrice") return o.limitPrice ?? -Infinity;
+    if (key === "status") return o.status ?? "";
+  }
+  return 0;
+}
+
+function sortRows(rows: OpenOrderDisplayRow[], key: OrderSortKey): OpenOrderDisplayRow[] {
+  if (key === "default") return rows;
+  return [...rows].sort((a, b) => {
+    const av = rowSortValue(a, key);
+    const bv = rowSortValue(b, key);
+    if (typeof av === "number" && typeof bv === "number") return bv - av;
+    return String(av).localeCompare(String(bv));
+  });
+}
+
 export default function MobileOrderList({
   rows,
   pendingCancelPermIds,
@@ -70,6 +106,7 @@ export default function MobileOrderList({
   onRequestModify,
 }: MobileOrderListProps) {
   const [activeRow, setActiveRow] = useState<OpenOrderDisplayRow | null>(null);
+  const [sortKey, setSortKey] = useState<OrderSortKey>("default");
 
   const cancels: HasPermId = pendingCancelPermIds ?? new Set<number>();
   const modifies: HasPermId = pendingModifyPermIds ?? new Set<number>();
@@ -115,8 +152,20 @@ export default function MobileOrderList({
 
   return (
     <>
+      <div className="m-sortbar" role="toolbar" aria-label="Sort orders">
+        {ORDER_SORT_CHIPS.map(({ key, label }) => (
+          <button
+            key={key}
+            className={`m-chip${sortKey === key ? " m-chip--active" : ""}`}
+            onClick={() => setSortKey(key)}
+            type="button"
+          >
+            {label}
+          </button>
+        ))}
+      </div>
       <div className="mobile-card-list" data-testid="mobile-order-list">
-        {rows.map((row) => {
+        {sortRows(rows, sortKey).map((row) => {
           const summary = rowSummary(row);
           const pending = pendingFor(row, cancels, modifies);
           const action = rowAction(row);

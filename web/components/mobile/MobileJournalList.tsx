@@ -7,7 +7,16 @@ import { fmtPrice } from "@/lib/positionUtils";
 import Card from "./Card";
 import MetricCell from "./MetricCell";
 
-type SortKey = "date" | "pnl" | "ror";
+type SortKey = "date" | "ticker" | "pnl" | "ror" | "cost" | "risk";
+
+export const JOURNAL_SORT_CHIPS: { key: SortKey; label: string }[] = [
+  { key: "date", label: "Date" },
+  { key: "ticker", label: "Ticker" },
+  { key: "pnl", label: "P&L" },
+  { key: "ror", label: "RoR" },
+  { key: "cost", label: "Cost" },
+  { key: "risk", label: "Risk" },
+];
 
 type MobileJournalListProps = {
   trades: TradeEntry[];
@@ -54,6 +63,15 @@ function sortTrades(trades: TradeEntry[], key: SortKey): TradeEntry[] {
       const bRor = b.return_on_risk ?? -Infinity;
       return bRor - aRor;
     }
+    if (key === "ticker") {
+      return (a.ticker ?? "").localeCompare(b.ticker ?? "");
+    }
+    if (key === "cost") {
+      return (b.entry_cost ?? -Infinity) - (a.entry_cost ?? -Infinity);
+    }
+    if (key === "risk") {
+      return (b.max_risk ?? -Infinity) - (a.max_risk ?? -Infinity);
+    }
     return 0;
   });
 }
@@ -74,14 +92,14 @@ export default function MobileJournalList({ trades }: MobileJournalListProps) {
   return (
     <div data-testid="mobile-journal-list">
       <div className="m-sortbar" role="toolbar" aria-label="Sort trades">
-        {(["date", "pnl", "ror"] as SortKey[]).map((k) => (
+        {JOURNAL_SORT_CHIPS.map(({ key, label }) => (
           <button
-            key={k}
-            className={`m-chip${sortKey === k ? " m-chip--active" : ""}`}
-            onClick={() => setSortKey(k)}
+            key={key}
+            className={`m-chip${sortKey === key ? " m-chip--active" : ""}`}
+            onClick={() => setSortKey(key)}
             type="button"
           >
-            {k === "date" ? "Date" : k === "pnl" ? "P&L" : "RoR"}
+            {label}
           </button>
         ))}
       </div>
