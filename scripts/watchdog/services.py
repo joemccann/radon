@@ -84,6 +84,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     #    ok on holiday skips (run_catalysts.sh), so the longest legit gap is
     #    the Fri→Mon weekend. UW-only, no IB.
     "llm-token-index":  {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # margin-debt — daily wrapper every calendar day (FINRA monthly source,
+    # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
+    # 26h window: no weekend/holiday gap to widen for.
+    "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "catalysts":        {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
@@ -181,6 +185,7 @@ BUCKETS: dict[str, list[str]] = {
         # Once-per-day writers — hourly check surfaces a delay within 1h
         # of the window expiring.
         "llm-token-index",
+        "margin-debt",
         "leap-scan",
         "garch-scan",
         "catalysts",

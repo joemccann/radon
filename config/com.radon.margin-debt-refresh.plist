@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.margin-debt-refresh</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/joemccann/dev/apps/finance/radon/scripts/run_margin_debt_refresh.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/joemccann/dev/apps/finance/radon</string>
+
+    <!-- Daily 07:10 local, every day: FINRA publishes monthly with no fixed
+         date; the fetcher's conditional GET makes unchanged days a no-op. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Hour</key>
+        <integer>7</integer>
+        <key>Minute</key>
+        <integer>10</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>KeepAlive</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>/Users/joemccann/dev/apps/finance/radon/logs/margin_debt.out.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/joemccann/dev/apps/finance/radon/logs/margin_debt.err.log</string>
+
+    <key>ProcessType</key>
+    <string>Background</string>
+</dict>
+</plist>
