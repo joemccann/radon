@@ -4,13 +4,12 @@
 
 export const LEGAL_ENTITY_NAME = "Subprint Media, LLC";
 
-// FLAG (operator must confirm): no registration state for Subprint Media, LLC
-// exists anywhere in the repo. Delaware is the conventional LLC default, not
-// a verified fact. Update this constant if the LLC is organized elsewhere.
-export const GOVERNING_LAW_REGION = "the State of Delaware";
+// Confirmed by the operator 2026-07-04: Subprint Media, LLC is a Texas entity.
+export const GOVERNING_LAW_REGION = "the State of Texas";
 
-// FLAG (operator must confirm): no contact address exists anywhere in the
-// repo or site source. hello@radon.run is a conventional default.
+// Confirmed by the operator 2026-07-04, but the MAILBOX DOES NOT EXIST YET
+// (Google Workspace setup pending). Until it does, privacy/terms point at a
+// dead address; treat wiring hello@radon.run as an open operator task.
 export const LEGAL_CONTACT_EMAIL = "hello@radon.run";
 
 // Frozen ISO date (never request-time), rendered on both documents and
