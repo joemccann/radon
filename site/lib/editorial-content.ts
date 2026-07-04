@@ -14,6 +14,9 @@ export const editorialNavLinks: EditorialNavLink[] = [
   { label: "Registry", href: "#registry" },
 ];
 
+// The one external destination on the page: the instrument itself.
+export const TERMINAL_URL = "https://app.radon.run";
+
 export type ScannerRow = {
   ticker: string;
   read: string;

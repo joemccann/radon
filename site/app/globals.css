@@ -69,10 +69,9 @@ html[data-theme="light"] body {
   -webkit-font-smoothing: auto;
 }
 
-html[data-theme="light"] header {
-  background-color: var(--color-panel);
-  border-bottom: 1px solid var(--color-grid);
-}
+/* The Editorial header supplies its own translucent blur treatment via
+   bg-canvas/[0.86]; the canvas token flips per theme, so no opaque
+   light-mode override is needed (it used to kill the blur in light). */
 
 html {
   scroll-behavior: smooth;
@@ -238,6 +237,7 @@ a {
   line-height: 1.02;
   letter-spacing: -0.022em;
   font-weight: 500;
+  text-wrap: balance;
 }
 
 .editorial-display em {
@@ -252,6 +252,12 @@ a {
   letter-spacing: -0.018em;
   font-weight: 500;
   max-width: 18ch;
+  text-wrap: balance;
+}
+
+/* Serif body copy avoids orphaned last-line words. */
+main p {
+  text-wrap: pretty;
 }
 
 .editorial-pull {
