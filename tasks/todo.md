@@ -75,12 +75,26 @@ Exa available for retrieval).
       `FRED_API_KEY` added to VPS `/home/radon/radon-cloud/.env`
 - [x] service_health `margin-debt` registered in `scripts/watchdog/services.py` (daily bucket, 26h) +
       `web/lib/serviceHealthWindows.ts` (26h uniform); watchdog 141 + windows 96 tests green
-- [ ] Post-deploy: delete stray `margin_debt` (underscore) service_health row written by the
-      pre-rename VPS run; confirm `margin-debt` row appears after next timer fire
+- [x] Post-deploy: stray `margin_debt` row deleted; VPS re-run under deployed code wrote
+      `margin-debt` ok @ 2026-07-04T06:08Z (304 fast path, snapshot refreshed)
 
 ## Notes
 - SPX monthly history back to 1959: Yahoo ^GSPC monthly (1950+) via existing fallback path;
   IB/UW have no multi-decade monthly series (documented exception to the source-priority chain)
 
 ## Review
-(fill in as phases land)
+
+Shipped 2026-07-03/04 in two commits (b521924a backend, fd159cbf frontend+scheduling), both
+deployed green. /regime/margin renders the Topdown-style overlay: S&P 500 log left axis
+1959-2026 vs margin-debt YoY% right axis; current reading May 2026 $1,415.6bn, YoY +53.7%
+(froth-amber). Data: FINRA XLSX (plain UA — Cloudflare 403s browser UAs) + Wayback NYSE
+legacy splice (raw in DB, ×1.0390 display) + Shiller/Yahoo SPX + FRED CPI/GDP toggles.
+Daily VPS timer with 304 fast path; margin-debt service_health registered both registries.
+Tests: 25 pytest + 34 panel vitest + 5 Playwright E2E; full suites 3478 pytest /
+3840 vitest / 0 fail; live screenshot verified against the real 809-month payload.
+
+Deferred / follow-ups:
+- demo.radon.run has no margin-debt snapshot mirror (tab shows empty state there)
+- operator-session browser check on app.radon.run (localhost + mocked E2E done; prod is
+  Clerk-gated so needs the operator's browser)
+- optional chart niceties skipped by design: shaded +50/−20 bands, per-month tooltip parity
