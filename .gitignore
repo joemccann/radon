@@ -195,3 +195,6 @@ web/data/replica.db
 web/data/replica.db-shm
 web/data/replica.db-wal
 data/replica.db-info
+
+# Remotion promo project (local only)
+video/
