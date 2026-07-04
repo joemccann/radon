@@ -1,5 +1,6 @@
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
+import { TERMINAL_URL } from "@/lib/editorial-content";
 
 const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:ring-offset-2 focus-visible:ring-offset-panel-raised";
@@ -40,16 +41,22 @@ export function ColophonSection() {
           this far and nodded, you already understand the discipline. Convexity or no trade.
         </RevealOnScroll>
 
-        <RevealOnScroll className="flex flex-wrap items-center gap-4">
+        <RevealOnScroll className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <a
-            href="#top"
+            href={TERMINAL_URL}
             className={`inline-block rounded-[4px] border border-signal-deep bg-signal-deep px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-canvas transition-colors hover:bg-transparent hover:text-signal-deep ${focusRing}`}
+          >
+            Open the terminal
+          </a>
+          <a
+            href="#pipeline"
+            className={`inline-block rounded-[4px] border border-grid bg-transparent px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
           >
             Read the method
           </a>
           <a
             href="#registry"
-            className={`inline-block rounded-[4px] border border-grid bg-transparent px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
+            className={`font-mono text-[12px] uppercase tracking-[0.06em] text-secondary underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep ${focusRing}`}
           >
             Review the registry
           </a>
