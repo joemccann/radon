@@ -83,6 +83,47 @@ test.describe("MobileShell — phase 1 foundation", () => {
     expect(icon512.status()).toBe(200);
   });
 
+  test("bottom nav stays pinned and the ticker cockpit fills the viewport (no dead gap)", async ({ page }) => {
+    // Regression: on the ticker-detail cockpit the mobile height chain collapsed
+    // (.main only had min-height, .content flex:1 grew to its content), so a short
+    // flat position left a dead gap between the content and the fixed bottom nav.
+    // The cockpit must fill the space between the fixed app bar and tab bar, and
+    // the nav must sit flush at the visual-viewport bottom with no body scroll.
+    await page.goto("/GOOGL");
+
+    const tabBar = page.getByTestId("mobile-tab-bar");
+    await expect(tabBar).toBeVisible();
+    await expect(page.locator(".cockpit-host")).toBeVisible();
+
+    const geo = await page.evaluate(() => {
+      const bar = document.querySelector(".mobile-tab-bar");
+      const cockpit = document.querySelector(".cockpit-host");
+      const vpBottom = window.visualViewport ? window.visualViewport.height : window.innerHeight;
+      const barRect = bar!.getBoundingClientRect();
+      const cockpitRect = cockpit!.getBoundingClientRect();
+      return {
+        navPosition: getComputedStyle(bar!).position,
+        navBottom: barRect.bottom,
+        navTop: barRect.top,
+        cockpitBottom: cockpitRect.bottom,
+        cockpitHeight: cockpitRect.height,
+        vpBottom,
+        innerH: window.innerHeight,
+        docScrollH: document.scrollingElement!.scrollHeight,
+      };
+    });
+
+    // Nav is fixed and flush with the bottom of the visible viewport.
+    expect(geo.navPosition).toBe("fixed");
+    expect(Math.abs(geo.navBottom - geo.vpBottom)).toBeLessThanOrEqual(2);
+    // Cockpit fills down to the nav — no dead gap.
+    expect(geo.navTop - geo.cockpitBottom).toBeLessThanOrEqual(8);
+    // Cockpit occupies most of the viewport (not collapsed to content height).
+    expect(geo.cockpitHeight).toBeGreaterThan(geo.innerH * 0.5);
+    // The cockpit scrolls internally — the document itself does not scroll.
+    expect(geo.docScrollH).toBeLessThanOrEqual(geo.innerH + 2);
+  });
+
   test("interactive elements meet 44px touch target floor", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
