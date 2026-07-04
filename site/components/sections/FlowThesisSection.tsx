@@ -22,8 +22,9 @@ export function FlowThesisSection() {
               accumulation or distribution before the move appears on a chart.
             </p>
             <p className="mb-[1.05em] text-secondary">
-              This is not forecasting. It is observation of a known mechanism with a
-              measurable lead. The signal either clears a threshold or it does not.
+              The lead is measured, not assumed. Accumulation shows up in the print
+              stream sessions before it shows up in price, and a score that misses its
+              threshold is discarded, whatever the chart looks like.
             </p>
 
             <div className="mt-7 border-t border-hairline-soft">

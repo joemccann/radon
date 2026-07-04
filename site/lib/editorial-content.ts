@@ -14,8 +14,14 @@ export const editorialNavLinks: EditorialNavLink[] = [
   { label: "Registry", href: "#registry" },
 ];
 
-// The one external destination on the page: the instrument itself.
-export const TERMINAL_URL = "https://app.radon.run";
+// The one product destination on the page: the free demo instance
+// (public signups live there; app.radon.run is operator-allowlisted).
+export const DEMO_URL = "https://demo.radon.run";
+
+// Data-source reference links (from README.md; UW carries the referral).
+export const IB_URL = "https://www.interactivebrokers.com/";
+export const UW_URL =
+  "https://unusualwhales.com/referral#39985a64-656c-4642-a051-db89f6324d64";
 
 export type ScannerRow = {
   ticker: string;

@@ -3,6 +3,10 @@ import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
 import { PlateFrame } from "@/components/molecules/PlateFrame";
 import { ProductPlate } from "@/components/molecules/ProductPlate";
 import { FlowLeadFigure } from "@/components/organisms/FlowLeadFigure";
+import { IB_URL, UW_URL } from "@/lib/editorial-content";
+
+const sourceLink =
+  "underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep";
 
 export function EditorialHeroSection() {
   return (
@@ -40,7 +44,15 @@ export function EditorialHeroSection() {
         >
           Radon reconstructs market structure from dark-pool and OTC flow, then scores
           institutional accumulation while the lit price is still quiet. The read comes
-          from Interactive Brokers and Unusual Whales data, not a model that guesses.
+          from{" "}
+          <a href={IB_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
+            Interactive Brokers
+          </a>{" "}
+          and{" "}
+          <a href={UW_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
+            Unusual Whales
+          </a>{" "}
+          data, not a model that guesses.
           Nothing routes until it clears four sequential gates and seven milestones:
           convexity, defined risk, Kelly size. No black box. Every edge is a named,
           testable mechanism.
@@ -48,10 +60,17 @@ export function EditorialHeroSection() {
 
         <RevealOnScroll className="mt-[34px] flex flex-wrap gap-7 font-mono text-[12px] tracking-[0.03em] text-muted">
           <span>
-            Inputs <b className="font-medium text-primary">Interactive Brokers</b> realtime
+            Inputs{" "}
+            <a href={IB_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
+              <b className="font-medium text-primary">Interactive Brokers</b>
+            </a>{" "}
+            realtime
           </span>
           <span>
-            <b className="font-medium text-primary">Unusual Whales</b> dark-pool prints
+            <a href={UW_URL} target="_blank" rel="noopener noreferrer" className={sourceLink}>
+              <b className="font-medium text-primary">Unusual Whales</b>
+            </a>{" "}
+            dark-pool prints
           </span>
           <span>
             Regime read across <b className="font-medium text-primary">four</b> orthogonal

@@ -1,5 +1,5 @@
 import { ThemeToggle } from "@/components/atoms/ThemeToggle";
-import { editorialNavLinks, TERMINAL_URL } from "@/lib/editorial-content";
+import { editorialNavLinks, DEMO_URL } from "@/lib/editorial-content";
 
 const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:ring-offset-2 focus-visible:ring-offset-canvas";
@@ -31,10 +31,10 @@ export function EditorialHeader() {
             </a>
           ))}
           <a
-            href={TERMINAL_URL}
+            href={DEMO_URL}
             className={`inline-block rounded-[4px] border border-grid px-[13px] py-[7px] font-mono text-[11px] uppercase tracking-[0.06em] text-primary transition-colors hover:border-signal-deep hover:text-signal-deep ${focusRing}`}
           >
-            Open terminal
+            Try free demo
           </a>
           <ThemeToggle />
         </nav>
