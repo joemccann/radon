@@ -129,12 +129,12 @@ From the laptop: `ssh root@ib-gateway radon stop`. Useful for off-hours shutdown
 
 ### Day-to-day deploys
 
-Since 2026-07-03 the deploy job is bound to the gated **`Production` GitHub
-Environment**: a green push waits for manual approval (Actions UI, or
-`gh api -X POST .../actions/runs/<RUN>/pending_deployments -f state=approved
--F "environment_ids[]=<ENV_ID>"`). A newer push cancels a run still waiting
-at the gate, so only the latest push deploys. Once approved, CI runs
-`bash scripts/deploy.sh` (from `radon-cloud`):
+The deploy job is bound to the **`Production` GitHub Environment** (added
+2026-07-03; its manual-approval rule was removed the same week at the
+operator's request, so a green push deploys automatically again). The
+environment remains as a non-blocking label; re-adding a required-reviewers
+rule in repo Settings > Environments re-enables the gate without any yaml
+change. On green, CI runs `bash scripts/deploy.sh` (from `radon-cloud`):
 
 1. `git fetch origin main && git reset --hard origin/main` → applies repo changes.
 2. `pip install -r requirements.txt` → picks up new Python deps (e.g. `libsql-experimental`).
