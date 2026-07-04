@@ -14446,6 +14446,27 @@ body[data-mobile="true"] td.right {
   border-top: 1px solid var(--line-grid);
 }
 
+.m-signal-card__footer {
+  padding: 8px 12px 10px;
+  border-top: 1px solid var(--line-grid);
+}
+
+.m-flow-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.m-flow-spark__caption {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  line-height: 1;
+  padding-bottom: 2px;
+}
+
 /* ── .m-pill: large decision pill ── */
 .m-pill {
   display: inline-flex;
@@ -15218,12 +15239,21 @@ body[data-mobile="true"] .strength-card__head {
 }
 .profile-m-save-btn:disabled { opacity: 0.5; cursor: progress; }
 .profile-m-save-btn:not(:disabled):active { background: color-mix(in srgb, var(--signal-core) 22%, transparent); }
+/* Bookmark row (mobile). Row layout with a trailing star action — matches the
+   desktop bookmark (`.profile-bookmark.panel`), instead of a column that dropped
+   the full-width "SAVED" star centered below each item with uneven whitespace.
+   `.panel` carries no card style, so give each row an explicit card (border +
+   surface + 4px radius) for clear separation; `.profile-list` gap spaces them. */
 .profile-bookmark--mobile {
-  flex-direction: column;
-  gap: 6px;
-  align-items: stretch;
+  flex-direction: row;
+  align-items: center;
+  gap: 12px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-panel);
 }
-.profile-bookmark--mobile .profile-bookmark__body { flex: 1; }
+.profile-bookmark--mobile .profile-bookmark__body { flex: 1; min-width: 0; }
+.profile-bookmark--mobile > .star-toggle { flex-shrink: 0; }
 .profile-bookmark__mobile-meta {
   display: flex;
   align-items: center;
@@ -15280,6 +15310,42 @@ body[data-mobile="true"] .strength-card__head {
 .profile-watch--mobile > [class*="star"] {
   padding-right: 12px;
   flex-shrink: 0;
+}
+
+/* Mobile profile: fixed frame with an independently scrollable list. Without
+   this the surface grows to its content height and relies on a whole-document
+   scroll — which iOS PWAs often suppress, so the watchlist/bookmarks list
+   appears pinned and unscrollable. Cap `.main` to the viewport (same technique
+   as the ticker cockpit), then lay the surface out as a column where the header,
+   segment tabs and action buttons hold their size and ONLY the list scrolls. */
+body[data-mobile="true"] .main:has(.profile-surface--mobile) {
+  height: 100dvh;
+}
+body[data-mobile="true"] .content:has(.profile-surface--mobile) {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
+}
+.profile-surface--mobile {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.profile-surface--mobile > .profile-header,
+.profile-surface--mobile > .m-segment,
+.profile-surface--mobile > .m-sticky-cta {
+  flex: 0 0 auto;
+}
+.profile-surface--mobile > .profile-list,
+.profile-surface--mobile > .profile-empty {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+/* The list is now the scroll region, so the CTA no longer needs to stick. */
+.profile-surface--mobile .m-sticky-cta {
+  position: static;
 }
 
 /* ── Alerts (signal alert rules) ─────────────────────────────────────────────
