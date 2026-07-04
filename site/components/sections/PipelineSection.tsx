@@ -18,6 +18,23 @@ export function PipelineSection() {
             sit seven milestones, run in order. Each is a checkpoint with a pass condition.
             Nothing skips ahead.
           </p>
+          <p className="mt-5 text-secondary">
+            The procedure is published in full, thresholds included, in{" "}
+            <a
+              href="/convex-options-from-dark-pool-flow"
+              className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
+            >
+              the working method
+            </a>
+            , and the sizing milestone&apos;s math in{" "}
+            <a
+              href="/fractional-kelly-position-sizing"
+              className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
+            >
+              the fractional Kelly sizing policy
+            </a>
+            .
+          </p>
         </RevealOnScroll>
 
         <RevealOnScroll className="pipeline">

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import manifest from "../app/manifest";
 import robots, { AI_ANSWER_ENGINE_BOTS } from "../app/robots";
 import sitemap from "../app/sitemap";
-import { faqEntries } from "./faq-content";
+import { clusterPages } from "./cluster-pages";
 import {
   DEFAULT_SITE_URL,
   SITE_CONTENT_LAST_MODIFIED,
@@ -58,14 +58,12 @@ describe("site SEO contract", () => {
     }
   });
 
-  it("publishes structured data for website, organization, software, and FAQ", () => {
+  it("publishes only site-scoped structured data from the root layout", () => {
+    // FAQPage is homepage content, not site-wide: it is emitted by app/page.tsx
+    // (see faq-content.test.ts for the schema mirror), never by the layout,
+    // so cluster pages carry exactly one FAQPage each.
     const types = siteStructuredData.map((item) => item["@type"]);
-    expect(types).toEqual([
-      "WebSite",
-      "Organization",
-      "SoftwareApplication",
-      "FAQPage",
-    ]);
+    expect(types).toEqual(["WebSite", "Organization", "SoftwareApplication"]);
     expect(siteStructuredData[0]).toMatchObject({
       "@context": "https://schema.org",
       "@type": "WebSite",
@@ -111,23 +109,6 @@ describe("site SEO contract", () => {
     expect(audience.audienceType).toContain("options traders");
   });
 
-  it("mirrors the FAQPage schema from the visible FAQ content", () => {
-    const faq = siteStructuredData.find(
-      (item) => item["@type"] === "FAQPage",
-    ) as { mainEntity: Array<Record<string, unknown>> };
-    expect(faq.mainEntity).toHaveLength(faqEntries.length);
-    faq.mainEntity.forEach((question, index) => {
-      expect(question).toEqual({
-        "@type": "Question",
-        name: faqEntries[index].question,
-        acceptedAnswer: {
-          "@type": "Answer",
-          text: faqEntries[index].answer,
-        },
-      });
-    });
-  });
-
   it("publishes crawl routes and manifest metadata", () => {
     expect(robots()).toEqual({
       rules: [
@@ -156,7 +137,8 @@ describe("site SEO contract", () => {
     );
 
     const routes = sitemap();
-    expect(routes).toHaveLength(1);
+    expect(routes).toHaveLength(7);
+    expect(routes).toHaveLength(1 + clusterPages.length);
     expect(routes[0]).toMatchObject({
       url: siteUrl,
       changeFrequency: "weekly",
@@ -165,9 +147,21 @@ describe("site SEO contract", () => {
     // lastmod must be a frozen content date, never stamped at request time:
     // Google ignores lastmod when it always equals "now".
     expect(routes[0].lastModified).toEqual(new Date(SITE_CONTENT_LAST_MODIFIED));
-    const lastModified = new Date(routes[0].lastModified!);
-    expect(Number.isNaN(lastModified.getTime())).toBe(false);
-    expect(lastModified.getTime()).toBeLessThanOrEqual(Date.now());
+    clusterPages.forEach((page, index) => {
+      expect(routes[index + 1]).toMatchObject({
+        url: `${siteUrl}/${page.slug}`,
+        changeFrequency: "weekly",
+        priority: 0.8,
+      });
+      expect(routes[index + 1].lastModified).toEqual(
+        new Date(page.lastModified),
+      );
+    });
+    for (const route of routes) {
+      const lastModified = new Date(route.lastModified!);
+      expect(Number.isNaN(lastModified.getTime())).toBe(false);
+      expect(lastModified.getTime()).toBeLessThanOrEqual(Date.now());
+    }
 
     expect(manifest()).toMatchObject({
       name: SITE_NAME,

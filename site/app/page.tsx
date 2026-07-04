@@ -2,6 +2,7 @@ import { ScrollProgress } from "@/components/atoms/ScrollProgress";
 import { SectionRule } from "@/components/atoms/SectionRule";
 import { ColophonSection } from "@/components/sections/ColophonSection";
 import { ConvexitySection } from "@/components/sections/ConvexitySection";
+import { DossiersSection } from "@/components/sections/DossiersSection";
 import { EditorialFooter } from "@/components/sections/EditorialFooter";
 import { EditorialHeader } from "@/components/sections/EditorialHeader";
 import { EditorialHeroSection } from "@/components/sections/EditorialHeroSection";
@@ -11,6 +12,7 @@ import { FlowThesisSection } from "@/components/sections/FlowThesisSection";
 import { PipelineSection } from "@/components/sections/PipelineSection";
 import { RegimeSection } from "@/components/sections/RegimeSection";
 import { RegistrySection } from "@/components/sections/RegistrySection";
+import { faqStructuredData } from "@/lib/faq-content";
 
 export default function LandingPage() {
   return (
@@ -39,9 +41,20 @@ export default function LandingPage() {
         <EvidenceSection />
         <SectionRule />
         <FaqSection />
+        <SectionRule />
+        <DossiersSection />
         <ColophonSection />
         <EditorialFooter />
       </main>
+
+      {/* Homepage-scoped FAQPage schema: mirrors the visible FaqSection rows.
+          Site-wide entities (WebSite, Organization, SoftwareApplication) come
+          from the root layout; emitting the FAQ here keeps subpages to exactly
+          one FAQPage each. */}
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{ __html: JSON.stringify(faqStructuredData()) }}
+      />
     </div>
   );
 }

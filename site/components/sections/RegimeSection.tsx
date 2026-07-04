@@ -27,6 +27,20 @@ export function RegimeSection() {
           ))}
         </RevealOnScroll>
 
+        <RevealOnScroll className="mt-8 max-w-[66ch]">
+          <p className="text-secondary">
+            The tail-risk model carries its own dossier: how{" "}
+            <a
+              href="/crash-risk-index"
+              className="underline decoration-grid underline-offset-4 transition-colors hover:text-signal-deep hover:decoration-signal-deep"
+            >
+              the Crash Risk Index
+            </a>{" "}
+            is built from VIX, VVIX, implied correlation, and SPX trend, and
+            how its bands are read.
+          </p>
+        </RevealOnScroll>
+
         <RevealOnScroll className="mt-12 grid items-start gap-[clamp(36px,5vw,72px)] md:grid-cols-2">
           <ProductPlate
             figNo="Plate 4"
