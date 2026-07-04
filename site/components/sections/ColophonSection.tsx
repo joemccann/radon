@@ -1,6 +1,6 @@
 import { EditorialEyebrow } from "@/components/atoms/EditorialEyebrow";
 import { RevealOnScroll } from "@/components/atoms/RevealOnScroll";
-import { TERMINAL_URL } from "@/lib/editorial-content";
+import { DEMO_URL } from "@/lib/editorial-content";
 
 const focusRing =
   "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus/60 focus-visible:ring-offset-2 focus-visible:ring-offset-panel-raised";
@@ -43,10 +43,10 @@ export function ColophonSection() {
 
         <RevealOnScroll className="flex flex-wrap items-center gap-x-6 gap-y-4">
           <a
-            href={TERMINAL_URL}
+            href={DEMO_URL}
             className={`inline-block rounded-[4px] border border-signal-deep bg-signal-deep px-[22px] py-[13px] font-mono text-[12px] uppercase tracking-[0.06em] text-canvas transition-colors hover:bg-transparent hover:text-signal-deep ${focusRing}`}
           >
-            Open the terminal
+            Try the free demo
           </a>
           <a
             href="#pipeline"

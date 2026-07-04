@@ -1,4 +1,4 @@
-import { editorialNavLinks, TERMINAL_URL } from "@/lib/editorial-content";
+import { editorialNavLinks, DEMO_URL } from "@/lib/editorial-content";
 
 export function EditorialFooter() {
   return (
@@ -16,10 +16,10 @@ export function EditorialFooter() {
             </a>
           ))}
           <a
-            href={TERMINAL_URL}
+            href={DEMO_URL}
             className="text-primary transition-colors hover:text-signal-deep"
           >
-            Terminal
+            Free demo
           </a>
         </span>
       </div>
