@@ -34,10 +34,39 @@ const REGIME = {
   })),
 };
 
+const FLOW = {
+  analysis_time: new Date().toISOString(),
+  positions_scanned: 1,
+  supports: [
+    {
+      ticker: "AAPL",
+      position: "Long Call",
+      direction: "LONG",
+      flow_direction: "ACCUMULATION",
+      flow_label: "ACCUM",
+      flow_class: "accum",
+      strength: 82,
+      buy_ratio: 0.62,
+      daily_buy_ratios: [
+        { date: "2026-06-27", buy_ratio: 0.62 },
+        { date: "2026-06-30", buy_ratio: 0.4 },
+        { date: "2026-07-01", buy_ratio: 0.7 },
+      ],
+      note: "steady accumulation",
+    },
+  ],
+  against: [],
+  watch: [],
+  neutral: [],
+};
+
 async function setupMocks(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });
   await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(REGIME) }),
+  );
+  await page.route("**/api/flow-analysis", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(FLOW) }),
   );
   await page.route("**/api/prices**", (route) => route.abort());
 }
@@ -71,5 +100,21 @@ test.describe("Mobile P2 polish", () => {
     expect(probe.visualWidth).toBeLessThanOrEqual(10);
     expect(probe.leftHandleInteriorHit).toBe(true);
     expect(probe.rightHandleInteriorHit).toBe(true);
+  });
+
+  test("flow cards carry a tappable buy-ratio sparkline at 393px", async ({ page }) => {
+    await setupMocks(page);
+    await page.goto("/flow-analysis", { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
+
+    const spark = page.getByTestId("mobile-flow-sparkline").first();
+    await spark.scrollIntoViewIfNeeded();
+    await expect(spark).toBeVisible();
+
+    const caption = page.getByTestId("mobile-flow-sparkline-caption").first();
+    await expect(caption).toHaveText("5D BUY RATIO");
+
+    await page.getByTestId("mobile-flow-sparkline-svg").first().tap();
+    await expect(caption).toContainText("%");
   });
 });

@@ -61,6 +61,7 @@ import MobileBlotterList from "./mobile/MobileBlotterList";
 import MobileExecutedList from "./mobile/MobileExecutedList";
 import MobileJournalList from "./mobile/MobileJournalList";
 import SignalCard from "./mobile/SignalCard";
+import MobileFlowSparkline from "./mobile/MobileFlowSparkline";
 import { buildGroupedComboModifyTarget } from "@/lib/openOrderComboModify";
 import PositionTable, {
   POSITION_COLUMNS,
@@ -866,37 +867,6 @@ function FlowTable({ rows, lastColumn }: { rows: FlowAnalysisPosition[]; lastCol
   );
 }
 
-/* ── Inline buy_ratio sparkline (mobile) ── */
-function MobileFlowSparkline({ ratios }: { ratios?: { date: string; buy_ratio: number | null }[] }) {
-  if (!ratios || ratios.length === 0) return null;
-  const maxH = 18;
-  return (
-    <svg
-      width={ratios.length * 5}
-      height={maxH + 2}
-      aria-hidden="true"
-      style={{ display: "inline-block", verticalAlign: "middle", marginLeft: 4 }}
-    >
-      {ratios.map((d, i) => {
-        const r = d.buy_ratio;
-        const h = r == null ? 2 : Math.max(2, Math.round(r * maxH));
-        const fill = r == null ? "var(--text-muted)" : r >= 0.55 ? "var(--positive)" : r <= 0.45 ? "var(--negative)" : "var(--warn)";
-        return (
-          <rect
-            key={i}
-            x={i * 5}
-            y={maxH + 2 - h}
-            width={3}
-            height={h}
-            rx={1}
-            fill={fill}
-          />
-        );
-      })}
-    </svg>
-  );
-}
-
 function flowLabelTone(flowClass: string): "pos" | "neg" | "warn" | "mut" {
   if (flowClass === "accum" || flowClass === "bullish") return "pos";
   if (flowClass === "distrib" || flowClass === "bearish") return "neg";
@@ -935,6 +905,11 @@ function FlowMobileCards({ rows }: { rows: FlowAnalysisPosition[] }) {
                 value: String(item.strength),
               },
             ]}
+            footer={
+              item.daily_buy_ratios?.length ? (
+                <MobileFlowSparkline ratios={item.daily_buy_ratios} />
+              ) : undefined
+            }
           />
         );
       })}

@@ -17,6 +17,7 @@ type SignalCardProps = {
   score: number;
   signals: SignalPill[];
   stats: StatItem[];
+  footer?: React.ReactNode;
   onPress?: () => void;
 };
 
@@ -26,7 +27,7 @@ function scoreTone(score: number): "pos" | "warn" | "neg" {
   return "neg";
 }
 
-export function SignalCard({ ticker, score, signals, stats, onPress }: SignalCardProps) {
+export function SignalCard({ ticker, score, signals, stats, footer, onPress }: SignalCardProps) {
   const tone = scoreTone(score);
 
   return (
@@ -60,6 +61,8 @@ export function SignalCard({ ticker, score, signals, stats, onPress }: SignalCar
           ))}
         </div>
       )}
+
+      {footer ? <div className="m-signal-card__footer">{footer}</div> : null}
     </div>
   );
 }

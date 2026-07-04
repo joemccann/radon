@@ -90,9 +90,9 @@ Key lesson: the app is already heavily mobile-optimized (mobile variant componen
 
 ### P2 fixed (2026-07-03 loop)
 - RRV brush-handle hit area: ~36px invisible hit halo on `.regime-spread-brush-handle` + `.brush-minimap-handle` (`::after`, max-width 640 / coarse pointer); visual unchanged. Verified via Playwright mobile (393×852, elementFromPoint probe) in `e2e/mobile-p2-polish.spec.ts`.
+- Flow sparklines on mobile: extracted the dead in-file sparkline into `components/mobile/MobileFlowSparkline.tsx` (5px bars, 24px tall), mounted in flow cards via new optional `SignalCard.footer` slot; tapping a bar shows that day's date + buy% in the caption (hover-tooltip parity on touch). Vitest (5) + Playwright tap test.
 
 ### Deferred P2 (genuine, low-impact polish — not blocking parity)
-- Flow sparklines small on mobile + desktop hover-tooltip not reproduced on touch
 - Mobile sort chips = subset of desktop sort keys (orders/journal/cta/discover)
 - L2 book montage 9px text legibility at ~186px columns
 - /workflow React Flow canvas: touch drag-to-canvas unverified (niche; desktop-first tool)
