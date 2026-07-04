@@ -42,6 +42,14 @@ export function EditorialFooter() {
         >
           @joemccann
         </a>
+        <span aria-hidden="true">·</span>
+        <a href="/privacy" className={footerLink}>
+          Privacy
+        </a>
+        <span aria-hidden="true">·</span>
+        <a href="/terms" className={footerLink}>
+          Terms
+        </a>
       </div>
     </footer>
   );
