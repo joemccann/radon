@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Loader2, Telescope } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
+import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
@@ -17,6 +18,7 @@ type LeapScannerProps = {
   error?: string | null;
   lastSync?: string | null;
   onScan?: () => void;
+  onTickerScan?: (tickers: string[]) => void;
 };
 
 const LEAP_SECTION_HELP =
@@ -52,6 +54,7 @@ export default function LeapScanner({
   error = null,
   lastSync = null,
   onScan,
+  onTickerScan,
 }: LeapScannerProps) {
   const rows = data?.results ?? [];
   const { sorted, sort, toggle } = useSort(rows, extract);
@@ -73,6 +76,13 @@ export default function LeapScanner({
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{mispricedCount} MISPRICED</span>
+          {onTickerScan && (
+            <ScannerTickerSearch
+              id="leap-ticker-search"
+              scanning={scanning}
+              onTickerScan={onTickerScan}
+            />
+          )}
           {onScan && (
             <button
               type="button"
@@ -91,6 +101,13 @@ export default function LeapScanner({
           <div className="alert-item bearish">{error}</div>
         ) : loading && rows.length === 0 ? (
           <div className="report-meta">Sampling…</div>
+        ) : rows.length === 0 && data?.universe === "explicit" ? (
+          <SectionEmptyState
+            icon={Telescope}
+            headline="Scan complete: no qualifying setups"
+            secondary={`0 of ${data.requested_tickers?.length ?? 0} requested tickers qualified (${(data.requested_tickers ?? []).join(", ")}). Adjust the list or run the preset scan.`}
+            action={onScan ? { label: "Run scan", onClick: onScan } : undefined}
+          />
         ) : rows.length === 0 ? (
           <SectionEmptyState
             icon={Telescope}

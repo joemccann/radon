@@ -98,6 +98,50 @@ describe("LeapScanner", () => {
     render(<LeapScanner data={{ scan_time: "", min_gap: null, results: [] }} />);
     expect(screen.getByText("No LEAP scan on file")).toBeTruthy();
   });
+
+  it("distinguishes a completed zero-result ticker scan from never-scanned", () => {
+    render(
+      <LeapScanner
+        data={{
+          scan_time: "2026-07-05T14:00:00Z",
+          min_gap: null,
+          results: [],
+          universe: "explicit",
+          requested_tickers: ["KO", "PEP"],
+        }}
+      />,
+    );
+    expect(screen.queryByText("No LEAP scan on file")).toBeNull();
+    expect(screen.getByText("Scan complete: no qualifying setups")).toBeTruthy();
+    expect(
+      screen.getByText(/0 of 2 requested tickers qualified \(KO, PEP\)/),
+    ).toBeTruthy();
+  });
+
+  it("submits a parsed, deduped ticker list through onTickerScan", () => {
+    const onTickerScan = vi.fn();
+    render(<LeapScanner data={leapData} onTickerScan={onTickerScan} />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbols"), {
+      target: { value: "nvda, amd, nvda" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+
+    expect(onTickerScan).toHaveBeenCalledWith(["NVDA", "AMD"]);
+  });
+
+  it("rejects malformed ticker search text", () => {
+    const onTickerScan = vi.fn();
+    render(<LeapScanner data={leapData} onTickerScan={onTickerScan} />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbols"), { target: { value: "MU1" } });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+
+    expect(onTickerScan).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Enter 1-6 letter tickers, comma-separated.",
+    );
+  });
 });
 
 describe("GarchConvergenceScanner", () => {
@@ -121,5 +165,51 @@ describe("GarchConvergenceScanner", () => {
   it("renders the empty state when no scan is on file", () => {
     render(<GarchConvergenceScanner data={{ scan_time: "", tickers: {}, pairs: [] }} />);
     expect(screen.getByText("No GARCH scan on file")).toBeTruthy();
+  });
+
+  it("distinguishes a completed zero-result ticker scan from never-scanned", () => {
+    render(
+      <GarchConvergenceScanner
+        data={{
+          scan_time: "2026-07-05T14:00:00Z",
+          tickers: {},
+          pairs: [],
+          universe: "explicit",
+          requested_tickers: ["NVDA", "AMD"],
+        }}
+      />,
+    );
+    expect(screen.queryByText("No GARCH scan on file")).toBeNull();
+    expect(screen.getByText("Scan complete: no qualifying setups")).toBeTruthy();
+    expect(
+      screen.getByText(/0 of 2 requested tickers qualified \(NVDA, AMD\)/),
+    ).toBeTruthy();
+  });
+
+  it("submits pair tickers in order without deduping", () => {
+    const onTickerScan = vi.fn();
+    render(<GarchConvergenceScanner data={garchData} onTickerScan={onTickerScan} />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbols"), {
+      target: { value: "nvda, amd, nvda, tsm" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+
+    expect(onTickerScan).toHaveBeenCalledWith(["NVDA", "AMD", "NVDA", "TSM"]);
+  });
+
+  it("rejects an odd number of pair tickers", () => {
+    const onTickerScan = vi.fn();
+    render(<GarchConvergenceScanner data={garchData} onTickerScan={onTickerScan} />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbols"), {
+      target: { value: "NVDA, AMD, TSM" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Scan" }));
+
+    expect(onTickerScan).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toContain(
+      "Enter pairs: an even number of tickers.",
+    );
   });
 });

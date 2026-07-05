@@ -11,6 +11,8 @@ from leap_iv_scanner import (
 from leap_scanner_uw import (
     calculate_hv,
     approximate_delta,
+    build_json_payload,
+    resolve_explicit_tickers,
 )
 
 
@@ -155,6 +157,34 @@ class TestAnalyzeMispricing:
         r_low = analyze_mispricing(option_low_vega, vol, min_gap=15)
         r_high = analyze_mispricing(option_high_vega, vol, min_gap=15)
         assert r_high.mispricing_score > r_low.mispricing_score
+
+
+# ── explicit ticker-scan support (scan-by-ticker) ───────────────────
+
+class TestResolveExplicitTickers:
+    def test_merges_positional_and_comma_list(self):
+        assert resolve_explicit_tickers(["nvda"], "amd, tsm") == ["NVDA", "AMD", "TSM"]
+
+    def test_dedupes_across_sources(self):
+        assert resolve_explicit_tickers(["MU", "mu"], "MU,AAPL") == ["MU", "AAPL"]
+
+    def test_empty_inputs_yield_empty_list(self):
+        assert resolve_explicit_tickers([], None) == []
+        assert resolve_explicit_tickers(None, "") == []
+
+
+class TestBuildJsonPayload:
+    def test_stamps_universe_and_requested_tickers(self):
+        payload = build_json_payload([], 10.0, "explicit", ["NVDA", "AMD"])
+        assert payload["universe"] == "explicit"
+        assert payload["requested_tickers"] == ["NVDA", "AMD"]
+        assert payload["min_gap"] == 10.0
+        assert payload["results"] == []
+        assert payload["scan_time"]
+
+    def test_preset_universe_stamp(self):
+        payload = build_json_payload([], 15.0, "preset:mag7", ["AAPL"])
+        assert payload["universe"] == "preset:mag7"
 
 
 # ── find_strikes_by_delta ───────────────────────────────────────────

@@ -1487,7 +1487,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
     }
   };
 
-  const runLeapScan = async () => {
+  const runLeapScan = async (tickers?: string[]) => {
     if (leapScanning) return;
     setLeapScanError(null);
     setLeapScanning(true);
@@ -1495,7 +1495,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
       const res = await fetch("/api/leap/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preset: "mag7" }),
+        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "mag7" }),
         cache: "no-store",
       });
       if (!res.ok) {
@@ -1510,7 +1510,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
     }
   };
 
-  const runGarchScan = async () => {
+  const runGarchScan = async (tickers?: string[]) => {
     if (garchScanning) return;
     setGarchScanError(null);
     setGarchScanning(true);
@@ -1518,7 +1518,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
       const res = await fetch("/api/garch-convergence/scan", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ preset: "mega-tech" }),
+        body: JSON.stringify(tickers && tickers.length > 0 ? { tickers } : { preset: "mega-tech" }),
         cache: "no-store",
       });
       if (!res.ok) {
@@ -1656,6 +1656,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           error={leapScanError || leap.error}
           lastSync={leap.lastSync}
           onScan={() => { void runLeapScan(); }}
+          onTickerScan={(tickers) => { void runLeapScan(tickers); }}
         />
       </div>
     );
@@ -1672,6 +1673,7 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
           error={garchScanError || garch.error}
           lastSync={garch.lastSync}
           onScan={() => { void runGarchScan(); }}
+          onTickerScan={(tickers) => { void runGarchScan(tickers); }}
         />
       </div>
     );

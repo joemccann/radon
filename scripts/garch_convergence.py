@@ -47,6 +47,7 @@ if str(_SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPT_DIR))
 
 from clients.uw_client import UWClient, UWAPIError
+from utils.ticker_args import parse_ticker_list
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -685,9 +686,16 @@ def generate_html(
 
 # ── JSON output ───────────────────────────────────────────────────
 
-def to_json(all_vol: Dict[str, TickerVol], pairs: List[PairAnalysis]) -> Dict:
+def to_json(
+    all_vol: Dict[str, TickerVol],
+    pairs: List[PairAnalysis],
+    universe: str = "",
+    requested_tickers: Optional[List[str]] = None,
+) -> Dict:
     return {
         "scan_time": datetime.now().isoformat(),
+        "universe": universe,
+        "requested_tickers": list(requested_tickers or []),
         "tickers": {
             t: {
                 "price": v.price, "hv20": v.hv20, "hv60": v.hv60, "hv252": v.hv252,
@@ -738,6 +746,11 @@ Examples:
 """,
     )
     parser.add_argument("tickers", nargs="*", help="Tickers (paired consecutively)")
+    parser.add_argument(
+        "--tickers",
+        dest="ticker_list",
+        help="Comma-separated tickers (paired consecutively); overrides --preset",
+    )
     parser.add_argument("--preset", "-p", help="Pair preset name (or 'all')")
     parser.add_argument("--json", action="store_true", help="Output JSON instead of HTML")
     parser.add_argument("--no-open", action="store_true", help="Don't open report in browser")
@@ -746,14 +759,19 @@ Examples:
 
     args = parser.parse_args()
 
-    if not args.tickers and not args.preset:
+    tickers_in = parse_ticker_list(
+        ",".join(list(args.tickers or []) + [args.ticker_list or ""]), dedupe=False
+    )
+
+    if not tickers_in and not args.preset:
         parser.print_help()
         sys.exit(1)
 
-    tickers_in = [t.upper() for t in args.tickers] if args.tickers else []
-
     # ── Step 1: Resolve inputs ──
-    all_tickers, all_pairs, description, vol_driver = resolve_inputs(tickers_in, args.preset)
+    # Explicit tickers override --preset (theta precedent).
+    preset_name = None if tickers_in else args.preset
+    all_tickers, all_pairs, description, vol_driver = resolve_inputs(tickers_in, preset_name)
+    universe = "explicit" if tickers_in else f"preset:{args.preset}"
 
     if not all_pairs:
         print("❌ No pairs to analyze.", file=sys.stderr)
@@ -802,7 +820,9 @@ Examples:
 
     # ── Step 4: Output ──
     if args.json:
-        json_data = to_json(vol_data, pair_results)
+        json_data = to_json(
+            vol_data, pair_results, universe=universe, requested_tickers=all_tickers
+        )
         # Mirror to data/garch_convergence.json so the dashboard
         # Opportunities → GARCH tab can read the latest scan via
         # /api/garch-convergence. Mirrors the LEAP scanner convention

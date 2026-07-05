@@ -472,6 +472,9 @@ export type LeapResult = {
 export type LeapData = {
   scan_time: string;
   min_gap: number | null;
+  /** "explicit" for custom ticker scans, "preset:<name>" for scheduled/preset scans. */
+  universe?: string;
+  requested_tickers?: string[];
   results: LeapResult[];
 };
 
@@ -509,6 +512,9 @@ export type GarchTickerVol = {
 
 export type GarchConvergenceData = {
   scan_time: string;
+  /** "explicit" for custom pair scans, "preset:<name>" for scheduled/preset scans. */
+  universe?: string;
+  requested_tickers?: string[];
   tickers: Record<string, GarchTickerVol>;
   pairs: GarchPair[];
 };

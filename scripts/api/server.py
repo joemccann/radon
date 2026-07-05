@@ -2150,17 +2150,67 @@ async def vcg_share():
 _leap_last_scan: float = 0.0
 _leap_scan_lock: Optional[asyncio.Lock] = None
 LEAP_COOLDOWN_S = 600  # 10 min — LEAP scans are slow + low-cadence
+_SCAN_TICKER_LIST_MAX = 25
+
+
+def _parse_scan_tickers(raw: str, require_pairs: bool = False, dedupe: bool = True) -> list:
+    """Validate + normalise a comma-separated ticker-scan query param.
+
+    Raises HTTPException(400) on malformed symbols, oversized lists, or
+    (for pair scanners) an odd symbol count.
+    """
+    tokens = [token.strip().upper() for token in (raw or "").split(",") if token.strip()]
+    if dedupe:
+        seen = set()
+        unique = []
+        for token in tokens:
+            if token not in seen:
+                seen.add(token)
+                unique.append(token)
+        tokens = unique
+    for token in tokens:
+        if not re.fullmatch(r"[A-Z]{1,6}", token):
+            raise HTTPException(
+                status_code=400,
+                detail="tickers must be comma-separated 1-6 letter symbols",
+            )
+    if len(tokens) > _SCAN_TICKER_LIST_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"too many tickers (max {_SCAN_TICKER_LIST_MAX})",
+        )
+    if require_pairs and tokens and len(tokens) % 2 != 0:
+        raise HTTPException(
+            status_code=400,
+            detail="tickers must be an even number of symbols (consecutive pairs)",
+        )
+    return tokens
+
+
+def _scan_cache_matches_preset(cached: Any, preset: str) -> bool:
+    """True when a cached scan payload was produced by the requested preset.
+
+    An "explicit"-universe cache (custom ticker scan) never satisfies a
+    preset request; mirrors _theta_cache_matches_preset.
+    """
+    if not isinstance(cached, dict):
+        return False
+    universe = str(cached.get("universe") or "")
+    preset_key = preset.lower()
+    return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
 
 
 @app.post("/leap/scan")
-async def leap_scan(preset: str = "mag7", min_gap: float = 10.0):
-    """Run LEAP scan (leap_scanner_uw.py --preset X --json).
+async def leap_scan(preset: str = "mag7", min_gap: float = 10.0, tickers: str = ""):
+    """Run LEAP scan (leap_scanner_uw.py --preset X --json, or --tickers A,B).
 
     The scanner writes data/leap.json directly; stdout is text + a summary
     rather than JSON, so we ignore run_script's parsed payload and re-read
     the cache file after the subprocess completes. 600s cooldown stops
-    accidental thrash on the Unusual Whales API.
+    accidental thrash on the Unusual Whales API; explicit ticker scans
+    bypass it (cheap operator probes) and never advance it.
     """
+    requested = _parse_scan_tickers(tickers)
     if test_mode:
         return await demo_scan_response(
             "leap-scan", {"scan_time": "", "min_gap": min_gap, "results": []}
@@ -2170,27 +2220,35 @@ async def leap_scan(preset: str = "mag7", min_gap: float = 10.0):
     if _leap_scan_lock is None:
         _leap_scan_lock = asyncio.Lock()
     now = _time.monotonic()
-    if now - _leap_last_scan < LEAP_COOLDOWN_S:
+    is_ticker_scan = bool(requested)
+    if not is_ticker_scan and now - _leap_last_scan < LEAP_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "leap.json")
-        if cached:
+        if _scan_cache_matches_preset(cached, preset):
             return cached
     async with _leap_scan_lock:
-        if _time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
+        if not is_ticker_scan and _time.monotonic() - _leap_last_scan < LEAP_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "leap.json")
-            if cached:
+            if _scan_cache_matches_preset(cached, preset):
                 return cached
-        result = await run_script(
-            "leap_scanner_uw.py",
-            ["--preset", preset, "--min-gap", str(min_gap), "--json"],
-            timeout=300,
-        )
+        if is_ticker_scan:
+            args = ["--tickers", ",".join(requested), "--min-gap", str(min_gap), "--json"]
+        else:
+            args = ["--preset", preset, "--min-gap", str(min_gap), "--json"]
+        result = await run_script("leap_scanner_uw.py", args, timeout=300)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
-        _leap_last_scan = _time.monotonic()
+        if not is_ticker_scan:
+            _leap_last_scan = _time.monotonic()
         # The leap scanner subprocess wrote the JSON cache atomically AND
         # recorded its own service_health[leap-scan] row (db/scan_mirror.py).
         cached = _read_cache(DATA_DIR / "leap.json")
-        return cached or {"scan_time": "", "min_gap": min_gap, "results": []}
+        return cached or {
+            "scan_time": "",
+            "min_gap": min_gap,
+            "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
+            "requested_tickers": requested,
+            "results": [],
+        }
 
 
 # ── Theta Harvester (short-strangle theta scanner) ──────────────────
@@ -2525,17 +2583,20 @@ GARCH_COOLDOWN_S = 600  # 10 min — UW rate-limit + scan latency
 
 
 @app.post("/garch-convergence/scan")
-async def garch_convergence_scan(preset: str = "mega-tech"):
-    """Run GARCH convergence scan (garch_convergence.py --preset X --json).
+async def garch_convergence_scan(preset: str = "mega-tech", tickers: str = ""):
+    """Run GARCH convergence scan (garch_convergence.py --preset X --json,
+    or --tickers A,B,C,D paired consecutively — even symbol count required).
 
     Mirrors /leap/scan semantics: 600s cooldown + lock, subprocess writes
     data/garch_convergence.json directly (and records its own
     service_health[garch-scan] row), we re-read the cache file after the
-    subprocess completes.
+    subprocess completes. Explicit pair scans bypass the cooldown and never
+    advance it.
 
     Built-in presets: semis, mega-tech, energy, china-etf, all. File
     presets (data/presets/) also accepted.
     """
+    requested = _parse_scan_tickers(tickers, require_pairs=True, dedupe=False)
     if test_mode:
         return await demo_scan_response(
             "garch-scan", {"scan_time": "", "tickers": {}, "pairs": []}
@@ -2545,25 +2606,33 @@ async def garch_convergence_scan(preset: str = "mega-tech"):
     if _garch_scan_lock is None:
         _garch_scan_lock = asyncio.Lock()
     now = _time.monotonic()
-    if now - _garch_last_scan < GARCH_COOLDOWN_S:
+    is_ticker_scan = bool(requested)
+    if not is_ticker_scan and now - _garch_last_scan < GARCH_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
-        if cached:
+        if _scan_cache_matches_preset(cached, preset):
             return cached
     async with _garch_scan_lock:
-        if _time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
+        if not is_ticker_scan and _time.monotonic() - _garch_last_scan < GARCH_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "garch_convergence.json")
-            if cached:
+            if _scan_cache_matches_preset(cached, preset):
                 return cached
-        result = await run_script(
-            "garch_convergence.py",
-            ["--preset", preset, "--json", "--no-open"],
-            timeout=180,
-        )
+        if is_ticker_scan:
+            args = ["--tickers", ",".join(requested), "--json", "--no-open"]
+        else:
+            args = ["--preset", preset, "--json", "--no-open"]
+        result = await run_script("garch_convergence.py", args, timeout=180)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
-        _garch_last_scan = _time.monotonic()
+        if not is_ticker_scan:
+            _garch_last_scan = _time.monotonic()
         cached = _read_cache(DATA_DIR / "garch_convergence.json")
-        return cached or {"scan_time": "", "tickers": {}, "pairs": []}
+        return cached or {
+            "scan_time": "",
+            "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
+            "requested_tickers": requested,
+            "tickers": {},
+            "pairs": [],
+        }
 
 
 # ── GEX (Gamma Exposure Levels) ─────────────────────────────────────

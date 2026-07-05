@@ -170,14 +170,20 @@ def test_garch_scan_returns_empty_envelope_when_cache_missing(client):
 
 def test_garch_scan_returns_cached_payload_within_cooldown(client, monkeypatch):
     """Cooldown gate: second call within 600s skips run_script and returns
-    the cache directly."""
+    the cache directly (when the cache matches the requested preset)."""
     import time
     from scripts.api import server
 
     # Force the cooldown to be active.
     monkeypatch.setattr(server, "_garch_last_scan", time.monotonic())
 
-    cache_payload = {"scan_time": "2026-05-22T14:00:00", "tickers": {}, "pairs": []}
+    cache_payload = {
+        "scan_time": "2026-05-22T14:00:00",
+        "universe": "preset:mega-tech",
+        "requested_tickers": [],
+        "tickers": {},
+        "pairs": [],
+    }
 
     with (
         patch("scripts.api.server.run_script") as run_mock,
@@ -187,4 +193,102 @@ def test_garch_scan_returns_cached_payload_within_cooldown(client, monkeypatch):
 
     assert resp.status_code == 200
     # run_script should NOT have been invoked.
+    run_mock.assert_not_called()
+
+
+def test_garch_ticker_scan_bypasses_preset_cooldown(client, monkeypatch):
+    """A custom pair scan runs even inside the 600s preset cooldown and does
+    not advance the preset cooldown clock."""
+    import time
+    from scripts.api import server
+
+    seeded = time.monotonic()
+    monkeypatch.setattr(server, "_garch_last_scan", seeded)
+
+    explicit_payload = {
+        "scan_time": "2026-07-05T14:00:00",
+        "universe": "explicit",
+        "requested_tickers": ["NVDA", "AMD"],
+        "tickers": {},
+        "pairs": [],
+    }
+    calls = []
+
+    async def _stub(script, args, timeout=None):
+        calls.append((script, args, timeout))
+        return _fake_script_result(ok=True, data={})
+
+    with (
+        patch("scripts.api.server.run_script", side_effect=_stub),
+        patch("scripts.api.server._read_cache", return_value=explicit_payload),
+    ):
+        resp = client.post("/garch-convergence/scan?tickers=nvda,amd")
+
+    assert resp.status_code == 200
+    assert resp.json()["requested_tickers"] == ["NVDA", "AMD"]
+    assert calls == [
+        ("garch_convergence.py", ["--tickers", "NVDA,AMD", "--json", "--no-open"], 180)
+    ]
+    assert server._garch_last_scan == seeded
+
+
+def test_garch_preset_scan_ignores_explicit_ticker_cache(client, monkeypatch):
+    """A preset request inside the cooldown must not be served an
+    explicit-universe cache left behind by a custom pair scan."""
+    import time
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "_garch_last_scan", time.monotonic())
+
+    explicit_payload = {
+        "scan_time": "2026-07-05T14:00:00",
+        "universe": "explicit",
+        "requested_tickers": ["NVDA", "AMD"],
+        "tickers": {},
+        "pairs": [],
+    }
+    preset_payload = {
+        **explicit_payload,
+        "universe": "preset:mega-tech",
+        "requested_tickers": ["AAPL", "MSFT"],
+    }
+    cache_reads = {"n": 0}
+    calls = []
+
+    def _read(_path):
+        cache_reads["n"] += 1
+        return explicit_payload if cache_reads["n"] < 3 else preset_payload
+
+    async def _stub(script, args, timeout=None):
+        calls.append((script, args, timeout))
+        return _fake_script_result(ok=True, data={})
+
+    with (
+        patch("scripts.api.server.run_script", side_effect=_stub),
+        patch("scripts.api.server._read_cache", side_effect=_read),
+    ):
+        resp = client.post("/garch-convergence/scan?preset=mega-tech")
+
+    assert resp.status_code == 200
+    assert resp.json()["universe"] == "preset:mega-tech"
+    assert calls == [
+        ("garch_convergence.py", ["--preset", "mega-tech", "--json", "--no-open"], 180)
+    ]
+
+
+def test_garch_rejects_odd_ticker_count(client):
+    with patch("scripts.api.server.run_script") as run_mock:
+        resp = client.post("/garch-convergence/scan?tickers=NVDA,AMD,TSM")
+
+    assert resp.status_code == 400
+    assert "even number" in resp.text
+    run_mock.assert_not_called()
+
+
+def test_garch_rejects_invalid_ticker_symbol(client):
+    with patch("scripts.api.server.run_script") as run_mock:
+        resp = client.post("/garch-convergence/scan?tickers=NVDA,AM-D")
+
+    assert resp.status_code == 400
+    assert "1-6 letter" in resp.text
     run_mock.assert_not_called()
