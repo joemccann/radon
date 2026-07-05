@@ -408,9 +408,25 @@ export function isStale(
  * behavior) rather than guessing. */
 function isUsMarketHoliday(et: Date): boolean {
   const isoDate = `${et.getFullYear()}-${String(et.getMonth() + 1).padStart(2, "0")}-${String(et.getDate()).padStart(2, "0")}`;
-  const year = String(et.getFullYear());
-  const dates = (staticHolidays as Record<string, string[]>)[year];
+  return isHolidayIso(isoDate);
+}
+
+function isHolidayIso(isoDate: string): boolean {
+  const dates = (staticHolidays as Record<string, string[]>)[isoDate.slice(0, 4)];
   return Array.isArray(dates) && dates.includes(isoDate);
+}
+
+/**
+ * Date-only trading-day check against the same holiday SoT: a weekday that is
+ * not a full-closure US market holiday. Pure on the ISO "YYYY-MM-DD" string —
+ * the weekday is derived at UTC noon so the calendar date never shifts with
+ * the host timezone.
+ */
+export function isUsTradingDay(isoDate: string): boolean {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  const weekday = new Date(Date.UTC(y, m - 1, d, 12)).getUTCDay();
+  if (weekday === 0 || weekday === 6) return false;
+  return !isHolidayIso(isoDate);
 }
 
 /**

@@ -35,20 +35,25 @@ vi.mock("@/components/dashboard/FlowSurpriseCard", () => ({
 }));
 
 // ── Mock the data hooks the mounted panels depend on ──
-vi.mock("@/lib/useCatalysts", () => ({
-  useCatalysts: () => ({
-    data: {
-      scan_time: "2026-06-21T12:00:00Z",
-      count: 1,
-      catalysts: [
-        { ticker: "AAPL", type: "earnings", title: "APPLE INC", date: "2026-06-23", source: "earnings_premarket", days_until: 2 },
-      ],
-    },
-    isLoading: false,
-    error: null,
-    refresh: vi.fn(),
-  }),
-}));
+vi.mock("@/lib/useCatalysts", () => {
+  // Window-relative fixture date: CatalystCard drops past events at render
+  // time, so a hardcoded date would rot out of the card as the clock advances.
+  const fixtureDate = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 10);
+  return {
+    useCatalysts: () => ({
+      data: {
+        scan_time: new Date().toISOString(),
+        count: 1,
+        catalysts: [
+          { ticker: "AAPL", type: "earnings", title: "APPLE INC", date: fixtureDate, source: "earnings_premarket", days_until: 2 },
+        ],
+      },
+      isLoading: false,
+      error: null,
+      refresh: vi.fn(),
+    }),
+  };
+});
 
 vi.mock("@/lib/useInformedFlow", () => ({
   useInformedFlow: () => ({

@@ -24,7 +24,9 @@ function urgencyFor(daysUntil: number): CatalystUrgency {
 }
 
 function labelFor(daysUntil: number): string {
-  if (daysUntil <= 0) return "Today";
+  if (daysUntil === 0) return "Today";
+  // Negative (past) inputs should be filtered upstream (catalystUpcoming);
+  // if one slips through it must read as past, never as "Today".
   return `${daysUntil}d`;
 }
 
