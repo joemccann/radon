@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { useCatalysts, type CatalystRow } from "@/lib/useCatalysts";
 import { catalystBadge, CATALYST_URGENCY_TOKEN } from "@/lib/catalystBadge";
+import { upcomingCatalysts } from "@/lib/catalystUpcoming";
 
 /**
  * CatalystCard — upcoming earnings / FDA / economic events ranked nearest
@@ -44,7 +45,9 @@ function typeStyle(): React.CSSProperties {
 export function CatalystCard() {
   const { data, isLoading, error } = useCatalysts(true);
 
-  const rows = (data?.catalysts ?? []).slice(0, 6);
+  // The writer skips weekends/holidays, so stored days_until can be days old.
+  // Recompute from each row's date and drop past events before slicing.
+  const rows = upcomingCatalysts(data?.catalysts ?? []).slice(0, 6);
   const lastSync = data?.scan_time || null;
 
   return (
