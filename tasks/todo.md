@@ -106,7 +106,7 @@ Purpose (operator, 2026-07-04): new features deploy to beta first, get tested, t
 ### Checklist
 - [ ] Prereqs from the beta plan (block the CI work until done):
   - [ ] Build memory safety on the 2-vCPU/0-swap VPS: swap + `MemoryMax`/`CPUQuota` on build, or build off-box — a second concurrent `next build` for beta can OOM-kill prod
-  - [ ] DNS: repoint `beta.radon.run` A → 5.78.148.38 (currently Vercel anycast) + detach from Vercel project; add `beta.radon.run {}` Caddy block → :3001
+  - [ ] DNS: repoint `beta.radon.run` A → <prod-host> (currently Vercel anycast) + detach from Vercel project; add `beta.radon.run {}` Caddy block → :3001
   - [ ] sudoers/polkit coverage for `radon-beta-*` units (deploy + admin panel restarts)
   - [ ] Seed/refresh the separate beta Turso DB (dump→restore from prod; never the prod DB URL)
   - [ ] Commit `radon-beta-*` unit files to radon-cloud once shapes settle (drop the drift-audit `known-untracked` allowlist entries)

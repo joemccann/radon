@@ -11,7 +11,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
                 ┌─────────────────┴─────────────────┐
                 │   direct-to-cloud, no replica     │
                 ▼                                   ▼
-         LAPTOP dev process                 HETZNER production (5.78.148.38)
+         LAPTOP dev process                 HETZNER production (<prod-host>)
          localhost:3000 (Next.js)           app.radon.run (Caddy → radon-nextjs)
          FastAPI 8321                       FastAPI 8321 (radon-api, private)
          IB realtime relay 8765             radon-relay, radon-monitor (host systemd)
@@ -75,7 +75,7 @@ The default rsync target (`radon@ib-gateway:/home/radon/radon-cloud/media/`) onl
 To bypass Tailscale and push over the Hetzner public IP, export the env override before running the scraper / dev stack:
 
 ```bash
-export RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/
+export RADON_MEDIA_REMOTE=radon@<prod-host>:/home/radon/radon-cloud/media/
 ```
 
 The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys` on the VPS is shared between the Tailscale and public-IP entry points, so no key swap is needed. Tailscale remains the secure default; only flip the env when you actively want the public path. If the public route ever needs different SSH options (custom port, identity file, `StrictHostKeyChecking`), surface them via `RADON_MEDIA_RSYNC_SSH_OPTS` (not yet wired — add when you actually need it).

@@ -9,7 +9,7 @@ import { spawn } from "node:child_process";
 
 // Default target uses Tailscale's MagicDNS name `ib-gateway` — secure private route.
 // Operators without Tailscale on the laptop can switch to the Hetzner public IP via
-//   RADON_MEDIA_REMOTE=radon@5.78.148.38:/home/radon/radon-cloud/media/
+//   RADON_MEDIA_REMOTE=<user>@<prod-host>:/path/to/media/
 // Same SSH key is authorized on both routes (single ~/.ssh/authorized_keys on the VPS).
 // See docs/cloud-services.md "Tailscale-free media push".
 const REMOTE = process.env.RADON_MEDIA_REMOTE ?? "radon@ib-gateway:/home/radon/radon-cloud/media/";
