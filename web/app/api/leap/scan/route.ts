@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
 
 /**
  * POST /api/leap/scan
  *
  * Triggers leap_scanner_uw.py via the FastAPI /leap/scan endpoint. Cooldown
- * + lock live on the FastAPI side. Body accepts {preset?, min_gap?}; both
- * have FastAPI defaults (preset=mag7, min_gap=10.0).
+ * + lock live on the FastAPI side. Body accepts {preset?, min_gap?, tickers?}
+ * where tickers (comma-separated string or array) wins over preset; preset
+ * and min_gap have FastAPI defaults (preset=mag7, min_gap=10.0).
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +24,19 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const params = new URLSearchParams();
-  if (typeof body.preset === "string") params.set("preset", body.preset);
+  const rawTickers = tickersBodyToRaw(body.tickers);
+  if (rawTickers.trim().length > 0) {
+    const parsed = validateTickerList(rawTickers);
+    if (!parsed.ok) {
+      return setNoStoreResponseHeaders(
+        NextResponse.json({ error: parsed.error }, { status: 400 }),
+        requestId,
+      );
+    }
+    params.set("tickers", parsed.tickers.join(","));
+  } else if (typeof body.preset === "string") {
+    params.set("preset", body.preset);
+  }
   if (typeof body.min_gap === "number") params.set("min_gap", String(body.min_gap));
 
   const path = params.toString() ? `/leap/scan?${params.toString()}` : "/leap/scan";

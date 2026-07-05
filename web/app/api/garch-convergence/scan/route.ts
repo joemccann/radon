@@ -1,13 +1,16 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
+import { tickersBodyToRaw, validateTickerList } from "@/lib/scanTickerList";
 
 /**
  * POST /api/garch-convergence/scan
  *
  * Triggers garch_convergence.py via FastAPI /garch-convergence/scan.
- * Cooldown + lock live on the FastAPI side. Body accepts {preset?}; the
- * FastAPI default is preset=mega-tech.
+ * Cooldown + lock live on the FastAPI side. Body accepts {preset?, tickers?}
+ * where tickers (comma-separated string or array, paired consecutively so
+ * the count must be even) wins over preset; the FastAPI default is
+ * preset=mega-tech.
  */
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -22,7 +25,19 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   const params = new URLSearchParams();
-  if (typeof body.preset === "string") params.set("preset", body.preset);
+  const rawTickers = tickersBodyToRaw(body.tickers);
+  if (rawTickers.trim().length > 0) {
+    const parsed = validateTickerList(rawTickers, { requirePairs: true, dedupe: false });
+    if (!parsed.ok) {
+      return setNoStoreResponseHeaders(
+        NextResponse.json({ error: parsed.error }, { status: 400 }),
+        requestId,
+      );
+    }
+    params.set("tickers", parsed.tickers.join(","));
+  } else if (typeof body.preset === "string") {
+    params.set("preset", body.preset);
+  }
 
   const path = params.toString()
     ? `/garch-convergence/scan?${params.toString()}`

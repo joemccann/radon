@@ -51,6 +51,7 @@ from urllib.error import HTTPError, URLError
 from dataclasses import dataclass, field, asdict
 
 from clients.uw_client import UWClient, UWAPIError
+from utils.ticker_args import parse_ticker_list
 
 try:
     from db.scan_mirror import mirror_scan_snapshot  # type: ignore
@@ -646,13 +647,49 @@ def generate_report(results: List[ScanResult], min_gap: float) -> str:
     return html
 
 
+def resolve_explicit_tickers(positional, ticker_list):
+    """Merge positional tickers with a --tickers comma list into one deduped list."""
+    combined = ",".join(list(positional or []) + [ticker_list or ""])
+    return parse_ticker_list(combined)
+
+
+def build_json_payload(results, min_gap, universe, requested_tickers):
+    """Build the data/leap.json envelope, stamped with the scanned universe."""
+    return {
+        "scan_time": datetime.now().isoformat(),
+        "min_gap": min_gap,
+        "universe": universe,
+        "requested_tickers": list(requested_tickers or []),
+        "results": [
+            {
+                "ticker": r.ticker,
+                "price": r.vol_data.price,
+                "hv_20": r.vol_data.hv_20,
+                "hv_60": r.vol_data.hv_60,
+                "hv_252": r.vol_data.hv_252,
+                "current_iv": r.current_iv,
+                "iv_rank": r.iv_rank,
+                "leap_count": len(r.leaps),
+                "best_gap": r.best_gap,
+                "is_mispriced": r.is_mispriced,
+            }
+            for r in results
+        ],
+    }
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="LEAP IV Mispricing Scanner (UW primary, Yahoo LAST RESORT)",
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    
+
     parser.add_argument("tickers", nargs="*", help="Tickers to scan")
+    parser.add_argument(
+        "--tickers",
+        dest="ticker_list",
+        help="Comma-separated tickers to scan; overrides --preset",
+    )
     parser.add_argument("--preset", help="Use preset ticker group (built-in or from data/presets/)")
     parser.add_argument("--min-gap", type=float, default=MIN_IV_GAP, help=f"Min HV-IV gap (default: {MIN_IV_GAP})")
     parser.add_argument("--output", default="reports/leap-scan-uw.html", help="Output file")
@@ -676,9 +713,12 @@ def main():
         sys.exit(0)
     
     # Determine tickers
-    if args.tickers:
-        tickers = [t.upper() for t in args.tickers]
+    explicit_tickers = resolve_explicit_tickers(args.tickers, args.ticker_list)
+    if explicit_tickers:
+        tickers = explicit_tickers
+        universe = "explicit"
     elif args.preset:
+        universe = f"preset:{args.preset}"
         # Check built-in presets first, then file presets
         if args.preset in PRESETS:
             tickers = PRESETS[args.preset]
@@ -728,49 +768,34 @@ def main():
         for r in sorted(mispriced, key=lambda x: x.best_gap, reverse=True)[:5]:
             print(f"   {r.ticker}: HV20={r.vol_data.hv_20:.1f}% vs LEAP IV gap +{r.best_gap:.1f}%")
     
-    # Generate report
+    # Generate report (HTML only when there is something to show)
+    output_path = Path(args.output)
     if results:
         report = generate_report(results, args.min_gap)
-        output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text(report)
         print(f"\n✓ Report saved to {output_path}")
-        
-        if args.json:
-            json_data = {
-                "scan_time": datetime.now().isoformat(),
-                "min_gap": args.min_gap,
-                "results": [
-                    {
-                        "ticker": r.ticker,
-                        "price": r.vol_data.price,
-                        "hv_20": r.vol_data.hv_20,
-                        "hv_60": r.vol_data.hv_60,
-                        "hv_252": r.vol_data.hv_252,
-                        "current_iv": r.current_iv,
-                        "iv_rank": r.iv_rank,
-                        "leap_count": len(r.leaps),
-                        "best_gap": r.best_gap,
-                        "is_mispriced": r.is_mispriced,
-                    }
-                    for r in results
-                ]
-            }
-            json_path = output_path.with_suffix(".json")
-            json_path.write_text(json.dumps(json_data, indent=2))
-            print(f"✓ JSON saved to {json_path}")
 
-            # Also mirror to data/leap.json so the dashboard
-            # Opportunities → LEAP tab can read the latest scan via the
-            # /api/leap route. Other scans (scanner, discover) follow the
-            # same data/<scan>.json convention.
-            cache_path = DASHBOARD_CACHE_PATH
-            cache_path.parent.mkdir(parents=True, exist_ok=True)
-            cache_path.write_text(json.dumps(json_data, indent=2))
-            print(f"✓ Dashboard cache saved to {cache_path}")
-            # No leap table in Turso — the file cache is canonical; the
-            # service_health row lets the banner spot a stale scheduled scan.
-            mirror_scan_snapshot("leap-scan", json_data)
+    # JSON cache is written even for an empty scan so a custom ticker scan
+    # with zero results still replaces the dashboard cache (theta precedent).
+    if args.json:
+        json_data = build_json_payload(results, args.min_gap, universe, tickers)
+        json_path = output_path.with_suffix(".json")
+        json_path.parent.mkdir(parents=True, exist_ok=True)
+        json_path.write_text(json.dumps(json_data, indent=2))
+        print(f"✓ JSON saved to {json_path}")
+
+        # Also mirror to data/leap.json so the dashboard
+        # Opportunities → LEAP tab can read the latest scan via the
+        # /api/leap route. Other scans (scanner, discover) follow the
+        # same data/<scan>.json convention.
+        cache_path = DASHBOARD_CACHE_PATH
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        cache_path.write_text(json.dumps(json_data, indent=2))
+        print(f"✓ Dashboard cache saved to {cache_path}")
+        # No leap table in Turso — the file cache is canonical; the
+        # service_health row lets the banner spot a stale scheduled scan.
+        mirror_scan_snapshot("leap-scan", json_data)
 
 
 if __name__ == "__main__":
