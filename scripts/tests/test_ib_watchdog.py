@@ -109,13 +109,16 @@ class TestIsApiHang:
         s = GatewayState("unhealthy", True, False, "awaiting_2fa")
         assert is_api_hang(s) is False
 
-    def test_awaiting_2fa_with_upstream_dead_IS_a_hang(self):
-        # 2026-06-15 loop fix: a dead JVM acceptor (upstream_dead) whose
-        # cached pool auth_state still reads awaiting_2fa is the api-hang,
-        # NOT a 2FA problem. upstream_dead overrides auth_state — firing a
-        # fresh push does nothing for a dead upstream and looped 15× before.
+    def test_awaiting_2fa_with_upstream_dead_is_NOT_a_hang(self):
+        # 2026-07-05 storm fix (reverses the 2026-06-15 override): a gateway
+        # parked at the 2FA push prompt has a legitimately silent upstream,
+        # and restarting it cold-starts a FULL login that mints a NEW push,
+        # invalidating the pending one (48 restarts / 48 pushes overnight).
+        # awaiting_2fa is NEVER the api-hang — the stand-down owns it, and
+        # is_stuck_awaiting_2fa still requires upstream_dead=False so the
+        # 2026-06-15 misroute stays fixed (nothing restarts here at all).
         s = GatewayState("unhealthy", True, True, "awaiting_2fa")
-        assert is_api_hang(s) is True
+        assert is_api_hang(s) is False
 
     def test_port_open_but_upstream_dead_is_the_hang(self):
         s = GatewayState("unhealthy", True, True, "authenticated")

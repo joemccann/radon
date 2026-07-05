@@ -10,8 +10,12 @@ every ~12 min: 15 gateway restarts (each a real 2FA re-auth + an hour-long
 Pushover EMERGENCY) across 20:36-23:30.
 
 The four fixes these tests pin down:
-  1. ``upstream_dead=True`` is ALWAYS the api-hang, regardless of auth_state —
-     never the stuck-2FA path. The two can never both restart in one cycle.
+  1. ``upstream_dead=True`` with ``awaiting_2fa`` never reaches the stuck-2FA
+     push path. (Originally it was routed to the api-hang ladder instead; the
+     2026-07-05 storm superseded that with a full stand-down — NO ladder owns
+     awaiting_2fa now. What this incident actually requires is that the
+     misroute never fires a push, which the stand-down satisfies with zero
+     restarts. See test_ib_watchdog_2fa_storm_2026_07_05.py.)
   2. Even a genuine stuck-2FA (``upstream_dead=False``) is capped at <=2
      watchdog gateway restarts per rolling hour, with exponential backoff, so
      it can NEVER loop 15×.
@@ -96,6 +100,15 @@ def _dead_upstream_awaiting_2fa() -> dict:
     )
 
 
+# The genuine api-hang the restart ladder still owns: dead upstream with a
+# non-2FA auth_state (awaiting_2fa now stands the watchdog down entirely —
+# 2026-07-05 storm fix).
+def _dead_upstream_authenticated() -> dict:
+    return _payload(
+        service_state="unhealthy", upstream_dead=True, auth_state="authenticated"
+    )
+
+
 def _drive(
     state_path: Path,
     payload: dict | None,
@@ -126,9 +139,13 @@ def _drive(
 
 
 class TestDeadUpstreamIsApiHangNotStuck2fa:
-    def test_classifier_dead_upstream_awaiting_2fa_is_api_hang(self):
+    def test_classifier_dead_upstream_awaiting_2fa_owns_no_ladder(self):
+        # 2026-07-05 update: awaiting_2fa + upstream_dead is neither the
+        # api-hang (restarting mints a NEW push — the 48-push storm) nor the
+        # stuck-2FA push path (the 2026-06-15 misroute). The stand-down owns
+        # it: zero restarts, which still satisfies this incident's invariant.
         s = GatewayState("unhealthy", True, True, "awaiting_2fa")
-        assert is_api_hang(s) is True
+        assert is_api_hang(s) is False
         assert is_stuck_awaiting_2fa(s) is False
 
     def test_classifier_genuine_stuck_2fa_is_not_api_hang(self):
@@ -136,19 +153,18 @@ class TestDeadUpstreamIsApiHangNotStuck2fa:
         assert is_api_hang(s) is False
         assert is_stuck_awaiting_2fa(s) is True
 
-    def test_cycle_routes_dead_upstream_to_api_hang_counter(self, state_path):
-        # Counter advanced is degraded_count (api-hang), NOT stuck_2fa_count.
+    def test_cycle_routes_dead_upstream_to_stand_down(self, state_path):
+        # NEITHER counter advances; the stand-down owns awaiting_2fa.
         result, restart = _drive(state_path, _dead_upstream_awaiting_2fa())
-        assert result.degraded_count == 1
+        assert result.degraded_count == 0
         assert result.stuck_2fa_count == 0
-        restart.assert_not_called()  # threshold not yet hit
+        assert result.last_outcome == "standing_down_awaiting_2fa"
+        restart.assert_not_called()
 
-    def test_dead_upstream_restart_is_via_api_hang_ladder_at_threshold(self, state_path):
+    def test_dead_upstream_never_restarts_even_at_threshold(self, state_path):
         save_state(state_path, WatchdogState(degraded_count=2))
         result, restart = _drive(state_path, _dead_upstream_awaiting_2fa())
-        assert restart.call_count == 1
-        # api-hang outcome, not stuck_2fa.
-        assert "restarted" in result.last_outcome
+        restart.assert_not_called()
         assert "stuck_2fa" not in result.last_outcome
         assert result.degraded_count == 0
 
@@ -157,11 +173,12 @@ class TestDeadUpstreamIsApiHangNotStuck2fa:
 
 
 class TestSustainedDeadUpstreamDoesNotLoop:
-    def test_dead_upstream_drives_at_most_one_gateway_restart_per_episode(self, state_path):
-        """The 2026-06-15 signature: dead upstream every cycle. The api-hang
-        ladder restarts ONCE at threshold, then resets and re-warms — it does
-        NOT fire a gateway restart every single cycle. Over many cycles the
-        gateway restart count stays bounded, not 15×."""
+    def test_dead_upstream_awaiting_2fa_fires_zero_gateway_restarts(self, state_path):
+        """The 2026-06-15 signature: dead upstream + awaiting_2fa every cycle.
+        Since the 2026-07-05 storm fix the stand-down owns this state — ZERO
+        restarts (the strongest possible version of the original "never 15×"
+        invariant; restarting a gateway parked at the 2FA prompt only mints
+        a fresh push and invalidates the pending one)."""
         t = [1000.0]
 
         def clock():
@@ -170,16 +187,13 @@ class TestSustainedDeadUpstreamDoesNotLoop:
 
         total_restarts = 0
         # 20 cycles of unbroken dead-upstream (the incident ran ~3h = ~180
-        # cycles, but 20 is enough to prove the per-episode ceiling).
+        # cycles, but 20 is enough to prove the ceiling).
         for _ in range(20):
             _, restart = _drive(
                 state_path, _dead_upstream_awaiting_2fa(), clock=clock
             )
             total_restarts += restart.call_count
-        # 20 cycles / 3-cycle threshold ≈ 6 restarts MAX — and critically each
-        # restart arms the pool-reconnect + resets the counter, never the
-        # every-cycle 15× cadence the loop produced.
-        assert total_restarts <= 7, total_restarts
+        assert total_restarts == 0, total_restarts
         # No stuck-2FA push was ever fired down the misclassified path.
         st = load_state(state_path)
         assert st.stuck_2fa_count == 0
@@ -275,13 +289,13 @@ class TestStuck2faRestartCap:
 class TestPoolReconnectAfterRecovery:
     def test_gateway_restart_arms_pending_pool_reconnect(self, state_path):
         save_state(state_path, WatchdogState(degraded_count=2))
-        result, _ = _drive(state_path, _dead_upstream_awaiting_2fa())
+        result, _ = _drive(state_path, _dead_upstream_authenticated())
         assert result.pending_pool_reconnect is True
 
     def test_authenticated_after_restart_bounces_api_once(self, state_path):
         # Cycle 1: dead upstream at threshold → gateway restart, flag armed.
         save_state(state_path, WatchdogState(degraded_count=2))
-        _drive(state_path, _dead_upstream_awaiting_2fa())
+        _drive(state_path, _dead_upstream_authenticated())
         assert load_state(state_path).pending_pool_reconnect is True
 
         # Cycle 2: auth resolved → exactly one radon-api restart, flag cleared.
@@ -329,15 +343,16 @@ class TestPoolReconnectAfterRecovery:
 
 class TestPushLockPreserved:
     def test_dead_upstream_at_threshold_still_respects_push_lock(self, state_path):
-        # The api-hang ladder (which now owns dead-upstream) must still defer
-        # when another holder has the 2FA push lock — no stacking.
+        # The api-hang ladder must still defer when another holder has the
+        # 2FA push lock — no stacking. (awaiting_2fa payloads never reach the
+        # ladder at all since 2026-07-05; the authenticated hang exercises it.)
         ib_2fa_lock.acquire_2fa_push_lock(
             "scripts.api.ib_gateway.restart_ib_gateway",
             ttl_secs=600,
             reason="user-initiated",
         )
         save_state(state_path, WatchdogState(degraded_count=2))
-        result, restart = _drive(state_path, _dead_upstream_awaiting_2fa())
+        result, restart = _drive(state_path, _dead_upstream_authenticated())
         restart.assert_not_called()
         assert "2fa_push_in_flight" in result.last_outcome
 

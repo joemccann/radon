@@ -140,18 +140,18 @@ HEALTH_DAEMON_TIMEOUT_SECS = 3.0
 # After the gateway's own IBC AutoRestartTime fires, the relogin transiently
 # looks EXACTLY like an api-hang (socat keeps 4001 listening, upstream dead)
 # for up to a few minutes. Counting those cycles is how the watchdog ended up
-# force-restarting a mid-relogin gateway at ~23:51 UTC nightly. Two windows:
-#   23:40-00:15  the CURRENT IBC default AutoRestartTime (11:45 PM session-
-#                local = 23:45 UTC) plus the 00:00 UTC session rollover
-#                re-detections. Remove this entry (via the env override)
-#                once radon-cloud pending/dur-08-compose.patch — which moves
-#                the restart to 09:05 UTC — is applied and clean nights are
-#                observed.
-#   09:00-09:30  the pending dur-08 patch's AUTO_RESTART_TIME=09:05 AM
-#                (= 09:05 UTC), pre-armed so the operator can apply the
-#                patch without a watchdog race.
+# force-restarting a mid-relogin gateway. Two windows:
+#   22:30-23:05  AUTO_RESTART_TIME 10:35 PM (22:35 UTC = 15:35 PT). Chosen so
+#                the weekly session-token expiry's occasional FULL login — a
+#                real 2FA push — lands while the operator is awake, including
+#                Saturday, and on weekdays AFTER the market close (21:00 UTC)
+#                and after cta-sync (21:30 UTC). NOT the naive "morning PT":
+#                that collides with RTH, and the prior 09:05 UTC slot fired
+#                its push at 02:05 PT — the operator slept, the push expired,
+#                and the 2026-07-05 storm followed (48 restarts / 48 pushes).
+#   23:40-00:15  the 00:00 UTC session rollover re-detections.
 QUIET_WINDOWS_ENV = "RADON_GW_RESTART_QUIET_WINDOWS_UTC"
-DEFAULT_QUIET_WINDOWS_UTC = "23:40-00:15,09:00-09:30"
+DEFAULT_QUIET_WINDOWS_UTC = "22:30-23:05,23:40-00:15"
 
 
 # --- Bounded sub-step execution ---------------------------------------------
@@ -470,18 +470,25 @@ def is_api_hang(state: GatewayState) -> bool:
     (port_listening would be False — Docker `restart: always` handles
     that).
 
-    ``upstream_dead`` is the decisive signal and OVERRIDES auth_state.
-    On 2026-06-15 a dead JVM acceptor produced a never-connecting pool
-    whose cached auth_state still read ``awaiting_2fa``; the watchdog
-    misclassified it as stuck-2FA and looped 15 gateway restarts (each
-    a real 2FA push) because restarting does nothing for a dead
-    upstream. When ``upstream_dead`` is True it is ALWAYS the api-hang —
-    a forced 2FA re-auth cannot fix a wedged acceptor. The genuine
-    stuck-2FA case (``is_stuck_awaiting_2fa``) has ``upstream_dead`` False
-    (container running + healthy, parked at the prompt).
+    ``upstream_dead`` is the decisive signal and overrides every
+    auth_state EXCEPT ``awaiting_2fa``. While the gateway is parked at
+    the 2FA push prompt the upstream API is legitimately not answering
+    handshakes, so ``upstream_dead`` reads True — but restarting there
+    cold-starts the gateway into a FULL login that mints a NEW push and
+    invalidates the pending one. On 2026-07-05 that loop fired 48
+    restarts / 48 pushes overnight; ``awaiting_2fa`` is therefore NEVER
+    the api-hang — the dedicated stand-down (no restart, one alert per
+    episode) owns it. This deliberately reverses the 2026-06-15 override
+    (dead JVM acceptor with cached ``awaiting_2fa`` misrouted to the
+    stuck-2FA push path, 15 restarts) WITHOUT reopening it: the genuine
+    stuck-2FA case (``is_stuck_awaiting_2fa``) still requires
+    ``upstream_dead`` False, so awaiting_2fa + upstream_dead now
+    restarts NOTHING instead of restarting the wrong thing.
     """
     if not state.port_listening:
         return False  # Port down → Docker restart policy handles it
+    if state.auth_state == "awaiting_2fa":
+        return False  # Stand-down owns awaiting_2fa (2026-07-05 storm)
     return state.upstream_dead
 
 
@@ -537,6 +544,15 @@ class WatchdogState:
     # a rolling hour with exponential backoff between them, so this branch
     # can NEVER loop 15× again (2026-06-15 incident).
     stuck_2fa_restart_history: list = field(default_factory=list)
+    # Consecutive watchdog-initiated api-hang gateway restarts with no
+    # intervening recovery to `authenticated`. Bounds the api-hang ladder
+    # (exponential backoff + hard cap): without it, degraded_count resets to
+    # 0 on every restart and 3 fresh 60s cycles re-arm the ladder — the
+    # ~6-min restart cadence of the 2026-07-05 storm (48 restarts/pushes).
+    api_hang_restart_count: int = 0
+    # True once the one-per-episode awaiting-2FA stand-down alert has been
+    # emitted; cleared when auth leaves `awaiting_2fa` (episode over).
+    awaiting_2fa_alerted: bool = False
     # Set True when THIS watchdog restarts the gateway (api-hang or stuck-2FA
     # path). When a later cycle observes auth back at `authenticated`, the
     # watchdog bounces radon-api ONCE to un-stick the ib_pool, then clears the
@@ -551,6 +567,8 @@ class WatchdogState:
             "last_outcome": self.last_outcome,
             "stuck_2fa_count": self.stuck_2fa_count,
             "stuck_2fa_restart_history": list(self.stuck_2fa_restart_history),
+            "api_hang_restart_count": self.api_hang_restart_count,
+            "awaiting_2fa_alerted": self.awaiting_2fa_alerted,
             "pending_pool_reconnect": self.pending_pool_reconnect,
         }
 
@@ -565,6 +583,8 @@ class WatchdogState:
             stuck_2fa_restart_history=[float(t) for t in history]
             if isinstance(history, list)
             else [],
+            api_hang_restart_count=int(data.get("api_hang_restart_count", 0)),
+            awaiting_2fa_alerted=bool(data.get("awaiting_2fa_alerted", False)),
             pending_pool_reconnect=bool(data.get("pending_pool_reconnect", False)),
         )
 
@@ -891,6 +911,45 @@ def _handle_stuck_awaiting_2fa(
     return state
 
 
+# --- Awaiting-2FA stand-down (2026-07-05 storm) --------------------------------
+
+
+def _stand_down_awaiting_2fa(
+    *,
+    state: "WatchdogState",
+    state_path: Path,
+    health: GatewayState,
+) -> "WatchdogState":
+    """The gateway is parked at the 2FA push prompt with a dead upstream
+    (e.g. the weekly session-token expiry turned the scheduled AutoRestartTime
+    into a FULL login). Any restart here cold-starts the gateway into another
+    full login — a NEW push that invalidates the pending one, the exact loop
+    of the 2026-07-05 storm. The watchdog stands down: no restart regardless
+    of push-lock state, hang counter already reset by the caller, ONE
+    service_health alert per episode (first cycle only; the error row latches
+    until recovery heals it). Normal monitoring resumes when auth leaves
+    ``awaiting_2fa``."""
+    first_observation = not state.awaiting_2fa_alerted
+    LOG.warning(
+        "gateway awaiting 2FA (upstream_dead=%s) — watchdog standing down: "
+        "no restart, approve the pending push on IBKR Mobile",
+        health.upstream_dead,
+    )
+    state.awaiting_2fa_alerted = True
+    state.last_outcome = "standing_down_awaiting_2fa"
+    save_state(state_path, state)
+    if first_observation:
+        record_service_health(
+            "error",
+            error_message=(
+                "IB Gateway parked awaiting 2FA (upstream dead) — watchdog "
+                "standing down (restarting would mint a new push); approve "
+                "the push on IBKR Mobile or force one from /admin"
+            ),
+        )
+    return state
+
+
 # --- DUR-08: JVM forensic capture on first hang detection --------------------
 
 # How many seconds of the cycle the forensic capture may consume. Must stay
@@ -1018,6 +1077,38 @@ def _handle_primary_sensor_down(
 
 # --- Api-hang ladder ----------------------------------------------------------
 
+# Bounded remediation for the api-hang restart (2026-07-05 storm): the ladder
+# resets degraded_count to 0 on every restart, so 3 fresh 60s cycles re-armed
+# it and it fired at a fixed ~6-min cadence forever (48 restarts / 48 pushes
+# in one night). Consecutive watchdog restarts without an intervening recovery
+# to `authenticated` now back off exponentially (base * 2**(n-1), capped) and
+# hard-stop at the cap — past it the watchdog alerts and stands down for the
+# operator. `api_hang_restart_count` persists in the state file so the bound
+# survives the oneshot process model, and resets on authenticated recovery.
+API_HANG_MAX_CONSECUTIVE_RESTARTS = 3
+API_HANG_BACKOFF_BASE_SECS = 360
+API_HANG_BACKOFF_CAP_SECS = 3600
+
+
+def _api_hang_restart_blocked(state: "WatchdogState", now: float) -> Optional[str]:
+    """Return a human-readable reason the api-hang restart is blocked this
+    cycle (consecutive cap or exponential backoff not yet elapsed), or None
+    if it may proceed."""
+    if state.api_hang_restart_count >= API_HANG_MAX_CONSECUTIVE_RESTARTS:
+        return (
+            f"api_hang_restart_cap:{state.api_hang_restart_count}_of_"
+            f"{API_HANG_MAX_CONSECUTIVE_RESTARTS}"
+        )
+    if state.api_hang_restart_count > 0:
+        backoff = min(
+            API_HANG_BACKOFF_BASE_SECS * (2 ** (state.api_hang_restart_count - 1)),
+            API_HANG_BACKOFF_CAP_SECS,
+        )
+        elapsed = now - state.last_restart_at
+        if elapsed < backoff:
+            return f"api_hang_backoff:{int(backoff - elapsed)}s_remaining"
+    return None
+
 
 def _advance_api_hang(
     *,
@@ -1080,7 +1171,36 @@ def _advance_api_hang(
         )
         return state
 
-    # Threshold hit — but before restarting, check the cross-process 2FA
+    # Threshold hit. Bounded remediation BEFORE any lock work or restart:
+    # consecutive restarts back off exponentially and hard-stop at the cap,
+    # so this ladder can never fire at a fixed cadence forever again
+    # (2026-07-05). Counter is held at threshold so the first cycle after
+    # the backoff clears acts immediately (no fresh warm-up).
+    blocked = _api_hang_restart_blocked(state, clock())
+    if blocked is not None:
+        capped = blocked.startswith("api_hang_restart_cap")
+        LOG.warning(
+            "api hang sustained %s cycles but watchdog restart %s — "
+            "standing down this cycle%s",
+            state.degraded_count,
+            blocked,
+            " (restarts exhausted; operator intervention required)"
+            if capped
+            else "",
+        )
+        state.degraded_count = threshold
+        state.last_outcome = blocked
+        save_state(state_path, state)
+        record_service_health(
+            "error" if capped else "ok",
+            error_message=(
+                f"api hang persists but watchdog restart {blocked}"
+                + (" — operator intervention required" if capped else "")
+            ),
+        )
+        return state
+
+    # Before restarting, check the cross-process 2FA
     # push lock. If another holder (typically scripts.api.ib_gateway) is
     # mid-2FA-push, restarting here would stack a second push on top —
     # the failure pattern that motivated this lock. Skip this cycle and
@@ -1136,6 +1256,9 @@ def _advance_api_hang(
     with _timed("restart"):
         ok = trigger_restart(restart_unit, dry_run=dry_run)
     state.last_restart_at = clock()
+    # Count the attempt toward the consecutive cap/backoff regardless of
+    # outcome; only recovery to `authenticated` re-arms the ladder.
+    state.api_hang_restart_count += 1
     state.degraded_count = 0  # Reset; let the next cycle observe recovery
     # Arm the one-shot radon-api bounce: once auth resolves back to
     # authenticated, the ib_pool may stay stuck disconnected until api is
@@ -1272,6 +1395,11 @@ def _run_cycle_steps(
             quiet=quiet,
         )
 
+    # An awaiting-2FA episode ends the moment auth reads anything else;
+    # re-arm the one-per-episode stand-down alert.
+    if health.auth_state != "awaiting_2fa":
+        state.awaiting_2fa_alerted = False
+
     if not is_api_hang(health):
         # api-hang counter resets unconditionally — it only counts the
         # `upstream_dead with authenticated auth_state` pattern, and
@@ -1285,6 +1413,14 @@ def _run_cycle_steps(
                 state.degraded_count,
             )
         state.degraded_count = 0
+
+        # awaiting_2fa + dead upstream: the gateway is parked at the push
+        # prompt (2026-07-05 storm). NO restart ladder owns this — stand
+        # down, alert once per episode, resume when auth resolves.
+        if health.auth_state == "awaiting_2fa" and health.upstream_dead:
+            return _stand_down_awaiting_2fa(
+                state=state, state_path=state_path, health=health
+            )
 
         # Stuck-awaiting-2FA branch: separate failure mode from api-hang.
         if is_stuck_awaiting_2fa(health):
@@ -1313,8 +1449,12 @@ def _run_cycle_steps(
             record_service_health("ok")
             return state
 
-        # Genuinely healthy — clear both counters.
+        # Genuinely healthy — clear both counters. Recovery to authenticated
+        # also re-arms the bounded api-hang remediation (consecutive-restart
+        # cap + backoff reset only here, never mid-episode).
         state.stuck_2fa_count = 0
+        if health.auth_state == "authenticated":
+            state.api_hang_restart_count = 0
 
         # One-shot pool reconnect: if a prior watchdog-initiated gateway
         # restart is now resolved (auth back to authenticated), the FastAPI

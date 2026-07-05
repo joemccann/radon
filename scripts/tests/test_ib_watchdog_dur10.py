@@ -11,10 +11,10 @@ Covers:
      restart costs a 2FA push. The fallback may only CONTINUE an
      existing api-hang episode when the handshake itself shows
      upstream-dead.
-  3. The scheduled-restart quiet windows (default 23:40-00:15 UTC for
-     the gateway's built-in 23:45 UTC auto-restart, 09:00-09:30 UTC for
-     the pending dur-08 patch's 09:05 restart): detections are logged
-     but degraded_count does not advance and no 2FA push fires.
+  3. The scheduled-restart quiet windows (default 22:30-23:05 UTC for
+     the AUTO_RESTART_TIME=22:35 UTC evening restart, 23:40-00:15 UTC
+     for the 00:00 UTC session rollover): detections are logged but
+     degraded_count does not advance and no 2FA push fires.
   4. service_health writes go through the bounded stdlib hrana
      transport (scripts/db/hrana_http), never sync libsql (db.writer) —
      the suspected source of the watchdog's post-refused 60s hangs.
@@ -243,19 +243,22 @@ class TestQuietWindowParsing:
         )
 
     def test_default_windows_cover_both_scheduled_restarts(self):
-        # 23:45 UTC (current IBC default) and 09:05 UTC (pending dur-08 patch).
+        # 22:35 UTC (AUTO_RESTART_TIME, Saturday-wakeable 15:35 PT) and the
+        # 00:00 UTC session rollover re-detections.
+        assert quiet_window_active(_utc(22, 35)) is True
         assert quiet_window_active(_utc(23, 45)) is True
-        assert quiet_window_active(_utc(9, 5)) is True
 
-    def test_first_window_wraps_midnight(self):
+    def test_rollover_window_wraps_midnight(self):
         assert quiet_window_active(_utc(23, 40)) is True
         assert quiet_window_active(_utc(0, 10)) is True
         assert quiet_window_active(_utc(0, 15)) is False  # exclusive end
 
     def test_outside_windows_is_inactive(self):
         assert quiet_window_active(NOON) is False
-        assert quiet_window_active(_utc(9, 30)) is False
-        assert quiet_window_active(_utc(8, 59)) is False
+        # The old 09:00-09:30 slot (02:05 PT push — 2026-07-05 storm) is gone.
+        assert quiet_window_active(_utc(9, 5)) is False
+        assert quiet_window_active(_utc(22, 29)) is False
+        assert quiet_window_active(_utc(23, 5)) is False  # exclusive end
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("RADON_GW_RESTART_QUIET_WINDOWS_UTC", "09:00-09:30")
@@ -281,7 +284,7 @@ class TestQuietWindowSuppression:
             ib_watchdog.QUIET_WINDOWS_ENV, ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
         )
 
-    @pytest.mark.parametrize("now", [_utc(23, 50), _utc(0, 5), _utc(9, 10)])
+    @pytest.mark.parametrize("now", [_utc(23, 50), _utc(0, 5), _utc(22, 40)])
     def test_hang_does_not_advance_counter_in_window(self, state_path, now):
         save_state(state_path, WatchdogState(degraded_count=1))
         result, restart, _, _ = _drive(state_path, _hang_payload(), now=now)
@@ -301,7 +304,7 @@ class TestQuietWindowSuppression:
         # No 2FA push may be initiated by the watchdog during the window.
         save_state(state_path, WatchdogState(stuck_2fa_count=2))
         result, restart, _, _ = _drive(
-            state_path, _stuck_2fa_payload(), now=_utc(9, 10)
+            state_path, _stuck_2fa_payload(), now=_utc(22, 40)
         )
         assert result.stuck_2fa_count == 2  # frozen
         restart.assert_not_called()
