@@ -178,6 +178,7 @@ Things that shipped in the last few weeks and are worth knowing about:
 | Topic | Doc |
 |-------|-----|
 | Developer runbook, gates, calculations, component cheat sheet | [`CLAUDE.md`](CLAUDE.md) |
+| Authoring toolchain map (agents, session tooling, verification, creative stack) | [`DEVELOPMENT.md`](DEVELOPMENT.md) |
 | Cloud architecture, two-mode deploy, Turso DB | [`docs/cloud-services.md`](docs/cloud-services.md) |
 | Background services, watchdogs, deploy flow, env vars | [`docs/operations.md`](docs/operations.md) |
 | CLI commands and test runners | [`docs/scripts-reference.md`](docs/scripts-reference.md) |
