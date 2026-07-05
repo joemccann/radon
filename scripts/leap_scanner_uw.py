@@ -326,8 +326,8 @@ def get_current_iv(ticker: str, _client: UWClient = None) -> tuple:
             return 0, 0
         if 'data' in data and data['data']:
             latest = data['data'][0]
-            iv = float(latest.get('volatility', 0)) * 100
-            rank = float(latest.get('iv_rank_1y', 0))
+            iv = float(latest.get('volatility') or 0) * 100
+            rank = float(latest.get('iv_rank_1y') or 0)
             return iv, rank
         return 0, 0
 
@@ -384,9 +384,9 @@ def get_leap_options(ticker: str, min_year: int = 2027, _client: UWClient = None
             strike = int(symbol[right_idx+1:]) / 1000
             expiry = f"20{date_str[:2]}-{date_str[2:4]}-{date_str[4:6]}"
             
-            iv = float(c.get('implied_volatility', 0)) * 100
-            volume = int(c.get('volume', 0))
-            oi = int(c.get('open_interest', 0))
+            iv = float(c.get('implied_volatility') or 0) * 100
+            volume = int(c.get('volume') or 0)
+            oi = int(c.get('open_interest') or 0)
             
             if iv == 0:
                 continue
