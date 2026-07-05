@@ -201,8 +201,8 @@ def _fetch_uw_iv(ticker: str, client: UWClient) -> Tuple[float, float]:
         data = client.get_iv_rank(ticker)
         if "data" in data and data["data"]:
             latest = data["data"][0]
-            iv = float(latest.get("volatility", 0)) * 100
-            rank = float(latest.get("iv_rank_1y", 0))
+            iv = float(latest.get("volatility") or 0) * 100
+            rank = float(latest.get("iv_rank_1y") or 0)
             return iv, rank
     except UWAPIError:
         pass
@@ -235,10 +235,10 @@ def _fetch_uw_leaps(ticker: str, client: UWClient, min_year: int = 2027) -> List
             if sym[right_idx] != "C":
                 continue
             strike = int(sym[right_idx + 1 :]) / 1000
-            iv = float(c.get("implied_volatility", 0)) * 100
+            iv = float(c.get("implied_volatility") or 0) * 100
             if iv == 0:
                 continue
-            results.append({"strike": strike, "iv": iv, "oi": int(c.get("open_interest", 0))})
+            results.append({"strike": strike, "iv": iv, "oi": int(c.get("open_interest") or 0)})
         except (ValueError, IndexError):
             continue
     return results

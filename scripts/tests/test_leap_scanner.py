@@ -12,6 +12,8 @@ from leap_scanner_uw import (
     calculate_hv,
     approximate_delta,
     build_json_payload,
+    get_current_iv,
+    get_leap_options,
     resolve_explicit_tickers,
 )
 
@@ -217,3 +219,62 @@ class TestFindStrikesByDelta:
         result = find_strikes_by_delta(options, [0.50], 100)
         assert 0.50 in result
         assert result[0.50]["strike"] == 105
+
+
+# ── null-tolerant UW field coercion (2026-07-05 regression) ─────────
+# UW returns keys PRESENT with null values (ETF chains, weekends), so
+# dict.get(key, 0) hands None to float()/int() and the TypeError is not
+# caught by the loop's (ValueError, IndexError) handler - it killed the
+# whole ticker ("Error scanning XLU: float() argument ... 'NoneType'").
+
+class _FakeUW:
+    def __init__(self, contracts=None, iv_data=None):
+        self._contracts = contracts
+        self._iv_data = iv_data
+
+    def get_option_contracts(self, ticker):
+        return {"data": self._contracts or []}
+
+    def get_iv_rank(self, ticker):
+        return {"data": self._iv_data or []}
+
+
+class TestNullUwFields:
+    def test_null_implied_vol_contract_skipped_not_fatal(self):
+        contracts = [
+            {  # null IV: must be skipped, not raise TypeError
+                "option_symbol": "XLU   270115C00045000",
+                "implied_volatility": None,
+                "volume": None,
+                "open_interest": None,
+            },
+            {  # healthy contract survives
+                "option_symbol": "XLU   270115C00050000",
+                "implied_volatility": 0.14,
+                "volume": 12,
+                "open_interest": 340,
+            },
+        ]
+        leaps = get_leap_options("XLU", min_year=2027, _client=_FakeUW(contracts=contracts))
+        assert [l.strike for l in leaps] == [50.0]
+
+    def test_null_volume_and_oi_coerce_to_zero(self):
+        contracts = [
+            {
+                "option_symbol": "XLU   270115C00050000",
+                "implied_volatility": 0.14,
+                "volume": None,
+                "open_interest": None,
+            },
+        ]
+        leaps = get_leap_options("XLU", min_year=2027, _client=_FakeUW(contracts=contracts))
+        assert len(leaps) == 1
+        assert leaps[0].volume == 0
+        assert leaps[0].oi == 0
+
+    def test_null_iv_rank_fields_return_zero(self):
+        iv, rank = get_current_iv(
+            "XLU", _client=_FakeUW(iv_data=[{"volatility": None, "iv_rank_1y": None}])
+        )
+        assert iv == 0
+        assert rank == 0
