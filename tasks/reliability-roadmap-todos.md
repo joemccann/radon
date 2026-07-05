@@ -1,6 +1,6 @@
 # Reliability Roadmap — Execution Todos
 
-Source: `tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/proposal per item).
+Source: `radon-cloud:security-archive/tasks/reliability-report-2026-06-12.html` § 10 (full problem/evidence/proposal per item).
 
 > **⛔ EXECUTION GATE: do not start implementation before market close — 16:00 ET Friday 2026-06-12.**
 > Several NOW items touch live prod units (radon-api, watchdog, deploy gate, systemd config) and must not run during RTH.
