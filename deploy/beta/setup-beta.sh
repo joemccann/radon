@@ -116,7 +116,7 @@ Remaining (run repo/turso steps AS radon; install sudoers AS root):
   # first deploy (as radon):
   sudo -u radon -H bash $BETA_DIR/deploy/beta/deploy-beta.sh
 
-Already done: Vercel DNS (beta A 5.78.148.38), Clerk satellite (beta.radon.run).
+Already done: Vercel DNS (beta A <prod-host>), Clerk satellite (beta.radon.run).
 Still required before deploy-beta.sh yields a working app: the Clerk-satellite
 app-code wiring + RADON_BETA_* IB guards (see README).
 NEXT
