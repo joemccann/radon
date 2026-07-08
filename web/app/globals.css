@@ -14798,7 +14798,6 @@ body[data-mobile="true"] .scanner-page-shell {
 body[data-mobile="true"] .scanner-mode-tabs {
   width: calc(100% - 32px);
   margin: 8px 16px 0;
-  gap: 2px;
   flex-wrap: nowrap;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
