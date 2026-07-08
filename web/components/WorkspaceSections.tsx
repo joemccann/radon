@@ -21,6 +21,8 @@ import {
   Wrench,
   XCircle,
 } from "lucide-react";
+import { ScannerModeTabs } from "./ScannerModeTabs";
+import { SigMeter } from "./SigMeter";
 import SectionEmptyState from "./SectionEmptyState";
 import type { BlotterTrade, DiscoverCandidate, ExecutedOrder, FlowAnalysisPosition, OpenOrder, OrdersData, PortfolioData, PortfolioPosition, ScannerSignal, TradeEntry, WorkspaceSection } from "@/lib/types";
 import { useOrderActions } from "@/lib/OrderActionsContext";
@@ -1534,62 +1536,17 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
   };
 
   const modeTabs = (
-    <div className="scanner-mode-tabs" role="tablist" aria-label="Scanner mode">
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "flow"}
-        className={`scanner-mode-tab${mode === "flow" ? " scanner-mode-tab--active" : ""}`}
-        onClick={() => setMode("flow")}
-      >
-        Flow Signals
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "discover"}
-        className={`scanner-mode-tab${mode === "discover" ? " scanner-mode-tab--active" : ""}`}
-        onClick={() => setMode("discover")}
-      >
-        Discover
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "theta"}
-        className={`scanner-mode-tab${mode === "theta" ? " scanner-mode-tab--active" : ""}`}
-        onClick={() => setMode("theta")}
-      >
-        Theta Harvester
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "strength"}
-        className={`scanner-mode-tab${mode === "strength" ? " scanner-mode-tab--active" : ""}`}
-        onClick={() => setMode("strength")}
-      >
-        7-Step Strength
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "leap"}
-        className={`scanner-mode-tab${mode === "leap" ? " scanner-mode-tab--active" : ""}`}
-        onClick={() => setMode("leap")}
-      >
-        LEAP
-      </button>
-      <button
-        type="button"
-        role="tab"
-        aria-selected={mode === "garch"}
-        className={`scanner-mode-tab${mode === "garch" ? " scanner-mode-tab--active" : ""}`}
-        onClick={() => setMode("garch")}
-      >
-        GARCH
-      </button>
-    </div>
+    <ScannerModeTabs
+      mode={mode}
+      onModeChange={setMode}
+      counts={{
+        flow: data ? data.signals_found ?? 0 : undefined,
+        theta: theta.data ? theta.data.theta_harvest_count ?? 0 : undefined,
+        strength: strength.data ? strength.data.confirmed_strength_count ?? 0 : undefined,
+        leap: leap.data ? (leap.data.results ?? []).filter((r) => r.is_mispriced).length : undefined,
+        garch: garch.data ? (garch.data.pairs ?? []).filter((p) => p.gates_passed).length : undefined,
+      }}
+    />
   );
 
   const signalClass = (signal: string) => {
@@ -1907,7 +1864,10 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
                     <td><TickerLink ticker={row.ticker} /></td>
                     <td><span className={signalClass(row.signal)}>{row.signal}</span></td>
                     <td><span className={`pill ${dirClass(row.direction)}`}>{row.direction}</span></td>
-                    <td className="right">{row.score.toFixed(1)}</td>
+                    <td className="right">
+                      {row.score.toFixed(1)}
+                      <SigMeter value={row.score} tone={row.direction === "ACCUMULATION" ? "pos" : row.direction === "DISTRIBUTION" ? "neg" : "mut"} />
+                    </td>
                     <td className="right">{row.strength.toFixed(1)}</td>
                     <td className="right">{row.buy_ratio != null ? `${(row.buy_ratio * 100).toFixed(1)}%` : "—"}</td>
                     <td className="right">{row.sustained_days > 0 ? `${row.sustained_days}d` : "—"}</td>

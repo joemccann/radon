@@ -5,6 +5,7 @@ import { Loader2, Telescope } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
+import { SigMeter } from "./SigMeter";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
 import type { LeapData, LeapResult } from "@/lib/types";
@@ -141,7 +142,10 @@ export default function LeapScanner({
                     </td>
                     <td className="right">{r.price != null ? `$${fmt(r.price, 2)}` : "---"}</td>
                     <td className="right">{fmt(r.current_iv)}</td>
-                    <td className="right">{fmt(r.iv_rank)}</td>
+                    <td className="right">
+                      {fmt(r.iv_rank)}
+                      <SigMeter value={r.iv_rank ?? null} tone={r.is_mispriced ? "pos" : "mut"} />
+                    </td>
                     <td className="right">{fmt(r.hv_20)}</td>
                     <td className="right">{fmt(r.hv_252)}</td>
                     <td className="right">{r.leap_count}</td>

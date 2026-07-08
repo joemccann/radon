@@ -10346,6 +10346,46 @@ tr {
   background: color-mix(in srgb, var(--signal-core) 7%, transparent);
 }
 
+/* Per-tab result-count chip: signal presence reads across modes at a glance. */
+.scanner-mode-tab__count {
+  margin-left: 7px;
+  padding: 1px 5px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 3px;
+  border: 1px solid var(--line-grid);
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.scanner-mode-tab__count[data-hot="true"] {
+  color: var(--positive);
+  border-color: color-mix(in srgb, var(--positive) 30%, transparent);
+  background: color-mix(in srgb, var(--positive) 10%, transparent);
+}
+
+/* Inline table meter: proportional fill so 0-100 readings scan visually. */
+.sig-meter {
+  display: inline-block;
+  vertical-align: middle;
+  width: 44px;
+  height: 4px;
+  margin-left: 8px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--line-grid) 60%, transparent);
+  overflow: hidden;
+}
+
+.sig-meter i {
+  display: block;
+  height: 100%;
+  border-radius: 2px;
+}
+
+.sig-meter--pos i { background: var(--positive); }
+.sig-meter--neg i { background: var(--negative); }
+.sig-meter--mut i { background: var(--text-muted); }
+
 .theta-harvester__meta {
   display: flex;
   align-items: center;
