@@ -37,10 +37,12 @@ function makePortfolio(lastSync = "2026-05-07T12:00:00Z") {
 function mockDb({
   portfolio = makePortfolio(),
   journalRows = [],
+  contractRows = [],
   journalThrows = false,
 }: {
   portfolio?: Record<string, unknown> | null;
   journalRows?: Array<Record<string, string>>;
+  contractRows?: Array<Record<string, unknown>>;
   journalThrows?: boolean;
 } = {}) {
   mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
@@ -53,6 +55,10 @@ function mockDb({
     }
     if (/FROM\s+journal/i.test(sql)) {
       if (journalThrows) throw new Error("WAL locked");
+      // The contract-open-dates query is the one selecting the aliased
+      // opt_right / contracts columns; the trade_log_dates query is the MAX
+      // aggregate. Return the shape each expects.
+      if (/opt_right/i.test(sql)) return { rows: contractRows };
       return { rows: journalRows };
     }
     return { rows: [] };
@@ -103,6 +109,26 @@ describe("GET /api/portfolio — trade_log_dates source", () => {
     expect(res.status).toBe(200);
     expect(body.trade_log_dates).toEqual({});
     expect(mockReadFile).not.toHaveBeenCalled();
+  });
+
+  it("maps the aliased opt_right column back to right and derives contract_open_dates", async () => {
+    // Guards the route-level column-mapping seam: the query aliases the SQL
+    // reserved word `right` to opt_right, and the builder reads `right`. If the
+    // route fails to remap it, every key resolves null and the map is empty
+    // (the exact no-op that shipped and was caught only in prod).
+    mockDb({
+      contractRows: [
+        { ticker: "MSFT", expiry: "20260717", opt_right: "C", strike: 410, action: "SELL_TO_OPEN", contracts: 25, date: "2026-07-02" },
+        { ticker: "MSFT", expiry: "20260717", opt_right: "C", strike: 410, action: "BUY_OPTION", contracts: 25, date: "2026-07-08" },
+      ],
+    });
+
+    const { GET } = await import("../app/api/portfolio/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.contract_open_dates).toEqual({ "MSFT|20260717|C|410": "2026-07-02" });
   });
 
   it("returns an empty trade_log_dates map when the journal query throws", async () => {
