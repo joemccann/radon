@@ -10,8 +10,11 @@ vi.mock("@clerk/nextjs", () => ({
 
 import DemoWelcomeModal, { formatExpiryEt } from "@/components/DemoWelcomeModal";
 
-const FUTURE = "2026-07-07T16:00:00-04:00";
-const PAST = "2026-01-05T16:00:00-05:00";
+// Window-relative, never hardcoded: a fixed "future" date rots into the
+// past and silently flips the active-trial tests to the expired path
+// (exactly what happened when 2026-07-07 passed).
+const FUTURE = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString();
+const PAST = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
 
 function clerkUser(publicMetadata: Record<string, unknown> | undefined, id = "user_1") {
   return { isLoaded: true, user: { id, publicMetadata } };
