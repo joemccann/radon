@@ -142,7 +142,24 @@ async function loadContractOpenDates(): Promise<Record<string, string>> {
       `,
       args: [],
     }, { label: "portfolio contract open date", timeoutMs: DB_READ_TIMEOUT_MS });
-    const rows = result.rows as unknown as JournalEntryRow[];
+    // `right` is a SQL reserved word, so it is aliased opt_right in the query;
+    // map it back to the JournalEntryRow field the builder reads. Coerce
+    // contracts to a number in case the driver hands it back as text.
+    const rows: JournalEntryRow[] = result.rows.map((row) => {
+      const r = row as unknown as {
+        ticker?: string; expiry?: string; opt_right?: string;
+        strike?: number | string; action?: string; contracts?: number | string; date?: string;
+      };
+      return {
+        ticker: r.ticker,
+        expiry: r.expiry,
+        right: r.opt_right,
+        strike: r.strike,
+        action: r.action,
+        contracts: r.contracts == null ? null : Number(r.contracts),
+        date: r.date,
+      };
+    });
     return buildContractEntryDates(rows);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
