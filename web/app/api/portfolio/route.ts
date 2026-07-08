@@ -8,6 +8,7 @@ import {
 import { resetDb } from "@/lib/db";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
+import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
 
 // Disable Next.js static caching: this handler reads live Turso state.
 // Without this, the framework freezes the first response and serves stale
@@ -114,6 +115,55 @@ async function loadTradeLogDates(): Promise<Record<string, string>> {
   return {};
 }
 
+/** Load per-contract opening-episode date.
+ *
+ * Keyed `SYMBOL|EXPIRY|RIGHT|STRIKE` (the conId-free journal form the share
+ * card reconstructs). `buildContractEntryDates` walks each contract's fills by
+ * signed net quantity and returns the date its current open episode began — the
+ * position's true entry day even once it is fully closed and gone from the
+ * portfolio, which the per-ticker trade_log_dates MAX cannot give. Correct
+ * across re-opens, duplicated session/Flex rows, and out-of-order fills.
+ */
+async function loadContractOpenDates(): Promise<Record<string, string>> {
+  try {
+    const result = await dbExecute({
+      sql: `
+        SELECT
+          json_extract(payload, '$.ticker')    AS ticker,
+          json_extract(payload, '$.expiry')    AS expiry,
+          json_extract(payload, '$.right')     AS opt_right,
+          json_extract(payload, '$.strike')    AS strike,
+          json_extract(payload, '$.action')    AS action,
+          json_extract(payload, '$.contracts') AS contracts,
+          COALESCE(filled_at, json_extract(payload, '$.date')) AS date
+        FROM journal
+        WHERE json_extract(payload, '$.right')  IS NOT NULL
+          AND json_extract(payload, '$.strike') IS NOT NULL
+      `,
+      args: [],
+    }, { label: "portfolio contract open date", timeoutMs: DB_READ_TIMEOUT_MS });
+    const rows = result.rows as unknown as JournalEntryRow[];
+    return buildContractEntryDates(rows);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.warn(`[Portfolio] contract_open_dates journal query failed: ${message}`);
+    return {};
+  }
+}
+
+/** The two journal-derived entry-date maps the share card consults, read
+ *  concurrently and cached independently. */
+async function loadPortfolioEntryDates(): Promise<{
+  trade_log_dates: Record<string, string>;
+  contract_open_dates: Record<string, string>;
+}> {
+  const [trade_log_dates, contract_open_dates] = await Promise.all([
+    cachedRead("portfolio:tradeLogDates", TRADE_LOG_DATES_CACHE_TTL_MS, loadTradeLogDates),
+    cachedRead("portfolio:contractOpenDates", TRADE_LOG_DATES_CACHE_TTL_MS, loadContractOpenDates),
+  ]);
+  return { trade_log_dates, contract_open_dates };
+}
+
 let bgSyncInFlight = false;
 let bgSyncLastTriggeredMs = 0;
 const BG_SYNC_MIN_INTERVAL_MS = 60_000;
@@ -175,12 +225,8 @@ async function portfolioResponseFromSnapshot(
   requestId: string,
   warning?: string,
 ): Promise<Response> {
-  const tradeLogDates = await cachedRead(
-    "portfolio:tradeLogDates",
-    TRADE_LOG_DATES_CACHE_TTL_MS,
-    loadTradeLogDates,
-  );
-  const response = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
+  const entryDates = await loadPortfolioEntryDates();
+  const response = NextResponse.json({ ...snapshot.data, ...entryDates });
   if (warning) {
     response.headers.set("X-Sync-Warning", warning);
     response.headers.set("X-Portfolio-Source", "ib-live-fallback");
@@ -249,8 +295,8 @@ export async function POST(): Promise<Response> {
   const requestId = getRequestId();
   try {
     const data = await radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000 });
-    const tradeLogDates = await loadTradeLogDates();
-    const response = NextResponse.json({ ...data, trade_log_dates: tradeLogDates });
+    const entryDates = await loadPortfolioEntryDates();
+    const response = NextResponse.json({ ...data, ...entryDates });
     return setNoStoreResponseHeaders(response, requestId);
   } catch {
     let snapshot: PortfolioSnapshot | null = null;
@@ -270,8 +316,8 @@ export async function POST(): Promise<Response> {
     }
     if (snapshot) {
       console.warn("[Portfolio] Sync failed, serving latest Turso snapshot");
-      const tradeLogDates = await loadTradeLogDates();
-      const res = NextResponse.json({ ...snapshot.data, trade_log_dates: tradeLogDates });
+      const entryDates = await loadPortfolioEntryDates();
+      const res = NextResponse.json({ ...snapshot.data, ...entryDates });
       res.headers.set("X-Sync-Warning", "IB sync failed - serving latest Turso snapshot");
       return setNoStoreResponseHeaders(res, requestId);
     }
