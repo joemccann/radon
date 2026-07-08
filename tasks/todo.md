@@ -13,6 +13,9 @@ Proposal: `tasks/mobile-order-builder-ux-proposal.md`
 - Current mobile path is discovery-heavy (3 taps/leg) and skips desktop safety (confirm, `okToSubmit`, open/close honesty, error formatting).
 - Recommended ship order: safety parity first, then quote chips + strip preview, then long-press quick-add.
 
+## Follow-up (this branch)
+- [x] Add `web/vercel.json` Ignored Build Step for `radon-demo` (watch `web/` + `lib/tools`) so docs-only PRs do not deploy demo.radon.run.
+
 ---
 
 # Task: Margin Debt Acceleration Indicator (FINRA)

@@ -65,6 +65,8 @@ The demo reads the vars below. They live in **two places**: `web/.env` (local de
 
 **Topology revised from the original plan (2026-06-27):** the **frontend runs on Vercel** (`demo.radon.run`, project `radon-demo`, root `web/`) behind **Vercel WAF + rate-limiting** (100 req/min/IP challenge, 1000 req/min/IP deny) — replacing the Cloudflare layer described above. Only **FastAPI + the relay** run on the Hetzner VM; the Vercel frontend calls the VM backend over the public internet via `RADON_API_URL`, so the backend authenticates the Clerk JWT (no localhost-trust bypass). The managed OWASP WAF ruleset is Enterprise-only and not enabled on Pro.
 
+**Ignored Build Step:** `web/vercel.json` → `scripts/vercel-ignore-build.mjs` skips the `radon-demo` build unless `web/` or `lib/tools` changed (the `@tools` webpack alias). Docs/tasks/site-only pushes cancel with "Canceled by Ignored Build Step", matching the marketing `site/` project. Defaults to continuing the build if the diff cannot be determined.
+
 ## Build phases
 
 **Operator-provisioned infra (you; I provide configs/checklists):**
