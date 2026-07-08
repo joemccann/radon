@@ -14790,20 +14790,34 @@ body[data-mobile="true"] .scanner-page-shell {
   gap: 8px;
 }
 
+/* Six tabs never fit a phone's width, so they scroll horizontally rather than
+   squeezing to fit — squeezing wrapped the multi-word labels ("THETA
+   HARVESTER", "7-STEP STRENGTH") onto two lines and overlapped them. Natural
+   width + single line + scroll keeps every label and count chip intact; the
+   partial tab at the trailing edge signals there is more to scroll. */
 body[data-mobile="true"] .scanner-mode-tabs {
   width: calc(100% - 32px);
   margin: 8px 16px 0;
+  gap: 2px;
+  flex-wrap: nowrap;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  scroll-snap-type: x proximity;
+  scrollbar-width: none;
+}
+
+body[data-mobile="true"] .scanner-mode-tabs::-webkit-scrollbar {
+  display: none;
 }
 
 body[data-mobile="true"] .scanner-mode-tab {
-  flex: 1 1 0;
+  flex: 0 0 auto;
   min-height: 44px;
-  padding: 0 8px;
+  padding: 0 14px;
   font-size: 10px;
-  line-height: 1.15;
-  white-space: normal;
+  line-height: 1;
+  white-space: nowrap;
+  scroll-snap-align: start;
 }
 
 body[data-mobile="true"] .theta-harvester {

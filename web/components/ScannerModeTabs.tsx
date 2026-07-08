@@ -1,3 +1,7 @@
+"use client";
+
+import { useEffect, useRef } from "react";
+
 export type ScannerMode = "flow" | "discover" | "theta" | "strength" | "leap" | "garch";
 
 type ScannerTabCounts = Partial<Record<ScannerMode, number>>;
@@ -27,17 +31,28 @@ const TABS: { mode: ScannerMode; label: string }[] = [
  * without clicking through them.
  */
 export function ScannerModeTabs({ mode, onModeChange, counts }: ScannerModeTabsProps) {
+  const activeRef = useRef<HTMLButtonElement | null>(null);
+
+  // When the strip scrolls horizontally (phone), keep the selected tab in view
+  // so arriving on e.g. ?mode=garch does not leave the active tab off-screen.
+  // No-op on desktop where the strip never overflows.
+  useEffect(() => {
+    activeRef.current?.scrollIntoView?.({ inline: "center", block: "nearest" });
+  }, [mode]);
+
   return (
     <div className="scanner-mode-tabs" role="tablist" aria-label="Scanner mode">
       {TABS.map((tab) => {
         const count = counts[tab.mode];
+        const isActive = mode === tab.mode;
         return (
           <button
             key={tab.mode}
+            ref={isActive ? activeRef : undefined}
             type="button"
             role="tab"
-            aria-selected={mode === tab.mode}
-            className={`scanner-mode-tab${mode === tab.mode ? " scanner-mode-tab--active" : ""}`}
+            aria-selected={isActive}
+            className={`scanner-mode-tab${isActive ? " scanner-mode-tab--active" : ""}`}
             onClick={() => onModeChange(tab.mode)}
           >
             {tab.label}
