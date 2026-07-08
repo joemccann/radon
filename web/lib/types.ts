@@ -212,8 +212,13 @@ export type PortfolioData = {
   undefined_risk_count: number;
   avg_kelly_optimal: number | null;
   account_summary?: AccountSummary;
-  /** Ticker -> earliest journal trade date for entry time on share cards. */
+  /** Ticker -> LATEST journal trade date. Coarse entry-time fallback for share
+   *  cards; only usable when it predates the exit. */
   trade_log_dates?: Record<string, string>;
+  /** `SYMBOL|EXPIRY|RIGHT|STRIKE` -> earliest opening-fill date. Per-contract
+   *  entry day for share-card hold time, correct even after a position is fully
+   *  closed and gone from the portfolio. */
+  contract_open_dates?: Record<string, string>;
 };
 
 export type PerformanceSeriesPoint = {

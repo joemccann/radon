@@ -165,6 +165,32 @@ function executedOptionContractKey(fill: ExecutedOrder): string | null {
   return `${symbol}|${expiry}|${right}|${strike}`;
 }
 
+/** Earliest per-contract opening-fill date across a group's option legs, from
+ *  the `contract_open_dates` map (keyed `SYMBOL|EXPIRY|RIGHT|STRIKE`, the
+ *  conId-free form the journal can key on). The earliest fill of any contract
+ *  is by definition its opening fill, so this is the position's true entry day
+ *  even after it is fully closed and gone from the portfolio. Null when no leg
+ *  has a known open date. */
+function groupEarliestOpenDate(
+  group: PositionFillGroup,
+  contractOpenDates: Record<string, string> | undefined,
+): string | null {
+  if (!contractOpenDates) return null;
+  let earliest: string | null = null;
+  for (const fill of group.fills) {
+    if (fill.contract.secType !== "OPT") continue;
+    const symbol = fill.contract.symbol?.toUpperCase();
+    const expiry = fill.contract.expiry?.replace(/-/g, "");
+    const strike = fill.contract.strike;
+    const rightRaw = fill.contract.right;
+    const right = rightRaw === "CALL" ? "C" : rightRaw === "PUT" ? "P" : rightRaw;
+    if (!symbol || !expiry || !right || strike == null) continue;
+    const opened = contractOpenDates[`${symbol}|${expiry}|${right}|${strike}`];
+    if (opened && (earliest == null || opened < earliest)) earliest = opened;
+  }
+  return earliest;
+}
+
 function resolveOpeningLegBasis(
   group: PositionFillGroup,
   allGroups?: PositionFillGroup[],
@@ -308,6 +334,7 @@ export function positionGroupShareData(
   allGroups?: PositionFillGroup[],
   portfolioPositions?: readonly PortfolioPosition[],
   tradeLogDates?: Record<string, string>,
+  contractOpenDates?: Record<string, string>,
 ): SharePnlData {
   let pnlPct: number | null = null;
   let entryPrice: number | null = null;
@@ -413,6 +440,20 @@ export function positionGroupShareData(
 
   // Exit time is the closing group's time
   const exitTime = group.isClosing ? group.time : null;
+
+  // Per-contract opening-fill date: the last honest entry source for a
+  // position opened days ago and fully closed today. It is gone from the
+  // portfolio, its opening fills are outside the executed-orders lookback, and
+  // the per-ticker trade_log_dates map below carries only the close date. The
+  // realized-P&L identity above recovers the entry PRICE but no time, so
+  // without this the share card silently loses its hold duration. Guard so a
+  // stale/bad open date can never post-date the exit.
+  if (entryTime == null && contractOpenDates) {
+    const opened = groupEarliestOpenDate(group, contractOpenDates);
+    if (opened && (exitTime == null || isEarlierLocalDay(opened, exitTime))) {
+      entryTime = opened;
+    }
+  }
 
   // Fallback entry time from trade_log for fully-closed positions. The map
   // holds each ticker's LATEST journal date, so once the closing fill is
@@ -3042,7 +3083,7 @@ function OrdersSections({
                   const isExpanded = expandedGroups.has(group.id);
                   const isCancelled = group.fills[0]?.side === "CANCELLED";
                   const shareData = group.isClosing && group.totalPnL != null
-                    ? positionGroupShareData(group, positionGroups, portfolio?.positions, portfolio?.trade_log_dates)
+                    ? positionGroupShareData(group, positionGroups, portfolio?.positions, portfolio?.trade_log_dates, portfolio?.contract_open_dates)
                     : null;
                   return (
                     <React.Fragment key={group.id}>

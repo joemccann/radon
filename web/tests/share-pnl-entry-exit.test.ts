@@ -433,3 +433,82 @@ describe("SharePnlData type", () => {
     expect(data.exitTime).toBe("2026-03-18T07:03:53-07:00");
   });
 });
+
+describe("Share PnL entry time - per-contract opening-fill fallback", () => {
+  // A position opened days ago and fully closed today is gone from the
+  // portfolio, its opening fills are outside the executed-orders lookback, and
+  // the per-ticker trade_log_dates map carries only the (rejected) close date.
+  // The per-contract contract_open_dates map is the last honest entry source;
+  // without it the share card loses its hold time entirely.
+  it("resolves entry time from contract_open_dates for a fully-closed same-day-journaled position", () => {
+    const closingGroup: PositionFillGroup = {
+      id: "msft-close",
+      symbol: "MSFT",
+      description: "Closed MSFT (Short $410 Call)",
+      isClosing: true,
+      totalQuantity: 25,
+      netPrice: 1.37,
+      totalCommission: 12.5,
+      totalPnL: 8150,
+      time: "2026-07-08T12:42:02-07:00",
+      fills: [
+        makeOptionFill({
+          contract: { symbol: "MSFT", secType: "OPT", strike: 410, right: "C", expiry: "2026-07-17", conId: 3001 },
+          side: "BOT",
+          quantity: 25,
+          avgPrice: 1.37,
+          realizedPNL: 8150,
+          time: "2026-07-08T12:42:02-07:00",
+        }),
+      ],
+    };
+
+    // trade_log_dates only knows the LATEST journal date (the close) -> rejected.
+    // contract_open_dates knows the per-contract opening fill.
+    const data = positionGroupShareData(
+      closingGroup,
+      [closingGroup],
+      [],
+      { MSFT: "2026-07-08" },
+      { "MSFT|20260717|C|410": "2026-07-02" },
+    );
+
+    expect(data.entryTime).toBe("2026-07-02");
+    expect(data.exitTime).toBe("2026-07-08T12:42:02-07:00");
+  });
+
+  it("never lets an opening date post-date the exit", () => {
+    const closingGroup: PositionFillGroup = {
+      id: "msft-close-2",
+      symbol: "MSFT",
+      description: "Closed MSFT (Short $410 Call)",
+      isClosing: true,
+      totalQuantity: 25,
+      netPrice: 1.37,
+      totalCommission: 12.5,
+      totalPnL: 8150,
+      time: "2026-07-08T12:42:02-07:00",
+      fills: [
+        makeOptionFill({
+          contract: { symbol: "MSFT", secType: "OPT", strike: 410, right: "C", expiry: "2026-07-17", conId: 3001 },
+          side: "BOT",
+          quantity: 25,
+          avgPrice: 1.37,
+          realizedPNL: 8150,
+          time: "2026-07-08T12:42:02-07:00",
+        }),
+      ],
+    };
+
+    // A stale/bad open date on the exit's own day must not be used.
+    const data = positionGroupShareData(
+      closingGroup,
+      [closingGroup],
+      [],
+      undefined,
+      { "MSFT|20260717|C|410": "2026-07-08" },
+    );
+
+    expect(data.entryTime).toBeNull();
+  });
+});
