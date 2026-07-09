@@ -64,7 +64,7 @@ export type PiResponse = {
   error?: string;
 };
 
-export type WorkspaceSection = "dashboard" | "flow-analysis" | "portfolio" | "performance" | "orders" | "scanner" | "discover" | "journal" | "regime" | "cta" | "alerts" | "workflow" | "ticker-detail" | "admin" | "profile";
+export type WorkspaceSection = "dashboard" | "flow-analysis" | "portfolio" | "performance" | "orders" | "scanner" | "discover" | "watchlist" | "journal" | "regime" | "cta" | "alerts" | "workflow" | "ticker-detail" | "admin" | "profile";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 

@@ -4,7 +4,7 @@ import WorkspaceShell from "@/components/WorkspaceShell";
 // Static routes that Next.js already handles — defense-in-depth guard
 const RESERVED = new Set([
   "api", "dashboard", "flow-analysis", "portfolio", "performance",
-  "orders", "scanner", "discover", "journal", "regime", "cta", "kit",
+  "orders", "scanner", "discover", "watchlist", "journal", "regime", "cta", "kit",
   "internals",
   "_next", "favicon",
 ]);

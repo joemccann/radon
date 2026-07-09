@@ -137,6 +137,7 @@ describe("navItems", () => {
     expect(routeMap.get("orders")).toBe("/orders");
     expect(routeMap.get("scanner")).toBe("/scanner");
     expect(routeMap.get("discover")).toBe("/discover");
+    expect(routeMap.get("watchlist")).toBe("/watchlist");
     expect(routeMap.get("journal")).toBe("/journal");
   });
 
@@ -158,12 +159,12 @@ describe("navItems", () => {
     expect(new Set(hrefs).size).toBe(hrefs.length);
   });
 
-  it("orders Flow Analysis directly below Scanner in the visible nav", () => {
+  it("orders Watchlist directly below Scanner in the visible nav", () => {
     const routes = navItems.filter((n) => !n.hidden).map((n) => n.route);
     const scannerIdx = routes.indexOf("scanner");
-    const flowIdx = routes.indexOf("flow-analysis");
+    const watchlistIdx = routes.indexOf("watchlist");
     expect(scannerIdx).toBeGreaterThanOrEqual(0);
-    expect(flowIdx).toBe(scannerIdx + 1);
+    expect(watchlistIdx).toBe(scannerIdx + 1);
   });
 
   it("locks the full visible-nav order", () => {
@@ -172,6 +173,7 @@ describe("navItems", () => {
       "portfolio",
       "orders",
       "scanner",
+      "watchlist",
       "flow-analysis",
       "journal",
       "regime",
@@ -196,6 +198,7 @@ describe("quickPromptsBySection", () => {
     "orders",
     "scanner",
     "discover",
+    "watchlist",
     "journal",
     "regime",
     "cta",
@@ -249,6 +252,7 @@ describe("sectionDescription", () => {
     "orders",
     "scanner",
     "discover",
+    "watchlist",
     "journal",
     "regime",
     "cta",

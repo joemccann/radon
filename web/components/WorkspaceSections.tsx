@@ -110,6 +110,7 @@ import RegimePanel from "./RegimePanel";
 import CtaPage from "./CtaPage";
 import AdminWorkspace from "./admin/AdminWorkspace";
 import ProfileContent from "./profile/ProfileContent";
+import WatchlistContent from "./watchlist/WatchlistContent";
 import PerformancePanel from "./PerformancePanel";
 import InfoTooltip from "./InfoTooltip";
 import SharePnlButton, { type SharePnlData } from "./SharePnlButton";
@@ -3933,6 +3934,8 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
       return <AdminWorkspace />;
     case "profile":
       return <ProfileContent prices={prices} />;
+    case "watchlist":
+      return <WatchlistContent prices={prices} portfolio={portfolio ?? null} orders={orders ?? null} theme={theme ?? "dark"} />;
     case "ticker-detail":
       return tickerParam ? (
         <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} />

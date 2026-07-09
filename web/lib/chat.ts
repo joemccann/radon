@@ -347,6 +347,10 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "discover";
   }
 
+  if (pathname.startsWith("/watchlist")) {
+    return "watchlist";
+  }
+
   if (pathname.startsWith("/journal")) {
     return "journal";
   }
