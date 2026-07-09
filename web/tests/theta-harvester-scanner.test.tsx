@@ -164,6 +164,30 @@ describe("ThetaHarvesterScanner", () => {
     expect(onTickerScan).toHaveBeenCalledWith("MU");
   });
 
+  it("passes DTE window + min-credit search params to onScan", () => {
+    const onScan = vi.fn();
+    render(<ThetaHarvesterScanner data={data} onScan={onScan} />);
+
+    // Defaults are pre-filled (7 / 45 / 0).
+    fireEvent.click(screen.getByRole("button", { name: /scan ndx/i }));
+    expect(onScan).toHaveBeenLastCalledWith({ minDte: 7, maxDte: 45, minCredit: 0 });
+
+    fireEvent.change(screen.getByTestId("theta-min-dte"), { target: { value: "21" } });
+    fireEvent.change(screen.getByTestId("theta-max-dte"), { target: { value: "60" } });
+    fireEvent.change(screen.getByTestId("theta-min-credit"), { target: { value: "1.5" } });
+    fireEvent.click(screen.getByRole("button", { name: /scan ndx/i }));
+    expect(onScan).toHaveBeenLastCalledWith({ minDte: 21, maxDte: 60, minCredit: 1.5 });
+  });
+
+  it("clamps an inverted DTE window so max is never below min", () => {
+    const onScan = vi.fn();
+    render(<ThetaHarvesterScanner data={data} onScan={onScan} />);
+    fireEvent.change(screen.getByTestId("theta-min-dte"), { target: { value: "40" } });
+    fireEvent.change(screen.getByTestId("theta-max-dte"), { target: { value: "10" } });
+    fireEvent.click(screen.getByRole("button", { name: /scan ndx/i }));
+    expect(onScan).toHaveBeenLastCalledWith({ minDte: 40, maxDte: 40, minCredit: 0 });
+  });
+
   it("renders help bubbles for the theta scanner and metric inputs", () => {
     render(<ThetaHarvesterScanner data={data} />);
 

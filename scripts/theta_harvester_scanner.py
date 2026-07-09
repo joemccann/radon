@@ -324,11 +324,15 @@ def select_short_strangle(
     spot: float,
     fallback_iv: float,
     now: Optional[datetime] = None,
+    *,
+    min_dte: int = MIN_DTE,
+    max_dte: int = MAX_DTE,
+    min_credit: float = 0.0,
 ) -> Optional[ThetaStructure]:
     rows = _as_rows(contracts_payload)
     options = [
         opt for opt in (_parse_option(row, spot, fallback_iv, now) for row in rows)
-        if opt is not None and MIN_DTE <= _dte(opt.expiry, now) <= MAX_DTE
+        if opt is not None and min_dte <= _dte(opt.expiry, now) <= max_dte
     ]
     calls = [o for o in options if o.right == "C" and o.strike > spot and 0.05 <= o.delta <= 0.35]
     puts = [o for o in options if o.right == "P" and o.strike < spot and 0.05 <= abs(o.delta) <= 0.35]
@@ -348,6 +352,11 @@ def select_short_strangle(
             call_mid = (call.bid + call.ask) / 2 if call.bid is not None and call.ask is not None else None
             put_mid = (put.bid + put.ask) / 2 if put.bid is not None and put.ask is not None else None
             credit = round(call_mid + put_mid, 4) if call_mid is not None and put_mid is not None else None
+            # Minimum-credit filter (per-share premium collected). min_credit <= 0
+            # disables it; a pair with no quotable credit is skipped when a
+            # positive floor is set.
+            if min_credit > 0 and (credit is None or credit < min_credit):
+                continue
             structure = ThetaStructure(
                 expiry=call.expiry,
                 dte=dte,
@@ -468,6 +477,9 @@ def scan_ticker(
     now: Optional[datetime] = None,
     *,
     retry_transient: bool = False,
+    min_dte: int = MIN_DTE,
+    max_dte: int = MAX_DTE,
+    min_credit: float = 0.0,
 ) -> Optional[ThetaCandidate]:
     own_client = None
     if client is None:
@@ -498,7 +510,10 @@ def scan_ticker(
         except Exception as exc:
             errors.append(f"contracts:{exc}")
             return None
-        structure = select_short_strangle(contracts, spot, current_iv, now)
+        structure = select_short_strangle(
+            contracts, spot, current_iv, now,
+            min_dte=min_dte, max_dte=max_dte, min_credit=min_credit,
+        )
         if structure is None:
             errors.append("no_short_strangle_pair")
             return None
@@ -584,6 +599,7 @@ def build_output(
     source: str,
     universe_count: int,
     requested_tickers: Optional[Sequence[str]] = None,
+    params: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     sorted_results = sorted(results, key=lambda row: row.score, reverse=True)
     return {
@@ -592,6 +608,10 @@ def build_output(
         "universe": source,
         "requested_tickers": list(requested_tickers or []),
         "tickers_scanned": universe_count,
+        # Search parameters this scan ran with — surfaced in the UI and used by
+        # the FastAPI cooldown so a different DTE/credit search never serves a
+        # stale cached snapshot.
+        "params": params or {"min_dte": MIN_DTE, "max_dte": MAX_DTE, "min_credit": 0.0},
         "candidates_found": len(sorted_results),
         "theta_harvest_count": sum(1 for row in sorted_results if row.verdict == "THETA_HARVEST"),
         "results": [asdict(row) for row in sorted_results],
@@ -604,6 +624,9 @@ def scan_universe(
     limit: Optional[int] = None,
     max_workers: int = DEFAULT_MAX_WORKERS,
     retry_transient: bool = False,
+    min_dte: int = MIN_DTE,
+    max_dte: int = MAX_DTE,
+    min_credit: float = 0.0,
 ) -> Dict[str, Any]:
     resolved, source = resolve_tickers(tickers, preset)
     if limit is not None and limit > 0:
@@ -613,7 +636,10 @@ def scan_universe(
     results: List[ThetaCandidate] = []
     with ThreadPoolExecutor(max_workers=max(1, max_workers)) as pool:
         futures = {
-            pool.submit(scan_ticker, ticker, retry_transient=retry_transient): ticker
+            pool.submit(
+                scan_ticker, ticker, retry_transient=retry_transient,
+                min_dte=min_dte, max_dte=max_dte, min_credit=min_credit,
+            ): ticker
             for ticker in resolved
         }
         for idx, future in enumerate(as_completed(futures), start=1):
@@ -628,7 +654,10 @@ def scan_universe(
                 continue
             print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.score:.1f})", file=sys.stderr)
             results.append(row)
-    return build_output(results, source, len(resolved), requested_tickers=resolved)
+    return build_output(
+        results, source, len(resolved), requested_tickers=resolved,
+        params={"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit},
+    )
 
 
 def save_cache(payload: Dict[str, Any], path: Path = _CACHE_PATH) -> None:
@@ -644,6 +673,12 @@ def main() -> None:
     parser.add_argument("tickers", nargs="*", help="Tickers to scan. Overrides --preset.")
     parser.add_argument("--preset", default="ndx100", help="Preset name from data/presets (default: ndx100).")
     parser.add_argument("--limit", type=int, default=None, help="Limit tickers for smoke/validation runs.")
+    parser.add_argument("--min-dte", type=int, default=MIN_DTE, help=f"Minimum days-to-expiration (default {MIN_DTE}).")
+    parser.add_argument("--max-dte", type=int, default=MAX_DTE, help=f"Maximum days-to-expiration (default {MAX_DTE}).")
+    parser.add_argument(
+        "--min-credit", type=float, default=0.0,
+        help="Minimum per-share credit collected on the strangle (default 0 = no filter).",
+    )
     parser.add_argument(
         "--workers",
         type=int,
@@ -665,6 +700,9 @@ def main() -> None:
         limit=args.limit,
         max_workers=args.workers,
         retry_transient=args.retry_transient,
+        min_dte=args.min_dte,
+        max_dte=args.max_dte,
+        min_credit=args.min_credit,
     )
     save_cache(payload, Path(args.output))
     if args.json:

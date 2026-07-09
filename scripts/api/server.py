@@ -2258,26 +2258,60 @@ _theta_scan_lock: Optional[asyncio.Lock] = None
 THETA_COOLDOWN_S = 600  # 10 min — UW option-chain + GEX scan budget
 
 
-def _theta_cache_matches_preset(cached: Any, preset: str) -> bool:
+# Route defaults mirror theta_harvester_scanner.py's MIN_DTE / MAX_DTE / no-credit-floor.
+THETA_DEFAULT_MIN_DTE = 7
+THETA_DEFAULT_MAX_DTE = 45
+
+
+def _theta_cache_matches(
+    cached: Any, preset: str, min_dte: int, max_dte: int, min_credit: float
+) -> bool:
+    """A cached snapshot may only satisfy the cooldown when BOTH the preset AND
+    the search parameters match — otherwise a fresh DTE/credit search within the
+    cooldown window would silently return the previous parameters' results."""
     if not isinstance(cached, dict):
         return False
     universe = str(cached.get("universe") or "")
     preset_key = preset.lower()
-    return universe.lower() in {f"preset:{preset_key}", f"fallback:{preset_key}"}
+    if universe.lower() not in {f"preset:{preset_key}", f"fallback:{preset_key}"}:
+        return False
+    params = cached.get("params") or {}
+    try:
+        return (
+            int(params.get("min_dte")) == min_dte
+            and int(params.get("max_dte")) == max_dte
+            and float(params.get("min_credit")) == float(min_credit)
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 @app.post("/theta-harvester/scan")
-async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: str = ""):
+async def theta_harvester_scan(
+    preset: str = "ndx100",
+    limit: int = 0,
+    ticker: str = "",
+    min_dte: int = THETA_DEFAULT_MIN_DTE,
+    max_dte: int = THETA_DEFAULT_MAX_DTE,
+    min_credit: float = 0.0,
+):
     """Run theta_harvester_scanner.py against a preset or explicit ticker.
 
-    The script writes data/theta_harvester.json and records its own
-    service_health row. Cooldown mirrors LEAP/GARCH to protect UW quotas.
+    ``min_dte`` / ``max_dte`` bound the expiration window; ``min_credit`` is the
+    minimum per-share strangle premium (0 = no floor). The script writes
+    data/theta_harvester.json and records its own service_health row. Cooldown
+    mirrors LEAP/GARCH to protect UW quotas and is keyed on preset + params.
     """
     global _theta_last_scan, _theta_scan_lock
     import time as _time
     ticker = ticker.upper().strip()
     if ticker and not re.fullmatch(r"[A-Z]{1,6}", ticker):
         raise HTTPException(status_code=400, detail="ticker must be 1-6 letters")
+    if not (0 <= min_dte <= max_dte <= 400):
+        raise HTTPException(status_code=400, detail="require 0 <= min_dte <= max_dte <= 400")
+    if not (0.0 <= min_credit <= 1000.0):
+        raise HTTPException(status_code=400, detail="min_credit must be between 0 and 1000")
+    params_block = {"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit}
     if test_mode:
         return await demo_scan_response(
             "theta-harvester",
@@ -2287,6 +2321,7 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
                 "universe": f"preset:{preset}",
                 "requested_tickers": [],
                 "tickers_scanned": 0,
+                "params": params_block,
                 "candidates_found": 0,
                 "theta_harvest_count": 0,
                 "results": [],
@@ -2298,12 +2333,12 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
     is_ticker_scan = bool(ticker)
     if not is_ticker_scan and now - _theta_last_scan < THETA_COOLDOWN_S:
         cached = _read_cache(DATA_DIR / "theta_harvester.json")
-        if _theta_cache_matches_preset(cached, preset):
+        if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
             return cached
     async with _theta_scan_lock:
         if not is_ticker_scan and _time.monotonic() - _theta_last_scan < THETA_COOLDOWN_S:
             cached = _read_cache(DATA_DIR / "theta_harvester.json")
-            if _theta_cache_matches_preset(cached, preset):
+            if _theta_cache_matches(cached, preset, min_dte, max_dte, min_credit):
                 return cached
         workers = _bounded_env_int("RADON_THETA_SCANNER_WORKERS", 24)
         args = ["--json", "--workers", str(workers)]
@@ -2313,6 +2348,11 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
             args.extend(["--preset", preset])
         if not is_ticker_scan and limit and limit > 0:
             args.extend(["--limit", str(limit)])
+        args.extend([
+            "--min-dte", str(min_dte),
+            "--max-dte", str(max_dte),
+            "--min-credit", str(min_credit),
+        ])
         result = await run_script("theta_harvester_scanner.py", args, timeout=420)
         if not result.ok:
             raise HTTPException(status_code=502, detail=result.error)
@@ -2325,6 +2365,7 @@ async def theta_harvester_scan(preset: str = "ndx100", limit: int = 0, ticker: s
             "universe": "explicit" if is_ticker_scan else f"preset:{preset}",
             "requested_tickers": [ticker] if is_ticker_scan else [],
             "tickers_scanned": 0,
+            "params": params_block,
             "candidates_found": 0,
             "theta_harvest_count": 0,
             "results": [],

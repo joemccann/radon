@@ -90,6 +90,58 @@ def test_select_short_strangle_prefers_near_flat_short_delta() -> None:
     assert structure.credit == pytest.approx(1.9)
 
 
+# ── DTE window + min-credit search params ─────────────────────────
+
+_NOW = datetime(2026, 6, 24, tzinfo=timezone.utc)
+
+
+def _strangle_contracts() -> dict:
+    """A single 23-DTE strangle (expiry 2026-07-17), credit 1.9 per share."""
+    return {
+        "data": [
+            {"option_symbol": "AAPL260717P00095000", "delta": -0.15, "theta": -0.04,
+             "gamma": 0.002, "vega": 0.018, "bid": 0.9, "ask": 1.1},
+            {"option_symbol": "AAPL260717C00105000", "delta": 0.16, "theta": -0.035,
+             "gamma": 0.0022, "vega": 0.02, "bid": 0.8, "ask": 1.0},
+        ],
+    }
+
+
+def test_select_short_strangle_dte_window_excludes_out_of_range_expiry() -> None:
+    # The only pair is 23 DTE; a 30-DTE minimum must reject it entirely.
+    assert theta.select_short_strangle(
+        _strangle_contracts(), spot=100.0, fallback_iv=35.0, now=_NOW, min_dte=30, max_dte=60,
+    ) is None
+
+
+def test_select_short_strangle_dte_window_includes_in_range_expiry() -> None:
+    structure = theta.select_short_strangle(
+        _strangle_contracts(), spot=100.0, fallback_iv=35.0, now=_NOW, min_dte=14, max_dte=30,
+    )
+    assert structure is not None
+    assert structure.dte == 23
+
+
+def test_select_short_strangle_min_credit_rejects_thin_premium() -> None:
+    # Credit is 1.9/share; a 2.5 floor rejects, a 1.0 floor keeps it.
+    assert theta.select_short_strangle(
+        _strangle_contracts(), spot=100.0, fallback_iv=35.0, now=_NOW, min_credit=2.5,
+    ) is None
+    kept = theta.select_short_strangle(
+        _strangle_contracts(), spot=100.0, fallback_iv=35.0, now=_NOW, min_credit=1.0,
+    )
+    assert kept is not None
+    assert kept.credit == pytest.approx(1.9)
+
+
+def test_build_output_records_search_params() -> None:
+    default = theta.build_output([], "explicit", 1)
+    assert default["params"] == {"min_dte": theta.MIN_DTE, "max_dte": theta.MAX_DTE, "min_credit": 0.0}
+
+    custom = theta.build_output([], "explicit", 1, params={"min_dte": 21, "max_dte": 60, "min_credit": 2.0})
+    assert custom["params"] == {"min_dte": 21, "max_dte": 60, "min_credit": 2.0}
+
+
 class FakeUWClient:
     def get_stock_ohlc(self, ticker: str, candle_size: str = "1d"):
         assert ticker == "AAPL"

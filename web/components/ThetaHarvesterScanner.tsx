@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type FormEvent, type KeyboardEvent } from "react";
+import { useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, Sparkles } from "lucide-react";
@@ -13,15 +13,50 @@ import type { ThetaHarvesterData, ThetaHarvesterResult } from "@/lib/types";
 
 type ThetaSortKey = "ticker" | "score" | "theta" | "delta" | "iv_edge" | "range" | "dte" | "credit";
 
+export type ThetaScanParams = { minDte: number; maxDte: number; minCredit: number };
+
+export const THETA_DEFAULT_SCAN_PARAMS: ThetaScanParams = { minDte: 7, maxDte: 45, minCredit: 0 };
+
 type ThetaHarvesterScannerProps = {
   data: ThetaHarvesterData | null;
   loading?: boolean;
   scanning?: boolean;
   error?: string | null;
   lastSync?: string | null;
-  onScan?: () => void;
+  onScan?: (params: ThetaScanParams) => void;
   onTickerScan?: (ticker: string) => void;
 };
+
+const THETA_PARAMS_ROW: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: 4,
+};
+
+const THETA_PARAMS_LABEL: CSSProperties = {
+  fontFamily: "var(--font-mono)",
+  fontSize: 9,
+  letterSpacing: "0.05em",
+  color: "var(--text-muted)",
+};
+
+const THETA_PARAMS_INPUT: CSSProperties = {
+  width: 40,
+  padding: "2px 4px",
+  fontFamily: "var(--font-mono)",
+  fontSize: 11,
+  textAlign: "right",
+  background: "var(--bg-panel-raised)",
+  color: "var(--text-primary)",
+  border: "1px solid var(--border-dim)",
+  borderRadius: 4,
+};
+
+function clampNumber(raw: string, min: number, max: number, fallback: number, integer: boolean): number {
+  const parsed = integer ? parseInt(raw, 10) : parseFloat(raw);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(min, Math.min(max, parsed));
+}
 
 const THETA_SECTION_HELP =
   "Neutral short-premium scan for true theta setups: near-zero net delta, positive theta, rich IV versus realized vol, dealer support, and range-bound price action.";
@@ -174,9 +209,20 @@ export default function ThetaHarvesterScanner({
   const router = useRouter();
   const [tickerQuery, setTickerQuery] = useState("");
   const [tickerError, setTickerError] = useState<string | null>(null);
+  const [minDteInput, setMinDteInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.minDte));
+  const [maxDteInput, setMaxDteInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.maxDte));
+  const [minCreditInput, setMinCreditInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.minCredit));
   const rows = data?.results ?? [];
   const { sorted, sort, toggle } = useSort(rows, extract);
   const normalizedTicker = tickerQuery.trim().toUpperCase();
+
+  const runPresetScan = () => {
+    if (!onScan || scanning) return;
+    const minDte = clampNumber(minDteInput, 0, 400, THETA_DEFAULT_SCAN_PARAMS.minDte, true);
+    const maxDte = Math.max(minDte, clampNumber(maxDteInput, 0, 400, THETA_DEFAULT_SCAN_PARAMS.maxDte, true));
+    const minCredit = clampNumber(minCreditInput, 0, 1000, 0, false);
+    onScan({ minDte, maxDte, minCredit });
+  };
 
   const submitTickerScan = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -250,15 +296,38 @@ export default function ThetaHarvesterScanner({
             </form>
           )}
           {onScan && (
-            <button
-              type="button"
-              className="theta-scan-button"
-              onClick={onScan}
-              disabled={scanning}
-            >
-              <Loader2 size={12} className={scanning ? "spin" : ""} />
-              {scanning ? "SCANNING" : "SCAN NDX"}
-            </button>
+            <div className="theta-params" role="group" aria-label="Theta search parameters" style={THETA_PARAMS_ROW}>
+              <span style={THETA_PARAMS_LABEL}>DTE</span>
+              <input
+                type="number" min={0} max={400} step={1} value={minDteInput}
+                onChange={(e) => setMinDteInput(e.target.value)}
+                aria-label="Minimum days to expiration" style={THETA_PARAMS_INPUT}
+                data-testid="theta-min-dte"
+              />
+              <span style={THETA_PARAMS_LABEL}>–</span>
+              <input
+                type="number" min={0} max={400} step={1} value={maxDteInput}
+                onChange={(e) => setMaxDteInput(e.target.value)}
+                aria-label="Maximum days to expiration" style={THETA_PARAMS_INPUT}
+                data-testid="theta-max-dte"
+              />
+              <span style={{ ...THETA_PARAMS_LABEL, marginLeft: 6 }}>MIN CR</span>
+              <input
+                type="number" min={0} max={1000} step={0.05} value={minCreditInput}
+                onChange={(e) => setMinCreditInput(e.target.value)}
+                aria-label="Minimum credit per share" style={THETA_PARAMS_INPUT}
+                data-testid="theta-min-credit"
+              />
+              <button
+                type="button"
+                className="theta-scan-button"
+                onClick={runPresetScan}
+                disabled={scanning}
+              >
+                <Loader2 size={12} className={scanning ? "spin" : ""} />
+                {scanning ? "SCANNING" : "SCAN NDX"}
+              </button>
+            </div>
           )}
         </div>
       </div>
