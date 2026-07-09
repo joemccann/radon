@@ -32,6 +32,20 @@ export async function POST(request: Request): Promise<Response> {
     params.set("limit", String(Math.trunc(body.limit)));
   }
 
+  // Search parameters (DTE window + minimum per-share credit). FastAPI validates
+  // ranges; only forward finite numbers so bad input never reaches the subprocess.
+  const intParam = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) && v >= 0 ? Math.trunc(v) : null;
+  const minDte = intParam(body.min_dte);
+  const maxDte = intParam(body.max_dte);
+  const minCredit =
+    typeof body.min_credit === "number" && Number.isFinite(body.min_credit) && body.min_credit >= 0
+      ? body.min_credit
+      : null;
+  if (minDte !== null) params.set("min_dte", String(minDte));
+  if (maxDte !== null) params.set("max_dte", String(maxDte));
+  if (minCredit !== null) params.set("min_credit", String(minCredit));
+
   const path = params.toString()
     ? `/theta-harvester/scan?${params.toString()}`
     : "/theta-harvester/scan";
