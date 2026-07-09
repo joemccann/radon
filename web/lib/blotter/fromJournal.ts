@@ -18,11 +18,11 @@
  *   already collapsed by journal_rehydrate.py (composite ib_exec_id).
  *
  * Status:
- *   - realized_pnl present  → closed (round-trip materialised)
- *   - action contains BUY   → open long
+ *   - realized_pnl nonzero  → closed (round-trip materialised)
+ *   - BUY_OPTION / BUY      → open long
  *   - SELL_TO_OPEN          → open short
- *   - SELL_OPTION / SELL without realized_pnl → fall back to closed
- *     (legacy rows from before realized_pnl was tracked)
+ *   - SELL_OPTION / SELL / BUY_TO_CLOSE / CLOSED → closed
+ *   - BUY_TO_CLOSE          → cover short (buy-to-close)
  */
 
 export interface JournalTradePayload {
@@ -125,7 +125,7 @@ function resolveContractDesc(p: JournalTradePayload, secType: string): string {
 function resolveSide(action: string): string {
   // IB exec sides: BOT (bought) / SLD (sold).
   if (!action) return "BOT";
-  if (action === "BUY" || action === "BUY_OPTION") return "BOT";
+  if (action === "BUY" || action === "BUY_OPTION" || action === "BUY_TO_CLOSE") return "BOT";
   if (action === "SELL" || action === "SELL_OPTION" || action === "SELL_TO_OPEN" || action === "CLOSED") return "SLD";
   return action.includes("BUY") ? "BOT" : "SLD";
 }
@@ -145,12 +145,23 @@ function isOpeningAction(action: string): boolean {
 }
 
 function isClosingAction(action: string): boolean {
-  return action === "SELL" || action === "SELL_OPTION" || action === "CLOSED";
+  // BUY_TO_CLOSE = cover short (bot). SELL_OPTION = close long (sld).
+  // CLOSED = rehydrate net-flat round-trip.
+  return (
+    action === "SELL"
+    || action === "SELL_OPTION"
+    || action === "CLOSED"
+    || action === "BUY_TO_CLOSE"
+  );
 }
 
 function rowIsClosed(p: JournalTradePayload): boolean {
-  if (typeof p.realized_pnl === "number" && p.realized_pnl !== 0) return true;
+  // Closing action labels always win (including BUY_TO_CLOSE covers).
+  // Non-zero realized_pnl also marks closed (legacy / IB commission path).
+  // Do NOT treat realized_pnl === 0 alone as closed — lot-match synth writes
+  // 0 on residual open legs in a partially-closed group.
   if (isClosingAction(p.action || "")) return true;
+  if (typeof p.realized_pnl === "number" && p.realized_pnl !== 0) return true;
   return false;
 }
 
@@ -281,7 +292,7 @@ function contractGroupKey(p: JournalTradePayload): string | null {
 
 function rowSide(action: string): "BUY" | "SELL" | "FLAT" | null {
   const a = (action || "").toUpperCase();
-  if (a === "BUY" || a === "BUY_OPTION") return "BUY";
+  if (a === "BUY" || a === "BUY_OPTION" || a === "BUY_TO_CLOSE") return "BUY";
   if (a === "SELL" || a === "SELL_TO_OPEN" || a === "SELL_OPTION") return "SELL";
   if (a === "CLOSED") return "FLAT";
   return null;
@@ -495,27 +506,35 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
 
       let rowRealizedPnl: number | null = isAnyClosed ? 0 : null;
       let rowRealizedQty = 0;
-      let rowIsClosed = false;
+      let rowIsClosedFlag = false;
       if (isAnyClosed) {
-        rowIsClosed = side === "FLAT" || side === "SELL";
-        if (rowIsClosed) {
-          // Pro-rata share of group P&L for closing rows. Use sell-leg
-          // weight (qty for SELL, qty for FLAT — half the total since
-          // FLAT contributes both buy and sell).
-          const sellWeight = side === "FLAT" ? qty : qty;
-          const sellTotalWeight = orderedIdx
+        // Closing legs: SELL/FLAT always; BUY only when labeled BUY_TO_CLOSE
+        // (cover short). Bare BUY_OPTION stays open-side even when the
+        // group has realized volume from other closes.
+        const action = p.action || "";
+        rowIsClosedFlag =
+          side === "FLAT"
+          || side === "SELL"
+          || (side === "BUY" && isClosingAction(action));
+        if (rowIsClosedFlag) {
+          // Pro-rata share of group P&L across closing legs (sells,
+          // buy-to-close, and net-flat CLOSED rows).
+          const closeWeight = qty;
+          const closeTotalWeight = orderedIdx
             .map((j) => {
-              const sj = rowSide(rows[j].payload.action || "");
-              const qj = resolveQuantity(rows[j].payload);
+              const pj = rows[j].payload;
+              const sj = rowSide(pj.action || "");
+              const qj = resolveQuantity(pj);
               if (sj === "SELL" || sj === "FLAT") return qj;
+              if (sj === "BUY" && isClosingAction(pj.action || "")) return qj;
               return 0;
             })
             .reduce((a, b) => a + b, 0);
           rowRealizedPnl =
-            sellTotalWeight > 0
-              ? (groupPnl.realized_pnl * sellWeight) / sellTotalWeight
+            closeTotalWeight > 0
+              ? (groupPnl.realized_pnl * closeWeight) / closeTotalWeight
               : 0;
-          rowRealizedQty = sellWeight;
+          rowRealizedQty = closeWeight;
         }
       }
 
@@ -539,7 +558,7 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
         proceeds: rowProceeds,
         realized_quantity: rowRealizedQty,
         total_round_trip_quantity: isAnyClosed ? totalRoundTripQty : qty,
-        is_closed: rowIsClosed,
+        is_closed: rowIsClosedFlag,
       });
     });
   }

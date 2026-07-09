@@ -3558,11 +3558,22 @@ function getTradeDate(item: BlotterTrade): string {
 
 function blotterStalenessAgeDays(asOf: string | undefined | null): number | null {
   if (!asOf) return null;
-  const asOfTime = Date.parse(asOf);
+  const asOfTime = Date.parse(asOf.length === 10 ? `${asOf}T12:00:00` : asOf);
   if (Number.isNaN(asOfTime)) return null;
   const diffMs = Date.now() - asOfTime;
   if (diffMs <= 0) return 0;
   return Math.floor(diffMs / (24 * 60 * 60 * 1000));
+}
+
+/** Format blotter as_of without UTC day-shift for date-only strings. */
+function formatBlotterAsOf(asOf: string): string {
+  if (/^\d{4}-\d{2}-\d{2}$/.test(asOf)) {
+    const [y, m, d] = asOf.split("-").map(Number);
+    return new Date(y, m - 1, d).toLocaleDateString();
+  }
+  const t = Date.parse(asOf);
+  if (Number.isNaN(t)) return asOf;
+  return new Date(t).toLocaleDateString();
 }
 
 const blotterExtract = (item: BlotterTrade, key: BlotterSortKey): string | number | null => {
@@ -3671,7 +3682,7 @@ export function HistoricalTradesSection({
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {data?.as_of && (
             <span className="report-meta" style={{ margin: 0, padding: 0, border: "none" }}>
-              {new Date(data.as_of).toLocaleDateString()}
+              {formatBlotterAsOf(data.as_of)}
             </span>
           )}
           {isStale && stalenessAgeDays !== null && (

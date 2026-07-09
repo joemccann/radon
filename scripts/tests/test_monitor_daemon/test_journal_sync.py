@@ -586,12 +586,9 @@ class TestSellCloseLabeling:
         new_row = next(t for t in loaded["trades"] if t["ib_exec_id"] == "PARTIAL-CLOSE")
         assert new_row["action"] == "SELL_OPTION"
 
-    def test_short_cover_buy_stays_buy_option(self, trade_log_path):
-        """Symmetry check: covering a short with a BUY keeps BUY_OPTION.
-        fromJournal.ts does not distinguish open-long from cover-short
-        on the buy side — both use the BUY/BUY_OPTION label, so this
-        is a no-change case. Captures it explicitly to lock the
-        behaviour against future "let's add BUY_TO_COVER" refactors."""
+    def test_short_cover_buy_labels_as_buy_to_close(self, trade_log_path):
+        """Covering a short with a BUY must label BUY_TO_CLOSE so the blotter
+        marks the cover as closed (not a phantom open long)."""
         prior_short = [
             self._row(
                 {
@@ -630,7 +627,8 @@ class TestSellCloseLabeling:
 
         loaded = verified_load(str(trade_log_path))
         new_row = next(t for t in loaded["trades"] if t["ib_exec_id"] == "COVER-BUY")
-        assert new_row["action"] == "BUY_OPTION"
+        assert new_row["action"] == "BUY_TO_CLOSE"
+        assert new_row["structure"].startswith("Closed")
 
     def test_two_sells_in_one_cycle_both_label_sell_option(self, trade_log_path):
         """Within a single execute() cycle the per-contract prior_state
