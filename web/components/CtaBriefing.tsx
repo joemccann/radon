@@ -15,6 +15,8 @@ type CtaTables = {
 type CtaBriefingProps = {
   tables: CtaTables;
   estSellingBn: number | null;
+  /** Session-to-session change in implied cut vs AUM ($B). */
+  dayChangeBn?: number | null;
 };
 
 /* ─── Helpers ────────────────────────────────────────── */
@@ -211,7 +213,11 @@ function deriveSignalTags(tables: CtaTables): Array<{ label: string; cssColor: s
 }
 
 /** Build narrative prose from data */
-function buildNarrative(tables: CtaTables, estSellingBn: number | null): string {
+function buildNarrative(
+  tables: CtaTables,
+  estSellingBn: number | null,
+  dayChangeBn: number | null = null,
+): string {
   const main = tables.main ?? [];
   const commodity = tables.commodity ?? [];
   const currency = tables.currency ?? [];
@@ -271,7 +277,13 @@ function buildNarrative(tables: CtaTables, estSellingBn: number | null): string 
   }
 
   if (estSellingBn != null && estSellingBn > 20) {
-    parts.push(`Vol-targeting model estimates $${fmt(estSellingBn, 1)}B in forced selling still in pipeline.`);
+    let line =
+      `Vol-targeting model implies $${fmt(estSellingBn, 1)}B equity underweight vs full AUM at the 10% vol target.`;
+    if (dayChangeBn != null && Number.isFinite(dayChangeBn) && Math.abs(dayChangeBn) >= 0.1) {
+      const sign = dayChangeBn > 0 ? "+" : "-";
+      line += ` Day change ${sign}$${Math.abs(dayChangeBn).toFixed(1)}B.`;
+    }
+    parts.push(line);
   }
 
   return parts.join(" ") || "Positioning data available. No extreme concentration detected.";
@@ -279,14 +291,14 @@ function buildNarrative(tables: CtaTables, estSellingBn: number | null): string 
 
 /* ─── Component ──────────────────────────────────────── */
 
-export default function CtaBriefing({ tables, estSellingBn }: CtaBriefingProps) {
+export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null }: CtaBriefingProps) {
   const main = tables.main ?? [];
   const commodity = tables.commodity ?? [];
   const spx = getSpxRow(main);
   const posture = deriveEquityPosture(main);
   const squeezeRisk = deriveSqueezeRisk(spx);
   const tags = deriveSignalTags(tables);
-  const narrative = buildNarrative(tables, estSellingBn);
+  const narrative = buildNarrative(tables, estSellingBn, dayChangeBn ?? null);
   const crowded = getCrowdedCommodityLongs(commodity);
 
   return (
@@ -336,7 +348,7 @@ export default function CtaBriefing({ tables, estSellingBn }: CtaBriefingProps) 
           </div>
         </div>
         <div className="cta-briefing-metric">
-          <div className="cta-briefing-metric-label">EST. SELLING</div>
+          <div className="cta-briefing-metric-label">IMPLIED CUT</div>
           <div
             className="cta-briefing-metric-value"
             style={{ color: estSellingBn != null && estSellingBn > 50 ? "var(--warning)" : "var(--text-primary)" }}
