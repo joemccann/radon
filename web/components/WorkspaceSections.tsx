@@ -53,6 +53,17 @@ import {
   resolveOpenOrderComboPrice,
   findPortfolioLegDirection,
 } from "@/lib/openOrderCombos";
+import {
+  distanceToFill,
+  formatDistanceDelta,
+  formatFillQuantity,
+  isPartialFill,
+  mapOrderStatus,
+  resolveOrderIntent,
+  statusPillClass,
+  summarizeOpenOrders,
+} from "@/lib/orders/orderDisplay";
+import { formatRelativeTime } from "@/lib/adminFormat";
 import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import { useColumnVisibility } from "@/lib/useColumnVisibility";
@@ -2370,13 +2381,26 @@ function JournalSections() {
 
 /* ─── Orders tables ────────────────────────────────────── */
 
-type OpenOrderKey = "symbol" | "action" | "orderType" | "totalQuantity" | "limitPrice" | "lastPrice" | "implied" | "implied_mv" | "status" | "tif" | "actions";
+type OpenOrderKey =
+  | "symbol"
+  | "action"
+  | "orderType"
+  | "totalQuantity"
+  | "limitPrice"
+  | "lastPrice"
+  | "deltaFill"
+  | "implied"
+  | "implied_mv"
+  | "status"
+  | "tif"
+  | "actions";
 
 type OrderToggleableKey =
   | "orderType"
   | "totalQuantity"
   | "limitPrice"
   | "lastPrice"
+  | "deltaFill"
   | "implied"
   | "implied_mv"
   | "tif";
@@ -2386,6 +2410,7 @@ const ORDER_COLUMNS: readonly ColumnsToggleEntry<OrderToggleableKey>[] = [
   { key: "totalQuantity", label: "Quantity" },
   { key: "limitPrice", label: "Limit Price" },
   { key: "lastPrice", label: "Last Price" },
+  { key: "deltaFill", label: "Δ Fill" },
   { key: "implied", label: "Implied" },
   { key: "implied_mv", label: "Implied MV" },
   { key: "tif", label: "TIF" },
@@ -2396,10 +2421,13 @@ const ORDER_COLUMN_DEFAULTS: Record<OrderToggleableKey, boolean> = {
   totalQuantity: true,
   limitPrice: true,
   lastPrice: true,
+  deltaFill: true,
   implied: true,
   implied_mv: false,
   tif: true,
 };
+
+const MODIFY_DISABLED_TITLE = "Only LMT and STP LMT orders can be modified";
 
 type OrderColumnVisibility = Record<OrderToggleableKey, boolean>;
 
@@ -2477,6 +2505,22 @@ function makeOpenOrderExtract(
         return item.kind === "combo"
           ? resolveOpenOrderComboPrice(item.orders, prices)
           : resolveOrderLastPrice(item.order, prices, portfolio);
+      case "deltaFill": {
+        if (item.kind === "combo") {
+          const last = resolveOpenOrderComboPrice(item.orders, prices);
+          const action = item.orders[0]?.action ?? "BUY";
+          return distanceToFill({
+            action,
+            limitPrice: item.limitPrice,
+            lastPrice: last,
+          })?.delta ?? null;
+        }
+        return distanceToFill({
+          action: item.order.action,
+          limitPrice: item.order.limitPrice,
+          lastPrice: resolveOrderLastPrice(item.order, prices, portfolio),
+        })?.delta ?? null;
+      }
       case "implied":
         if (!prices) return null;
         return item.kind === "combo"
@@ -2646,6 +2690,7 @@ function OrdersSections({
   const openFilter = useTableFilter(openSort.sorted, extractOpenSearch);
 
   const [cancelTarget, setCancelTarget] = useState<OpenOrder | null>(null);
+  const [cancelCombo, setCancelCombo] = useState<OpenOrder[] | null>(null);
   const [modifyTarget, setModifyTarget] = useState<{
     modalOrder: OpenOrder;
     requestOrder: OpenOrder;
@@ -2653,13 +2698,29 @@ function OrdersSections({
   } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
 
-  const handleCancel = useCallback(async () => {
-    if (!cancelTarget) return;
-    setActionLoading(true);
-    await requestCancel(cancelTarget);
-    setActionLoading(false);
+  const clearCancelDialog = useCallback(() => {
     setCancelTarget(null);
-  }, [cancelTarget, requestCancel]);
+    setCancelCombo(null);
+  }, []);
+
+  const handleCancel = useCallback(async () => {
+    const combo = cancelCombo;
+    const single = cancelTarget;
+    if (!combo?.length && !single) return;
+    setActionLoading(true);
+    try {
+      if (combo && combo.length > 0) {
+        for (const order of combo) {
+          await requestCancel(order);
+        }
+      } else if (single) {
+        await requestCancel(single);
+      }
+    } finally {
+      setActionLoading(false);
+      clearCancelDialog();
+    }
+  }, [cancelCombo, cancelTarget, requestCancel, clearCancelDialog]);
 
   const handleModify = useCallback(async (request: ModifyOrderRequest) => {
     if (!modifyTarget) return;
@@ -2673,17 +2734,6 @@ function OrdersSections({
     setActionLoading(false);
     setModifyTarget(null);
   }, [modifyTarget, requestModify]);
-
-  const handleCancelCombo = useCallback(async (comboOrders: OpenOrder[]) => {
-    setActionLoading(true);
-    try {
-      for (const order of comboOrders) {
-        await requestCancel(order);
-      }
-    } finally {
-      setActionLoading(false);
-    }
-  }, [requestCancel]);
 
   // Merge cancelled orders into executed list for display (dedupe by permId)
   const allExecutedRows = useMemo(() => {
@@ -2751,15 +2801,19 @@ function OrdersSections({
   }
 
   const canModify = (o: OpenOrder) => o.orderType === "LMT" || o.orderType === "STP LMT";
-  const execCount = orders.executed_count + cancelledOrders.length;
+  const openOrdersSummary = summarizeOpenOrders(orders.open_orders);
+  const lastSyncLabel = orders.last_sync
+    ? formatRelativeTime(orders.last_sync)
+    : null;
 
   return (
     <>
       <CancelOrderDialog
         order={cancelTarget}
+        orders={cancelCombo}
         loading={actionLoading}
         onConfirm={handleCancel}
-        onClose={() => setCancelTarget(null)}
+        onClose={clearCancelDialog}
       />
       <ModifyOrderModal
         order={modifyTarget?.modalOrder ?? null}
@@ -2770,7 +2824,34 @@ function OrdersSections({
         onClose={() => setModifyTarget(null)}
       />
 
-      <div className="section">
+      <div className="orders-command-strip" data-testid="orders-command-strip">
+        <span className="orders-command-strip__stat">
+          <span className="orders-command-strip__label">Working</span>
+          <span className="orders-command-strip__value">{openOrdersSummary.workingCount}</span>
+        </span>
+        <span className="orders-command-strip__stat">
+          <span className="orders-command-strip__label">Partial</span>
+          <span className="orders-command-strip__value">{openOrdersSummary.partialCount}</span>
+        </span>
+        <span className="orders-command-strip__stat">
+          <span className="orders-command-strip__label">Fills today</span>
+          <span className="orders-command-strip__value">{positionGroups.length}</span>
+        </span>
+        {lastSyncLabel && (
+          <span className="orders-command-strip__stat" title={orders.last_sync ?? undefined}>
+            <span className="orders-command-strip__label">Last sync</span>
+            <span className="orders-command-strip__value">{lastSyncLabel}</span>
+          </span>
+        )}
+        <span className="orders-command-strip__jumps">
+          <a className="orders-command-strip__jump" href="#orders-open">Open</a>
+          <a className="orders-command-strip__jump" href="#orders-executed">Executed</a>
+          <a className="orders-command-strip__jump" href="#orders-historical">Historical</a>
+          <a className="orders-command-strip__jump" href="#orders-cash">Cash</a>
+        </span>
+      </div>
+
+      <div className="section" id="orders-open">
         <div className="section-header">
           <div className="section-title">
             <ClipboardList size={14} />
@@ -2799,12 +2880,18 @@ function OrdersSections({
           ) : showMobileOrders ? (
             <MobileOrderList
               rows={openFilter.filtered}
+              portfolioPositions={portfolio?.positions}
               pendingCancelPermIds={pendingCancels}
               pendingModifyPermIds={pendingModifies}
               canModify={canModify}
               onRequestCancel={(single, combo) => {
-                if (single) setCancelTarget(single);
-                else if (combo) handleCancelCombo(combo);
+                if (single) {
+                  setCancelCombo(null);
+                  setCancelTarget(single);
+                } else if (combo) {
+                  setCancelTarget(null);
+                  setCancelCombo(combo);
+                }
               }}
               onRequestModify={(single, combo) => {
                 if (single) {
@@ -2835,6 +2922,7 @@ function OrdersSections({
                   {orderColumns.totalQuantity && <SortTh<OpenOrderKey> label="Quantity" sortKey="totalQuantity" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   {orderColumns.limitPrice && <SortTh<OpenOrderKey> label="Limit Price" sortKey="limitPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   {orderColumns.lastPrice && <SortTh<OpenOrderKey> label="Last Price" sortKey="lastPrice" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
+                  {orderColumns.deltaFill && <SortTh<OpenOrderKey> label="Δ Fill" sortKey="deltaFill" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   {showImplied && orderColumns.implied && <SortTh<OpenOrderKey> label="Implied" sortKey="implied" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   {showImplied && orderColumns.implied_mv && <SortTh<OpenOrderKey> label="Implied MV" sortKey="implied_mv" className="right" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
                   <SortTh<OpenOrderKey> label="Status" sortKey="status" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
@@ -2850,6 +2938,22 @@ function OrdersSections({
                     const isPendingCancel = o.orders.some((order) => pendingCancels.has(order.permId));
                     const isPendingModify = o.orders.some((order) => pendingModifies.has(order.permId));
                     const isPending = isPendingCancel || isPendingModify;
+                    const partialLeg = o.orders.find((leg) => isPartialFill(leg));
+                    const comboQtyLabel = partialLeg
+                      ? formatFillQuantity(partialLeg)
+                      : String(o.totalQuantity);
+                    const comboLast = resolveOpenOrderComboPrice(o.orders, prices);
+                    const comboDistance = distanceToFill({
+                      action: o.orders[0]?.action ?? "BUY",
+                      limitPrice: o.limitPrice,
+                      lastPrice: comboLast,
+                    });
+                    const comboStatus = mapOrderStatus(o.status, {
+                      filled: partialLeg?.filled,
+                      remaining: partialLeg?.remaining,
+                      isPendingCancel,
+                      isPendingModify,
+                    });
 
                     return (
                       <tr
@@ -2878,7 +2982,7 @@ function OrdersSections({
                           <span className="pill neutral">COMBO</span>
                         </td>
                         {orderColumns.orderType && <td>{o.structure}</td>}
-                        {orderColumns.totalQuantity && <td className="right">{o.totalQuantity}</td>}
+                        {orderColumns.totalQuantity && <td className="right">{comboQtyLabel}</td>}
                         {orderColumns.limitPrice && (
                           <td className="right">
                             <span className={isPendingModify ? "status-modifying" : ""}>
@@ -2887,7 +2991,18 @@ function OrdersSections({
                           </td>
                         )}
                         {orderColumns.lastPrice && (
-                          <OrderPriceCell price={resolveOpenOrderComboPrice(o.orders, prices)} />
+                          <OrderPriceCell price={comboLast} />
+                        )}
+                        {orderColumns.deltaFill && (
+                          <td className="right">
+                            {comboDistance ? (
+                              <span className={`order-delta order-delta--${comboDistance.urgency}`}>
+                                {formatDistanceDelta(comboDistance.delta)}
+                              </span>
+                            ) : (
+                              "--"
+                            )}
+                          </td>
                         )}
                         {showImplied && orderColumns.implied && (
                           <OrderImpliedCell
@@ -2900,13 +3015,12 @@ function OrdersSections({
                           />
                         )}
                         <td>
-                          {isPendingCancel ? (
-                            <span className="status-cancelling">Cancelling...</span>
-                          ) : isPendingModify ? (
-                            <span className="status-modifying">Modifying...</span>
-                          ) : (
-                            o.status
-                          )}
+                          <span
+                            className={statusPillClass(comboStatus.tone)}
+                            title={comboStatus.raw}
+                          >
+                            {comboStatus.label}
+                          </span>
                         </td>
                         {orderColumns.tif && <td>{o.tif}</td>}
                         <td className="actions-cell">
@@ -2917,7 +3031,7 @@ function OrdersSections({
                               <button
                                 className="btn-order-action btn-modify"
                                 disabled={!comboCanModify}
-                                title={comboCanModify ? "Modify combo order" : "Only LMT orders can be modified"}
+                                title={comboCanModify ? "Modify combo order" : MODIFY_DISABLED_TITLE}
                                 onClick={() => setModifyTarget({
                                   modalOrder: comboModifyTarget.modalOrder,
                                   requestOrder: o.orders[0],
@@ -2928,7 +3042,10 @@ function OrdersSections({
                               </button>
                               <button
                                 className="btn-order-action btn-cancel"
-                                onClick={() => void handleCancelCombo(o.orders)}
+                                onClick={() => {
+                                  setCancelTarget(null);
+                                  setCancelCombo(o.orders);
+                                }}
                               >
                                 CANCEL ALL
                               </button>
@@ -2942,6 +3059,19 @@ function OrdersSections({
                   const isPendingCancel = pendingCancels.has(o.order.permId);
                   const isPendingModify = pendingModifies.has(o.order.permId);
                   const isPending = isPendingCancel || isPendingModify;
+                  const singleLast = resolveOrderLastPrice(o.order, prices, portfolio);
+                  const singleDistance = distanceToFill({
+                    action: o.order.action,
+                    limitPrice: o.order.limitPrice,
+                    lastPrice: singleLast,
+                  });
+                  const singleStatus = mapOrderStatus(o.order.status, {
+                    filled: o.order.filled,
+                    remaining: o.order.remaining,
+                    isPendingCancel,
+                    isPendingModify,
+                  });
+                  const intent = resolveOrderIntent(o.order, portfolio?.positions);
                   return (
                     <tr
                       key={`${o.order.orderId}-${o.order.permId}`}
@@ -2965,6 +3095,9 @@ function OrdersSections({
                             {o.summary}
                           </span>
                         ) : null}
+                        {intent !== "UNKNOWN" && (
+                          <span className="order-intent-pill">{intent}</span>
+                        )}
                         {isPending && <Loader2 size={12} className="cancel-spinner" />}
                       </td>
                       <td>
@@ -2973,7 +3106,9 @@ function OrdersSections({
                         </span>
                       </td>
                       {orderColumns.orderType && <td>{o.order.orderType}</td>}
-                      {orderColumns.totalQuantity && <td className="right">{o.order.totalQuantity}</td>}
+                      {orderColumns.totalQuantity && (
+                        <td className="right">{formatFillQuantity(o.order)}</td>
+                      )}
                       {orderColumns.limitPrice && (
                         <td className="right">
                           {isPendingModify && o.order.orderType === "STP LMT" ? (
@@ -2984,7 +3119,18 @@ function OrdersSections({
                         </td>
                       )}
                       {orderColumns.lastPrice && (
-                        <OrderPriceCell price={resolveOrderLastPrice(o.order, prices, portfolio)} />
+                        <OrderPriceCell price={singleLast} />
+                      )}
+                      {orderColumns.deltaFill && (
+                        <td className="right">
+                          {singleDistance ? (
+                            <span className={`order-delta order-delta--${singleDistance.urgency}`}>
+                              {formatDistanceDelta(singleDistance.delta)}
+                            </span>
+                          ) : (
+                            "--"
+                          )}
+                        </td>
                       )}
                       {showImplied && orderColumns.implied && (
                         <OrderImpliedCell
@@ -2997,13 +3143,12 @@ function OrdersSections({
                         />
                       )}
                       <td>
-                        {isPendingCancel ? (
-                          <span className="status-cancelling">Cancelling...</span>
-                        ) : isPendingModify ? (
-                          <span className="status-modifying">Modifying...</span>
-                        ) : (
-                          o.order.status
-                        )}
+                        <span
+                          className={statusPillClass(singleStatus.tone)}
+                          title={singleStatus.raw}
+                        >
+                          {singleStatus.label}
+                        </span>
                       </td>
                       {orderColumns.tif && <td>{o.order.tif}</td>}
                       <td className="actions-cell">
@@ -3014,7 +3159,7 @@ function OrdersSections({
                             <button
                               className="btn-order-action btn-modify"
                               disabled={!canModify(o.order)}
-                              title={canModify(o.order) ? "Modify limit price" : "Only LMT orders can be modified"}
+                              title={canModify(o.order) ? "Modify limit price" : MODIFY_DISABLED_TITLE}
                               onClick={() => setModifyTarget({
                                 modalOrder: o.order,
                                 requestOrder: o.order,
@@ -3024,7 +3169,10 @@ function OrdersSections({
                             </button>
                             <button
                               className="btn-order-action btn-cancel"
-                              onClick={() => setCancelTarget(o.order)}
+                              onClick={() => {
+                                setCancelCombo(null);
+                                setCancelTarget(o.order);
+                              }}
                             >
                               CANCEL
                             </button>
@@ -3041,7 +3189,7 @@ function OrdersSections({
         </div>
       </div>
 
-      <div className="section">
+      <div className="section" id="orders-executed">
         <div className="section-header">
           <div className="section-title">
             <CheckCircle2 size={14} />
@@ -3168,15 +3316,7 @@ function OrdersSections({
         </div>
       </div>
 
-      {orders.last_sync && (
-        <div className="section">
-          <div className="report-meta">
-            Last Sync: {new Date(orders.last_sync).toLocaleString()} • Source: IB Gateway
-          </div>
-        </div>
-      )}
-
-      <HistoricalTradesSection />
+      <HistoricalTradesSection defaultExpanded={openOrderRows.length === 0} />
 
       <CashFlowsSection />
     </>
@@ -3220,10 +3360,14 @@ const blotterExtract = (item: BlotterTrade, key: BlotterSortKey): string | numbe
   }
 };
 
-export function HistoricalTradesSection() {
+export function HistoricalTradesSection({
+  defaultExpanded = true,
+}: {
+  defaultExpanded?: boolean;
+} = {}) {
   const { data, loading, syncing, error, syncNow } = useBlotter(true);
   const [page, setPage] = useState(0);
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(defaultExpanded);
   const { isMobile, hasMounted } = useViewport();
   const showMobileBlotter = isMobile && hasMounted;
   const stopToggle = (e: React.SyntheticEvent) => e.stopPropagation();
@@ -3261,7 +3405,7 @@ export function HistoricalTradesSection() {
   const isStale = stalenessAgeDays !== null && stalenessAgeDays > BLOTTER_STALE_THRESHOLD_DAYS;
 
   return (
-    <div className="section" data-testid="historical-trades-section">
+    <div className="section" id="orders-historical" data-testid="historical-trades-section">
       <div
         className="section-header cash-flows-header"
         role="button"
@@ -3389,7 +3533,7 @@ export function HistoricalTradesSection() {
                   <SortTh<BlotterSortKey> label="Symbol" sortKey="symbol" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Description" sortKey="contract_desc" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Type" sortKey="sec_type" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <SortTh<BlotterSortKey> label="Side" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+                  <SortTh<BlotterSortKey> label="Status" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Qty" sortKey="net_quantity" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Commission" sortKey="total_commission" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
                   <SortTh<BlotterSortKey> label="Realized P&L" sortKey="realized_pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />

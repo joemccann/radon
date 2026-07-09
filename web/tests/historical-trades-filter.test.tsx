@@ -253,4 +253,23 @@ describe("HistoricalTradesSection", () => {
 
     expect(screen.queryByText(/STALE/)).toBeNull();
   });
+
+  it("uses Status column header (not Side) for Closed/Open values", () => {
+    render(React.createElement(HistoricalTradesSection));
+
+    expect(screen.getByText("Status")).toBeTruthy();
+    expect(screen.queryByText("Side")).toBeNull();
+    expect(screen.getAllByText("Closed").length).toBeGreaterThan(0);
+    expect(screen.getByText("Open")).toBeTruthy();
+  });
+
+  it("honors defaultExpanded=false by collapsing the body", () => {
+    render(React.createElement(HistoricalTradesSection, { defaultExpanded: false }));
+
+    expect(screen.getByTestId("historical-trades-toggle").getAttribute("aria-expanded")).toBe(
+      "false",
+    );
+    expect(document.getElementById("historical-trades-body")).toBeNull();
+    expect(document.getElementById("orders-historical")).toBeTruthy();
+  });
 });

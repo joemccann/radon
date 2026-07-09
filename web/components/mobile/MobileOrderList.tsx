@@ -2,9 +2,16 @@
 
 import { useState } from "react";
 import { Inbox, Loader2 } from "lucide-react";
-import type { OpenOrder } from "@/lib/types";
+import type { OpenOrder, PortfolioPosition } from "@/lib/types";
 import type { OpenOrderDisplayRow } from "@/lib/openOrderCombos";
 import { fmtPrice } from "@/lib/positionUtils";
+import {
+  cardToneForIntent,
+  formatFillQuantity,
+  mapOrderStatus,
+  resolveOrderIntent,
+  type OrderIntent,
+} from "@/lib/orders/orderDisplay";
 import Card from "./Card";
 import BottomSheet from "./BottomSheet";
 import SectionEmptyState from "../SectionEmptyState";
@@ -18,6 +25,8 @@ type MobileOrderListProps = {
   canModify: (order: OpenOrder) => boolean;
   onRequestCancel: (single: OpenOrder | null, combo: OpenOrder[] | null) => void;
   onRequestModify: (single: OpenOrder | null, combo: OpenOrder[] | null) => void;
+  /** Optional portfolio for OPEN/CLOSE intent and card tone. */
+  portfolioPositions?: readonly PortfolioPosition[];
 };
 
 type ActionTarget = {
@@ -27,30 +36,100 @@ type ActionTarget = {
   modifyEnabled: boolean;
   isPendingCancel: boolean;
   isPendingModify: boolean;
+  isCombo: boolean;
 };
 
-function rowSummary(row: OpenOrderDisplayRow): { title: string; subtitle: string; price: string } {
+function limitLabel(limitPrice: number | null, orderType: string): string {
+  if (limitPrice != null) return fmtPrice(limitPrice);
+  if (orderType === "MKT") return "MKT";
+  return "--";
+}
+
+function comboFillQuantity(orders: readonly OpenOrder[], totalQuantity: number): string {
+  if (orders.length === 0) return String(totalQuantity);
+  const filled = Math.min(...orders.map((o) => o.filled));
+  const remaining = Math.max(...orders.map((o) => o.remaining));
+  return formatFillQuantity({ filled, remaining, totalQuantity });
+}
+
+function statusLabel(
+  raw: string,
+  opts: {
+    filled?: number;
+    remaining?: number;
+    isPendingCancel: boolean;
+    isPendingModify: boolean;
+  },
+): string {
+  if (opts.isPendingCancel) return "Cancelling...";
+  if (opts.isPendingModify) return "Modifying...";
+  return mapOrderStatus(raw, {
+    filled: opts.filled,
+    remaining: opts.remaining,
+  }).label;
+}
+
+function rowSummary(
+  row: OpenOrderDisplayRow,
+  pending: { cancel: boolean; modify: boolean },
+): { title: string; subtitle: string; price: string; status: string } {
   if (row.kind === "combo") {
+    const qty = comboFillQuantity(row.orders, row.totalQuantity);
+    const first = row.orders[0];
     return {
       title: `${row.symbol} · ${row.structure}`,
-      subtitle: `${row.totalQuantity}x ${row.summary}`,
-      price: row.limitPrice != null ? fmtPrice(row.limitPrice) : "MKT",
+      subtitle: `${qty}x ${row.summary}`,
+      price: limitLabel(row.limitPrice, row.orderType),
+      status: statusLabel(row.status ?? "", {
+        filled: first?.filled,
+        remaining: first?.remaining,
+        isPendingCancel: pending.cancel,
+        isPendingModify: pending.modify,
+      }),
     };
   }
   const o = row.order;
+  const qty = formatFillQuantity(o);
   return {
     title: `${o.contract.symbol} · ${o.action}`,
-    subtitle: `${o.totalQuantity}x ${o.orderType}${o.tif ? ` · ${o.tif}` : ""}`,
-    price: o.limitPrice != null ? fmtPrice(o.limitPrice) : o.orderType === "MKT" ? "MKT" : "--",
+    subtitle: `${qty}x ${o.orderType}${o.tif ? ` · ${o.tif}` : ""}`,
+    price: limitLabel(o.limitPrice, o.orderType),
+    status: statusLabel(o.status ?? "", {
+      filled: o.filled,
+      remaining: o.remaining,
+      isPendingCancel: pending.cancel,
+      isPendingModify: pending.modify,
+    }),
   };
 }
 
 function rowAction(row: OpenOrderDisplayRow): "BUY" | "SELL" | null {
   if (row.kind === "single") return row.order.action === "SELL" ? "SELL" : "BUY";
-  // For combos derive from the first leg's action
   const first = row.orders[0];
   if (!first) return null;
   return first.action === "SELL" ? "SELL" : "BUY";
+}
+
+function rowIntent(
+  row: OpenOrderDisplayRow,
+  portfolio: readonly PortfolioPosition[] | undefined,
+): OrderIntent {
+  if (row.kind === "single") {
+    return resolveOrderIntent(row.order, portfolio);
+  }
+  // Combos are BAG-like; try first leg when portfolio coverage is clear.
+  const first = row.orders[0];
+  if (!first) return "UNKNOWN";
+  return resolveOrderIntent(first, portfolio);
+}
+
+function rowCardTone(
+  intent: OrderIntent,
+  action: "BUY" | "SELL" | null,
+  isCombo: boolean,
+): "positive" | "negative" | "default" {
+  if (isCombo && intent === "UNKNOWN") return "default";
+  return cardToneForIntent(intent, action ?? "");
 }
 
 function pendingFor(row: OpenOrderDisplayRow, cancels: HasPermId, modifies: HasPermId) {
@@ -59,6 +138,106 @@ function pendingFor(row: OpenOrderDisplayRow, cancels: HasPermId, modifies: HasP
     cancel: orders.some((o) => cancels.has(o.permId)),
     modify: orders.some((o) => modifies.has(o.permId)),
   };
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mobile-card__metric">
+      <span className="mobile-card__metric-label">{label}</span>
+      <span className="mobile-card__metric-value">{value}</span>
+    </div>
+  );
+}
+
+function IntentBadge({ intent }: { intent: OrderIntent }) {
+  if (intent === "UNKNOWN") return null;
+  const pillClass = intent === "CLOSE" ? "distrib" : "accum";
+  return (
+    <span className={`pill ${pillClass}`} data-testid="mobile-order-intent-badge">
+      {intent}
+    </span>
+  );
+}
+
+function OrderSheetSummary({
+  row,
+  pending,
+  portfolio,
+}: {
+  row: OpenOrderDisplayRow;
+  pending: { cancel: boolean; modify: boolean };
+  portfolio: readonly PortfolioPosition[] | undefined;
+}) {
+  const intent = rowIntent(row, portfolio);
+
+  if (row.kind === "combo") {
+    const first = row.orders[0];
+    const qty = comboFillQuantity(row.orders, row.totalQuantity);
+    const status = statusLabel(row.status ?? "", {
+      filled: first?.filled,
+      remaining: first?.remaining,
+      isPendingCancel: pending.cancel,
+      isPendingModify: pending.modify,
+    });
+    return (
+      <div className="mobile-order-sheet-summary" data-testid="mobile-order-sheet-summary">
+        <div className="mobile-card__title-row">
+          <div className="mobile-card__title">
+            <span>{row.symbol}</span>
+            <IntentBadge intent={intent} />
+          </div>
+        </div>
+        {row.summary ? <div className="mobile-card__subtitle">{row.summary}</div> : null}
+        <div className="mobile-card__metrics">
+          <Metric label="Qty" value={qty} />
+          <Metric label="Limit" value={limitLabel(row.limitPrice, row.orderType)} />
+          <Metric label="Status" value={status} />
+          <Metric label="TIF" value={row.tif || "--"} />
+        </div>
+        <div className="mobile-card__detail" data-testid="mobile-order-sheet-legs">
+          {row.orders.map((leg) => {
+            const legLabel = leg.contract.secType === "OPT" && leg.contract.strike != null
+              ? `${leg.action} ${formatFillQuantity(leg)}x ${leg.contract.right ?? ""} ${leg.contract.strike}`
+              : `${leg.action} ${formatFillQuantity(leg)}x ${leg.contract.secType}`;
+            return (
+              <div key={leg.permId} className="mobile-card__leg-row">
+                <div className="mobile-card__leg-desc">{legLabel}</div>
+                <div className="mobile-card__leg-metrics">
+                  <span className="mobile-card__leg-meta">
+                    {limitLabel(leg.limitPrice, leg.orderType)}
+                  </span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  const o = row.order;
+  const status = statusLabel(o.status ?? "", {
+    filled: o.filled,
+    remaining: o.remaining,
+    isPendingCancel: pending.cancel,
+    isPendingModify: pending.modify,
+  });
+  return (
+    <div className="mobile-order-sheet-summary" data-testid="mobile-order-sheet-summary">
+      <div className="mobile-card__title-row">
+        <div className="mobile-card__title">
+          <span>{o.contract.symbol}</span>
+          <IntentBadge intent={intent} />
+        </div>
+      </div>
+      <div className="mobile-card__metrics">
+        <Metric label="Qty" value={formatFillQuantity(o)} />
+        <Metric label="Limit" value={limitLabel(o.limitPrice, o.orderType)} />
+        <Metric label="Status" value={status} />
+        <Metric label="TIF" value={o.tif || "--"} />
+      </div>
+    </div>
+  );
 }
 
 type OrderSortKey = "default" | "symbol" | "totalQuantity" | "limitPrice" | "status";
@@ -104,6 +283,7 @@ export default function MobileOrderList({
   canModify,
   onRequestCancel,
   onRequestModify,
+  portfolioPositions,
 }: MobileOrderListProps) {
   const [activeRow, setActiveRow] = useState<OpenOrderDisplayRow | null>(null);
   const [sortKey, setSortKey] = useState<OrderSortKey>("default");
@@ -136,6 +316,7 @@ export default function MobileOrderList({
         modifyEnabled: activeRow.orders.every(canModify),
         isPendingCancel: pending.cancel,
         isPendingModify: pending.modify,
+        isCombo: true,
       };
     } else {
       const pending = pendingFor(activeRow, cancels, modifies);
@@ -146,6 +327,7 @@ export default function MobileOrderList({
         modifyEnabled: canModify(activeRow.order),
         isPendingCancel: pending.cancel,
         isPendingModify: pending.modify,
+        isCombo: false,
       };
     }
   }
@@ -166,10 +348,11 @@ export default function MobileOrderList({
       </div>
       <div className="mobile-card-list" data-testid="mobile-order-list">
         {sortRows(rows, sortKey).map((row) => {
-          const summary = rowSummary(row);
           const pending = pendingFor(row, cancels, modifies);
+          const summary = rowSummary(row, pending);
           const action = rowAction(row);
-          const tone = action === "SELL" ? "negative" : "positive";
+          const intent = rowIntent(row, portfolioPositions);
+          const tone = rowCardTone(intent, action, row.kind === "combo");
           const id = row.kind === "combo" ? row.id : `single-${row.order.permId}`;
 
           return (
@@ -191,9 +374,7 @@ export default function MobileOrderList({
                 </div>
                 <div className="mobile-card__chevron-row">
                   <span className="mobile-card__subtitle">{summary.subtitle}</span>
-                  <span className="mobile-card__subtitle">
-                    {pending.cancel ? "Cancelling..." : pending.modify ? "Modifying..." : (row.kind === "combo" ? row.status : row.order.status)}
-                  </span>
+                  <span className="mobile-card__subtitle">{summary.status}</span>
                 </div>
               </Card>
             </div>
@@ -242,11 +423,15 @@ export default function MobileOrderList({
               }}
               data-testid="mobile-order-action-cancel"
             >
-              Cancel order
+              {target.isCombo ? "Cancel all legs" : "Cancel order"}
             </button>
           }
         >
-          <div />
+          <OrderSheetSummary
+            row={activeRow}
+            pending={{ cancel: target.isPendingCancel, modify: target.isPendingModify }}
+            portfolio={portfolioPositions}
+          />
         </BottomSheet>
       ) : null}
     </>
