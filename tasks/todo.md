@@ -6,12 +6,21 @@ Proposal: `tasks/mobile-order-builder-ux-proposal.md`
 - T1 Analyze mobile chain + ticket vs desktop OrderBuilder — done
 - T2 Map gaps to industry mobile options UX — done
 - T3 Write prioritized proposal (P0 safety → P1 speed → P2 polish) — done
-- T4 Operator decisions on quick-add / confirm chrome — blocked on review
-- T5 Implement Phase 1 safety parity — depends_on: [T4] (or proceed on defaults in proposal)
+- T4 Operator decisions on quick-add / confirm chrome — RESOLVED (proposal recommendations adopted): long-press popover, in-sheet confirm step, one-line risk teaser
+- T5 Implement Phase 1 safety parity — done
+- T6 Implement Phase 2 speed parity — done
+- T7 Implement Phase 3 build-speed — done
 
 ## Review
 - Current mobile path is discovery-heavy (3 taps/leg) and skips desktop safety (confirm, `okToSubmit`, open/close honesty, error formatting).
 - Recommended ship order: safety parity first, then quote chips + strip preview, then long-press quick-add.
+
+### Implemented 2026-07-08 (Phases 1-3, on the proposal's recommended decisions)
+- Phase 1 (safety): in-sheet confirm step; submit gated on `okToSubmit` via `<OrderRiskGate onState>`; single-leg SELL/BUY TO CLOSE labels + `closeOut.entryCostDollars` (per-contract); IB errors through `formatOrderError`/`<OrderErrorBanner>`; notional line + Max loss/gain teaser + Clear. Combo close labeling intentionally scoped out (close a combo from the position/OrderTab, not by rebuilding on the chain).
+- Phase 2 (speed): tappable Bid/Mid/Ask chips; per-leg BUY<->SELL flip (structure change invalidates manual price); pending strip shows structure + signed net + Clear + Review; ladder selection tint on staged strikes.
+- Phase 3 (build-speed): long-press quick-add popover (480ms dwell, move-cancel, guarded haptic, self-dismiss guard so the opening release doesn't close it); adaptive tick (penny under $3); qty presets 5/10 + Max on closing legs.
+- Files: `web/components/mobile/{MobileOrderTicket,MobileChainLadder}.tsx`, `web/app/globals.css` (tokens only). Tests: `web/tests/mobile-order-ticket.test.tsx` (6 vitest) + extended `web/e2e/mobile-order-ticket.spec.ts` (9 mobile Playwright, all green live at 393x852). Full web suite 3920 vitest / 0 fail; tsc clean.
+- Live-browser verification surfaced + fixed a real bug: the long-press popover dismissed itself on the trailing click from its own opening gesture (backdrop now ignores dismissals within 400ms of open).
 
 ## Follow-up (this branch)
 - [x] Add `web/vercel.json` Ignored Build Step for `radon-demo` (watch `web/` + `lib/tools`) so docs-only PRs do not deploy demo.radon.run.

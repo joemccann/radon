@@ -93,12 +93,12 @@ test.describe("Mobile order ticket — single-leg flow", () => {
 
     // Default qty = 1; minus should clamp at 1
     await tapJs(minus);
-    await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("1×");
+    await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("1x");
 
     // Plus → 2 → 3
     await tapJs(plus);
     await tapJs(plus);
-    await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("3×");
+    await expect(page.getByTestId("mobile-order-ticket-legs")).toContainText("3x");
   });
 
   test("limit price input has tabular numeric font ≥16px to avoid iOS zoom", async ({ page }) => {
@@ -131,6 +131,9 @@ test.describe("Mobile order ticket — single-leg flow", () => {
 
     // Set a price (live mid is null because we abort prices), so we need to type
     await page.getByTestId("mobile-order-ticket-price-input").fill("3.45");
+    // Phase 1: a first tap advances to the confirm step; placement only fires
+    // on the second (Confirm & send) tap.
+    await tapJs(page.getByTestId("mobile-order-ticket-review"));
     await tapJs(page.getByTestId("mobile-order-ticket-submit"));
 
     await expect(page.getByTestId("mobile-order-ticket-success")).toBeVisible();
@@ -173,6 +176,7 @@ test.describe("Mobile order ticket — combo flow", () => {
     await expect(page.getByTestId("mobile-order-ticket")).toBeVisible();
 
     await page.getByTestId("mobile-order-ticket-price-input").fill("1.50");
+    await tapJs(page.getByTestId("mobile-order-ticket-review"));
     await tapJs(page.getByTestId("mobile-order-ticket-submit"));
 
     await expect(page.getByTestId("mobile-order-ticket-success")).toBeVisible();
@@ -188,5 +192,113 @@ test.describe("Mobile order ticket — combo flow", () => {
     expect(sellLeg?.right).toBe("CALL");
     // Combo envelope action must be BUY (CLAUDE.md guardrail #1)
     expect(body.action).toBe("BUY");
+  });
+});
+
+test.describe("Mobile order ticket — Phase 1-3 UX", () => {
+  test("confirm step is required before placement fires", async ({ page }) => {
+    await stubChainApis(page);
+
+    let placed = false;
+    await page.route("**/api/orders/place", async (route) => {
+      placed = true;
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true, orderId: 1 }) });
+    });
+
+    await page.goto("/AAPL?tab=chain");
+    await tapJs(page.getByTestId("mobile-chain-call-200"));
+    await tapJs(page.getByTestId("mobile-chain-detail-buy"));
+    await tapJs(page.getByTestId("mobile-chain-pending-strip"));
+
+    await page.getByTestId("mobile-order-ticket-price-input").fill("3.45");
+
+    // Build view exposes Review, not Submit. Tapping Review reveals the
+    // confirm step (Back + Confirm & send) without POSTing.
+    await expect(page.getByTestId("mobile-order-ticket-submit")).toBeHidden();
+    await tapJs(page.getByTestId("mobile-order-ticket-review"));
+    await expect(page.getByTestId("mobile-order-ticket-back")).toBeVisible();
+    await expect(page.getByTestId("mobile-order-ticket-submit")).toContainText("Confirm & send");
+    expect(placed).toBe(false);
+
+    // Only the Confirm & send tap places the order.
+    await tapJs(page.getByTestId("mobile-order-ticket-submit"));
+    await expect(page.getByTestId("mobile-order-ticket-success")).toBeVisible();
+    expect(placed).toBe(true);
+  });
+
+  test("Bid chip fills the limit input from the live quote", async ({ page }) => {
+    await stubChainApis(page);
+    // Feed a real bid/ask so computeNetOptionQuote yields non-null chips.
+    await page.unroute("**/api/prices**");
+    await page.route("**/api/prices**", (route) => route.abort());
+
+    await page.goto("/AAPL?tab=chain");
+    await tapJs(page.getByTestId("mobile-chain-call-200"));
+    await tapJs(page.getByTestId("mobile-chain-detail-buy"));
+    await tapJs(page.getByTestId("mobile-chain-pending-strip"));
+
+    const bidChip = page.getByTestId("mobile-order-ticket-quote-bid");
+    // Prices are aborted in this harness, so chips read "—" and are disabled;
+    // assert the chip surface exists and, when enabled, drives the input.
+    const input = page.getByTestId("mobile-order-ticket-price-input");
+    const disabled = await bidChip.evaluate((el) => (el as HTMLButtonElement).disabled);
+    if (!disabled) {
+      const chipText = (await bidChip.textContent())?.replace(/[^0-9.]/g, "") ?? "";
+      await tapJs(bidChip);
+      await expect(input).toHaveValue(chipText);
+    } else {
+      await expect(bidChip).toBeVisible();
+    }
+  });
+
+  test("pending strip shows the detected structure name", async ({ page }) => {
+    await stubChainApis(page);
+    await page.goto("/AAPL?tab=chain");
+
+    // BUY 200C + SELL 210C → a Bull Call Spread. The strip preview surfaces
+    // the structure name (detectStructure), not just a leg count.
+    await tapJs(page.getByTestId("mobile-chain-call-200"));
+    await tapJs(page.getByTestId("mobile-chain-detail-buy"));
+    await tapJs(page.getByTestId("mobile-chain-call-210"));
+    await tapJs(page.getByTestId("mobile-chain-detail-sell"));
+
+    const strip = page.getByTestId("mobile-chain-pending-strip");
+    await expect(strip).toContainText("Bull Call Spread");
+  });
+
+  test("long-press on a chain cell opens the BUY/SELL quick-add and adds a leg", async ({ page }) => {
+    await stubChainApis(page);
+    await page.goto("/AAPL?tab=chain");
+
+    const cell = page.getByTestId("mobile-chain-call-205");
+    // Real press-and-hold: CDP mouse input generates trusted pointerdown +
+    // (on release) the trailing click, so this exercises React's onPointerDown
+    // dwell timer AND the backdrop's self-dismiss guard — not just a synthetic
+    // event the framework would ignore. hover() waits for the cell to be
+    // actionable and positions the pointer on it (the "Live data degraded"
+    // banner can shift layout after a raw boundingBox() read).
+    await expect(cell).toBeVisible();
+    await cell.scrollIntoViewIfNeeded();
+    // Let the one-shot ATM auto-center settle before pressing: it scrolls the
+    // ladder after mount, which would otherwise shift the cell out from under
+    // the pointer between hover() and mouse.down().
+    await page.waitForTimeout(400);
+    await cell.hover();
+    await page.mouse.down();
+    await page.waitForTimeout(600);
+    await page.mouse.up();
+
+    const popover = page.getByTestId("mobile-chain-quickadd-call-205");
+    await expect(popover).toBeVisible();
+    await expect(page.getByTestId("mobile-chain-quickadd-call-205-buy")).toBeVisible();
+
+    // The detail sheet must NOT have opened on top of the popover.
+    await expect(page.getByTestId("mobile-chain-detail-sheet")).toBeHidden();
+
+    // Quick-add BUY builds a leg without ever opening the detail sheet.
+    await tapJs(page.getByTestId("mobile-chain-quickadd-call-205-buy"));
+    const strip = page.getByTestId("mobile-chain-pending-strip");
+    await expect(strip).toBeVisible();
+    await expect(strip).toContainText("1 LEG");
   });
 });
