@@ -49,7 +49,7 @@ describe("ChatPanel streaming UX", () => {
     global.fetch = fetchMock;
 
     const { container } = render(<ChatPanel activeSection="portfolio" />);
-    const textarea = screen.getByLabelText("Message Pi assistant");
+    const textarea = screen.getByLabelText("Message Grok assistant");
     fireEvent.change(textarea, { target: { value: "hello there" } });
     fireEvent.submit(textarea.closest("form")!);
 
@@ -84,7 +84,7 @@ describe("ChatPanel streaming UX", () => {
     global.fetch = fetchMock;
 
     render(<ChatPanel activeSection="portfolio" />);
-    const textarea = screen.getByLabelText("Message Pi assistant");
+    const textarea = screen.getByLabelText("Message Grok assistant");
     fireEvent.change(textarea, { target: { value: "/portfolio" } });
     fireEvent.submit(textarea.closest("form")!);
 

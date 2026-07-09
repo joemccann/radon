@@ -64,7 +64,7 @@ const PROPOSAL = {
 };
 
 async function sendNonCommandMessage(text: string) {
-  const textarea = screen.getByLabelText("Message Pi assistant");
+  const textarea = screen.getByLabelText("Message Grok assistant");
   fireEvent.change(textarea, { target: { value: text } });
   const form = textarea.closest("form")!;
   fireEvent.submit(form);

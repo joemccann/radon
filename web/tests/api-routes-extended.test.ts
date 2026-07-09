@@ -1436,7 +1436,7 @@ describe("POST /api/assistant — extended", () => {
 
     const body = await res.json();
     expect(body.model).toBe("mock");
-    expect(body.content).toContain("Mock Claude response");
+    expect(body.content).toContain("Mock Grok response");
   });
 
   it("returns 400 when no messages supplied", async () => {

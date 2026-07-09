@@ -11,9 +11,9 @@
  *   3. Repeat until the model stops requesting tools or the round cap is hit.
  *
  * The conversation carries structured content blocks (text / tool_use /
- * tool_result) so the model sees its own calls and their outputs. `chat()` maps
- * `message.content` straight onto the Anthropic Messages body, so passing block
- * arrays is the native shape; string turns from the UI stay strings.
+ * tool_result) so the model sees its own calls and their outputs. Anthropic
+ * accepts those blocks natively; OpenAI-compatible providers (xAI Grok) map
+ * them in `toOpenAiMessages`. String turns from the UI stay strings.
  */
 
 import { chat, type LlmMessage, type LlmToolCall } from "@/lib/llm/provider";
