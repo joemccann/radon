@@ -151,15 +151,26 @@ describe("GarchConvergenceScanner", () => {
 
     const section = screen.getByTestId("garch-scanner-section");
     expect(within(section).getByText("GARCH Convergence")).toBeTruthy();
-    expect(within(section).getByText("NVDA ↔ AMD")).toBeTruthy();
+    // Pair cell: leader → lagger hierarchy
+    expect(within(section).getByTestId("garch-row-NVDA-AMD")).toBeTruthy();
     expect(within(section).getByText("+2.41")).toBeTruthy();
     expect(within(section).getByText("STRONG")).toBeTruthy();
-    expect(within(section).getByText("1 ACTIONABLE")).toBeTruthy();
-    // Failed gates are named, never a bare dash (failing gate = the WHY).
-    expect(within(section).getByText(/Edge/)).toBeTruthy();
+    expect(within(section).getByTestId("garch-actionable-count").textContent).toMatch(/1\s*ACTIONABLE/);
+    // Failed gates named as chips (the WHY), not a bare dash.
+    expect(within(section).getByText("Edge")).toBeTruthy();
+    // Filter bar present
+    expect(within(section).getByTestId("garch-filter-actionable")).toBeTruthy();
 
     fireEvent.click(within(section).getByRole("button", { name: /run scan/i }));
     expect(onScan).toHaveBeenCalledTimes(1);
+  });
+
+  it("filters to actionable pairs only", () => {
+    render(<GarchConvergenceScanner data={garchData} />);
+    const section = screen.getByTestId("garch-scanner-section");
+    fireEvent.click(within(section).getByTestId("garch-filter-actionable"));
+    expect(within(section).getByTestId("garch-row-NVDA-AMD")).toBeTruthy();
+    expect(within(section).queryByTestId("garch-row-GOOGL-META")).toBeNull();
   });
 
   it("renders the empty state when no scan is on file", () => {
