@@ -161,7 +161,7 @@ test("assistant API route returns mock response when mock mode is enabled", asyn
 
     expect(response.status).toBe(200);
     expect(typeof body.content).toBe("string");
-    expect(body.content).toContain("Mock Claude response");
+    expect(body.content).toContain("Mock Grok response");
     expect(body.model).toBe("mock");
   } finally {
     if (prev === undefined) delete process.env.ASSISTANT_MOCK;

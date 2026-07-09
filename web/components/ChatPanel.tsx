@@ -274,7 +274,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
                       className={`chat-message ${message.role}${isStreamingThis ? " streaming" : ""}`}
                     >
                       <div className="chat-meta">
-                        <span className="chat-role">{isAssistant ? "Pi" : "You"}</span>
+                        <span className="chat-role">{isAssistant ? "Grok" : "You"}</span>
                         <span className="chat-time">{message.timestamp}</span>
                       </div>
                       <div className="chat-message-body">
@@ -368,9 +368,9 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
                 onCompositionEnd={() => {
                   composingRef.current = false;
                 }}
-                placeholder="Ask Pi for flow analysis, risk checks, action items..."
+                placeholder="Ask Grok for flow analysis, risk checks, action items..."
                 className="chat-textarea"
-                aria-label="Message Pi assistant"
+                aria-label="Message Grok assistant"
                 rows={1}
                 maxLength={1000}
               />

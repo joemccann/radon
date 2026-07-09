@@ -1,18 +1,31 @@
 /**
  * Provider-agnostic LLM layer.
  *
- * One async `chat()` entrypoint targets Anthropic natively (default), any
- * OpenAI-compatible base URL (OpenAI / Groq / DeepSeek / Ollama), or Gemini,
- * selected by env. Request and response are normalized so call sites never see
- * provider-specific shapes. A configurable fallback provider is tried when the
- * primary fails. Honors ASSISTANT_MOCK for offline tests.
+ * One async `chat()` entrypoint targets:
+ *   - xAI Grok (OpenAI-compatible; preferred when XAI_API_KEY is set)
+ *   - Anthropic (native Messages API; historical default)
+ *   - OpenAI-compatible bases (OpenAI / Groq / DeepSeek / Ollama)
+ *   - Gemini
+ *
+ * Request and response are normalized so call sites never see provider-specific
+ * shapes. A configurable fallback provider is tried when the primary fails.
+ * Honors ASSISTANT_MOCK for offline tests.
+ *
+ * Note: SuperGrok / grok.com consumer subscriptions are not an API. CMD+J
+ * uses the xAI Inference API (console.x.ai) with XAI_API_KEY / GROK_API_KEY.
  */
 
 export type LlmRole = "user" | "assistant";
 
+/** Structured content blocks used by the multi-round tool loop. */
+export type LlmContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | { type: "tool_result"; tool_use_id: string; content: string };
+
 export type LlmMessage = {
   role: LlmRole;
-  content: string;
+  content: string | LlmContentBlock[];
 };
 
 export type LlmTool = {
@@ -21,7 +34,8 @@ export type LlmTool = {
   input_schema: Record<string, unknown>;
 };
 
-export type LlmProviderName = "anthropic" | "openai" | "gemini";
+/** `grok` is accepted as an alias of `xai`. */
+export type LlmProviderName = "xai" | "grok" | "anthropic" | "openai" | "gemini";
 
 export type LlmChatRequest = {
   messages: LlmMessage[];
@@ -55,8 +69,16 @@ export type LlmChatResponse = {
 
 const DEFAULT_MAX_TOKENS = 1200;
 const DEFAULT_PROVIDER: LlmProviderName = "anthropic";
+const KNOWN_PROVIDERS: readonly LlmProviderName[] = [
+  "xai",
+  "grok",
+  "anthropic",
+  "openai",
+  "gemini",
+];
 
 const ANTHROPIC_ENV_KEYS = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_API_KEY", "CLAUDE_API_KEY"];
+const XAI_ENV_KEYS = ["XAI_API_KEY", "GROK_API_KEY"];
 
 const isMockMode = () =>
   process.env.ASSISTANT_MOCK === "1" ||
@@ -75,21 +97,49 @@ function resolveAnthropicApiKey(): string | undefined {
   return undefined;
 }
 
-function resolveProvider(request: LlmChatRequest): LlmProviderName {
-  const requested = request.provider ?? (envValue("LLM_PROVIDER") as LlmProviderName | undefined);
-  if (requested === "anthropic" || requested === "openai" || requested === "gemini") {
-    return requested;
+export function resolveXaiApiKey(): string | undefined {
+  for (const key of XAI_ENV_KEYS) {
+    const value = envValue(key);
+    if (value) return value;
   }
-  return DEFAULT_PROVIDER;
+  return undefined;
 }
 
-function resolveFallbackProvider(primary: LlmProviderName): LlmProviderName | undefined {
-  const configured = envValue("LLM_FALLBACK_PROVIDER") as LlmProviderName | undefined;
-  if (configured !== "anthropic" && configured !== "openai" && configured !== "gemini") {
-    return undefined;
+function isKnownProvider(value: string | undefined): value is LlmProviderName {
+  return Boolean(value && (KNOWN_PROVIDERS as readonly string[]).includes(value));
+}
+
+/** Normalize aliases so dispatch only sees canonical names. */
+export function normalizeProvider(name: LlmProviderName): Exclude<LlmProviderName, "grok"> {
+  return name === "grok" ? "xai" : name;
+}
+
+/**
+ * Provider resolution order:
+ * 1. Explicit request.provider
+ * 2. LLM_PROVIDER env
+ * 3. Auto-prefer xAI when XAI_API_KEY / GROK_API_KEY is set (CMD+J → Grok)
+ * 4. Anthropic fallback
+ */
+export function resolveProvider(request: Pick<LlmChatRequest, "provider"> = {}): Exclude<LlmProviderName, "grok"> {
+  const requested = request.provider ?? (envValue("LLM_PROVIDER") as LlmProviderName | undefined);
+  if (isKnownProvider(requested)) {
+    return normalizeProvider(requested);
   }
-  if (configured === primary) return undefined;
-  return configured;
+  if (resolveXaiApiKey()) {
+    return "xai";
+  }
+  return DEFAULT_PROVIDER === "grok" ? "xai" : DEFAULT_PROVIDER;
+}
+
+function resolveFallbackProvider(
+  primary: Exclude<LlmProviderName, "grok">,
+): Exclude<LlmProviderName, "grok"> | undefined {
+  const configured = envValue("LLM_FALLBACK_PROVIDER") as LlmProviderName | undefined;
+  if (!isKnownProvider(configured)) return undefined;
+  const normalized = normalizeProvider(configured);
+  if (normalized === primary) return undefined;
+  return normalized;
 }
 
 function maxTokensFor(request: LlmChatRequest): number {
@@ -98,7 +148,12 @@ function maxTokensFor(request: LlmChatRequest): number {
 
 function lastUserContent(messages: LlmMessage[]): string {
   const lastUser = [...messages].reverse().find((message) => message.role === "user");
-  return lastUser?.content ?? "";
+  if (!lastUser) return "";
+  if (typeof lastUser.content === "string") return lastUser.content;
+  return lastUser.content
+    .filter((block): block is Extract<LlmContentBlock, { type: "text" }> => block.type === "text")
+    .map((block) => block.text)
+    .join("");
 }
 
 function mockResponse(request: LlmChatRequest, provider: LlmProviderName): LlmChatResponse {
@@ -190,10 +245,11 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
   };
 }
 
-// --- OpenAI-compatible (OpenAI / Groq / DeepSeek / Ollama) ----------------
+// --- OpenAI-compatible (xAI / OpenAI / Groq / DeepSeek / Ollama) ----------
 
 type OpenAiToolCall = {
   id?: string;
+  type?: string;
   function?: { name?: string; arguments?: string };
 };
 
@@ -206,31 +262,83 @@ type OpenAiResponse = {
   usage?: { prompt_tokens?: number; completion_tokens?: number };
 };
 
-function openAiConfig(provider: LlmProviderName) {
-  if (provider === "openai") {
+type OpenAiOutboundMessage =
+  | { role: string; content: string | null; tool_calls?: OpenAiToolCall[] }
+  | { role: "tool"; tool_call_id: string; content: string };
+
+function openAiConfig(provider: Exclude<LlmProviderName, "grok" | "anthropic" | "gemini">) {
+  if (provider === "xai") {
     return {
-      apiKey: envValue("OPENAI_API_KEY"),
-      baseUrl: envValue("OPENAI_BASE_URL") || "https://api.openai.com/v1",
-      model: envValue("OPENAI_MODEL") || "gpt-4o",
-      label: "OpenAI",
+      apiKey: resolveXaiApiKey(),
+      baseUrl: envValue("XAI_BASE_URL") || envValue("GROK_BASE_URL") || "https://api.x.ai/v1",
+      model: envValue("XAI_MODEL") || envValue("GROK_MODEL") || "grok-4",
+      label: "xAI Grok",
     };
   }
-  // Groq exposes the same OpenAI-compatible surface; kept selectable via
-  // LLM_PROVIDER=openai + OPENAI_BASE_URL for DeepSeek/Ollama/etc.
   return {
-    apiKey: envValue("GROQ_API_KEY"),
-    baseUrl: envValue("GROQ_BASE_URL") || "https://api.groq.com/openai/v1",
-    model: envValue("GROQ_MODEL") || "llama-3.3-70b-versatile",
-    label: "Groq",
+    apiKey: envValue("OPENAI_API_KEY"),
+    baseUrl: envValue("OPENAI_BASE_URL") || "https://api.openai.com/v1",
+    model: envValue("OPENAI_MODEL") || "gpt-4o",
+    label: "OpenAI",
   };
 }
 
-function toOpenAiMessages(request: LlmChatRequest) {
-  const messages: Array<{ role: string; content: string }> = [];
+/**
+ * Map Anthropic-style structured tool turns onto OpenAI chat/completions
+ * message roles so the multi-round assistant loop works on xAI/Grok.
+ */
+export function toOpenAiMessages(request: LlmChatRequest): OpenAiOutboundMessage[] {
+  const messages: OpenAiOutboundMessage[] = [];
   if (request.system) messages.push({ role: "system", content: request.system });
+
   for (const message of request.messages) {
-    messages.push({ role: message.role, content: message.content });
+    if (typeof message.content === "string") {
+      messages.push({ role: message.role, content: message.content });
+      continue;
+    }
+
+    const blocks = message.content;
+    const toolResults = blocks.filter(
+      (block): block is Extract<LlmContentBlock, { type: "tool_result" }> => block.type === "tool_result",
+    );
+    if (toolResults.length > 0) {
+      for (const result of toolResults) {
+        messages.push({
+          role: "tool",
+          tool_call_id: result.tool_use_id,
+          content: result.content,
+        });
+      }
+      continue;
+    }
+
+    const text = blocks
+      .filter((block): block is Extract<LlmContentBlock, { type: "text" }> => block.type === "text")
+      .map((block) => block.text)
+      .join("");
+    const toolUses = blocks.filter(
+      (block): block is Extract<LlmContentBlock, { type: "tool_use" }> => block.type === "tool_use",
+    );
+
+    if (toolUses.length > 0) {
+      messages.push({
+        role: "assistant",
+        content: text.length > 0 ? text : null,
+        tool_calls: toolUses.map((call) => ({
+          id: call.id,
+          type: "function",
+          function: {
+            name: call.name,
+            arguments: JSON.stringify(call.input ?? {}),
+          },
+        })),
+      });
+      continue;
+    }
+
+    messages.push({ role: message.role, content: text });
   }
+
   return messages;
 }
 
@@ -246,9 +354,18 @@ function toOpenAiTools(tools: LlmTool[] | undefined) {
   }));
 }
 
-async function callOpenAiCompatible(request: LlmChatRequest, provider: LlmProviderName): Promise<LlmChatResponse> {
+async function callOpenAiCompatible(
+  request: LlmChatRequest,
+  provider: "xai" | "openai",
+): Promise<LlmChatResponse> {
   const config = openAiConfig(provider);
   if (!config.apiKey) {
+    if (provider === "xai") {
+      throw new Error(
+        "Missing xAI API key. Set XAI_API_KEY (or GROK_API_KEY) from https://console.x.ai. " +
+          "A SuperGrok / grok.com subscription alone is not enough for server-side chat.",
+      );
+    }
     throw new Error(`Missing ${config.label} API key.`);
   }
 
@@ -332,7 +449,7 @@ async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
   const body: Record<string, unknown> = {
     contents: request.messages.map((message) => ({
       role: message.role === "assistant" ? "model" : "user",
-      parts: [{ text: message.content }],
+      parts: [{ text: typeof message.content === "string" ? message.content : lastUserContent([message]) }],
     })),
     generationConfig: { maxOutputTokens: maxTokensFor(request) },
   };
@@ -370,10 +487,14 @@ function normalizeUsage(input: number | undefined, output: number | undefined): 
   return { inputTokens: input ?? 0, outputTokens: output ?? 0 };
 }
 
-function dispatch(provider: LlmProviderName, request: LlmChatRequest): Promise<LlmChatResponse> {
+function dispatch(
+  provider: Exclude<LlmProviderName, "grok">,
+  request: LlmChatRequest,
+): Promise<LlmChatResponse> {
   if (provider === "anthropic") return callAnthropic(request);
   if (provider === "gemini") return callGemini(request);
-  return callOpenAiCompatible(request, provider);
+  if (provider === "xai") return callOpenAiCompatible(request, "xai");
+  return callOpenAiCompatible(request, "openai");
 }
 
 /**

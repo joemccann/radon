@@ -1,6 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { chat, type LlmChatRequest } from "@/lib/llm/provider";
+import {
+  chat,
+  resolveProvider,
+  toOpenAiMessages,
+  type LlmChatRequest,
+} from "@/lib/llm/provider";
 
 type FetchCall = { url: string; init: RequestInit };
 
@@ -42,6 +47,12 @@ const ENV_KEYS = [
   "OPENAI_API_KEY",
   "OPENAI_BASE_URL",
   "OPENAI_MODEL",
+  "XAI_API_KEY",
+  "GROK_API_KEY",
+  "XAI_BASE_URL",
+  "GROK_BASE_URL",
+  "XAI_MODEL",
+  "GROK_MODEL",
   "GROQ_API_KEY",
   "GROQ_BASE_URL",
   "GROQ_MODEL",
@@ -81,7 +92,86 @@ describe("llm provider", () => {
     expect(result.text.length).toBeGreaterThan(0);
   });
 
-  it("defaults to Anthropic with the native message shape", async () => {
+  it("auto-selects xAI when XAI_API_KEY is set and LLM_PROVIDER is unset", () => {
+    process.env.XAI_API_KEY = "xai-test";
+    expect(resolveProvider({})).toBe("xai");
+  });
+
+  it("aliases grok provider name to xai", () => {
+    expect(resolveProvider({ provider: "grok" })).toBe("xai");
+  });
+
+  it("targets xAI chat/completions with Grok model defaults", async () => {
+    process.env.XAI_API_KEY = "xai-test-key";
+    const { calls } = captureFetch(() =>
+      jsonResponse({
+        model: "grok-4",
+        choices: [{ message: { role: "assistant", content: "Grok flow take." }, finish_reason: "stop" }],
+        usage: { prompt_tokens: 5, completion_tokens: 4 },
+      }),
+    );
+
+    const result = await chat(SAMPLE_REQUEST);
+
+    expect(calls).toHaveLength(1);
+    const call = calls[0];
+    expect(call.url).toBe("https://api.x.ai/v1/chat/completions");
+    expect(
+      (call.init.headers as Record<string, string>)["authorization"] ??
+        (call.init.headers as Record<string, string>)["Authorization"],
+    ).toBe("Bearer xai-test-key");
+
+    const payload = bodyOf(call);
+    expect(payload.model).toBe("grok-4");
+    const messages = payload.messages as Array<{ role: string; content: string }>;
+    expect(messages[0]).toEqual({ role: "system", content: "You are Radon." });
+    expect(messages[1]).toEqual({ role: "user", content: "What is flow?" });
+
+    expect(result.provider).toBe("xai");
+    expect(result.text).toBe("Grok flow take.");
+    expect(result.usage).toEqual({ inputTokens: 5, outputTokens: 4 });
+  });
+
+  it("serializes Anthropic-style tool rounds into OpenAI tool messages", () => {
+    const messages = toOpenAiMessages({
+      system: "sys",
+      messages: [
+        { role: "user", content: "check SPY" },
+        {
+          role: "assistant",
+          content: [
+            { type: "text", text: "Looking up." },
+            { type: "tool_use", id: "call_1", name: "get_flow", input: { ticker: "SPY" } },
+          ],
+        },
+        {
+          role: "user",
+          content: [{ type: "tool_result", tool_use_id: "call_1", content: "{\"ok\":true}" }],
+        },
+      ],
+    });
+
+    expect(messages[0]).toEqual({ role: "system", content: "sys" });
+    expect(messages[1]).toEqual({ role: "user", content: "check SPY" });
+    expect(messages[2]).toMatchObject({
+      role: "assistant",
+      content: "Looking up.",
+      tool_calls: [
+        {
+          id: "call_1",
+          type: "function",
+          function: { name: "get_flow", arguments: "{\"ticker\":\"SPY\"}" },
+        },
+      ],
+    });
+    expect(messages[3]).toEqual({
+      role: "tool",
+      tool_call_id: "call_1",
+      content: "{\"ok\":true}",
+    });
+  });
+
+  it("defaults to Anthropic with the native message shape when no xAI key", async () => {
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
     const { calls } = captureFetch(() =>
       jsonResponse({

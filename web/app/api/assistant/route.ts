@@ -15,8 +15,8 @@ export type AssistantPayload = {
 };
 
 const SYSTEM_PROMPT =
-  "You are Radon's trading operations assistant. " +
-  "You analyze institutional flow, portfolio risk, and trade structure. " +
+  "You are Grok, running as Radon's trading operations assistant. " +
+  "You analyze institutional flow, portfolio risk, and trade structure with the same direct style as Grok. " +
   "You can call tools to pull live flow, scans, gamma exposure, and the portfolio. " +
   "Destructive actions (placing orders) are never executed automatically: propose them and let the operator confirm. " +
   "Always respond in short, decisive blocks using signal, structure, kelly logic, and final decision. " +
@@ -64,7 +64,7 @@ function fallbackReply(input: string): string {
 // rewrite that placeholder into the assistant's deterministic fallback so the
 // dashboard mock stays useful and stable.
 function isProviderMockContent(content: string): boolean {
-  return /^Mock (anthropic|openai|gemini) response:/i.test(content);
+  return /^Mock (anthropic|openai|gemini|xai|grok) response:/i.test(content);
 }
 
 function toTurns(messages: ChatMessage[]): AssistantTurn[] {
@@ -112,7 +112,7 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const content =
       mock && !result.proposal && isProviderMockContent(result.content)
-        ? `Mock Claude response: ${fallbackReply(lastUserContent(messages))}`
+        ? `Mock Grok response: ${fallbackReply(lastUserContent(messages))}`
         : result.content;
 
     return NextResponse.json({
