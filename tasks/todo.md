@@ -1,3 +1,23 @@
+# Task: Mobile Order Builder UX (analysis)
+
+Proposal: `tasks/mobile-order-builder-ux-proposal.md`
+
+## Dependency graph
+- T1 Analyze mobile chain + ticket vs desktop OrderBuilder — done
+- T2 Map gaps to industry mobile options UX — done
+- T3 Write prioritized proposal (P0 safety → P1 speed → P2 polish) — done
+- T4 Operator decisions on quick-add / confirm chrome — blocked on review
+- T5 Implement Phase 1 safety parity — depends_on: [T4] (or proceed on defaults in proposal)
+
+## Review
+- Current mobile path is discovery-heavy (3 taps/leg) and skips desktop safety (confirm, `okToSubmit`, open/close honesty, error formatting).
+- Recommended ship order: safety parity first, then quote chips + strip preview, then long-press quick-add.
+
+## Follow-up (this branch)
+- [x] Add `web/vercel.json` Ignored Build Step for `radon-demo` (watch `web/` + `lib/tools`) so docs-only PRs do not deploy demo.radon.run.
+
+---
+
 # Task: Margin Debt Acceleration Indicator (FINRA)
 
 Decisions (2026-07-03): splice legacy NYSE history back to ~1959 · lives as a new
