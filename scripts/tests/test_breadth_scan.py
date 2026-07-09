@@ -393,6 +393,69 @@ def test_accumulate_session_tape_keeps_tape_when_live_missing() -> None:
     assert tape[0][1] == pytest.approx(733.0)
 
 
+# ── parse_stockcharts_daily (primary daily source) ───────────────
+
+
+def _sc_interval(date: str, close: float, source: str = "SQL_DAILY") -> dict:
+    return {
+        "source": source,
+        "close": close,
+        "end": {"time": f"{date} 16:00:00", "zone": "America/New_York"},
+    }
+
+
+def test_parse_stockcharts_daily_extracts_completed_bars() -> None:
+    payload = {
+        "history": {
+            "intervals": [
+                _sc_interval("2026-07-07", 809.0),
+                _sc_interval("2026-07-08", -1142.0),
+            ]
+        }
+    }
+    assert breadth_scan.parse_stockcharts_daily(payload) == [
+        ("2026-07-07", 809.0),
+        ("2026-07-08", -1142.0),
+    ]
+
+
+def test_parse_stockcharts_daily_drops_in_progress_session() -> None:
+    # The trailing OTHER (in-progress) interval must NOT enter the daily series —
+    # today's partial net A/D belongs to the live tape, not the cumulative line.
+    payload = {
+        "history": {
+            "intervals": [
+                _sc_interval("2026-07-08", -1142.0, source="SQL_DAILY"),
+                {
+                    "source": "OTHER",
+                    "close": 701.0,
+                    "end": {"time": "2026-07-09 15:14:00"},
+                },
+            ]
+        }
+    }
+    assert breadth_scan.parse_stockcharts_daily(payload) == [("2026-07-08", -1142.0)]
+
+
+def test_parse_stockcharts_daily_skips_bad_rows() -> None:
+    payload = {
+        "history": {
+            "intervals": [
+                _sc_interval("2026-07-07", 809.0),
+                _sc_interval("2026-07-08", float("nan")),  # non-finite close
+                {"source": "SQL_DAILY", "close": 5.0, "end": {"time": "bad"}},  # bad date
+            ]
+        }
+    }
+    assert breadth_scan.parse_stockcharts_daily(payload) == [("2026-07-07", 809.0)]
+
+
+def test_parse_stockcharts_daily_empty_on_missing() -> None:
+    assert breadth_scan.parse_stockcharts_daily(None) == []
+    assert breadth_scan.parse_stockcharts_daily({}) == []
+    assert breadth_scan.parse_stockcharts_daily({"history": {"intervals": []}}) == []
+
+
 def test_scan_mirror_registers_breadth_scan_with_date_keyed_upsert(monkeypatch) -> None:
     """mirror_scan_snapshot must dispatch the (date, taken_at, payload) arity
     that upsert_breadth_snapshot requires. Never touches a real DB — writer
