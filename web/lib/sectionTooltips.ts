@@ -76,9 +76,9 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "(PreSubmitted, Submitted, Filled, Cancelled).",
 
   "Today's Executed Orders":
-    "Today's fills and cancellations from IB. Avg Fill Price = volume-weighted average " +
-    "across partial fills. Commission = total IB fees. Realized P&L is reported by IB " +
-    "on closing transactions only. Use this to verify fill quality vs limit price.",
+    "Fills and cancellations on the America/New_York calendar day only (not a multi-day " +
+    "lookback). Avg fill = volume-weighted across partials. Commission = IB fees. " +
+    "Realized P&L is IB-reported on closing transactions. Prior-day fills belong in Historical.",
 
   "Historical Trades (30 Days)":
     "Trade blotter derived from the Turso journal (live fill writers + rehydrate). " +
