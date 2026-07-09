@@ -64,6 +64,10 @@ import {
   summarizeOpenOrders,
 } from "@/lib/orders/orderDisplay";
 import {
+  filterExecutedToEtToday,
+  formatExecutedFillTime,
+} from "@/lib/orders/executedToday";
+import {
   OPEN_ORDERS_DENSITY_KEY,
   HISTORICAL_PAGE_SIZE_KEY,
   HISTORICAL_PAGE_SIZES,
@@ -2890,7 +2894,10 @@ function OrdersSections({
         exchange: "",
       });
     }
-    return [...cancelRows, ...(orders?.executed_orders ?? [])];
+    // Belt-and-suspenders: API should already day-cut, but live sync payloads
+    // can still carry a multi-day IB fills list under "Today's Executed".
+    const todayFills = filterExecutedToEtToday(orders?.executed_orders ?? []);
+    return [...cancelRows, ...todayFills];
   }, [cancelledOrders, orders?.executed_orders]);
 
   const execSortWithCancelled = useSort<ExecutedOrder, ExecOrderKey>(allExecutedRows, execOrderExtract, "time", "desc");
@@ -3492,7 +3499,7 @@ function OrdersSections({
                             return `${group.totalPnL >= 0 ? "+" : ""}${fmtPrice(group.totalPnL)}${pct != null ? ` (${pct >= 0 ? "+" : ""}${pct.toFixed(1)}%)` : ""}`;
                           })() : "—"}
                         </td>
-                        <td>{new Date(group.time).toLocaleTimeString()}</td>
+                        <td>{formatExecutedFillTime(group.time)}</td>
                         <td>
                           {shareData != null && (
                             <SharePnlButton data={shareData} />
@@ -3524,7 +3531,7 @@ function OrdersSections({
                                 ? `${e.realizedPNL >= 0 ? "+" : ""}${fmtPrice(e.realizedPNL)}`
                                 : "—"}
                             </td>
-                            <td style={{ color: "var(--text-secondary)" }}>{new Date(e.time).toLocaleTimeString()}</td>
+                            <td style={{ color: "var(--text-secondary)" }}>{formatExecutedFillTime(e.time)}</td>
                             <td></td>
                           </tr>
                         );

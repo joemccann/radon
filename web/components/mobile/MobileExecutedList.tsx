@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronDown, ChevronRight, History, XCircle } from "lucide-react";
 import type { PositionFillGroup } from "@/components/WorkspaceSections";
+import { formatExecutedFillTime } from "@/lib/orders/executedToday";
 import { fmtPrice } from "@/lib/positionUtils";
 import Card from "./Card";
 import BuySellRow from "./BuySellRow";
@@ -102,7 +103,7 @@ export default function MobileExecutedList({ groups }: MobileExecutedListProps) 
               </div>
 
               <div className="mobile-card__chevron-row">
-                <span className="mobile-card__subtitle">{new Date(group.time).toLocaleTimeString()}</span>
+                <span className="mobile-card__subtitle">{formatExecutedFillTime(group.time)}</span>
                 {canExpand ? (
                   <span className="mobile-card__chevron" aria-hidden>
                     {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
@@ -116,7 +117,7 @@ export default function MobileExecutedList({ groups }: MobileExecutedListProps) 
                     const side = fillSide(fill.side);
                     const label = `${fill.quantity}x ${fillContractLabel(fill)}`;
                     const price = fill.avgPrice != null ? fmtPrice(fill.avgPrice) : "--";
-                    const sub = new Date(fill.time).toLocaleTimeString();
+                    const sub = formatExecutedFillTime(fill.time);
 
                     if (side) {
                       return (

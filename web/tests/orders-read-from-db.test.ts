@@ -46,7 +46,11 @@ const openPayload = (permId: number) => ({
   tif: "DAY",
 });
 
-const execPayload = (execId: string) => ({
+const todayEt = new Date().toLocaleDateString("sv", { timeZone: "America/New_York" });
+// Noon ET-ish ISO for "today" so day-cut keeps the row under any host TZ.
+const todayFillIso = `${todayEt}T12:00:00-04:00`;
+
+const execPayload = (execId: string, time = todayFillIso) => ({
   execId,
   symbol: "TSLA",
   contract: { conId: 1, symbol: "TSLA", secType: "OPT", strike: 200, right: "C", expiry: "20260530" },
@@ -55,7 +59,7 @@ const execPayload = (execId: string) => ({
   avgPrice: 5.25,
   commission: 0.65,
   realizedPNL: null,
-  time: "2026-05-07T13:30:00Z",
+  time,
   exchange: "ISE",
 });
 
@@ -83,7 +87,7 @@ describe("readOrdersFromDb", () => {
   it("returns OrdersData shape when rows exist", async () => {
     mockGetDb(
       [{ payload: JSON.stringify(openPayload(1)), updated_at: "2026-05-07T13:30:00Z" }],
-      [{ payload: JSON.stringify(execPayload("e1")), fill_time: "2026-05-07T13:30:00Z" }],
+      [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
     );
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
     const result = await readOrdersFromDb();
@@ -92,6 +96,23 @@ describe("readOrdersFromDb", () => {
     expect(result!.executed_count).toBe(1);
     expect(result!.open_orders[0].permId).toBe(1);
     expect(result!.executed_orders[0].execId).toBe("e1");
+  });
+
+  it("excludes executed fills from prior ET calendar days", async () => {
+    mockGetDb(
+      [],
+      [
+        { payload: JSON.stringify(execPayload("today")), fill_time: todayFillIso },
+        {
+          payload: JSON.stringify(execPayload("yesterday", "2026-07-08T10:31:16-04:00")),
+          fill_time: "2026-07-08T10:31:16-04:00",
+        },
+      ],
+    );
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    const result = await readOrdersFromDb();
+    expect(result!.executed_count).toBe(1);
+    expect(result!.executed_orders.map((e) => e.execId)).toEqual(["today"]);
   });
 
   it("skips rows with unparseable payloads", async () => {
@@ -124,11 +145,11 @@ describe("readOrdersFromDb", () => {
   it("falls back to executed fill_time when no open orders exist", async () => {
     mockGetDb(
       [],
-      [{ payload: JSON.stringify(execPayload("e1")), fill_time: "2026-05-07T13:30:00Z" }],
+      [{ payload: JSON.stringify(execPayload("e1")), fill_time: todayFillIso }],
     );
     const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
     const result = await readOrdersFromDb();
-    expect(result!.last_sync).toBe("2026-05-07T13:30:00Z");
+    expect(result!.last_sync).toBe(todayFillIso);
   });
 
   it("syncs the embedded replica before reading (eliminates 60s lag drift)", async () => {

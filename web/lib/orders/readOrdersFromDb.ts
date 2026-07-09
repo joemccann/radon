@@ -3,13 +3,16 @@ import { resetDb, syncDb } from "@/lib/db";
 import { dbExecute } from "@/lib/dbExecute";
 import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
+import { filterExecutedToEtToday } from "@/lib/orders/executedToday";
 
 export type OrdersSnapshot = Static<typeof OrdersData>;
 
 type Open = OrdersSnapshot["open_orders"][number];
 type Executed = OrdersSnapshot["executed_orders"][number];
 
-const EXECUTED_LOOKBACK_HOURS = 36;
+// SQL bound only: pull a short window then filter to ET calendar day in JS.
+// 48h covers overnight + DST edges; "Today's Executed" is always ET day-cut.
+const EXECUTED_SQL_LOOKBACK_HOURS = 48;
 const DB_READ_TIMEOUT_MS = 3_000;
 
 export const EMPTY_ORDERS: OrdersSnapshot = {
@@ -57,7 +60,9 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
     { timeoutMs: DB_READ_TIMEOUT_MS, label: "open orders" },
   );
 
-  const cutoff = new Date(Date.now() - EXECUTED_LOOKBACK_HOURS * 60 * 60 * 1000).toISOString();
+  const cutoff = new Date(
+    Date.now() - EXECUTED_SQL_LOOKBACK_HOURS * 60 * 60 * 1000,
+  ).toISOString();
   const execResult = await dbExecute(
     {
       sql: `SELECT payload, fill_time FROM executed_orders
@@ -78,15 +83,19 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
     if (updatedAt > latestOpenSync) latestOpenSync = updatedAt;
   }
 
-  const executed: Executed[] = [];
+  const executedRaw: Executed[] = [];
   let latestExecSync = "";
   for (const row of execResult.rows) {
     const payload = safeParse<Executed>((row as { payload?: unknown }).payload);
     if (!payload) continue;
-    executed.push(payload);
+    executedRaw.push(payload);
     const fillTime = String((row as { fill_time?: unknown }).fill_time ?? "");
     if (fillTime > latestExecSync) latestExecSync = fillTime;
   }
+
+  // Product contract: "Today's Executed" = America/New_York calendar day only.
+  // SQL lookback is only a bound; never surface yesterday's 10:31 under "Today".
+  const executed = filterExecutedToEtToday(executedRaw);
 
   if (open.length === 0 && executed.length === 0) return null;
 
