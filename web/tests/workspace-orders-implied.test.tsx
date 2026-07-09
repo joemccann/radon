@@ -189,7 +189,54 @@ describe("WorkspaceSections orders — Implied column", () => {
     expect(screen.getAllByText("Implied MV").length).toBeGreaterThan(0);
   });
 
+  it("hides Implied by default even when OPT orders are present", () => {
+    const orders: OrdersData = {
+      last_sync: NOW.toISOString(),
+      open_count: 1,
+      executed_count: 0,
+      executed_orders: [],
+      open_orders: [
+        {
+          orderId: 1,
+          permId: 1,
+          symbol: "AMD",
+          contract: {
+            conId: 1,
+            symbol: "AMD",
+            secType: "OPT",
+            strike: 295,
+            right: "P",
+            expiry: expiry.replace(/-/g, ""),
+          },
+          action: "BUY",
+          orderType: "LMT",
+          totalQuantity: 1,
+          limitPrice: 3.0,
+          auxPrice: null,
+          status: "Submitted",
+          filled: 0,
+          remaining: 1,
+          avgFillPrice: null,
+          tif: "DAY",
+        },
+      ],
+    };
+    render(
+      React.createElement(WorkspaceSections, {
+        section: "orders",
+        orders,
+        prices: {},
+        portfolio: null,
+      }),
+    );
+    // Column toggle still lists the option; table header is off by default.
+    const table = document.querySelector('[data-testid="open-orders-table"]');
+    expect(table).not.toBeNull();
+    expect(within(table as HTMLElement).queryByText("Implied")).toBeNull();
+  });
+
   it("renders 'Implied' header and BS-derived value for a single OPT order", () => {
+    enableAllImpliedOrderColumns();
     const sigma = 0.45;
     const spot = 280;
     const orders: OrdersData = {
@@ -252,6 +299,7 @@ describe("WorkspaceSections orders — Implied column", () => {
   });
 
   it("renders signed combo Implied for a BAG (vertical call spread)", () => {
+    enableAllImpliedOrderColumns();
     const sigma = 0.3;
     const expiryV = "20990619";
     const spot = 105;

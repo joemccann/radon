@@ -63,6 +63,23 @@ import {
   statusPillClass,
   summarizeOpenOrders,
 } from "@/lib/orders/orderDisplay";
+import {
+  OPEN_ORDERS_DENSITY_KEY,
+  HISTORICAL_PAGE_SIZE_KEY,
+  HISTORICAL_PAGE_SIZES,
+  canModifyDisplayRow,
+  flattenSelectedOpenOrders,
+  formatShowingRange,
+  isEditableKeyboardTarget,
+  openOrderRowKey,
+  parseHistoricalPageSize,
+  parseOpenOrdersDensity,
+  resolveOrdersShortcut,
+  setAllSelectionKeys,
+  toggleSelectionKey,
+  type HistoricalPageSize,
+  type OpenOrdersDensity,
+} from "@/lib/orders/ordersUx";
 import { formatRelativeTime } from "@/lib/adminFormat";
 import { computeLegImpliedValue, computeOrderImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
@@ -2422,7 +2439,7 @@ const ORDER_COLUMN_DEFAULTS: Record<OrderToggleableKey, boolean> = {
   limitPrice: true,
   lastPrice: true,
   deltaFill: true,
-  implied: true,
+  implied: false,
   implied_mv: false,
   tif: true,
 };
@@ -2697,10 +2714,21 @@ function OrdersSections({
     cancelOrders?: ModifyOrderRequest["cancelOrders"];
   } | null>(null);
   const [actionLoading, setActionLoading] = useState(false);
+  const [keyboardSelectedKey, setKeyboardSelectedKey] = useState<string | null>(null);
+  const [bulkSelectedKeys, setBulkSelectedKeys] = useState<Set<string>>(() => new Set());
+  const [openOrdersDensity, setOpenOrdersDensity] = useState<OpenOrdersDensity>(() => {
+    if (typeof window === "undefined") return "comfortable";
+    return parseOpenOrdersDensity(window.localStorage.getItem(OPEN_ORDERS_DENSITY_KEY));
+  });
+  const openOrdersFilterRef = useRef<HTMLInputElement>(null);
 
   const clearCancelDialog = useCallback(() => {
     setCancelTarget(null);
     setCancelCombo(null);
+  }, []);
+
+  const clearBulkSelection = useCallback(() => {
+    setBulkSelectedKeys(new Set());
   }, []);
 
   const handleCancel = useCallback(async () => {
@@ -2719,8 +2747,115 @@ function OrdersSections({
     } finally {
       setActionLoading(false);
       clearCancelDialog();
+      clearBulkSelection();
     }
-  }, [cancelCombo, cancelTarget, requestCancel, clearCancelDialog]);
+  }, [cancelCombo, cancelTarget, requestCancel, clearCancelDialog, clearBulkSelection]);
+
+  const openModifyForRow = useCallback((row: OpenOrderDisplayRow) => {
+    if (row.kind === "combo") {
+      if (!row.orders.every((o) => o.orderType === "LMT" || o.orderType === "STP LMT")) return;
+      const target = buildGroupedComboModifyTarget(row);
+      setModifyTarget({
+        modalOrder: target.modalOrder,
+        requestOrder: row.orders[0],
+        cancelOrders: target.cancelOrders,
+      });
+      return;
+    }
+    if (row.order.orderType !== "LMT" && row.order.orderType !== "STP LMT") return;
+    setModifyTarget({ modalOrder: row.order, requestOrder: row.order });
+  }, []);
+
+  const openCancelForRow = useCallback((row: OpenOrderDisplayRow) => {
+    if (row.kind === "combo") {
+      setCancelTarget(null);
+      setCancelCombo(row.orders);
+      return;
+    }
+    setCancelCombo(null);
+    setCancelTarget(row.order);
+  }, []);
+
+  const openBulkCancelSelected = useCallback(() => {
+    const orders = flattenSelectedOpenOrders(openFilter.filtered, bulkSelectedKeys);
+    if (orders.length === 0) return;
+    setCancelTarget(null);
+    setCancelCombo(orders);
+  }, [openFilter.filtered, bulkSelectedKeys]);
+
+  // Desktop open-orders shortcuts: / filter, M modify, X cancel.
+  useEffect(() => {
+    if (showMobileOrders) return;
+
+    function onKeyDown(e: KeyboardEvent) {
+      if (cancelTarget || cancelCombo || modifyTarget) return;
+
+      const action = resolveOrdersShortcut({
+        key: e.key,
+        isTyping: isEditableKeyboardTarget(document.activeElement),
+        hasModifier: e.metaKey || e.ctrlKey || e.altKey,
+        selectedRowKey: keyboardSelectedKey,
+        canModifySelected: (() => {
+          if (!keyboardSelectedKey) return false;
+          const row = openFilter.filtered.find((r) => openOrderRowKey(r) === keyboardSelectedKey);
+          if (!row) return false;
+          return canModifyDisplayRow(
+            row,
+            (o) => o.orderType === "LMT" || o.orderType === "STP LMT",
+          );
+        })(),
+      });
+      if (!action) return;
+
+      e.preventDefault();
+      if (action.type === "focus-filter") {
+        openOrdersFilterRef.current?.focus();
+        openOrdersFilterRef.current?.select();
+        return;
+      }
+
+      const row = openFilter.filtered.find((r) => openOrderRowKey(r) === keyboardSelectedKey);
+      if (!row) return;
+      if (action.type === "modify") openModifyForRow(row);
+      if (action.type === "cancel") openCancelForRow(row);
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [
+    showMobileOrders,
+    cancelTarget,
+    cancelCombo,
+    modifyTarget,
+    keyboardSelectedKey,
+    openFilter.filtered,
+    openModifyForRow,
+    openCancelForRow,
+  ]);
+
+  // Drop bulk selection keys that no longer appear in the filtered list.
+  useEffect(() => {
+    const visible = new Set(openFilter.filtered.map(openOrderRowKey));
+    setBulkSelectedKeys((prev) => {
+      let changed = false;
+      const next = new Set<string>();
+      for (const key of prev) {
+        if (visible.has(key)) next.add(key);
+        else changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [openFilter.filtered]);
+
+  const toggleOpenOrdersDensity = useCallback(() => {
+    setOpenOrdersDensity((prev) => {
+      const next: OpenOrdersDensity = prev === "compact" ? "comfortable" : "compact";
+      if (typeof window !== "undefined") {
+        window.localStorage.setItem(OPEN_ORDERS_DENSITY_KEY, next);
+      }
+      return next;
+    });
+  }, []);
 
   const handleModify = useCallback(async (request: ModifyOrderRequest) => {
     if (!modifyTarget) return;
@@ -2859,13 +2994,42 @@ function OrdersSections({
             <InfoTooltip text={SECTION_TOOLTIPS["Open Orders"]} />
           </div>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {!showMobileOrders && bulkSelectedKeys.size > 0 && (
+              <button
+                type="button"
+                className="btn-order-action btn-cancel"
+                data-testid="cancel-selected-orders"
+                onClick={openBulkCancelSelected}
+              >
+                Cancel selected ({bulkSelectedKeys.size})
+              </button>
+            )}
+            {!showMobileOrders && openOrderRows.length > 0 && (
+              <button
+                type="button"
+                className="btn-secondary orders-density-toggle"
+                data-testid="orders-density-toggle"
+                title={openOrdersDensity === "compact" ? "Switch to comfortable density" : "Switch to compact density"}
+                onClick={toggleOpenOrdersDensity}
+              >
+                {openOrdersDensity === "compact" ? "Comfortable" : "Compact"}
+              </button>
+            )}
             <ColumnsToggle<OrderToggleableKey>
               columns={visibleOrderColumnEntries}
               visible={orderColumns}
               onToggle={toggleOrderColumn}
               onReset={resetOrderColumns}
             />
-            <TableSearch query={openFilter.query} setQuery={openFilter.setQuery} placeholder="Filter orders..." resultCount={openFilter.filtered.length} totalCount={openSort.sorted.length} />
+            <TableSearch
+              query={openFilter.query}
+              setQuery={openFilter.setQuery}
+              placeholder="Filter orders..."
+              resultCount={openFilter.filtered.length}
+              totalCount={openSort.sorted.length}
+              inputId="orders-open-filter"
+              inputRef={openOrdersFilterRef}
+            />
             <span className="pill defined">{orders.open_count} ORDERS</span>
           </div>
         </div>
@@ -2912,10 +3076,32 @@ function OrdersSections({
               }}
             />
           ) : (
-            <div className="table-wrap">
-            <table>
+            <div
+              className={`table-wrap${openOrdersDensity === "compact" ? " table-wrap--compact" : ""}`}
+              data-density={openOrdersDensity}
+            >
+            <table data-testid="open-orders-table">
               <thead>
                 <tr>
+                  <th className="open-order-select-th" scope="col">
+                    <input
+                      type="checkbox"
+                      aria-label="Select all open orders"
+                      data-testid="open-orders-select-all"
+                      checked={
+                        openFilter.filtered.length > 0
+                        && openFilter.filtered.every((row) => bulkSelectedKeys.has(openOrderRowKey(row)))
+                      }
+                      onChange={(e) => {
+                        setBulkSelectedKeys(
+                          setAllSelectionKeys(
+                            openFilter.filtered.map(openOrderRowKey),
+                            e.target.checked,
+                          ),
+                        );
+                      }}
+                    />
+                  </th>
                   <SortTh<OpenOrderKey> label="Symbol" sortKey="symbol" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   <SortTh<OpenOrderKey> label="Action" sortKey="action" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />
                   {orderColumns.orderType && <SortTh<OpenOrderKey> label="Type" sortKey="orderType" activeKey={openSort.sort.key} direction={openSort.sort.direction} onToggle={openSort.toggle} />}
@@ -2932,6 +3118,24 @@ function OrdersSections({
               </thead>
               <tbody>
                 {openFilter.filtered.map((o) => {
+                  const rowKey = openOrderRowKey(o);
+                  const isKeyboardSelected = keyboardSelectedKey === rowKey;
+                  const isBulkSelected = bulkSelectedKeys.has(rowKey);
+                  const selectCell = (
+                    <td className="open-order-select-td" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select order ${rowKey}`}
+                        data-testid={`open-order-select-${rowKey}`}
+                        checked={isBulkSelected}
+                        onChange={(e) => {
+                          setBulkSelectedKeys((prev) =>
+                            toggleSelectionKey(prev, rowKey, e.target.checked),
+                          );
+                        }}
+                      />
+                    </td>
+                  );
                   if (o.kind === "combo") {
                     const comboCanModify = o.orders.every(canModify);
                     const comboModifyTarget = buildGroupedComboModifyTarget(o);
@@ -2954,16 +3158,25 @@ function OrdersSections({
                       isPendingCancel,
                       isPendingModify,
                     });
+                    const rowClass = [
+                      isPendingCancel ? "row-pending-cancel" : "",
+                      isPendingModify ? "row-pending-modify" : "",
+                      isKeyboardSelected ? "open-order-row--selected" : "",
+                      "open-order-row",
+                    ].filter(Boolean).join(" ");
 
                     return (
                       <tr
                         key={o.id}
-                        className={isPendingCancel
-                          ? "row-pending-cancel"
-                          : isPendingModify
-                            ? "row-pending-modify"
-                            : undefined}
+                        className={rowClass}
+                        tabIndex={0}
+                        data-row-key={rowKey}
+                        data-testid={`open-order-row-${rowKey}`}
+                        aria-selected={isKeyboardSelected}
+                        onClick={() => setKeyboardSelectedKey(rowKey)}
+                        onFocus={() => setKeyboardSelectedKey(rowKey)}
                       >
+                        {selectCell}
                         <td>
                           <TickerLink ticker={o.symbol} />
                           <span
@@ -3072,15 +3285,24 @@ function OrdersSections({
                     isPendingModify,
                   });
                   const intent = resolveOrderIntent(o.order, portfolio?.positions);
+                  const singleRowClass = [
+                    isPendingCancel ? "row-pending-cancel" : "",
+                    isPendingModify ? "row-pending-modify" : "",
+                    isKeyboardSelected ? "open-order-row--selected" : "",
+                    "open-order-row",
+                  ].filter(Boolean).join(" ");
                   return (
                     <tr
                       key={`${o.order.orderId}-${o.order.permId}`}
-                      className={isPendingCancel
-                        ? "row-pending-cancel"
-                        : isPendingModify
-                          ? "row-pending-modify"
-                          : undefined}
+                      className={singleRowClass}
+                      tabIndex={0}
+                      data-row-key={rowKey}
+                      data-testid={`open-order-row-${rowKey}`}
+                      aria-selected={isKeyboardSelected}
+                      onClick={() => setKeyboardSelectedKey(rowKey)}
+                      onFocus={() => setKeyboardSelectedKey(rowKey)}
                     >
+                      {selectCell}
                       <td>
                         <TickerLink ticker={o.order.contract.symbol} />
                         {o.summary ? (
@@ -3325,7 +3547,6 @@ function OrdersSections({
 
 /* ─── Historical Trades (Flex Query) ───────────────────── */
 
-const BLOTTER_PAGE_SIZE = 15;
 const BLOTTER_STALE_THRESHOLD_DAYS = 1;
 
 type BlotterSortKey = "date" | "symbol" | "contract_desc" | "sec_type" | "status" | "net_quantity" | "total_commission" | "realized_pnl" | "cost_basis" | "proceeds";
@@ -3367,6 +3588,10 @@ export function HistoricalTradesSection({
 } = {}) {
   const { data, loading, syncing, error, syncNow } = useBlotter(true);
   const [page, setPage] = useState(0);
+  const [pageSize, setPageSize] = useState<HistoricalPageSize>(() => {
+    if (typeof window === "undefined") return 15;
+    return parseHistoricalPageSize(window.localStorage.getItem(HISTORICAL_PAGE_SIZE_KEY));
+  });
   const [expanded, setExpanded] = useState(defaultExpanded);
   const { isMobile, hasMounted } = useViewport();
   const showMobileBlotter = isMobile && hasMounted;
@@ -3392,11 +3617,20 @@ export function HistoricalTradesSection({
   const { filtered, query, setQuery } = useTableFilter(allTrades, extractSearchText);
   const { sorted, sort, toggle } = useSort(filtered, blotterExtract);
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / BLOTTER_PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(sorted.length / pageSize));
   const safePage = Math.min(page, totalPages - 1);
-  const pageRows = sorted.slice(safePage * BLOTTER_PAGE_SIZE, (safePage + 1) * BLOTTER_PAGE_SIZE);
+  const pageRows = sorted.slice(safePage * pageSize, (safePage + 1) * pageSize);
+  const showingLabel = formatShowingRange(safePage, pageSize, sorted.length);
 
-  // Reset page when data changes
+  const setHistoricalPageSize = useCallback((next: HistoricalPageSize) => {
+    setPageSize(next);
+    setPage(0);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(HISTORICAL_PAGE_SIZE_KEY, String(next));
+    }
+  }, []);
+
+  // Reset page when data or filter changes
   useEffect(() => { setPage(0); }, [data, query]);
 
   const totalCount = allTrades.length;
@@ -3500,6 +3734,22 @@ export function HistoricalTradesSection({
         )}
         {!loading && pageRows.length > 0 && showMobileBlotter && (
           <>
+            <div className="historical-page-controls" data-testid="historical-page-controls">
+              <span className="page-meta" data-testid="historical-showing-range">{showingLabel}</span>
+              <label className="historical-page-size">
+                <span className="historical-page-size__label">Rows</span>
+                <select
+                  aria-label="Historical trades page size"
+                  data-testid="historical-page-size"
+                  value={pageSize}
+                  onChange={(e) => setHistoricalPageSize(parseHistoricalPageSize(e.target.value))}
+                >
+                  {HISTORICAL_PAGE_SIZES.map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <MobileBlotterList trades={pageRows} />
             {totalPages > 1 && (
               <div className="pagination" style={{ marginTop: 8 }}>
@@ -3526,6 +3776,22 @@ export function HistoricalTradesSection({
         )}
         {!loading && pageRows.length > 0 && !showMobileBlotter && (
           <>
+            <div className="historical-page-controls" data-testid="historical-page-controls">
+              <span className="page-meta" data-testid="historical-showing-range">{showingLabel}</span>
+              <label className="historical-page-size">
+                <span className="historical-page-size__label">Rows</span>
+                <select
+                  aria-label="Historical trades page size"
+                  data-testid="historical-page-size"
+                  value={pageSize}
+                  onChange={(e) => setHistoricalPageSize(parseHistoricalPageSize(e.target.value))}
+                >
+                  {HISTORICAL_PAGE_SIZES.map((size) => (
+                    <option key={size} value={size}>{size}</option>
+                  ))}
+                </select>
+              </label>
+            </div>
             <table>
               <thead>
                 <tr>
