@@ -13,7 +13,7 @@ Features:
 import subprocess
 import logging
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from .base import BaseHandler
 from clients.ib_client import IBClient, DEFAULT_HOST
@@ -25,6 +25,20 @@ try:
     from db.writer import upsert_journal_entry  # type: ignore
 except ImportError:  # pragma: no cover — DB layer optional in unit tests
     upsert_journal_entry = None  # type: ignore[assignment]
+
+try:
+    from db.client import get_db  # type: ignore
+except ImportError:  # pragma: no cover
+    get_db = None  # type: ignore[assignment]
+
+try:
+    from clients.journal_basis import (  # type: ignore
+        normalize_expiry_compact,
+        prior_net_qty_for_contract,
+    )
+except ImportError:  # pragma: no cover
+    normalize_expiry_compact = None  # type: ignore[assignment]
+    prior_net_qty_for_contract = None  # type: ignore[assignment]
 
 logger = logging.getLogger(__name__)
 
@@ -191,6 +205,77 @@ class FillMonitorHandler(BaseHandler):
         
         return result
     
+    @staticmethod
+    def _side_to_action(side_label: str, sec_type: str, prior_qty: float = 0.0) -> str:
+        """Map order side + prior signed qty → journal action label.
+
+        Mirrors journal_sync._side_to_action so fill_monitor and journal_sync
+        do not diverge (buy-to-cover short → BUY_TO_CLOSE, sell-to-close long
+        → SELL_OPTION).
+        """
+        upper = (side_label or "").upper()
+        if upper == "BUY":
+            if sec_type == "STK":
+                return "BUY"
+            return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
+        if upper == "SELL":
+            if sec_type == "STK":
+                return "SELL"
+            return "SELL_OPTION" if prior_qty > 0 else "SELL_TO_OPEN"
+        return "BUY" if sec_type == "STK" else "BUY_OPTION"
+
+    @staticmethod
+    def _structure_label(action: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
+        type_label = {"STK": "Stock", "OPT": "Option", "BAG": "Spread"}.get(sec_type, sec_type)
+        a = (action or "").upper()
+        if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
+            side_label = "Long"
+        elif a == "SELL_TO_OPEN":
+            side_label = "Short"
+        else:
+            side_label = "Closed"
+        if sec_type in ("OPT", "BAG") and strike is not None and right:
+            right_label = "Call" if right in ("C", "CALL") else "Put" if right in ("P", "PUT") else right
+            exp = str(expiry) if expiry else ""
+            if len(exp) == 8 and exp.isdigit():
+                expiry_iso = f"{exp[0:4]}-{exp[4:6]}-{exp[6:8]}"
+            else:
+                expiry_iso = exp
+            try:
+                strike_f = float(strike)
+                strike_val = int(strike_f) if strike_f.is_integer() else strike_f
+            except (TypeError, ValueError):
+                strike_val = strike
+            suffix = f" {expiry_iso}" if expiry_iso else ""
+            return f"{side_label} {right_label} ${strike_val}{suffix}"
+        return f"{side_label} {type_label} ({sec_type})"
+
+    def _lookup_prior_qty(self, contract: Any) -> float:
+        if get_db is None or prior_net_qty_for_contract is None:
+            return 0.0
+        ticker = getattr(contract, "symbol", None)
+        if not ticker:
+            return 0.0
+        sec_type = getattr(contract, "secType", "STK") or "STK"
+        try:
+            db = get_db()
+            expiry = getattr(contract, "lastTradeDateOrContractMonth", None)
+            if normalize_expiry_compact is not None:
+                expiry = normalize_expiry_compact(expiry)
+            return float(
+                prior_net_qty_for_contract(
+                    db,
+                    ticker=ticker,
+                    sec_type=sec_type,
+                    strike=getattr(contract, "strike", None),
+                    right=getattr(contract, "right", None),
+                    expiry=expiry,
+                )
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("fill_monitor: prior-qty lookup failed for %s: %s", ticker, exc)
+            return 0.0
+
     def _persist_fill_to_journal(
         self,
         fill_info: Dict,
@@ -213,11 +298,10 @@ class FillMonitorHandler(BaseHandler):
         # Real ib_exec_id would be ideal but is not exposed on order status.
         trade_id = f"fill-monitor:order-{order_id}:filled-{total_filled}"
 
-        sec_type = getattr(contract, "secType", "STK")
+        sec_type = getattr(contract, "secType", "STK") or "STK"
         side_label = "BUY" if str(order.action).upper() == "BUY" else "SELL"
-        action = side_label if sec_type == "STK" else (
-            "BUY_OPTION" if side_label == "BUY" else "SELL_TO_OPEN"
-        )
+        prior_qty = self._lookup_prior_qty(contract)
+        action = self._side_to_action(side_label, sec_type, prior_qty=prior_qty)
 
         avg_price = fill_info.get("avg_price") or 0.0
         newly_filled = fill_info.get("newly_filled", 0)
@@ -225,10 +309,18 @@ class FillMonitorHandler(BaseHandler):
         total_cost = float(newly_filled) * float(avg_price) * multiplier
         filled_at = datetime.now().strftime("%Y-%m-%d")
 
+        strike = getattr(contract, "strike", None) if sec_type in ("OPT", "BAG") else None
+        right = getattr(contract, "right", None) if sec_type in ("OPT", "BAG") else None
+        expiry = getattr(contract, "lastTradeDateOrContractMonth", None) if sec_type in ("OPT", "BAG") else None
+        if normalize_expiry_compact is not None:
+            expiry = normalize_expiry_compact(expiry)
+
+        structure = self._structure_label(action, sec_type, strike, right, expiry)
+
         payload: Dict[str, Any] = {
             "date": filled_at,
             "ticker": fill_info.get("symbol", ""),
-            "structure": f"{side_label} {sec_type}",
+            "structure": structure,
             "decision": "FILL_MONITOR_AUTO_IMPORT",
             "action": action,
             "fill_price": round(float(avg_price), 4),
@@ -241,6 +333,15 @@ class FillMonitorHandler(BaseHandler):
         }
         if sec_type in ("OPT", "BAG"):
             payload["contracts"] = int(abs(newly_filled))
+            if strike is not None:
+                try:
+                    payload["strike"] = float(strike)
+                except (TypeError, ValueError):
+                    pass
+            if right:
+                payload["right"] = right
+            if expiry:
+                payload["expiry"] = expiry
         else:
             payload["shares"] = int(abs(newly_filled))
 

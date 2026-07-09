@@ -183,12 +183,11 @@ def _resolve_action(bucket: Dict[str, Any], prior_qty: float = 0.0) -> Optional[
     net = bucket["buy_qty"] - bucket["sell_qty"]
 
     if net > 0:
-        # Net buy. Whether the buys opened a new long or covered a prior
-        # short, the consumer-side label is the same — BUY/BUY_OPTION
-        # treats the row as adding to the long side. (Distinguishing
-        # "buy to cover" would require a separate label that
-        # fromJournal.ts doesn't recognise.)
-        return "BUY" if sec_type == "STK" else "BUY_OPTION"
+        # Net buy. Covering a prior short (prior_qty < 0) is BUY_TO_CLOSE so
+        # fromJournal.ts marks the row closed; otherwise open long BUY_OPTION.
+        if sec_type == "STK":
+            return "BUY"
+        return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
     if net < 0:
         # Net sell. If the position was long beforehand, this is a close
         # (SELL_OPTION). Otherwise it's opening / extending a short

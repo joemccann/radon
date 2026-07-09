@@ -774,4 +774,90 @@ describe("journalRowsToBlotter", () => {
       expect(journalRowsToBlotter(rows, newerLegacy).as_of).toBe("2027-01-01T00:00:00Z");
     });
   });
+
+  it("projects BUY_TO_CLOSE as a closed cover (not open long)", () => {
+    const rows: JournalRow[] = [
+      row(
+        {
+          id: 100,
+          date: "2026-07-09",
+          ticker: "MU",
+          structure: "Closed Put $880 2026-07-17",
+          action: "BUY_TO_CLOSE",
+          fill_price: 16.0,
+          total_cost: 8000,
+          contracts: 5,
+          commission: 1.25,
+          ib_exec_id: "mu-cover",
+          right: "P",
+          strike: 880,
+          expiry: "20260717",
+          realized_pnl: 17457.63,
+          cost_basis: 8000,
+          proceeds: 25457.63,
+        },
+        "2026-07-09",
+      ),
+    ];
+    const out = journalRowsToBlotter(rows);
+    expect(out.closed_trades).toHaveLength(1);
+    expect(out.open_trades).toHaveLength(0);
+    expect(out.closed_trades[0].is_closed).toBe(true);
+    expect(out.closed_trades[0].realized_pnl).toBeCloseTo(17457.63, 2);
+    expect(out.closed_trades[0].executions[0].side).toBe("BOT");
+  });
+
+  it("lot-matches short open + BUY_TO_CLOSE into closed cover with P&L", () => {
+    const rows: JournalRow[] = [
+      row(
+        {
+          id: 1,
+          date: "2026-07-01",
+          ticker: "AAOI",
+          structure: "Short Put $110 2026-07-10",
+          action: "SELL_TO_OPEN",
+          fill_price: 5.8,
+          total_cost: 11600,
+          contracts: 20,
+          commission: 5,
+          ib_exec_id: "aaoi-open",
+          right: "P",
+          strike: 110,
+          expiry: "20260710",
+        },
+        "2026-07-01",
+      ),
+      row(
+        {
+          id: 2,
+          date: "2026-07-09",
+          ticker: "AAOI",
+          structure: "Closed Put $110 2026-07-10",
+          action: "BUY_TO_CLOSE",
+          fill_price: 0.87,
+          total_cost: 1740,
+          contracts: 20,
+          commission: 5,
+          ib_exec_id: "aaoi-cover",
+          right: "P",
+          strike: 110,
+          expiry: "20260710",
+        },
+        "2026-07-09",
+      ),
+    ];
+    const out = journalRowsToBlotter(rows);
+    const closed = out.closed_trades.filter((t) => t.symbol === "AAOI");
+    expect(closed.length).toBeGreaterThanOrEqual(1);
+    // Cover row must be closed (not a phantom open long)
+    const cover = closed.find((t) => t.executions.some((e) => e.exec_id === "aaoi-cover"));
+    expect(cover).toBeTruthy();
+    expect(cover!.is_closed).toBe(true);
+    // Short credit 20*5.8*100 − buyback 20*0.87*100 ≈ 9860 before commissions.
+    // P&L is pro-rated across closing legs (open short + cover); total group P&L
+    // must land on closed rows, and the cover itself must be marked closed.
+    const groupPnl = closed.reduce((s, t) => s + (t.realized_pnl ?? 0), 0);
+    expect(groupPnl).toBeGreaterThan(9000);
+    expect(out.open_trades.filter((t) => t.symbol === "AAOI")).toHaveLength(0);
+  });
 });

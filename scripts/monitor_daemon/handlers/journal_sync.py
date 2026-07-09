@@ -675,9 +675,11 @@ class JournalSyncHandler(BaseHandler):
         """
         upper = (side or "").upper()
         if upper in ("BOT", "BUY"):
-            # BUY label is the same whether opening a long or covering a
-            # short — fromJournal.ts treats both as adding to long side.
-            return "BUY" if sec_type == "STK" else "BUY_OPTION"
+            if sec_type == "STK":
+                return "BUY"
+            # Covering a short (prior signed qty negative) is a close.
+            # fromJournal treats BUY_TO_CLOSE as closed; bare BUY_OPTION is open long.
+            return "BUY_TO_CLOSE" if prior_qty < 0 else "BUY_OPTION"
         if upper in ("SLD", "SELL"):
             if sec_type == "STK":
                 # STK has no OPEN/CLOSE distinction.
@@ -688,8 +690,7 @@ class JournalSyncHandler(BaseHandler):
     @staticmethod
     def _structure_label(action: str, sec_type: str, strike: Any, right: Any, expiry: Any) -> str:
         type_label = {"STK": "Stock", "OPT": "Option", "BAG": "Spread"}.get(sec_type, sec_type)
-        # A sold-to-open call is a SHORT position, not a Closed one. Only a
-        # close-long sell (SELL_OPTION) or a round-trip (CLOSED) reads "Closed".
+        # Opens: Long / Short. Closes: Closed (SELL_OPTION, BUY_TO_CLOSE, CLOSED).
         a = (action or "").upper()
         if a in ("BUY", "BUY_OPTION", "BUY_TO_OPEN"):
             side_label = "Long"

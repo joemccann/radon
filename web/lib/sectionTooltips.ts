@@ -81,9 +81,10 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
     "on closing transactions only. Use this to verify fill quality vs limit price.",
 
   "Historical Trades (30 Days)":
-    "30-day trade blotter from IB Flex Query. Groups executions by position — " +
-    "shows cost basis, proceeds, realized P&L, and commission for each completed " +
-    "or open trade. Use this for reconciliation against the Turso journal and tax reporting.",
+    "Trade blotter derived from the Turso journal (live fill writers + rehydrate). " +
+    "Shows cost basis, proceeds, realized P&L, and commission per completed or open trade. " +
+    "Session fills on Today's Executed may land here after journal_sync / fill_monitor " +
+    "with open/close labels; use Refresh to re-pull. Not a live IB session blotter.",
 
   /* ── Regime / CRI ────────────────────────────────────── */
 
