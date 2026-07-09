@@ -17,6 +17,7 @@ import {
   resolveEntryCost,
   positionDirectionSign,
   getAvgEntry,
+  getInitialValue,
   getMultiplier,
   getLastPrice,
   getLastPriceIsCalculated,
@@ -164,10 +165,11 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
       }
       case "daily_chg": return isStock ? getDailyChange(prices?.[pos.ticker]) : getOptionDailyChg(pos, prices);
       case "today_pnl": return getTodayPnlDollars(pos, prices);
-      // Combo Initial Value carries the net credit/debit sign (credit → negative);
-      // single-leg/stock is the unsigned notional. Must match the rendered cell
-      // (line ~461) or the column sorts on a different number than it shows.
-      case "initial_value": return pos.legs.length > 1 ? resolveEntryCost(pos) : Math.abs(resolveEntryCost(pos));
+      // Initial Value follows the Avg Entry sign convention: combo net sign,
+      // single-leg short option is a CREDIT (negative), stock/long-option are
+      // positive notionals. Must match the rendered cell (getInitialValue) or
+      // the column sorts on a different number than it shows.
+      case "initial_value": return getInitialValue(pos);
       case "entry_cost": return resolveEntryCost(pos);
       case "market_value": return mv;
       case "pnl": return mv != null ? mv - resolveEntryCost(pos) : null;
@@ -461,7 +463,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
         )}
         {columns.market_value && <td className="right">{mv != null ? fmtUsd(mv) : "—"}</td>}
         {columns.entry_cost && <td className="right">{fmtUsd(entryCost)}</td>}
-        {columns.initial_value && <td className="right">{fmtUsd(pos.legs.length > 1 ? entryCost : Math.abs(entryCost))}</td>}
+        {columns.initial_value && <td className="right">{fmtUsd(getInitialValue(pos))}</td>}
         {columns.pnl && (
           <td className={`right ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
             {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}` : "—"}

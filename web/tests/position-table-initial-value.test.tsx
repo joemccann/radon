@@ -5,14 +5,18 @@
  *
  * Initial Value = the notional put on at entry.
  *   stock         : qty × avg_entry              (multiplier 1, positive)
- *   single option : contracts × avg_entry × 100  (positive notional)
+ *   single option : contracts × avg_entry × 100, SIGNED — a SHORT option is a
+ *                   premium CREDIT and reads NEGATIVE; a LONG option is a debit
+ *                   paid and reads positive
  *   combo         : net entry cost, SIGNED — a net credit shows NEGATIVE
  *                   (credits negative, debits positive)
  *
- * Default ON. Toggleable in the Columns popover. Single-leg stock/option keep
- * the unsigned notional; a multi-leg COMBO carries the net credit/debit sign
- * (a credit was received, so it reads negative). Per-leg LegRow stays
- * |leg.entry_cost| (positive).
+ * Default ON. Toggleable in the Columns popover. Initial Value follows the same
+ * sign scoping as Avg Entry (getInitialValue): a single-leg short option is a
+ * CREDIT (negative), a single-leg stock and long option stay positive notionals,
+ * and a multi-leg COMBO carries the net credit/debit sign (a credit was
+ * received, so it reads negative). Per-leg LegRow stays |leg.entry_cost|
+ * (positive).
  */
 
 import React from "react";
@@ -156,6 +160,53 @@ const SHORT_RISK_REVERSAL: PortfolioPosition = {
   ],
 };
 
+// 20 AAOI $110 SHORT PUTs opened for an $11,574 premium credit. A single-leg
+// short option's Initial Value is a CREDIT → NEGATIVE (-$11,574), mirroring the
+// signed Avg Entry ($-5.79). entry_cost is stored as a positive magnitude.
+const AAOI_SHORT_PUT: PortfolioPosition = {
+  id: 200,
+  ticker: "AAOI",
+  structure: "Short Put $110.0",
+  structure_type: "Short Put",
+  risk_profile: "undefined",
+  expiry,
+  contracts: 20,
+  direction: "SHORT",
+  entry_cost: 11574,
+  max_risk: null,
+  market_value: 8140,
+  kelly_optimal: null,
+  target: null, stop: null,
+  entry_date: "2026-04-27",
+  legs: [
+    { direction: "SHORT", contracts: 20, type: "Put", strike: 110,
+      entry_cost: 11574, avg_cost: -5.79, market_price: 4.07, market_value: 8140 },
+  ],
+};
+
+// 100 shares TSLA SHORT @ $113.49/share → notional $11,349. A single-leg SHORT
+// STOCK's Initial Value stays a positive per-instrument notional (daca786).
+const TSLA_SHORT_STOCK: PortfolioPosition = {
+  id: 201,
+  ticker: "TSLA",
+  structure: "Stock",
+  structure_type: "Stock",
+  risk_profile: "equity",
+  expiry: "N/A",
+  contracts: 100,
+  direction: "SHORT",
+  entry_cost: 11349,
+  max_risk: null,
+  market_value: null,
+  kelly_optimal: null,
+  target: null, stop: null,
+  entry_date: "2026-04-27",
+  legs: [
+    { direction: "SHORT", contracts: 100, type: "Stock", strike: null,
+      entry_cost: 11349, avg_cost: 113.49, market_price: null, market_value: null },
+  ],
+};
+
 /* ─── tests ────────────────────────────────────────────── */
 
 describe("PositionTable — POSITION_COLUMNS exposes initial_value", () => {
@@ -234,6 +285,34 @@ describe("PositionTable — Initial Value renders by default", () => {
     expect(cells[ivIdx]).toContain("-");
     expect(cells[ivIdx]).toContain("2,500");
     expect(cells[ivIdx]).not.toBe("$2,500");
+  });
+
+  it("renders a NEGATIVE Initial Value for a single-leg SHORT option (premium credit)", () => {
+    // A short put opened for an $11,574 credit. Its Initial Value is a CREDIT →
+    // -$11,574, mirroring the signed Avg Entry ($-5.79). It must NOT hard-abs to
+    // +$11,574. Format-agnostic about "-$" vs "$-".
+    render(<PositionTable positions={[AAOI_SHORT_PUT]} prices={{}} />);
+    const tr = screen.getByText("AAOI").closest("tr")!;
+    const cells = Array.from(tr.querySelectorAll("td")).map((td) => td.textContent?.trim() ?? "");
+    const headers = getThTexts();
+    const ivIdx = headers.findIndex((h) => h === "Initial Value");
+    expect(ivIdx).toBeGreaterThan(-1);
+    expect(cells[ivIdx]).toContain("-");
+    expect(cells[ivIdx]).toContain("11,574");
+    expect(cells[ivIdx]).not.toBe("$11,574");
+  });
+
+  it("keeps a POSITIVE Initial Value for a single-leg SHORT stock (per-instrument notional)", () => {
+    // A short stock's Initial Value is a per-instrument notional and stays
+    // positive regardless of direction (daca786) — never negated.
+    render(<PositionTable positions={[TSLA_SHORT_STOCK]} prices={{}} />);
+    const tr = screen.getByText("TSLA").closest("tr")!;
+    const cells = Array.from(tr.querySelectorAll("td")).map((td) => td.textContent?.trim() ?? "");
+    const headers = getThTexts();
+    const ivIdx = headers.findIndex((h) => h === "Initial Value");
+    expect(ivIdx).toBeGreaterThan(-1);
+    expect(cells[ivIdx]).toContain("11,349");
+    expect(cells[ivIdx]).not.toContain("-");
   });
 });
 
