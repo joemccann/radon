@@ -106,6 +106,11 @@ def test_theta_harvester_preset_scan_ignores_explicit_ticker_cache(monkeypatch):
 def test_theta_harvester_forwards_dte_and_credit_params(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    # Force the cooldown window to zero so the subprocess always runs. Setting
+    # only _theta_last_scan = 0.0 is fragile: `monotonic() - 0.0 < 600` on a
+    # freshly-booted CI runner (uptime < 10 min) leaves the cooldown active, so
+    # the params-matching mocked cache short-circuits and run_script never fires.
+    monkeypatch.setattr(server, "THETA_COOLDOWN_S", 0)
     monkeypatch.setattr(server, "_theta_last_scan", 0.0)
     monkeypatch.setattr(server, "_theta_scan_lock", None)
 

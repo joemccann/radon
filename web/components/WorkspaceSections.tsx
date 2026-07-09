@@ -29,13 +29,6 @@ import { useOrderActions } from "@/lib/OrderActionsContext";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useJournal } from "@/lib/useJournal";
-import {
-  filterTradesByRange,
-  isClosedTrade,
-  rangeForPreset,
-  summarizeRangePnl,
-  type JournalRangePreset,
-} from "@/lib/journal/rangePnl";
 import { useDiscover } from "@/lib/useDiscover";
 import { useFlowAnalysis } from "@/lib/useFlowAnalysis";
 import { useScanner } from "@/lib/useScanner";
@@ -2229,67 +2222,22 @@ const journalSortExtract = (t: TradeEntry, key: JournalSortKey): string | number
   }
 };
 
-const JOURNAL_RANGE_PRESETS: { id: JournalRangePreset; label: string }[] = [
-  { id: "today", label: "Today" },
-  { id: "7d", label: "7D" },
-  { id: "mtd", label: "MTD" },
-  { id: "ytd", label: "YTD" },
-  { id: "all", label: "All" },
-  { id: "custom", label: "Custom" },
-];
-
 function JournalSections() {
   const { data, loading, error, syncWithIB, syncing, lastSyncResult } = useJournal();
   const [syncError, setSyncError] = useState<string | null>(null);
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
-  const [rangePreset, setRangePreset] = useState<JournalRangePreset>("mtd");
-  const mtdBounds = useMemo(() => rangeForPreset("mtd"), []);
-  const [customFrom, setCustomFrom] = useState(mtdBounds.from ?? "");
-  const [customTo, setCustomTo] = useState(mtdBounds.to ?? "");
   const { isMobile, hasMounted } = useViewport();
   const showMobileJournal = isMobile && hasMounted;
-
   const trades = useMemo(() => {
     if (!data?.trades) return [];
     return [...data.trades].sort((a, b) => b.id - a.id);
   }, [data]);
 
-  const { from: rangeFrom, to: rangeTo } = useMemo(() => {
-    if (rangePreset === "custom") {
-      return {
-        from: customFrom || null,
-        to: customTo || null,
-      };
-    }
-    return rangeForPreset(rangePreset);
-  }, [rangePreset, customFrom, customTo]);
-
-  // List: activity in range (opens + closes). All time: full journal.
-  const rangedTrades = useMemo(() => {
-    if (rangeFrom == null && rangeTo == null) return trades;
-    return filterTradesByRange(trades, rangeFrom, rangeTo, "activity");
-  }, [trades, rangeFrom, rangeTo]);
-
-  // Summary: realized P&L for closes whose close date is in range.
-  // Open count / trade count reflect activity listed in the table.
-  const rangeSummary = useMemo(() => {
-    const closedInRange =
-      rangeFrom == null && rangeTo == null
-        ? trades.filter((t) => isClosedTrade(t))
-        : filterTradesByRange(trades, rangeFrom, rangeTo, "closed");
-    const base = summarizeRangePnl(closedInRange);
-    return {
-      ...base,
-      openCount: rangedTrades.filter((t) => !isClosedTrade(t)).length,
-      tradeCount: rangedTrades.length,
-    };
-  }, [trades, rangedTrades, rangeFrom, rangeTo]);
-
   const extractSearchText = useCallback(
     (t: TradeEntry) => `${t.ticker} ${t.structure} ${t.decision} ${t.date} ${t.edge_analysis?.edge_type ?? ""}`,
     [],
   );
-  const { filtered, query, setQuery } = useTableFilter(rangedTrades, extractSearchText);
+  const { filtered, query, setQuery } = useTableFilter(trades, extractSearchText);
   const { sorted: sortedTrades, sort, toggle } = useSort(filtered, journalSortExtract, "id" as JournalSortKey, "desc");
 
   const toggleExpand = useCallback((id: number) => {
@@ -2309,26 +2257,11 @@ function JournalSections() {
     }
   }, [syncWithIB]);
 
-  const applyPreset = useCallback((preset: JournalRangePreset) => {
-    setRangePreset(preset);
-    if (preset !== "custom") {
-      const bounds = rangeForPreset(preset);
-      if (bounds.from) setCustomFrom(bounds.from);
-      if (bounds.to) setCustomTo(bounds.to);
-    }
-  }, []);
-
   const fmtJournalUsd = (v: number | undefined | null) => {
-    if (v == null) return "--";
+    if (v == null) return "—";
     const abs = Math.abs(v);
     const formatted = abs >= 1000 ? `$${abs.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}` : `$${abs.toFixed(2)}`;
     return v < 0 ? `-${formatted}` : formatted;
-  };
-
-  const fmtSignedJournalUsd = (v: number) => {
-    if (v === 0) return fmtJournalUsd(0);
-    const sign = v > 0 ? "+" : "-";
-    return `${sign}${fmtJournalUsd(Math.abs(v))}`;
   };
 
   const decisionClass = (d: string) => {
@@ -2344,16 +2277,9 @@ function JournalSections() {
     return v >= 0 ? "bullish" : "bearish";
   };
 
-  const rangeLabel =
-    rangeFrom && rangeTo
-      ? rangeFrom === rangeTo
-        ? rangeFrom
-        : `${rangeFrom} → ${rangeTo}`
-      : "All time";
-
   return (
     <>
-      <div className="section" data-testid="journal-section">
+      <div className="section">
         <div className="section-header">
           <div className="section-title">
             <Wrench size={14} />
@@ -2382,95 +2308,12 @@ function JournalSections() {
                 setQuery={setQuery}
                 placeholder="Filter trades..."
                 resultCount={filtered.length}
-                totalCount={rangedTrades.length}
+                totalCount={trades.length}
               />
             ) : null}
-            <span className="pill defined" data-testid="journal-trade-count">
-              {rangedTrades.length} TRADES
-            </span>
+            <span className="pill defined">{trades.length} TRADES</span>
           </div>
         </div>
-
-        {trades.length > 0 && (
-          <div className="journal-range-bar" data-testid="journal-range-bar">
-            <div className="journal-range-presets" role="toolbar" aria-label="Journal date range">
-              {JOURNAL_RANGE_PRESETS.map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  className={`journal-range-chip${rangePreset === p.id ? " journal-range-chip--active" : ""}`}
-                  aria-pressed={rangePreset === p.id}
-                  onClick={() => applyPreset(p.id)}
-                  data-testid={`journal-range-${p.id}`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-            {rangePreset === "custom" && (
-              <div className="journal-range-custom">
-                <label className="journal-range-custom__field">
-                  <span>From</span>
-                  <input
-                    type="date"
-                    value={customFrom}
-                    onChange={(e) => setCustomFrom(e.target.value)}
-                    data-testid="journal-range-from"
-                  />
-                </label>
-                <label className="journal-range-custom__field">
-                  <span>To</span>
-                  <input
-                    type="date"
-                    value={customTo}
-                    onChange={(e) => setCustomTo(e.target.value)}
-                    data-testid="journal-range-to"
-                  />
-                </label>
-              </div>
-            )}
-            <div
-              className="journal-pnl-strip"
-              data-testid="journal-pnl-strip"
-              title={`Realized P&L for closes in ${rangeLabel} (America/New_York). Opens in range are listed but not summed.`}
-            >
-              <div className="journal-pnl-strip__stat">
-                <span className="journal-pnl-strip__label">Realized P&L</span>
-                <span
-                  className={`journal-pnl-strip__value mono ${rangeSummary.realizedPnl >= 0 ? "positive" : "negative"}`}
-                  data-testid="journal-range-realized"
-                >
-                  {fmtSignedJournalUsd(rangeSummary.realizedPnl)}
-                </span>
-              </div>
-              <div className="journal-pnl-strip__stat">
-                <span className="journal-pnl-strip__label">Closed</span>
-                <span className="journal-pnl-strip__value mono" data-testid="journal-range-closed">
-                  {rangeSummary.closedCount}
-                </span>
-              </div>
-              <div className="journal-pnl-strip__stat">
-                <span className="journal-pnl-strip__label">W / L</span>
-                <span className="journal-pnl-strip__value mono" data-testid="journal-range-wl">
-                  {rangeSummary.winners} / {rangeSummary.losers}
-                </span>
-              </div>
-              <div className="journal-pnl-strip__stat">
-                <span className="journal-pnl-strip__label">Open in range</span>
-                <span className="journal-pnl-strip__value mono" data-testid="journal-range-open">
-                  {rangeSummary.openCount}
-                </span>
-              </div>
-              <div className="journal-pnl-strip__stat journal-pnl-strip__stat--range">
-                <span className="journal-pnl-strip__label">Range</span>
-                <span className="journal-pnl-strip__value mono" data-testid="journal-range-label">
-                  {rangeLabel}
-                </span>
-              </div>
-            </div>
-          </div>
-        )}
-
         {error && <div className="section-body"><div className="alert-item bearish">{error}</div></div>}
         {syncError && <div className="section-body"><div className="alert-item bearish">IB Sync: {syncError}</div></div>}
         {loading && <div className="section-body p-6"><SpectralLoader label="Loading journal" /></div>}
@@ -2479,23 +2322,12 @@ function JournalSections() {
             <SectionEmptyState icon={Wrench} headline="No trades in journal" />
           </div>
         )}
-        {!loading && trades.length > 0 && rangedTrades.length === 0 && (
-          <div className="section-body">
-            <SectionEmptyState
-              icon={Wrench}
-              headline="No trades in this range"
-              secondary="No journal activity on the selected America/New_York dates. Widen the range or switch to All."
-              action={{ label: "Show all", onClick: () => applyPreset("all") }}
-              testId="journal-range-empty"
-            />
-          </div>
-        )}
-        {rangedTrades.length > 0 && showMobileJournal && (
+        {trades.length > 0 && showMobileJournal && (
           <div className="section-body">
             <MobileJournalList trades={sortedTrades} />
           </div>
         )}
-        {rangedTrades.length > 0 && !showMobileJournal && (
+        {trades.length > 0 && !showMobileJournal && (
           <div className="section-body table-wrap">
             <table>
               <thead>
@@ -2541,25 +2373,25 @@ function JournalSections() {
                         </td>
                         <td>{t.structure}</td>
                         <td><span className={decisionClass(t.decision)}>{t.decision}</span></td>
-                        <td className="right">{qty ?? "--"}</td>
+                        <td className="right">{qty ?? "—"}</td>
                         <td className="right">{fmtJournalUsd(cost)}</td>
                         <td className="right">{fmtJournalUsd(t.max_risk)}</td>
                         <td className="right"><span className={pnlClass(t.realized_pnl)}>{fmtJournalUsd(t.realized_pnl)}{t.return_on_risk != null ? ` (${(t.return_on_risk * 100) >= 0 ? "+" : ""}${(t.return_on_risk * 100).toFixed(1)}%)` : ""}</span></td>
-                        <td className="right">{t.return_on_risk != null ? `${(t.return_on_risk * 100).toFixed(1)}%` : "--"}</td>
-                        <td className="cell-muted">{t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || "--"}</td>
-                        <td className="cell-muted">{t.edge_analysis?.edge_type ?? "--"}</td>
+                        <td className="right">{t.return_on_risk != null ? `${(t.return_on_risk * 100).toFixed(1)}%` : "—"}</td>
+                        <td className="cell-muted">{t.gates_passed?.join(", ") || t.gates_failed?.join(", ") || "—"}</td>
+                        <td className="cell-muted">{t.edge_analysis?.edge_type ?? "—"}</td>
                       </tr>
                       {hasLegs && isExpanded && t.legs!.map((leg, i) => (
                         <tr key={`${t.id}-leg-${i}`} className="leg-row">
                           <td />
-                          <td className="cell-muted">{leg.expiry ?? "--"}</td>
+                          <td className="cell-muted">{leg.expiry ?? "—"}</td>
                           <td />
-                          <td className="cell-muted">{leg.type ?? "--"}{leg.strike != null ? ` $${leg.strike}` : ""}</td>
+                          <td className="cell-muted">{leg.type ?? "—"}{leg.strike != null ? ` $${leg.strike}` : ""}</td>
                           <td />
-                          <td className="right cell-muted">{leg.contracts ?? "--"}</td>
-                          <td className="right cell-muted">{leg.open_price != null ? `$${leg.open_price.toFixed(2)}` : "--"}</td>
-                          <td className="right cell-muted">{leg.close_price != null ? `$${leg.close_price.toFixed(2)}` : "--"}</td>
-                          <td className="right"><span className={pnlClass(leg.leg_pnl)}>{leg.leg_pnl != null ? fmtJournalUsd(leg.leg_pnl) : "--"}</span></td>
+                          <td className="right cell-muted">{leg.contracts ?? "—"}</td>
+                          <td className="right cell-muted">{leg.open_price != null ? `$${leg.open_price.toFixed(2)}` : "—"}</td>
+                          <td className="right cell-muted">{leg.close_price != null ? `$${leg.close_price.toFixed(2)}` : "—"}</td>
+                          <td className="right"><span className={pnlClass(leg.leg_pnl)}>{leg.leg_pnl != null ? fmtJournalUsd(leg.leg_pnl) : "—"}</span></td>
                           <td />
                           <td />
                           <td />
