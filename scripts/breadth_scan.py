@@ -7,11 +7,14 @@ TICK-NYSE snapshot. Divergence between SPY and the cumulative A/D line over
 the trailing 20 sessions flags narrowing (bearish) or broadening (bullish)
 participation.
 
-Data sources (priority order):
-  1. Interactive Brokers — Index('AD-NYSE','NYSE'), Index('TICK-NYSE','NYSE'),
-     Stock('SPY','SMART','USD'). IB is the ONLY live source: Unusual Whales
-     cannot serve index data and Yahoo has no reliable breadth symbols.
-  2. data/breadth.json cache — served (source: "cache") when IB is
+Data sources:
+  1. Daily net A/D + SPY history: StockCharts quotebrain ($NYAD, SPY) — public
+     JSON, COMPLETE daily series. Primary because IB's AD-NYSE daily is gappy and
+     lags a session or two. IB daily bars are the fallback.
+  2. Live current net A/D + TICK: Interactive Brokers snapshot — AD-NYSE
+     publishes advancers in the bid, decliners in the ask (net = bid - ask);
+     TICK-NYSE via reqMktData. StockCharts $NYAD quote is the live fallback.
+  3. data/breadth.json cache — served (source: "cache") when everything above is
      unavailable or returns nothing.
 
 IB serves AD-NYSE DAILY bars (gappy, and lagging the tape by a session or two)
@@ -34,7 +37,7 @@ import json
 import math
 import sys
 import zoneinfo
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -268,6 +271,88 @@ def _fetch_live_snapshots() -> Tuple[Optional[float], Optional[float]]:
         return ad_net, tick
     finally:
         ib.disconnect()
+
+
+# ══════════════════════════════════════════════════════════════════
+# StockCharts daily A/D (IB's AD-NYSE daily is gappy + lags a session or two)
+# ══════════════════════════════════════════════════════════════════
+
+# StockCharts' ACP quotebrain endpoints are public JSON (no auth). $NYAD carries
+# the COMPLETE daily NYSE net advance/decline series (advancers minus decliners)
+# that IB's gappy AD-NYSE daily bars miss. SPY is fetched the same way so the two
+# series align by date.
+_STOCKCHARTS_QUOTEBRAIN = "https://stockcharts.com/quotebrain"
+_STOCKCHARTS_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36"
+)
+_STOCKCHARTS_LOOKBACK_DAYS = 400  # > 1Y of sessions for the history chart's All range
+
+
+def _stockcharts_get(path: str, params: Dict[str, str], timeout: int = 15) -> Any:
+    """GET a public StockCharts quotebrain JSON endpoint."""
+    from urllib.parse import urlencode
+    from urllib.request import Request, urlopen
+
+    url = f"{_STOCKCHARTS_QUOTEBRAIN}/{path}?{urlencode(params)}"
+    req = Request(url, headers={"User-Agent": _STOCKCHARTS_UA, "Accept-Encoding": "gzip"})
+    with urlopen(req, timeout=timeout) as resp:
+        raw = resp.read()
+        if resp.headers.get("Content-Encoding") == "gzip":
+            import gzip
+
+            raw = gzip.decompress(raw)
+    return json.loads(raw.decode("utf-8"))
+
+
+def parse_stockcharts_daily(payload: Any) -> List[Tuple[str, float]]:
+    """Completed daily (date, close) bars from a StockCharts historyandquote
+    payload. Each bar's close is that session's value — net A/D for $NYAD, price
+    for SPY. Only ``SQL_DAILY`` (completed) intervals are used; the trailing
+    in-progress ``OTHER`` interval is dropped so today's partial value never
+    enters the daily/cumulative series (the live tape carries that instead)."""
+    intervals = ((payload or {}).get("history") or {}).get("intervals") or []
+    series: List[Tuple[str, float]] = []
+    for interval in intervals:
+        if not isinstance(interval, dict) or interval.get("source") != "SQL_DAILY":
+            continue
+        close = _finite_value(interval.get("close"))
+        end_time = str((interval.get("end") or {}).get("time") or "")
+        date = end_time.split(" ")[0]
+        if close is None or len(date) != 10:
+            continue
+        series.append((date, close))
+    return series
+
+
+def _fetch_stockcharts_daily(symbol: str) -> List[Tuple[str, float]]:
+    """~1Y of completed daily bars for a StockCharts symbol ($NYAD net A/D, SPY
+    price). Returns [] on any failure so the caller can fall back to IB."""
+    now_et = datetime.now(_ET)
+    start = (now_et - timedelta(days=_STOCKCHARTS_LOOKBACK_DAYS)).strftime("%Y%m%d")
+    end = (now_et + timedelta(days=1)).strftime("%Y%m%d")
+    try:
+        payload = _stockcharts_get(
+            "historyandquote/d", {"symbol": symbol, "start": start, "end": end}
+        )
+        series = parse_stockcharts_daily(payload)
+        print(f"  StockCharts: {symbol} daily — {len(series)} sessions", file=sys.stderr)
+        return series
+    except Exception as exc:
+        print(f"  StockCharts: {symbol} daily fetch failed — {exc}", file=sys.stderr)
+        return []
+
+
+def _fetch_stockcharts_quote(symbol: str) -> Optional[float]:
+    """Current value for a StockCharts symbol — the live-net-A/D fallback when
+    the IB snapshot is unavailable."""
+    try:
+        payload = _stockcharts_get("quote", {"symbol": symbol, "format": "json"})
+        if isinstance(payload, list) and payload:
+            return _finite_value(payload[0].get("close"))
+    except Exception as exc:
+        print(f"  StockCharts: {symbol} quote fetch failed — {exc}", file=sys.stderr)
+    return None
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -665,15 +750,32 @@ def main() -> None:
             print(json.dumps(cached, indent=2))
             return
 
-    ad_daily_bars, spy_daily_bars, ad_intraday_bars = _fetch_ib_bars()
     ad_net_live, tick = _fetch_live_snapshots()
+
+    # Daily history: StockCharts is primary. IB's AD-NYSE daily is gappy and lags
+    # by a session or two, so $NYAD (complete daily net A/D) drives the cumulative
+    # line + 20-day stats; SPY comes from the same source so dates align. IB daily
+    # is the fallback if StockCharts is unreachable.
+    ad_daily = _fetch_stockcharts_daily("$NYAD")
+    spy_daily = _fetch_stockcharts_daily("SPY")
+    daily_source = "stockcharts"
+    ad_intraday_bars: List[Any] = []
+    if not ad_daily:
+        print("  StockCharts AD daily unavailable — falling back to IB.", file=sys.stderr)
+        ad_daily_bars, spy_daily_bars, ad_intraday_bars = _fetch_ib_bars()
+        ad_daily = build_daily_net_ad(ad_daily_bars)
+        if not spy_daily:
+            spy_daily = build_daily_net_ad(spy_daily_bars)
+        daily_source = "ib"
+
+    # Live current net A/D: IB bid-ask snapshot (real-time); StockCharts quote
+    # fallback when IB is unavailable.
+    if ad_net_live is None:
+        ad_net_live = _fetch_stockcharts_quote("$NYAD")
     if ad_net_live is not None:
-        print(f"  IB: AD-NYSE live net {ad_net_live:+.0f}", file=sys.stderr)
+        print(f"  Live AD-NYSE net {ad_net_live:+.0f}", file=sys.stderr)
     if tick is not None:
         print(f"  IB: TICK-NYSE current {tick:.0f}", file=sys.stderr)
-
-    ad_daily = build_daily_net_ad(ad_daily_bars)
-    spy_daily = build_daily_net_ad(spy_daily_bars)
 
     cached_payload = _read_cached_payload()
     historical_intraday = [
@@ -695,7 +797,7 @@ def main() -> None:
         )
 
     if not ad_daily and not intraday:
-        print("  No IB breadth data — falling back to cache.", file=sys.stderr)
+        print("  No breadth data — falling back to cache.", file=sys.stderr)
         result = _load_cache_fallback(market_open)
         print_summary(result)
         print(json.dumps(result, indent=2))
@@ -707,7 +809,7 @@ def main() -> None:
         intraday=intraday,
         tick=tick,
         market_open=market_open,
-        source="ib",
+        source=daily_source,
     )
     result = carry_forward_history(result, cached_payload)
     persist_result(result)

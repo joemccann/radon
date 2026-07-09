@@ -48,7 +48,7 @@ export type BreadthIntradayPoint = {
 export type BreadthData = {
   scan_time: string | null;
   market_open?: boolean;
-  source?: "ib" | "cache";
+  source?: "ib" | "stockcharts" | "cache";
   /** GET contract: absent data is HTTP 200 with missing:true, never a 4xx. */
   missing?: boolean;
   latest: BreadthLatest | null;
