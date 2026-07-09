@@ -182,7 +182,7 @@ function ExistingOrderRow({
           <button
             className="btn-order-action btn-modify"
             disabled={!canModify}
-            title={canModify ? "Modify limit price" : "Only LMT orders can be modified"}
+            title={canModify ? "Modify limit price" : "Only LMT and STP LMT orders can be modified"}
             onClick={() => onModify(order)}
           >
             MODIFY

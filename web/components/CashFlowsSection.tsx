@@ -139,7 +139,7 @@ export default function CashFlowsSection() {
   const stopToggle = (e: React.SyntheticEvent) => e.stopPropagation();
 
   return (
-    <div className="section" data-testid="cash-flows-section">
+    <div className="section" id="orders-cash" data-testid="cash-flows-section">
       <div
         className="section-header cash-flows-header"
         role="button"

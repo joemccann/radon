@@ -3,58 +3,118 @@
 import type { OpenOrder } from "@/lib/types";
 import Modal from "./Modal";
 import { fmtPrice } from "@/lib/positionUtils";
+import { formatFillQuantity } from "@/lib/orders/orderDisplay";
 
 type CancelOrderDialogProps = {
-  order: OpenOrder | null;
+  order?: OpenOrder | null;
+  /** Combo multi-leg cancel. When non-empty, takes precedence over `order`. */
+  orders?: OpenOrder[] | null;
   loading: boolean;
   onConfirm: () => void;
   onClose: () => void;
 };
 
-export default function CancelOrderDialog({ order, loading, onConfirm, onClose }: CancelOrderDialogProps) {
-  if (!order) return null;
+export default function CancelOrderDialog({
+  order = null,
+  orders = null,
+  loading,
+  onConfirm,
+  onClose,
+}: CancelOrderDialogProps) {
+  const multi = orders && orders.length > 0 ? orders : null;
+  const single = multi ? null : order;
+  if (!multi && !single) return null;
 
-  const partiallyFilled = order.filled > 0 && order.remaining > 0;
+  if (multi) {
+    const symbol = multi[0]?.symbol ?? multi[0]?.contract.symbol ?? "Combo";
+    const anyPartial = multi.some((o) => o.filled > 0 && o.remaining > 0);
+    return (
+      <Modal open onClose={onClose} title="Cancel Orders">
+        <div className="cancel-dialog">
+          <div className="cancel-order-details">
+            <div className="cancel-detail-row">
+              <span className="cancel-label">Symbol</span>
+              <span className="cancel-value"><strong>{symbol}</strong></span>
+            </div>
+            <div className="cancel-detail-row">
+              <span className="cancel-label">Legs</span>
+              <span className="cancel-value">{multi.length}</span>
+            </div>
+            {multi.map((leg) => (
+              <div key={`${leg.permId}-${leg.orderId}`} className="cancel-detail-row">
+                <span className="cancel-label">{leg.action}</span>
+                <span className="cancel-value">
+                  {leg.orderType} · qty {leg.totalQuantity}
+                  {leg.limitPrice != null ? ` · ${fmtPrice(leg.limitPrice)}` : ""}
+                  {leg.filled > 0 && leg.remaining > 0
+                    ? ` · filled ${leg.filled}/${leg.totalQuantity}`
+                    : ""}
+                </span>
+              </div>
+            ))}
+          </div>
+
+          {anyPartial && (
+            <div className="cancel-warning">
+              One or more legs are partially filled. Only remaining quantity on each leg will be cancelled.
+            </div>
+          )}
+
+          <div className="cancel-actions">
+            <button className="btn-secondary" onClick={onClose} disabled={loading}>
+              Keep Orders
+            </button>
+            <button className="btn-danger" onClick={onConfirm} disabled={loading}>
+              {loading ? "Cancelling..." : "Cancel All"}
+            </button>
+          </div>
+        </div>
+      </Modal>
+    );
+  }
+
+  const target = single!;
+  const partiallyFilled = target.filled > 0 && target.remaining > 0;
 
   return (
-    <Modal open={!!order} onClose={onClose} title="Cancel Order">
+    <Modal open={!!target} onClose={onClose} title="Cancel Order">
       <div className="cancel-dialog">
         <div className="cancel-order-details">
           <div className="cancel-detail-row">
             <span className="cancel-label">Symbol</span>
-            <span className="cancel-value"><strong>{order.symbol}</strong></span>
+            <span className="cancel-value"><strong>{target.symbol}</strong></span>
           </div>
           <div className="cancel-detail-row">
             <span className="cancel-label">Action</span>
             <span className="cancel-value">
-              <span className={`pill ${order.action === "BUY" ? "accum" : "distrib"}`}>
-                {order.action}
+              <span className={`pill ${target.action === "BUY" ? "accum" : "distrib"}`}>
+                {target.action}
               </span>
             </span>
           </div>
           <div className="cancel-detail-row">
             <span className="cancel-label">Type</span>
-            <span className="cancel-value">{order.orderType}</span>
+            <span className="cancel-value">{target.orderType}</span>
           </div>
           <div className="cancel-detail-row">
             <span className="cancel-label">Quantity</span>
-            <span className="cancel-value">{order.totalQuantity}</span>
+            <span className="cancel-value">{formatFillQuantity(target)}</span>
           </div>
-          {order.limitPrice != null && (
+          {target.limitPrice != null && (
             <div className="cancel-detail-row">
               <span className="cancel-label">Limit Price</span>
-              <span className="cancel-value">{fmtPrice(order.limitPrice)}</span>
+              <span className="cancel-value">{fmtPrice(target.limitPrice)}</span>
             </div>
           )}
           <div className="cancel-detail-row">
             <span className="cancel-label">Status</span>
-            <span className="cancel-value">{order.status}</span>
+            <span className="cancel-value">{target.status}</span>
           </div>
         </div>
 
         {partiallyFilled && (
           <div className="cancel-warning">
-            Partially filled ({order.filled} of {order.totalQuantity}). Only the remaining {order.remaining} will be cancelled.
+            Partially filled ({target.filled} of {target.totalQuantity}). Only the remaining {target.remaining} will be cancelled.
           </div>
         )}
 
