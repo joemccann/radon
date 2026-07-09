@@ -133,6 +133,22 @@ export function getAvgEntry(pos: PortfolioPosition): number {
   return isShort ? -magnitude : magnitude;
 }
 
+export function getInitialValue(pos: PortfolioPosition): number {
+  const raw = resolveEntryCost(pos);
+  // A multi-leg combo carries the net credit/debit sign (credit → negative).
+  if (pos.legs.length > 1) return raw;
+  // Single-leg: mirror getAvgEntry. A SHORT option's initial value is a premium
+  // CREDIT → negative; a stock stays a positive per-instrument notional; a long
+  // option is a debit paid (positive). Sign from leg.direction, not entry_cost
+  // (stored as a positive magnitude).
+  const magnitude = Math.abs(raw);
+  const onlyLeg = pos.legs[0];
+  const isStock = pos.structure_type === "Stock" || onlyLeg?.type === "Stock";
+  if (isStock) return magnitude;
+  const isShort = (onlyLeg?.direction ?? pos.direction) === "SHORT";
+  return isShort ? -magnitude : magnitude;
+}
+
 export function getLastPrice(pos: PortfolioPosition): number | null {
   const mv = resolveMarketValue(pos);
   if (mv == null) return null;
