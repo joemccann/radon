@@ -10,6 +10,7 @@ import {
   PortfolioGlyph,
   RegimeGlyph,
   ScannerGlyph,
+  WatchlistGlyph,
   ProfileGlyph,
 } from "@/components/icons/RadonGlyphs";
 import type { WorkspaceNavItem, WorkspaceSection } from "./types";
@@ -33,7 +34,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Orders", route: "orders", href: "/orders", icon: OrdersGlyph },
   { label: "Scanner", route: "scanner", href: "/scanner", icon: ScannerGlyph },
   { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true },
-  { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: ScannerGlyph },
+  { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: WatchlistGlyph },
   { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph },
   { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph },
   { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph },

@@ -315,3 +315,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - If stash is unavoidable: `git stash push` → capture the printed stash ref → `git stash
   apply <ref>` + `git stash drop <ref>`, never bare `pop`.
 - After any failed git plumbing, run `git status` BEFORE the next command.
+
+## 2026-07-09 - nav icon specificity
+
+- When adding a primary sidebar route, create or assign a dedicated semantic glyph in the Radon icon set; do not reuse an adjacent route's icon as a placeholder on a shipped page.

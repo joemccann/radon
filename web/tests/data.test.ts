@@ -7,6 +7,7 @@ import {
   quickPromptsBySection,
   sectionDescription,
 } from "../lib/data";
+import { ScannerGlyph, WatchlistGlyph } from "../components/icons/RadonGlyphs";
 import type { WorkspaceSection } from "../lib/types";
 
 // =============================================================================
@@ -165,6 +166,14 @@ describe("navItems", () => {
     const watchlistIdx = routes.indexOf("watchlist");
     expect(scannerIdx).toBeGreaterThanOrEqual(0);
     expect(watchlistIdx).toBe(scannerIdx + 1);
+  });
+
+  it("uses a dedicated watchlist icon instead of the scanner glyph", () => {
+    const scanner = navItems.find((n) => n.route === "scanner");
+    const watchlist = navItems.find((n) => n.route === "watchlist");
+    expect(scanner?.icon).toBe(ScannerGlyph);
+    expect(watchlist?.icon).toBe(WatchlistGlyph);
+    expect(watchlist?.icon).not.toBe(scanner?.icon);
   });
 
   it("locks the full visible-nav order", () => {

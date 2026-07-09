@@ -98,6 +98,18 @@ export function ScannerGlyph(p: GlyphProps) {
   );
 }
 
+/* Watchlist - saved instrument ledger with a fixed signal latch. */
+export function WatchlistGlyph(p: GlyphProps) {
+  return (
+    <Glyph {...p}>
+      <path d="M5 4 L19 4 L19 20 L12 16.5 L5 20 Z" />
+      <path d="M8 8 L16 8" />
+      <path d="M8 12 L14 12" />
+      <circle cx="15.5" cy="15.5" r="1.4" fill={p.color ?? "currentColor"} stroke="none" />
+    </Glyph>
+  );
+}
+
 /* Discover — radar quadrant arc with a fixed detector dot. */
 export function DiscoverGlyph(p: GlyphProps) {
   return (
