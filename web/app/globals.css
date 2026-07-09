@@ -11052,6 +11052,229 @@ tr {
   min-width: 0;
 }
 
+/* ─── GARCH Convergence scanner ───────────────────────── */
+
+.garch-scanner__header {
+  gap: 8px;
+}
+
+.garch-scanner__meta {
+  gap: 6px;
+}
+
+.garch-scanner__pair-count {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.garch-scanner__filterbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 0 12px 8px;
+}
+
+.garch-filter-chip {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  padding: 4px 8px;
+  min-height: 26px;
+  cursor: pointer;
+}
+
+.garch-filter-chip:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--signal-core) 40%, var(--line-grid));
+}
+
+.garch-filter-chip--active {
+  color: var(--signal-core);
+  border-color: color-mix(in srgb, var(--signal-core) 50%, var(--line-grid));
+  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
+}
+
+.garch-filter-chip__count {
+  font-variant-numeric: tabular-nums;
+  color: var(--text-muted);
+}
+
+.garch-filter-chip--active .garch-filter-chip__count {
+  color: var(--signal-core);
+}
+
+.garch-scanner__body {
+  padding-top: 0;
+}
+
+.garch-scanner__table-wrap {
+  max-width: 100%;
+}
+
+.garch-scanner__table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.garch-scanner__table thead th {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line-grid);
+  white-space: nowrap;
+}
+
+.garch-scanner__table tbody td {
+  padding: 7px 8px;
+  border-bottom: 1px solid color-mix(in srgb, var(--line-grid) 70%, transparent);
+  vertical-align: middle;
+}
+
+.garch-scanner__table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.garch-scanner__table .mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+.garch-row--actionable {
+  background: color-mix(in srgb, var(--signal-core) 4%, transparent);
+}
+
+.garch-row--actionable:hover {
+  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
+}
+
+.garch-row--failed:hover {
+  background: color-mix(in srgb, var(--bg-panel-raised) 80%, transparent);
+}
+
+.garch-pair-cell {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.garch-pair-cell__leader {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+
+.garch-pair-cell__arrow {
+  margin: 0 4px;
+  color: var(--text-muted);
+  font-size: 10px;
+}
+
+.garch-pair-cell__lagger-name {
+  color: var(--text-primary);
+  font-weight: 650;
+}
+
+.garch-lagger-link {
+  font-family: var(--font-mono);
+  font-weight: 650;
+  letter-spacing: 0.03em;
+}
+
+.garch-signal {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--line-grid);
+  white-space: nowrap;
+}
+
+.garch-signal--strong {
+  color: var(--signal-core);
+  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--line-grid));
+  background: color-mix(in srgb, var(--signal-core) 10%, transparent);
+}
+
+.garch-signal--pass {
+  color: var(--signal-core);
+  border-color: color-mix(in srgb, var(--signal-core) 35%, var(--line-grid));
+  background: color-mix(in srgb, var(--signal-core) 6%, transparent);
+}
+
+.garch-signal--watch {
+  color: var(--warning);
+  border-color: color-mix(in srgb, var(--warning) 45%, var(--line-grid));
+  background: color-mix(in srgb, var(--warning) 8%, transparent);
+}
+
+.garch-signal--none {
+  color: var(--text-muted);
+  border-color: var(--line-grid);
+  background: transparent;
+}
+
+.garch-gates-cell {
+  max-width: 220px;
+}
+
+.garch-fail-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  max-width: 220px;
+}
+
+.garch-fail-chip {
+  display: inline-block;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fault);
+  border: 1px solid color-mix(in srgb, var(--fault) 35%, var(--line-grid));
+  background: color-mix(in srgb, var(--fault) 6%, transparent);
+  border-radius: 4px;
+  padding: 1px 5px;
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+body[data-mobile="true"] .garch-scanner__filterbar {
+  padding: 0 8px 8px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+}
+
+body[data-mobile="true"] .garch-scanner__table thead th,
+body[data-mobile="true"] .garch-scanner__table tbody td {
+  padding: 6px;
+  font-size: 11px;
+}
+
 .theta-search {
   display: inline-flex;
   align-items: center;
