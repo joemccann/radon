@@ -107,6 +107,7 @@ const BASE_BLOTTER: BlotterData = {
 };
 
 beforeEach(() => {
+  window.localStorage.clear();
   useBlotterMock.mockReturnValue({
     data: BASE_BLOTTER,
     loading: false,
@@ -271,5 +272,29 @@ describe("HistoricalTradesSection", () => {
     );
     expect(document.getElementById("historical-trades-body")).toBeNull();
     expect(document.getElementById("orders-historical")).toBeTruthy();
+  });
+
+  it("shows showing-range and page-size controls, persists page size", () => {
+    render(React.createElement(HistoricalTradesSection));
+
+    expect(screen.getByTestId("historical-showing-range").textContent).toBe(
+      "Showing 1-3 of 3",
+    );
+    const sizeSelect = screen.getByTestId("historical-page-size") as HTMLSelectElement;
+    expect(sizeSelect.value).toBe("15");
+
+    fireEvent.change(sizeSelect, { target: { value: "30" } });
+    expect(sizeSelect.value).toBe("30");
+    expect(window.localStorage.getItem("radon:orders-historical-page-size")).toBe("30");
+    expect(screen.getByTestId("historical-showing-range").textContent).toBe(
+      "Showing 1-3 of 3",
+    );
+  });
+
+  it("loads persisted page size from localStorage", () => {
+    window.localStorage.setItem("radon:orders-historical-page-size", "50");
+    render(React.createElement(HistoricalTradesSection));
+    const sizeSelect = screen.getByTestId("historical-page-size") as HTMLSelectElement;
+    expect(sizeSelect.value).toBe("50");
   });
 });

@@ -26,7 +26,17 @@ export default function CancelOrderDialog({
   if (!multi && !single) return null;
 
   if (multi) {
-    const symbol = multi[0]?.symbol ?? multi[0]?.contract.symbol ?? "Combo";
+    const symbols = Array.from(
+      new Set(
+        multi.map((o) => o.symbol || o.contract.symbol).filter(Boolean),
+      ),
+    );
+    const symbolLabel =
+      symbols.length === 1
+        ? symbols[0]
+        : symbols.length > 1
+          ? `${symbols.length} symbols`
+          : "Orders";
     const anyPartial = multi.some((o) => o.filled > 0 && o.remaining > 0);
     return (
       <Modal open onClose={onClose} title="Cancel Orders">
@@ -34,10 +44,10 @@ export default function CancelOrderDialog({
           <div className="cancel-order-details">
             <div className="cancel-detail-row">
               <span className="cancel-label">Symbol</span>
-              <span className="cancel-value"><strong>{symbol}</strong></span>
+              <span className="cancel-value"><strong>{symbolLabel}</strong></span>
             </div>
             <div className="cancel-detail-row">
-              <span className="cancel-label">Legs</span>
+              <span className="cancel-label">Orders</span>
               <span className="cancel-value">{multi.length}</span>
             </div>
             {multi.map((leg) => (
