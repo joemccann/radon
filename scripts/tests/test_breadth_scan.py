@@ -318,6 +318,81 @@ def test_carry_forward_history_noop_when_cache_empty() -> None:
 # ── scan_mirror registration ──────────────────────────────────────
 
 
+# ── live AD-NYSE snapshot (bid − ask = advancers − decliners) ─────
+
+
+def test_extract_ad_net_is_bid_minus_ask() -> None:
+    """IB publishes advancing issues in the bid and declining in the ask for
+    AD-NYSE; the live net advance/decline is bid − ask."""
+    ticker = SimpleNamespace(last=float("nan"), bid=1752.0, ask=1019.0, close=0.0)
+    assert breadth_scan._extract_ad_net(ticker) == pytest.approx(733.0)
+
+
+def test_extract_ad_net_none_when_side_missing() -> None:
+    assert breadth_scan._extract_ad_net(SimpleNamespace(bid=1752.0, ask=None)) is None
+    assert breadth_scan._extract_ad_net(SimpleNamespace(bid=None, ask=1019.0)) is None
+    assert breadth_scan._extract_ad_net(SimpleNamespace(bid=float("nan"), ask=1019.0)) is None
+
+
+# ── accumulate_session_tape (live intraday tape) ──────────────────
+
+_ET = timezone.utc  # placeholder; real ET conversion exercised via aware datetimes
+
+
+def _et_now(hour_et: int, minute_et: int, day: str = "2026-07-09") -> datetime:
+    """An ET wall-clock time as an aware UTC datetime (ET = UTC−4 in July)."""
+    import zoneinfo
+    et = zoneinfo.ZoneInfo("America/New_York")
+    y, m, d = (int(x) for x in day.split("-"))
+    return datetime(y, m, d, hour_et, minute_et, tzinfo=et).astimezone(timezone.utc)
+
+
+def test_accumulate_session_tape_appends_first_live_point() -> None:
+    now = _et_now(10, 0)
+    tape = breadth_scan.accumulate_session_tape(None, 733.0, now)
+    assert len(tape) == 1
+    assert tape[0][1] == pytest.approx(733.0)
+
+
+def test_accumulate_session_tape_appends_new_bucket() -> None:
+    t0 = _et_now(10, 0)
+    first = breadth_scan.accumulate_session_tape(None, 733.0, t0)
+    cached = {"intraday": [{"time": t, "net_ad": v} for t, v in first]}
+    t1 = _et_now(10, 5)
+    tape = breadth_scan.accumulate_session_tape(cached, 810.0, t1)
+    assert len(tape) == 2
+    assert tape[0][1] == pytest.approx(733.0)
+    assert tape[1][1] == pytest.approx(810.0)
+
+
+def test_accumulate_session_tape_replaces_same_bucket() -> None:
+    t0 = _et_now(10, 0)
+    first = breadth_scan.accumulate_session_tape(None, 733.0, t0)
+    cached = {"intraday": [{"time": t, "net_ad": v} for t, v in first]}
+    # A second scan within the SAME bucket updates that bucket in place.
+    same_bucket = _et_now(10, 0)
+    tape = breadth_scan.accumulate_session_tape(cached, 900.0, same_bucket)
+    assert len(tape) == 1
+    assert tape[0][1] == pytest.approx(900.0)
+
+
+def test_accumulate_session_tape_drops_prior_session_points() -> None:
+    yesterday = {"intraday": [{"time": _et_now(15, 0, "2026-07-08").isoformat(), "net_ad": 111.0}]}
+    now = _et_now(10, 0, "2026-07-09")
+    tape = breadth_scan.accumulate_session_tape(yesterday, 733.0, now)
+    assert len(tape) == 1
+    assert tape[0][1] == pytest.approx(733.0)
+
+
+def test_accumulate_session_tape_keeps_tape_when_live_missing() -> None:
+    t0 = _et_now(10, 0)
+    first = breadth_scan.accumulate_session_tape(None, 733.0, t0)
+    cached = {"intraday": [{"time": t, "net_ad": v} for t, v in first]}
+    tape = breadth_scan.accumulate_session_tape(cached, None, _et_now(10, 5))
+    assert len(tape) == 1
+    assert tape[0][1] == pytest.approx(733.0)
+
+
 def test_scan_mirror_registers_breadth_scan_with_date_keyed_upsert(monkeypatch) -> None:
     """mirror_scan_snapshot must dispatch the (date, taken_at, payload) arity
     that upsert_breadth_snapshot requires. Never touches a real DB — writer

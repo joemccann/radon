@@ -14,10 +14,14 @@ Data sources (priority order):
   2. data/breadth.json cache — served (source: "cache") when IB is
      unavailable or returns nothing.
 
-AD-NYSE daily history MAY be unavailable from IB (historical support for
-breadth indices is unverified). The scan degrades gracefully: intraday-only
-payloads still populate latest.net_ad, and a total fetch failure serves the
-existing cache and exits 0.
+IB serves AD-NYSE DAILY bars (gappy, and lagging the tape by a session or two)
+but NO intraday history — reqHistoricalData returns Error 162 "HMDS query
+returned no data" for every intraday bar size. The current session's net A/D is
+therefore sampled from a LIVE snapshot: IB publishes advancing issues in the
+bid and declining issues in the ask of AD-NYSE (bid + ask ~= total NYSE issues),
+so live net A/D = bid - ask. Those live readings accumulate into the session
+tape across scans (see accumulate_session_tape). A total fetch failure serves
+the existing cache and exits 0.
 
 Usage:
     python3 scripts/breadth_scan.py --json           # JSON to stdout
@@ -29,6 +33,7 @@ import argparse
 import json
 import math
 import sys
+import zoneinfo
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -71,6 +76,12 @@ DIVERGENCE_SPY_THRESHOLD_PCT = 1.0
 # Scanner-range pools disjoint from cri_scan's 50-61.
 BREADTH_IB_HISTORY_CLIENT_IDS = (62, 63, 64)
 BREADTH_IB_QUOTE_CLIENT_IDS = (65, 66)
+
+# IB serves NO intraday HMDS history for AD-NYSE (Error 162), so the current
+# session's net-A/D tape is accumulated from live snapshots — one point per
+# bucket, updated in place while a bucket is current.
+INTRADAY_BUCKET_MINUTES = 1
+_ET = zoneinfo.ZoneInfo("America/New_York")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -198,42 +209,63 @@ def _extract_ib_quote_value(ticker: Any) -> Optional[float]:
     return None
 
 
-def _fetch_tick_quote() -> Optional[float]:
-    """Fetch the current TICK-NYSE reading from IB, trying live then delayed."""
+def _extract_ad_net(ticker: Any) -> Optional[float]:
+    """Live NYSE net advance/decline from an AD-NYSE snapshot.
+
+    IB publishes advancing issues in the bid and declining issues in the ask
+    for this generated index (bid + ask ~= total NYSE issues); the live net is
+    ``bid - ask``. ``last`` is NaN for these calculated indices, and there is no
+    intraday HMDS history, so this snapshot is the ONLY source of the current
+    session's net A/D."""
+    bid = _finite_value(getattr(ticker, "bid", None))
+    ask = _finite_value(getattr(ticker, "ask", None))
+    if bid is None or ask is None:
+        return None
+    return bid - ask
+
+
+def _snapshot_value(ib: Any, contract: Any, extract: Any) -> Optional[float]:
+    """Live snapshot of an IB index, trying live -> frozen -> delayed feeds.
+    snapshot=True MUST pass "" genericTickList (feedback_ib_snapshot_no_generic_ticks)."""
+    qualified = ib.qualifyContracts(contract)
+    if not qualified:
+        return None
+    contract = qualified[0]
+    for data_type in (1, 3, 4):
+        try:
+            ib.reqMarketDataType(data_type)
+            snapshot = ib.reqMktData(contract, "", True, False)
+            ib.sleep(2)
+            value = extract(snapshot)
+            ib.cancelMktData(contract)
+            if value is not None:
+                return value
+        except Exception:
+            continue
+    return None
+
+
+def _fetch_live_snapshots() -> Tuple[Optional[float], Optional[float]]:
+    """Fetch the current AD-NYSE net (bid - ask) and TICK-NYSE readings from IB
+    over a single connection. AD-NYSE has no intraday history (Error 162), so
+    this live snapshot is how the current session's net A/D is sampled."""
     auth_state = _ib_auth_state()
     if auth_state and auth_state != "authenticated":
-        return None
+        return None, None
 
     try:
         from ib_insync import IB, Index
     except ImportError:
-        return None
+        return None, None
 
     ib = IB()
     if not _connect_ib_with_retry(ib, BREADTH_IB_QUOTE_CLIENT_IDS):
-        return None
+        return None, None
 
-    contract = Index("TICK-NYSE", "NYSE")
     try:
-        qualified = ib.qualifyContracts(contract)
-        if not qualified:
-            return None
-        contract = qualified[0]
-
-        for data_type in (1, 3, 4):
-            try:
-                ib.reqMarketDataType(data_type)
-                # snapshot=True MUST pass "" genericTickList
-                # (feedback_ib_snapshot_no_generic_ticks).
-                snapshot = ib.reqMktData(contract, "", True, False)
-                ib.sleep(2)
-                value = _extract_ib_quote_value(snapshot)
-                ib.cancelMktData(contract)
-                if value is not None:
-                    return value
-            except Exception:
-                continue
-        return None
+        ad_net = _snapshot_value(ib, Index("AD-NYSE", "NYSE"), _extract_ad_net)
+        tick = _snapshot_value(ib, Index("TICK-NYSE", "NYSE"), _extract_ib_quote_value)
+        return ad_net, tick
     finally:
         ib.disconnect()
 
@@ -473,6 +505,59 @@ def carry_forward_history(
     )
 
 
+def _et_date(dt: datetime) -> str:
+    """ET session date (YYYY-MM-DD) of an aware/naive UTC datetime."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(_ET).strftime("%Y-%m-%d")
+
+
+def _bucket_iso(dt: datetime, minutes: int = INTRADAY_BUCKET_MINUTES) -> str:
+    """Floor a UTC datetime to the bucket boundary and return ISO-8601 UTC."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    dt = dt.astimezone(timezone.utc)
+    floored = dt.replace(minute=(dt.minute // minutes) * minutes, second=0, microsecond=0)
+    return floored.isoformat()
+
+
+def accumulate_session_tape(
+    cached: Optional[Dict[str, Any]],
+    live_net_ad: Optional[float],
+    now: datetime,
+    minutes: int = INTRADAY_BUCKET_MINUTES,
+) -> List[Tuple[str, float]]:
+    """Build the current session's intraday net-A/D tape from live snapshots.
+
+    IB serves no intraday history for AD-NYSE (HMDS Error 162), so the SESSION
+    NET A/D tape is accumulated across scans: carry forward the cached points
+    from today's ET session, then append the latest live reading (or update it
+    in place while its bucket is still current). Points from prior sessions are
+    dropped so a new session starts clean."""
+    session_date = _et_date(now)
+    tape: List[Tuple[str, float]] = []
+    for point in (cached or {}).get("intraday") or []:
+        if not isinstance(point, dict) or point.get("net_ad") is None:
+            continue
+        raw = str(point.get("time", ""))
+        try:
+            dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if _et_date(dt) == session_date:
+            tape.append((raw, float(point["net_ad"])))
+
+    if live_net_ad is None:
+        return tape
+
+    bucket = _bucket_iso(now, minutes)
+    if tape and tape[-1][0] == bucket:
+        tape[-1] = (bucket, live_net_ad)
+    else:
+        tape.append((bucket, live_net_ad))
+    return tape
+
+
 def _read_cached_payload() -> Optional[Dict[str, Any]]:
     try:
         cached = json.loads(_CACHE_PATH.read_text())
@@ -581,18 +666,33 @@ def main() -> None:
             return
 
     ad_daily_bars, spy_daily_bars, ad_intraday_bars = _fetch_ib_bars()
-    tick = _fetch_tick_quote()
+    ad_net_live, tick = _fetch_live_snapshots()
+    if ad_net_live is not None:
+        print(f"  IB: AD-NYSE live net {ad_net_live:+.0f}", file=sys.stderr)
     if tick is not None:
         print(f"  IB: TICK-NYSE current {tick:.0f}", file=sys.stderr)
 
     ad_daily = build_daily_net_ad(ad_daily_bars)
     spy_daily = build_daily_net_ad(spy_daily_bars)
-    intraday = [
+
+    cached_payload = _read_cached_payload()
+    historical_intraday = [
         (_iso_utc(bar.date), close)
         for bar in ad_intraday_bars
         for close in [_finite_value(getattr(bar, "close", None))]
         if close is not None
     ]
+    # IB has no intraday history for AD-NYSE, so the session tape is built from
+    # live snapshots (only while the market is open). If IB ever starts serving
+    # intraday bars, those take precedence.
+    if historical_intraday:
+        intraday = historical_intraday
+    else:
+        intraday = accumulate_session_tape(
+            cached_payload,
+            ad_net_live if market_open else None,
+            datetime.now(timezone.utc),
+        )
 
     if not ad_daily and not intraday:
         print("  No IB breadth data — falling back to cache.", file=sys.stderr)
@@ -609,7 +709,7 @@ def main() -> None:
         market_open=market_open,
         source="ib",
     )
-    result = carry_forward_history(result, _read_cached_payload())
+    result = carry_forward_history(result, cached_payload)
     persist_result(result)
     print_summary(result)
     print(json.dumps(result, indent=2))
