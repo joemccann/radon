@@ -50,6 +50,7 @@ export { useOrderValidation } from "./hooks/useOrderValidation";
 
 // Components
 export { OrderPriceStrip } from "./components/OrderPriceStrip";
+export type { OrderQuoteSide } from "./components/OrderPriceStrip";
 export { OrderLegPills } from "./components/OrderLegPills";
 export { OrderPriceButtons } from "./components/OrderPriceButtons";
 export { OrderActionToggle } from "./components/OrderActionToggle";

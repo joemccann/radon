@@ -100,6 +100,7 @@ export default function ComboSkewPanel({
       ? fmtSource(skew.call.source)
       : "MIXED";
 
+  // Compact (order ticket): four primary metrics. Full: add per-leg deltas + SRC.
   return (
     <div className={`short-strangle-skew${compact ? " short-strangle-skew--compact" : ""}`} data-testid="short-strangle-skew-panel">
       <div className="short-strangle-skew__header">
@@ -124,20 +125,24 @@ export default function ComboSkewPanel({
           </span>
           <span className="short-strangle-skew__sub">{skewLabel}</span>
         </div>
-        <div className="short-strangle-skew__metric">
-          <span className="short-strangle-skew__label">CALL Δ</span>
-          <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaToneClass(callPositionDelta)}`}>
-            {fmtDelta(callPositionDelta)}
-          </span>
-          <span className="short-strangle-skew__sub">{legSubLabel(skew.call)}</span>
-        </div>
-        <div className="short-strangle-skew__metric">
-          <span className="short-strangle-skew__label">PUT Δ</span>
-          <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaToneClass(putPositionDelta)}`}>
-            {fmtDelta(putPositionDelta)}
-          </span>
-          <span className="short-strangle-skew__sub">{legSubLabel(skew.put)}</span>
-        </div>
+        {!compact && (
+          <>
+            <div className="short-strangle-skew__metric">
+              <span className="short-strangle-skew__label">CALL Δ</span>
+              <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaToneClass(callPositionDelta)}`}>
+                {fmtDelta(callPositionDelta)}
+              </span>
+              <span className="short-strangle-skew__sub">{legSubLabel(skew.call)}</span>
+            </div>
+            <div className="short-strangle-skew__metric">
+              <span className="short-strangle-skew__label">PUT Δ</span>
+              <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaToneClass(putPositionDelta)}`}>
+                {fmtDelta(putPositionDelta)}
+              </span>
+              <span className="short-strangle-skew__sub">{legSubLabel(skew.put)}</span>
+            </div>
+          </>
+        )}
         <div className="short-strangle-skew__metric">
           <span className="short-strangle-skew__label">NET Δ</span>
           <span className={`short-strangle-skew__value short-strangle-skew__value--${deltaTone}`}>
@@ -147,11 +152,13 @@ export default function ComboSkewPanel({
             {fmtDelta(skew.netDeltaPerCombo)} / combo
           </span>
         </div>
-        <div className="short-strangle-skew__metric short-strangle-skew__metric--source">
-          <span className="short-strangle-skew__label">SRC</span>
-          <span className="short-strangle-skew__value">{sourceLabel}</span>
-          <span className="short-strangle-skew__sub">{skewLabel}</span>
-        </div>
+        {!compact && (
+          <div className="short-strangle-skew__metric short-strangle-skew__metric--source">
+            <span className="short-strangle-skew__label">SRC</span>
+            <span className="short-strangle-skew__value">{sourceLabel}</span>
+            <span className="short-strangle-skew__sub">{skewLabel}</span>
+          </div>
+        )}
       </div>
     </div>
   );
