@@ -63,9 +63,10 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
 
   "Trade Journal":
     "Append-only execution log from the Turso journal. Each entry records structure, " +
-    "Kelly sizing, gate pass/fail status, and edge analysis. Return on Risk = " +
-    "Realized P&L / Capital at Risk (debit paid or spread width minus credit). " +
-    "Use this to audit decision quality and identify pattern drift.",
+    "Kelly sizing, gate pass/fail status, and edge analysis. Date range filters activity " +
+    "in America/New_York; Realized P&L sums closes whose close date falls in the range " +
+    "(opens in range are listed but not summed). Return on Risk = Realized P&L / Capital " +
+    "at Risk. Use this to audit decision quality and identify pattern drift.",
 
   /* ── Orders ──────────────────────────────────────────── */
 
@@ -117,10 +118,11 @@ export const SECTION_TOOLTIPS: Record<string, string> = {
   /* ── CTA Page ────────────────────────────────────────── */
 
   "VOL-TARGETING MODEL":
-    "CTA vol-targeting exposure estimate from CRI scan. Implied Exposure = " +
-    "target vol / realized vol (100% = full allocation). Forced Reduction = " +
-    "the % CTAs must sell when vol spikes above target. Est. Selling = " +
-    "notional CTA selling in billions. Low exposure = systematic deleveraging underway.",
+    "CTA vol-targeting exposure estimate from CRI scan (SPY 20d realized vol, " +
+    "10% target, fixed $400B AUM). Implied Exposure = target / rvol (100% = full allocation). " +
+    "Cut from 100% = how far below full allocation the model sizes. " +
+    "Implied cut vs AUM = that gap times AUM: a stock of underweight, not a draining sell pipeline. " +
+    "Day change = session-to-session change in that stock (positive = more implied cut).",
 
   "MENTHORQ CTA POSITIONING":
     "Institutional CTA positioning data from MenthorQ. Shows normalized positions " +

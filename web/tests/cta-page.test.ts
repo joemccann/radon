@@ -50,6 +50,13 @@ describe("components/CtaPage.tsx — structure", () => {
     expect(src).toMatch(/VOL-TARGETING|exposure_pct|forced_reduction/i);
   });
 
+  it("shows model inputs stamp and day-change companion metric", () => {
+    expect(src).toMatch(/cta-model-inputs/);
+    expect(src).toMatch(/cta-day-change/);
+    expect(src).toMatch(/Implied cut vs AUM/);
+    expect(src).toMatch(/formatCtaModelInputsStamp|ctaVolTarget/);
+  });
+
   it("renders SortableCtaTable JSX (not old CtaTables)", () => {
     expect(src).toMatch(/<SortableCtaTable/);
     expect(src).not.toMatch(/import CtaTables/);

@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo } from "react";
 import { Activity } from "lucide-react";
 import ShareReportModal from "./ShareReportModal";
 import { useRegime } from "@/lib/useRegime";
@@ -9,6 +10,13 @@ import InfoTooltip from "./InfoTooltip";
 import SortableCtaTable, { type CtaSectionCallout } from "./SortableCtaTable";
 import CtaBriefing from "./CtaBriefing";
 import { formatCtaPercentileLabel, normalizeCtaPercentile } from "@/lib/ctaPercentiles";
+import {
+  CTA_AUM_BN,
+  CTA_VOL_TARGET,
+  dayOverDayEstSellingDelta,
+  formatCtaModelInputsStamp,
+  priorSessionEstSellingBn,
+} from "@/lib/ctaVolTarget";
 
 /* ─── Helpers ────────────────────────────────────────── */
 
@@ -59,6 +67,21 @@ export default function CtaPage() {
 
   const cta = data?.cta ?? null;
   const exposurePct = cta?.exposure_pct ?? null;
+  const realizedVol = cta?.realized_vol ?? data?.realized_vol ?? null;
+  const estSellingBn = cta?.est_selling_bn ?? null;
+
+  const dayChangeBn = useMemo(() => {
+    const priorBn = priorSessionEstSellingBn(data?.history, data?.date);
+    return dayOverDayEstSellingDelta(estSellingBn, priorBn);
+  }, [data?.history, data?.date, estSellingBn]);
+
+  const asOfLabel = formatFetchedAt(data?.scan_time);
+  const modelInputsStamp = formatCtaModelInputsStamp({
+    realizedVol,
+    volTarget: CTA_VOL_TARGET,
+    aumBn: CTA_AUM_BN,
+    asOfLabel: asOfLabel || null,
+  });
 
   const order = ["main", "index", "commodity", "currency"] as const;
 
@@ -216,12 +239,26 @@ export default function CtaPage() {
             letterSpacing: "0.10em",
             color: "var(--text-muted)",
             textTransform: "uppercase",
-            marginBottom: "12px",
+            marginBottom: "6px",
           }}
         >
           <Activity size={14} />
           VOL-TARGETING MODEL
           <InfoTooltip text={SECTION_TOOLTIPS["VOL-TARGETING MODEL"]} />
+        </div>
+        <div
+          data-testid="cta-model-inputs"
+          style={{
+            fontFamily: "var(--font-mono, monospace)",
+            fontSize: "9px",
+            fontWeight: 400,
+            letterSpacing: "0.06em",
+            color: "var(--text-muted)",
+            textTransform: "uppercase",
+            marginBottom: "12px",
+          }}
+        >
+          {modelInputsStamp}
         </div>
 
         <div className="regime-cta-rows">
@@ -232,7 +269,7 @@ export default function CtaPage() {
             </span>
           </div>
           <div className="regime-cta-row">
-            <span>Forced Reduction</span>
+            <span>Cut from 100%</span>
             <span
               className={
                 cta?.forced_reduction_pct && cta.forced_reduction_pct > 0
@@ -244,13 +281,33 @@ export default function CtaPage() {
             </span>
           </div>
           <div className="regime-cta-row">
-            <span>Est. CTA Selling</span>
+            <span>Implied cut vs AUM</span>
             <span
+              data-testid="cta-implied-cut"
               className={
-                cta?.est_selling_bn && cta.est_selling_bn > 50 ? "text-negative" : ""
+                estSellingBn != null && estSellingBn > 50 ? "text-negative" : ""
               }
             >
-              ${fmt(cta?.est_selling_bn, 1)}B
+              ${fmt(estSellingBn, 1)}B
+            </span>
+          </div>
+          <div className="regime-cta-row">
+            <span>Day change</span>
+            <span
+              data-testid="cta-day-change"
+              className={
+                dayChangeBn == null
+                  ? ""
+                  : dayChangeBn > 0
+                    ? "text-negative"
+                    : dayChangeBn < 0
+                      ? "text-positive"
+                      : ""
+              }
+            >
+              {dayChangeBn == null
+                ? "---"
+                : `${dayChangeBn > 0 ? "+" : dayChangeBn < 0 ? "-" : ""}$${Math.abs(dayChangeBn).toFixed(1)}B`}
             </span>
           </div>
         </div>
@@ -344,7 +401,8 @@ export default function CtaPage() {
           <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: "0" }}>
             <CtaBriefing
               tables={ctaData.tables}
-              estSellingBn={cta?.est_selling_bn ?? null}
+              estSellingBn={estSellingBn}
+              dayChangeBn={dayChangeBn}
             />
             {order.map((key) => {
               const rows = ctaData.tables![key];

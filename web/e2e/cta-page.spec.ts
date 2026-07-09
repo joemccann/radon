@@ -37,11 +37,12 @@ const CRI_MOCK = {
     conditions: { spx_below_100d_ma: false, realized_vol_gt_25: false, cor1m_gt_60: false },
   },
   history: [
-    { date: "2026-03-03", vix: 22.1, vvix: 105.3, spy: 660.2, spx_vs_ma_pct: -1.2, vix_5d_roc: 5.1 },
-    { date: "2026-03-04", vix: 24.5, vvix: 110.1, spy: 658.7, spx_vs_ma_pct: -1.5, vix_5d_roc: 8.3 },
-    { date: "2026-03-05", vix: 26.0, vvix: 114.2, spy: 655.0, spx_vs_ma_pct: -2.0, vix_5d_roc: 12.1 },
-    { date: "2026-03-06", vix: 27.8, vvix: 118.5, spy: 662.3, spx_vs_ma_pct: -1.4, vix_5d_roc: 15.4 },
-    { date: "2026-03-07", vix: 29.49, vvix: 121.27, spy: 677.69, spx_vs_ma_pct: -0.64, vix_5d_roc: 18.9 },
+    { date: "2026-03-03", vix: 22.1, vvix: 105.3, spy: 660.2, realized_vol: 12.5, spx_vs_ma_pct: -1.2, vix_5d_roc: 5.1 },
+    { date: "2026-03-04", vix: 24.5, vvix: 110.1, spy: 658.7, realized_vol: 12.8, spx_vs_ma_pct: -1.5, vix_5d_roc: 8.3 },
+    { date: "2026-03-05", vix: 26.0, vvix: 114.2, spy: 655.0, realized_vol: 13.1, spx_vs_ma_pct: -2.0, vix_5d_roc: 12.1 },
+    { date: "2026-03-06", vix: 27.8, vvix: 118.5, spy: 662.3, realized_vol: 12.2, spx_vs_ma_pct: -1.4, vix_5d_roc: 15.4 },
+    { date: "2026-03-07", vix: 29.49, vvix: 121.27, spy: 677.69, realized_vol: 12.0, spx_vs_ma_pct: -0.64, vix_5d_roc: 18.9 },
+    { date: "2026-03-08", vix: 28.0, vvix: 120.0, spy: 675.0, realized_vol: 13.0, spx_vs_ma_pct: -0.5, vix_5d_roc: 16.0 },
   ],
 };
 
@@ -188,6 +189,19 @@ test.describe("/cta page", () => {
     await model.waitFor({ timeout: 10_000 });
     // CRI_MOCK.cta.exposure_pct = 95
     await expect(model).toContainText("95");
+  });
+
+  test("vol-targeting model shows inputs stamp, implied cut, and day change", async ({ page }) => {
+    await setupMocks(page);
+    await page.goto("/cta");
+    const model = page.locator('[data-testid="vol-targeting-model"]');
+    await model.waitFor({ timeout: 10_000 });
+    await expect(page.locator('[data-testid="cta-model-inputs"]')).toContainText("RVOL");
+    await expect(page.locator('[data-testid="cta-model-inputs"]')).toContainText("AUM");
+    await expect(model).toContainText("Implied cut vs AUM");
+    await expect(page.locator('[data-testid="cta-implied-cut"]')).toContainText("$1.2B");
+    // prior session rvol 13.0 → est ~$92.3B; current 1.2 → large negative day change
+    await expect(page.locator('[data-testid="cta-day-change"]')).toContainText("$");
   });
 
   test("MenthorQ CTA tables render below vol-targeting model", async ({ page }) => {
