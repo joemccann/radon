@@ -30,10 +30,9 @@ import {
 } from "@/lib/optionsChainUtils";
 import {
   OrderPriceStrip,
-  OrderLegPills,
   OrderRiskGate,
   useOrderRisk,
-  type OrderLeg as UnifiedOrderLeg,
+  type OrderQuoteSide,
   type OrderRiskInput,
 } from "@/lib/order";
 import { useViewport } from "@/lib/useViewport";
@@ -468,208 +467,186 @@ function OrderBuilder({
     signedLimitPrice,
   ]);
 
-  // Convert chain legs to unified OrderLeg format for pills
-  const unifiedLegs: UnifiedOrderLeg[] = useMemo(() => {
-    return legs.map((leg) => {
-      const key = optionKey({
-        symbol: ticker,
-        expiry: leg.expiry,
-        strike: leg.strike,
-        right: leg.right,
-      });
-      const pd = prices[key];
-      return {
-        id: leg.id,
-        action: leg.action,
-        direction: leg.action === "BUY" ? "LONG" : "SHORT" as const,
-        strike: leg.strike,
-        type: leg.right === "C" ? "Call" : "Put" as const,
-        expiry: leg.expiry,
-        quantity: leg.quantity,
-        bid: pd?.bid ?? null,
-        ask: pd?.ask ?? null,
-      };
-    });
-  }, [legs, prices, ticker]);
-
-  // OrderPriceStrip prices
+  // OrderPriceStrip prices (combo) or single-leg signed mid
   const stripPrices = useMemo(() => {
     const { bid, ask, mid } = signedNetPrices;
     if (bid == null || ask == null || mid == null) {
       return { bid: null, mid: null, ask: null, spread: null, spreadPct: null, available: false };
     }
     const spread = ask - bid;
-    const spreadPct = mid > 0 ? (spread / mid) * 100 : null;
+    const midAbs = Math.abs(mid);
+    const spreadPct = midAbs > 0 ? (Math.abs(spread) / midAbs) * 100 : null;
     return { bid, mid, ask, spread, spreadPct, available: true };
   }, [signedNetPrices]);
+
+  const selectedQuoteSide = useMemo((): OrderQuoteSide | null => {
+    if (!isValidPrice || !Number.isFinite(signedLimitPrice)) return null;
+    const sides: OrderQuoteSide[] = ["bid", "mid", "ask"];
+    for (const side of sides) {
+      const v = signedNetPrices[side];
+      if (v != null && Math.abs(v - signedLimitPrice) < 0.005) return side;
+    }
+    return null;
+  }, [isValidPrice, signedLimitPrice, signedNetPrices]);
+
+  const applyQuoteSide = useCallback(
+    (side: OrderQuoteSide, value: number) => {
+      setLimitPrice(value.toFixed(2));
+      setPriceManuallySet(true);
+      setConfirmStep(false);
+    },
+    [],
+  );
+
+  const riskTeaser = useMemo(() => {
+    if (!isValidPrice || riskState == null) return null;
+    const s = riskState.summary;
+    const creditDebit =
+      isDebit === false
+        ? `credit ${fmtPrice(Math.abs(signedLimitPrice))}`
+        : isDebit === true
+          ? `debit ${fmtPrice(Math.abs(signedLimitPrice))}`
+          : fmtPrice(signedLimitPrice);
+    const notional = fmtPrice(signedLimitPrice * totalQty * 100);
+    let maxPart: string;
+    if (s.maxLossUnbounded) {
+      maxPart = "max loss UNBOUNDED";
+    } else if (s.maxLoss != null && Number.isFinite(s.maxLoss)) {
+      maxPart = `max loss ${fmtPrice(s.maxLoss)}`;
+    } else if (riskState.coverageStatus === "pending") {
+      maxPart = "coverage pending";
+    } else {
+      maxPart = "max loss --";
+    }
+    return `${creditDebit} · notional ${notional} · ${maxPart}`;
+  }, [isValidPrice, riskState, isDebit, signedLimitPrice, totalQty]);
 
   if (legs.length === 0) return null;
 
   return (
     <div className="order-builder" ref={builderRef} data-prefilled={prefillLabel ? "true" : undefined}>
-      <div className="order-builder-header">
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "11px",
-            textTransform: "uppercase",
-            letterSpacing: "0.05em",
-            color: "var(--text-secondary)",
-          }}
-        >
-          ORDER BUILDER {structure ? `: ${structure}` : ""}
-        </span>
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            onClearLegs();
-            setConfirmStep(false);
-            setLimitPrice("");
-            setPriceManuallySet(false);
-            setError(null);
-          }}
-          style={{ fontSize: "10px", padding: "2px 8px" }}
-        >
-          Clear
-        </button>
+      <div className="order-builder-section order-builder-section--structure">
+        <div className="order-builder-header">
+          <span className="order-builder-title">
+            ORDER BUILDER{structure ? ` : ${structure}` : ""}
+          </span>
+          <button
+            type="button"
+            className="btn-secondary order-builder-clear"
+            onClick={() => {
+              onClearLegs();
+              setConfirmStep(false);
+              setLimitPrice("");
+              setPriceManuallySet(false);
+              setError(null);
+            }}
+          >
+            Clear
+          </button>
+        </div>
+
+        {prefillLabel && (
+          <div className="order-builder-prefill order-builder-prefill--chip" role="status">
+            {prefillLabel}
+          </div>
+        )}
+
+        {riskState != null && riskState.coveringLegs.length > 0 && (
+          <div className="order-builder-coverage" data-testid="order-builder-coverage">
+            COVERED BY HELD{" "}
+            {riskState.coveringLegs
+              .map((l) =>
+                l.type === "Option"
+                  ? `LONG ${l.contracts}× $${l.strike} ${l.right === "C" ? "Call" : "Put"}`
+                  : `${l.shares.toLocaleString()} shares @ $${l.avgCost.toFixed(2)}`,
+              )
+              .join(" + ")}
+          </div>
+        )}
+
+        {isBearishRiskReversal(legs) && (
+          <div
+            className="order-builder-routing-warning"
+            role="status"
+            data-testid="order-builder-bearish-rr-warning"
+          >
+            <div className="order-builder-routing-warning__title">
+              HEADS-UP: BEARISH RISK REVERSAL ROUTING
+            </div>
+            <div>
+              IB Smart sometimes silently drops this combo. If the order
+              sits in PendingSubmit with no permId after submit, place the
+              legs separately (SELL the call as one order, BUY the put as
+              another). Both transmit fine as singletons.
+            </div>
+          </div>
+        )}
       </div>
 
-      {prefillLabel && (
-        <div className="order-builder-prefill" role="status">
-          {prefillLabel}
-        </div>
-      )}
-
-      {/* Coverage hint: show when a held LONG bounds an otherwise-naked SELL.
-          Helps the operator understand why Max Loss dropped from UNBOUNDED.
-          Stock-coverage chips include the avg cost so the operator sees the
-          basis driving the structural max-loss (stock-to-zero net of premium). */}
-      {riskState != null && riskState.coveringLegs.length > 0 && (
-        <div
-          className="order-builder-coverage"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            color: "var(--text-secondary)",
-            padding: "4px 8px",
-            marginBottom: "8px",
-            background: "color-mix(in srgb, var(--ok) 8%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--ok) 30%, transparent)",
-            borderRadius: "4px",
-            letterSpacing: "0.04em",
-          }}
-        >
-          COVERED BY HELD{" "}
-          {riskState.coveringLegs
-            .map((l) =>
-              l.type === "Option"
-                ? `LONG ${l.contracts}× $${l.strike} ${l.right === "C" ? "Call" : "Put"}`
-                : `${l.shares.toLocaleString()} shares @ $${l.avgCost.toFixed(2)}`,
-            )
-            .join(" + ")}
-        </div>
-      )}
-
-      {/* Bearish risk reversal heads-up. IB Smart's combo router has been
-          observed to silently drop this BAG structure (SELL CALL + BUY PUT,
-          different strikes) without an errorEvent — the order vanishes into
-          PendingSubmit and gets discarded when the placing client
-          disconnects. Bullish RR with identical strikes routes fine; single
-          legs route fine. Warn the operator pre-emptively so the routing
-          failure isn't a surprise. Diagnostic in
-          `feedback_ib_combo_router_silent_drops_bearish_rr.md`. */}
-      {isBearishRiskReversal(legs) && (
-        <div
-          className="order-builder-routing-warning"
-          role="status"
-          data-testid="order-builder-bearish-rr-warning"
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontSize: "10px",
-            color: "var(--text-secondary)",
-            padding: "6px 8px",
-            marginBottom: "8px",
-            background: "color-mix(in srgb, var(--warning, var(--fault)) 8%, transparent)",
-            border: "1px solid color-mix(in srgb, var(--warning, var(--fault)) 40%, transparent)",
-            borderRadius: "4px",
-            lineHeight: 1.5,
-          }}
-        >
-          <div style={{ letterSpacing: "0.04em", marginBottom: 2 }}>
-            HEADS-UP: BEARISH RISK REVERSAL ROUTING
-          </div>
-          <div>
-            IB Smart sometimes silently drops this combo. If the order
-            sits in PendingSubmit with no permId after submit, place the
-            legs separately (SELL the call as one order, BUY the put as
-            another) — both transmit fine as singletons.
-          </div>
-        </div>
-      )}
-
-      {/* Price strip for combo orders */}
+      {/* Market: single tappable quote surface */}
       {isCombo && stripPrices.available && (
-        <OrderPriceStrip prices={stripPrices} />
+        <div className="order-builder-section order-builder-section--market">
+          <OrderPriceStrip
+            prices={stripPrices}
+            selected={selectedQuoteSide}
+            onSelect={applyQuoteSide}
+          />
+        </div>
       )}
 
-      <ComboSkewPanel
-        ticker={ticker}
-        legs={legs}
-        prices={prices}
-        spot={spot}
-        riskFreeRate={riskFreeRate}
-      />
+      <div className="order-builder-section order-builder-section--analytics">
+        <ComboSkewPanel
+          ticker={ticker}
+          legs={legs}
+          prices={prices}
+          spot={spot}
+          riskFreeRate={riskFreeRate}
+          compact
+        />
+      </div>
 
-      {/* Leg pills for combo, detailed list for single */}
-      {isCombo ? (
-        <div style={{ marginBottom: "12px" }}>
-          <OrderLegPills legs={unifiedLegs} />
-        </div>
-      ) : null}
+      {/* Legs: single editable list (no redundant pills) */}
+      <div className="order-builder-section order-builder-section--legs">
+        <div className="order-builder-section-label">LEGS</div>
+        <div className="order-builder-legs">
+          {legs.map((leg) => {
+            const key = optionKey({
+              symbol: ticker,
+              expiry: leg.expiry,
+              strike: leg.strike,
+              right: leg.right,
+            });
+            const pd = prices[key];
+            const mid = pd?.bid != null && pd?.ask != null ? (pd.bid + pd.ask) / 2 : null;
+            const legPrice = leg.priceManuallySet || mid == null ? leg.limitPrice : mid;
 
-      {/* Legs list (editable) */}
-      <div className="order-builder-legs">
-        {legs.map((leg) => {
-          const key = optionKey({
-            symbol: ticker,
-            expiry: leg.expiry,
-            strike: leg.strike,
-            right: leg.right,
-          });
-          const pd = prices[key];
-          const mid = pd?.bid != null && pd?.ask != null ? (pd.bid + pd.ask) / 2 : null;
-          const legPrice = leg.priceManuallySet || mid == null ? leg.limitPrice : mid;
-
-          return (
-            <div key={leg.id} className="order-builder-leg">
-              <div style={{ display: "flex", alignItems: "center", gap: "8px", flex: 1 }}>
+            return (
+              <div key={leg.id} className="order-builder-leg" data-testid="order-builder-leg">
                 <button
-                  className={`order-action-btn order-action-active ${leg.action === "BUY" ? "order-action-buy" : "order-action-sell"}`}
+                  type="button"
+                  className={`order-builder-leg-action ${leg.action === "BUY" ? "order-builder-leg-action--buy" : "order-builder-leg-action--sell"}`}
                   onClick={() => {
                     onUpdateLeg(leg.id, { action: leg.action === "BUY" ? "SELL" : "BUY" });
                     setConfirmStep(false);
                   }}
-                  style={{ fontSize: "9px", padding: "2px 6px", minWidth: "36px" }}
+                  title="Toggle buy/sell"
                 >
                   {leg.action}
                 </button>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "12px" }}>
+                <span className="order-builder-leg-contract">
                   {leg.quantity}x ${leg.strike} {leg.right === "C" ? "Call" : "Put"}
                 </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)" }}>
-                  {formatExpiry(leg.expiry)}
+                <span className="order-builder-leg-expiry">{formatExpiry(leg.expiry)}</span>
+                <span className="order-builder-leg-mid" title="Leg mid">
+                  {mid != null ? fmtPrice(mid) : "--"}
                 </span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: "11px", color: "var(--text-secondary)", marginLeft: "auto" }}>
-                  {mid != null ? fmtPrice(mid) : "---"}
-                </span>
-              </div>
-              <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
                 <input
-                  className="order-input"
+                  className="order-input order-builder-leg-qty"
                   type="number"
                   min="1"
                   step="1"
                   value={leg.quantity}
+                  aria-label="Quantity"
                   onChange={(e) => {
                     const v = parseInt(e.target.value, 10);
                     if (v > 0) {
@@ -677,201 +654,180 @@ function OrderBuilder({
                       setConfirmStep(false);
                     }
                   }}
-                  style={{ width: "48px", fontSize: "11px", padding: "2px 4px", textAlign: "center" }}
                 />
                 {isCombo && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "2px",
-                      flex: "0 0 auto",
-                    }}
-                  >
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-secondary)" }}>
-                      $
-                    </span>
+                  <div className="order-builder-leg-limit">
+                    <span className="order-builder-leg-limit-prefix">$</span>
                     <input
                       className="order-input"
                       type="number"
                       min="0.01"
                       step="0.01"
                       value={legPrice == null ? "" : legPrice}
+                      aria-label="Leg limit"
                       onChange={(e) => {
                         const v = parseFloat(e.target.value);
-                        onUpdateLeg(
-                          leg.id,
-                          {
-                            limitPrice: Number.isFinite(v) ? v : null,
-                            priceManuallySet: true,
-                          },
-                        );
+                        onUpdateLeg(leg.id, {
+                          limitPrice: Number.isFinite(v) ? v : null,
+                          priceManuallySet: true,
+                        });
                         setPriceManuallySet(true);
                         setConfirmStep(false);
                       }}
-                      style={{ width: "54px", fontSize: "11px", padding: "2px 4px", textAlign: "center" }}
                     />
                   </div>
                 )}
                 <button
+                  type="button"
+                  className="order-builder-leg-remove"
                   onClick={() => {
                     onRemoveLeg(leg.id);
                     setConfirmStep(false);
-                  }}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "var(--fault)",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                    padding: "0 4px",
-                    fontFamily: "var(--font-mono)",
                   }}
                   title="Remove leg"
                 >
                   ×
                 </button>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
       </div>
 
-      {/* Limit Price */}
-      <div className="order-builder-net">
-        <div className="order-field" style={{ margin: 0 }}>
-          <label className="order-label">
-            Limit Price — NET {isDebit ? "DEBIT" : "CREDIT"}
-          </label>
-          <div className="modify-price-input-row">
-            <span className="modify-price-prefix">$</span>
-            <input
-              className="modify-price-input"
-              type="number"
-              step="0.01"
-              min={isCombo ? "-100000" : "0.01"}
-              value={limitPrice}
-              onChange={(e) => {
-                setLimitPrice(e.target.value);
-                setPriceManuallySet(true);
-                setConfirmStep(false);
-              }}
-              placeholder="0.00"
-            />
+      {/* Ticket: limit, TIF, risk teaser, submit */}
+      <div className="order-builder-section order-builder-section--ticket">
+        <div className="order-builder-net">
+          <div className="order-field order-builder-limit-field">
+            <label className="order-label">
+              Limit price ({isDebit ? "net debit" : "net credit"})
+            </label>
+            <div className="modify-price-input-row">
+              <span className="modify-price-prefix">$</span>
+              <input
+                className="modify-price-input"
+                type="number"
+                step="0.01"
+                min={isCombo ? "-100000" : "0.01"}
+                value={limitPrice}
+                onChange={(e) => {
+                  setLimitPrice(e.target.value);
+                  setPriceManuallySet(true);
+                  setConfirmStep(false);
+                }}
+                placeholder="0.00"
+              />
+            </div>
+            {/* Single-leg: no top strip; keep compact quote chips */}
+            {!isCombo && (
+              <div className="modify-quick-buttons">
+                <button
+                  type="button"
+                  className="btn-quick"
+                  disabled={signedNetPrices.bid == null}
+                  onClick={() => {
+                    if (signedNetPrices.bid != null) applyQuoteSide("bid", signedNetPrices.bid);
+                  }}
+                >
+                  BID{signedNetPrices.bid != null ? ` ${signedNetPrices.bid.toFixed(2)}` : ""}
+                </button>
+                <button
+                  type="button"
+                  className="btn-quick"
+                  disabled={signedNetPrices.mid == null}
+                  onClick={() => {
+                    if (signedNetPrices.mid != null) applyQuoteSide("mid", signedNetPrices.mid);
+                  }}
+                >
+                  MID{signedNetPrices.mid != null ? ` ${signedNetPrices.mid.toFixed(2)}` : ""}
+                </button>
+                <button
+                  type="button"
+                  className="btn-quick"
+                  disabled={signedNetPrices.ask == null}
+                  onClick={() => {
+                    if (signedNetPrices.ask != null) applyQuoteSide("ask", signedNetPrices.ask);
+                  }}
+                >
+                  ASK{signedNetPrices.ask != null ? ` ${signedNetPrices.ask.toFixed(2)}` : ""}
+                </button>
+              </div>
+            )}
+            {isValidPrice && (
+              <span className="order-builder-notional">
+                {fmtPrice(signedLimitPrice * totalQty * 100)} notional
+              </span>
+            )}
           </div>
-          <div className="modify-quick-buttons">
+        </div>
+
+        <div className="order-field order-builder-tif">
+          <label className="order-label">Time in force</label>
+          <div className="order-builder-tif-seg" role="group" aria-label="Time in force">
             <button
-              className="btn-quick"
-              disabled={signedNetPrices.bid == null}
-              onClick={() => {
-                if (signedNetPrices.bid != null) {
-                  setLimitPrice(signedNetPrices.bid.toFixed(2));
-                  setPriceManuallySet(true);
-                  setConfirmStep(false);
-                }
-              }}
+              type="button"
+              className={`order-builder-tif-btn${tif === "DAY" ? " order-builder-tif-btn--active" : ""}`}
+              onClick={() => setTif("DAY")}
             >
-              BID{signedNetPrices.bid != null ? ` ${signedNetPrices.bid.toFixed(2)}` : ""}
+              DAY
             </button>
             <button
-              className="btn-quick"
-              disabled={signedNetPrices.mid == null}
-              onClick={() => {
-                if (signedNetPrices.mid != null) {
-                  setLimitPrice(signedNetPrices.mid.toFixed(2));
-                  setPriceManuallySet(true);
-                  setConfirmStep(false);
-                }
-              }}
+              type="button"
+              className={`order-builder-tif-btn${tif === "GTC" ? " order-builder-tif-btn--active" : ""}`}
+              onClick={() => setTif("GTC")}
             >
-              MID{signedNetPrices.mid != null ? ` ${signedNetPrices.mid.toFixed(2)}` : ""}
-            </button>
-            <button
-              className="btn-quick"
-              disabled={signedNetPrices.ask == null}
-              onClick={() => {
-                if (signedNetPrices.ask != null) {
-                  setLimitPrice(signedNetPrices.ask.toFixed(2));
-                  setPriceManuallySet(true);
-                  setConfirmStep(false);
-                }
-              }}
-            >
-              ASK{signedNetPrices.ask != null ? ` ${signedNetPrices.ask.toFixed(2)}` : ""}
+              GTC
             </button>
           </div>
-          {isValidPrice && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-secondary)", marginTop: "4px" }}>
-              {fmtPrice(signedLimitPrice * totalQty * 100)} notional
-            </span>
+        </div>
+
+        <OrderErrorBanner error={error} />
+
+        {confirmStep && (
+          <OrderRiskGate
+            input={riskInput}
+            portfolio={portfolio ?? null}
+            surface="chain-builder"
+            variant="info"
+          />
+        )}
+
+        {!confirmStep && riskTeaser && (
+          <div className="order-builder-risk-teaser" data-testid="order-builder-risk-teaser">
+            {riskTeaser}
+          </div>
+        )}
+
+        <div className="order-submit order-builder-submit">
+          {confirmStep ? (
+            <div className="order-confirm-row">
+              <button
+                type="button"
+                className="btn-secondary"
+                onClick={() => setConfirmStep(false)}
+                disabled={loading}
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                className={`btn-primary ${isDebit === false ? "btn-danger" : ""}`}
+                onClick={handlePlace}
+                disabled={!isValidPrice || loading}
+              >
+                {loading ? "Placing..." : "Confirm Order"}
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className="btn-primary order-builder-place"
+              onClick={handlePlace}
+              disabled={!isValidPrice}
+            >
+              Place {structure || "Order"}
+            </button>
           )}
         </div>
-      </div>
-
-      {/* TIF */}
-      <div className="order-field" style={{ marginTop: "8px" }}>
-        <label className="order-label">Time in Force</label>
-        <div className="order-action-buttons">
-          <button
-            className={`order-action-btn ${tif === "DAY" ? "order-action-active" : ""}`}
-            onClick={() => setTif("DAY")}
-          >
-            DAY
-          </button>
-          <button
-            className={`order-action-btn ${tif === "GTC" ? "order-action-active" : ""}`}
-            onClick={() => setTif("GTC")}
-          >
-            GTC
-          </button>
-        </div>
-      </div>
-
-      <OrderErrorBanner error={error} />
-
-      {/* Order Summary (shown in confirm step). Risk math is owned entirely
-          by `<OrderRiskGate>` — it consumes `riskInput` + `portfolio`, runs
-          the augmentation pipeline, and renders `<OrderConfirmSummary>` with
-          a branded summary. The parent surface no longer constructs the
-          summary literal; the brand at the type level prevents that. */}
-      {confirmStep && (
-        <OrderRiskGate
-          input={riskInput}
-          portfolio={portfolio ?? null}
-          surface="chain-builder"
-          variant="info"
-        />
-      )}
-
-      {/* Submit */}
-      <div className="order-submit" style={{ marginTop: "8px" }}>
-        {confirmStep ? (
-          <div className="order-confirm-row">
-            <button
-              className="btn-secondary"
-              onClick={() => setConfirmStep(false)}
-              disabled={loading}
-            >
-              Back
-            </button>
-            <button
-              className={`btn-primary ${isDebit === false ? "btn-danger" : ""}`}
-              onClick={handlePlace}
-              disabled={!isValidPrice || loading}
-            >
-              {loading ? "Placing..." : "Confirm Order"}
-            </button>
-          </div>
-        ) : (
-          <button
-            className="btn-primary"
-            onClick={handlePlace}
-            disabled={!isValidPrice}
-            style={{ width: "100%" }}
-          >
-            Place {structure || "Order"}
-          </button>
-        )}
       </div>
     </div>
   );

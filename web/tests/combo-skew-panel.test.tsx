@@ -66,6 +66,7 @@ describe("ComboSkewPanel", () => {
 
     expect(screen.getByTestId("short-strangle-skew-panel")).toBeTruthy();
     expect(screen.getByText("STRANGLE SKEW")).toBeTruthy();
+    // Full (non-compact) surface keeps all seven tiles.
     for (const label of ["CALL IV", "PUT IV", "IV SKEW", "CALL Δ", "PUT Δ", "NET Δ", "SRC"]) {
       expect(screen.getByText(label)).toBeTruthy();
     }
@@ -77,6 +78,29 @@ describe("ComboSkewPanel", () => {
     expect(screen.getByText("+5 sh")).toBeTruthy();
     expect(screen.getAllByText("SHORT LEG").length).toBe(2);
     expect(screen.getAllByText("STREAM").length).toBeGreaterThan(0);
+  });
+
+  it("compact mode keeps four primary metrics and drops SRC / per-leg deltas", () => {
+    render(
+      <ComboSkewPanel
+        compact
+        ticker="MU"
+        legs={[leg("P", 850), leg("C", 1250)]}
+        spot={1050}
+        prices={{
+          MU_20260717_850_P: pd({ symbol: "MU_20260717_850_P", impliedVol: 0.42, delta: -0.231 }),
+          MU_20260717_1250_C: pd({ symbol: "MU_20260717_1250_C", impliedVol: 0.30, delta: 0.184 }),
+        }}
+      />,
+    );
+
+    for (const label of ["CALL IV", "PUT IV", "IV SKEW", "NET Δ"]) {
+      expect(screen.getByText(label)).toBeTruthy();
+    }
+    expect(screen.queryByText("SRC")).toBeNull();
+    expect(screen.queryByText("CALL Δ")).toBeNull();
+    expect(screen.queryByText("PUT Δ")).toBeNull();
+    expect(document.querySelector(".short-strangle-skew--compact")).toBeTruthy();
   });
 
   it("renders the skew telemetry for a bullish risk reversal", () => {

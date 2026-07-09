@@ -92,3 +92,19 @@ tsc --noEmit: clean
 - `web/tests/orders-bulk-cancel.test.tsx` (new)
 - `web/tests/workspace-orders-implied.test.tsx`
 - `web/tests/historical-trades-filter.test.tsx`
+
+---
+
+# Task: Options OrderBuilder layout pass (2026-07-09)
+
+## Shipped
+- Fixed leg grid (56px BUY/SELL chip)
+- Removed redundant OrderLegPills
+- Tappable OrderPriceStrip for combos; no duplicate chips
+- Compact skew (4 metrics)
+- Prefill chip, compact TIF, risk teaser, no em-dash limit label
+- CSS `.order-builder-*`
+
+## Verify
+vitest: order-builder-layout, combo-skew-panel, chain-url-deeplink, order-unified-components green
+tsc clean

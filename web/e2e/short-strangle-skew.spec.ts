@@ -150,12 +150,11 @@ test("short strangle proposals show skew and signed delta telemetry", async ({ p
 
   const panel = detail.getByTestId("short-strangle-skew-panel");
   await expect(panel).toBeVisible();
+  // OrderBuilder uses compact skew: primary tiles only (no per-leg Δ / SRC).
   await expect(panel).toContainText("IV SKEW");
   await expect(panel).toContainText("+12.0 pt");
-  await expect(panel).toContainText("CALL Δ");
-  await expect(panel).toContainText("-0.184");
-  await expect(panel).toContainText("PUT Δ");
-  await expect(panel).toContainText("+0.231");
   await expect(panel).toContainText("NET Δ");
   await expect(panel).toContainText("+5 sh");
+  await expect(panel).not.toContainText("CALL Δ");
+  await expect(panel).not.toContainText("SRC");
 });
