@@ -186,13 +186,21 @@ Second state in the same sheet (or a stacked sheet):
 
 ---
 
-## Open decisions (need operator call before Phase 3)
+## Open decisions — RESOLVED 2026-07-08 (recommendations adopted)
 
-1. **Quick-add default:** long-press popover vs split bid/ask cell vs settings toggle?
-2. **Confirm UI:** in-sheet step (recommended, matches desktop) vs second full-height sheet?
-3. **Risk teaser on Review screen:** one-line max loss/gain always visible, or only after Review?
+1. **Quick-add default:** long-press popover. ✅
+2. **Confirm UI:** in-sheet step (matches desktop). ✅
+3. **Risk teaser on Review screen:** one-line max loss/gain in the build view + full gate on confirm. ✅
 
-Recommendation if unblocked: (1) long-press popover, (2) in-sheet confirm, (3) one-line teaser + full gate on confirm.
+## Status — Phases 1-3 shipped 2026-07-08
+
+All three phases implemented on the decisions above. Phase 1 (confirm step, `okToSubmit` gating,
+single-leg TO CLOSE labels + `closeOut`, `formatOrderError`, notional + teaser + Clear); Phase 2
+(Bid/Mid/Ask chips, per-leg flip, structure preview strip, ladder selection tint); Phase 3
+(long-press quick-add popover, adaptive tick, qty presets + Max). Combo close labeling scoped out by
+design (close a combo from the position/OrderTab). Tests: 6 vitest + 9 mobile Playwright (green live
+at 393x852); full web suite 3920 vitest / 0 fail; tsc clean. Live verification caught + fixed a real
+bug (popover self-dismiss on its own opening-gesture click). See `tasks/todo.md` for the detail.
 
 ---
 

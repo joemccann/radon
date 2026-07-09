@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type PointerEvent as ReactPointerEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+} from "react";
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { PortfolioData } from "@/lib/types";
 import { fmtPrice } from "@/lib/positionUtils";
@@ -10,6 +17,8 @@ import {
   type OrderLeg,
   normalizeComboOrder,
   computeNetOptionQuote,
+  computeNetPrice,
+  detectStructure,
   ALL_STRIKES,
 } from "@/lib/optionsChainUtils";
 import type { SideFilter } from "@/lib/useChainUrlState";
@@ -103,6 +112,11 @@ function fmtGreek(value: number | null | undefined, digits = 3): string {
   return value.toFixed(digits);
 }
 
+/** F1: long-press fires the quick-add popover at this dwell; a pointer drag past
+ *  the move threshold (a scroll) cancels it. */
+const LONG_PRESS_MS = 480;
+const LONG_PRESS_MOVE_PX = 10;
+
 /** One option side rendered inside a ladder row. Compact in the two-sided
  *  layout; surfaces Δ and Vol inline when a single side has the full width. */
 function SideCell({
@@ -111,22 +125,111 @@ function SideCell({
   data,
   align,
   expanded,
+  selectedAction,
   onSelect,
+  onAddLeg,
 }: {
   right: "C" | "P";
   strike: number;
   data: PriceData | null;
   align: "left" | "right";
   expanded: boolean;
+  /** BUY / SELL when this contract is an active order leg — drives the
+   *  selection tint (P5). null = not in the pending order. */
+  selectedAction: "BUY" | "SELL" | null;
   onSelect: () => void;
+  /** F1: quick-add without the detail sheet. When absent, long-press is a
+   *  no-op (the ladder isn't in order-building mode). */
+  onAddLeg?: (strike: number, right: "C" | "P", action: "BUY" | "SELL") => void;
 }) {
+  const [quickAddOpen, setQuickAddOpen] = useState(false);
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pressOriginRef = useRef<{ x: number; y: number } | null>(null);
+  // Set when a long-press fires so the click that follows pointerup doesn't
+  // also open the detail sheet.
+  const longPressFiredRef = useRef(false);
+  // Timestamp of the moment the popover opened. The press-release that opens it
+  // synthesises a trailing `click` under the finger, which would land on the
+  // dismiss backdrop and close the popover the instant it appears. Ignore
+  // backdrop dismissals within this window so the popover survives its own
+  // opening gesture; a later tap-outside still closes it.
+  const openedAtRef = useRef(0);
+
+  const cancelPress = () => {
+    if (pressTimerRef.current != null) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
+    pressOriginRef.current = null;
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent) => {
+    if (!onAddLeg) return;
+    longPressFiredRef.current = false;
+    pressOriginRef.current = { x: event.clientX, y: event.clientY };
+    pressTimerRef.current = setTimeout(() => {
+      longPressFiredRef.current = true;
+      openedAtRef.current = Date.now();
+      navigator.vibrate?.(10);
+      setQuickAddOpen(true);
+      cancelPress();
+    }, LONG_PRESS_MS);
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent) => {
+    const origin = pressOriginRef.current;
+    if (!origin) return;
+    if (
+      Math.abs(event.clientX - origin.x) > LONG_PRESS_MOVE_PX ||
+      Math.abs(event.clientY - origin.y) > LONG_PRESS_MOVE_PX
+    ) {
+      cancelPress();
+    }
+  };
+
+  const handleClick = () => {
+    // Suppress the click synthesised after a long-press so the detail sheet
+    // doesn't open on top of the quick-add popover.
+    if (longPressFiredRef.current) {
+      longPressFiredRef.current = false;
+      return;
+    }
+    onSelect();
+  };
+
+  const handleKeyDown = (event: ReactKeyboardEvent) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      onSelect();
+    }
+  };
+
+  const quickAdd = (action: "BUY" | "SELL") => {
+    onAddLeg?.(strike, right, action);
+    setQuickAddOpen(false);
+  };
+
+  const selectedClass =
+    selectedAction === "BUY"
+      ? " mobile-chain__cell--selected-buy"
+      : selectedAction === "SELL"
+        ? " mobile-chain__cell--selected-sell"
+        : "";
   return (
-    <button
-      type="button"
-      className={`mobile-chain__cell mobile-chain__cell--${right === "C" ? "call" : "put"}${align === "right" ? " mobile-chain__cell--right" : ""}`}
-      onClick={onSelect}
+    <div
+      role="button"
+      tabIndex={0}
+      className={`mobile-chain__cell mobile-chain__cell--${right === "C" ? "call" : "put"}${align === "right" ? " mobile-chain__cell--right" : ""}${selectedClass}`}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={cancelPress}
+      onPointerLeave={cancelPress}
+      onPointerCancel={cancelPress}
       data-testid={`mobile-chain-${right === "C" ? "call" : "put"}-${strike}`}
       aria-label={`${right === "C" ? "Call" : "Put"} ${strike}`}
+      aria-pressed={selectedAction != null}
     >
       <span className="mobile-chain__last">{fmtLast(data?.last)}</span>
       <span className="mobile-chain__bid-ask">{fmtBidAsk(data?.bid, data?.ask)}</span>
@@ -136,7 +239,60 @@ function SideCell({
         {expanded ? <span>V {fmtOi(data?.volume)}</span> : null}
         <span>OI {fmtOi(data?.avgVolume)}</span>
       </span>
-    </button>
+
+      {quickAddOpen ? (
+        <>
+          {/* Dismiss backdrop — stops propagation so tapping outside neither
+              opens the detail sheet nor re-triggers the cell. */}
+          <div
+            className="mobile-chain__quickadd-backdrop"
+            onClick={(e) => {
+              e.stopPropagation();
+              // Swallow the trailing click from the opening long-press so the
+              // popover does not dismiss itself the moment it appears.
+              if (Date.now() - openedAtRef.current < 400) return;
+              setQuickAddOpen(false);
+            }}
+            onPointerDown={(e) => e.stopPropagation()}
+            aria-hidden
+          />
+          <div
+            className="mobile-chain__quickadd"
+            role="menu"
+            aria-label={`Quick add ${right === "C" ? "call" : "put"} ${strike}`}
+            onClick={(e) => e.stopPropagation()}
+            onPointerDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.stopPropagation();
+                setQuickAddOpen(false);
+              }
+            }}
+            data-testid={`mobile-chain-quickadd-${right === "C" ? "call" : "put"}-${strike}`}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              autoFocus
+              className="mobile-chain__quickadd-buy"
+              onClick={() => quickAdd("BUY")}
+              data-testid={`mobile-chain-quickadd-${right === "C" ? "call" : "put"}-${strike}-buy`}
+            >
+              BUY
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className="mobile-chain__quickadd-sell"
+              onClick={() => quickAdd("SELL")}
+              data-testid={`mobile-chain-quickadd-${right === "C" ? "call" : "put"}-${strike}-sell`}
+            >
+              SELL
+            </button>
+          </div>
+        </>
+      ) : null}
+    </div>
   );
 }
 
@@ -196,6 +352,31 @@ export default function MobileChainLadder({
     if (quote.mid == null) return null;
     return quote.mid;
   }, [orderLegs, prices, ticker]);
+
+  // F2: structure name + signed debit/credit for the pending strip preview.
+  // Sign comes from computeNetPrice (positive = debit, negative = credit) —
+  // computeNetOptionQuote returns unsigned magnitudes, so it can't tell the
+  // direction on its own.
+  const pendingStructure = useMemo(
+    () => (orderLegs.length > 0 ? detectStructure(orderLegs) : ""),
+    [orderLegs],
+  );
+  const pendingSignedNet = useMemo(() => {
+    if (orderLegs.length === 0) return null;
+    const normalized = normalizeComboOrder(orderLegs);
+    return computeNetPrice(normalized.legs, prices);
+  }, [orderLegs, prices]);
+  const pendingIsCredit = pendingSignedNet != null ? pendingSignedNet < 0 : null;
+
+  // P5: (strike,right) -> BUY/SELL for the active order legs, so the ladder can
+  // tint the cells that are already in the pending order.
+  const legActionByKey = useMemo(() => {
+    const map = new Map<string, "BUY" | "SELL">();
+    for (const leg of orderLegs) {
+      map.set(`${leg.strike}_${leg.right}`, leg.action);
+    }
+    return map;
+  }, [orderLegs]);
 
   const expiryChips = useMemo(() => expirations.slice(0, 24), [expirations]);
   const showCalls = sideFilter !== "puts";
@@ -314,7 +495,9 @@ export default function MobileChainLadder({
                     data={call}
                     align="left"
                     expanded={singleSide}
+                    selectedAction={legActionByKey.get(`${strike}_C`) ?? null}
                     onSelect={() => setSelected({ strike, right: "C", data: call })}
+                    onAddLeg={onAddLeg}
                   />
                 )}
 
@@ -327,7 +510,9 @@ export default function MobileChainLadder({
                     data={put}
                     align={singleSide ? "left" : "right"}
                     expanded={singleSide}
+                    selectedAction={legActionByKey.get(`${strike}_P`) ?? null}
                     onSelect={() => setSelected({ strike, right: "P", data: put })}
+                    onAddLeg={onAddLeg}
                   />
                 )}
               </div>
@@ -337,22 +522,61 @@ export default function MobileChainLadder({
       )}
 
       {orderLegs.length > 0 ? (
-        <button
-          type="button"
+        // F2: single thumb bar. Tapping the bar (the primary Review affordance)
+        // opens the ticket; the Clear control stops propagation so it discards
+        // without opening.
+        <div
+          role="button"
+          tabIndex={0}
           className="mobile-chain__pending-strip"
           onClick={() => setTicketOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" || e.key === " ") {
+              e.preventDefault();
+              setTicketOpen(true);
+            }
+          }}
           data-testid="mobile-chain-pending-strip"
         >
-          <span className="mobile-chain__pending-count">
-            {orderLegs.length} {orderLegs.length === 1 ? "LEG" : "LEGS"}
-          </span>
-          {pendingNetMid != null ? (
-            <span className="mobile-chain__pending-mid">
-              Mid {fmtPrice(Math.abs(pendingNetMid))}
+          <span className="mobile-chain__pending-summary">
+            <span className="mobile-chain__pending-structure">
+              {pendingStructure || "Order"}
             </span>
-          ) : null}
-          <span className="mobile-chain__pending-action">Build order &rarr;</span>
-        </button>
+            <span className="mobile-chain__pending-detail">
+              <span className="mobile-chain__pending-count">
+                {orderLegs.length} {orderLegs.length === 1 ? "LEG" : "LEGS"}
+              </span>
+              {pendingNetMid != null ? (
+                <span
+                  className={`mobile-chain__pending-net${
+                    pendingIsCredit === true
+                      ? " mobile-chain__pending-net--credit"
+                      : pendingIsCredit === false
+                        ? " mobile-chain__pending-net--debit"
+                        : ""
+                  }`}
+                  data-testid="mobile-chain-pending-net"
+                >
+                  {pendingIsCredit === true ? "CR" : "DB"} {fmtPrice(Math.abs(pendingNetMid))}
+                </span>
+              ) : null}
+            </span>
+          </span>
+          <span className="mobile-chain__pending-actions">
+            <button
+              type="button"
+              className="mobile-chain__pending-clear"
+              onClick={(e) => {
+                e.stopPropagation();
+                onClearLegs?.();
+              }}
+              data-testid="mobile-chain-pending-clear"
+            >
+              Clear
+            </button>
+            <span className="mobile-chain__pending-action">Review &rarr;</span>
+          </span>
+        </div>
       ) : null}
 
       <MobileOrderTicket
