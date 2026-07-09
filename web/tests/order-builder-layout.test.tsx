@@ -71,4 +71,16 @@ describe("OrderBuilder source contract", () => {
     expect(src).toContain("onSelect={applyQuoteSide}");
     expect(src).toContain("!isCombo &&");
   });
+
+  it("CSS packs leg rows without fr stretch tracks", () => {
+    const css = readFileSync(join(__dirname, "../app/globals.css"), "utf8");
+    const legBlock = css.slice(
+      css.indexOf(".order-builder-leg {"),
+      css.indexOf(".order-builder-leg-action {"),
+    );
+    expect(legBlock).toMatch(/display:\s*flex/);
+    expect(legBlock).toMatch(/width:\s*fit-content/);
+    expect(legBlock).not.toMatch(/\dfr/);
+    expect(css).toMatch(/\.order-builder\s*\{[^}]*max-width:\s*560px/s);
+  });
 });
