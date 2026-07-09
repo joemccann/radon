@@ -1156,6 +1156,441 @@ body {
   padding: 20px;
 }
 
+/* ─── Watchlist standalone workspace ───────────────────── */
+
+@media (min-width: 900px) {
+  .app-shell .content:has(> .watchlist-shell) {
+    overflow: hidden;
+    padding: 0;
+    min-height: 0;
+  }
+}
+
+.watchlist-shell {
+  --watchlist-motion: cubic-bezier(0.32, 0.72, 0, 1);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 0;
+  padding: 20px;
+}
+
+@media (min-width: 900px) {
+  .watchlist-shell {
+    height: 100%;
+  }
+}
+
+@keyframes watchlist-enter {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.watchlist-hero,
+.watchlist-rail,
+.watchlist-detail,
+.watchlist-empty {
+  animation: watchlist-enter 720ms var(--watchlist-motion) both;
+}
+
+.watchlist-rail {
+  animation-delay: 80ms;
+}
+
+.watchlist-detail {
+  animation-delay: 140ms;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watchlist-hero,
+  .watchlist-rail,
+  .watchlist-detail,
+  .watchlist-empty,
+  .watchlist-row {
+    animation: none;
+    transition: none;
+  }
+}
+
+.watchlist-shell--empty {
+  min-height: min(620px, calc(100dvh - var(--header-height) - 40px));
+  justify-content: center;
+  align-items: center;
+}
+
+.watchlist-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: end;
+  flex-shrink: 0;
+}
+
+.watchlist-hero__copy {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 760px;
+}
+
+.watchlist-eyebrow {
+  width: fit-content;
+  border: 1px solid color-mix(in srgb, var(--signal-core) 36%, var(--line-grid));
+  border-radius: 999px;
+  padding: 4px 9px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  line-height: 1;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--signal-core);
+  background: color-mix(in srgb, var(--signal-core) 7%, transparent);
+}
+
+.watchlist-hero h1,
+.watchlist-empty h1 {
+  margin: 0;
+  font-size: clamp(28px, 4vw, 56px);
+  line-height: 0.95;
+  font-weight: 720;
+  color: var(--text-primary);
+  letter-spacing: 0;
+}
+
+.watchlist-hero p,
+.watchlist-empty p {
+  margin: 0;
+  max-width: 640px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+.watchlist-stats {
+  display: grid;
+  grid-template-columns: repeat(4, max-content);
+  gap: 1px;
+  border: 1px solid var(--line-grid);
+  background: var(--line-grid);
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.watchlist-stats span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 76px;
+  padding: 9px 11px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.watchlist-stats b {
+  color: var(--text-primary);
+  font-size: 15px;
+  letter-spacing: 0;
+}
+
+.watchlist-grid {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
+  gap: 14px;
+}
+
+.watchlist-rail,
+.watchlist-detail {
+  min-height: 0;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-panel-raised) 36%, var(--bg-panel));
+  padding: 4px;
+}
+
+.watchlist-rail {
+  display: flex;
+  flex-direction: column;
+}
+
+.watchlist-rail__head,
+.watchlist-detail__head {
+  min-height: 30px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 0 8px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.watchlist-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.watchlist-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  padding: 3px;
+  transition:
+    transform 520ms var(--watchlist-motion),
+    border-color 520ms var(--watchlist-motion),
+    background-color 520ms var(--watchlist-motion);
+}
+
+.watchlist-row:hover,
+.watchlist-row--active {
+  border-color: color-mix(in srgb, var(--signal-core) 42%, var(--line-grid));
+  background: color-mix(in srgb, var(--signal-core) 5%, var(--bg-panel));
+}
+
+.watchlist-row:hover {
+  transform: translateY(-1px);
+}
+
+.watchlist-row--active::before {
+  content: "";
+  position: absolute;
+  inset: 3px auto 3px 3px;
+  width: 2px;
+  background: var(--signal-core);
+}
+
+.watchlist-row__press {
+  min-width: 0;
+  appearance: none;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "primary quote"
+    "meta meta";
+  gap: 8px 10px;
+  align-items: center;
+  padding: 10px 9px 9px 12px;
+  text-align: left;
+}
+
+.watchlist-row__press:focus-visible {
+  outline: 1px solid var(--signal-core);
+  outline-offset: 2px;
+}
+
+.watchlist-row > .star-toggle {
+  align-self: center;
+  margin-right: 5px;
+}
+
+.watchlist-row__primary,
+.watchlist-row__quote,
+.watchlist-row__meta {
+  min-width: 0;
+}
+
+.watchlist-row__primary {
+  grid-area: primary;
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+}
+
+.watchlist-row__symbol {
+  color: var(--text-primary);
+  font-size: 16px;
+  font-weight: 760;
+  letter-spacing: 0.08em;
+}
+
+.watchlist-row__label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watchlist-row__quote {
+  grid-area: quote;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.watchlist-row__last {
+  color: var(--text-primary);
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.watchlist-row__change {
+  font-size: 10px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+
+.watchlist-row__change.positive { color: var(--positive); }
+.watchlist-row__change.negative { color: var(--negative); }
+.watchlist-row__change.neutral { color: var(--text-muted); }
+
+.watchlist-row__meta {
+  grid-area: meta;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.watchlist-row__meta span {
+  border: 1px solid color-mix(in srgb, var(--line-grid) 72%, transparent);
+  border-radius: 3px;
+  padding: 2px 5px;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 8px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, var(--bg-panel-raised) 45%, transparent);
+}
+
+.watchlist-detail {
+  display: grid;
+  grid-template-rows: 30px minmax(0, 1fr);
+}
+
+.watchlist-detail__label {
+  color: var(--text-muted);
+}
+
+.watchlist-detail__symbol {
+  color: var(--signal-core);
+  font-weight: 740;
+  letter-spacing: 0.1em;
+}
+
+.watchlist-detail__frame {
+  min-height: 0;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+
+.watchlist-detail__frame .ticker-detail-page {
+  height: 100%;
+}
+
+.watchlist-detail__empty,
+.watchlist-empty {
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+}
+
+.watchlist-detail__empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 320px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.watchlist-empty {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 28px;
+}
+
+body[data-mobile="true"] .watchlist-shell {
+  padding: 12px;
+  gap: 12px;
+}
+
+body[data-mobile="true"] .watchlist-hero {
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+body[data-mobile="true"] .watchlist-hero h1,
+body[data-mobile="true"] .watchlist-empty h1 {
+  font-size: 34px;
+}
+
+body[data-mobile="true"] .watchlist-stats {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  width: 100%;
+}
+
+body[data-mobile="true"] .watchlist-stats span {
+  min-width: 0;
+}
+
+body[data-mobile="true"] .watchlist-grid {
+  grid-template-columns: 1fr;
+  gap: 12px;
+  overflow: visible;
+}
+
+body[data-mobile="true"] .watchlist-rail,
+body[data-mobile="true"] .watchlist-detail {
+  min-height: auto;
+}
+
+body[data-mobile="true"] .watchlist-list {
+  overflow: visible;
+}
+
+body[data-mobile="true"] .watchlist-detail__frame {
+  min-height: 620px;
+}
+
+body[data-mobile="true"] .watchlist-row {
+  transform: none;
+}
+
 /* ───────────────────────────────────────────────────────────
    Dashboard surface — MOVE 5. Two-column layout: instrument grid +
    newsfeed rail. Chat lives behind ⌘J via <ChatLauncher>.
