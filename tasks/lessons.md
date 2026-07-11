@@ -1,5 +1,12 @@
 # Lessons
 
+## 2026-07-11 — portfolio LIVE DATA DEGRADED on weekend (snapshot age)
+
+- GET `/api/portfolio` must never call IB (browser amplification fix). That is correct.
+- A flat **60s** snapshot-age check still painted **LIVE DATA DEGRADED** all weekend because `portfolio-sync` only runs Mon–Fri RTH and last Friday's row is hours old by design.
+- Reuse **`portfolio-sync` service-health windows** (`open` 10m, `extended`/`closed` 3d) via `getMarketStateFromDate` + `isStale`. Expected off-hours lag is silent; true RTH silence and Turso `staleWhileError` still warn.
+- Helper: `web/lib/portfolioSnapshotFreshness.ts`. Do not reintroduce wall-clock 60s for this surface.
+
 ## 2026-07-11 — production reliability cutover (monorepo + broker)
 
 Source-green is not production-green. After source hardening, live recovery still required deploy, bootstrap, 2FA, env invariants, host packages (Bun), and GitHub control-plane settings.
