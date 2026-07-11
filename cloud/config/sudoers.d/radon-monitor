@@ -1,0 +1,2 @@
+# Replica repair is one atomic stop/delete/start transaction under the shared lock.
+radon ALL=(root) NOPASSWD: /usr/local/bin/radon repair-nextjs-replica

@@ -1,0 +1,28 @@
+title = "Radon Cloud secret scanning"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "literal-tws-credential-assignment"
+description = "Literal TWS credentials must never be committed"
+regex = '''\bTWS_(?:USERID|PASSWORD)[ \t]*=[ \t]*["']?[A-Za-z0-9][A-Za-z0-9_.$!@#%^&*+:/=-]{3,}["']?'''
+keywords = ["TWS_"]
+
+[[rules.allowlists]]
+description = "Known synthetic fixture in the pre-secret-scan baseline"
+commits = ["3ee6e6e8a50c24944c1983a75f5bf6dda9048f67"]
+
+[[rules]]
+id = "credential-shaped-example"
+description = "Credential examples must use empty or named placeholders"
+regex = '''(?i)\b(?:credential|password)s?\s+(?:example|like)\s*[:=]?\s*["'`]?[A-Za-z0-9][A-Za-z0-9_.$!@#%^&*+:/=-]{7,}["'`]?'''
+keywords = ["credential", "password"]
+
+[[rules.allowlists]]
+description = "Known credential-shaped prose in the pre-secret-scan baseline"
+commits = ["3ee6e6e8a50c24944c1983a75f5bf6dda9048f67"]
+
+[allowlist]
+description = "Generated local artifacts are not source"
+paths = ['''(^|/)__pycache__/|\.pyc$|(^|/)\.venv/''']

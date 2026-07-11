@@ -1,0 +1,44 @@
+[Unit]
+Description=Radon FastAPI server
+After=network.target radon-ib-gateway.service
+# Ordering only: deploy/app starts must not pull an inactive Gateway while the
+# shared deploy lock is held. Both units are enabled at boot, and API remains
+# available for recovery even when Gateway cannot start.
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Apply pending Turso migrations before serving traffic. Idempotent — a
+# no-op when at latest. See scripts/db/migrate.py.
+ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/db/migrate.py
+# --host 0.0.0.0 so the laptop cloud-thin Next.js can reach FastAPI over
+# Tailscale at 100.112.32.16:8321. Direct (non-proxied) requests from outside
+# loopback/tailnet require a valid Clerk JWT (CLERK_JWKS_URL is set in .env).
+# --proxy-headers + --forwarded-allow-ips 127.0.0.1 trust X-Forwarded-* ONLY
+# from the local Caddy hop, so a request proxied via Caddy's `handle_path
+# /api/ib/*` carries the real client IP and does NOT inherit the loopback
+# bypass. The bypass itself also rejects any forwarded request — see
+# scripts/api/auth.py:is_trusted_local_request.
+#
+# FastAPI is write-heavy (orders, fills, snapshots) — every embedded
+# replica it would open competes with radon-nextjs for the same
+# replica.db WAL on this host. The one-writer rule (CLAUDE.md +
+# feedback_libsql_replica_one_writer.md) reserves the replica for
+# nextjs; FastAPI streams writes straight to Turso.
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/uvicorn scripts.api.server:app --host 0.0.0.0 --port 8321 --proxy-headers --forwarded-allow-ips 127.0.0.1
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

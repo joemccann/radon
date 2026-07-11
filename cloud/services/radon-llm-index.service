@@ -1,0 +1,27 @@
+[Unit]
+Description=Radon LLM Token Expenditure Index (Artificial Analysis pull, daily)
+After=network.target
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Pin the resolver to the venv interpreter so libsql_experimental + dotenv
+# are guaranteed available (matches the pattern other oneshots use).
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/llm_token_index.py --record
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

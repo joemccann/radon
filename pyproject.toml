@@ -16,6 +16,20 @@ known-first-party = ["utils", "trade_blotter"]
 # Do NOT add `testpaths` — it would orphan scripts/test_ib_realtime.py and
 # scripts/trade_blotter/test_*.py (29 tests). Keep collection broad.
 pythonpath = [".", "scripts", "scripts/trade_blotter"]
+# cloud/ has its own tests/ package (former radon-cloud). Collecting it with
+# the app suite collides on import path `tests.conftest`. Run cloud tests via
+# `pytest cloud/tests` (CI job step). Also skip agent worktrees and web trees.
+norecursedirs = [
+    ".git",
+    ".venv",
+    ".claude",
+    "node_modules",
+    "web",
+    "cloud",
+    "site",
+    "video",
+    "data",
+]
 # Skip live integration tests by default — they hit real MenthorQ over the
 # network (90 tests, ~600s, require credentials). The fast unit suite runs in
 # ~14s. Opt back in with `pytest -m integration` on a credentialed host.

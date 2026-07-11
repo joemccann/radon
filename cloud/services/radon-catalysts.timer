@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon catalyst feed — Mon-Fri 10:30 UTC (~06:30 ET pre-market)
+
+[Timer]
+# Pre-market daily refresh: earnings / FDA / economic calendars move
+# overnight; 10:30 UTC lands ~06:30 ET so days-until context is fresh at
+# the open. run_catalysts.sh re-checks the trading calendar and exits 0
+# on US holidays. Was laptop-launchd-only until 2026-07-02 — prod served
+# missing:true whenever the laptop was asleep; now the VPS owns it and
+# fetch_catalysts dual-writes Turso (catalysts table) + data/catalysts.json.
+OnCalendar=Mon..Fri *-*-* 10:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

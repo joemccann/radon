@@ -1,0 +1,43 @@
+[Unit]
+Description=IB Gateway Docker Compose
+# tailscaled ordering: the compose file binds IB Gateway 4001 to the Tailscale
+# interface IP, so the container should start after tailscaled is up. Soft
+# (Wants, not Requires): loopback binding still works without Tailscale, and the
+# lock-aware watchdog retries if the Tailscale IP is not yet assigned.
+After=docker.service tailscaled.service
+Requires=docker.service
+Wants=tailscaled.service
+
+# DUR-10 (2026-06-12): a gateway stop cascade-stops relay+monitor
+# (Requires=radon-ib-gateway in their units), and a clean container exit never
+# re-fires after a clean cascade stop — they stayed down silently after a
+# manual stop -> start. Wants= makes ANY gateway start pull the cascade
+# victims back; their own After=radon-ib-gateway ordering still applies.
+# Deliberately NOT ExecStartPost=systemctl (job-queue deadlock).
+Wants=radon-relay.service radon-monitor.service
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=radon
+StateDirectory=radon
+StateDirectoryMode=0750
+WorkingDirectory=/home/radon/radon-cloud
+# Boot and dependency-driven starts use the same state-aware lease gate as
+# operator recovery. A healthy container is a no-op with no lease; a missing or
+# stopped container must acquire the atomic cross-process lease before start.
+ExecStart=/usr/local/bin/radon-ib-gateway-control start
+ExecStop=/usr/local/bin/radon-ib-gateway-control stop
+TimeoutStartSec=90
+TimeoutStopSec=60
+
+[Install]
+WantedBy=multi-user.target

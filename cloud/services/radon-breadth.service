@@ -1,0 +1,24 @@
+[Unit]
+Description=Radon NYSE breadth refresh (breadth_scan via FastAPI /breadth/scan)
+After=network.target radon-api.service
+Wants=radon-api.service
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever. The unit watchdog (radon main repo
+# scripts/watchdog/units.py, continuous bucket) alerts on failed/start-limit-hit
+# so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_breadth_scan.sh
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,32 @@
+[Unit]
+Description=Radon CTA sync (MenthorQ positioning via scripts/run_cta_sync.sh)
+After=network.target radon-api.service
+Wants=radon-api.service
+
+# DUR-02 (2026-06-12): brake crash loops -- after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Pin the resolver to the venv interpreter (the only one with playwright
+# installed). Without this, run_cta_sync.sh tries python3.13 / python3.9
+# / /usr/bin/python3 and exits 1 with "No Python interpreter with
+# Playwright available".
+Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python
+ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_cta_sync.sh
+StandardOutput=journal
+StandardError=journal
+# CTA-02: raised from 300s -- Jun 11 18:15Z run was killed mid-fetch by the
+# 5-min limit. Playwright headless fetch can take 8-12 min on a cold session.
+TimeoutStartSec=900
+
+[Install]
+WantedBy=multi-user.target

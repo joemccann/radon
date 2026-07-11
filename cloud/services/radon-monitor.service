@@ -1,0 +1,33 @@
+[Unit]
+Description=Radon monitor daemon
+After=network.target radon-ib-gateway.service radon-api.service
+# Ordering only. Monitor reconnects after Gateway recovery; deploy/app starts
+# must not pull Gateway while holding the shared deploy lock.
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=PYTHONPATH=/home/radon/radon/scripts
+# Bypass the libsql embedded replica and write direct to Turso cloud.
+# Reason: replica.db can only have ONE long-running writer per host before
+# WalConflicts cascade (feedback_libsql_replica_one_writer.md). nextjs and
+# api are the high-throughput writers and keep the replica; the monitor
+# daemon's lower write rate accepts the ~50ms cloud round-trip in exchange
+# for eliminating contention.
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.monitor_daemon.run --daemon
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

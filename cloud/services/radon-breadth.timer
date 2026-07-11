@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon NYSE breadth refresh - every 5 minutes during ET trading hours
+
+[Timer]
+# Fires every 5 minutes Mon-Fri 13:00-21:00 UTC. Covers ET trading hours
+# 09:30-16:00 across both DST shoulders (winter 14:30-21:00 UTC, summer
+# 13:30-20:00 UTC). run_breadth_scan.sh re-checks the trading calendar at
+# runtime (_is_trading_day) and exits 0 on US trading holidays / weekends
+# before doing any work; the scan itself serves cache pre/post-open.
+OnCalendar=Mon..Fri *-*-* 13..21:00,05,10,15,20,25,30,35,40,45,50,55
+Persistent=false
+
+[Install]
+WantedBy=timers.target

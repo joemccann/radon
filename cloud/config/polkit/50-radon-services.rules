@@ -1,0 +1,22 @@
+// The watchdog may invoke only its fixed preheld adapter, which consumes its
+// exact 2FA lease once. Every other mutation uses the root-owned operator.
+// Any unit where unit.indexOf("radon-ib-gateway") != 0 is non-gateway and is
+// not granted here. Gateway units other than the preheld adapter are denied.
+polkit.addRule(function(action, subject) {
+    if (action.id == "org.freedesktop.systemd1.manage-units" &&
+        subject.user == "radon") {
+        var unit = action.lookup("unit");
+        var verb = action.lookup("verb");
+        if (!unit) {
+            return polkit.Result.NOTHING;
+        }
+        if (unit.indexOf("radon-ib-gateway") != 0) {
+            return polkit.Result.NOTHING;
+        }
+        if (unit == "radon-ib-gateway-preheld-restart.service" &&
+            (verb == "start" || verb == "restart")) {
+            return polkit.Result.YES;
+        }
+        return polkit.Result.NO;
+    }
+});

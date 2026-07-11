@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon watchdog continuous timer — every 5m, 24/7
+
+[Timer]
+# Continuous writers should never go quiet, so this timer fires every
+# 5 minutes around the clock. Persistent=true catches missed runs after
+# reboot.
+OnCalendar=*-*-* *:00,05,10,15,20,25,30,35,40,45,50,55
+Persistent=false
+
+[Install]
+WantedBy=timers.target

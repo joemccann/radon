@@ -1,0 +1,75 @@
+services:
+  ib-gateway:
+    image: ghcr.io/gnzsnz/ib-gateway@sha256:1bbdeb1bb467ee6546810733b3709c5146ad1cdc6cd2a486b6f75dcf35a67c75
+    container_name: ib-gateway
+    # Restart ownership is centralized in scripts/ib_watchdog.py, which applies
+    # the persisted failure threshold, 2FA push lock, and bounded backoff/cap.
+    # Docker must not independently relaunch a timed-out login and mint another
+    # push outside that control plane.
+    restart: "no"
+
+    env_file:
+      - .env
+
+    environment:
+      - VNC_SERVER_PASSWORD=${VNC_SERVER_PASSWORD:-}
+      - EXISTING_SESSION_DETECTED_ACTION=${EXISTING_SESSION_DETECTED_ACTION:-primary}
+      # Exit after an unattended 2FA timeout and leave relaunch ownership to the
+      # watchdog. Relogin retries inside IBC would bypass the same push lock.
+      - TWOFA_TIMEOUT_ACTION=exit
+      - RELOGIN_AFTER_TWOFA_TIMEOUT=no
+      # IBC must not independently cycle the session and mint an unleased 2FA
+      # push. All scheduled/cold recovery belongs to the lease-aware watchdog.
+      - AUTO_RESTART_TIME=
+      - TWS_COLD_RESTART=
+
+    # 4001 is bound to loopback (for the VPS-local FastAPI, which connects with
+    # IB_GATEWAY_HOST=127.0.0.1) and to the Tailscale interface IP (so the
+    # laptop can reach the Gateway over the tailnet). It is NOT published on the
+    # public NIC. NOTE: the Tailscale bind requires tailscaled up and
+    # 100.112.32.16 assigned before the container starts; on a cold boot the
+    # bind can fail until then; the systemd/watchdog owner retries with bounded
+    # backoff after tailscaled and the interface address are available.
+    # If this node is rebuilt and gets a new Tailscale IP, update the line below.
+    ports:
+      - "127.0.0.1:4001:4003"
+      - "100.112.32.16:4001:4003"
+      - "127.0.0.1:4002:4004"
+      - "127.0.0.1:5900:5900"
+
+    volumes:
+      - ib-config:/home/ibgateway/Jts
+
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          case "$${TRADING_MODE:-paper}" in
+            live) port=4001 ;;
+            paper) port=4002 ;;
+            *) exit 1 ;;
+          esac;
+          exec bash -c "exec 3<>/dev/tcp/127.0.0.1/$${port}"
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+    security_opt:
+      - no-new-privileges:true
+
+    privileged: false
+
+    ulimits:
+      nofile:
+        soft: 10240
+        hard: 10240
+
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  ib-config:

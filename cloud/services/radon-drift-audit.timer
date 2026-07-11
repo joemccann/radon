@@ -1,0 +1,14 @@
+[Unit]
+Description=Daily Radon config drift audit
+
+[Timer]
+# Once a day, 24/7 (weekends are normal run days -- config can drift any
+# time). 06:40 UTC sits after the nightly schedulers and before the US
+# session. The main repo's serviceHealthWindows.ts gives `config-drift` a
+# uniform 26h window: cadence + RandomizedDelaySec + slack.
+OnCalendar=*-*-* 06:40:00 UTC
+RandomizedDelaySec=600
+Persistent=true
+
+[Install]
+WantedBy=timers.target

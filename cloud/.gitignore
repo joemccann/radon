@@ -1,0 +1,24 @@
+# Never track ANY .env variant except the example template -- backups
+# (.env.bak.*, .env.beta*) carry live keys (Clerk, Turso, IB).
+.env
+.env*
+!.env.example
+*.log
+node_modules/
+__pycache__/
+.pytest_cache/
+.venv/
+report.html
+
+# Newsfeed image rsync target (fed by laptop scraper). Grows over time.
+media/
+
+# Stale deploy script backups (timestamp-suffixed by deploy.sh on rotation).
+scripts/deploy.sh.bak.*
+
+# Nightly Turso dumps (DUR-13) — 117MB+ gz per night, pruned in-script.
+# NEVER commit: backups belong off-git (laptop pull + 30d retention).
+backups/
+# Runtime data — never config:
+state/
+archive/

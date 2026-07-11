@@ -1,0 +1,35 @@
+[Unit]
+Description=Radon host/process metrics sampler (DUR-12: CPU, memory, loop lag, unit restarts)
+After=network.target
+# DUR-02 pattern: brake crash loops -- (60s timer cadence: Burst=10 like ib-watchdog/portfolio-sync, else 5 starts/300s trips it). after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed instead of
+# restarting forever. The host-metrics service_health heartbeat (10-min
+# window) surfaces a parked/silent sampler on the dashboard + watchdog
+# continuous bucket.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+# The sampler ships with the MAIN repo (scripts/host_metrics_sampler.py)
+# and lands on the next deploy. Until then this condition skips the run
+# CLEANLY (unit ends inactive, not failed) so the watchdog unit alarm
+# doesn't page P1 every minute on a not-yet-deployed file.
+ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/host_metrics_sampler.py
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/host_metrics_sampler.py
+StandardOutput=journal
+StandardError=journal
+# A oneshot with no runtime ceiling can hang forever and freeze its timer
+# (the ib-watchdog self-hang, 2026-06-10 / 2fbc72f class) -- bound the whole
+# run. For Type=oneshot the operative bound is TimeoutStartSec; RuntimeMaxSec
+# is set for belt-and-suspenders symmetry. Normal run is ~1.2s (1s CPU
+# sample + bounded hrana writes, 4s timeout each).
+RuntimeMaxSec=30
+TimeoutStartSec=30
+
+[Install]
+WantedBy=multi-user.target
