@@ -680,7 +680,12 @@ finalize_release_artifacts() {
   clear_transition_journal || return 1
   if [[ -n "$backup_dir" ]]; then
     if release_dir_is_managed "$backup_dir"; then
-      rm -rf -- "$backup_dir"
+      # Root-owned venv files (e.g. py-spy installed via sudo) can leave a
+      # managed backup that radon cannot fully delete. The release is already
+      # gated and marked green before finalize; treat cleanup as best-effort.
+      if ! rm -rf -- "$backup_dir" 2>/dev/null; then
+        log_warn "Could not fully remove release backup ${backup_dir}; leaving for root cleanup"
+      fi
     else
       log_error "Refusing to clean unmanaged release backup path"
       return 1
