@@ -6,7 +6,6 @@ Manages multiple handlers with different intervals.
 Supports state persistence and market hours awareness.
 """
 
-import json
 import logging
 import time
 from datetime import datetime, timedelta
@@ -14,6 +13,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional
 
 from .handlers.base import BaseHandler
+from utils.atomic_io import atomic_save, verified_load
 
 logger = logging.getLogger(__name__)
 
@@ -223,7 +223,7 @@ class MonitorDaemon:
             state["handlers"][handler.name] = handler.get_state()
 
         self.state_file.parent.mkdir(parents=True, exist_ok=True)
-        self.state_file.write_text(json.dumps(state, indent=2))
+        atomic_save(str(self.state_file), state)
         logger.debug(f"Saved state to {self.state_file}")
 
         # Best-effort dual-write to Turso (direct-to-cloud by default).
@@ -251,7 +251,7 @@ class MonitorDaemon:
             return
         
         try:
-            state = json.loads(self.state_file.read_text())
+            state = verified_load(str(self.state_file))
             handler_states = state.get("handlers", {})
             
             for handler in self.handlers:

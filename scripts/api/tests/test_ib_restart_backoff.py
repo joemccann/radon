@@ -203,8 +203,14 @@ def test_backoff_grows_geometrically_across_consecutive_failures(monkeypatch):
     monkeypatch.setattr(ib_gateway, "_probe_authenticated", fake_probe)
 
     expected = [60, 120, 300]
-    for want in expected:
-        # Force window past so each call gets through the gate.
+    for index, want in enumerate(expected):
+        # Simulate the previous ten-minute lease expiring without resetting the
+        # independent failure counter. Active same-holder reentry is correctly
+        # refused; this test isolates the mathematical backoff ladder.
+        if index:
+            ib_gateway.ib_2fa_lock.release_2fa_push_lock(
+                expected_holder=ib_gateway.IB_GATEWAY_LOCK_HOLDER
+            )
         ib_gateway._restart_state["next_attempt_after"] = 0.0
         result = asyncio.run(ib_gateway.restart_ib_gateway())
         assert result["next_attempt_in_secs"] == want, (

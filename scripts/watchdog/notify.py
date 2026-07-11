@@ -394,31 +394,51 @@ def flush_daily_digest(*, now: datetime) -> Optional[str]:
 
 # ── public entry point ─────────────────────────────────────────────
 
-def dispatch(outcome: CheckOutcome) -> None:
+def _mark_notified_best_effort(*, service: str, severity: str, now) -> None:
+    """Persist cooldown state without putting storage on the paging path."""
+    try:
+        cooldown_mod.mark_notified(service=service, severity=severity, now=now)
+    except Exception as exc:  # noqa: BLE001 - duplicate delivery beats no delivery
+        log.warning(
+            "cooldown mark failed for %s/%s; later alerts may repeat: %s",
+            service,
+            severity,
+            exc,
+        )
+
+
+def dispatch(
+    outcome: CheckOutcome,
+    *,
+    record_health: bool = True,
+) -> Optional[str]:
     """Route ``outcome`` to every enabled channel matching its
-    severity, then stamp the cooldown row.
+    severity, then stamp the cooldown row only after successful delivery.
 
     Callers should pre-check ``cooldown_allows_fire()``; ``dispatch``
     does NOT skip on cooldown so end-to-end tests can verify channel
     dispatch directly.
 
-    Writes a dispatcher-health row reflecting whether the dispatch
-    itself succeeded. Downstream alert content goes to journalctl via
-    ``_log_alert_event``, never into ``service_health.last_error``.
+    By default, writes a dispatcher-health row reflecting whether the dispatch
+    itself succeeded. Bucket dispatch passes ``record_health=False`` and writes
+    one aggregate row after every outcome. Downstream alert content goes to
+    journalctl via ``_log_alert_event``, never into ``service_health.last_error``.
     P2/P3 outcomes additionally batch into the once-daily digest.
     """
     if not outcome.fired:
-        return
+        return None
 
     _log_alert_event(outcome)
     dispatcher_error = _emit_pushover(outcome)
     if outcome.severity and outcome.severity != "P1":
         _enqueue_digest(outcome)
-    _write_dispatcher_health(now=outcome.now, dispatcher_error=dispatcher_error)
+    if record_health:
+        _write_dispatcher_health(now=outcome.now, dispatcher_error=dispatcher_error)
 
-    if outcome.severity:
-        cooldown_mod.mark_notified(
+    if outcome.severity and dispatcher_error is None:
+        _mark_notified_best_effort(
             service=outcome.service,
             severity=outcome.severity,
             now=outcome.now,
         )
+    return dispatcher_error

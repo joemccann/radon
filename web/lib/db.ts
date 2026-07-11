@@ -31,6 +31,13 @@
 import { createClient, type Client } from "@libsql/client";
 import { Agent, fetch as undiciFetch } from "undici";
 import path from "node:path";
+import {
+  createDbOperationIdentity,
+  currentDbOperationIdentity,
+  markCurrentDbOperationPoolGeneration,
+  runWithDbOperation,
+  type DbOperationIdentity,
+} from "./dbOperation";
 
 let cached: Client | null = null;
 
@@ -50,6 +57,9 @@ export const DB_POOL_MAX_CONNECTIONS = 8;
 // ABOVE the 3s `dbKeepAlive` heartbeat interval so the heartbeat keeps one
 // socket on the warm path (~12ms) between 60s polls.
 export const DB_POOL_KEEP_ALIVE_TIMEOUT_MS = 10_000;
+/** Hard transport deadline. Unlike a Promise.race timeout, this aborts undici
+ * and releases the socket occupied by the libSQL request. */
+export const DB_TRANSPORT_TIMEOUT_MS = 12_000;
 // ── Destroy cooldown (2026-07-02 incident, second wave) ──────────────────
 // Agent.destroy() aborts every in-flight request on the shared pool; each
 // aborted request rejects TypeError('fetch failed') and its catch calls
@@ -75,6 +85,9 @@ export const DB_POOL_FAILURE_CLUSTER_WINDOW_MS = 10_000;
 let cachedAgent: Agent | null = null;
 let lastAgentDestroyAtMs = Number.NEGATIVE_INFINITY;
 let lastResetAttemptAtMs = Number.NEGATIVE_INFINITY;
+let nextPoolGeneration = 0;
+let activePoolGeneration: number | null = null;
+let observedFailures = new WeakSet<DbOperationIdentity>();
 
 function getPoolAgent(): Agent {
   if (!cachedAgent) {
@@ -82,6 +95,8 @@ function getPoolAgent(): Agent {
       connections: DB_POOL_MAX_CONNECTIONS,
       keepAliveTimeout: DB_POOL_KEEP_ALIVE_TIMEOUT_MS,
     });
+    nextPoolGeneration += 1;
+    activePoolGeneration = nextPoolGeneration;
   }
   return cachedAgent;
 }
@@ -109,7 +124,46 @@ function destroyPoolAgent(force = false): void {
   lastAgentDestroyAtMs = now;
   const agent = cachedAgent;
   cachedAgent = null;
+  activePoolGeneration = null;
   agent?.destroy().catch(() => {});
+}
+
+function transportAbort(signals: Array<AbortSignal | null | undefined>): {
+  signal: AbortSignal;
+  cleanup: () => void;
+} {
+  const controller = new AbortController();
+  const listeners: Array<{ signal: AbortSignal; listener: () => void }> = [];
+
+  for (const signal of signals) {
+    if (!signal) continue;
+    if (signal.aborted) {
+      controller.abort(signal.reason);
+      break;
+    }
+    const listener = () => controller.abort(signal.reason);
+    signal.addEventListener("abort", listener, { once: true });
+    listeners.push({ signal, listener });
+  }
+
+  const timer = setTimeout(() => {
+    const error = new Error(
+      `Turso HTTP transport timed out after ${DB_TRANSPORT_TIMEOUT_MS}ms`,
+    );
+    error.name = "TimeoutError";
+    controller.abort(error);
+  }, DB_TRANSPORT_TIMEOUT_MS);
+  timer.unref?.();
+
+  return {
+    signal: controller.signal,
+    cleanup: () => {
+      clearTimeout(timer);
+      for (const { signal, listener } of listeners) {
+        signal.removeEventListener("abort", listener);
+      }
+    },
+  };
 }
 
 /** `fetch` pinned to the bounded pool — passed to `createClient` so every
@@ -120,34 +174,51 @@ function destroyPoolAgent(force = false): void {
  * method"), so same-realm dispatch is the only version-proof pairing. The
  * hrana client passes global `Request` objects, which undici's fetch
  * brand-checks and refuses — translate them to (url, init). hrana bodies are
- * strings/bytes and it never sets an AbortSignal, so the translation is
- * lossless. */
+ * strings/bytes; the translation preserves any caller signal and composes it
+ * with the hard transport deadline below. */
 export async function pooledDbFetch(
   input: string | URL | Request,
   init?: RequestInit,
 ): Promise<Response> {
+  let target: string | URL;
+  let requestInit: RequestInit;
+  let requestSignal: AbortSignal | undefined;
+
   if (typeof input === "object" && input !== null && "url" in input) {
     const request = input as Request;
     const body =
       request.method === "GET" || request.method === "HEAD"
         ? undefined
         : new Uint8Array(await request.arrayBuffer());
-    // Resolve the dispatcher AFTER the body await: a resetDb() landing in
-    // that microtask gap would otherwise route this request onto the
-    // already-destroyed Agent (instant ClientDestroyedError).
-    const dispatcher = getPoolAgent();
-    return (await undiciFetch(request.url, {
+    target = request.url;
+    requestSignal = request.signal;
+    requestInit = {
       method: request.method,
       headers: request.headers,
       body,
       ...init,
-      dispatcher,
-    } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+    };
+  } else {
+    target = input as string | URL;
+    requestInit = { ...init };
   }
-  return (await undiciFetch(input as string | URL, {
-    ...init,
-    dispatcher: getPoolAgent(),
-  } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+
+  // Resolve the dispatcher after Request body materialization. A reset in that
+  // microtask gap must not route work onto an already-destroyed Agent.
+  const dispatcher = getPoolAgent();
+  if (activePoolGeneration !== null) {
+    markCurrentDbOperationPoolGeneration(activePoolGeneration);
+  }
+  const abort = transportAbort([requestSignal, init?.signal]);
+  try {
+    return (await undiciFetch(target, {
+      ...requestInit,
+      dispatcher,
+      signal: abort.signal,
+    } as Parameters<typeof undiciFetch>[1])) as unknown as Response;
+  } finally {
+    abort.cleanup();
+  }
 }
 
 // A stalled HTTP request still has to settle before its pooled socket frees up.
@@ -184,18 +255,30 @@ export function getPoolStats(): Record<string, unknown> | null {
 /** Drop the cached primary client AND destroy the bounded undici pool so the
  * next getDb() opens fresh sockets.
  *
- * Public so route catch-blocks can recover promptly from a read timeout
- * instead of waiting for the in-flight request to hit undici's ceiling.
+ * Public so the bounded helpers can recover promptly from a read timeout
+ * instead of waiting for the in-flight request to hit the transport ceiling.
  * Destroying the Agent is the load-bearing half: without it a wedged pool's
  * sockets survive the client swap and keep pinning Turso's per-IP limit.
  * Idempotent. */
-export function resetDb(): void {
+function isCurrentFailure(identity: DbOperationIdentity): boolean {
+  if (observedFailures.has(identity)) return false;
+  observedFailures.add(identity);
+
+  return (
+    identity.poolGeneration === null ||
+    identity.poolGeneration === activePoolGeneration
+  );
+}
+
+export function resetDb(identity?: DbOperationIdentity): void {
+  if (identity && !isCurrentFailure(identity)) return;
   cached = null;
   destroyPoolAgent();
 }
 
 /** Drop the cached demo client so the next getDemoDb() opens a fresh pool. */
-export function resetDemoDb(): void {
+export function resetDemoDb(identity?: DbOperationIdentity): void {
+  if (identity && !isCurrentFailure(identity)) return;
   cachedDemo = null;
   destroyPoolAgent();
 }
@@ -206,15 +289,21 @@ export function resetDemoDb(): void {
  * instead of poisoning the process. `onHeal` is passed in (rather than closing
  * over `cached`) so the same wrapper protects the primary AND the demo client,
  * each resetting its own cache slot. */
-function selfHealing(client: Client, onHeal: () => void): Client {
-  const healOn = (settled: Promise<unknown>): void => {
-    const timer = setTimeout(onHeal, STALL_CEILING_MS);
+function selfHealing(
+  client: Client,
+  onHeal: (identity: DbOperationIdentity) => void,
+): Client {
+  const healOn = (
+    settled: Promise<unknown>,
+    identity: DbOperationIdentity,
+  ): void => {
+    const timer = setTimeout(() => onHeal(identity), STALL_CEILING_MS);
     timer.unref?.();
     settled.then(
       () => clearTimeout(timer),
       () => {
         clearTimeout(timer);
-        onHeal();
+        onHeal(identity);
       },
     );
   };
@@ -224,9 +313,19 @@ function selfHealing(client: Client, onHeal: () => void): Client {
       const value = Reflect.get(target, prop, receiver);
       if (prop === "execute" || prop === "batch") {
         return (...args: unknown[]) => {
-          const result = (value as (...a: unknown[]) => unknown).apply(target, args);
+          const identity =
+            currentDbOperationIdentity() ?? createDbOperationIdentity();
+          let result: unknown;
+          try {
+            result = runWithDbOperation(identity, () =>
+              (value as (...a: unknown[]) => unknown).apply(target, args),
+            );
+          } catch (error) {
+            onHeal(identity);
+            throw error;
+          }
           if (result && typeof (result as Promise<unknown>).then === "function") {
-            healOn(result as Promise<unknown>);
+            healOn(result as Promise<unknown>, identity);
           }
           return result;
         };
@@ -330,6 +429,9 @@ export function __resetDbForTests(): void {
   destroyPoolAgent(true);
   lastAgentDestroyAtMs = Number.NEGATIVE_INFINITY;
   lastResetAttemptAtMs = Number.NEGATIVE_INFINITY;
+  nextPoolGeneration = 0;
+  activePoolGeneration = null;
+  observedFailures = new WeakSet<DbOperationIdentity>();
 }
 
 // Test seam — inject a libSQL client (typically in-memory) so route

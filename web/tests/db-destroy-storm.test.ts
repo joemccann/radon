@@ -93,6 +93,128 @@ describe("isolated failures do not tear down the pool", () => {
     expect(agents[0].destroyed).toBe(false);
   });
 
+  it("counts one dbExecute rejection once across the proxy and helper", async () => {
+    const db = await freshDbModule();
+    db.getDb();
+    const boundedFetch = createClientMock.mock.calls[0][0].fetch as typeof db.pooledDbFetch;
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+
+    const rawClient = createClientMock.mock.results[0].value as {
+      execute: ReturnType<typeof vi.fn>;
+    };
+    rawClient.execute.mockRejectedValueOnce(new Error("single socket failure"));
+
+    const { dbExecute } = await import("../lib/dbExecute");
+    await expect(dbExecute("SELECT 1", { label: "topology" })).rejects.toThrow(
+      "single socket failure",
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // The proxy and dbExecute observe the same logical operation. It is one
+    // failure, so it may invalidate the client but must not destroy the Agent.
+    expect(totalDestroys()).toBe(0);
+  });
+
+  it("counts a nested dbFirstRead plus dbExecute rejection as one operation", async () => {
+    const db = await freshDbModule();
+    db.getDb();
+    const boundedFetch = createClientMock.mock.calls[0][0].fetch as typeof db.pooledDbFetch;
+    await boundedFetch("https://example.turso.io/v2/pipeline");
+
+    const rawClient = createClientMock.mock.results[0].value as {
+      execute: ReturnType<typeof vi.fn>;
+    };
+    rawClient.execute.mockRejectedValueOnce(new Error("nested socket failure"));
+
+    const { dbExecute } = await import("../lib/dbExecute");
+    const { dbFirstRead } = await import("../lib/dbFirstRead");
+    const result = await dbFirstRead({
+      fromDb: async () => {
+        await dbExecute("SELECT 1", { label: "nested" });
+        return null;
+      },
+      fromDisk: async () => ({ data: { source: "disk" }, timestampMs: Date.now() }),
+      maxAgeMs: 60_000,
+      label: "nested",
+    });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(result.ok).toBe(true);
+    expect(totalDestroys()).toBe(0);
+  });
+
+  it("allows two distinct dbExecute failures to destroy the Agent once", async () => {
+    const rejectingClient = (config: Record<string, unknown>) => ({
+      config,
+      execute: vi.fn().mockRejectedValue(new Error("connection wedge")),
+      batch: vi.fn(),
+    });
+    createClientMock
+      .mockImplementationOnce(rejectingClient)
+      .mockImplementationOnce(rejectingClient);
+
+    const db = await freshDbModule();
+    await db.pooledDbFetch("https://example.turso.io/v2/pipeline");
+    const { dbExecute } = await import("../lib/dbExecute");
+
+    await expect(dbExecute("SELECT 1", { label: "wedge-1" })).rejects.toThrow(
+      "connection wedge",
+    );
+    await expect(dbExecute("SELECT 1", { label: "wedge-2" })).rejects.toThrow(
+      "connection wedge",
+    );
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(totalDestroys()).toBe(1);
+  });
+
+  it("ignores collateral failures from an Agent generation already destroyed", async () => {
+    const rejects: Array<(error: Error) => void> = [];
+    const pendingFetch = () =>
+      new Promise((_resolve, reject) => {
+        rejects.push(reject);
+      });
+    undiciFetchMock
+      .mockImplementationOnce(pendingFetch)
+      .mockImplementationOnce(pendingFetch)
+      .mockImplementationOnce(pendingFetch);
+    createClientMock.mockImplementationOnce((config: Record<string, unknown>) => ({
+      config,
+      execute: vi.fn(() =>
+        (config.fetch as (url: string) => Promise<unknown>)(
+          "https://example.turso.io/v2/pipeline",
+        ),
+      ),
+      batch: vi.fn(),
+    }));
+
+    const db = await freshDbModule();
+    const { dbExecute } = await import("../lib/dbExecute");
+    const reads = [
+      dbExecute("SELECT 1", { label: "old-1" }).catch((error) => error),
+      dbExecute("SELECT 2", { label: "old-2" }).catch((error) => error),
+      dbExecute("SELECT 3", { label: "old-3" }).catch((error) => error),
+    ];
+    await Promise.resolve();
+    expect(rejects).toHaveLength(3);
+
+    rejects[0](new Error("old failure 1"));
+    await reads[0];
+    rejects[1](new Error("old failure 2"));
+    await reads[1];
+    expect(totalDestroys()).toBe(1);
+
+    const replacement = db.getDb();
+    rejects[2](new Error("collateral abort"));
+    await reads[2];
+
+    expect(db.getDb()).toBe(replacement);
+    expect(totalDestroys()).toBe(1);
+  });
+
   it("a second failure inside the cluster window destroys (genuine wedge detection)", async () => {
     const db = await freshDbModule();
     db.getDb();

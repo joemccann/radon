@@ -1,6 +1,10 @@
 import type { Static } from "@sinclair/typebox";
 import { resetDb, syncDb } from "@/lib/db";
 import { dbExecute } from "@/lib/dbExecute";
+import {
+  createDbOperationIdentity,
+  runWithDbOperation,
+} from "@/lib/dbOperation";
 import { withTimeout } from "@/lib/asyncTimeout";
 import type { OrdersData } from "@tools/schemas/ib-orders";
 import { filterExecutedToEtToday } from "@/lib/orders/executedToday";
@@ -38,9 +42,10 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   // background sync interval), which surfaces as transient `status`
   // drift on every order state transition (PreSubmitted → Submitted at
   // market open, Submitted → Filled, etc.).
+  const syncIdentity = createDbOperationIdentity();
   try {
     await withTimeout(
-      syncDb(),
+      runWithDbOperation(syncIdentity, syncDb),
       DB_READ_TIMEOUT_MS,
       `orders replica sync timed out after ${DB_READ_TIMEOUT_MS}ms`,
     );
@@ -49,7 +54,7 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
     // we read the slightly-older replica — same as the pre-sync world.
     // Still drop the cached client: a hung sync is the same wedged-pool
     // signature the reads below would hit; let them rebuild fresh.
-    resetDb();
+    resetDb(syncIdentity);
   }
 
   const openResult = await dbExecute(

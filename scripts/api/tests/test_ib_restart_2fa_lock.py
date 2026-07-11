@@ -28,6 +28,7 @@ in-memory backoff:
 from __future__ import annotations
 
 import asyncio
+import os
 import sys
 import time
 from pathlib import Path
@@ -153,11 +154,8 @@ def test_lock_held_blocks_second_restart_even_without_backoff(monkeypatch):
     assert "ib-watchdog" in result["error"]
 
 
-def test_lock_held_by_same_holder_refreshes_and_proceeds(monkeypatch):
-    """The lock is keyed by holder identity. A second
-    ``restart_ib_gateway`` call inside the lock window must NOT
-    deadlock against its own previous attempt — IBC may have died
-    mid-2FA-dialog and the same holder needs to retry."""
+def test_lock_held_by_same_holder_blocks_second_restart(monkeypatch):
+    """A holder name is not an operation id; reentry would mint a new push."""
     holder = "scripts.api.ib_gateway.restart_ib_gateway"
     ok, _ = ib_2fa_lock.acquire_2fa_push_lock(holder, ttl_secs=600)
     assert ok is True
@@ -169,8 +167,28 @@ def test_lock_held_by_same_holder_refreshes_and_proceeds(monkeypatch):
     )
 
     result = asyncio.run(ib_gateway.restart_ib_gateway())
-    assert result["restarted"] is True
-    assert result["auth_state"] == "awaiting_2fa"
+    assert result["restarted"] is False
+    assert result["deferred"] is True
+    assert result["reason"] == "2fa_push_in_flight"
+
+
+def test_backoff_short_circuits_before_touching_push_lease(monkeypatch):
+    """A deferred call must not acquire or refresh the cross-process lease."""
+    # Force the local restart path. Importing scripts.api.server first can load
+    # .env.ib-mode with IB_GATEWAY_MODE=cloud, which returns before backoff.
+    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: False)
+    ib_gateway._restart_state["attempt_count"] = 1
+    ib_gateway._restart_state["next_attempt_after"] = time.time() + 120
+
+    def fail_acquire(*args, **kwargs):
+        raise AssertionError("backoff must be evaluated before lease acquisition")
+
+    monkeypatch.setattr(ib_gateway.ib_2fa_lock, "acquire_2fa_push_lock", fail_acquire)
+
+    result = asyncio.run(ib_gateway.restart_ib_gateway())
+
+    assert result["restarted"] is False
+    assert result["reason"] == "awaiting_backoff"
 
 
 # --- Operator escape hatch must also release the lock ----------------------
@@ -210,3 +228,119 @@ def test_expired_lock_does_not_block_new_restart(monkeypatch):
     held = ib_2fa_lock.check_2fa_push_lock()
     assert held is not None
     assert "restart_ib_gateway" in held.holder
+
+
+def test_ensure_docker_refuses_start_when_push_lease_is_held(monkeypatch):
+    ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+    monkeypatch.setattr(ib_gateway, "_port_listening", lambda: False)
+
+    async def exited():
+        return "exited", ""
+
+    async def fail_compose(*args, **kwargs):
+        raise AssertionError("ensure must not start while another push lease is active")
+
+    monkeypatch.setattr(ib_gateway, "_docker_container_state", exited)
+    monkeypatch.setattr(ib_gateway, "_docker_compose", fail_compose)
+
+    result = asyncio.run(ib_gateway._ensure_docker_container())
+
+    assert result["restarted"] is False
+    assert result["deferred"] is True
+    assert result["reason"] == "2fa_push_in_flight"
+
+
+def test_ensure_docker_acquires_lease_before_start(monkeypatch):
+    monkeypatch.setattr(ib_gateway, "_port_listening", lambda: False)
+
+    async def exited():
+        return "exited", ""
+
+    async def compose(*args, **kwargs):
+        return "", "", 0
+
+    async def port_ready(*args, **kwargs):
+        return True, 3
+
+    monkeypatch.setattr(ib_gateway, "_docker_container_state", exited)
+    monkeypatch.setattr(ib_gateway, "_docker_compose", compose)
+    monkeypatch.setattr(ib_gateway, "_poll_port", port_ready)
+
+    result = asyncio.run(ib_gateway._ensure_docker_container())
+
+    assert result["port_listening"] is True
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held is not None
+    assert "ensure_ib_gateway" in held.holder
+
+
+def test_restart_stopped_docker_reuses_preheld_restart_lease(monkeypatch):
+    ib_2fa_lock.acquire_2fa_push_lock(ib_gateway.IB_GATEWAY_LOCK_HOLDER, ttl_secs=600)
+    monkeypatch.setattr(ib_gateway, "_port_listening", lambda: False)
+
+    async def exited():
+        return "exited", ""
+
+    compose_calls = []
+
+    async def compose(*args, **kwargs):
+        compose_calls.append(args)
+        return "", "", 0
+
+    async def port_ready(*args, **kwargs):
+        return True, 3
+
+    def fail_acquire(*args, **kwargs):
+        raise AssertionError("stopped-container restart must reuse its preheld lease")
+
+    monkeypatch.setattr(ib_gateway, "_docker_container_state", exited)
+    monkeypatch.setattr(ib_gateway, "_docker_compose", compose)
+    monkeypatch.setattr(ib_gateway, "_poll_port", port_ready)
+    monkeypatch.setattr(ib_gateway, "_acquire_gateway_push_lease", fail_acquire)
+
+    result = asyncio.run(ib_gateway._restart_docker())
+
+    assert result["port_listening"] is True
+    assert compose_calls == [("up", "-d")]
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held is not None and held.holder == ib_gateway.IB_GATEWAY_LOCK_HOLDER
+
+
+def test_cloud_restart_returns_before_push_lease_acquisition(monkeypatch):
+    lock_path = Path(os.environ["IB_2FA_LOCK_PATH"])
+    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: True)
+
+    def fail_acquire(*args, **kwargs):
+        raise AssertionError("cloud-mode restart must not acquire a local push lease")
+
+    monkeypatch.setattr(ib_gateway.ib_2fa_lock, "acquire_2fa_push_lock", fail_acquire)
+
+    result = asyncio.run(ib_gateway.restart_ib_gateway())
+
+    assert result["gateway_mode"] == "cloud"
+    assert result["restarted"] is False
+    assert not lock_path.exists()
+
+
+def test_ensure_healthy_docker_does_not_touch_lease(monkeypatch):
+    monkeypatch.setattr(ib_gateway, "_port_listening", lambda: True)
+
+    def fail_acquire(*args, **kwargs):
+        raise AssertionError("read-only ensure must not acquire a push lease")
+
+    monkeypatch.setattr(ib_gateway.ib_2fa_lock, "acquire_2fa_push_lock", fail_acquire)
+
+    result = asyncio.run(ib_gateway._ensure_docker_container())
+
+    assert result["status"] == "already_running"
+
+
+def test_authenticated_observation_releases_ensure_lease(monkeypatch):
+    holder = "scripts.api.ib_gateway.ensure_ib_gateway"
+    ib_2fa_lock.acquire_2fa_push_lock(holder, ttl_secs=600)
+    pool = type("Pool", (), {"status": lambda self: {}})()
+    ib_gateway._auth_transition_state["previous_auth_state"] = "awaiting_2fa"
+
+    asyncio.run(ib_gateway.handle_auth_state_transition("authenticated", pool))
+
+    assert ib_2fa_lock.check_2fa_push_lock() is None

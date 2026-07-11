@@ -205,6 +205,86 @@ describe("Authenticated WebSocket URL", () => {
     expect(result.current.connected).toBe(false);
     expect(result.current.error).toBe("Failed to obtain WS ticket: 401");
   });
+
+  it("times out stalled authentication and leaves the connecting state", async () => {
+    const { result } = renderHook(() => usePrices({
+      symbols: ["AAPL"],
+      enabled: true,
+      getToken: () => new Promise<string | null>(() => {}),
+    }));
+    await flush();
+
+    expect(wsInstances).toHaveLength(0);
+    await advance(10_001);
+
+    expect(result.current.connected).toBe(false);
+    expect(result.current.error?.toLowerCase()).toContain("timed out");
+  });
+
+  it("does not open a socket when authentication resolves after realtime is disabled", async () => {
+    let resolveToken!: (token: string | null) => void;
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ticket: "late-ticket" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { rerender } = renderHook(
+      (props: { enabled: boolean }) => usePrices({
+        symbols: ["AAPL"],
+        enabled: props.enabled,
+        getToken: () => new Promise<string | null>((resolve) => { resolveToken = resolve; }),
+      }),
+      { initialProps: { enabled: true } },
+    );
+    await flush();
+    rerender({ enabled: false });
+    resolveToken("clerk-token");
+    await flush();
+
+    expect(wsInstances).toHaveLength(0);
+  });
+
+  it("does not create an orphan snapshot socket after its caller deadline", async () => {
+    let resolveToken!: (token: string | null) => void;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ ticket: "late-snapshot-ticket" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ));
+    const { result } = renderHook(() => usePrices({
+      symbols: [],
+      enabled: false,
+      getToken: () => new Promise<string | null>((resolve) => { resolveToken = resolve; }),
+    }));
+
+    let snapshot!: Record<string, PriceData>;
+    await act(async () => {
+      const pending = result.current.getSnapshot(["AAPL"]);
+      vi.advanceTimersByTime(5_001);
+      snapshot = await pending;
+    });
+    expect(snapshot).toEqual({});
+
+    resolveToken("clerk-token");
+    await flush();
+    expect(wsInstances).toHaveLength(0);
+  });
+});
+
+describe("Connection deadlines", () => {
+  it("closes a WebSocket that never reaches open and schedules recovery", async () => {
+    renderHook(() => usePrices({ symbols: ["AAPL"], enabled: true }));
+    await flush();
+    const stalled = latestWs();
+
+    await advance(10_001);
+
+    expect(stalled.readyState).toBe(MockWebSocket.CLOSED);
+  });
 });
 
 describe("Stale socket isolation", () => {

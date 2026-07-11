@@ -12,16 +12,13 @@ is corrupt, the same line repeats every sync cycle (60s) and the
 dashboard silently serves stale data until someone notices.
 
 Manual recipe (mirrored here):
-    sudo systemctl stop radon-nextjs.service
-    rm -f data/replica.db data/replica.db-wal data/replica.db-shm data/replica.db-info
-    sudo systemctl start radon-nextjs.service
+    /usr/local/bin/radon repair-nextjs-replica
 
 Wired into monitor_daemon via scripts/monitor_daemon/run.py:create_daemon().
 """
 from __future__ import annotations
 
 import logging
-import os
 import subprocess
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
@@ -45,19 +42,13 @@ class ReplicaWatchdogHandler(BaseHandler):
 
     # Tunables (class constants so tests can override).
     SERVICE_NAME = "radon-nextjs.service"
-    DATA_DIR = "/home/radon/radon/data"
-    REPLICA_FILES = (
-        "replica.db",
-        "replica.db-wal",
-        "replica.db-shm",
-        "replica.db-info",
-    )
     WAL_CONFLICT_TOKEN = "WalConflict"
     CONFLICT_THRESHOLD = 3  # >= this many in a 5-min window → heal
     JOURNAL_WINDOW = "5 minutes ago"
     THROTTLE_SECONDS = 30 * 60  # 30 minutes between heals
-    SYSTEMCTL_BIN = "/usr/bin/systemctl"
-    SUBPROCESS_TIMEOUT = 30
+    OPERATOR_BIN = "/usr/local/bin/radon"
+    REPAIR_ACTION = "repair-nextjs-replica"
+    SUBPROCESS_TIMEOUT = 150
     JOURNALCTL_TIMEOUT = 10
 
     def __init__(self) -> None:
@@ -186,9 +177,7 @@ class ReplicaWatchdogHandler(BaseHandler):
             logger.warning("record_service_health(syncing) failed: %s", exc)
 
         try:
-            self._stop_service()
-            self._delete_replica_files()
-            self._start_service()
+            self._repair_replica()
         except subprocess.CalledProcessError as exc:
             return self._record_heal_failure(exc, conflicts)
         except subprocess.TimeoutExpired as exc:
@@ -217,28 +206,12 @@ class ReplicaWatchdogHandler(BaseHandler):
         )
         return {"status": "healed", "wal_conflicts_5m": conflicts}
 
-    def _stop_service(self) -> None:
+    def _repair_replica(self) -> None:
         subprocess.run(
-            ["sudo", self.SYSTEMCTL_BIN, "stop", self.SERVICE_NAME],
+            [self.OPERATOR_BIN, self.REPAIR_ACTION],
             check=True,
             timeout=self.SUBPROCESS_TIMEOUT,
         )
-
-    def _start_service(self) -> None:
-        subprocess.run(
-            ["sudo", self.SYSTEMCTL_BIN, "start", self.SERVICE_NAME],
-            check=True,
-            timeout=self.SUBPROCESS_TIMEOUT,
-        )
-
-    def _delete_replica_files(self) -> None:
-        for filename in self.REPLICA_FILES:
-            path = os.path.join(self.DATA_DIR, filename)
-            try:
-                os.unlink(path)
-                logger.info("Removed corrupt replica file: %s", path)
-            except FileNotFoundError:
-                continue
 
     def _record_heal_failure(
         self, exc: BaseException, conflicts: int

@@ -1,7 +1,9 @@
 services:
   ib-gateway:
-    image: ghcr.io/gnzsnz/ib-gateway@sha256:22d5bf5e6699b3c28cb806c21e2cc46c6337df3599f758d9ae685ad3aa9eb0d5
-    restart: unless-stopped
+    image: ghcr.io/gnzsnz/ib-gateway@sha256:1bbdeb1bb467ee6546810733b3709c5146ad1cdc6cd2a486b6f75dcf35a67c75
+    # All starts are owned by the lock-aware watchdog/FastAPI control plane.
+    # Docker restart policies cannot consult the IBKR 2FA push lease.
+    restart: "no"
     environment:
       TWS_USERID: ${TWS_USERID}
       TWS_PASSWORD_FILE: /run/secrets/ib_password
@@ -16,22 +18,16 @@ services:
       # api-hang detection). Both consult a shared 10-min push lock so
       # only one 2FA push is ever in flight at a time. Letting IBC
       # ALSO relogin on its own would bypass the lock.
-      # `exit` makes IBC quit on 2FA timeout; the container's
-      # `restart: unless-stopped` recovers via a fresh container boot
-      # rather than an IBC in-container restart the radon stack can't
-      # see. (No autoheal sidecar — see the note below the healthcheck.)
+      # `exit` makes IBC quit on 2FA timeout. The protocol-level watchdog
+      # observes the down port and owns bounded, lock-aware recovery.
       TWOFA_TIMEOUT_ACTION: exit
       RELOGIN_AFTER_TWOFA_TIMEOUT: "no"
       EXISTING_SESSION_DETECTED_ACTION: primary
-      # DUR-08: IBC's AutoRestartTime expects "hh:mm AM/PM" interpreted in the
-      # GATEWAY SESSION timezone (jts.ini TimeZone — Africa/Abidjan = UTC on
-      # our hosts), NOT ET. The previous "23:58 ET" was an invalid format, so
-      # IBC fell back to the gateway's default nightly restart at 11:45 PM
-      # session-local = 23:45 UTC — the anchor of the nightly api-hang wedge
-      # cluster (23:51-00:09 UTC). 09:05 AM session-local = 09:05 UTC =
-      # 05:05 ET: outside RTH, outside IBKR's NA server reset (23:45-00:45 ET),
-      # and quiet for the relay. If the relogin wedges here it cascades nothing.
-      AUTO_RESTART_TIME: "09:05 AM"
+      # Blank both IBC schedules. Even a normally credential-preserving auto
+      # restart becomes a full login at weekly token expiry and can mint a 2FA
+      # push without Radon's lease. The lock-aware watchdog owns every cycle.
+      AUTO_RESTART_TIME: ""
+      TWS_COLD_RESTART: ""
       # DUR-08: GC logging does NOT work via JAVA_TOOL_OPTIONS — the image's
       # launcher blanks it before starting the JVM (verified on the java
       # process /proc environ). It lives instead in the persistent ib-config
@@ -46,7 +42,15 @@ services:
     volumes:
       - ib-gateway-settings:/home/ibgateway/Jts
     healthcheck:
-      test: ["CMD-SHELL", "bash -c 'echo > /dev/tcp/localhost/4001'"]
+      test:
+        - CMD-SHELL
+        - >-
+          case "$${TRADING_MODE:-live}" in
+            live) port=4001 ;;
+            paper) port=4002 ;;
+            *) exit 1 ;;
+          esac;
+          exec bash -c "exec 3<>/dev/tcp/127.0.0.1/$${port}"
       interval: 30s
       timeout: 10s
       retries: 5

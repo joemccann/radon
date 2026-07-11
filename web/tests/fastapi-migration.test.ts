@@ -327,17 +327,13 @@ describe("GET /api/portfolio (stale-while-revalidate)", () => {
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("serves live sync data when no Turso portfolio snapshot exists", async () => {
-    const livePortfolio = { bankroll: 120000, last_sync: "2026-03-14T16:00:00Z", positions: [] };
+  it("returns unavailable without live sync when no Turso portfolio snapshot exists", async () => {
     mockPortfolioDb(null);
-    mockRadonFetch.mockResolvedValue(livePortfolio);
 
     const { GET } = await import("../app/api/portfolio/route");
     const res = await GET();
-    const body = await res.json();
-    expect(res.status).toBe(200);
-    expect(body.bankroll).toBe(120000);
-    expect(res.headers.get("X-Portfolio-Source")).toBe("ib-live-fallback");
+    expect(res.status).toBe(503);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 });

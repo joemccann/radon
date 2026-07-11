@@ -62,6 +62,7 @@ function clientConfig(call = 0): Record<string, unknown> {
 }
 
 afterEach(() => {
+  vi.useRealTimers();
   delete process.env.TURSO_DB_URL;
   delete process.env.TURSO_AUTH_TOKEN;
   delete process.env.TURSO_DEMO_DB_URL;
@@ -132,6 +133,36 @@ describe("bounded pool wiring", () => {
     await boundedFetch("https://example.turso.io/v2/pipeline");
     await boundedFetch("https://example.turso.io/v2/pipeline");
     expect(agents).toHaveLength(1);
+  });
+
+  it("aborts the underlying HTTP request at the transport deadline", async () => {
+    vi.useFakeTimers();
+    let capturedSignal: AbortSignal | undefined;
+    undiciFetchMock.mockImplementationOnce(((_input: unknown, init?: RequestInit) => {
+      capturedSignal = init?.signal ?? undefined;
+      return new Promise((_resolve, reject) => {
+        if (!capturedSignal) {
+          reject(new Error("missing transport signal"));
+          return;
+        }
+        capturedSignal.addEventListener("abort", () => reject(capturedSignal?.reason));
+      });
+    }) as typeof undiciFetchMock);
+
+    const db = await freshDbModule();
+    db.getDb();
+    const boundedFetch = clientConfig().fetch as typeof db.pooledDbFetch;
+    const request = boundedFetch("https://example.turso.io/v2/pipeline").catch((error) => error);
+    await Promise.resolve();
+
+    expect(capturedSignal).toBeInstanceOf(AbortSignal);
+    expect(capturedSignal?.aborted).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(db.DB_TRANSPORT_TIMEOUT_MS + 1);
+    const error = await request;
+    expect(capturedSignal?.aborted).toBe(true);
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).name).toBe("TimeoutError");
   });
 });
 

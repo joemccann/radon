@@ -190,46 +190,49 @@ If a script fails:
 | Install monitor daemon | `./scripts/setup_monitor_daemon.sh install` |
 | Monitor daemon status (launchd) | `./scripts/setup_monitor_daemon.sh status` |
 | **IBC Gateway status** | `~/ibc/bin/status-secure-ibc-service.sh` |
-| **IBC Gateway start** | `~/ibc/bin/start-secure-ibc-service.sh` |
+| **IBC Gateway start** | `./scripts/ibc_remote_control.sh ibc-start` |
 | **IBC Gateway stop** | `~/ibc/bin/stop-secure-ibc-service.sh` |
-| **IBC Gateway restart** | `~/ibc/bin/restart-secure-ibc-service.sh` |
+| **IBC Gateway restart** | `./scripts/ibc_remote_control.sh ibc-restart` |
 | **IBC remote helper** | `./scripts/ibc_remote_control.sh check` |
 
 ### IB Gateway Management (IBC)
 
-IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gateway`). The active install lives at `~/ibc-install/`, with config and wrappers under `~/ibc/`. Credentials are stored in macOS Keychain, not on disk.
+IB Gateway is managed by the launchd definition `com.radon.ibc-gateway`.
+Credentials are stored in macOS Keychain, not on disk. The definition has no
+autonomous schedule; FastAPI, the watchdog, and operator wrappers acquire the
+shared 2FA lease before every start/restart.
 
 **Service commands:**
 ```bash
-~/ibc/bin/start-secure-ibc-service.sh    # Start Gateway via launchd
 ~/ibc/bin/stop-secure-ibc-service.sh     # Stop Gateway
-~/ibc/bin/restart-secure-ibc-service.sh  # Restart Gateway
 ~/ibc/bin/status-secure-ibc-service.sh   # Show launchd state
+scripts/ibc_remote_control.sh ibc-start  # Lease-gated start
+scripts/ibc_remote_control.sh ibc-restart # Lease-gated restart
 tail -f ~/ibc/logs/ibc-gateway-service.log
 ```
 
 **Automated lifecycle:**
-1. **00:00** — launchd starts Gateway via IBC
-2. The secure runner reads credentials from Keychain, writes a temporary `0600` runtime config, and launches Gateway
-3. You approve 2FA on IBKR Mobile once
-4. **11:58 PM** — IBC restarts Gateway (reuses auth session, no 2FA)
-5. **Sunday 07:05** — Cold restart with full re-auth (2FA required)
+1. FastAPI or the watchdog proves a start/restart is required.
+2. The caller acquires the atomic cross-process lease; any active or unreadable lease fails closed.
+3. IBC starts Gateway and the operator approves the single IBKR Mobile push.
+4. On 2FA timeout IBC exits without relogin. The watchdog waits for lease expiry before a bounded new attempt.
 
 **Key config settings (`~/ibc/config.secure.ini`):**
 | Setting | Value | Purpose |
 |---------|-------|---------|
 | `ExistingSessionDetectedAction` | `primary` | Gateway reconnects if bumped |
 | `AcceptIncomingConnectionAction` | `accept` | No popup for API connections |
-| `AutoRestartTime` | `11:58 PM` | Daily restart before IB's forced window |
-| `ColdRestartTime` | `07:05` | Sunday re-auth |
-| `CommandServerPort` | `7462` | IBC command server for stop/restart |
+| `AutoRestartTime` | blank | Disabled because it cannot acquire the 2FA lease |
+| `ColdRestartTime` | blank | Disabled because it can mint an unleased weekly push |
+| `ReloginAfterSecondFactorAuthenticationTimeout` | `no` | Prevent stacked retry pushes |
+| `CommandServerPort` | `7462` | IBC command server for STOP only |
 | `IbLoginId` / `IbPassword` | unset in file | Credentials come from Keychain only |
 
 **Architecture:**
-- LaunchAgent: `~/Library/LaunchAgents/local.ibc-gateway.plist`
+- LaunchAgent: `~/Library/LaunchAgents/com.radon.ibc-gateway.plist`
 - Runner: `~/ibc/bin/run-secure-ibc-gateway.sh`
 - Logs: `~/ibc/logs/ibc-gateway-service.log` plus IBC diagnostics under `~/ibc/logs/`
-- `KeepAlive=false` — IBC/Gateway manage their own lifecycle via `AutoRestartTime`
+- `RunAtLoad=false`, no `StartCalendarInterval`, `KeepAlive=false`
 
 **Phase 1 remote access dependencies:**
 - `Tailscale.app` on the Mac
@@ -240,21 +243,22 @@ tail -f ~/ibc/logs/ibc-gateway-service.log
 
 **Phase 1 remote access usage:**
 ```bash
-# Direct secure service commands over SSH
+# Read-only status may be called directly over SSH
 ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
-ssh joemccann@macbook-pro '~/ibc/bin/restart-secure-ibc-service.sh'
 
-# Optional repo helper
-ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/convex-scavenger && ./scripts/ibc_remote_control.sh ibc-status'
+# Start/restart through the lease-gated repo helper
+ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-restart'
+
+ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-status'
 ```
 
 **Reference:** `docs/ibc-remote-access.md`
 
 **Troubleshooting:**
-- Gateway not running after a scheduled start → approve 2FA on IBKR Mobile, or run `~/ibc/bin/start-secure-ibc-service.sh`
+- Gateway stopped: run `./scripts/ibc_remote_control.sh ibc-start` and approve the single 2FA push
 - `ExistingSessionDetectedAction=primary` means this Gateway always wins session conflicts
-- IBC command server (port 7462) allows `STOP`, `RESTART`, `RECONNECT` commands via `echo "STOP" | nc localhost 7462`
-- Legacy `scripts/setup_ibc.sh` is retained for historical reference only and is not the active service path
+- IBC command server port 7462 is permitted for `STOP`; direct `RESTART` is forbidden because it bypasses the lease
+- `scripts/setup_ibc.sh` generates a schedule-free launchd definition and lease-gates install/manual starts
 
 ### IB Connection Ports
 | Port | Environment |

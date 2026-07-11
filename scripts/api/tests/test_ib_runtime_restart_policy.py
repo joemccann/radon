@@ -27,7 +27,7 @@ def test_local_launchd_runtime_failures_do_not_auto_restart(monkeypatch):
 
     assert result.ok is False
     assert result.error is not None
-    assert "manual restart required" in result.error.lower()
+    assert "lock-aware watchdog recovery is pending" in result.error.lower()
     assert "2fa" in result.error.lower()
 
 

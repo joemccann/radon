@@ -244,6 +244,19 @@ describe("radonFetch — timeout", () => {
       "aborted",
     );
   });
+
+  it("combines caller cancellation with the helper timeout", async () => {
+    mockFetch.mockResolvedValue(jsonResponse({ ok: true }));
+    const caller = new AbortController();
+
+    await radonFetch("/health", { signal: caller.signal });
+
+    const [, opts] = mockFetch.mock.calls[0];
+    expect(opts.signal).not.toBe(caller.signal);
+    expect(opts.signal.aborted).toBe(false);
+    caller.abort();
+    expect(opts.signal.aborted).toBe(true);
+  });
 });
 
 // =============================================================================

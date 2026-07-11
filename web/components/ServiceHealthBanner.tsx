@@ -35,7 +35,25 @@ import { humanizeServiceHealthError } from "@/lib/serviceHealthError";
  * renders plain text, never raw JSON.
  */
 export default function ServiceHealthBanner() {
-  const { data } = useServiceHealth();
+  const { data, error } = useServiceHealth();
+
+  if (error) {
+    return (
+      <div
+        className="service-health-banner"
+        role="alert"
+        data-testid="service-health-banner"
+        data-severity="error"
+      >
+        <span className="service-health-banner__icon" aria-hidden>
+          <AlertTriangle size={14} />
+        </span>
+        <div className="service-health-banner__message">
+          <strong>Service telemetry unavailable.</strong> Latest background status cannot be verified.
+        </div>
+      </div>
+    );
+  }
 
   const degradedRows = collectDegradedRows(data?.failing ?? []);
   const degradedCount = data?.degraded_count ?? degradedRows.length;

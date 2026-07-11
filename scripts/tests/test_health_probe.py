@@ -16,6 +16,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from health_probe import probe, reader, turso_http
+from health_service import probes as health_service_probes
 
 
 # ── isolation contract: stdlib-only, no trading stack, no libsql ─────────────
@@ -151,18 +152,44 @@ class TestClassifyProbes:
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"ok": False}))
         assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
 
+    def test_contradictory_aggregate_fields_fail_closed(self):
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(payload={"ok": True, "overall_state": "down"}),
+        )
+        assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
+
     def test_aggregate_state_down_fails(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"state": "down"}))
         assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
 
-    def test_aggregate_state_unknown_is_not_fatal(self):
-        # 'unknown' is not proof of death — the edge answered 200.
-        result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"state": "unknown"}))
-        assert result["ok"] == 1
+    def test_actual_health_service_payload_drives_the_verdict(self):
+        healthy = health_service_probes.build_status(
+            {"radon-api": {"state": "up"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+        down = health_service_probes.build_status(
+            {"radon-api": {"state": "down"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+        unknown = health_service_probes.build_status(
+            {"radon-api": {"state": "unknown"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
 
-    def test_opaque_200_payload_is_healthy(self):
+        assert probe.classify_probes(_ok_probe(), _ok_probe(payload=healthy))["ok"] == 1
+        assert probe.classify_probes(_ok_probe(), _ok_probe(payload=down))["ok"] == 0
+        assert probe.classify_probes(_ok_probe(), _ok_probe(payload=unknown))["ok"] == 0
+
+    def test_opaque_200_payload_fails_closed(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={}))
-        assert result["ok"] == 1
+        assert result["ok"] == 0
 
 
 # ── build_probe_row ──────────────────────────────────────────────────────────
@@ -375,10 +402,8 @@ class TestProbeUserPath:
 
 # ── freshness probe: /api/probe/freshness contract ──────────────────────────
 #
-# Recorded contract fixture (the web half builds the endpoint against this
-# exact shape — see DUR-16). The endpoint goes live only when the web half
-# deploys; until then production answers 404/401 which MUST classify as
-# endpoint_pending (freshness_ok NULL), not a failure.
+# Recorded contract fixture shared with the web endpoint (DUR-16). Endpoint,
+# auth, transport, and database failures are availability failures at any hour.
 
 FRESHNESS_CONTRACT_FIXTURE = {
     "generated_at": "2026-06-12T19:00:00Z",
@@ -390,6 +415,8 @@ FRESHNESS_CONTRACT_FIXTURE = {
         "journal": {"applicable": True, "age_secs": 120.0, "fresh": True},
     },
     "all_fresh": True,
+    "database_ok": True,
+    "database_failures": [],
 }
 
 FRESHNESS_QUIET_MARKET_FIXTURE = {
@@ -402,6 +429,8 @@ FRESHNESS_QUIET_MARKET_FIXTURE = {
         "journal": {"applicable": False, "age_secs": None, "fresh": None},
     },
     "all_fresh": None,
+    "database_ok": True,
+    "database_failures": [],
 }
 
 
@@ -429,6 +458,7 @@ class TestClassifyFreshness:
     def test_200_all_fresh_false_is_unhealthy_with_per_check_flags(self):
         payload = {
             "generated_at": "x", "market_state": "open", "all_fresh": False,
+            "database_ok": True, "database_failures": [],
             "checks": {
                 "relay_tick": {"applicable": True, "age_secs": 900.0, "fresh": False},
                 "vcg_scan": {"applicable": True, "age_secs": 100.0, "fresh": True},
@@ -444,42 +474,153 @@ class TestClassifyFreshness:
 
     def test_scan_fresh_is_null_safe_across_the_pair(self):
         payload = {
-            "market_state": "open", "all_fresh": True,
+            "generated_at": "x", "market_state": "open", "all_fresh": True,
+            "database_ok": True, "database_failures": [],
             "checks": {
-                "relay_tick": {"applicable": True, "fresh": True},
-                "vcg_scan": {"applicable": True, "fresh": True},
-                "gex_scan": {"applicable": False, "fresh": None},
+                "relay_tick": {"applicable": True, "age_secs": 1.0, "fresh": True},
+                "vcg_scan": {"applicable": True, "age_secs": 1.0, "fresh": True},
+                "gex_scan": {"applicable": False, "age_secs": None, "fresh": None},
+                "journal": {"applicable": True, "age_secs": 1.0, "fresh": True},
             },
         }
         assert probe.classify_freshness(_freshness_raw(payload=payload))["scan_fresh"] == 1
 
-    def test_404_is_endpoint_pending_not_failure(self):
+    @pytest.mark.parametrize(
+        "check",
+        [
+            None,
+            {},
+            {"applicable": 1, "age_secs": 4.2, "fresh": True},
+            {"applicable": True, "age_secs": "4.2", "fresh": True},
+            {"applicable": True, "age_secs": -1, "fresh": True},
+            {"applicable": True, "age_secs": 4.2, "fresh": None},
+            {"applicable": True, "age_secs": 4.2, "fresh": 1},
+            {"applicable": False, "age_secs": 4.2, "fresh": None},
+            {"applicable": False, "age_secs": None, "fresh": False},
+            {"applicable": True, "age_secs": 4.2, "fresh": True, "extra": "drift"},
+        ],
+    )
+    def test_malformed_check_objects_fail_closed(self, check):
+        payload = {
+            **FRESHNESS_CONTRACT_FIXTURE,
+            "checks": {**FRESHNESS_CONTRACT_FIXTURE["checks"], "relay_tick": check},
+        }
+
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_malformed_payload"
+
+    @pytest.mark.parametrize("asserted", [True, None])
+    def test_all_fresh_cannot_hide_an_applicable_stale_check(self, asserted):
+        payload = {
+            **FRESHNESS_CONTRACT_FIXTURE,
+            "all_fresh": asserted,
+            "checks": {
+                **FRESHNESS_CONTRACT_FIXTURE["checks"],
+                "journal": {"applicable": True, "age_secs": 999.0, "fresh": False},
+            },
+        }
+
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_malformed_payload"
+
+    def test_all_fresh_false_cannot_contradict_all_applicable_checks(self):
+        payload = {**FRESHNESS_CONTRACT_FIXTURE, "all_fresh": False}
+
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_malformed_payload"
+
+    def test_check_set_must_match_the_fixed_contract(self):
+        payload = {
+            **FRESHNESS_CONTRACT_FIXTURE,
+            "checks": {**FRESHNESS_CONTRACT_FIXTURE["checks"], "unknown": {}},
+        }
+
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_malformed_payload"
+
+    @pytest.mark.parametrize(
+        ("database_ok", "database_failures"),
+        [
+            (False, []),
+            (True, ["relay_tick"]),
+            (False, ["unknown"]),
+            (False, ["relay_tick", "relay_tick"]),
+            (False, [1]),
+        ],
+    )
+    def test_database_summary_must_match_failure_evidence(
+        self, database_ok, database_failures
+    ):
+        payload = {
+            **FRESHNESS_CONTRACT_FIXTURE,
+            "database_ok": database_ok,
+            "database_failures": database_failures,
+        }
+
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_malformed_payload"
+
+    def test_malformed_200_payload_is_an_availability_failure(self):
+        result = probe.classify_freshness(_freshness_raw(payload={"all_fresh": None}))
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_malformed_payload"
+
+    def test_404_is_an_availability_failure(self):
         result = probe.classify_freshness(_freshness_raw(status=404, payload={}))
-        assert result["freshness_ok"] is None
-        assert result["detail"] == "endpoint_pending"
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_http_404"
         assert result["market_state"] is None
 
-    def test_401_is_endpoint_pending_not_failure(self):
+    def test_401_is_an_availability_failure(self):
         result = probe.classify_freshness(_freshness_raw(status=401, payload={}))
-        assert result["freshness_ok"] is None
-        assert result["detail"] == "endpoint_pending"
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["detail"] == "freshness_http_401"
 
     def test_500_is_unhealthy_but_market_state_unknown(self):
         result = probe.classify_freshness(_freshness_raw(status=500, payload={}))
         assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
         assert result["detail"] == "freshness_http_500"
         assert result["market_state"] is None
 
     def test_timeout_is_unhealthy_but_market_state_unknown(self):
         result = probe.classify_freshness({"reachable": False, "detail": "timeout"})
         assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
         assert result["detail"] == "freshness_unreachable:timeout"
         assert result["market_state"] is None
 
-    def test_missing_token_is_pending_like_not_failure(self):
+    def test_missing_token_is_an_availability_failure(self):
         result = probe.classify_freshness({"reachable": False, "detail": "no_token", "skipped": True})
-        assert result["freshness_ok"] is None
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
         assert result["detail"] == "freshness_no_token"
+
+    def test_database_failure_is_unhealthy_even_during_a_quiet_market(self):
+        payload = {**FRESHNESS_QUIET_MARKET_FIXTURE, "database_ok": False,
+                   "database_failures": ["relay_tick", "vcg_scan"]}
+        result = probe.classify_freshness(_freshness_raw(payload=payload))
+        assert result["freshness_ok"] == 0
+        assert result["availability_ok"] == 0
+        assert result["market_state"] == "closed"
+        assert result["detail"] == "freshness_database_unavailable"
 
 
 class TestProbeFreshness:
@@ -525,8 +666,9 @@ class TestExitCodePolicy:
     def test_stale_freshness_with_unknown_market_state_exits_zero(self):
         assert probe.exit_code_for(1, 1, 0, None) == 0
 
-    def test_endpoint_pending_exits_zero(self):
-        assert probe.exit_code_for(1, 1, None, "open") == 0
+    def test_freshness_availability_failure_exits_nonzero_off_hours(self):
+        assert probe.exit_code_for(1, 1, 0, "closed", availability_ok=0) == probe.EXIT_UNHEALTHY
+        assert probe.exit_code_for(1, 1, 0, None, availability_ok=0) == probe.EXIT_UNHEALTHY
 
 
 # ── history row construction ─────────────────────────────────────────────────
@@ -639,15 +781,15 @@ class TestRunProbe:
         monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
         assert probe.main() == probe.EXIT_UNHEALTHY
 
-    def test_pending_freshness_keeps_exit_zero(self, monkeypatch):
+    def test_missing_freshness_endpoint_fails_loud(self, monkeypatch):
         _patch_happy_network(monkeypatch)
         monkeypatch.setattr(probe, "probe_freshness",
                             lambda url, token, **k: _freshness_raw(status=404, payload={}))
         monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
         history = {}
         monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: history.update(row))
-        assert probe.main() == 0
-        assert history["freshness_ok"] is None
+        assert probe.main() == probe.EXIT_UNHEALTHY
+        assert history["freshness_ok"] == 0
 
     def test_main_returns_1_when_write_fails(self, monkeypatch):
         _patch_happy_network(monkeypatch)
@@ -688,9 +830,21 @@ class TestDeadMansSwitch:
         assert result["verdict"] == reader.VERDICT_DOWN
         assert result["reason"] == "status_http_503"
 
+    def test_observed_scheduler_delay_does_not_flap_or_hide_failure(self):
+        # The latest 99 GitHub scheduled runs reached 88.1 minutes between
+        # dispatches. A 90-minute row is delayed evidence, not a dead prober.
+        healthy = reader.classify_external_probe(
+            _row(ok=1, ago_seconds=90 * 60), now=_NOW
+        )
+        failed = reader.classify_external_probe(
+            _row(ok=0, ago_seconds=90 * 60, detail="status_http_503"), now=_NOW
+        )
+        assert healthy["verdict"] == reader.VERDICT_HEALTHY
+        assert failed["verdict"] == reader.VERDICT_DOWN
+
     def test_stale_ok_row_is_stale_not_healthy(self):
         # The critical case: a frozen ok=1 must NOT read as green.
-        result = reader.classify_external_probe(_row(ok=1, ago_seconds=30 * 60), now=_NOW)
+        result = reader.classify_external_probe(_row(ok=1, ago_seconds=3 * 60 * 60), now=_NOW)
         assert result["verdict"] == reader.VERDICT_STALE
         assert result["reason"] == "prober_silent"
 
@@ -709,3 +863,21 @@ class TestDeadMansSwitch:
     def test_age_seconds_clamps_future_timestamps_to_zero(self):
         future = (_NOW + timedelta(seconds=120)).isoformat().replace("+00:00", "Z")
         assert reader.age_seconds(future, now=_NOW) == 0.0
+
+    def test_far_future_probe_timestamp_is_stale_not_healthy(self):
+        row = _row(ok=1)
+        row["checked_at"] = (_NOW + timedelta(minutes=6)).isoformat().replace("+00:00", "Z")
+
+        result = reader.classify_external_probe(row, now=_NOW)
+
+        assert result["verdict"] == reader.VERDICT_STALE
+        assert result["reason"] == "probe_timestamp_in_future"
+
+    def test_malformed_probe_timestamp_is_stale_not_an_exception(self):
+        row = _row(ok=1)
+        row["checked_at"] = "not-a-timestamp"
+
+        result = reader.classify_external_probe(row, now=_NOW)
+
+        assert result["verdict"] == reader.VERDICT_STALE
+        assert result["reason"] == "invalid_checked_at"

@@ -124,7 +124,6 @@ class TestGroupedAlertOnIbAwaiting2fa:
         assert "4" in msg
         # Operator action hint.
         assert "reset-backoff" in msg or "Approve on phone" in msg
-
     def test_api_warmup_suppresses_grouped_2fa_push(self, db_conn, monkeypatch, fresh_now):
         """A radon-api restart (a deploy) briefly reports awaiting_2fa during
         pool warmup. The grouped 2FA page must be SUPPRESSED (no push) — there's
@@ -211,6 +210,170 @@ class TestGroupedAlertOnIbAwaiting2fa:
         assert "vcg-scan" in ib_grouped[0]
         assert "cri-scan" in ib_grouped[0]
         assert "cash-flow-sync" not in ib_grouped[0]
+
+
+class TestGroupedCooldownDeliverySemantics:
+    def test_failed_grouped_push_does_not_start_cooldown(self, monkeypatch, fresh_now):
+        from watchdog import grouping
+        from watchdog.check import CheckOutcome
+
+        outcome = CheckOutcome(
+            service="portfolio-sync",
+            kind="stale",
+            status="stale",
+            severity="P1",
+            fired=True,
+            message="stale",
+            consecutive_failures=2,
+            now=fresh_now,
+        )
+        monkeypatch.setattr(grouping.cooldown_mod, "cooldown_allows_fire", lambda **_: True)
+        monkeypatch.setattr(grouping, "_emit_grouped_pushover", lambda **_: "pushover 503")
+
+        with patch.object(grouping.cooldown_mod, "mark_notified") as mark:
+            grouping._dispatch_grouped(
+                ib_outcomes=[outcome],
+                auth_state="unreachable",
+                now=fresh_now,
+            )
+
+        mark.assert_not_called()
+
+    def test_cooldown_storage_failure_does_not_block_per_service_delivery(
+        self, monkeypatch, fresh_now
+    ):
+        from watchdog import grouping
+        from watchdog.check import CheckOutcome
+
+        outcome = CheckOutcome(
+            service="external-health-probe",
+            kind="deadman",
+            status="stale",
+            severity="P1",
+            fired=True,
+            message="off-box observer silent",
+            consecutive_failures=1,
+            now=fresh_now,
+        )
+        monkeypatch.setattr(
+            grouping.cooldown_mod,
+            "cooldown_allows_fire",
+            lambda **_: (_ for _ in ()).throw(RuntimeError("Turso unavailable")),
+        )
+
+        with patch.object(grouping.notify, "dispatch", return_value=None) as dispatch:
+            summary = grouping.dispatch_with_grouping(outcomes=[outcome], now=fresh_now)
+
+        dispatch.assert_called_once_with(outcome, record_health=False)
+        assert summary.health_recorded is True
+
+    def test_cooldown_storage_failure_does_not_block_grouped_delivery(
+        self, monkeypatch, fresh_now
+    ):
+        from watchdog import grouping
+        from watchdog.check import CheckOutcome
+
+        outcome = CheckOutcome(
+            service="portfolio-sync",
+            kind="stale",
+            status="stale",
+            severity="P1",
+            fired=True,
+            message="stale",
+            consecutive_failures=2,
+            now=fresh_now,
+        )
+        monkeypatch.setattr(
+            grouping.cooldown_mod,
+            "cooldown_allows_fire",
+            lambda **_: (_ for _ in ()).throw(RuntimeError("Turso unavailable")),
+        )
+        monkeypatch.setattr(grouping, "_emit_grouped_pushover", lambda **_: None)
+
+        handled, error, attempted = grouping._dispatch_grouped(
+            ib_outcomes=[outcome], auth_state="unreachable", now=fresh_now
+        )
+
+        assert handled == {"portfolio-sync"}
+        assert error is None
+        assert attempted is True
+
+    def test_mixed_delivery_results_record_one_aggregate_failure(
+        self, monkeypatch, fresh_now
+    ):
+        from watchdog import grouping
+        from watchdog.check import CheckOutcome
+
+        outcomes = [
+            CheckOutcome(
+                service=service,
+                kind="deadman",
+                status="error",
+                severity="P1",
+                fired=True,
+                message="failed",
+                consecutive_failures=1,
+                now=fresh_now,
+            )
+            for service in ("external-health-probe", "radon-relay.service")
+        ]
+        monkeypatch.setattr(grouping.cooldown_mod, "cooldown_allows_fire", lambda **_: True)
+
+        with (
+            patch.object(
+                grouping.notify,
+                "dispatch",
+                side_effect=["pushover 503", None],
+            ) as dispatch,
+            patch.object(grouping.notify, "_write_dispatcher_health") as write_health,
+        ):
+            summary = grouping.dispatch_with_grouping(
+                outcomes=outcomes, now=fresh_now
+            )
+
+        assert dispatch.call_count == 2
+        write_health.assert_called_once_with(
+            now=fresh_now, dispatcher_error="pushover 503"
+        )
+        assert summary.health_recorded is True
+        assert summary.delivery_failed is True
+
+    def test_cooldown_mark_failure_does_not_abort_later_delivery(
+        self, monkeypatch, fresh_now
+    ):
+        from watchdog import grouping
+        from watchdog.check import CheckOutcome
+
+        outcomes = [
+            CheckOutcome(
+                service=service,
+                kind="deadman",
+                status="error",
+                severity="P1",
+                fired=True,
+                message="failed",
+                consecutive_failures=1,
+                now=fresh_now,
+            )
+            for service in ("external-health-probe", "radon-relay.service")
+        ]
+        monkeypatch.setattr(grouping.cooldown_mod, "cooldown_allows_fire", lambda **_: True)
+        monkeypatch.setattr(
+            grouping.cooldown_mod,
+            "mark_notified",
+            lambda **_: (_ for _ in ()).throw(RuntimeError("Turso unavailable")),
+        )
+
+        with (
+            patch.object(grouping.notify, "_emit_pushover", return_value=None) as emit,
+            patch.object(grouping.notify, "_write_dispatcher_health"),
+        ):
+            summary = grouping.dispatch_with_grouping(
+                outcomes=outcomes, now=fresh_now
+            )
+
+        assert emit.call_count == 2
+        assert summary.delivery_failed is False
 
 
 class TestGroupingThreshold:

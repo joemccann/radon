@@ -44,12 +44,14 @@ import {
 } from "./lib/staleDataMachine.js";
 import { isMarketOpen } from "./lib/marketCalendar.js";
 import { shouldSkipTicketValidation } from "./lib/wsTrust.js";
+import { createReconnectGate } from "./lib/reconnectGate.js";
 
 const DEFAULT_WS_PORT = 8765;
 const DEFAULT_IB_HOST = process.env.IB_GATEWAY_HOST || "127.0.0.1";
 const DEFAULT_IB_PORT = parseInt(process.env.IB_GATEWAY_PORT || "4001", 10);
 const RECONNECT_MS = 5000;
 const SNAPSHOT_TIMEOUT_MS = 5000;
+const TICKET_VALIDATION_TIMEOUT_MS = 3000;
 
 /* ─── Keep-Alive Ping/Pong ─────────────────────────────────────────────── */
 const PING_INTERVAL_MS = 30_000;
@@ -332,6 +334,7 @@ httpServer.on("upgrade", async (req, socket, head) => {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ticket }),
+      signal: AbortSignal.timeout(TICKET_VALIDATION_TIMEOUT_MS),
     });
 
     if (!res.ok) {
@@ -563,7 +566,8 @@ const snapshotLimiter = new RateLimiter(50);
 
 let ibConnected = false;
 let shuttingDown = false;
-let reconnectTimer = null;
+const reconnectGate = createReconnectGate({ delayMs: RECONNECT_MS });
+let ibClientGeneration = 0;
 let nextRequestId = 1;
 let statusBroadcastTick = null;
 let ibConnectionIssue = null;
@@ -2080,47 +2084,69 @@ async function handleClientMessage(client, data) {
 }
 
 function rotateIBClient(newClientId) {
-  // Tear down old instance
-  try { ib.disconnect(); } catch { /* ignore */ }
-  try { ib.removeAllListeners(); } catch { /* ignore */ }
+  reconnectGate.invalidate();
+  ibClientGeneration += 1;
+
+  // Remove callbacks before the deliberate disconnect so the old client's
+  // disconnected event cannot enqueue work for the replacement generation.
+  const oldClient = ib;
+  try { oldClient.removeAllListeners(); } catch { /* ignore */ }
+  try { oldClient.disconnect(); } catch { /* ignore */ }
 
   // Create new instance and rewire all events
   ib = createIBClient(newClientId);
   wireIBEvents();
+  const nextClient = ib;
+  const nextGeneration = ibClientGeneration;
 
-  // Reconnect after a short delay
-  setTimeout(() => {
-    try { ib.connect(); } catch { /* ignore — scheduleReconnect will retry */ }
+  // Reconnect after a short delay through the same single-flight gate used by
+  // disconnect recovery. Rotation and shutdown can now cancel this work too.
+  reconnectGate.schedule(() => {
+    if (nextClient !== ib || nextGeneration !== ibClientGeneration) return;
+    try {
+      nextClient.connect();
+    } catch {
+      ibConnected = false;
+      broadcastStatus();
+      scheduleReconnect();
+    }
   }, 2000);
 }
 
 function scheduleReconnect() {
-  if (shuttingDown || reconnectTimer) return;
-  reconnectTimer = setTimeout(() => {
-    reconnectTimer = null;
+  if (shuttingDown) return;
+  const scheduledClient = ib;
+  const scheduledGeneration = ibClientGeneration;
+  reconnectGate.schedule(() => {
+    if (scheduledClient !== ib || scheduledGeneration !== ibClientGeneration) return;
     console.log(`Attempting IB reconnect to ${cli.ibHost}:${cli.ibPort}...`);
     try {
-      ib.disconnect();
+      scheduledClient.disconnect();
     } catch {
       // Ignore.
     }
     try {
-      ib.connect();
+      scheduledClient.connect();
     } catch {
       // Ignore.
       ibConnected = false;
       broadcastStatus();
       scheduleReconnect();
     }
-  }, RECONNECT_MS);
+  });
 }
 
 function wireIBEvents() {
+  const wiredClient = ib;
+  const wiredGeneration = ibClientGeneration;
+  const isCurrentClient = () => wiredClient === ib && wiredGeneration === ibClientGeneration;
+
   ib.on(EventName.connected, () => {
+    if (!isCurrentClient()) return;
     ibConnected = true;
     ibConnectionIssue = null;
     console.log(`IB connected (clientId ${IB_CLIENT_ID_POOL[activeClientIdIndex]})`);
-    reconnectTimer = null;
+    reconnectGate.invalidate();
     // Real-time market data (type 1) for ALL L1 — a trading terminal must not
     // show ~15-min delayed quotes. Was delayed-frozen (type 4) when depth was
     // off, which made the header futures strip (and every watchlist quote) lag
@@ -2138,6 +2164,7 @@ function wireIBEvents() {
   });
 
   ib.on(EventName.disconnected, () => {
+    if (!isCurrentClient()) return;
     if (ibConnected) {
       console.log("IB disconnected");
     }
@@ -2477,9 +2504,7 @@ staleCheckTimer = setInterval(() => {
 process.on("SIGINT", () => {
   if (shuttingDown) process.exit(0);
   shuttingDown = true;
-  if (reconnectTimer) {
-    clearTimeout(reconnectTimer);
-  }
+  reconnectGate.invalidate();
   if (statusBroadcastTick) {
     clearInterval(statusBroadcastTick);
   }

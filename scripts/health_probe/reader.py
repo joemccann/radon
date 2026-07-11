@@ -21,9 +21,15 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 
-# GH cron min granularity is 5 min and it lags. Allow ~4 missed cycles before
-# declaring the prober dead so normal scheduler jitter doesn't flap the banner.
-STALE_AFTER_SECONDS = 20 * 60
+# GitHub requests a five-minute cron, but the latest 99 scheduled runs observed
+# on 2026-07-10 had a 41.8-minute median, 78.8-minute p95, and 88.1-minute max
+# dispatch interval. Two hours tolerates that platform jitter plus one delayed
+# cycle without flapping, while still detecting a silent off-box monitor within
+# a bounded window.
+STALE_AFTER_SECONDS = 2 * 60 * 60
+# GitHub and the VPS may differ by a few seconds. A timestamp materially ahead
+# of the reader is corrupt evidence, not a perpetually fresh row.
+MAX_FUTURE_SKEW_SECONDS = 5 * 60
 
 # Three-valued verdict, matching the daemon's vocabulary:
 #   "healthy"  — fresh row AND ok=1: edge is reachable + aggregate happy
@@ -69,7 +75,7 @@ def classify_external_probe(
         SELECT
           CASE
             WHEN checked_at IS NULL
-              OR (julianday('now') - julianday(checked_at)) * 86400 > 1200
+              OR (julianday('now') - julianday(checked_at)) * 86400 > 7200
               THEN 'stale'
             WHEN ok = 1 THEN 'healthy'
             ELSE 'down'
@@ -80,7 +86,20 @@ def classify_external_probe(
     if not row or not row.get("checked_at"):
         return {"verdict": VERDICT_STALE, "reason": "no_probe_row"}
 
-    seconds_old = age_seconds(row["checked_at"], now=now)
+    reference = now.astimezone(timezone.utc) if now else datetime.now(timezone.utc)
+    try:
+        checked_at = _parse_iso(row["checked_at"])
+    except (AttributeError, TypeError, ValueError):
+        return {"verdict": VERDICT_STALE, "reason": "invalid_checked_at"}
+
+    delta_seconds = (reference - checked_at).total_seconds()
+    if delta_seconds < -MAX_FUTURE_SKEW_SECONDS:
+        return {
+            "verdict": VERDICT_STALE,
+            "reason": "probe_timestamp_in_future",
+            "age_seconds": 0.0,
+        }
+    seconds_old = max(0.0, delta_seconds)
     if seconds_old > stale_after_seconds:
         return {
             "verdict": VERDICT_STALE,

@@ -39,6 +39,16 @@ describe("startDbKeepAlive", () => {
     stop();
   });
 
+  it("never overlaps pings when the current heartbeat is still pending", async () => {
+    execute.mockImplementation(() => new Promise<never>(() => {}));
+    const stop = startDbKeepAlive(1000);
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(execute).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
   it("stop() halts further pings", async () => {
     execute.mockResolvedValue({ rows: [] });
     const stop = startDbKeepAlive(1000);

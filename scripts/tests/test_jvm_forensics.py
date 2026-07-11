@@ -226,8 +226,12 @@ def _drive(state_path: Path, payload: dict, capture_mock, **kwargs):
     def fake_fetch(url: str, timeout: float):
         return GatewayState.from_health_payload(payload)
 
+    gateway = payload["ib_gateway"]
+    direct_verdict = "wedged" if gateway.get("upstream_dead") else "alive"
+
     with (
         patch("ib_watchdog.fetch_health", side_effect=fake_fetch),
+        patch("ib_watchdog.probe_gateway_direct", return_value=direct_verdict),
         patch("ib_watchdog.trigger_restart", return_value=True) as restart_mock,
         patch("ib_watchdog.record_service_health"),
         patch("jvm_forensics.capture_jvm_forensics", capture_mock),

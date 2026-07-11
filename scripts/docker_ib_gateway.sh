@@ -5,12 +5,23 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-COMPOSE_DIR="$(cd "$SCRIPT_DIR/../docker/ib-gateway" && pwd)"
+DEFAULT_COMPOSE_DIR="$(cd "$SCRIPT_DIR/../docker/ib-gateway" && pwd)"
+COMPOSE_DIR="${IB_GATEWAY_COMPOSE_DIR:-$DEFAULT_COMPOSE_DIR}"
 COMPOSE_OVERRIDE=""
 if [[ -f "$COMPOSE_DIR/docker-compose.override.yml" ]]; then
     COMPOSE_OVERRIDE="-f $COMPOSE_DIR/docker-compose.override.yml"
 fi
 COMPOSE_CMD="docker compose -f $COMPOSE_DIR/docker-compose.yml $COMPOSE_OVERRIDE --env-file $COMPOSE_DIR/.env"
+LOCK_PYTHON="${IB_2FA_LOCK_PYTHON:-python3.13}"
+LOCK_CLI="$SCRIPT_DIR/utils/ib_2fa_lock.py"
+LOCK_HOLDER="scripts.docker_ib_gateway"
+
+acquire_push_lease() {
+    if ! "$LOCK_PYTHON" "$LOCK_CLI" acquire "$LOCK_HOLDER"; then
+        echo "ERROR: refusing IB Gateway cycle because the shared 2FA push lease is unavailable or already held." >&2
+        exit 1
+    fi
+}
 
 ensure_docker_running() {
     if ! docker info >/dev/null 2>&1; then
@@ -52,11 +63,20 @@ validate_env() {
     fi
 }
 
+container_is_running() {
+    $COMPOSE_CMD ps --status running --services 2>/dev/null | grep -qx "ib-gateway"
+}
+
 cmd_start() {
     ensure_docker_running
     check_launchd_not_running
     validate_env
     validate_secrets
+    if container_is_running; then
+        echo "IB Gateway Docker container is already running."
+        return
+    fi
+    acquire_push_lease
     echo "Starting IB Gateway Docker container..."
     $COMPOSE_CMD up -d
     echo "Container started. Check status: $0 status"
@@ -74,6 +94,7 @@ cmd_restart() {
     ensure_docker_running
     validate_env
     validate_secrets
+    acquire_push_lease
     echo "Restarting IB Gateway Docker container..."
     $COMPOSE_CMD restart ib-gateway
     echo "Container restarted."

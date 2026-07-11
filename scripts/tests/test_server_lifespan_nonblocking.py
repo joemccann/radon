@@ -43,6 +43,7 @@ async def test_lifespan_yields_before_ib_pool_finishes_connecting():
     fake_pool_instance.disconnect_all = AsyncMock(return_value=None)
 
     with (
+        patch.object(srv, "test_mode", False),
         patch.object(srv, "IBPool", return_value=fake_pool_instance),
         patch.object(
             srv,
@@ -92,6 +93,7 @@ async def test_lifespan_exposes_pool_on_app_state_before_connect_completes():
     fake_pool_instance.disconnect_all = AsyncMock(return_value=None)
 
     with (
+        patch.object(srv, "test_mode", False),
         patch.object(srv, "IBPool", return_value=fake_pool_instance),
         patch.object(
             srv,
@@ -110,3 +112,41 @@ async def test_lifespan_exposes_pool_on_app_state_before_connect_completes():
             assert app.state.ib_pool is fake_pool_instance
             pool_ready.set()
             await asyncio.sleep(0)
+
+
+@pytest.mark.asyncio
+async def test_lifespan_cancels_and_joins_background_pool_connect():
+    os.environ.pop("RADON_API_TEST_MODE", None)
+    started = asyncio.Event()
+    cancelled = asyncio.Event()
+
+    async def blocked_connect():
+        started.set()
+        try:
+            await asyncio.Event().wait()
+        finally:
+            cancelled.set()
+
+    fake_pool_instance = AsyncMock()
+    fake_pool_instance.connect_all = blocked_connect
+    fake_pool_instance.disconnect_all = AsyncMock(return_value=None)
+
+    with (
+        patch.object(srv, "test_mode", False),
+        patch.object(srv, "IBPool", return_value=fake_pool_instance),
+        patch.object(
+            srv,
+            "ensure_ib_gateway",
+            new=AsyncMock(return_value={"status": "already_running"}),
+        ),
+        patch.object(
+            srv,
+            "_warm_journal_reconciliation_on_startup",
+            new=AsyncMock(return_value=None),
+        ),
+    ):
+        async with srv.lifespan(srv.app):
+            await started.wait()
+
+    assert cancelled.is_set()
+    fake_pool_instance.disconnect_all.assert_awaited_once()

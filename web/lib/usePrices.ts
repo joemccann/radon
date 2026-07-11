@@ -18,6 +18,7 @@ import {
 } from "./pricesProtocol";
 import { createReconnectStrategy, type ReconnectState } from "./reconnectStrategy";
 import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "./realtimeSocketAuth";
+import { REALTIME_OPEN_TIMEOUT_MS } from "./realtimeDeadline";
 import type { RealtimeTokenGetter } from "./RealtimeAuthContext";
 
 export type PriceUpdate = {
@@ -131,9 +132,11 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stalenessTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastMessageRef = useRef<number>(Date.now());
   const mountedRef = useRef(true);
+  const enabledRef = useRef(enabled);
 
   // Connection state machine (ref — not rendered)
   const connStateRef = useRef<ConnState>("idle");
@@ -189,6 +192,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     normalizedSymbols.length > 0 ||
     normalizedContracts.length > 0 ||
     normalizedIndexes.length > 0;
+  const hasSubscriptionsRef = useRef(hasSubscriptions);
 
   const normalizedDepthSymbol =
     depthSymbol && depthSymbol.trim().length > 0 ? depthSymbol.trim() : null;
@@ -201,6 +205,8 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     contracts: normalizedContracts,
     indexes: normalizedIndexes,
   };
+  enabledRef.current = enabled;
+  hasSubscriptionsRef.current = hasSubscriptions;
   desiredDepthRef.current = normalizedDepthSymbol;
   desiredDepthExpiryRef.current = normalizedDepthExpiry;
   onPriceUpdateRef.current = onPriceUpdate;
@@ -224,6 +230,13 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     if (stalenessTimerRef.current) {
       clearInterval(stalenessTimerRef.current);
       stalenessTimerRef.current = null;
+    }
+  }, []);
+
+  const clearOpenTimer = useCallback(() => {
+    if (openTimeoutRef.current) {
+      clearTimeout(openTimeoutRef.current);
+      openTimeoutRef.current = null;
     }
   }, []);
 
@@ -472,13 +485,30 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         scheduleReconnectRef.current();
         return;
       }
-      if (gen !== socketGenRef.current) return; // stale connect attempt
+      if (
+        gen !== socketGenRef.current ||
+        !mountedRef.current ||
+        !enabledRef.current ||
+        !hasSubscriptionsRef.current
+      ) return;
 
       const ws = new WebSocket(url);
       wsRef.current = ws;
+      clearOpenTimer();
+      openTimeoutRef.current = setTimeout(() => {
+        if (
+          gen === socketGenRef.current &&
+          mountedRef.current &&
+          ws.readyState === WebSocket.CONNECTING
+        ) {
+          setError("Realtime connection timed out");
+          ws.close();
+        }
+      }, REALTIME_OPEN_TIMEOUT_MS);
 
     ws.onopen = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
+      clearOpenTimer();
       connStateRef.current = "open";
       reconnectStrategyRef.current.reset(); // Reset backoff on success
       lastMessageRef.current = Date.now();
@@ -625,6 +655,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
     ws.onclose = () => {
       if (gen !== socketGenRef.current || !mountedRef.current) return;
+      clearOpenTimer();
       connStateRef.current = "closed";
       clearStalenessTimer();
       setConnected(false);
@@ -647,7 +678,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       ws.close();
     };
     })();
-  }, [enabled, socketUrl, clearReconnectTimer, clearStalenessTimer, syncSubscriptions, syncDepth]);
+  }, [enabled, socketUrl, clearReconnectTimer, clearStalenessTimer, clearOpenTimer, syncSubscriptions, syncDepth]);
 
   // Wire scheduleReconnect via ref to avoid circular dep
   const scheduleReconnect = useCallback(() => {
@@ -697,8 +728,10 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
         const results: Record<string, PriceData> = {};
         const pending = new Set(symbolsToRequest);
         let ws: WebSocket | null = null;
+        let settled = false;
 
         const timeout = setTimeout(() => {
+          settled = true;
           ws?.close();
           resolve(results);
         }, 5000);
@@ -719,11 +752,13 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
                 pending.delete(symbol);
 
                 if (pending.size === 0) {
+                  settled = true;
                   clearTimeout(timeout);
                   socket.close();
                   resolve(results);
                 }
               } else if (message.type === "error") {
+                settled = true;
                 clearTimeout(timeout);
                 socket.close();
                 reject(new Error(message.message));
@@ -734,6 +769,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
           };
 
           socket.onerror = () => {
+            settled = true;
             clearTimeout(timeout);
             socket.close();
             reject(new Error("Failed to connect to price server"));
@@ -742,10 +778,13 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
         buildAuthenticatedWebSocketUrl(socketUrl, getTokenRef.current)
           .then((url) => {
+            if (settled || !mountedRef.current) return;
             ws = new WebSocket(url);
             wireSnapshotSocket(ws);
           })
           .catch((error_) => {
+            if (settled) return;
+            settled = true;
             clearTimeout(timeout);
             reject(error_);
           });
@@ -770,10 +809,12 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       connect();
     } else {
       // Teardown
+      socketGenRef.current += 1;
       clearReconnectTimer();
       clearStalenessTimer();
+      clearOpenTimer();
       if (wsRef.current) {
-        if (wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current.readyState !== WebSocket.CLOSED) {
           wsRef.current.close();
         }
         wsRef.current = null;
@@ -787,10 +828,12 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
     return () => {
       mountedRef.current = false;
+      socketGenRef.current += 1;
       clearReconnectTimer();
       clearStalenessTimer();
+      clearOpenTimer();
       if (wsRef.current) {
-        if (wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current.readyState !== WebSocket.CLOSED) {
           wsRef.current.close();
         }
         wsRef.current = null;
@@ -799,7 +842,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       lastSentHashRef.current = "";
       lastSentDepthKeyRef.current = null;
     };
-  }, [enabled, hasSubscriptions, connect, clearReconnectTimer, clearStalenessTimer]);
+  }, [enabled, hasSubscriptions, connect, clearReconnectTimer, clearStalenessTimer, clearOpenTimer]);
 
   // ---------------------------------------------------------------------------
   // Subscription sync effect — sends diffs over open connection

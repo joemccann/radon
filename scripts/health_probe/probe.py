@@ -8,7 +8,7 @@ row-construction logic is broken out so it is testable without sockets:
   * probe_freshness()      — bearer-auth GET /api/probe/freshness (DUR-16)
   * classify_probes()      — combine ping + status probes -> ok/detail
   * classify_user_path()   — Clerk-wall verdict for the user path
-  * classify_freshness()   — freshness verdict (404/401 = endpoint_pending, not fail)
+  * classify_freshness()   — data freshness plus fail-closed endpoint availability
   * build_probe_row()      — assemble the external_probe UPSERT row
   * build_runs_row()       — assemble the append-only external_probe_runs row
   * exit_code_for()        — the alerting policy (see below)
@@ -21,16 +21,15 @@ Usage (off-box, e.g. GitHub Actions):
 Exit-code policy (DUR-16, closing the DUR-04 residual — GitHub emails the
 operator on workflow FAILURE, so a nonzero exit IS the stopgap alert):
   * 1              — could not write to Turso (the run recorded nothing)
-  * EXIT_UNHEALTHY — edge_ok or user_path_ok false; or freshness_ok explicitly
-                     false while the endpoint reports market_state == "open"
-                     (quiet-market NULLs and the pre-deploy endpoint_pending
-                     state never page)
+  * EXIT_UNHEALTHY — edge/user path down; freshness endpoint/database unavailable;
+                     or valid data explicitly stale during market_state == "open"
   * 0              — otherwise; the row still records any soft degradation
 """
 from __future__ import annotations
 
 import errno
 import json
+import math
 import os
 import socket
 import sys
@@ -226,9 +225,9 @@ def probe_freshness(url: str, token: str, timeout: float = HTTP_TIMEOUT_SECONDS)
     return probe_endpoint(url, timeout=timeout, headers={"Authorization": "Bearer " + token})
 
 
-def _freshness_unknown(detail: str) -> dict:
-    return {"freshness_ok": None, "tick_fresh": None, "scan_fresh": None,
-            "market_state": None, "detail": detail}
+def _freshness_availability_failure(detail: str, market_state=None) -> dict:
+    return {"freshness_ok": 0, "tick_fresh": None, "scan_fresh": None,
+            "market_state": market_state, "availability_ok": 0, "detail": detail}
 
 
 def _check_fresh_flag(check) -> int | None:
@@ -237,6 +236,43 @@ def _check_fresh_flag(check) -> int | None:
         return None
     fresh = check.get("fresh")
     return None if fresh is None else int(bool(fresh))
+
+
+_EXPECTED_FRESHNESS_CHECKS = frozenset(
+    {"relay_tick", "vcg_scan", "gex_scan", "journal"}
+)
+_FRESHNESS_CHECK_FIELDS = frozenset({"applicable", "age_secs", "fresh"})
+
+
+def _valid_freshness_check(check) -> bool:
+    """Validate one fixed-contract freshness check without coercion."""
+    if not isinstance(check, dict) or set(check) != _FRESHNESS_CHECK_FIELDS:
+        return False
+
+    applicable = check["applicable"]
+    age_secs = check["age_secs"]
+    fresh = check["fresh"]
+    if type(applicable) is not bool:  # bool is intentionally not an integer here
+        return False
+    if age_secs is not None:
+        if (
+            isinstance(age_secs, bool)
+            or not isinstance(age_secs, (int, float))
+            or not math.isfinite(age_secs)
+            or age_secs < 0
+        ):
+            return False
+
+    if applicable:
+        return type(fresh) is bool
+    return age_secs is None and fresh is None
+
+
+def _derived_all_fresh(checks: dict) -> bool | None:
+    applicable = [check for check in checks.values() if check["applicable"]]
+    if not applicable:
+        return None
+    return all(check["fresh"] is True for check in applicable)
 
 
 def _combined_scan_flag(*flags) -> int | None:
@@ -250,34 +286,67 @@ def _combined_scan_flag(*flags) -> int | None:
 def classify_freshness(raw: dict) -> dict:
     """Freshness verdict per the DUR-16 contract: healthy = HTTP 200 AND
     all_fresh in (true, null) — null means a quiet market, not a failure.
-    404/401 = the web half has not deployed the endpoint yet (endpoint_pending,
-    freshness_ok NULL); this self-heals the moment a 200 takes over. Transport
-    failures and 5xx record freshness_ok=0 but with market_state unknown, so
-    they never page on their own (the edge checks own that class)."""
+    Endpoint/transport/database availability failures are distinct from valid
+    data staleness so they can page at any hour. Only a valid 200 payload's data
+    freshness remains market-gated."""
     if raw.get("skipped"):
-        return _freshness_unknown("freshness_no_token")
+        return _freshness_availability_failure("freshness_no_token")
     if not raw.get("reachable"):
-        unknown = _freshness_unknown("freshness_unreachable:" + str(raw.get("detail", "?")))
-        unknown["freshness_ok"] = 0
-        return unknown
+        return _freshness_availability_failure(
+            "freshness_unreachable:" + str(raw.get("detail", "?")))
     status = int(raw.get("http_status", 0))
-    if status in (401, 404):
-        return _freshness_unknown("endpoint_pending")
     if not (200 <= status < 300):
-        unknown = _freshness_unknown("freshness_http_%d" % status)
-        unknown["freshness_ok"] = 0
-        return unknown
+        return _freshness_availability_failure("freshness_http_%d" % status)
 
     payload = raw.get("payload") if isinstance(raw.get("payload"), dict) else {}
     checks = payload.get("checks") if isinstance(payload.get("checks"), dict) else {}
+    market_state = payload.get("market_state")
     all_fresh = payload.get("all_fresh")
-    healthy = all_fresh in (True, None)
+    database_ok = payload.get("database_ok")
+    database_failures = payload.get("database_failures")
+    checks_valid = (
+        set(checks) == _EXPECTED_FRESHNESS_CHECKS
+        and all(_valid_freshness_check(checks[name]) for name in _EXPECTED_FRESHNESS_CHECKS)
+    )
+    failures_valid = (
+        isinstance(database_failures, list)
+        and all(
+            type(name) is str and name in _EXPECTED_FRESHNESS_CHECKS
+            for name in database_failures
+        )
+        and len(database_failures) == len(set(database_failures))
+    )
+    derived_all_fresh = _derived_all_fresh(checks) if checks_valid else None
+    malformed = (
+        not isinstance(payload.get("generated_at"), str)
+        or not payload.get("generated_at", "").strip()
+        or "all_fresh" not in payload
+        or not isinstance(market_state, str)
+        or market_state not in {"open", "extended", "closed"}
+        or not checks_valid
+        or (all_fresh is not None and type(all_fresh) is not bool)
+        or (checks_valid and all_fresh is not derived_all_fresh)
+        or type(database_ok) is not bool
+        or not failures_valid
+        or (
+            type(database_ok) is bool
+            and failures_valid
+            and database_ok is not (len(database_failures) == 0)
+        )
+    )
+    if malformed:
+        return _freshness_availability_failure("freshness_malformed_payload", market_state)
+    if database_ok is False:
+        return _freshness_availability_failure(
+            "freshness_database_unavailable", market_state)
+    healthy = derived_all_fresh in (True, None)
     return {
         "freshness_ok": 1 if healthy else 0,
         "tick_fresh": _check_fresh_flag(checks.get("relay_tick")),
         "scan_fresh": _combined_scan_flag(_check_fresh_flag(checks.get("vcg_scan")),
                                           _check_fresh_flag(checks.get("gex_scan"))),
-        "market_state": payload.get("market_state"),
+        "market_state": market_state,
+        "availability_ok": 1,
         "detail": "fresh" if healthy else "stale",
     }
 
@@ -285,20 +354,20 @@ def classify_freshness(raw: dict) -> dict:
 def _is_status_payload_healthy(payload: dict) -> bool:
     """The Tier-2 aggregate is healthy when its top-level state is not an error.
 
-    /edge-health/status reports an `ok` boolean and/or a three-valued `state`
-    ('up'|'down'|'unknown'|...). Be liberal: treat an explicit ok==False or a
-    state of 'down'/'error' as unhealthy; anything else (including 'unknown',
-    which is not proof of death) as healthy. A non-dict / empty payload is
-    treated as healthy-but-opaque — the 200 itself proved the edge answered.
+    New health daemons publish ``ok`` plus ``overall_state``. The legacy
+    ``state`` field remains accepted during rolling deploys, but an opaque body
+    is not evidence that the aggregate is healthy.
     """
     if not isinstance(payload, dict) or not payload:
-        return True
-    if payload.get("ok") is False:
         return False
-    state = payload.get("state")
-    if isinstance(state, str) and state.lower() in {"down", "error", "failed"}:
-        return False
-    return True
+    state = payload.get("overall_state", payload.get("state"))
+    state_healthy = (
+        isinstance(state, str) and state.lower() in {"up", "ok", "healthy"})
+    if isinstance(payload.get("ok"), bool):
+        if payload["ok"] is False:
+            return False
+        return state is None or state_healthy
+    return state_healthy
 
 
 def classify_probes(ping: dict, status: dict) -> dict:
@@ -370,13 +439,15 @@ def build_runs_row(edge_row: dict, user_path: dict, freshness: dict,
     }
 
 
-def exit_code_for(edge_ok: int, user_path_ok: int, freshness_ok, market_state) -> int:
-    """The alerting policy. Edge or user-path down always pages (GitHub emails
-    on a red workflow run — the DUR-04 residual). Freshness alone pages only
-    when explicitly stale during regular trading hours: quiet-market NULLs,
-    the pre-deploy endpoint_pending state, and stale-with-unknown-market-state
-    (5xx/timeout, already covered by the edge checks) stay green."""
-    if not edge_ok or not user_path_ok:
+def exit_code_for(edge_ok: int, user_path_ok: int, freshness_ok, market_state,
+                  availability_ok=None) -> int:
+    """Page for control-plane availability at any hour; market-gate only data.
+
+    GitHub emails on a red workflow run. A valid endpoint with stale data pages
+    only during regular trading hours; endpoint, auth, transport, schema, or DB
+    availability failure pages regardless of market state.
+    """
+    if not edge_ok or not user_path_ok or availability_ok == 0:
         return EXIT_UNHEALTHY
     if freshness_ok == 0 and market_state == "open":
         return EXIT_UNHEALTHY
@@ -425,7 +496,8 @@ def run_probe(source: str = PROBE_SOURCE) -> dict:
         "edge_row": edge_row,
         "runs_row": runs_row,
         "exit_code": exit_code_for(edge_row["ok"], user_path["ok"],
-                                   freshness["freshness_ok"], freshness["market_state"]),
+                                   freshness["freshness_ok"], freshness["market_state"],
+                                   freshness.get("availability_ok")),
     }
 
 

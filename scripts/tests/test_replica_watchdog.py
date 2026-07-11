@@ -1,7 +1,8 @@
 """Tests for ReplicaWatchdogHandler — WalConflict death-spiral detection + self-heal.
 
-We mock subprocess.run + os.unlink so the test environment never actually shells
-out to journalctl/systemctl or touches files on disk.
+Heal is one atomic operator action (`radon repair-nextjs-replica`) under the
+shared deploy lock. Tests mock subprocess.run so the environment never shells
+out to journalctl or the operator CLI.
 
 `db.writer` depends on libsql_experimental which isn't installed in the test
 environment, so we inject a fake `db.writer` module into sys.modules before
@@ -14,7 +15,7 @@ import sys
 import types
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, call, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -87,13 +88,20 @@ def _ok_result() -> MagicMock:
     return mock
 
 
+def _is_repair_cmd(cmd) -> bool:
+    return (
+        list(cmd[:2])
+        == [ReplicaWatchdogHandler.OPERATOR_BIN, ReplicaWatchdogHandler.REPAIR_ACTION]
+    )
+
+
 def _build_subprocess_router(conflict_count: int):
-    """Return a side_effect function that routes journalctl vs systemctl calls."""
+    """Return a side_effect function that routes journalctl vs repair calls."""
 
     def _route(cmd, *args, **kwargs):
         if cmd and cmd[0] == "journalctl":
             return _journalctl_result(conflict_count)
-        if cmd and cmd[0] == "sudo":
+        if _is_repair_cmd(cmd):
             return _ok_result()
         return _ok_result()
 
@@ -109,16 +117,13 @@ class TestHealthy:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(0),
-        ) as run_mock, patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ) as run_mock:
             result = handler.execute()
 
         assert result == {"status": "healthy", "wal_conflicts_5m": 0}
         # Only the journalctl call should have happened.
         assert run_mock.call_count == 1
         assert run_mock.call_args_list[0][0][0][0] == "journalctl"
-        unlink_mock.assert_not_called()
 
     def test_two_conflicts_below_threshold_is_healthy(self):
         """Two conflicts in 5min is noise, not a death spiral."""
@@ -126,14 +131,11 @@ class TestHealthy:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(2),
-        ) as run_mock, patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ) as run_mock:
             result = handler.execute()
 
         assert result == {"status": "healthy", "wal_conflicts_5m": 2}
         assert run_mock.call_count == 1
-        unlink_mock.assert_not_called()
 
     def test_healthy_path_writes_ok_heartbeat(self, fake_db_writer):
         """Every healthy cycle must heartbeat service_health=ok so the
@@ -147,8 +149,6 @@ class TestHealthy:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(0),
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
         ):
             handler.execute()
 
@@ -170,36 +170,19 @@ class TestSelfHeal:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(3),
-        ) as run_mock, patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ) as run_mock:
             result = handler.execute()
 
         assert result == {"status": "healed", "wal_conflicts_5m": 3}
 
-        # Subprocess call order: journalctl → sudo systemctl stop → sudo systemctl start.
+        # Subprocess call order: journalctl → atomic operator repair.
         commands = [c[0][0] for c in run_mock.call_args_list]
         assert commands[0][0] == "journalctl"
         assert commands[1] == [
-            "sudo",
-            ReplicaWatchdogHandler.SYSTEMCTL_BIN,
-            "stop",
-            ReplicaWatchdogHandler.SERVICE_NAME,
+            ReplicaWatchdogHandler.OPERATOR_BIN,
+            ReplicaWatchdogHandler.REPAIR_ACTION,
         ]
-        assert commands[2] == [
-            "sudo",
-            ReplicaWatchdogHandler.SYSTEMCTL_BIN,
-            "start",
-            ReplicaWatchdogHandler.SERVICE_NAME,
-        ]
-        assert len(commands) == 3, "Expected exactly journalctl + stop + start"
-
-        # Unlink each replica sidecar in order, between stop and start.
-        expected_unlinks = [
-            call(f"{ReplicaWatchdogHandler.DATA_DIR}/{f}")
-            for f in ReplicaWatchdogHandler.REPLICA_FILES
-        ]
-        assert unlink_mock.call_args_list == expected_unlinks
+        assert len(commands) == 2, "Expected exactly journalctl + repair"
 
         # service_health called twice — syncing then ok.
         assert record_mock.call_count == 2
@@ -220,8 +203,6 @@ class TestSelfHeal:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(5),
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
         ):
             result = handler.execute()
 
@@ -241,16 +222,14 @@ class TestThrottle:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(5),
-        ) as run_mock, patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ) as run_mock:
             result = handler.execute()
 
         assert result["status"] == "throttled"
         assert 590 <= result["since_last_heal_s"] <= 610  # ~10 min
-        # journalctl ran but no systemctl/unlink.
+        # journalctl ran but no repair.
         assert run_mock.call_count == 1
-        unlink_mock.assert_not_called()
+        assert not any(_is_repair_cmd(c[0][0]) for c in run_mock.call_args_list)
 
     def test_heal_runs_again_after_throttle_expires(self):
         handler = ReplicaWatchdogHandler()
@@ -260,8 +239,6 @@ class TestThrottle:
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(5),
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
         ):
             result = handler.execute()
 
@@ -309,145 +286,62 @@ class TestStateRoundTrip:
 # Failure paths.
 # ---------------------------------------------------------------------------
 class TestHealFailure:
-    def test_stop_fails_returns_heal_failed_and_throttle_not_advanced(self, fake_db_writer):
+    def test_repair_fails_returns_heal_failed_and_throttle_not_advanced(
+        self, fake_db_writer
+    ):
         record_mock, _ = fake_db_writer
         handler = ReplicaWatchdogHandler()
 
         def _route(cmd, *args, **kwargs):
             if cmd and cmd[0] == "journalctl":
                 return _journalctl_result(5)
-            if cmd[:3] == ["sudo", ReplicaWatchdogHandler.SYSTEMCTL_BIN, "stop"]:
+            if _is_repair_cmd(cmd):
                 raise subprocess.CalledProcessError(
-                    returncode=1, cmd=cmd, stderr="systemd unit not found"
+                    returncode=1, cmd=cmd, stderr="deploy/control lock held"
                 )
             return _ok_result()
 
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_route,
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ):
             result = handler.execute()
 
         assert result["status"] == "heal_failed"
         assert "error" in result
         # Throttle MUST NOT advance — operator wants the next cycle to retry.
         assert handler._last_heal_at is None
-        # No unlinks should have happened (stop failed before delete step).
-        unlink_mock.assert_not_called()
         # service_health called with syncing (start) + error (failure).
         states = [c[0][1] for c in record_mock.call_args_list]
         assert "syncing" in states
         assert "error" in states
 
 
-class TestUnlinkMissingFile:
-    def test_unlink_filenotfounderror_is_swallowed(self):
-        """Replica sidecar files may already be gone — that's fine."""
-        handler = ReplicaWatchdogHandler()
-
-        def _unlink_side_effect(path):
-            if path.endswith("replica.db-shm"):
-                raise FileNotFoundError(path)
-            return None
-
-        with patch(
-            "monitor_daemon.handlers.replica_watchdog.subprocess.run",
-            side_effect=_build_subprocess_router(3),
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink",
-            side_effect=_unlink_side_effect,
-        ) as unlink_mock:
-            result = handler.execute()
-
-        assert result["status"] == "healed"
-        # All four unlinks attempted, missing one didn't abort the loop.
-        assert unlink_mock.call_count == 4
-
-
-class TestStartFailureAfterDelete:
-    def test_start_fails_after_files_deleted_logs_alert_and_throttle_not_advanced(
-        self, fake_db_writer
-    ):
-        """Start failing AFTER unlink succeeds — error path mid-heal.
-
-        Sequence: journalctl→5 conflicts, stop OK, all 4 unlinks OK, start raises.
-        Throttle MUST stay None so the next monitor cycle retries.
-        """
-        record_mock, _ = fake_db_writer
-        handler = ReplicaWatchdogHandler()
-
-        def _route(cmd, *args, **kwargs):
-            if cmd and cmd[0] == "journalctl":
-                return _journalctl_result(5)
-            if cmd[:3] == ["sudo", ReplicaWatchdogHandler.SYSTEMCTL_BIN, "stop"]:
-                return _ok_result()
-            if cmd[:3] == ["sudo", ReplicaWatchdogHandler.SYSTEMCTL_BIN, "start"]:
-                raise subprocess.CalledProcessError(
-                    returncode=5, cmd=cmd, stderr="failed to start unit"
-                )
-            return _ok_result()
-
-        with patch(
-            "monitor_daemon.handlers.replica_watchdog.subprocess.run",
-            side_effect=_route,
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
-            result = handler.execute()
-
-        assert result["status"] == "heal_failed"
-        assert "error" in result
-        assert "failed to start unit" in result["error"] or "5" in result["error"]
-
-        # Throttle deliberately not advanced — next cycle must retry.
-        assert handler._last_heal_at is None
-
-        # All 4 sidecar files were unlinked before start failed.
-        expected_unlinks = [
-            call(f"{ReplicaWatchdogHandler.DATA_DIR}/{f}")
-            for f in ReplicaWatchdogHandler.REPLICA_FILES
-        ]
-        assert unlink_mock.call_args_list == expected_unlinks
-
-        # service_health: syncing then error, no ok.
-        states = [c[0][1] for c in record_mock.call_args_list]
-        assert states == ["syncing", "error"]
-        assert "ok" not in states
-
-        # Error payload carries the conflict count for operator triage.
-        error_kwargs = record_mock.call_args_list[1][1]
-        assert error_kwargs["error"]["wal_conflicts_observed"] == 5
-
-
 class TestSubprocessTimeout:
     def test_subprocess_timeout_treated_same_as_call_error(self, fake_db_writer):
-        """TimeoutExpired on stop must take the same heal_failed path as CalledProcessError."""
+        """TimeoutExpired on repair must take the same heal_failed path as CalledProcessError."""
         record_mock, _ = fake_db_writer
         handler = ReplicaWatchdogHandler()
 
         def _route(cmd, *args, **kwargs):
             if cmd and cmd[0] == "journalctl":
                 return _journalctl_result(4)
-            if cmd[:3] == ["sudo", ReplicaWatchdogHandler.SYSTEMCTL_BIN, "stop"]:
-                raise subprocess.TimeoutExpired(cmd=cmd, timeout=30)
+            if _is_repair_cmd(cmd):
+                raise subprocess.TimeoutExpired(
+                    cmd=cmd, timeout=ReplicaWatchdogHandler.SUBPROCESS_TIMEOUT
+                )
             return _ok_result()
 
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_route,
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ):
             result = handler.execute()
 
         assert result["status"] == "heal_failed"
         assert "error" in result
         # Throttle stays unadvanced.
         assert handler._last_heal_at is None
-        # Stop timed out before delete step.
-        unlink_mock.assert_not_called()
         # service_health hit syncing then error, no ok.
         states = [c[0][1] for c in record_mock.call_args_list]
         assert states == ["syncing", "error"]
@@ -476,19 +370,16 @@ class TestJournalctlUnavailable:
                 raise exception
             return _ok_result()
 
-        with caplog.at_level("WARNING", logger="monitor_daemon.handlers.replica_watchdog"), patch(
+        with caplog.at_level(
+            "WARNING", logger="monitor_daemon.handlers.replica_watchdog"
+        ), patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_route,
-        ) as run_mock, patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
-        ) as unlink_mock:
+        ) as run_mock:
             result = handler.execute()
 
         # Healthy with zero count — fail open, don't restart on a blind read.
         assert result == {"status": "healthy", "wal_conflicts_5m": 0}
-
-        # No heal attempted: no unlinks, no further subprocess calls.
-        unlink_mock.assert_not_called()
 
         # The healthy path heartbeats service_health=ok (single write).
         # Heal-specific writes (syncing → ok with wal_conflicts_observed)
@@ -499,6 +390,7 @@ class TestJournalctlUnavailable:
         assert "heartbeat_at" in kwargs.get("error", {})
         assert run_mock.call_count == 1
         assert run_mock.call_args_list[0][0][0][0] == "journalctl"
+        assert not any(_is_repair_cmd(c[0][0]) for c in run_mock.call_args_list)
 
         # Warning logged so operators can see the watchdog has gone blind.
         warnings = [r for r in caplog.records if r.levelname == "WARNING"]
@@ -524,12 +416,10 @@ class TestNaiveIsoStateRestore:
         assert handler._last_heal_at.tzinfo is not None
         assert handler._last_heal_at.utcoffset() == timedelta(0)
 
-        # Throttle check (line 124) must not raise — execute() should complete cleanly.
+        # Throttle check must not raise — execute() should complete cleanly.
         with patch(
             "monitor_daemon.handlers.replica_watchdog.subprocess.run",
             side_effect=_build_subprocess_router(5),
-        ), patch(
-            "monitor_daemon.handlers.replica_watchdog.os.unlink"
         ):
             # Whether this returns "throttled" or "healed" depends on how long ago
             # 2026-05-09T08:30:00Z was relative to wall-clock. The test guarantee is

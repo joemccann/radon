@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 /**
- * Verifies that GET /api/portfolio triggers background sync via FastAPI
- * when the latest Turso portfolio snapshot is stale, without blocking the
- * response.
+ * Verifies that GET /api/portfolio is a read-only snapshot surface. Browser
+ * polling must never initiate IB work; scheduled jobs and explicit POST own
+ * synchronization.
  */
 
 const mockRadonFetch = vi.fn();
@@ -51,7 +51,7 @@ function mockDbPortfolio(portfolio: Record<string, unknown> | null) {
   });
 }
 
-describe("GET /api/portfolio — stale-while-revalidate background sync", () => {
+describe("GET /api/portfolio — cache-only polling", () => {
   beforeEach(() => {
     vi.resetModules();
     vi.clearAllMocks();
@@ -59,7 +59,7 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
     mockDbPortfolio(makePortfolio(ageAgo(10_000)));
   });
 
-  it("triggers FastAPI background sync when the Turso snapshot is >60 s old", async () => {
+  it("serves stale Turso data with a warning without triggering IB sync", async () => {
     const portfolio = makePortfolio(ageAgo(90_000));
     mockDbPortfolio(portfolio);
 
@@ -69,10 +69,9 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
 
     expect(response.status).toBe(200);
     expect(body.last_sync).toBe(portfolio.last_sync);
-    expect(mockRadonFetch).toHaveBeenCalledOnce();
-    const [path, options] = mockRadonFetch.mock.calls[0] as [string, Record<string, unknown>];
-    expect(path).toBe("/portfolio/background-sync");
-    expect(options).toMatchObject({ method: "POST" });
+    expect(response.headers.get("X-Sync-Warning")).toContain("stale");
+    expect(response.headers.get("X-Portfolio-Source")).toBe("turso-stale");
+    expect(mockRadonFetch).not.toHaveBeenCalled();
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
@@ -86,26 +85,17 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("serves live IB sync data when no Turso snapshot exists", async () => {
-    const livePortfolio = makePortfolio(new Date().toISOString());
+  it("returns unavailable without touching IB when no Turso snapshot exists", async () => {
     mockDbPortfolio(null);
-    mockRadonFetch.mockResolvedValue(livePortfolio);
 
     const { GET } = await import("../app/api/portfolio/route");
     const response = await GET();
-    const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.last_sync).toBe(livePortfolio.last_sync);
-    expect(response.headers.get("X-Portfolio-Source")).toBe("ib-live-fallback");
-    expect(mockRadonFetch).toHaveBeenCalledOnce();
-    const [path, options] = mockRadonFetch.mock.calls[0] as [string, Record<string, unknown>];
-    expect(path).toBe("/portfolio/sync");
-    expect(options).toMatchObject({ method: "POST" });
+    expect(response.status).toBe(503);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
-  it("does not trigger a second sync when one is already in-flight", async () => {
-    mockRadonFetch.mockReturnValue(new Promise(() => {}));
+  it("keeps repeated stale GETs free of IB side effects", async () => {
     mockDbPortfolio(makePortfolio(ageAgo(90_000)));
 
     const { GET } = await import("../app/api/portfolio/route");
@@ -113,6 +103,31 @@ describe("GET /api/portfolio — stale-while-revalidate background sync", () => 
     await GET();
     await GET();
 
-    expect(mockRadonFetch).toHaveBeenCalledOnce();
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
+
+  it("warns when a recent snapshot is served from memory after a Turso failure", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T20:00:00Z"));
+    process.env.RADON_DB_CACHE_FORCE = "1";
+    try {
+      mockDbPortfolio(makePortfolio(ageAgo(10_000)));
+      const { GET } = await import("../app/api/portfolio/route");
+
+      const fresh = await GET();
+      expect(fresh.headers.get("X-Sync-Warning")).toBeNull();
+
+      vi.advanceTimersByTime(3_001);
+      mockExecute.mockRejectedValue(new Error("turso down"));
+      const degraded = await GET();
+
+      expect(degraded.status).toBe(200);
+      expect(degraded.headers.get("X-Sync-Warning")).toContain("Turso read failed");
+      expect(degraded.headers.get("X-Portfolio-Source")).toBe("turso-stale");
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+    } finally {
+      delete process.env.RADON_DB_CACHE_FORCE;
+      vi.useRealTimers();
+    }
   });
 });

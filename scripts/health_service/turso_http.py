@@ -46,6 +46,17 @@ _EXTERNAL_PROBE_SQL = (
 )
 
 
+def _external_probe_sql(source: str | None = None) -> str:
+    if source is None:
+        return _EXTERNAL_PROBE_SQL
+    literal = source.replace("'", "''")
+    return (
+        "SELECT source, ok, http_status, latency_ms, checked_at, detail "
+        f"FROM external_probe WHERE source = '{literal}' "
+        "ORDER BY checked_at DESC LIMIT 1"
+    )
+
+
 def http_url_from_libsql(url: str) -> str:
     """Convert a libsql:// (or ws://) DB URL to the https:// HTTP-API origin.
 
@@ -196,16 +207,17 @@ def fetch_service_health(timeout: float = 2.5) -> dict:
         return {"state": "unknown", "detail": "fetch_error", "rows": []}
 
 
-def fetch_external_probe(timeout: float = 2.5):
+def fetch_external_probe(timeout: float = 2.5, source: str | None = None):
     """Read the freshest external_probe row (the Tier-3 off-box witness) over
     stdlib HTTP. Returns a dict {source, ok, http_status, latency_ms, checked_at,
-    detail} or None (no creds / no row / any failure). NEVER raises."""
+    detail} or None (no creds / no row / any failure). When ``source`` is set,
+    only that independent observer can satisfy the read. NEVER raises."""
     db_url, token = read_env()
     http_origin = http_url_from_libsql(db_url)
     if not http_origin or not token:
         return None
     try:
-        body = _post_pipeline(http_origin, token, _EXTERNAL_PROBE_SQL, timeout)
+        body = _post_pipeline(http_origin, token, _external_probe_sql(source), timeout)
         rows = _rows_from_pipeline(body)
         if not rows:
             return None

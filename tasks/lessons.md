@@ -3,7 +3,7 @@
 ## 2026-06-27
 
 - Portfolio sync endpoints must return the freshly reconstructed live IB payload directly; persistence to Turso is a separate best-effort step. Never make `/portfolio/sync` prove success by rereading Turso, because a DB read outage turns a successful IB sync into a dashboard blank.
-- For dashboard live-data regressions, the portfolio GET path needs a bounded live IB fallback when the Turso snapshot read times out or no snapshot exists. Service health should still report the DB degradation, but the dashboard should not show `Failed to fetch portfolio` while live IB data is reachable.
+- Superseded 2026-07-10: browser portfolio and orders GET paths must be snapshot-only and must never invoke live IB as a fallback. Live reconstruction belongs behind explicit POST/operator actions or server-owned schedules with single-flight and minimum-age caching; otherwise every open tab amplifies a DB outage into an IB client/subprocess storm. When a snapshot read falls back after an upstream error, keep serving the snapshot but preserve a visible degraded warning.
 
 ## 2026-06-25
 

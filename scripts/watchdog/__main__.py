@@ -46,7 +46,7 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
         print(f"[watchdog] bucket={args.bucket} skipped (off-window)")
         return 0
 
-    fired = [o for o in report.outcomes if o.fired]
+    observed_outcomes = list(report.outcomes)
     for outcome in report.outcomes:
         line = f"  {outcome.service:24s} {outcome.status:8s} fired={outcome.fired}"
         print(line)
@@ -55,24 +55,33 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # one probe per 5 min is enough and keeps the other buckets pure
     # service_health checks. ALERT-ONLY; see scripts/watchdog/units.py.
     if args.bucket == "continuous":
-        from scripts.watchdog import units
+        from scripts.watchdog import external_probe, units
         unit_outcomes = units.check_units(now=now)
+        observed_outcomes.extend(unit_outcomes)
         for outcome in unit_outcomes:
             print(f"  {outcome.service:24s} {outcome.status:8s} fired={outcome.fired}")
-        fired.extend(unit_outcomes)
+
+        probe_outcome = external_probe.check_external_probe(now=now)
+        observed_outcomes.append(probe_outcome)
+        print(
+            f"  {probe_outcome.service:24s} {probe_outcome.status:8s} "
+            f"fired={probe_outcome.fired}"
+        )
+
+    fired = [outcome for outcome in observed_outcomes if outcome.fired]
 
     # Root-cause-aware dispatch: when IB Gateway is the upstream root
     # cause (auth_state ∈ awaiting_2fa, unreachable) AND ≥2 IB-dependent
     # services degraded in this cycle, collapse them into one Pushover
     # message + individual service_health rows. Otherwise per-service
     # cooldown-gated dispatch fires normally. See scripts/watchdog/grouping.py.
-    grouping.dispatch_with_grouping(outcomes=fired, now=now)
+    dispatch_summary = grouping.dispatch_with_grouping(outcomes=fired, now=now)
 
     # Cancel-on-recovery: a P1 Pushover emergency re-alerts every 60s for a full
     # hour, even after the condition clears (a transient blip thus spams for an
     # hour). Once the service is healthy again — or IB is authenticated, for the
     # grouped key — cancel its emergency push so it stops paging.
-    _reconcile_recovered_emergencies(report=report, now=now)
+    _reconcile_recovered_emergencies(outcomes=observed_outcomes, now=now)
 
     # The daily bucket carries the once-per-UTC-day P2/P3 digest flush
     # (DUR-14). On send failure flush_daily_digest records the dispatcher
@@ -83,7 +92,7 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     if args.bucket == "daily":
         digest_error = notify.flush_daily_digest(now=now)
 
-    print(f"[watchdog] bucket={args.bucket} fired={len(fired)}/{len(report.outcomes)}")
+    print(f"[watchdog] bucket={args.bucket} fired={len(fired)}/{len(observed_outcomes)}")
 
     # Heartbeat the watchdog-alerts row when this bucket cycle dispatched
     # nothing. notify._emit_service_health() writes ``error`` on every
@@ -92,15 +101,15 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     # watchdog-alerts even after the underlying issue heals. Same
     # heartbeat-on-success pattern as replica-watchdog (see
     # feedback_service_health_heartbeat.md).
-    if not fired and not digest_error:
+    if not dispatch_summary.health_recorded and not digest_error:
         notify.heartbeat_ok(bucket=args.bucket, now=now)
     return 0
 
 
-def _reconcile_recovered_emergencies(*, report, now) -> None:
+def _reconcile_recovered_emergencies(*, outcomes, now) -> None:
     """Cancel still-retrying P1 emergency pushes whose condition has recovered.
 
-    Per-service: the service is healthy in this cycle's report. Grouped
+    Per-service: the service is healthy in this cycle's observations. Grouped
     (ib-gateway-grouped): IB is no longer in a grouping auth-state. Health is
     only fetched when a grouped emergency is actually active, so a quiet cycle
     costs one cheap cooldown read and no network."""
@@ -109,7 +118,7 @@ def _reconcile_recovered_emergencies(*, report, now) -> None:
     active = cooldown.active_emergency_services(now=now)
     if not active:
         return
-    healthy = {o.service for o in report.outcomes if o.status == "healthy"}
+    healthy = {o.service for o in outcomes if o.status == "healthy"}
     for svc in active:
         if svc == grouping.GROUPED_ALERT_KEY:
             try:

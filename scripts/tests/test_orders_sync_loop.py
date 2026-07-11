@@ -166,6 +166,7 @@ async def test_orders_sync_loop_task_created_in_lifespan():
     fake_pool.disconnect_all = AsyncMock(return_value=None)
 
     with (
+        patch.object(srv, "test_mode", False),
         patch.object(srv, "IBPool", return_value=fake_pool),
         patch.object(srv, "ensure_ib_gateway", new=AsyncMock(return_value={"status": "ok"})),
         patch.object(

@@ -12,6 +12,10 @@ import {
 import { useAuth } from "@clerk/nextjs";
 import { createReconnectStrategy, type ReconnectState } from "./reconnectStrategy";
 import { buildAuthenticatedWebSocketUrl, resolveRealtimeWebSocketUrl } from "./realtimeSocketAuth";
+import {
+  REALTIME_HEALTH_TIMEOUT_MS,
+  REALTIME_OPEN_TIMEOUT_MS,
+} from "./realtimeDeadline";
 
 /* ─── Types ───────────────────────────────────────────── */
 
@@ -100,6 +104,7 @@ const IBStatusContext = createContext<IBStatusState>({
 const STALENESS_CHECK_INTERVAL_MS = 15_000;
 const STALENESS_THRESHOLD_MS = 60_000;
 const HEALTH_POLL_MS = 15_000;
+const HEALTH_STALE_AFTER_MS = 45_000;
 
 type HealthPayload = {
   ib_gateway?: {
@@ -122,6 +127,7 @@ function deriveDisplayStatus(args: {
   if (args.upstreamDead === true || args.authState === "unreachable") return "unreachable";
   if (args.authState === "awaiting_2fa") return "awaiting_2fa";
   if (args.serviceState === "unhealthy") return "unhealthy";
+  if (args.authState === "unknown" || args.serviceState === "unknown") return "unhealthy";
   if (args.authState === "authenticated" && args.serviceState === "healthy") return "connected";
   // Fall back to the legacy WS-relay flag when /health hasn't responded yet.
   if (args.ibConnected) return "connected";
@@ -249,6 +255,7 @@ function IBStatusCoreProvider({
   const mountedRef = useRef(true);
   const prevConnectedRef = useRef<boolean | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stalenessTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const lastMessageRef = useRef<number>(Date.now());
   const strategyRef = useRef<ReconnectState>(
@@ -271,6 +278,13 @@ function IBStatusCoreProvider({
     }
   }, []);
 
+  const clearOpenTimer = useCallback(() => {
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+  }, []);
+
   const getTokenRef = useRef(getToken);
   getTokenRef.current = getToken;
 
@@ -279,18 +293,29 @@ function IBStatusCoreProvider({
   const connect = useCallback(() => {
     clearReconnectTimer();
 
+    const gen = ++socketGenRef.current;
+
     if (wsRef.current) {
       wsRef.current.close();
     }
 
-    const gen = ++socketGenRef.current;
-
     const openSocket = (url: string) => {
       const ws = new WebSocket(url);
       wsRef.current = ws;
+      clearOpenTimer();
+      openTimerRef.current = setTimeout(() => {
+        if (
+          gen === socketGenRef.current &&
+          mountedRef.current &&
+          ws.readyState === WebSocket.CONNECTING
+        ) {
+          ws.close();
+        }
+      }, REALTIME_OPEN_TIMEOUT_MS);
 
     ws.onopen = () => {
-      if (!mountedRef.current) return;
+      if (gen !== socketGenRef.current || !mountedRef.current) return;
+      clearOpenTimer();
       setWsConnected(true);
       strategyRef.current.reset();
       lastMessageRef.current = Date.now();
@@ -306,7 +331,7 @@ function IBStatusCoreProvider({
     };
 
     ws.onmessage = (event) => {
-      if (!mountedRef.current) return;
+      if (gen !== socketGenRef.current || !mountedRef.current) return;
       lastMessageRef.current = Date.now();
       try {
         const msg = JSON.parse(event.data) as StatusMessage | PingMessage;
@@ -336,7 +361,8 @@ function IBStatusCoreProvider({
     };
 
     ws.onclose = () => {
-      if (!mountedRef.current) return;
+      if (gen !== socketGenRef.current || !mountedRef.current) return;
+      clearOpenTimer();
       setWsConnected(false);
       clearStalenessTimer();
 
@@ -357,7 +383,7 @@ function IBStatusCoreProvider({
     };
 
     ws.onerror = () => {
-      if (!mountedRef.current) return;
+      if (gen !== socketGenRef.current || !mountedRef.current) return;
       ws.close();
     };
     };
@@ -380,7 +406,7 @@ function IBStatusCoreProvider({
         }
       }
     })();
-  }, [socketUrl, clearReconnectTimer, clearStalenessTimer]);
+  }, [socketUrl, clearReconnectTimer, clearStalenessTimer, clearOpenTimer]);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -390,14 +416,15 @@ function IBStatusCoreProvider({
       mountedRef.current = false;
       clearReconnectTimer();
       clearStalenessTimer();
+      clearOpenTimer();
       if (wsRef.current) {
-        if (wsRef.current.readyState === WebSocket.OPEN) {
+        if (wsRef.current.readyState !== WebSocket.CLOSED) {
           wsRef.current.close();
         }
         wsRef.current = null;
       }
     };
-  }, [connect, clearReconnectTimer, clearStalenessTimer]);
+  }, [connect, clearReconnectTimer, clearStalenessTimer, clearOpenTimer]);
 
   // Poll the authoritative IB state — the only signal that catches the "TCP
   // socket alive but session sitting at 2FA prompt" case, which the relay WS
@@ -412,10 +439,14 @@ function IBStatusCoreProvider({
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastSuccessfulHealthAt = Date.now();
 
     const fetchParsed = async (url: string): Promise<IbHealthFields | null> => {
       try {
-        const res = await fetch(url, { cache: "no-store" });
+        const res = await fetch(url, {
+          cache: "no-store",
+          signal: AbortSignal.timeout(REALTIME_HEALTH_TIMEOUT_MS),
+        });
         if (!res.ok) return null;
         return parseIbHealth((await res.json()) as HealthPayload & EdgeHealthPayload);
       } catch {
@@ -434,9 +465,14 @@ function IBStatusCoreProvider({
       // Keep previous cached state on a total failure — a transient blip
       // shouldn't flip the chip; the next poll resolves it.
       if (!cancelled && parsed) {
+        lastSuccessfulHealthAt = Date.now();
         setAuthState(parsed.authState);
         setServiceState(parsed.serviceState);
         setUpstreamDead(parsed.upstreamDead);
+      } else if (!cancelled && Date.now() - lastSuccessfulHealthAt >= HEALTH_STALE_AFTER_MS) {
+        setAuthState("unknown");
+        setServiceState("unknown");
+        setUpstreamDead(null);
       }
       if (!cancelled) timer = setTimeout(poll, HEALTH_POLL_MS);
     };

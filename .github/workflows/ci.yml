@@ -15,15 +15,18 @@ on:
 permissions:
   contents: read
 
-# Cancel superseded runs on the same ref so a rapid push doesn't deploy twice.
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+# Cancellation is scoped to test jobs below. Workflow-level cancellation is
+# forbidden: on 2026-07-08 it terminated the SSH deploy after production units
+# had been stopped, and the successor then mistook Git HEAD equality for a
+# completed release. The deploy job has its own non-canceling production lock.
 
 jobs:
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-secret-scan-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -60,6 +63,9 @@ jobs:
   web-tests:
     name: Vitest (full config)
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-web-tests-${{ github.ref }}
+      cancel-in-progress: true
     env:
       NODE_ENV: test
       ASSISTANT_MOCK: "1"
@@ -67,7 +73,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: "1.3.14"
       # The repo has TWO bun projects: the root one provides vitest + the
       # cross-cutting vitest.config.ts (which imports `vitest/config`), and
       # web/ provides the app modules the tests import (@/lib, react, ...).
@@ -103,6 +109,9 @@ jobs:
   py-tests:
     name: pytest (unit, no integration)
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-py-tests-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
@@ -134,6 +143,9 @@ jobs:
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
     runs-on: ubuntu-latest
+    concurrency:
+      group: ci-perimeter-smoke-${{ github.ref }}
+      cancel-in-progress: true
     # First job in CI that runs `next build`; compile mode keeps it to a few
     # minutes but budget for cold runner caches.
     timeout-minutes: 12
@@ -152,7 +164,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with:
-          bun-version: latest
+          bun-version: "1.3.14"
       # Both bun projects, same as web-tests: next.config aliases @tools to
       # the root lib/tools, so the build resolves modules from BOTH trees.
       - run: bun install --frozen-lockfile
@@ -256,6 +268,16 @@ jobs:
     needs: [secret-scan, web-tests, py-tests, perimeter-smoke]
     if: github.ref == 'refs/heads/main' && github.event_name == 'push'
     runs-on: ubuntu-latest
+    # Outer budget: deploy.sh gets 15m, then 30s to kill descendants. A root
+    # action can hold its lifecycle lock for 180s. Worst-case durable recovery
+    # can serialize four such helper actions after waiting 190s. SSH gets 36m
+    # and the job gets 40m so recovery remains inside the caller budget.
+    timeout-minutes: 60
+    # Once SSH starts it must finish. Newer green deploys queue behind the
+    # running release; they never cancel it while production is between states.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     # Bind the deploy to a GitHub Environment so a REQUIRED REVIEWER can gate it.
     # `git push origin main` runs `deploy.sh` over SSH as `radon` on the box that
     # owns the live IB Gateway (:4001) — i.e. push-to-main == code execution on
@@ -282,6 +304,7 @@ jobs:
           host: ${{ secrets.VPS_HOST }}
           username: radon
           key: ${{ secrets.VPS_SSH_KEY }}
+          command_timeout: 55m
           script: |
             cd ~/radon-cloud
-            bash scripts/deploy.sh
+            bash scripts/deploy.sh '${{ github.sha }}'

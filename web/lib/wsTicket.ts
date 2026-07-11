@@ -17,6 +17,7 @@ export async function getWsTicket(clerkToken: string): Promise<string> {
       Authorization: `Bearer ${clerkToken}`,
       "Content-Type": "application/json",
     },
+    signal: AbortSignal.timeout(8_000),
   });
 
   if (!res.ok) {

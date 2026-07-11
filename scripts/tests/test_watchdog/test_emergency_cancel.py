@@ -74,7 +74,9 @@ def test_reconcile_cancels_recovered_service(db_conn):
 
     cancelled = []
     with patch("watchdog.notify.cancel_emergency", side_effect=lambda t: cancelled.append(t)):
-        wd_main._reconcile_recovered_emergencies(report=report, now=NOW + timedelta(minutes=5))
+        wd_main._reconcile_recovered_emergencies(
+            outcomes=report.outcomes, now=NOW + timedelta(minutes=5)
+        )
 
     assert cancelled == ["cri-scan"]
     # Marked resolved → not cancelled again next cycle.
@@ -94,6 +96,8 @@ def test_reconcile_leaves_still_failing_service_alone(db_conn):
 
     cancelled = []
     with patch("watchdog.notify.cancel_emergency", side_effect=lambda t: cancelled.append(t)):
-        wd_main._reconcile_recovered_emergencies(report=report, now=NOW + timedelta(minutes=5))
+        wd_main._reconcile_recovered_emergencies(
+            outcomes=report.outcomes, now=NOW + timedelta(minutes=5)
+        )
 
     assert cancelled == [], "must NOT cancel an emergency while the service is still failing"

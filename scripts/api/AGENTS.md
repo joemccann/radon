@@ -14,7 +14,8 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 
 - FastAPI routes are JWT-protected by default.
 - Localhost bypass covers server-to-server development traffic.
-- Auth-exempt: `/health`, `/ws-ticket/validate`, `/docs`, `/openapi.json`, and all `*/share` routes.
+- Auth-exempt: `/health`, `/ws-ticket/validate`, `/demo/trial-expiry`, and all `*/share` routes.
+- `/docs` and `/openapi.json` are not publicly exempt; they require the trusted-local bypass so the endpoint map is not exposed through Caddy.
 - WebSocket tickets have 30s TTL.
 
 ## IB Gateway Modes
@@ -29,6 +30,7 @@ Applies under `scripts/api/`. Root and `scripts/AGENTS.md` also apply. Mirrors `
 
 - `/health` exposes `auth_state`, `service_state`, `upstream_dead`, and `restart_backoff`.
 - Restart paths must acquire the cross-process 2FA push lock and respect backoff. Do not stack IBKR Mobile pushes.
+- Production Gateway actions must call `/usr/local/bin/radon-ib-gateway-control`; never pre-acquire a lease and then call the helper, and never control `radon-ib-gateway-preheld-restart.service` from the admin API.
 - `POST /ib/reset-backoff` clears in-memory restart backoff and push lock.
 - IBC relogin on 2FA timeout is disabled; do not re-enable.
 - Watchdog stuck-2FA self-heal fires only after repeated stuck cycles when no push is in flight and backoff has elapsed.

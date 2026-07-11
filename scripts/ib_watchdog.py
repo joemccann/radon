@@ -9,9 +9,9 @@ forever, leaving fill-monitor / journal-sync / orders all timing out
 while Docker reports "healthy."
 
 This watchdog watches FastAPI's `/health` (which DOES probe the API
-layer via the existing `ib_pool` machinery) and triggers a clean
-`systemctl restart radon-ib-gateway.service` after sustained
-degradation. Cadence: 60s, threshold: 3 consecutive degraded
+layer via the existing `ib_pool` machinery) and triggers the fixed
+preheld-lease restart adapter after sustained degradation. Cadence:
+60s, threshold: 3 consecutive degraded
 readings (= ~3 min of real-time hang).
 
 State persists at ``STATE_PATH`` so each oneshot invocation can pick
@@ -86,7 +86,7 @@ logging.basicConfig(
 DEFAULT_HEALTH_URL = "http://127.0.0.1:8321/health"
 DEFAULT_HEALTH_TIMEOUT_SECS = 5.0
 DEFAULT_STATE_PATH = Path("/var/lib/radon/ib-watchdog-state.json")
-DEFAULT_RESTART_UNIT = "radon-ib-gateway.service"
+DEFAULT_RESTART_UNIT = "radon-ib-gateway-preheld-restart.service"
 # After a watchdog-initiated gateway restart resolves auth back to
 # `authenticated`, the FastAPI ib_pool can stay stuck disconnected — every
 # IB route then 502s "unresponsive" until radon-api is bounced once. This is
@@ -123,7 +123,7 @@ GATEWAY_PROBE_HANDSHAKE_TIMEOUT_SECS = 5.0
 # Verdicts from probe_gateway_direct.
 GATEWAY_ALIVE = "alive"      # TCP + IB API handshake answered
 GATEWAY_WEDGED = "wedged"    # TCP accepted but the API never answered — upstream-dead
-GATEWAY_DEAD = "dead"        # TCP refused — port down, Docker restart policy owns it
+GATEWAY_DEAD = "dead"        # TCP refused — watchdog recovery ladder owns it
 GATEWAY_UNKNOWN = "unknown"  # connect timeout / network ambiguity — can't tell
 
 # The isolated health daemon (scripts/health_service, :8330). Used ONLY to
@@ -137,21 +137,20 @@ HEALTH_DAEMON_TIMEOUT_SECS = 3.0
 
 # --- DUR-10: scheduled-restart quiet windows ----------------------------------
 
-# After the gateway's own IBC AutoRestartTime fires, the relogin transiently
-# looks EXACTLY like an api-hang (socat keeps 4001 listening, upstream dead)
-# for up to a few minutes. Counting those cycles is how the watchdog ended up
-# force-restarting a mid-relogin gateway. Two windows:
-#   22:30-23:05  AUTO_RESTART_TIME 10:35 PM (22:35 UTC = 15:35 PT). Chosen so
-#                the weekly session-token expiry's occasional FULL login — a
-#                real 2FA push — lands while the operator is awake, including
-#                Saturday, and on weekdays AFTER the market close (21:00 UTC)
-#                and after cta-sync (21:30 UTC). NOT the naive "morning PT":
-#                that collides with RTH, and the prior 09:05 UTC slot fired
-#                its push at 02:05 PT — the operator slept, the push expired,
-#                and the 2026-07-05 storm followed (48 restarts / 48 pushes).
-#   23:40-00:15  the 00:00 UTC session rollover re-detections.
+# IBC AutoRestartTime and ColdRestartTime are disabled because neither can
+# acquire the 2FA lease. Keep only the observed 00:00 UTC server-session
+# rollover window; a functional failure is suppressed for at most the bounded
+# grace below, then enters the normal recovery ladder.
 QUIET_WINDOWS_ENV = "RADON_GW_RESTART_QUIET_WINDOWS_UTC"
-DEFAULT_QUIET_WINDOWS_UTC = "22:30-23:05,23:40-00:15"
+DEFAULT_QUIET_WINDOWS_UTC = "23:40-00:15"
+# A quiet window identifies when a scheduled restart is plausible; it is not
+# permission to ignore a real outage for the entire window. Persist the first
+# functional failure and suppress for at most five minutes.
+try:
+    _scheduled_grace = int(os.environ.get("RADON_GW_SCHEDULED_RESTART_GRACE_SECS", "300"))
+except (TypeError, ValueError):
+    _scheduled_grace = 300
+SCHEDULED_RESTART_GRACE_SECS = max(0, min(900, _scheduled_grace))
 
 
 # --- Bounded sub-step execution ---------------------------------------------
@@ -251,6 +250,7 @@ class GatewayState:
     push_lock_active: bool = False
     backoff_attempt_count: int = 0
     next_attempt_in_secs: float = 0.0
+    probe_timed_out: bool = False
 
     @classmethod
     def from_health_payload(cls, payload: dict) -> Optional["GatewayState"]:
@@ -267,6 +267,7 @@ class GatewayState:
             push_lock_active=isinstance(push_lock, dict) and bool(push_lock.get("holder")),
             backoff_attempt_count=int(backoff.get("attempt_count", 0)) if isinstance(backoff, dict) else 0,
             next_attempt_in_secs=float(backoff.get("next_attempt_in_secs", 0.0)) if isinstance(backoff, dict) else 0.0,
+            probe_timed_out=bool(gw.get("probe_timed_out", False)),
         )
 
 
@@ -320,7 +321,8 @@ def probe_gateway_direct(
       GATEWAY_WEDGED   TCP accepted but the API never answered (recv timeout)
                        or the upstream closed without a handshake (socat
                        accepting while the JVM socket is gone)
-      GATEWAY_DEAD     TCP refused — port down, Docker restart policy owns it
+      GATEWAY_DEAD     TCP refused — port down; the watchdog recovery ladder
+                       owns restart decisions
       GATEWAY_UNKNOWN  connect timeout / other network ambiguity
     """
     host = host or os.environ.get("IB_GATEWAY_HOST", "127.0.0.1")
@@ -466,9 +468,9 @@ def is_api_hang(state: GatewayState) -> bool:
 
     TCP socket is bound (port_listening) but the upstream API isn't
     responding to handshakes (upstream_dead). This is the JVM
-    API-acceptor hang, distinct from a fully-down gateway
-    (port_listening would be False — Docker `restart: always` handles
-    that).
+    API-acceptor hang, distinct from a fully-down gateway. The direct
+    functional probe routes both modes into the same watchdog ladder; Docker
+    automatic restart is disabled because it cannot acquire the 2FA lease.
 
     ``upstream_dead`` is the decisive signal and overrides every
     auth_state EXCEPT ``awaiting_2fa``. While the gateway is parked at
@@ -486,7 +488,7 @@ def is_api_hang(state: GatewayState) -> bool:
     restarts NOTHING instead of restarting the wrong thing.
     """
     if not state.port_listening:
-        return False  # Port down → Docker restart policy handles it
+        return False  # Direct-probe DEAD classification owns the port-down path.
     if state.auth_state == "awaiting_2fa":
         return False  # Stand-down owns awaiting_2fa (2026-07-05 storm)
     return state.upstream_dead
@@ -559,6 +561,9 @@ class WatchdogState:
     # flag. Idempotent: the api restart fires on the auth→authenticated edge,
     # never in a loop (feedback_ib_pool_stuck_after_2fa).
     pending_pool_reconnect: bool = False
+    # First epoch at which a functional failure was observed inside a scheduled
+    # restart window. Suppression expires after SCHEDULED_RESTART_GRACE_SECS.
+    quiet_degraded_since: float = 0.0
 
     def to_dict(self) -> dict:
         return {
@@ -570,6 +575,7 @@ class WatchdogState:
             "api_hang_restart_count": self.api_hang_restart_count,
             "awaiting_2fa_alerted": self.awaiting_2fa_alerted,
             "pending_pool_reconnect": self.pending_pool_reconnect,
+            "quiet_degraded_since": self.quiet_degraded_since,
         }
 
     @classmethod
@@ -586,6 +592,7 @@ class WatchdogState:
             api_hang_restart_count=int(data.get("api_hang_restart_count", 0)),
             awaiting_2fa_alerted=bool(data.get("awaiting_2fa_alerted", False)),
             pending_pool_reconnect=bool(data.get("pending_pool_reconnect", False)),
+            quiet_degraded_since=float(data.get("quiet_degraded_since", 0.0)),
         )
 
 
@@ -612,26 +619,35 @@ def save_state(path: Path, state: WatchdogState) -> None:
 
 
 def trigger_restart(unit: str, dry_run: bool = False) -> bool:
-    """Restart the IB Gateway systemd unit. Returns True on success.
+    """Queue Gateway recovery or restart one non-Gateway unit.
 
-    Uses `systemctl restart` rather than calling FastAPI's
-    `/ib/restart` directly because FastAPI's path is gated on the
-    2FA backoff — we want this watchdog to be an escape hatch even
-    when that backoff is active (it isn't fired for this specific
-    failure mode, but defense in depth).
+    The fixed preheld adapter owns the long-running Gateway cycle, so the
+    watchdog queues it with ``systemctl --no-block start`` and returns before
+    its 45-second cycle ceiling. Other unit restarts route through the locked,
+    root-owned operator instead of broad systemctl privilege.
     """
-    cmd = ["systemctl", "restart", unit]
+    is_preheld_gateway = unit == DEFAULT_RESTART_UNIT
+    if is_preheld_gateway:
+        cmd = ["systemctl", "--no-block", "start", unit]
+        timeout = 10
+    else:
+        cmd = ["/usr/local/bin/radon", "unit", "restart", unit]
+        timeout = 40
     if dry_run:
         LOG.info("[dry-run] would run: %s", " ".join(cmd))
         return True
     try:
-        subprocess.run(cmd, check=True, timeout=30)
+        subprocess.run(cmd, check=True, timeout=timeout)
         return True
     except subprocess.CalledProcessError as exc:
-        LOG.error("systemctl restart failed: rc=%s stderr=%s", exc.returncode, exc.stderr)
+        LOG.error("restart handoff failed: rc=%s stderr=%s", exc.returncode, exc.stderr)
+        if is_preheld_gateway:
+            ib_2fa_lock.release_2fa_push_lock(expected_holder=WATCHDOG_LOCK_HOLDER)
         return False
     except subprocess.TimeoutExpired:
-        LOG.error("systemctl restart timed out after 30s")
+        LOG.error("restart handoff timed out after %ss", timeout)
+        if is_preheld_gateway:
+            ib_2fa_lock.release_2fa_push_lock(expected_holder=WATCHDOG_LOCK_HOLDER)
         return False
 
 
@@ -702,12 +718,11 @@ def _check_2fa_push_lock_bounded(now: float):
     """Bounded ``check_2fa_push_lock``. On timeout, conservatively report a
     synthetic held lock so the caller DEFERS its restart (never fires blind)."""
     try:
-        return _run_bounded(
-            "2fa-lock-check",
-            LOCK_OP_TIMEOUT_SECS,
-            lambda: ib_2fa_lock.check_2fa_push_lock(now=now),
+        return ib_2fa_lock.check_2fa_push_lock(
+            now=now,
+            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
         )
-    except _SubStepTimeout as exc:
+    except ib_2fa_lock.GuardLockTimeout as exc:
         LOG.warning("2FA lock check abandoned (%s); deferring restart", exc)
         return ib_2fa_lock.PushLock(
             holder=_LOCK_TIMEOUT_HOLDER,
@@ -721,18 +736,15 @@ def _acquire_2fa_push_lock_bounded(now: float, *, reason: str):
     """Bounded ``acquire_2fa_push_lock``. On timeout, report (False, None) so
     the caller treats it as a lost race and skips the restart this cycle."""
     try:
-        return _run_bounded(
-            "2fa-lock-acquire",
-            LOCK_OP_TIMEOUT_SECS,
-            lambda: ib_2fa_lock.acquire_2fa_push_lock(
-                WATCHDOG_LOCK_HOLDER,
-                ttl_secs=ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
-                reason=reason,
-                now=now,
-            ),
+        return ib_2fa_lock.acquire_2fa_push_lock(
+            WATCHDOG_LOCK_HOLDER,
+            ttl_secs=ib_2fa_lock.DEFAULT_LOCK_TTL_SECS,
+            reason=reason,
+            now=now,
+            guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
         )
-    except _SubStepTimeout as exc:
-        LOG.warning("2FA lock acquire abandoned (%s); skipping restart", exc)
+    except ib_2fa_lock.GuardLockTimeout as exc:
+        LOG.warning("2FA lock acquire timed out (%s); skipping restart", exc)
         return (False, None)
 
 
@@ -853,10 +865,11 @@ def _handle_stuck_awaiting_2fa(
         )
         return state
 
-    # Respect any in-flight push the FastAPI side may have
-    # acquired between our /health probe and now.
+    # Respect any in-flight push acquired between our /health probe and now.
+    # Holder names identify components, not logical operations, so a prior
+    # watchdog lease blocks a second watchdog cycle too.
     existing_lock = _check_2fa_push_lock_bounded(now=clock())
-    if existing_lock is not None and existing_lock.holder != WATCHDOG_LOCK_HOLDER:
+    if existing_lock is not None:
         LOG.warning(
             "stuck_2fa threshold hit but 2FA push lock raced — held by %r — "
             "deferring this cycle",
@@ -987,9 +1000,8 @@ def _handle_primary_sensor_down(
     quiet: bool,
 ) -> "WatchdogState":
     """/health is unreachable — probe the gateway DIRECTLY rather than going
-    blind. Deploys produce Connection refused routinely, so this path may
-    only CONTINUE an existing api-hang episode (and only when the handshake
-    itself shows upstream-dead); it never starts one.
+    blind. The direct protocol probe is the independent source of truth and
+    owns both port-down and wedged recovery now that Docker restart is disabled.
     """
     with _timed("direct_probe"):
         verdict = probe_gateway_direct()
@@ -1023,25 +1035,10 @@ def _handle_primary_sensor_down(
         )
         return state
 
-    if verdict == GATEWAY_DEAD:
-        # Port down — same rule as is_api_hang: Docker's restart policy
-        # owns recovery; an episode predicated on port-listening is over.
-        state.degraded_count = 0
-        state.last_outcome = f"probe_unreachable:gateway_port_down:{attribution}"
-        save_state(state_path, state)
-        record_service_health(
-            "ok",
-            error_message=(
-                "primary sensor broken: radon-api /health unreachable "
-                f"({attribution}); gateway port not listening (Docker restart "
-                "policy owns recovery)"
-            ),
-        )
-        return state
-
-    if verdict == GATEWAY_WEDGED and state.degraded_count > 0:
-        # The handshake itself shows upstream-dead — the existing episode
-        # continues through the normal ladder (incl. quiet-window gate).
+    if verdict in (GATEWAY_DEAD, GATEWAY_WEDGED):
+        # The independent functional sensor owns both a refused port and a
+        # protocol-level wedge. Docker automatic restart is intentionally
+        # disabled because it cannot participate in the 2FA push lease.
         return _advance_api_hang(
             state=state,
             state_path=state_path,
@@ -1050,19 +1047,11 @@ def _handle_primary_sensor_down(
             dry_run=dry_run,
             clock=clock,
             quiet=quiet,
-            evidence=f"direct handshake wedged ({attribution})",
+            evidence=f"direct gateway {verdict} while primary sensor down ({attribution})",
         )
 
-    if verdict == GATEWAY_WEDGED:
-        # Wedged handshake but NO existing episode: refuse to mint a new
-        # restart trigger while blind — every restart costs a 2FA push.
-        LOG.warning(
-            "direct handshake wedged but no existing api-hang episode — "
-            "not starting one while /health is unreachable"
-        )
-        state.last_outcome = f"probe_unreachable:gateway_wedged_no_episode:{attribution}"
-    else:  # GATEWAY_UNKNOWN — can't tell; freeze everything.
-        state.last_outcome = f"probe_unreachable:gateway_unknown:{attribution}"
+    # GATEWAY_UNKNOWN — can't tell; freeze everything.
+    state.last_outcome = f"probe_unreachable:gateway_unknown:{attribution}"
 
     save_state(state_path, state)
     record_service_health(
@@ -1126,6 +1115,20 @@ def _advance_api_hang(
     During a scheduled-restart quiet window the observation is logged (and
     forensics may fire) but the counter freezes and no push can start."""
     if quiet:
+        now = clock()
+        if state.quiet_degraded_since <= 0:
+            state.quiet_degraded_since = now
+        quiet_elapsed = max(0.0, now - state.quiet_degraded_since)
+        if quiet_elapsed >= SCHEDULED_RESTART_GRACE_SECS:
+            LOG.error(
+                "scheduled-restart grace expired after %.0fs; counting functional "
+                "failure despite quiet window (%s)",
+                quiet_elapsed,
+                evidence,
+            )
+            quiet = False
+
+    if quiet:
         LOG.warning(
             "api hang observed (%s) during scheduled-restart quiet window — "
             "counter frozen at %s, no restart",
@@ -1148,6 +1151,8 @@ def _advance_api_hang(
             ),
         )
         return state
+
+    state.quiet_degraded_since = 0.0
 
     state.degraded_count += 1
     LOG.warning(
@@ -1200,14 +1205,12 @@ def _advance_api_hang(
         )
         return state
 
-    # Before restarting, check the cross-process 2FA
-    # push lock. If another holder (typically scripts.api.ib_gateway) is
-    # mid-2FA-push, restarting here would stack a second push on top —
-    # the failure pattern that motivated this lock. Skip this cycle and
-    # let the FastAPI path's push resolve first.
+    # Before restarting, check the cross-process 2FA push lock. Any active
+    # lease, including one from a prior watchdog invocation, represents a
+    # separate Gateway cycle whose push must resolve first.
     with _timed("lock"):
         existing_lock = _check_2fa_push_lock_bounded(now=clock())
-    if existing_lock is not None and existing_lock.holder != WATCHDOG_LOCK_HOLDER:
+    if existing_lock is not None:
         LOG.warning(
             "api hang sustained %s cycles but 2FA push lock held by %r "
             "(expires in %ds) — refusing restart to avoid stacking IBKR pushes",
@@ -1395,6 +1398,65 @@ def _run_cycle_steps(
             quiet=quiet,
         )
 
+    # `/health` and the persistent pool share failure modes. Probe the IB
+    # protocol independently on every cycle so a green cached pool or a
+    # structured `probe_timed_out` response cannot mask failure for new clients.
+    with _timed("direct_probe"):
+        functional_verdict = probe_gateway_direct()
+
+    if health.auth_state == "awaiting_2fa" and functional_verdict in (
+        GATEWAY_DEAD,
+        GATEWAY_WEDGED,
+    ):
+        # Preserve the hard 2FA stand-down. Restarting here would invalidate the
+        # pending push, regardless of what the independent transport sees.
+        state.degraded_count = 0
+        state.stuck_2fa_count = 0
+        state.quiet_degraded_since = 0.0
+        return _stand_down_awaiting_2fa(
+            state=state,
+            state_path=state_path,
+            health=GatewayState(
+                service_state=health.service_state,
+                port_listening=health.port_listening,
+                upstream_dead=True,
+                auth_state=health.auth_state,
+                push_lock_active=health.push_lock_active,
+                backoff_attempt_count=health.backoff_attempt_count,
+                next_attempt_in_secs=health.next_attempt_in_secs,
+                probe_timed_out=health.probe_timed_out,
+            ),
+        )
+
+    if functional_verdict in (GATEWAY_DEAD, GATEWAY_WEDGED):
+        return _advance_api_hang(
+            state=state,
+            state_path=state_path,
+            restart_unit=restart_unit,
+            threshold=threshold,
+            dry_run=dry_run,
+            clock=clock,
+            quiet=quiet,
+            evidence=(
+                f"independent protocol probe={functional_verdict} "
+                f"http_timeout={health.probe_timed_out} "
+                f"http_port={health.port_listening} auth={health.auth_state}"
+            ),
+        )
+
+    if functional_verdict == GATEWAY_ALIVE:
+        # Functional evidence wins over Docker's TCP-only health flag.
+        health = GatewayState(
+            service_state=health.service_state,
+            port_listening=True,
+            upstream_dead=False,
+            auth_state=health.auth_state,
+            push_lock_active=health.push_lock_active,
+            backoff_attempt_count=health.backoff_attempt_count,
+            next_attempt_in_secs=health.next_attempt_in_secs,
+            probe_timed_out=health.probe_timed_out,
+        )
+
     # An awaiting-2FA episode ends the moment auth reads anything else;
     # re-arm the one-per-episode stand-down alert.
     if health.auth_state != "awaiting_2fa":
@@ -1413,6 +1475,7 @@ def _run_cycle_steps(
                 state.degraded_count,
             )
         state.degraded_count = 0
+        state.quiet_degraded_since = 0.0
 
         # awaiting_2fa + dead upstream: the gateway is parked at the push
         # prompt (2026-07-05 storm). NO restart ladder owns this — stand
@@ -1455,6 +1518,13 @@ def _run_cycle_steps(
         state.stuck_2fa_count = 0
         if health.auth_state == "authenticated":
             state.api_hang_restart_count = 0
+            try:
+                ib_2fa_lock.release_2fa_push_lock(
+                    expected_holder=WATCHDOG_LOCK_HOLDER,
+                    guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
+                )
+            except ib_2fa_lock.GuardLockTimeout as exc:
+                LOG.warning("watchdog lease release deferred: %s", exc)
 
         # One-shot pool reconnect: if a prior watchdog-initiated gateway
         # restart is now resolved (auth back to authenticated), the FastAPI

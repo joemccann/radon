@@ -53,26 +53,38 @@ const POLL_MS = 60_000;
 export function useServiceHealth(): {
   data: ServiceHealthResponse | null;
   loading: boolean;
+  error: string | null;
 } {
   const [data, setData] = useState<ServiceHealthResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
+    let inFlight = false;
     const fetchOnce = async () => {
+      if (inFlight) return;
+      inFlight = true;
       try {
         const res = await fetch("/api/service-health", {
           method: "GET",
           cache: "no-store",
+          signal: AbortSignal.timeout(10_000),
         });
-        if (!res.ok) return;
+        if (!res.ok) throw new Error(`Service health unavailable (${res.status})`);
         const json = (await res.json()) as ServiceHealthResponse;
         if (!cancelled) {
           setData(json);
+          setError(null);
           setLoading(false);
         }
-      } catch {
-        if (!cancelled) setLoading(false);
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof Error ? err.message : "Service health unavailable");
+          setLoading(false);
+        }
+      } finally {
+        inFlight = false;
       }
     };
 
@@ -84,5 +96,5 @@ export function useServiceHealth(): {
     };
   }, []);
 
-  return { data, loading };
+  return { data, loading, error };
 }

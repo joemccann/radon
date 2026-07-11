@@ -187,6 +187,7 @@ describe("llm provider", () => {
     expect(calls).toHaveLength(1);
     const call = calls[0];
     expect(call.url).toContain("api.anthropic.com");
+    expect(call.init.signal).toBeInstanceOf(AbortSignal);
     expect((call.init.headers as Record<string, string>)["x-api-key"]).toBe("sk-ant-test");
     expect((call.init.headers as Record<string, string>)["anthropic-version"]).toBe("2023-06-01");
 
@@ -216,6 +217,7 @@ describe("llm provider", () => {
     expect(calls).toHaveLength(1);
     const call = calls[0];
     expect(call.url).toContain("/chat/completions");
+    expect(call.init.signal).toBeInstanceOf(AbortSignal);
     expect((call.init.headers as Record<string, string>)["authorization"] ?? (call.init.headers as Record<string, string>)["Authorization"]).toBe("Bearer sk-openai-test");
 
     const payload = bodyOf(call);
@@ -255,6 +257,7 @@ describe("llm provider", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0].url).toContain("generativelanguage.googleapis.com");
+    expect(calls[0].init.signal).toBeInstanceOf(AbortSignal);
     expect(result.provider).toBe("gemini");
     expect(result.text).toBe("Gemini flow answer.");
     expect(result.usage).toEqual({ inputTokens: 4, outputTokens: 6 });

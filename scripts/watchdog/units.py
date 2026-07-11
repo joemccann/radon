@@ -180,15 +180,40 @@ def _delta_alert(unit: dict, previous: dict, now: datetime) -> Optional[CheckOut
     return _outcome_for(unit_id=unit["Id"], severity="P3", message=message, now=now)
 
 
+def _recovery_observation(
+    unit: dict, previous: dict, now: datetime
+) -> Optional[CheckOutcome]:
+    """Emit health when a prior P1-capable unit condition has cleared."""
+    prior = previous.get(unit["Id"]) or {}
+    was_p1_condition = (
+        prior.get("active_state") == "failed" or prior.get("auto_restart") is True
+    )
+    is_p1_condition = (
+        unit.get("ActiveState") == "failed" or unit.get("SubState") == "auto-restart"
+    )
+    if not was_p1_condition or is_p1_condition:
+        return None
+    return CheckOutcome(
+        service=unit["Id"],
+        kind="unit",
+        status="healthy",
+        severity=None,
+        fired=False,
+        message="systemd unit recovered",
+        consecutive_failures=0,
+        now=now,
+    )
+
+
 def evaluate(*, current: list[dict], previous: dict, now: datetime) -> list[CheckOutcome]:
-    """One alert max per unit, in priority order failed > flap > delta."""
+    """One alert max per unit, plus a prior-P1 recovery observation."""
     outcomes = []
     for unit in current:
-        alert = (
-            _failed_alert(unit, now)
-            or _flap_alert(unit, previous, now)
-            or _delta_alert(unit, previous, now)
-        )
+        p1_alert = _failed_alert(unit, now) or _flap_alert(unit, previous, now)
+        recovery = None if p1_alert else _recovery_observation(unit, previous, now)
+        if recovery:
+            outcomes.append(recovery)
+        alert = p1_alert or _delta_alert(unit, previous, now)
         if alert:
             outcomes.append(alert)
     return outcomes
@@ -203,7 +228,7 @@ def check_units(
     show_runner: Callable[[], str] = _run_systemctl_show,
 ) -> list[CheckOutcome]:
     """Probe systemd, compare against the persisted last cycle, persist
-    the new snapshot, and return fired outcomes.
+    the new snapshot, and return fired outcomes plus prior-P1 recovery observations.
 
     Best-effort by design: any probe failure degrades to [] with a
     warning — a broken units check must never abort the bucket cycle

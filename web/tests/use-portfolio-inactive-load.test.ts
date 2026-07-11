@@ -63,7 +63,7 @@ describe("usePortfolio inactive initial load", () => {
     );
   });
 
-  it("triggers the first sync when a previously inactive portfolio hook becomes active", async () => {
+  it("triggers the first cached read when a previously inactive portfolio hook becomes active", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse(PORTFOLIO_PAYLOAD))
       .mockResolvedValueOnce(jsonResponse({
@@ -94,7 +94,8 @@ describe("usePortfolio inactive initial load", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       "/api/portfolio",
-      expect.objectContaining({ method: "POST", cache: "no-store" }),
+      expect.objectContaining({ cache: "no-store" }),
     );
+    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBeUndefined();
   });
 });

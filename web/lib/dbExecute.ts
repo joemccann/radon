@@ -15,6 +15,11 @@
 import type { InStatement, ResultSet } from "@libsql/client";
 import { getDb, resetDb, getPoolStats } from "./db";
 import { withTimeout } from "./asyncTimeout";
+import {
+  createDbOperationIdentity,
+  currentDbOperationIdentity,
+  runWithDbOperation,
+} from "./dbOperation";
 
 /** Default per-read deadline. */
 export const DEFAULT_DB_READ_TIMEOUT_MS = 3_000;
@@ -37,15 +42,18 @@ export async function dbExecute(
   opts: { timeoutMs?: number; label?: string } = {},
 ): Promise<ResultSet> {
   const { timeoutMs = DEFAULT_DB_READ_TIMEOUT_MS, label = "db" } = opts;
+  const identity = currentDbOperationIdentity() ?? createDbOperationIdentity();
   try {
-    return await withTimeout(
-      getDb().execute(stmt),
-      timeoutMs,
-      `${label} read timed out after ${timeoutMs}ms`,
+    return await runWithDbOperation(identity, () =>
+      withTimeout(
+        getDb().execute(stmt),
+        timeoutMs,
+        `${label} read timed out after ${timeoutMs}ms`,
+      ),
     );
   } catch (err) {
     console.warn(`[dbExecute:${label}] ${describeDbError(err)}${poolStatsSuffix()}`);
-    resetDb();
+    resetDb(identity);
     throw err;
   }
 }

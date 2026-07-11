@@ -107,6 +107,8 @@ class UnitStateCache:
                 capture_output=True, text=True, timeout=self._timeout,
             )
             parsed = probes.parse_unit_states(out.stdout)
+            if out.returncode != 0 or set(parsed) != set(self._units):
+                return
             with self._lock:
                 self._value = parsed
                 self._updated = time.time()

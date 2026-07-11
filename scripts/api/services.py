@@ -18,24 +18,16 @@ end can render a generic table without per-service branching.
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import logging
 import os
 import re
+import signal
 import shutil
-import sys
 from dataclasses import dataclass, asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, List, Optional
-
-# scripts/utils lives under <repo>/scripts/utils; this module lives at
-# <repo>/scripts/api. Add the scripts dir to sys.path so the shared
-# 2FA push-lock module imports cleanly under any pytest rootdir.
-_SCRIPTS_DIR = Path(__file__).resolve().parent.parent
-if str(_SCRIPTS_DIR) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS_DIR))
-
-from utils import ib_2fa_lock  # noqa: E402
 
 logger = logging.getLogger("radon.services")
 
@@ -55,6 +47,12 @@ _SYSTEMCTL_TIMESTAMP_FORMATS = (
 # to /admin/services/<unit>/<action> must match. This keeps the panel from
 # being a generic systemctl proxy.
 _UNIT_PATTERN = re.compile(r"^radon-[a-z0-9-]+(?:\.service|\.timer)?$|^radon-ib-gateway\.service$")
+
+# Internal systemd adapter used only by the IB watchdog after it has acquired
+# its exact preheld lease. It must never be listed or controllable through the
+# generic admin service endpoint.
+GATEWAY_PREHELD_UNIT = "radon-ib-gateway-preheld-restart.service"
+_INTERNAL_UNITS = frozenset({GATEWAY_PREHELD_UNIT})
 
 # Static catalogue surfaced in /admin/services when systemd is unavailable.
 # Lets the UI render the panel + the "not controllable from here" notice
@@ -99,7 +97,7 @@ def is_valid_unit(unit: str) -> bool:
     Centralised so both the listing endpoint and the action endpoint use the
     same rule. Anything outside this pattern is rejected at the boundary.
     """
-    return bool(_UNIT_PATTERN.match(unit))
+    return unit not in _INTERNAL_UNITS and bool(_UNIT_PATTERN.match(unit))
 
 
 def is_systemd_available() -> bool:
@@ -127,6 +125,7 @@ async def _systemctl(*args: str, timeout: float = 15.0) -> tuple[str, str, int]:
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env={**_inherit_systemctl_env(), **env},
+        start_new_session=True,
     )
     try:
         stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
@@ -135,8 +134,11 @@ async def _systemctl(*args: str, timeout: float = 15.0) -> tuple[str, str, int]:
             stderr.decode("utf-8", errors="replace").strip(),
             proc.returncode if proc.returncode is not None else -1,
         )
+    except asyncio.CancelledError:
+        await _terminate_process_group(proc)
+        raise
     except asyncio.TimeoutError:
-        proc.kill()
+        await _terminate_process_group(proc)
         return ("", "systemctl timed out", -1)
 
 
@@ -311,7 +313,7 @@ async def show_unit(unit: str) -> UnitStatus:
 
     parsed = _parse_show_output(stdout)
     load_state = parsed.get("LoadState", "unknown")
-    return UnitStatus(
+    status = UnitStatus(
         unit=unit,
         load_state=load_state,
         active_state=parsed.get("ActiveState", "unknown"),
@@ -322,6 +324,31 @@ async def show_unit(unit: str) -> UnitStatus:
         last_exit_code=_derive_last_exit_code(parsed),
         uptime_secs=_derive_uptime_secs(parsed),
     )
+    if unit != GATEWAY_UNIT:
+        return status
+
+    # A Type=oneshot/RemainAfterExit wrapper can stay active (exited) after
+    # the Docker container dies. Never surface that stale unit state as a
+    # healthy Gateway; ask the authoritative helper for the real container.
+    if not is_gateway_control_available():
+        status.can_control = False
+        status.active_state = "unknown"
+        status.sub_state = "unknown"
+        return status
+    helper_stdout, _helper_stderr, helper_rc = await _run_gateway_helper(
+        "status", timeout=15.0,
+    )
+    if helper_rc == 0 and helper_stdout == "running":
+        status.active_state = "active"
+        status.sub_state = "running"
+    elif helper_stdout == "stopped":
+        status.active_state = "inactive"
+        status.sub_state = "dead"
+    else:
+        status.active_state = "unknown"
+        status.sub_state = "unknown"
+    status.can_control = True
+    return status
 
 
 async def list_units_with_status() -> List[UnitStatus]:
@@ -333,17 +360,23 @@ async def list_units_with_status() -> List[UnitStatus]:
 
 ALLOWED_ACTIONS = frozenset({"start", "stop", "restart"})
 
-# Cycling the IB Gateway fires an IBKR Mobile 2FA push — start/restart on this
-# unit must hold the shared cross-process push lock so the panel never stacks
-# a second push on top of the FastAPI restart path or the watchdog self-heal.
-# Stop fires no push and is never gated.
+# Cycling the IB Gateway fires an IBKR Mobile 2FA push. The installed cloud
+# helper is the single lease owner and Docker lifecycle path; callers must not
+# pre-acquire and then delegate because same-holder re-entry correctly fails.
 GATEWAY_UNIT = "radon-ib-gateway.service"
-_GATEWAY_PUSH_ACTIONS = frozenset({"start", "restart"})
-
-# Identifier this module uses when taking the shared 2FA push lock — distinct
-# from the FastAPI restart path and the watchdog so the lock file names the
-# component mid-2FA-cycle.
-ADMIN_PANEL_LOCK_HOLDER = "admin-panel"
+GATEWAY_CONTROL_PATH = "/usr/local/bin/radon-ib-gateway-control"
+GATEWAY_CONTROL_TIMEOUT_S = 120.0
+GATEWAY_LEASE_HELD_RC = 75
+GATEWAY_CONTROL_BUSY_RC = 74
+PROCESS_TERM_GRACE_S = 1.0
+OPERATOR_CLI_PATH = "/usr/local/bin/radon"
+OPERATOR_UNIT_TIMEOUT_S = 75.0
+# Shared with radon-cloud deploy/operator control so admin mutations never
+# race a release mid-transition. Override only in tests.
+DEPLOY_LOCK_FILE = Path(
+    os.environ.get("RADON_DEPLOY_LOCK_FILE", "/home/radon/.radon-deploy.lock")
+)
+SYSTEMCTL_MUTATION_TIMEOUT_S = 60.0
 
 # ActionResult.returncode sentinel for "refused: 2FA push lock held by another
 # holder". The route maps it to HTTP 409 (conflict, retry later) instead of
@@ -366,7 +399,7 @@ class ActionResult:
 
 
 async def control_unit(unit: str, action: str) -> ActionResult:
-    """Invoke ``systemctl <action> <unit>`` after allowlist + verb checks.
+    """Control an allowed unit through its authoritative lifecycle path.
 
     Returns an :class:`ActionResult` whether or not the call succeeded so
     the route handler can shape an HTTP response from a single object.
@@ -377,6 +410,9 @@ async def control_unit(unit: str, action: str) -> ActionResult:
     if not is_valid_unit(unit):
         return ActionResult(unit, action, False, f"unit {unit!r} is not allowed", -1)
 
+    if unit == GATEWAY_UNIT:
+        return await _control_gateway(action)
+
     if not is_systemd_available():
         return ActionResult(
             unit, action, False,
@@ -385,54 +421,167 @@ async def control_unit(unit: str, action: str) -> ActionResult:
             -1,
         )
 
-    if unit == GATEWAY_UNIT and action in _GATEWAY_PUSH_ACTIONS:
-        refusal = _take_gateway_push_lock(unit, action)
-        if refusal is not None:
-            return refusal
-        # The lock is deliberately NOT released after systemctl returns —
-        # the 2FA push is still pending at that point. The crash-safe TTL
-        # (DEFAULT_LOCK_TTL_SECS) or the authenticated-probe release in
-        # restart_ib_gateway clears it.
-
-    stdout, stderr, rc = await _systemctl(action, unit, timeout=60.0)
-    detail = stderr or stdout or f"systemctl exited with rc={rc}"
-    return ActionResult(unit, action, rc == 0, detail, rc)
+    return await _control_unit_under_deploy_lock(unit, action)
 
 
-def _take_gateway_push_lock(unit: str, action: str) -> Optional[ActionResult]:
-    """Acquire the shared 2FA push lock for a gateway cycle.
+async def _control_unit_under_deploy_lock(unit: str, action: str) -> ActionResult:
+    """Run a non-gateway systemctl mutation while holding the deploy lock."""
+    try:
+        handle = open(DEPLOY_LOCK_FILE, "a+", encoding="utf-8")
+    except OSError as exc:
+        return ActionResult(
+            unit,
+            action,
+            False,
+            f"cannot open deploy/control lock at {DEPLOY_LOCK_FILE}: {exc}",
+            -1,
+        )
 
-    Returns ``None`` when acquired (caller proceeds) or a refusal
-    :class:`ActionResult` naming the current holder when another restart
-    path already has a push in flight.
-    """
-    acquired, current = ib_2fa_lock.acquire_2fa_push_lock(
-        ADMIN_PANEL_LOCK_HOLDER, reason=f"admin panel {action} {unit}",
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        handle.close()
+        return ActionResult(
+            unit,
+            action,
+            False,
+            "deploy/control lock held",
+            PUSH_LOCK_HELD_RC,
+        )
+
+    try:
+        stdout, stderr, rc = await _systemctl(
+            action, unit, timeout=SYSTEMCTL_MUTATION_TIMEOUT_S,
+        )
+        detail = stderr or stdout or f"systemctl exited with rc={rc}"
+        if rc == -1 and "timed out" in detail.lower():
+            cancel_detail = await _cancel_pending_systemd_jobs(unit)
+            if cancel_detail:
+                detail = f"{detail}; {cancel_detail}"
+        return ActionResult(unit, action, rc == 0, detail, rc)
+    finally:
+        try:
+            fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+        finally:
+            handle.close()
+
+
+async def _cancel_pending_systemd_jobs(unit: str) -> str:
+    """Cancel still-running systemd jobs for ``unit`` after a timed-out action."""
+    stdout, _stderr, rc = await _systemctl(
+        "list-jobs", "--no-legend", "--plain", "--no-pager", timeout=15.0,
     )
-    if acquired:
-        return None
-    assert current is not None  # acquire returns (False, lock) on refusal
-    remaining = ib_2fa_lock.remaining_lock_secs()
-    logger.warning(
-        "admin panel %s %s refused — 2FA push lock held by %r (%ds remaining)",
-        action, unit, current.holder, remaining,
+    if rc != 0 or not stdout:
+        return ""
+
+    job_ids: list[str] = []
+    for line in stdout.splitlines():
+        parts = line.split()
+        if len(parts) >= 2 and parts[1] == unit:
+            job_ids.append(parts[0])
+    if not job_ids:
+        return ""
+
+    for job_id in job_ids:
+        await _systemctl("cancel", job_id, timeout=15.0)
+    return f"cancelled pending systemd jobs {', '.join(job_ids)}"
+
+
+def is_gateway_control_available() -> bool:
+    """Return whether the installed authoritative Gateway helper is usable."""
+    return os.access(GATEWAY_CONTROL_PATH, os.X_OK)
+
+
+async def _control_gateway(action: str) -> ActionResult:
+    """Delegate Gateway lifecycle to the helper that owns lease acquisition."""
+    if not is_gateway_control_available():
+        return ActionResult(
+            GATEWAY_UNIT,
+            action,
+            False,
+            f"IB Gateway control helper unavailable at {GATEWAY_CONTROL_PATH}",
+            -1,
+        )
+
+    stdout, stderr, rc = await _run_gateway_helper(
+        action, timeout=GATEWAY_CONTROL_TIMEOUT_S,
     )
-    return ActionResult(
-        unit, action, False,
-        f"2FA push lock held by {current.holder!r} ({remaining}s remaining). "
-        "Cycling the gateway now would stack a second IBKR push and every "
-        "approval would be rejected. Approve the pending push (or wait for "
-        "the lock to expire), then POST /ib/reset-backoff to retry.",
-        PUSH_LOCK_HELD_RC,
+    detail = stderr or stdout or f"Gateway control exited with rc={rc}"
+    if rc in {GATEWAY_LEASE_HELD_RC, GATEWAY_CONTROL_BUSY_RC}:
+        logger.warning("admin Gateway %s refused by active 2FA lease: %s", action, detail)
+        return ActionResult(GATEWAY_UNIT, action, False, detail, PUSH_LOCK_HELD_RC)
+    return ActionResult(GATEWAY_UNIT, action, rc == 0, detail, rc)
+
+
+async def _run_gateway_helper(
+    action: str, *, timeout: float,
+) -> tuple[str, str, int]:
+    """Run one helper command with bounded, fully-reaped subprocess cleanup."""
+    env = {**_inherit_systemctl_env(), "LC_ALL": "C", "LANG": "C"}
+    proc = await asyncio.create_subprocess_exec(
+        GATEWAY_CONTROL_PATH,
+        action,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        start_new_session=True,
     )
+    try:
+        stdout, stderr = await asyncio.wait_for(
+            proc.communicate(), timeout=timeout,
+        )
+    except asyncio.CancelledError:
+        await _terminate_process_group(proc)
+        raise
+    except asyncio.TimeoutError:
+        await _terminate_process_group(proc)
+        return "", f"IB Gateway control timed out after {timeout:.0f}s", -1
+
+    rc = proc.returncode if proc.returncode is not None else -1
+    out = stdout.decode("utf-8", errors="replace").strip()
+    err = stderr.decode("utf-8", errors="replace").strip()
+    return out, err, rc
+
+
+async def _terminate_process_group(proc: asyncio.subprocess.Process) -> None:
+    """TERM, then KILL and reap a subprocess plus every descendant it owns."""
+    pid = getattr(proc, "pid", None)
+    if pid is not None:
+        try:
+            os.killpg(pid, signal.SIGTERM)
+        except (PermissionError, ProcessLookupError):
+            pass
+    elif proc.returncode is None:
+        try:
+            proc.kill()
+        except (PermissionError, ProcessLookupError):
+            pass
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=PROCESS_TERM_GRACE_S)
+    except (asyncio.TimeoutError, ProcessLookupError):
+        pass
+
+    if pid is not None:
+        try:
+            os.killpg(pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+    elif proc.returncode is None:
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+    try:
+        await proc.wait()
+    except ProcessLookupError:
+        pass
 
 
 # Path to the operator CLI installed by radon-cloud/scripts/setup-vps.sh.
 # Restart-all goes through this wrapper rather than enumerating units in
 # Python because the wrapper knows the correct stop/start ordering (IB Gateway
 # first) and reads the current list of radon-* units from systemctl directly.
-OPERATOR_CLI_PATH = "/usr/local/bin/radon"
-
 # Walltime ceiling for a full stack restart. radon restart on the live VPS
 # typically takes 60-90s; 180s gives headroom for IB Gateway boot + 2FA
 # socket-listening probe without leaving the HTTP request hanging forever.
@@ -445,6 +594,34 @@ def is_operator_cli_available() -> bool:
     Mirrors :func:`is_systemd_available` for the higher-level wrapper.
     """
     return os.access(OPERATOR_CLI_PATH, os.X_OK)
+
+
+async def _run_operator_command(
+    *args: str, timeout: float,
+) -> tuple[str, str, int]:
+    """Run one fixed operator command with bounded process-group cleanup."""
+    env = {**_inherit_systemctl_env(), "LC_ALL": "C", "LANG": "C"}
+    proc = await asyncio.create_subprocess_exec(
+        OPERATOR_CLI_PATH,
+        *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env=env,
+        start_new_session=True,
+    )
+    try:
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.CancelledError:
+        await _terminate_process_group(proc)
+        raise
+    except asyncio.TimeoutError:
+        await _terminate_process_group(proc)
+        return "", f"operator timed out after {timeout:.0f}s", -1
+    return (
+        stdout.decode("utf-8", errors="replace").strip(),
+        stderr.decode("utf-8", errors="replace").strip(),
+        proc.returncode if proc.returncode is not None else -1,
+    )
 
 
 async def restart_full_stack() -> ActionResult:
@@ -475,27 +652,12 @@ async def restart_full_stack() -> ActionResult:
             -1,
         )
 
-    env = {**_inherit_systemctl_env(), "LC_ALL": "C", "LANG": "C"}
-    proc = await asyncio.create_subprocess_exec(
-        OPERATOR_CLI_PATH, "restart",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
+    stdout, stderr, rc = await _run_operator_command(
+        "restart", timeout=STACK_RESTART_TIMEOUT_S,
     )
-    try:
-        stdout, stderr = await asyncio.wait_for(
-            proc.communicate(), timeout=STACK_RESTART_TIMEOUT_S,
-        )
-        rc = proc.returncode if proc.returncode is not None else -1
-        out = stdout.decode("utf-8", errors="replace").strip()
-        err = stderr.decode("utf-8", errors="replace").strip()
-        detail = err or out or f"radon restart exited with rc={rc}"
-        return ActionResult("radon-stack", "restart", rc == 0, detail, rc)
-    except asyncio.TimeoutError:
-        proc.kill()
+    detail = stderr or stdout or f"radon restart exited with rc={rc}"
+    if rc == GATEWAY_CONTROL_BUSY_RC:
         return ActionResult(
-            "radon-stack", "restart", False,
-            f"radon restart timed out after {STACK_RESTART_TIMEOUT_S:.0f}s "
-            "— check VPS state via SSH",
-            -1,
+            "radon-stack", "restart", False, detail, PUSH_LOCK_HELD_RC,
         )
+    return ActionResult("radon-stack", "restart", rc == 0, detail, rc)

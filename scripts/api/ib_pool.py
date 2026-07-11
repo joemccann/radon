@@ -37,8 +37,46 @@ def _connect_in_thread(host: str, port: int, client_id: int, timeout: int = 5) -
         _aio.set_event_loop(_aio.new_event_loop())
 
     client = IBClient()
-    client.connect(host=host, port=port, client_id=client_id, timeout=timeout)
-    return client
+    try:
+        client.connect(host=host, port=port, client_id=client_id, timeout=timeout)
+        return client
+    except BaseException:
+        try:
+            client.disconnect()
+        except Exception:
+            logger.debug("IB pool: failed connect cleanup failed", exc_info=True)
+        raise
+
+
+async def _connect_owned(
+    host: str,
+    port: int,
+    client_id: int,
+    timeout: int,
+) -> IBClient:
+    """Connect in a worker thread without abandoning a late client on cancel."""
+    pending = asyncio.create_task(
+        asyncio.to_thread(_connect_in_thread, host, port, client_id, timeout)
+    )
+    try:
+        return await asyncio.shield(pending)
+    except asyncio.CancelledError:
+        # Cancelling ``to_thread`` cannot stop its worker. Wait for the bounded
+        # connect call and dispose any client it returns before propagating the
+        # cancellation, otherwise its client ID remains live but untracked.
+        try:
+            client = await asyncio.shield(pending)
+        except Exception:
+            pass
+        else:
+            try:
+                await asyncio.to_thread(client.disconnect)
+            except Exception:
+                logger.warning(
+                    "IB pool: cancelled connect returned a client that could not be disconnected",
+                    exc_info=True,
+                )
+        raise
 
 
 class IBPool:
@@ -64,6 +102,8 @@ class IBPool:
         self._clients: Dict[str, IBClient] = {}
         self._locks: Dict[str, asyncio.Lock] = {}
         self._connected: Dict[str, bool] = {}
+        self._lifecycle_lock = asyncio.Lock()
+        self._lifecycle_transition = False
 
         for role in POOL_ROLES:
             self._locks[role] = asyncio.Lock()
@@ -75,46 +115,76 @@ class IBPool:
         Non-blocking: if IB Gateway is down, roles start disconnected.
         IB-dependent endpoints will return 503; UW-only endpoints still work.
         """
+        async with self._lifecycle_lock:
+            self._lifecycle_transition = True
+            try:
+                return await self._connect_all_unlocked()
+            finally:
+                self._lifecycle_transition = False
+
+    async def _connect_all_unlocked(self) -> Dict[str, bool]:
+        """Connect roles while the caller owns ``_lifecycle_lock``."""
         status = {}
         for i, (role, client_id) in enumerate(POOL_ROLES.items()):
             # IB Gateway rate-limits rapid successive connections — stagger by 1s
             if i > 0:
                 await asyncio.sleep(1)
 
-            connected = False
-            for attempt in range(3):
-                try:
-                    client = await asyncio.to_thread(
-                        _connect_in_thread,
-                        self._host, self._port, client_id, 10,
-                    )
-                    self._clients[role] = client
-                    self._connected[role] = True
+            async with self._locks[role]:
+                if self.is_connected(role):
                     status[role] = True
-                    connected = True
-                    logger.info("IB pool: %s connected (client_id=%d)", role, client_id)
-                    break
-                except Exception as e:
-                    if attempt < 2:
-                        logger.info("IB pool: %s attempt %d failed, retrying in 2s: %s", role, attempt + 1, e)
-                        await asyncio.sleep(2)
-                    else:
-                        self._connected[role] = False
-                        status[role] = False
-                        logger.warning("IB pool: %s failed to connect after 3 attempts: %s", role, e)
+                    continue
+
+                stale = self._clients.pop(role, None)
+                if stale is not None:
+                    try:
+                        await asyncio.to_thread(stale.disconnect)
+                    except Exception:
+                        logger.debug("IB pool: %s stale disconnect failed", role, exc_info=True)
+
+                for attempt in range(3):
+                    try:
+                        client = await _connect_owned(
+                            self._host, self._port, client_id, 10,
+                        )
+                        self._clients[role] = client
+                        self._connected[role] = True
+                        status[role] = True
+                        logger.info("IB pool: %s connected (client_id=%d)", role, client_id)
+                        break
+                    except Exception as e:
+                        if attempt < 2:
+                            logger.info("IB pool: %s attempt %d failed, retrying in 2s: %s", role, attempt + 1, e)
+                            await asyncio.sleep(2)
+                        else:
+                            self._connected[role] = False
+                            status[role] = False
+                            logger.warning("IB pool: %s failed to connect after 3 attempts: %s", role, e)
 
         return status
 
     async def disconnect_all(self) -> None:
         """Disconnect all pool connections."""
-        for role, client in self._clients.items():
+        async with self._lifecycle_lock:
+            self._lifecycle_transition = True
             try:
-                await asyncio.to_thread(client.disconnect)
-                logger.info("IB pool: %s disconnected", role)
-            except Exception as e:
-                logger.warning("IB pool: %s disconnect error: %s", role, e)
-            self._connected[role] = False
-        self._clients.clear()
+                await self._disconnect_all_unlocked()
+            finally:
+                self._lifecycle_transition = False
+
+    async def _disconnect_all_unlocked(self) -> None:
+        """Disconnect roles after active borrowers release their role locks."""
+        for role in list(self._clients):
+            async with self._locks[role]:
+                client = self._clients.pop(role, None)
+                if client is None:
+                    continue
+                try:
+                    await asyncio.to_thread(client.disconnect)
+                    logger.info("IB pool: %s disconnected", role)
+                except Exception as e:
+                    logger.warning("IB pool: %s disconnect error: %s", role, e)
+                self._connected[role] = False
 
     def get(self, role: str) -> Optional[IBClient]:
         """Get the client for a role (may be None if not connected)."""
@@ -145,8 +215,13 @@ class IBPool:
         """Attempt to reconnect a disconnected role."""
         client_id = POOL_ROLES[role]
         try:
-            client = await asyncio.to_thread(
-                _connect_in_thread,
+            stale = self._clients.pop(role, None)
+            if stale is not None:
+                try:
+                    await asyncio.to_thread(stale.disconnect)
+                except Exception:
+                    logger.debug("IB pool: %s stale disconnect failed", role, exc_info=True)
+            client = await _connect_owned(
                 self._host, self._port, client_id, 5,
             )
             self._clients[role] = client
@@ -170,8 +245,13 @@ class IBPool:
         anyway). Each role gets a fresh connection attempt via `connect_all()`.
         """
         logger.info("IB pool: reconnect_all — dropping all pool clients")
-        await self.disconnect_all()
-        return await self.connect_all()
+        async with self._lifecycle_lock:
+            self._lifecycle_transition = True
+            try:
+                await self._disconnect_all_unlocked()
+                return await self._connect_all_unlocked()
+            finally:
+                self._lifecycle_transition = False
 
     def status(self) -> dict:
         """Return pool status for health endpoint.
@@ -213,6 +293,10 @@ class _PoolContext:
 
     async def __aenter__(self) -> IBClient:
         await self._pool._locks[self._role].acquire()
+
+        if self._pool._lifecycle_transition:
+            self._pool._locks[self._role].release()
+            raise ConnectionError("IB pool lifecycle transition in progress")
 
         # Auto-reconnect if connection dropped
         if not self._pool.is_connected(self._role):

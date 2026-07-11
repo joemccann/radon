@@ -28,58 +28,16 @@
         <key>TWS_PATH</key>
         <string>/Users/joemccann/Applications</string>
         <key>TWOFA_TIMEOUT_ACTION</key>
-        <string>restart</string>
+        <string>exit</string>
+        <key>RELOGIN_AFTER_TWOFA_TIMEOUT</key>
+        <string>no</string>
     </dict>
 
-    <!-- Mon=1 through Fri=5 at 00:00 -->
-    <key>StartCalendarInterval</key>
-    <array>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>1</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>2</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>3</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>4</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>5</integer>
-        </dict>
-    </array>
-
+    <!-- Loaded as a definition only. FastAPI/watchdog acquire the shared
+         2FA lease before invoking launchctl start. -->
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
 
-    <!-- IBC/Gateway manage their own lifecycle via AutoRestartTime -->
     <key>KeepAlive</key>
     <false/>
 
