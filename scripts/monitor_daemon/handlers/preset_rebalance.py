@@ -8,29 +8,170 @@ against current presets, and regenerates any that changed.
 
 Sources:
   - S&P 500:    Wikipedia 'List of S&P 500 companies' table scrape
-  - NASDAQ 100: Wikipedia 'Nasdaq-100' table scrape
-  - Russell 2000: iShares IWM holdings CSV download
+  - NASDAQ 100: Nasdaq official list-type JSON API
+  - Russell 2000: BlackRock/iShares structured IWM holdings API
 
 Registered as a monitor daemon handler.
 """
 
 import json
-import csv
-import io
 import re
 import os
 import logging
-from datetime import datetime, timedelta
+import tempfile
+from datetime import datetime
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Dict, List, Set, Tuple, Optional
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
 
 logger = logging.getLogger(__name__)
 
 PRESETS_DIR = Path(__file__).resolve().parent.parent.parent.parent / "data" / "presets"
 CHANGELOG_PATH = PRESETS_DIR / "changelog.json"
 USER_AGENT = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)"
+
+_INDEX_VALIDATION = {
+    "sp500": {"min_count": 450, "max_count": 550, "min_overlap": 0.90},
+    "ndx100": {"min_count": 90, "max_count": 110, "min_overlap": 0.80},
+    "r2k": {"min_count": 1500, "max_count": 2300, "min_overlap": 0.60},
+}
+_REQUIRED_FIELDS = {
+    "sp500": ("ticker", "name", "sector", "sub_industry"),
+    "ndx100": ("ticker", "name", "sector", "sub_industry"),
+    "r2k": ("ticker", "name", "sector"),
+}
+_VALID_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+
+
+class InvalidConstituentData(ValueError):
+    """Raised when an upstream constituent response is unsafe to publish."""
+
+
+class _SemanticTableParser(HTMLParser):
+    """Collect top-level table rows while tolerating normal HTML markup."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.tables: List[List[List[str]]] = []
+        self._table_depth = 0
+        self._table: Optional[List[List[str]]] = None
+        self._row: Optional[List[str]] = None
+        self._cell: Optional[List[str]] = None
+
+    def handle_starttag(self, tag: str, attrs) -> None:
+        if tag == "table":
+            self._table_depth += 1
+            if self._table_depth == 1:
+                self._table = []
+            return
+        if self._table_depth != 1:
+            return
+        if tag == "tr":
+            self._row = []
+        elif tag in {"td", "th"} and self._row is not None:
+            self._cell = []
+
+    def handle_data(self, data: str) -> None:
+        if self._cell is not None:
+            self._cell.append(data)
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "table":
+            if self._table_depth == 1 and self._table is not None:
+                self.tables.append(self._table)
+                self._table = None
+            self._table_depth = max(0, self._table_depth - 1)
+            return
+        if self._table_depth != 1:
+            return
+        if tag in {"td", "th"} and self._cell is not None:
+            value = re.sub(r"\s+", " ", "".join(self._cell)).strip()
+            if self._row is not None:
+                self._row.append(value)
+            self._cell = None
+        elif tag == "tr" and self._row is not None:
+            if self._row and self._table is not None:
+                self._table.append(self._row)
+            self._row = None
+
+
+def _write_json_atomic(path: Path, payload: object) -> None:
+    """Replace one JSON file atomically without changing its schema."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        target_mode = path.stat().st_mode & 0o777
+    except FileNotFoundError:
+        target_mode = 0o644
+    fd, temp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    try:
+        os.fchmod(fd, target_mode)
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            json.dump(payload, handle, indent=2)
+            handle.write("\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temp_name, path)
+    except BaseException:
+        try:
+            os.unlink(temp_name)
+        except OSError:
+            pass
+        raise
+
+
+def validate_constituents(
+    index: str, fresh_companies: List[Dict], current_tickers: List[str]
+) -> None:
+    """Reject truncated, misparsed, or unrelated upstream constituent data."""
+    limits = _INDEX_VALIDATION[index]
+    count = len(fresh_companies)
+    minimum = limits["min_count"]
+    maximum = limits["max_count"]
+    if not minimum <= count <= maximum:
+        raise InvalidConstituentData(
+            f"{index}: parsed {count} constituents; expected {minimum}..{maximum}"
+        )
+
+    tickers = [company.get("ticker") for company in fresh_companies]
+    invalid_tickers = [
+        ticker
+        for ticker in tickers
+        if not isinstance(ticker, str) or not _VALID_TICKER.fullmatch(ticker)
+    ]
+    if invalid_tickers:
+        sample = ", ".join(repr(ticker) for ticker in invalid_tickers[:5])
+        raise InvalidConstituentData(f"{index}: invalid tickers in upstream data: {sample}")
+
+    if len(set(tickers)) != len(tickers):
+        raise InvalidConstituentData(f"{index}: duplicate tickers in upstream data")
+
+    required_fields = _REQUIRED_FIELDS[index]
+    incomplete = []
+    for company in fresh_companies:
+        if any(
+            not isinstance(company.get(field), str) or not company[field].strip()
+            for field in required_fields
+        ):
+            incomplete.append(company.get("ticker"))
+    if incomplete:
+        sample = ", ".join(repr(ticker) for ticker in incomplete[:5])
+        raise InvalidConstituentData(
+            f"{index}: missing required constituent fields for: {sample}"
+        )
+
+    current = {ticker for ticker in current_tickers if isinstance(ticker, str)}
+    if current:
+        overlap = len(current.intersection(tickers)) / len(current)
+        minimum_overlap = limits["min_overlap"]
+        if overlap < minimum_overlap:
+            raise InvalidConstituentData(
+                f"{index}: upstream overlap {overlap:.1%} is below "
+                f"the {minimum_overlap:.0%} safety floor"
+            )
 
 
 # ─── Fetchers ────────────────────────────────────────────────
@@ -41,26 +182,40 @@ def fetch_sp500() -> List[Dict]:
     req = Request(url, headers={"User-Agent": USER_AGENT})
     html = urlopen(req, timeout=30).read().decode("utf-8")
 
-    tables = list(re.finditer(r"<table[^>]*>(.*?)</table>", html, re.DOTALL))
-    # Table 0 = current constituents (verified by header: Symbol, Security, GICS Sector...)
-    table_html = tables[0].group(1)
+    parser = _SemanticTableParser()
+    parser.feed(html)
+    required_headers = ("symbol", "security", "gics sector", "gics sub-industry")
+    rows = None
+    column_indices = None
+    for table in parser.tables:
+        for row_index, row in enumerate(table):
+            normalized = [cell.casefold().replace("‑", "-") for cell in row]
+            if all(header in normalized for header in required_headers):
+                column_indices = [normalized.index(header) for header in required_headers]
+                rows = table[row_index + 1 :]
+                break
+        if rows is not None:
+            break
+    if rows is None or column_indices is None:
+        raise InvalidConstituentData("sp500: semantic constituent table not found")
 
-    rows = re.findall(r"<tr>(.*?)</tr>", table_html, re.DOTALL)
     companies = []
-    for row in rows[1:]:
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
-        if len(cells) >= 4:
-            ticker = re.sub(r"<[^>]+>", "", cells[0]).strip()
-            name = re.sub(r"<[^>]+>", "", cells[1]).strip()
-            sector = re.sub(r"<[^>]+>", "", cells[2]).strip()
-            sub_industry = re.sub(r"<[^>]+>", "", cells[3]).strip().replace("&amp;", "&")
-            if ticker:
-                companies.append({
+    max_column = max(column_indices)
+    for row in rows:
+        if len(row) <= max_column:
+            continue
+        ticker, name, sector, sub_industry = (
+            row[column] for column in column_indices
+        )
+        if ticker:
+            companies.append(
+                {
                     "ticker": ticker,
                     "name": name,
                     "sector": sector,
                     "sub_industry": sub_industry,
-                })
+                }
+            )
 
     # Dedup
     seen = set()
@@ -73,31 +228,44 @@ def fetch_sp500() -> List[Dict]:
 
 
 def fetch_ndx100() -> List[Dict]:
-    """Fetch current NASDAQ 100 constituents from Wikipedia."""
-    url = "https://en.wikipedia.org/wiki/Nasdaq-100"
-    req = Request(url, headers={"User-Agent": USER_AGENT})
-    html = urlopen(req, timeout=30).read().decode("utf-8")
+    """Fetch current NASDAQ 100 constituents from Nasdaq's JSON API."""
+    url = "https://api.nasdaq.com/api/quote/list-type/nasdaq100"
+    req = Request(
+        url,
+        headers={
+            "User-Agent": USER_AGENT,
+            "Accept": "application/json, text/plain, */*",
+            "Origin": "https://www.nasdaq.com",
+            "Referer": "https://www.nasdaq.com/",
+        },
+    )
+    content = urlopen(req, timeout=30).read().decode("utf-8")
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise InvalidConstituentData("ndx100: Nasdaq response is not valid JSON") from exc
 
-    tables = list(re.finditer(r"<table[^>]*>(.*?)</table>", html, re.DOTALL))
-    # Table 4 = constituents (headers: Ticker, Company, ICB Industry, ICB Subsector)
-    ndx_table = tables[4].group(1)
+    try:
+        rows = payload["data"]["data"]["rows"]
+    except (KeyError, TypeError) as exc:
+        raise InvalidConstituentData("ndx100: Nasdaq constituent rows are missing") from exc
+    if not isinstance(rows, list):
+        raise InvalidConstituentData("ndx100: Nasdaq constituent rows are missing")
 
-    rows = re.findall(r"<tr>(.*?)</tr>", ndx_table, re.DOTALL)
     companies = []
-    for row in rows[1:]:
-        cells = re.findall(r"<td[^>]*>(.*?)</td>", row, re.DOTALL)
-        if len(cells) >= 4:
-            ticker = re.sub(r"<[^>]+>", "", cells[0]).strip()
-            name = re.sub(r"<[^>]+>", "", cells[1]).strip()
-            sector = re.sub(r"<[^>]+>", "", cells[2]).strip()
-            sub_industry = re.sub(r"<[^>]+>", "", cells[3]).strip().replace("&amp;", "&")
-            if ticker:
-                companies.append({
-                    "ticker": ticker,
-                    "name": name,
-                    "sector": sector,
-                    "sub_industry": sub_industry,
-                })
+    for row in rows:
+        if not isinstance(row, dict):
+            raise InvalidConstituentData("ndx100: Nasdaq constituent row is not an object")
+        ticker = str(row.get("symbol") or "").strip().upper()
+        name = str(row.get("companyName") or "").strip()
+        companies.append(
+            {
+                "ticker": ticker,
+                "name": name,
+                "sector": "Unknown",
+                "sub_industry": "Unknown",
+            }
+        )
 
     seen = set()
     unique = []
@@ -109,47 +277,82 @@ def fetch_ndx100() -> List[Dict]:
 
 
 def fetch_r2k() -> List[Dict]:
-    """Fetch current Russell 2000 constituents from iShares IWM holdings."""
-    url = (
-        "https://www.ishares.com/us/products/239710/ishares-russell-2000-etf/"
-        "1467271812596.ajax?fileType=csv&fileName=IWM_holdings&dataType=fund"
+    """Fetch current Russell 2000 exposure from structured IWM holdings."""
+    api = (
+        "https://www.blackrock.com/varnish-api/blk-one01-product-data/"
+        "product-data/api/v2/get-product-data?"
     )
-    req = Request(url, headers={"User-Agent": USER_AGENT})
-    content = urlopen(req, timeout=30).read().decode("utf-8", errors="ignore")
+    params = {
+        "appSubType": "ISHARES",
+        "appType": "PRODUCT_PAGE",
+        "component": "holdings.all",
+        "locale": "en_US",
+        "portfolioId": "239710",
+        "targetSite": "us-ishares",
+        "userType": "individual",
+        "excludeContent": "true",
+        "includeConfig": "true",
+    }
+    req = Request(
+        api + urlencode(params),
+        headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+    )
+    content = urlopen(req, timeout=30).read().decode("utf-8")
+    try:
+        payload = json.loads(content)
+    except json.JSONDecodeError as exc:
+        raise InvalidConstituentData(
+            "r2k: BlackRock response is not valid JSON"
+        ) from exc
 
-    lines = content.strip().split("\n")
-    # Header at line 9: Ticker,Name,Sector,Asset Class,...
+    try:
+        points = payload["componentsByNameMap"]["holdings"][
+            "containersByNameMap"
+        ]["all"]["dataPointsByNameMap"]
+        columns = {
+            name: points[name]["formattedValue"]
+            for name in (
+                "ticker",
+                "issueName",
+                "sectorName",
+                "assetClass",
+                "holdingPercent",
+            )
+        }
+    except (KeyError, TypeError) as exc:
+        raise InvalidConstituentData(
+            "r2k: BlackRock holdings columns are missing"
+        ) from exc
+    if any(not isinstance(values, list) for values in columns.values()):
+        raise InvalidConstituentData("r2k: BlackRock holdings columns are missing")
+    lengths = {len(values) for values in columns.values()}
+    if len(lengths) != 1:
+        raise InvalidConstituentData("r2k: BlackRock holdings column lengths differ")
+
     companies = []
-    for line in lines[10:]:
-        if not line.strip():
-            continue
-
-        # Manual CSV parse (handles quoted fields with commas)
-        parts = []
-        in_quote = False
-        current = []
-        for ch in line:
-            if ch == '"':
-                in_quote = not in_quote
-            elif ch == "," and not in_quote:
-                parts.append("".join(current).strip().strip('"'))
-                current = []
-            else:
-                current.append(ch)
-        parts.append("".join(current).strip().strip('"'))
-
-        if len(parts) < 4:
-            continue
-
-        ticker = parts[0].strip()
-        name = parts[1].strip()
-        sector = parts[2].strip()
-        asset_class = parts[3].strip()
-        weight_str = parts[4].strip() if len(parts) > 4 else "0"
+    for ticker_value, name_value, sector_value, asset_value, weight_value in zip(
+        columns["ticker"],
+        columns["issueName"],
+        columns["sectorName"],
+        columns["assetClass"],
+        columns["holdingPercent"],
+    ):
+        ticker = str(ticker_value or "").strip().upper()
+        name = str(name_value or "").strip()
+        sector = str(sector_value or "").strip()
+        asset_class = str(asset_value or "").strip()
+        weight_str = str(weight_value or "0").strip()
 
         if not ticker or ticker == "-" or asset_class != "Equity":
             continue
-        if any(x in name.upper() for x in ["CASH COLLATERAL", "FUTURES", "ISHARES", "SWAP", "TREASURY"]):
+        excluded_name_terms = (
+            "CASH COLLATERAL",
+            "FUTURES",
+            "ISHARES",
+            "SWAP",
+            "TREASURY",
+        )
+        if any(term in name.upper() for term in excluded_name_terms):
             continue
 
         try:
@@ -157,12 +360,14 @@ def fetch_r2k() -> List[Dict]:
         except ValueError:
             weight = 0.0
 
-        companies.append({
-            "ticker": ticker,
-            "name": name,
-            "sector": sector,
-            "weight": weight,
-        })
+        companies.append(
+            {
+                "ticker": ticker,
+                "name": name,
+                "sector": sector,
+                "weight": weight,
+            }
+        )
 
     seen = set()
     unique = []
@@ -260,8 +465,7 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
                     ci.setdefault("tickers", []).append(ticker)
 
     # ─── Write master ───
-    with open(master_path, "w") as f:
-        json.dump(master, f, indent=2)
+    _write_json_atomic(master_path, master)
     files_written += 1
 
     # ─── Regenerate sub-presets ───
@@ -277,8 +481,7 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
             "source": "S&P 500 GICS classification",
         }
         sub_path = PRESETS_DIR / f"sp500-{gkey}.json"
-        with open(sub_path, "w") as f:
-            json.dump(preset, f, indent=2)
+        _write_json_atomic(sub_path, preset)
         files_written += 1
 
     # ─── Regenerate sector rollups ───
@@ -304,8 +507,7 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
             "sector": sector_name,
             "source": "S&P 500 GICS classification",
         }
-        with open(PRESETS_DIR / f"sp500-sector-{key}.json", "w") as f:
-            json.dump(preset, f, indent=2)
+        _write_json_atomic(PRESETS_DIR / f"sp500-sector-{key}.json", preset)
         files_written += 1
 
     return files_written
@@ -345,10 +547,12 @@ def update_ndx100_presets(fresh_companies: List[Dict], added: Set[str], removed:
         f"NASDAQ 100 — {len(fresh_tickers)} companies, "
         f"{len(master['groups'])} groups, {len(master['pairs'])} curated pairs"
     )
+    master["source"] = (
+        "Nasdaq official Nasdaq-100 API, " + datetime.now().strftime("%B %Y")
+    )
 
     files_written = 0
-    with open(master_path, "w") as f:
-        json.dump(master, f, indent=2)
+    _write_json_atomic(master_path, master)
     files_written += 1
 
     # Regenerate sub-presets
@@ -360,10 +564,9 @@ def update_ndx100_presets(fresh_companies: List[Dict], added: Set[str], removed:
             "pairs": group["pairs"],
             "sector": group.get("sector", ""),
             "vol_driver": group.get("vol_driver", ""),
-            "source": "NASDAQ 100 Index",
+            "source": "Nasdaq official Nasdaq-100 API",
         }
-        with open(PRESETS_DIR / f"ndx100-{gkey}.json", "w") as f:
-            json.dump(preset, f, indent=2)
+        _write_json_atomic(PRESETS_DIR / f"ndx100-{gkey}.json", preset)
         files_written += 1
 
     return files_written
@@ -446,8 +649,7 @@ def update_r2k_presets(fresh_companies: List[Dict], added: Set[str], removed: Se
     }
 
     files_written = 0
-    with open(master_path, "w") as f:
-        json.dump(master, f, indent=2)
+    _write_json_atomic(master_path, master)
     files_written += 1
 
     for key, g in sorted(r2k_groups.items()):
@@ -460,8 +662,7 @@ def update_r2k_presets(fresh_companies: List[Dict], added: Set[str], removed: Se
             "vol_driver": g["vol_driver"],
             "source": "iShares Russell 2000 ETF (IWM) holdings",
         }
-        with open(PRESETS_DIR / f"r2k-{key}.json", "w") as f:
-            json.dump(preset, f, indent=2)
+        _write_json_atomic(PRESETS_DIR / f"r2k-{key}.json", preset)
         files_written += 1
 
     return files_written
@@ -492,8 +693,7 @@ def log_changes(index: str, added: Set[str], removed: Set[str]):
     # Keep last 100 entries
     changelog = changelog[-100:]
 
-    with open(CHANGELOG_PATH, "w") as f:
-        json.dump(changelog, f, indent=2)
+    _write_json_atomic(CHANGELOG_PATH, changelog)
 
 
 # ─── Main Handler ────────────────────────────────────────────
@@ -514,98 +714,73 @@ def execute() -> dict:
         "total_files_written": 0,
     }
 
-    # ─── S&P 500 ───
-    try:
-        logger.info("Fetching S&P 500 constituents...")
-        sp500_fresh = fetch_sp500()
-        sp500_tickers = [c["ticker"] for c in sp500_fresh]
+    sources = (
+        ("sp500", "S&P 500", "SP500", fetch_sp500, update_sp500_presets),
+        ("ndx100", "NASDAQ 100", "NDX100", fetch_ndx100, update_ndx100_presets),
+        ("r2k", "Russell 2000", "R2K", fetch_r2k, update_r2k_presets),
+    )
+    prepared = {}
+    validation_errors = []
 
-        master_path = PRESETS_DIR / "sp500.json"
-        with open(master_path) as f:
-            current = json.load(f)
-
-        added, removed = diff_tickers(current["tickers"], sp500_tickers)
-
-        if added or removed:
-            logger.info(f"SP500: +{len(added)} -{len(removed)} changes detected")
-            files = update_sp500_presets(sp500_fresh, added, removed)
-            log_changes("sp500", added, removed)
-            results["indices"]["sp500"] = {
+    # Fetch and validate every source before allowing any canonical write. A
+    # single malformed provider response aborts the whole publish phase.
+    for index, display_name, log_name, fetcher, updater in sources:
+        try:
+            logger.info("Fetching %s constituents...", display_name)
+            fresh_companies = fetcher()
+            with open(PRESETS_DIR / f"{index}.json", encoding="utf-8") as handle:
+                current = json.load(handle)
+            current_tickers = current.get("tickers")
+            if not isinstance(current_tickers, list):
+                raise InvalidConstituentData(
+                    f"{index}: canonical preset has no ticker list"
+                )
+            validate_constituents(index, fresh_companies, current_tickers)
+            fresh_tickers = [company["ticker"] for company in fresh_companies]
+            added, removed = diff_tickers(current_tickers, fresh_tickers)
+            prepared[index] = (fresh_companies, added, removed, updater, log_name)
+            results["indices"][index] = {
                 "added": sorted(added),
                 "removed": sorted(removed),
-                "files_written": files,
+                "files_written": 0,
+                "validated": True,
             }
+        except Exception as exc:
+            message = str(exc)
+            logger.error("%s fetch/validation failed: %s", log_name, message)
+            results["indices"][index] = {"error": message}
+            validation_errors.append(f"{index}: {message}")
+
+    if validation_errors:
+        results["status"] = "error"
+        results["error"] = "Unsafe constituent data; no presets written: " + "; ".join(
+            validation_errors
+        )
+        logger.error("Preset rebalance aborted before writes: %s", results["error"])
+        return results
+
+    for index, _, _, _, _ in sources:
+        fresh_companies, added, removed, updater, log_name = prepared[index]
+        if not added and not removed:
+            logger.info("%s: No changes", log_name)
+            continue
+
+        try:
+            logger.info(
+                "%s: +%s -%s changes detected", log_name, len(added), len(removed)
+            )
+            files = updater(fresh_companies, added, removed)
+            log_changes(index, added, removed)
+            results["indices"][index]["files_written"] = files
             results["total_changes"] += len(added) + len(removed)
             results["total_files_written"] += files
-        else:
-            logger.info("SP500: No changes")
-            results["indices"]["sp500"] = {"added": [], "removed": [], "files_written": 0}
-
-    except Exception as e:
-        logger.error(f"SP500 fetch failed: {e}")
-        results["indices"]["sp500"] = {"error": str(e)}
-
-    # ─── NASDAQ 100 ───
-    try:
-        logger.info("Fetching NASDAQ 100 constituents...")
-        ndx_fresh = fetch_ndx100()
-        ndx_tickers = [c["ticker"] for c in ndx_fresh]
-
-        master_path = PRESETS_DIR / "ndx100.json"
-        with open(master_path) as f:
-            current = json.load(f)
-
-        added, removed = diff_tickers(current["tickers"], ndx_tickers)
-
-        if added or removed:
-            logger.info(f"NDX100: +{len(added)} -{len(removed)} changes detected")
-            files = update_ndx100_presets(ndx_fresh, added, removed)
-            log_changes("ndx100", added, removed)
-            results["indices"]["ndx100"] = {
-                "added": sorted(added),
-                "removed": sorted(removed),
-                "files_written": files,
-            }
-            results["total_changes"] += len(added) + len(removed)
-            results["total_files_written"] += files
-        else:
-            logger.info("NDX100: No changes")
-            results["indices"]["ndx100"] = {"added": [], "removed": [], "files_written": 0}
-
-    except Exception as e:
-        logger.error(f"NDX100 fetch failed: {e}")
-        results["indices"]["ndx100"] = {"error": str(e)}
-
-    # ─── Russell 2000 ───
-    try:
-        logger.info("Fetching Russell 2000 constituents...")
-        r2k_fresh = fetch_r2k()
-        r2k_tickers = [c["ticker"] for c in r2k_fresh]
-
-        master_path = PRESETS_DIR / "r2k.json"
-        with open(master_path) as f:
-            current = json.load(f)
-
-        added, removed = diff_tickers(current["tickers"], r2k_tickers)
-
-        if added or removed:
-            logger.info(f"R2K: +{len(added)} -{len(removed)} changes detected")
-            files = update_r2k_presets(r2k_fresh, added, removed)
-            log_changes("r2k", added, removed)
-            results["indices"]["r2k"] = {
-                "added": sorted(added),
-                "removed": sorted(removed),
-                "files_written": files,
-            }
-            results["total_changes"] += len(added) + len(removed)
-            results["total_files_written"] += files
-        else:
-            logger.info("R2K: No changes")
-            results["indices"]["r2k"] = {"added": [], "removed": [], "files_written": 0}
-
-    except Exception as e:
-        logger.error(f"R2K fetch failed: {e}")
-        results["indices"]["r2k"] = {"error": str(e)}
+        except Exception as exc:
+            message = f"{index} update failed: {exc}"
+            logger.error(message)
+            results["indices"][index] = {"error": str(exc)}
+            results["status"] = "error"
+            results["error"] = message
+            break
 
     return results
 
@@ -656,6 +831,7 @@ if __name__ == "__main__":
                 fresh_tickers = [c["ticker"] for c in fresh]
                 with open(PRESETS_DIR / master_file) as f:
                     current = json.load(f)
+                validate_constituents(idx, fresh, current["tickers"])
                 added, removed = diff_tickers(current["tickers"], fresh_tickers)
 
                 if added or removed:
@@ -671,6 +847,8 @@ if __name__ == "__main__":
     else:
         result = execute()
         print(f"\n=== INDEX REBALANCE CHECK ===\n")
+        if result.get("status") == "error":
+            print(f"  ERROR: {result.get('error', 'rebalance failed')}")
         print(f"  Total changes: {result['total_changes']}")
         print(f"  Files written: {result['total_files_written']}")
         for idx, info in result["indices"].items():
@@ -683,3 +861,5 @@ if __name__ == "__main__":
                     print(f"  {idx}: +{added} -{removed}")
                 else:
                     print(f"  {idx}: ✅ No changes")
+        if result.get("status") == "error":
+            raise SystemExit(1)

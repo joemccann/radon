@@ -52,9 +52,9 @@
     "VZ",
     "WSM",
     "WY",
-    "SATS",
     "CASY",
-    "VEEV"
+    "VEEV",
+    "ECHO"
   ],
   "pairs": [
     [
@@ -160,6 +160,10 @@
     [
       "WY",
       "CRH"
+    ],
+    [
+      "CASY",
+      "VEEV"
     ]
   ],
   "sector": "Multi-Sector",

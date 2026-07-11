@@ -1,9 +1,28 @@
 {
   "name": "ndx100-travel-leisure",
   "description": "NASDAQ 100 Travel & Leisure",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "BKNG",
+    "MAR",
+    "ABNB",
+    "SBUX",
+    "ROST"
+  ],
+  "pairs": [
+    [
+      "BKNG",
+      "ABNB"
+    ],
+    [
+      "MAR",
+      "SBUX"
+    ],
+    [
+      "ROST",
+      "MAR"
+    ]
+  ],
   "sector": "Consumer Discretionary",
   "vol_driver": "Travel demand, consumer discretionary spending",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

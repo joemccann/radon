@@ -114,7 +114,7 @@ class TestPathConsistency:
         match = re.search(r"WorkingDirectory=(.+)", gateway)
         assert match
         working_dir = match.group(1).strip()
-        assert working_dir == "/home/radon/radon-cloud"
+        assert working_dir == "/home/radon/radon/cloud"
 
     def test_setup_vps_references_all_service_files(self, scripts_dir, services_dir):
         setup = read_text(scripts_dir / "setup-vps.sh")

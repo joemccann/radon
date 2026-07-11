@@ -121,6 +121,7 @@ def parse_unit_states(raw: str) -> dict:
 
 
 UNIT_STATE_MAX_AGE_SECS = 30.0
+STATUS_SCHEMA_VERSION = 2
 
 
 def _unit_evidence_current(units_age_secs) -> bool:
@@ -130,6 +131,50 @@ def _unit_evidence_current(units_age_secs) -> bool:
         and math.isfinite(units_age_secs)
         and 0 <= units_age_secs <= UNIT_STATE_MAX_AGE_SECS
     )
+
+
+def _nested_api_state(probe_results: dict) -> str | None:
+    """Classify the FastAPI payload carried by the HTTP transport probe.
+
+    HTTP 200 proves that FastAPI answered, not that its IB dependency works.
+    Older aggregation only inspected the outer transport state, which made an
+    ``awaiting_2fa`` / dead-upstream broker session look fully healthy.
+    """
+    api_probe = (probe_results or {}).get("radon-api")
+    if not isinstance(api_probe, dict):
+        return None
+    payload = api_probe.get("payload")
+    if not isinstance(payload, dict):
+        return None
+
+    service_state = payload.get("service_state")
+    auth_state = payload.get("auth_state")
+    upstream_dead = payload.get("upstream_dead")
+    port_listening = payload.get("port_listening")
+
+    if upstream_dead is True or port_listening is False:
+        return "down"
+    if isinstance(service_state, str) and service_state.lower() in {
+        "down", "error", "failed", "unhealthy",
+    }:
+        return "down"
+    if isinstance(auth_state, str) and auth_state.lower() in {
+        "awaiting_2fa", "down", "error", "failed", "unauthenticated",
+    }:
+        return "down"
+    if upstream_dead is not None and type(upstream_dead) is not bool:
+        return "unknown"
+    if port_listening is not None and type(port_listening) is not bool:
+        return "unknown"
+    if isinstance(service_state, str) and service_state.lower() not in {
+        "up", "ok", "healthy",
+    }:
+        return "unknown"
+    if isinstance(auth_state, str) and auth_state.lower() not in {
+        "authenticated", "ok", "healthy",
+    }:
+        return "unknown"
+    return "up"
 
 
 def aggregate_state(probe_results: dict, units: dict,
@@ -144,6 +189,9 @@ def aggregate_state(probe_results: dict, units: dict,
         for value in (collection or {}).values():
             if isinstance(value, dict):
                 states.append(str(value.get("state", "unknown")).lower())
+    nested_api_state = _nested_api_state(probe_results)
+    if nested_api_state is not None:
+        states.append(nested_api_state)
 
     if any(state in {"down", "error", "failed", "unhealthy"} for state in states):
         return "down"
@@ -180,6 +228,7 @@ def build_status(probes: dict, units: dict, generated_at: str,
         units_age_secs,
     )
     return {
+        "schema_version": STATUS_SCHEMA_VERSION,
         "ok": overall_state == "up",
         "overall_state": overall_state,
         "health_service": health_service,

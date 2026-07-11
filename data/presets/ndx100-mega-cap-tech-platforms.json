@@ -1,9 +1,30 @@
 {
   "name": "ndx100-mega-cap-tech-platforms",
   "description": "NASDAQ 100 Mega-Cap Tech Platforms",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "META",
+    "AMZN",
+    "NFLX",
+    "GOOG"
+  ],
+  "pairs": [
+    [
+      "AAPL",
+      "MSFT"
+    ],
+    [
+      "GOOGL",
+      "META"
+    ],
+    [
+      "AMZN",
+      "NFLX"
+    ]
+  ],
   "sector": "Technology",
   "vol_driver": "Ad spending, cloud capex, consumer tech demand",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

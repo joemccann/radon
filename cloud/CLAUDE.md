@@ -1,145 +1,141 @@
 # Radon Cloud
 
-Deployment infrastructure for the Radon trading terminal on a Hetzner VPS. **This repo contains no application code** — only systemd services, Caddy config, Docker Compose, deploy scripts, and environment templates.
+Production infrastructure for Radon lives in the main `radon` monorepo under
+`cloud/`. The standalone `radon-cloud` repository and checkout are migration
+compatibility only. Application code and production infrastructure must be
+tested at one Git SHA.
 
-## Repo Layout
+## Layout
 
+```text
+cloud/
+  caddy/                     # public edge and reverse proxy
+  config/                    # sudoers, polkit, required env contract
+  scripts/
+    bootstrap-control-plane.sh
+    deploy.sh
+    deploy-root-helper.sh
+    ib-gateway-control.sh
+    setup-vps.sh
+  services/                  # canonical systemd units and timers
+  tests/                     # cloud configuration and recovery tests
+  docker-compose.yml         # production IB Gateway container
 ```
-radon-cloud/
-├── docker-compose.yml      # IB Gateway container (port 4001, localhost only)
-├── services/               # systemd unit files (7 units)
-├── caddy/Caddyfile         # Reverse proxy: Next.js + FastAPI + WebSocket
-├── scripts/
-│   ├── setup-vps.sh        # One-time VPS bootstrap (run as root, two-pass)
-│   ├── post-setup.sh       # Local Mac script: env, build, services, data, verify
-│   ├── deploy.sh           # Health-gated deploy with auto-rollback
-│   ├── migrate-data.sh     # Snapshot + transfer runtime data
-│   └── wipe-vps.sh         # Reset VPS to pre-setup state for clean rebuild
-├── tests/                  # Pytest suite validating all configs
-├── .env.example            # Full environment variable matrix
-└── PLAN.md                 # Architecture + task dependency graph
-```
 
-## Architecture
+## Canonical Host Paths
 
-All services run on a single Hetzner VPS behind Caddy (auto-TLS):
+- Monorepo checkout: `/home/radon/radon`
+- Cloud source: `/home/radon/radon/cloud`
+- Immutable deploy support: `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`
+- Temporary stable secret file: `/home/radon/radon-cloud/.env`, mode `0600`,
+  owner `radon:radon`
+- Durable privileged deploy state: `/var/lib/radon/deploy`
+- Control-plane manifest/readiness:
+  `/var/lib/radon/control-plane-manifest.sha256` and
+  `/var/lib/radon/control-plane-ready`
 
-- **Caddy** (443) → reverse proxy with path-based routing
-- **Next.js** (3000) → full web terminal UI + API routes
-- **FastAPI** (8321) → IB-backed REST API, order management
-- **Node relay** (8765) → realtime WebSocket price streaming
-- **Monitor daemon** → fill tracking, exit orders
-- **Data refresh timer** → CRI/VCG scans during market hours
-- **IB Gateway** (4001) → Interactive Brokers API (Docker, localhost only)
+The legacy directory is not a code source. Do not symlink the whole
+`/home/radon/radon-cloud` directory while the secret file lives inside it.
+Code paths, working directories, Compose, drift audit, helpers, and units use
+the monorepo cloud path. `EnvironmentFile=/home/radon/radon-cloud/.env` is the
+single deliberate migration exception.
 
-## Related Repos
+## Deployment Contract
 
-- `radon` — Application code (FastAPI, relay, Next.js, scanners)
-- `market-data-warehouse` — Historical market data pipeline
+Pushes to `main` run the root CI workflow. The deploy job:
 
-## Key Conventions
+1. Fetches the exact tested SHA.
+2. Before the root readiness marker exists, uses the known legacy runner,
+   explicitly restarts `radon-health`, and validates only the `/status` schema
+   (`ok` plus `overall_state`). Broker health is advisory and cannot fail this
+   compatibility check.
+3. After privileged bootstrap, extracts `cloud/` from the exact SHA into a
+   retained immutable runner. It never rewrites live `cloud/` before the deploy
+   lock is held.
+4. Holds an activity lock through deploy, then on success keeps the current
+   runner plus the four newest other runners and prunes only inactive older
+   bundles under the serialized runner index lock.
+5. Validates the external secret file and Compose render without copying
+   secrets into the checkout.
+6. Verifies the installed root control plane against the root-written manifest
+   before any dependency build, service stop, or transition journal write.
+7. Builds frozen Bun workspaces and Python wheels in a detached worktree before
+   teardown.
+8. Fsyncs a durable transition journal, snapshots active services and timers,
+   promotes artifacts, restores the prior topology, and runs code-controlled
+   gates.
+9. Commits the topology transition and green marker only after verification.
 
-- **Single-tenant**: Only allowlisted Clerk user IDs can access the system
-- **Auth**: Clerk JWT validated on every request; WebSocket uses short-lived ticket flow
-- **Deploy**: Push to radon `main` triggers GitHub Actions → SSH → deploy.sh (auto-deploy)
-- **Rollback**: deploy.sh auto-rolls back on health check failure
-- **CI/CD**: Requires `VPS_HOST` and `VPS_SSH_KEY` secrets in the radon repo's GitHub Actions settings
-- **IB Gateway port 4001 is never public** — localhost only, always
+The journal helper is loaded from the immutable runner so rollback to a commit
+that predates `cloud/` cannot delete its own recovery implementation. Root
+topology state is durable across reboot under `/var/lib/radon/deploy`.
 
-## Deployment Conventions
+## Privileged Bootstrap
 
-- **Full setup is 3 commands**: `setup-vps.sh` (twice, for SSH key), then `post-setup.sh` (env, build, services, data, verify)
-- `setup-vps.sh` must be run as root — it installs system packages and creates systemd units
-- `post-setup.sh` runs locally from your Mac — writes `.env`, rebuilds Next.js, starts services with 2FA auto-retry, migrates data
-- Store production secrets in `.env.production` (gitignored) — `post-setup.sh` reads it automatically
-- Package sources: Docker from `download.docker.com`, Python 3.13 from deadsnakes PPA, Node.js 22 from NodeSource
-- npm strategy: `npm ci` with fallback to `npm install` when lock file is out of sync
-- Unit files are **copied** to `/etc/systemd/system/` (root-owned), not symlinked from the repo
-- Sudoers grants only `systemctl restart radon-*` to the `radon` user
-- `.env` must exist with required keys before services will start
-- `.env` is copied to `radon/web/.env` at build time so `NEXT_PUBLIC_*` vars are baked in
-- Unit file changes require manual root copy + `systemctl daemon-reload`
-- `MDW_API_KEY` must be the same value in both `radon-cloud/.env` (server) and MDW's `.env` (client)
+`scripts/bootstrap-control-plane.sh` is the only live-host upgrade path for the
+root-owned control-plane bundle. Run it as root from the exact target cloud
+source. It acquires the deploy lock, refuses pending app or Gateway transitions,
+validates candidates, atomically installs helpers/policies/changed units,
+performs one `systemctl daemon-reload`, verifies hashes, and publishes the
+readiness marker.
 
-## Post-Deploy Learnings
+It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
+Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
+shortcut; setup also provisions packages, firewall, Caddy, and service state.
 
-Issues discovered during live deployment that inform future setups:
+## Privilege Boundary
 
-- **SSH key two-pass flow**: `setup-vps.sh` generates an ed25519 deploy key on first run, prints it, and exits. User must add the key to GitHub, then re-run the script to continue.
-- **Root node_modules required**: The root `package.json` has shared deps (`@sinclair/typebox`) used by `lib/tools/` outside `web/`. Both `setup-vps.sh` and `deploy.sh` install root deps before building `web/`.
-- **`.env` must be copied to `web/`**: `NEXT_PUBLIC_*` vars are baked at build time. After creating `radon-cloud/.env`, copy it to `radon/web/.env` before building Next.js.
-- **Caddy reload vs restart**: On first setup Caddy hasn't started yet, so `systemctl reload caddy` fails. The script falls back to restart.
-- **PyJWT requires `cryptography`**: RS256 JWT verification needs the `cryptography` package — listed in `radon/requirements.txt`.
-- **Production Clerk user IDs differ from dev**: The `ALLOWED_USER_IDS` in `.env` must use the production Clerk user ID, not the dev instance ID.
-- **Clerk production requires own OAuth credentials**: Google/GitHub OAuth in production Clerk needs your own app credentials (dev uses Clerk's shared ones).
-- **5 Clerk CNAME records**: Production Clerk requires: `clerk`, `accounts`, `clkmail`, `clk._domainkey`, `clk2._domainkey` — all pointing to `*.clerk.services`.
-- **FastAPI skips auth for localhost**: Server-to-server calls from Next.js (localhost:3000 → localhost:8321) bypass Clerk JWT auth since port 8321 is never public.
-- **radon user authorized_keys**: If the VPS is wiped, root's authorized_keys must be copied to the radon user's `.ssh/` directory. `setup-vps.sh` handles this automatically.
-- **IB Gateway 2FA timeout**: The 2FA push may not arrive on first container start. `post-setup.sh` auto-retries up to 3 times (90s each) with automatic container restart between attempts.
-- **Docker group membership**: `usermod -aG docker radon` requires a new session. `setup-vps.sh` ensures group membership in `preflight_checks` on every run, not just during Docker install.
-- **MDW API key auth**: The `MDW_API_KEY` env var enables headless machine-to-machine access to historical data endpoints. Scoped to `/contract/qualify`, `/historical/head-timestamp`, `/historical/bars` only — trading routes remain Clerk JWT-only.
+- `/usr/local/sbin/radon-deploy-root` owns fixed deploy lifecycle actions.
+- `/usr/local/bin/radon-ib-gateway-control` is the single Gateway container
+  lifecycle path and holds the deploy/control lock.
+- `/usr/local/bin/radon` is the root-owned validating operator.
+- Sudoers permits exact helper/operator invocations, not arbitrary
+  `systemctl`, Docker, shell, or file mutation.
+- The watchdog may start only the fixed preheld Gateway restart adapter through
+  the scoped polkit rule.
 
-## Running Tests
+Never add a second Gateway restart owner. Docker restart policy remains `no`;
+IBC self-restart knobs remain disabled; deploys exclude Gateway-owned units.
+
+## Environment Handling
+
+- `config/required-env.txt` is the shared required-key contract.
+- `scripts/check-env.py` validates names, permissions, literal values, and mode
+  consistency without sourcing secrets.
+- Compose interpolation and service `env_file` both receive the explicit
+  external env path through `RADON_COMPOSE_ENV_FILE`.
+- `web/.env` contains only `NEXT_PUBLIC_*` build values and is mode `0600`.
+  Never copy the complete production env into the web tree.
+- Setup validates the stable env before dependency installation or builds.
+
+## Systemd And Drift
+
+Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
+not symlinked from the checkout. Unit changes require the non-restarting
+control-plane bootstrap or an equivalent reviewed root transaction.
+
+The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
+Compose, systemd, polkit, sudoers, and installed helpers with this source. It
+must never read or report `.env*` contents.
+
+`radon-health.service` remains runtime-isolated from the trading cascade: no
+Gateway `Requires=` or `After=` dependency. Coordinated release restart and
+schema validation do not change that zero-shared-fate runtime design.
+
+## Verification
+
+Run from the monorepo root:
 
 ```bash
-cd /Users/joemccann/dev/apps/finance/radon-cloud
-pip install pytest pyyaml
-pytest tests/ -v
+python3.13 -m pytest -q cloud/tests
+bash -n cloud/scripts/*.sh
+RADON_COMPOSE_ENV_FILE=/path/to/test.env \
+  docker compose --env-file /path/to/test.env \
+  -f cloud/docker-compose.yml config --quiet
+gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner
+git diff --check
 ```
 
-## Environment Variables
-
-Copy `.env.example` to `.env` and fill in secrets. **Never commit `.env`**.
-
-Required sections:
-- IB Gateway credentials
-- Clerk authentication keys
-- User allowlist (Clerk user IDs)
-- API/WebSocket URLs
-- Domain configuration
-
-## Deploy Workflow
-
-1. Push to `radon` repo `main` branch
-2. GitHub Actions SSHs to VPS, runs `scripts/deploy.sh`
-3. deploy.sh: git pull → pip install → npm build → restart services → health check
-4. On failure: auto-rollback to previous commit
-
-## Manual VPS Operations
-
-```bash
-# Bootstrap (first time only)
-ssh radon@ib-gateway 'bash -s' < scripts/setup-vps.sh
-
-# Check service status
-ssh radon@ib-gateway 'sudo systemctl status radon-api'
-
-# View logs
-ssh radon@ib-gateway 'journalctl -u radon-api -f'
-
-# Restart a service
-ssh radon@ib-gateway 'sudo systemctl restart radon-api'
-```
-
-### Whole-stack kill switch (`radon` wrapper)
-
-`/usr/local/bin/radon` controls every unit at once (IB Gateway + all `radon-*`). Run as root on the VPS, or remotely:
-
-```bash
-ssh root@ib-gateway radon stop      # full shutdown
-ssh root@ib-gateway radon start     # full bring-up (IB first)
-ssh root@ib-gateway radon restart
-ssh root@ib-gateway radon status
-```
-
-Covers `radon-{ib-gateway,api,relay,monitor,newsfeed,nextjs}` + `radon-refresh.timer`. Designed for off-hours shutdowns from iPhone/Termius without memorizing the unit list.
-
-**Provisioning gap (2026-05-04):** the wrapper was hand-installed and is **not** part of `setup-vps.sh`. A `wipe-vps.sh` rebuild drops it. To make it persistent across rebuilds, fold the install into `setup-vps.sh` (writes the script to `/usr/local/bin/radon`, `chmod +x`). Source for the wrapper lives in `README.md` § Managing services.
-
-## Editing Guidelines
-
-- Systemd units live in `services/` and are symlinked to `/etc/systemd/system/` on VPS
-- After changing a service file, run `sudo systemctl daemon-reload` on VPS
-- After changing Caddyfile, run `sudo systemctl reload caddy` on VPS
-- All scripts use `set -euo pipefail` and include rollback on failure
-- Keep `.env.example` in sync when adding new environment variables
+Deployment, rollback, locking, bootstrap, and unit-path changes require
+adversarial regression coverage. Tests must use isolated roots and must never
+write host `/etc`, `/usr/local`, `/var/lib`, production data, or real secrets.

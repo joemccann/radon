@@ -13,7 +13,7 @@ readonly VPS_HOST="${1:-5.78.148.38}"
 readonly VPS_ROOT="root@${VPS_HOST}"
 readonly VPS_RADON="radon@${VPS_HOST}"
 readonly LOCAL_RADON="$HOME/dev/apps/finance/radon"
-readonly ENV_FILE="$HOME/dev/apps/finance/radon-cloud/.env.production"
+readonly ENV_FILE="${RADON_LOCAL_ENV_FILE:-${LOCAL_RADON}/.env.production}"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -46,12 +46,12 @@ else
     echo "  Opening nano on the VPS to edit .env..."
     echo "  Fill in your values, save (Ctrl+O), and exit (Ctrl+X)."
     echo ""
-    ssh -t "${VPS_RADON}" "cp ~/radon-cloud/.env.example ~/radon-cloud/.env && chmod 0600 ~/radon-cloud/.env && nano ~/radon-cloud/.env"
+    ssh -t "${VPS_RADON}" "cp ~/radon/cloud/.env.example ~/radon-cloud/.env && chmod 0600 ~/radon-cloud/.env && nano ~/radon-cloud/.env"
   fi
 fi
 
 ssh "${VPS_RADON}" 'chmod 0600 ~/radon-cloud/.env'
-ssh "${VPS_RADON}" '/home/radon/radon/.venv/bin/python /home/radon/radon-cloud/scripts/check-env.py /home/radon/radon-cloud/.env /home/radon/radon-cloud/config/required-env.txt'
+ssh "${VPS_RADON}" '/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/check-env.py /home/radon/radon-cloud/.env /home/radon/radon/cloud/config/required-env.txt'
 log_info ".env configured"
 
 # ---------------------------------------------------------------------------
@@ -60,7 +60,7 @@ log_info ".env configured"
 log_step "Step 2: Write public web env and rebuild Next.js"
 
 ssh "${VPS_ROOT}" 'for unit in radon-nextjs.service radon-relay.service radon-newsfeed.service; do if systemctl is-active --quiet "$unit"; then echo "Refusing live rebuild while $unit is active; use scripts/deploy.sh with the exact tested commit SHA" >&2; exit 78; fi; done'
-ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /home/radon/radon-cloud/.env > "$tmp" || true; install -m 0600 -o radon -g radon "$tmp" /home/radon/radon/web/.env; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon-cloud/scripts/run_with_env.py /home/radon/radon-cloud/.env -- bun run build 2>&1 | tail -5'
+ssh "${VPS_ROOT}" 'set -o pipefail; tmp=$(mktemp); grep -E '\''^NEXT_PUBLIC_[A-Z0-9_]+='\'' /home/radon/radon-cloud/.env > "$tmp" || true; install -m 0600 -o radon -g radon "$tmp" /home/radon/radon/web/.env; rm -f "$tmp"; cd /home/radon/radon/web && sudo -u radon /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/run_with_env.py /home/radon/radon-cloud/.env -- bun run build 2>&1 | tail -5'
 
 log_info "Next.js rebuilt with production env vars"
 
@@ -80,7 +80,7 @@ echo ""
 ib_logged_in=false
 for i in $(seq 1 18); do
   sleep 5
-  login_status=$(ssh "${VPS_ROOT}" 'docker compose -f /home/radon/radon-cloud/docker-compose.yml logs 2>/dev/null | grep -c "Login has completed" || true' 2>/dev/null | tail -1 | tr -d '[:space:]')
+  login_status=$(ssh "${VPS_ROOT}" 'RADON_COMPOSE_ENV_FILE=/home/radon/radon-cloud/.env docker compose --env-file /home/radon/radon-cloud/.env -f /home/radon/radon/cloud/docker-compose.yml logs 2>/dev/null | grep -c "Login has completed" || true' 2>/dev/null | tail -1 | tr -d '[:space:]')
   if [[ "${login_status:-0}" -gt 0 ]]; then
     ib_logged_in=true
     break

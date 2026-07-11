@@ -1,9 +1,18 @@
 {
   "name": "ndx100-cybersecurity",
   "description": "NASDAQ 100 Cybersecurity",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "CRWD",
+    "PANW",
+    "FTNT"
+  ],
+  "pairs": [
+    [
+      "CRWD",
+      "PANW"
+    ]
+  ],
   "sector": "Technology",
   "vol_driver": "Cybersecurity spending, breach events, compliance",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

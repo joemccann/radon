@@ -1,32 +1,31 @@
 {
   "name": "r2k-utilities",
-  "description": "Russell 2000 Utilities (31 companies)",
+  "description": "Russell 2000 Utilities (30 companies)",
   "tickers": [
     "ORA",
-    "OKLO",
     "SWX",
-    "TXNM",
-    "NJR",
-    "BKH",
     "POR",
+    "NJR",
+    "TXNM",
+    "BKH",
     "OGS",
-    "SR",
     "BIPC",
+    "SR",
     "NWE",
-    "OTTR",
     "AVA",
+    "OTTR",
     "AWR",
     "CPK",
     "MGEE",
     "CWT",
     "HE",
-    "NWN",
     "HTO",
+    "NWN",
     "MSEX",
     "UTL",
     "HNRG",
-    "CWCO",
     "YORW",
+    "CWCO",
     "GNE",
     "CDZI",
     "PCYO",
@@ -37,67 +36,63 @@
   "pairs": [
     [
       "ORA",
-      "OKLO"
-    ],
-    [
-      "SWX",
-      "TXNM"
-    ],
-    [
-      "NJR",
-      "BKH"
+      "SWX"
     ],
     [
       "POR",
-      "OGS"
+      "NJR"
     ],
     [
-      "SR",
+      "TXNM",
+      "BKH"
+    ],
+    [
+      "OGS",
       "BIPC"
     ],
     [
-      "NWE",
-      "OTTR"
+      "SR",
+      "NWE"
     ],
     [
       "AVA",
-      "AWR"
+      "OTTR"
     ],
     [
-      "CPK",
-      "MGEE"
+      "AWR",
+      "CPK"
     ],
     [
-      "CWT",
-      "HE"
+      "MGEE",
+      "CWT"
     ],
     [
-      "NWN",
+      "HE",
       "HTO"
     ],
     [
-      "MSEX",
-      "UTL"
+      "NWN",
+      "MSEX"
     ],
     [
-      "HNRG",
-      "CWCO"
+      "UTL",
+      "HNRG"
     ],
     [
       "YORW",
-      "GNE"
+      "CWCO"
     ],
     [
-      "CDZI",
-      "PCYO"
+      "GNE",
+      "CDZI"
     ],
     [
-      "RGCO",
-      "MNTK"
+      "PCYO",
+      "RGCO"
     ],
     [
-      "GWRS",
-      "ORA"
+      "MNTK",
+      "GWRS"
     ]
   ],
   "sector": "Utilities",

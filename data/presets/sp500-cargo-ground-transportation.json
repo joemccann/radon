@@ -3,7 +3,8 @@
   "description": "S&P 500 Cargo Ground Transportation (Industrials)",
   "tickers": [
     "JBHT",
-    "ODFL"
+    "ODFL",
+    "FDXF"
   ],
   "pairs": [
     [

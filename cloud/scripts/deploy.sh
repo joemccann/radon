@@ -99,6 +99,10 @@ readonly ENV_FILE_DEFAULT="$(_default_env_file)"
 readonly DEPLOY_LOCK_FILE="${RADON_DEPLOY_LOCK_FILE:-/home/radon/.radon-deploy.lock}"
 readonly GREEN_MARKER_FILE="${RADON_DEPLOY_GREEN_MARKER:-/home/radon/.radon-last-green-deploy}"
 readonly DEPLOY_ROOT_HELPER="${RADON_DEPLOY_ROOT_HELPER:-/usr/local/sbin/radon-deploy-root}"
+readonly GATEWAY_CONTROL_HELPER="${RADON_GATEWAY_CONTROL_HELPER:-/usr/local/bin/radon-ib-gateway-control}"
+readonly CONTROL_PLANE_MANIFEST="${RADON_CONTROL_PLANE_MANIFEST:-/var/lib/radon/control-plane-manifest.sha256}"
+readonly CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
+readonly SHA256SUM="${RADON_SHA256SUM:-/usr/bin/sha256sum}"
 readonly REQUIRED_ENV_FILE="${RADON_REQUIRED_ENV_FILE:-${CLOUD_DIR}/config/required-env.txt}"
 readonly ENV_CHECKER="${CLOUD_DIR}/scripts/check-env.py"
 readonly ENV_CHECKER_PYTHON="${RADON_ENV_CHECKER_PYTHON:-${VENV_DIR}/bin/python}"
@@ -107,7 +111,8 @@ readonly RELEASES_DIR="${RADON_RELEASES_DIR:-/home/radon/.radon-releases}"
 readonly RELEASE_ARTIFACTS=(node_modules web/node_modules web/.next web/.env)
 readonly ROLLBACK_ARTIFACTS=(node_modules web/node_modules web/.next web/.env .venv)
 readonly TRANSITION_JOURNAL_FILE="${RADON_DEPLOY_TRANSITION_JOURNAL:-/home/radon/.radon-deploy-transition.json}"
-readonly JOURNAL_HELPER="${CLOUD_DIR}/scripts/deploy-journal.py"
+readonly DEPLOY_SUPPORT_DIR="${RADON_DEPLOY_SUPPORT_DIR:-${_CLOUD_FROM_SCRIPT}/scripts}"
+readonly JOURNAL_HELPER="${RADON_DEPLOY_JOURNAL_HELPER:-${DEPLOY_SUPPORT_DIR}/deploy-journal.py}"
 readonly JOURNAL_PYTHON="${RADON_DEPLOY_JOURNAL_PYTHON:-${SYSTEM_PYTHON}}"
 # Mutable deploy-process state used only by the TERM/INT/HUP recovery trap.
 # An interrupted deploy deliberately leaves Git at the requested SHA with no
@@ -167,13 +172,90 @@ preflight_env() {
 
   # Do not let Compose print expanded values or secret fragments. A generic
   # failure is enough; operators can inspect the named-key checks above.
-  if ! (cd "$CLOUD_DIR" && docker compose --env-file "$env_file" config --quiet >/dev/null 2>&1); then
+  if ! (
+    cd "$CLOUD_DIR"
+    RADON_COMPOSE_ENV_FILE="$env_file" \
+      docker compose --env-file "$env_file" config --quiet >/dev/null 2>&1
+  ); then
     log_error "[preflight] FAIL: docker compose config validation failed"
     return 1
   fi
 
   echo "[preflight] ok (shared required-env.txt contract passed)"
   return 0
+}
+
+preflight_control_plane() {
+  local line expected_hash source_rel installed_target source_path source_hash installed_hash
+  local entries=0
+  local deploy_helper_found=0
+  local gateway_helper_found=0
+
+  if [[ ! -x "$SHA256SUM" || ! -r "$CONTROL_PLANE_MANIFEST" || ! -r "$CONTROL_PLANE_READY" ]]; then
+    log_error "[preflight] control-plane readiness manifest is missing"
+    return 1
+  fi
+  if ! "$SHA256SUM" --check --status "$CONTROL_PLANE_READY"; then
+    log_error "[preflight] control-plane readiness marker does not match its manifest"
+    return 1
+  fi
+
+  while IFS= read -r line; do
+    [[ -n "$line" ]] || continue
+    if [[ ! "$line" =~ ^([0-9a-f]{64})[[:space:]][[:space:]]([^[:space:]]+)[[:space:]]-\>[[:space:]](/.+)$ ]]; then
+      log_error "[preflight] malformed control-plane manifest entry"
+      return 1
+    fi
+    expected_hash="${BASH_REMATCH[1]}"
+    source_rel="${BASH_REMATCH[2]}"
+    installed_target="${BASH_REMATCH[3]}"
+    if [[ "$source_rel" == /* || "$source_rel" == *".."* ]]; then
+      log_error "[preflight] unsafe control-plane source path"
+      return 1
+    fi
+    source_path="${_CLOUD_FROM_SCRIPT}/${source_rel}"
+    [[ -r "$source_path" ]] || {
+      log_error "[preflight] target release is missing ${source_rel}"
+      return 1
+    }
+    source_hash="$("$SHA256SUM" "$source_path" | awk '{print $1}')" || return 1
+    if [[ "$source_hash" != "$expected_hash" ]]; then
+      log_error "[preflight] installed control plane is incompatible with ${source_rel}"
+      return 1
+    fi
+    if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
+      log_error "[preflight] installed control-plane target is unavailable or unsafe: ${installed_target}"
+      return 1
+    fi
+    if [[ -r "$installed_target" ]]; then
+      installed_hash="$("$SHA256SUM" "$installed_target" | awk '{print $1}')" || return 1
+      if [[ "$installed_hash" != "$expected_hash" ]]; then
+        log_error "[preflight] installed control-plane target drifted: ${installed_target}"
+        return 1
+      fi
+    fi
+    [[ "$installed_target" == "$DEPLOY_ROOT_HELPER" ]] && deploy_helper_found=1
+    [[ "$installed_target" == "$GATEWAY_CONTROL_HELPER" ]] && gateway_helper_found=1
+    entries=$((entries + 1))
+  done < "$CONTROL_PLANE_MANIFEST"
+
+  if (( entries == 0 || deploy_helper_found == 0 || gateway_helper_found == 0 )); then
+    log_error "[preflight] control-plane manifest is incomplete"
+    return 1
+  fi
+  if ! sudo -n "$DEPLOY_ROOT_HELPER" verify-control-plane; then
+    log_error "[preflight] installed control-plane target contract failed privileged verification"
+    return 1
+  fi
+  if [[ ! -x "$DEPLOY_ROOT_HELPER" || ! -x "$GATEWAY_CONTROL_HELPER" ]]; then
+    log_error "[preflight] required installed control-plane helper is unavailable"
+    return 1
+  fi
+  if ! sudo -n "$DEPLOY_ROOT_HELPER" verify-restored; then
+    log_error "[preflight] deploy helper or exact sudo capability is unavailable"
+    return 1
+  fi
+  log_success "[preflight] installed control plane matches the target release"
 }
 
 green_marker_matches() {
@@ -513,6 +595,7 @@ restore_release_backup() {
     return 1
   fi
   git -C "$RADON_DIR" reset --hard "$previous_sha" || return 1
+  restore_precloud_control_plane_tree "$previous_sha" || return 1
   for artifact in "${ROLLBACK_ARTIFACTS[@]}"; do
     if [[ -e "${backup_dir}/${artifact}" || -L "${backup_dir}/${artifact}" ]]; then
       rm -rf -- "${RADON_DIR}/${artifact}"
@@ -522,6 +605,28 @@ restore_release_backup() {
   done
   validate_rollback_artifacts "$RADON_DIR" || return 1
   DEPLOY_RELEASE_UNVERIFIED=0
+}
+
+restore_precloud_control_plane_tree() {
+  local release_sha="$1"
+  local live_cloud="${RADON_DIR}/cloud"
+
+  if git -C "$RADON_DIR" cat-file -e "${release_sha}:cloud/scripts/deploy.sh" 2>/dev/null; then
+    return 0
+  fi
+  if [[ "${_CLOUD_FROM_SCRIPT}" == "${RADON_DIR}"/* ]]; then
+    log_error "Pre-cloud rollback requires immutable deploy support outside the live checkout"
+    return 1
+  fi
+  if [[ ! -r "${_CLOUD_FROM_SCRIPT}/scripts/deploy.sh" ]]; then
+    log_error "Immutable control-plane support is unavailable for pre-cloud rollback"
+    return 1
+  fi
+
+  rm -rf -- "$live_cloud"
+  cp -a -- "${_CLOUD_FROM_SCRIPT}" "$live_cloud" || return 1
+  chmod -R u+w "$live_cloud" || return 1
+  log_warn "Previous app release predates cloud/; retained immutable control-plane compatibility tree"
 }
 
 activate_staged_release() {
@@ -983,6 +1088,11 @@ main() {
 
   trap 'handle_deploy_signal TERM' TERM INT HUP
   log_info "Starting deployment (timeout: ${DEPLOY_TIMEOUT}s)..."
+
+  if ! preflight_control_plane; then
+    log_error "Aborting deploy: installed control plane is not ready for this release."
+    return 1
+  fi
 
   # Gate the deploy on required env vars BEFORE any service is touched.
   # A missing var here (e.g. PUSHOVER_TOKEN) used to silently degrade the

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
 
 // Proxy to the isolated health daemon's aggregate (/edge-health/status — units,
 // probes, service_health rows). Reuses the always-up off-box surface rather than
@@ -27,7 +28,15 @@ export async function GET(): Promise<Response> {
         requestId,
       );
     }
-    const data = await res.json();
+    const data = await res.json() as Record<string, unknown>;
+    const serviceHealth = data.service_health;
+    if (typeof serviceHealth === "object" && serviceHealth !== null) {
+      const section = serviceHealth as Record<string, unknown>;
+      if (Array.isArray(section.rows)) {
+        const rows = filterApplicableServiceHealthRows(section.rows);
+        data.service_health = { ...section, rows, row_count: rows.length };
+      }
+    }
     return setNoStoreResponseHeaders(NextResponse.json({ reachable: true, ...data }), requestId);
   } catch (error) {
     const detail = error instanceof Error ? error.message : "edge-health fetch failed";

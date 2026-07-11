@@ -1,187 +1,169 @@
 {
   "name": "r2k-consumer-staples",
-  "description": "Russell 2000 Consumer Staples (60 companies)",
+  "description": "Russell 2000 Consumer Staples (54 companies)",
   "tickers": [
     "PSMT",
-    "COCO",
     "CALM",
-    "UNFI",
     "CHEF",
+    "COCO",
     "WDFC",
+    "UNFI",
     "ANDE",
     "MZTI",
-    "SPB",
-    "TPB",
-    "CENTA",
     "IPAR",
+    "SPB",
+    "CENTA",
+    "TPB",
+    "FLO",
+    "BRBR",
+    "IMKTA",
+    "SAM",
     "HLF",
     "UVV",
-    "IMKTA",
-    "FDP",
-    "JJSF",
     "ENR",
-    "DOLE",
-    "SMPL",
-    "WMK",
-    "FIZZ",
-    "ODC",
     "EPC",
-    "TR",
+    "JJSF",
+    "SMPL",
+    "DOLE",
+    "ODC",
+    "WMK",
     "GO",
+    "DMC",
     "SENEA",
-    "JBSS",
+    "FIZZ",
     "AVO",
+    "COTY",
+    "JBSS",
+    "ODD",
     "MAMA",
     "UTZ",
-    "CVGW",
-    "VLGEA",
-    "NGVC",
-    "NATR",
-    "CENT",
-    "BGS",
-    "BYND",
-    "NUS",
-    "HNST",
-    "WEST",
-    "OLPX",
     "VITL",
+    "NGVC",
+    "CENT",
+    "VLGEA",
+    "HNST",
+    "NATR",
+    "BGS",
+    "YSWY",
+    "WEST",
+    "NUS",
     "MGPI",
+    "USNA",
     "ALCO",
+    "OFRM",
     "LMNR",
     "NAGE",
-    "USNA",
-    "MED",
-    "BRCC",
     "LWAY",
-    "SKIN",
-    "WALD",
-    "HFFG",
-    "HAIN",
-    "ZVIA",
-    "LFVN",
-    "ISPR",
-    "FTLF",
+    "BRCC",
     "AFRI"
   ],
   "pairs": [
     [
       "PSMT",
-      "COCO"
-    ],
-    [
-      "CALM",
-      "UNFI"
+      "CALM"
     ],
     [
       "CHEF",
-      "WDFC"
+      "COCO"
+    ],
+    [
+      "WDFC",
+      "UNFI"
     ],
     [
       "ANDE",
       "MZTI"
     ],
     [
-      "SPB",
-      "TPB"
+      "IPAR",
+      "SPB"
     ],
     [
       "CENTA",
-      "IPAR"
+      "TPB"
+    ],
+    [
+      "FLO",
+      "BRBR"
+    ],
+    [
+      "IMKTA",
+      "SAM"
     ],
     [
       "HLF",
       "UVV"
     ],
     [
-      "IMKTA",
-      "FDP"
-    ],
-    [
-      "JJSF",
-      "ENR"
-    ],
-    [
-      "DOLE",
-      "SMPL"
-    ],
-    [
-      "WMK",
-      "FIZZ"
-    ],
-    [
-      "ODC",
+      "ENR",
       "EPC"
     ],
     [
-      "TR",
+      "JJSF",
+      "SMPL"
+    ],
+    [
+      "DOLE",
+      "ODC"
+    ],
+    [
+      "WMK",
       "GO"
     ],
     [
-      "SENEA",
+      "DMC",
+      "SENEA"
+    ],
+    [
+      "FIZZ",
+      "AVO"
+    ],
+    [
+      "COTY",
       "JBSS"
     ],
     [
-      "AVO",
+      "ODD",
       "MAMA"
     ],
     [
       "UTZ",
-      "CVGW"
+      "VITL"
     ],
     [
-      "VLGEA",
-      "NGVC"
-    ],
-    [
-      "NATR",
+      "NGVC",
       "CENT"
     ],
     [
-      "BGS",
-      "BYND"
-    ],
-    [
-      "NUS",
+      "VLGEA",
       "HNST"
     ],
     [
-      "WEST",
-      "OLPX"
+      "NATR",
+      "BGS"
     ],
     [
-      "VITL",
+      "YSWY",
+      "WEST"
+    ],
+    [
+      "NUS",
       "MGPI"
     ],
     [
-      "ALCO",
+      "USNA",
+      "ALCO"
+    ],
+    [
+      "OFRM",
       "LMNR"
     ],
     [
       "NAGE",
-      "USNA"
+      "LWAY"
     ],
     [
-      "MED",
-      "BRCC"
-    ],
-    [
-      "LWAY",
-      "SKIN"
-    ],
-    [
-      "WALD",
-      "HFFG"
-    ],
-    [
-      "HAIN",
-      "ZVIA"
-    ],
-    [
-      "LFVN",
-      "ISPR"
-    ],
-    [
-      "FTLF",
+      "BRCC",
       "AFRI"
     ]
   ],

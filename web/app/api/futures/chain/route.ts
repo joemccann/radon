@@ -4,8 +4,6 @@ import { join } from "path";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 
-const DATA_DIR = join(process.cwd(), "..", "data");
-
 /**
  * Belt-and-suspenders fallback for when FastAPI is down/restarting: read the
  * per-symbol futures-chain cache FastAPI writes (data/futures_chain_{SYMBOL}.json)
@@ -16,7 +14,7 @@ async function readCachedFuturesChain(
 ): Promise<Record<string, unknown> | null> {
   try {
     const raw = await readFile(
-      join(DATA_DIR, `futures_chain_${symbolUpper}.json`),
+      join(process.cwd(), "..", "data", `futures_chain_${symbolUpper}.json`),
       "utf-8",
     );
     const jsonStart = raw.indexOf("{");

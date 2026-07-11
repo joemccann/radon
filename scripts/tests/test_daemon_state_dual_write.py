@@ -42,6 +42,10 @@ class FakeHandler:
         return self._state
 
 
+class RemoteWriterPanic(BaseException):
+    """Driver-level failure that intentionally bypasses ``Exception``."""
+
+
 def test_save_state_writes_one_daemon_state_row_per_handler(
     mock_writer, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):
@@ -113,6 +117,66 @@ def test_save_state_still_writes_json_when_db_dual_write_fails(
     assert state_path.exists()
     payload = json.loads(state_path.read_text())
     assert "h" in payload["handlers"]
+
+
+def test_save_state_contains_driver_panic_and_continues_remaining_rows(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, caplog: pytest.LogCaptureFixture
+):
+    from monitor_daemon.daemon import MonitorDaemon
+
+    attempts: list[str] = []
+
+    def upsert(handler, **_kwargs):
+        attempts.append(handler)
+        if handler == "first":
+            raise RemoteWriterPanic("could not load platform certs")
+
+    fake = types.ModuleType("db.writer")
+    fake.upsert_daemon_state = upsert  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "db.writer", fake)
+
+    state_path = tmp_path / "daemon_state.json"
+    daemon = MonitorDaemon(state_file=state_path, respect_market_hours=False)
+    daemon.handlers = [
+        FakeHandler("first", {"last_status": "ok"}),
+        FakeHandler("second", {"last_status": "ok"}),
+    ]
+
+    with caplog.at_level("WARNING", logger="monitor_daemon.daemon"):
+        daemon.save_state()
+
+    assert attempts == ["first", "second"]
+    payload = json.loads(state_path.read_text())
+    assert set(payload["handlers"]) == {"first", "second"}
+    assert "first" in caplog.text
+    assert "could not load platform certs" in caplog.text
+
+
+@pytest.mark.parametrize(
+    "termination",
+    [KeyboardInterrupt(), SystemExit(2), GeneratorExit()],
+    ids=["keyboard_interrupt", "system_exit", "generator_exit"],
+)
+def test_save_state_does_not_swallow_operator_termination(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, termination: BaseException
+):
+    from monitor_daemon.daemon import MonitorDaemon
+
+    fake = types.ModuleType("db.writer")
+
+    def terminate(*_args, **_kwargs):
+        raise termination
+
+    fake.upsert_daemon_state = terminate  # type: ignore[attr-defined]
+    monkeypatch.setitem(sys.modules, "db.writer", fake)
+    daemon = MonitorDaemon(
+        state_file=tmp_path / "daemon_state.json",
+        respect_market_hours=False,
+    )
+    daemon.handlers = [FakeHandler("h", {"last_status": "ok"})]
+
+    with pytest.raises(type(termination)):
+        daemon.save_state()
 
 
 def test_save_state_does_nothing_when_state_file_unset(mock_writer):

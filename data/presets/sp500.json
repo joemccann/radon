@@ -63,12 +63,12 @@
     "BF.B",
     "BG",
     "BIIB",
-    "BK",
     "BKNG",
     "BKR",
     "BLDR",
     "BLK",
     "BMY",
+    "BNY",
     "BR",
     "BRK.B",
     "BRO",
@@ -76,7 +76,6 @@
     "BX",
     "BXP",
     "C",
-    "CAG",
     "CAH",
     "CARR",
     "CASY",
@@ -114,7 +113,6 @@
     "COR",
     "COST",
     "CPAY",
-    "CPB",
     "CPRT",
     "CPT",
     "CRH",
@@ -157,6 +155,7 @@
     "DXCM",
     "EA",
     "EBAY",
+    "ECHO",
     "ECL",
     "ED",
     "EFX",
@@ -167,7 +166,6 @@
     "EME",
     "EMR",
     "EOG",
-    "EPAM",
     "EQIX",
     "EQR",
     "EQT",
@@ -189,6 +187,7 @@
     "FCX",
     "FDS",
     "FDX",
+    "FDXF",
     "FE",
     "FFIV",
     "FICO",
@@ -196,6 +195,7 @@
     "FISV",
     "FITB",
     "FIX",
+    "FLEX",
     "FOX",
     "FOXA",
     "FRT",
@@ -230,6 +230,7 @@
     "HII",
     "HLT",
     "HON",
+    "HONA",
     "HOOD",
     "HPE",
     "HPQ",
@@ -319,6 +320,7 @@
     "MRK",
     "MRNA",
     "MRSH",
+    "MRVL",
     "MS",
     "MSCI",
     "MSFT",
@@ -375,7 +377,6 @@
     "PNR",
     "PNW",
     "PODD",
-    "POOL",
     "PPG",
     "PPL",
     "PRU",
@@ -401,7 +402,6 @@
     "RSG",
     "RTX",
     "RVTY",
-    "SATS",
     "SBAC",
     "SBUX",
     "SCHW",
@@ -600,10 +600,6 @@
       "ARES"
     ],
     [
-      "BK",
-      "NTRS"
-    ],
-    [
       "AMP",
       "TROW"
     ],
@@ -754,10 +750,6 @@
     [
       "BF.B",
       "STZ"
-    ],
-    [
-      "GPC",
-      "POOL"
     ],
     [
       "JPM",
@@ -1012,10 +1004,6 @@
       "IBM"
     ],
     [
-      "CTSH",
-      "EPAM"
-    ],
-    [
       "IT",
       "ACN"
     ],
@@ -1246,14 +1234,6 @@
     [
       "TSCO",
       "ULTA"
-    ],
-    [
-      "GIS",
-      "CPB"
-    ],
-    [
-      "KHC",
-      "CAG"
     ],
     [
       "HSY",
@@ -1660,7 +1640,8 @@
         "NOC",
         "RTX",
         "TXT",
-        "TDG"
+        "TDG",
+        "HONA"
       ],
       "pairs": [
         [
@@ -1822,13 +1803,13 @@
         "ARES",
         "BLK",
         "BX",
-        "BK",
         "BEN",
         "IVZ",
         "KKR",
         "NTRS",
         "STT",
-        "TROW"
+        "TROW",
+        "BNY"
       ],
       "pairs": [
         [
@@ -1844,16 +1825,16 @@
           "ARES"
         ],
         [
-          "BK",
-          "NTRS"
-        ],
-        [
           "AMP",
           "TROW"
         ],
         [
           "BEN",
           "IVZ"
+        ],
+        [
+          "NTRS",
+          "AMP"
         ]
       ],
       "vol_driver": "Interest rates, credit spreads, loan growth"
@@ -2023,7 +2004,8 @@
       "sector": "Industrials",
       "tickers": [
         "JBHT",
-        "ODFL"
+        "ODFL",
+        "FDXF"
       ],
       "pairs": [
         [
@@ -2222,13 +2204,12 @@
       "name": "Distributors",
       "sector": "Consumer Discretionary",
       "tickers": [
-        "GPC",
-        "POOL"
+        "GPC"
       ],
       "pairs": [
         [
           "GPC",
-          "POOL"
+          "GPC"
         ]
       ],
       "vol_driver": "Consumer spending, employment, housing"
@@ -2415,7 +2396,8 @@
       "sector": "Information Technology",
       "tickers": [
         "JBL",
-        "TEL"
+        "TEL",
+        "FLEX"
       ],
       "pairs": [
         [
@@ -2801,7 +2783,6 @@
       "tickers": [
         "ACN",
         "CTSH",
-        "EPAM",
         "IT",
         "IBM"
       ],
@@ -2811,11 +2792,11 @@
           "IBM"
         ],
         [
-          "CTSH",
-          "EPAM"
+          "IT",
+          "ACN"
         ],
         [
-          "IT",
+          "CTSH",
           "ACN"
         ]
       ],
@@ -3387,8 +3368,6 @@
       "name": "Packaged Foods & Meats",
       "sector": "Consumer Staples",
       "tickers": [
-        "CPB",
-        "CAG",
         "GIS",
         "HSY",
         "HRL",
@@ -3400,14 +3379,6 @@
       ],
       "pairs": [
         [
-          "GIS",
-          "CPB"
-        ],
-        [
-          "KHC",
-          "CAG"
-        ],
-        [
           "HSY",
           "MDLZ"
         ],
@@ -3418,6 +3389,10 @@
         [
           "HRL",
           "TSN"
+        ],
+        [
+          "GIS",
+          "KHC"
         ]
       ],
       "vol_driver": "Inflation, input costs, consumer defensives"
@@ -3756,7 +3731,8 @@
         "ON",
         "QCOM",
         "SWKS",
-        "TXN"
+        "TXN",
+        "MRVL"
       ],
       "pairs": [
         [
@@ -4065,9 +4041,9 @@
         "VZ",
         "WSM",
         "WY",
-        "SATS",
         "CASY",
-        "VEEV"
+        "VEEV",
+        "ECHO"
       ],
       "pairs": [
         [
@@ -4173,6 +4149,10 @@
         [
           "WY",
           "CRH"
+        ],
+        [
+          "CASY",
+          "VEEV"
         ]
       ],
       "vol_driver": "Cross-industry fundamental correlation"

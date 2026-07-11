@@ -33,6 +33,12 @@ function securityHeaders() {
 
 const config = {
   outputFileTracingRoot: resolve(__dirname, ".."),
+  // Hetzner reads the host-mounted data tree directly. Do not package that
+  // mutable runtime state into the CTA server function when its disk fallback
+  // makes Turbopack conservatively trace the entire directory.
+  outputFileTracingExcludes: {
+    "/api/menthorq/cta": ["../data/**/*"],
+  },
   turbopack: {},
   webpack: (config) => {
     config.resolve.alias["@tools"] = resolve(__dirname, "..", "lib", "tools");

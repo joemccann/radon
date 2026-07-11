@@ -1,29 +1,35 @@
 import type { Metadata, Viewport } from "next";
-import { IBM_Plex_Sans, IBM_Plex_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import Providers from "@/components/Providers";
 import PwaRegister from "@/components/PwaRegister";
 import ThemeBootstrap from "@/components/ThemeBootstrap";
 import "./globals.css";
 
-// Self-hosted via next/font/google — replaces the render-blocking
-// `@import url("https://fonts.googleapis.com/...")` line that previously
-// fronted globals.css. Plex Sans + Plex Mono together create the
-// IBM-workstation-circa-1985 identity called out in the audit (MOVE 6).
-// `variable` exposes the family as a CSS custom property so existing
-// `var(--font-sans)` / `var(--font-mono)` references continue to work.
-const plexSans = IBM_Plex_Sans({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+// Local files keep both page loads and production builds independent of the
+// Google Fonts network. Variables preserve the existing typography contract.
+const inter = localFont({
+  src: "../public/fonts/Inter-Variable.woff2",
+  weight: "100 900",
   variable: "--font-sans",
   display: "swap",
 });
 
-const plexMono = IBM_Plex_Mono({
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
+const plexMono = localFont({
+  src: [
+    { path: "../public/fonts/IBMPlexMono-Regular.woff", weight: "400" },
+    { path: "../public/fonts/IBMPlexMono-Bold.woff", weight: "700" },
+  ],
   variable: "--font-mono",
   display: "swap",
 });
+
+// Inline custom properties outrank the :root fallbacks in globals.css. Using
+// only next/font's variable classes leaves the winner dependent on CSS chunk
+// order, which made production silently fall back to an unavailable family.
+const fontVariables = {
+  "--font-sans": inter.style.fontFamily,
+  "--font-mono": plexMono.style.fontFamily,
+} as React.CSSProperties;
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -78,7 +84,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
     <html
       lang="en"
       suppressHydrationWarning
-      className={`${plexSans.variable} ${plexMono.variable}`}
+      className={`${inter.variable} ${plexMono.variable}`}
+      style={fontVariables}
     >
       <head>
         <ThemeBootstrap />

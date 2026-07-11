@@ -319,3 +319,12 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-07-09 - nav icon specificity
 
 - When adding a primary sidebar route, create or assign a dedicated semantic glyph in the Radon icon set; do not reuse an adjacent route's icon as a placeholder on a shipped page.
+
+## 2026-07-11 - control-plane manifest completeness
+
+- Manifest verification must be total: require every installed target to be a regular non-symlink file and exact-hash match. Targets intentionally unreadable to the deploy user, such as `0440 root:root` sudoers, need a fixed no-argument privileged verifier over the bootstrap's exact contract; never treat unreadability as optional verification.
+
+## 2026-07-11 - retired subsystem health
+
+- Disabling a retired writer is incomplete while its historical health row remains in alert or rendering catalogs. Gate alert evaluation, current-health APIs, and historical reliability scoring on the same concrete applicability signal, while retaining enabled-path tests for installations where the subsystem exists.
+- Best-effort telemetry around native extensions must account for non-termination `BaseException` failures. Catch per telemetry item, continue independent writes, and explicitly re-raise `KeyboardInterrupt`, `SystemExit`, and `GeneratorExit`.

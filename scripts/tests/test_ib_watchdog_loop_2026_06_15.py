@@ -298,7 +298,18 @@ class TestPoolReconnectAfterRecovery:
         _drive(state_path, _dead_upstream_authenticated())
         assert load_state(state_path).pending_pool_reconnect is True
 
-        # Cycle 2: auth resolved → exactly one radon-api restart, flag cleared.
+        # Cycle 2: one authenticated sample is not enough; stale /health data
+        # immediately after a gateway restart caused the 2026-07-11 false
+        # recovery and premature API bounce.
+        pending, restart = _drive(
+            state_path, _payload(auth_state="authenticated"),
+            api_unit="radon-api.service",
+        )
+        restart.assert_not_called()
+        assert pending.pending_pool_reconnect is True
+        assert pending.authenticated_recovery_count == 1
+
+        # Cycle 3: a consecutive authenticated sample confirms recovery.
         result, restart = _drive(
             state_path, _payload(auth_state="authenticated"),
             api_unit="radon-api.service",
@@ -312,12 +323,38 @@ class TestPoolReconnectAfterRecovery:
         save_state(
             state_path, WatchdogState(pending_pool_reconnect=True)
         )
-        # First healthy/authenticated cycle bounces api once.
+        # First sample only arms recovery confirmation.
         _, restart1 = _drive(state_path, _payload(auth_state="authenticated"))
-        restart1.assert_called_once()
-        # Second healthy cycle must NOT bounce api again — flag is cleared.
+        restart1.assert_not_called()
+        # Second consecutive sample bounces once and clears the flag.
         _, restart2 = _drive(state_path, _payload(auth_state="authenticated"))
+        restart2.assert_called_once()
+        # Later healthy cycles cannot bounce again.
+        _, restart3 = _drive(state_path, _payload(auth_state="authenticated"))
+        restart3.assert_not_called()
+
+    def test_transient_authenticated_sample_does_not_false_recover(self, state_path):
+        save_state(state_path, WatchdogState(pending_pool_reconnect=True))
+
+        first, restart1 = _drive(state_path, _payload(auth_state="authenticated"))
+        restart1.assert_not_called()
+        assert first.authenticated_recovery_count == 1
+
+        parked, restart2 = _drive(
+            state_path,
+            _payload(
+                service_state="unhealthy",
+                upstream_dead=True,
+                auth_state="awaiting_2fa",
+            ),
+        )
         restart2.assert_not_called()
+        assert parked.pending_pool_reconnect is True
+        assert parked.authenticated_recovery_count == 0
+
+        retry, restart3 = _drive(state_path, _payload(auth_state="authenticated"))
+        restart3.assert_not_called()
+        assert retry.authenticated_recovery_count == 1
 
     def test_no_api_bounce_while_still_awaiting_2fa(self, state_path):
         # Flag armed but auth not yet resolved: do NOT bounce api prematurely.
@@ -361,5 +398,6 @@ class TestPushLockPreserved:
         # IBKR push (it restarts the API service, not the gateway).
         assert ib_2fa_lock.check_2fa_push_lock() is None
         save_state(state_path, WatchdogState(pending_pool_reconnect=True))
+        _drive(state_path, _payload(auth_state="authenticated"))
         _drive(state_path, _payload(auth_state="authenticated"))
         assert ib_2fa_lock.check_2fa_push_lock() is None

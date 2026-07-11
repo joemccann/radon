@@ -201,12 +201,15 @@ class TestSeverityMapping:
         )
         assert outcome.severity == "P1"
 
-    def test_continuous_stale_is_p3(self, db_conn):
-        from watchdog import check
+    def test_continuous_stale_is_p3(self, db_conn, tmp_path, monkeypatch):
+        from watchdog import check, services
 
         # replica-watchdog uses a 24h window because it's event-driven —
         # it only writes service_health when it heals. Seed 25h old so
         # the stale path trips for the severity test.
+        replica_path = tmp_path / "replica.db"
+        replica_path.touch()
+        monkeypatch.setattr(services, "REPLICA_PATH", replica_path, raising=False)
         now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
         _seed_service_health(db_conn, "replica-watchdog", "ok", now - timedelta(hours=25))
         check.check_service(service="replica-watchdog", kind="stale", now=now, market_state="closed")
@@ -217,6 +220,44 @@ class TestSeverityMapping:
             market_state="closed",
         )
         assert outcome.severity == "P3"
+
+    def test_absent_replica_disables_historical_stale_and_error_rows(
+        self, db_conn, tmp_path, monkeypatch
+    ):
+        from watchdog import check, services
+
+        replica_path = tmp_path / "missing-replica.db"
+        monkeypatch.setattr(services, "REPLICA_PATH", replica_path, raising=False)
+
+        def fail_if_health_is_read(_service):
+            raise AssertionError("disabled replica health must not be read")
+
+        monkeypatch.setattr(check, "_read_service_health", fail_if_health_is_read)
+        now = datetime(2026, 5, 11, 14, 0, tzinfo=timezone.utc)
+
+        for kind, state in (("stale", "ok"), ("error", "error")):
+            _seed_service_health(
+                db_conn,
+                "replica-watchdog",
+                state,
+                now - timedelta(days=7),
+                {"message": "historical replica failure"},
+            )
+            for offset in (0, 5):
+                outcome = check.check_service(
+                    service="replica-watchdog",
+                    kind=kind,
+                    now=now + timedelta(minutes=offset),
+                    market_state="closed",
+                )
+                assert outcome.status == "disabled"
+                assert outcome.fired is False
+                assert outcome.severity is None
+
+        cooldowns = db_conn.execute(
+            "SELECT * FROM watchdog_cooldowns WHERE service='replica-watchdog'"
+        ).fetchall()
+        assert cooldowns == []
 
     def test_error_state_is_p2(self, db_conn):
         from watchdog import check

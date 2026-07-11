@@ -1,131 +1,135 @@
 {
   "name": "r2k-materials",
-  "description": "Russell 2000 Materials (83 companies)",
+  "description": "Russell 2000 Materials (91 companies)",
   "tickers": [
-    "CDE",
-    "HL",
     "CMC",
     "SSRM",
     "BCPC",
-    "SXT",
+    "MTRN",
     "PRM",
+    "SXT",
+    "KNF",
+    "CBT",
+    "HCC",
     "CSTM",
     "USAR",
-    "KNF",
-    "HCC",
-    "MTRN",
-    "CBT",
-    "CC",
+    "AVNT",
     "CENX",
     "FUL",
-    "AVNT",
-    "HWKN",
+    "ASH",
     "KALU",
-    "PPTA",
+    "CC",
+    "HWKN",
     "NGVT",
     "MTX",
     "NG",
-    "AMR",
-    "IOSP",
     "KWR",
-    "ECVT",
-    "PCT",
+    "IOSP",
+    "HUN",
     "GEF",
-    "IE",
+    "PPTA",
+    "AMR",
     "OI",
-    "WS",
+    "FMC",
+    "ECVT",
     "SLVM",
-    "TRS",
-    "USLM",
-    "RYZ",
-    "UAMY",
     "SCL",
-    "TROX",
-    "CMP",
+    "HYMC",
     "MYE",
+    "TRS",
+    "RYZ",
+    "IE",
+    "PCT",
+    "USLM",
+    "WS",
+    "CMP",
+    "MUX",
+    "UAMY",
     "KOP",
-    "LXU",
+    "ALOY",
+    "TROX",
+    "SXC",
+    "MTUS",
     "NB",
+    "AMBP",
+    "LXU",
     "ASPI",
     "CRML",
-    "MTUS",
-    "SXC",
-    "IDR",
     "METC",
-    "RYAM",
     "ASIX",
     "DC",
-    "AMBP",
+    "ELE",
+    "IDR",
+    "TTAM",
+    "RYAM",
+    "GEFB",
     "CTGO",
-    "GSM",
     "MATV",
+    "MAGN",
+    "ALTO",
+    "GSM",
     "IPI",
+    "FTK",
+    "ASPN",
     "ABAT",
     "CMCL",
-    "TTAM",
-    "OEC",
-    "GEFB",
-    "ASPN",
-    "VOXR",
-    "MAGN",
-    "FTK",
     "PACK",
-    "USAU",
-    "TG",
+    "OEC",
+    "VOXR",
+    "VGZ",
     "CLW",
+    "FRD",
+    "USAU",
+    "GORO",
+    "TG",
     "CMT",
     "LZM",
     "KRO",
-    "FRD",
-    "ACNT",
+    "AP",
     "SMID",
-    "ARQ",
-    "AVD",
     "VHI",
+    "SBMT",
     "USGO",
+    "METCB",
     "SLSN",
-    "TSEOF"
+    "TSEOQ"
   ],
   "pairs": [
-    [
-      "CDE",
-      "HL"
-    ],
     [
       "CMC",
       "SSRM"
     ],
     [
       "BCPC",
-      "SXT"
+      "MTRN"
     ],
     [
       "PRM",
+      "SXT"
+    ],
+    [
+      "KNF",
+      "CBT"
+    ],
+    [
+      "HCC",
       "CSTM"
     ],
     [
       "USAR",
-      "KNF"
-    ],
-    [
-      "HCC",
-      "MTRN"
-    ],
-    [
-      "CBT",
-      "CC"
+      "AVNT"
     ],
     [
       "CENX",
       "FUL"
     ],
     [
-      "AVNT",
-      "HWKN"
+      "ASH",
+      "KALU"
     ],
     [
-      "KALU",
-      "PPTA"
+      "CC",
+      "HWKN"
     ],
     [
       "NGVT",
@@ -133,127 +137,147 @@
     ],
     [
       "NG",
-      "AMR"
-    ],
-    [
-      "IOSP",
       "KWR"
     ],
     [
-      "ECVT",
-      "PCT"
+      "IOSP",
+      "HUN"
     ],
     [
       "GEF",
-      "IE"
+      "PPTA"
     ],
     [
-      "OI",
-      "WS"
+      "AMR",
+      "OI"
+    ],
+    [
+      "FMC",
+      "ECVT"
     ],
     [
       "SLVM",
-      "TRS"
-    ],
-    [
-      "USLM",
-      "RYZ"
-    ],
-    [
-      "UAMY",
       "SCL"
     ],
     [
-      "TROX",
-      "CMP"
+      "HYMC",
+      "MYE"
     ],
     [
-      "MYE",
+      "TRS",
+      "RYZ"
+    ],
+    [
+      "IE",
+      "PCT"
+    ],
+    [
+      "USLM",
+      "WS"
+    ],
+    [
+      "CMP",
+      "MUX"
+    ],
+    [
+      "UAMY",
       "KOP"
     ],
     [
-      "LXU",
-      "NB"
+      "ALOY",
+      "TROX"
     ],
     [
-      "ASPI",
-      "CRML"
+      "SXC",
+      "MTUS"
     ],
     [
-      "MTUS",
-      "SXC"
-    ],
-    [
-      "IDR",
-      "METC"
-    ],
-    [
-      "RYAM",
-      "ASIX"
-    ],
-    [
-      "DC",
+      "NB",
       "AMBP"
     ],
     [
-      "CTGO",
-      "GSM"
+      "LXU",
+      "ASPI"
     ],
     [
-      "MATV",
-      "IPI"
+      "CRML",
+      "METC"
     ],
     [
-      "ABAT",
-      "CMCL"
+      "ASIX",
+      "DC"
+    ],
+    [
+      "ELE",
+      "IDR"
     ],
     [
       "TTAM",
-      "OEC"
+      "RYAM"
     ],
     [
       "GEFB",
-      "ASPN"
+      "CTGO"
     ],
     [
-      "VOXR",
+      "MATV",
       "MAGN"
     ],
     [
-      "FTK",
+      "ALTO",
+      "GSM"
+    ],
+    [
+      "IPI",
+      "FTK"
+    ],
+    [
+      "ASPN",
+      "ABAT"
+    ],
+    [
+      "CMCL",
       "PACK"
     ],
     [
-      "USAU",
-      "TG"
+      "OEC",
+      "VOXR"
     ],
     [
-      "CLW",
-      "CMT"
-    ],
-    [
-      "LZM",
-      "KRO"
+      "VGZ",
+      "CLW"
     ],
     [
       "FRD",
-      "ACNT"
+      "USAU"
+    ],
+    [
+      "GORO",
+      "TG"
+    ],
+    [
+      "CMT",
+      "LZM"
+    ],
+    [
+      "KRO",
+      "AP"
     ],
     [
       "SMID",
-      "ARQ"
-    ],
-    [
-      "AVD",
       "VHI"
     ],
     [
-      "USGO",
+      "SBMT",
+      "USGO"
+    ],
+    [
+      "METCB",
       "SLSN"
     ],
     [
-      "TSEOF",
-      "CDE"
+      "TSEOQ",
+      "CMC"
     ]
   ],
   "sector": "Materials",

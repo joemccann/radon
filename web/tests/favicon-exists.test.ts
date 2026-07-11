@@ -1,9 +1,9 @@
 /**
  * Regression: production logs showed `GET /favicon.ico 404` because the
- * Next.js App Router only serves `/favicon.ico` automatically when
- * `app/favicon.ico` exists. The `metadata.icons` block in `layout.tsx`
- * declares PNG variants for richer rich-results contexts, but browsers
- * ALWAYS hit the literal `/favicon.ico` first regardless.
+ * Browsers request the literal `/favicon.ico` regardless of metadata. Keep it
+ * in `public/` so Next serves it as a static asset. The App Router metadata
+ * route for `app/favicon.ico` produced an invalid `favicon.ico/route` artifact
+ * in Vercel's compile-mode onBuildComplete adapter on 2026-07-11.
  *
  * This test pins the asset: it must exist on disk, be non-empty, and
  * begin with the ICO magic bytes (`00 00 01 00`) so a browser will
@@ -13,10 +13,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 
-const FAVICON_PATH = resolve(__dirname, "../app/favicon.ico");
+const FAVICON_PATH = resolve(__dirname, "../public/favicon.ico");
 
-describe("App Router favicon", () => {
-  it("ships an app/favicon.ico so browsers don't 404 on /favicon.ico", () => {
+describe("static favicon", () => {
+  it("ships public/favicon.ico so browsers don't 404 on /favicon.ico", () => {
     const stats = statSync(FAVICON_PATH);
     expect(stats.isFile()).toBe(true);
     expect(stats.size).toBeGreaterThan(0);

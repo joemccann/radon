@@ -14,6 +14,7 @@ import {
   type ServiceCategory,
 } from "@/lib/serviceHealthWindows";
 import { formatServiceHealthError } from "@/lib/serviceHealthError";
+import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
 
 // Disable Next.js static caching: this handler reads live DB state.
 export const dynamic = "force-dynamic";
@@ -116,9 +117,12 @@ export async function GET(): Promise<Response> {
       readServiceHealthRows,
     );
 
+    // Latest-state rows outlive their writers. Suppress rows whose underlying
+    // subsystem is no longer installed before applying freshness semantics.
+    const applicableRows = filterApplicableServiceHealthRows(cachedRows);
     const nowMs = Date.now();
     const rows: ServiceHealthRow[] = [];
-    for (const row of cachedRows) {
+    for (const row of applicableRows) {
       const r = row as unknown as Record<string, unknown>;
       // This endpoint is PUBLIC (no Clerk session). Scrub any secret-shaped
       // substrings (Turso/libsql URLs, auth tokens, JWTs, IB account ids) out of

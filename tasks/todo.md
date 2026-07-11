@@ -38,7 +38,7 @@ Source: operator report of repeated reliability failures during the prior 48 hou
 - [x] T6D Realtime/alert/telemetry fixes.
 - [x] T6E External-probe cadence calibration.
 - [x] T7 Full verification and adversarial review (suite gates green; residual: live SIGKILL mid-promote dry-run on non-prod).
-- [ ] T8 Review documentation and final production checks.
+- [x] T8 Review documentation and final production checks (safe source/local repairs complete; destructive and privileged production actions documented below).
 
 ## Reconciled findings and fix specification
 
@@ -108,6 +108,110 @@ radon-cloud:      556 passed, 2 skipped
 
 - Operator actions: restore write-capable GitHub probe token if still read-only; enforce 0600 on deployed env files; rotate any credential exposed in cloud history; verify production green marker after first post-fix deploy.
 - Optional non-prod dry-run: SIGKILL mid-promote to confirm durable journal recovery on the real VPS filesystem.
+
+## Continuation: post-hardening reliability verification (2026-07-11)
+
+The July 10 hardening push passed CI, but the following monorepo cloud import failed CI and all observed Tier-3 probes after that import are red. This continuation treats those results as active reliability regressions rather than accepting the previous suite summary.
+
+### Dependency graph
+
+- T9 depends_on: [] - Collect the post-hardening CI, deploy, external-probe, local runtime-log, and production read-only evidence; build an exact timeline from the July 10 hardening push through the current run.
+- T10 depends_on: [] - Audit the cloud monorepo import, GitHub workflow paths, deploy packaging, external-probe contract, credentials, and service-unit topology for integration regressions.
+- T11 depends_on: [] - Audit application/API/IB/monitor/database/realtime paths against current logs and the July 10 fixes, including fault containment and observability behavior.
+- T12 depends_on: [T9, T10, T11] - Reconcile independent audits into a causal graph, distinguish active incidents from expected fail-closed alarms, and specify the smallest complete regression-test and fix set.
+- T13 depends_on: [T12] - Add failing regressions and implement the root-cause fixes across only the affected application and infrastructure surfaces.
+- T14 depends_on: [T13] - Run focused tests, affected suites, full Python/web/cloud suites, static checks, workflow validation, and an adversarial second-pass audit; iterate until new regressions are green and no supported active failure remains unexplained.
+- T15 depends_on: [T14] - Perform non-destructive production/read-only verification, document operational actions that cannot be safely automated, and complete the review with evidence and explicit confidence.
+
+### Checklist
+
+- [x] T9 Post-hardening evidence and timeline.
+- [x] T10 Cloud/CI/deploy/probe integration audit.
+- [x] T11 Runtime application/control-plane audit.
+- [x] T12 Causal reconciliation and fix specification.
+- [x] T13 Red/green regression fixes.
+- [x] T13-C1 depends_on: [] - Add a red regression for a missing non-helper control-plane manifest target and prove deploy mutation never begins.
+- [x] T13-C2 depends_on: [T13-C1] - Require every installed manifest target to be readable, regular, non-symlinked, and hash-identical while retaining helper executable checks.
+- [x] T14 Full verification and adversarial re-audit.
+- [x] T14-C1 depends_on: [T13-C2] - Run focused cutover tests, the full cloud suite, and static validation for the fail-closed manifest fix.
+- [x] T15 Production verification and final review (production remains correctly red pending deploy and IBKR 2FA).
+
+### Constraints
+
+- Existing dirty changes in `.serena/project.yml`, `data/tag_taxonomy.json`, `web/app/globals.css`, `web/components/WorkspaceSections.tsx`, `web/lib/journal/`, and journal-range tests are operator work; do not modify or revert them.
+- Evidence collection and production checks are read-only. Do not rotate credentials, mutate Turso, restart production services, acknowledge alerts, or rewrite Git history.
+- Treat a red fail-closed health probe as evidence to diagnose, not automatically as a defect in the probe. Restore green only by repairing the measured dependency or proving and testing a classifier defect.
+- No claim of perfect future availability is supportable. Completion requires that every observed failure has a traced cause, a containment or repair, a regression test where feasible, and a verified monitoring signal.
+
+### Reconciled findings and fix specification
+
+1. The broker incident is real and remains operator-blocked: Gateway restarted after an API hang, its 2FA dialog expired, and the watchdog briefly consumed a stale authenticated sample before the session settled at `awaiting_2fa`. Preserve the no-restart stand-down, heartbeat the error every cycle, and require consecutive authenticated samples before the one-shot API pool reconnect.
+2. The Tier-3 red sequence is a producer/consumer rollout split. Commit `218da845` made the off-box consumer fail closed on opaque status while the legacy deploy did not restart `radon-health`; the on-box process has served the old schema since June 12. Version the schema, validate exactly N and N-1, inspect nested FastAPI broker state, and gate deploys on producer schema without requiring IB to be healthy.
+3. Commit `bcd13a13` never deployed because a calendar-bound options expiry fixture rotted and a Linux-only deploy-lock test assigned a readonly variable after sourcing. Generate future expiries and pass supervisor budgets through subprocess environment before sourcing.
+4. The first monorepo cloud deploy is unsafe before it starts: Compose still requires an in-tree `.env`, production lacks the root-owned helpers and exact sudo policy, CI mutates live support code before acquiring the deploy lock, and rollback can delete its own journal helper when crossing to a pre-`cloud/` SHA. Use an immutable exact-SHA runner, external secret path, early compatibility preflight, stable journal support, and an explicit non-restarting root bootstrap.
+5. The imported infra still points drift audit, Gateway, backup, watchdog, and setup paths at the legacy checkout; transition topology under `/run` is lost on reboot. Canonicalize code to `/home/radon/radon/cloud`, retain only the temporary 0600 legacy secret file, and persist/fsync transition state under `/var/lib/radon/deploy`.
+6. The laptop monitor daemon is an active amplified crash loop: launchd selects Python 3.9, a PEP 604 annotation aborts import, failure KeepAlive retries about every 11 seconds, and status reports `RUNNING`. Pin Python 3.13 under an explicit launchd PATH, preflight dependencies, remove failure amplification, and make status evaluate exit code plus heartbeat age.
+7. The laptop data refresh is false green: the resolver accepts a Python missing `libsql_experimental`, all three core children fail, stale caches remain, and the wrapper exits zero. Require the complete Python 3.13 runtime, attempt every child, preserve caches, and return aggregate failure after post-close repair.
+8. Full pytest polluted ignored runtime state through an unredirected `/scan` cache and CTA history default. Redirect every implicated path to `tmp_path` and prove protected file hashes and mtimes remain unchanged.
+9. Demo reliability has two contained but repeated failures: the Vercel adapter rejects the App Router favicon metadata route under compile-mode output, and the local newsfeed mirror has unbounded single-attempt destination writes with timestamp-free logs. Serve the ICO as a public asset, reproduce the Vercel build path, and add bounded phase-labelled mirror retries and tests.
+10. External controls remain outside code: production/main GitHub protection rules and required reviewers are not enabled. Source can enforce pinned actions and tested policy configuration, but repository/environment settings require an explicit GitHub control-plane mutation after code verification.
+
+### T13/T14 control-plane follow-up review
+
+- Red evidence: a valid readiness/manifest fixture with a deleted non-helper systemd target passed preflight and reached every stubbed deploy mutation boundary.
+- Fix: deploy rejects missing/non-regular/symlink targets directly, hashes readable targets, and requires the fixed no-argument root helper to verify all 20 ordered bootstrap source/target/mode/hash records. This preserves intentional `0440 root:root` sudoers permissions.
+- Verification: 37 focused cutover/bootstrap tests passed; full cloud suite passed with 598 passed and 2 skipped; shell syntax and `git diff --check` are clean.
+
+### Final review (2026-07-11)
+
+#### Root causes closed in source
+
+- Broker recovery no longer acts on one stale authenticated sample after restart, and `awaiting_2fa` remains a no-restart error heartbeat.
+- Health producer/consumer contracts are versioned and fail closed; nested broker degradation now controls the aggregate even when FastAPI returns HTTP 200.
+- Cloud cutover is immutable-SHA, lock-first, durable, rollback-compatible, externally configured, and guarded by a complete root-owned 20-target manifest verifier before mutation.
+- Local launchd jobs pin Python 3.13, preflight required modules, avoid failure-amplifying KeepAlive, expose exit/heartbeat truth, and propagate aggregate refresh failures.
+- Preset refreshes use semantic upstream parsers, validate all three universes before any write, and atomically replace files. Canonical refresh is stable on a second dry run: S&P 500 503, Nasdaq-100 103, Russell 2000 1,979.
+- The retired replica watchdog is inapplicable when `data/replica.db` is absent across writer, alert, API, and reliability-scoring paths.
+- Monitor telemetry isolates non-termination native-extension panics without swallowing process termination signals.
+- Runtime-writing tests use temporary paths; the full suite preserved `data/scanner.json` and CTA history hashes and mtimes exactly.
+- Demo mirroring has bounded retries, deadlines, idempotent writes, structured phase logs, health heartbeats, and deterministic client cleanup.
+- The favicon is a public static asset, web fonts are local, date-sensitive fixtures are future-relative, and output tracing excludes backup/archive explosions with a post-build manifest audit.
+
+#### Verification evidence
+
+```text
+Python full suite:       4099 passed, 13 skipped, 90 deselected
+Web full Vitest suite:   4099 passed, 26 skipped
+Cloud full suite:         598 passed, 2 skipped
+Cloud focused cutover:     37 passed
+Demo mirror Vitest:         3 passed
+TypeScript:                 clean
+Next production build:      passed (Next 16.2.10)
+Vercel production build:    passed against linked radon-demo project
+Output trace audit:         126 manifests; 0 forbidden backup/archive paths;
+                            max 3,359 files / 70.64 MiB; 19 explicit fallbacks
+Static validation:          git diff --check, Python compileall, all shell bash -n,
+                            and three modified launchd plists passed
+Protected runtime files:    hashes and mtimes unchanged by the full Python suite
+Local monitor launchd:      idle as scheduled, exit 0, 42 runs, fresh heartbeat
+```
+
+#### Read-only production state at 2026-07-11 13:44 UTC
+
+- Application checkout is still `218da8456976`; legacy cloud checkout is `fb43aeea3e5d`. None of this review's source changes are deployed.
+- The legacy health producer is active but still emits no `schema_version`, `ok`, or `overall_state`. The external consumer correctly reports `aggregate_unhealthy` instead of masking it.
+- FastAPI reports `auth_state=awaiting_2fa`, `service_state=unhealthy`, and `upstream_dead=true`; `ib-gateway` is running but Docker reports it unhealthy.
+- The watchdog timer is active and its last oneshot result is successful. It is standing down on the authentication gate rather than creating another restart storm.
+- Current source is complete and test-green, but live production is not healthy. Claiming otherwise would be false.
+
+#### Required operator/control-plane actions
+
+1. Review and commit the intended reliability diff while excluding unrelated operator-owned changes.
+2. Run the non-restarting root control-plane bootstrap on the VPS, then deploy the exact reviewed SHA through the gated Production workflow and verify schema-v2 health plus the durable green marker.
+3. Complete a fresh IBKR 2FA approval and verify two consecutive authenticated samples, API/pool recovery, Gateway health, and a green external aggregate.
+4. Enable GitHub `main`/Production protections and required reviewers. These repository settings are not enforceable from source alone.
+
+Confidence: high for the traced root causes, source fixes, regression coverage, cloud preflight, and local monitor behavior; moderate for live cutover until the first privileged bootstrap/deploy is exercised; current live broker availability is conclusively unhealthy, not unknown.
 
 ---
 

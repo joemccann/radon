@@ -13,7 +13,8 @@
     <!-- Program to run -->
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
+        <string>/usr/bin/env</string>
+        <string>python3.13</string>
         <string>/Users/joemccann/dev/apps/finance/radon/scripts/exit_order_service.py</string>
     </array>
     
@@ -33,7 +34,7 @@
     <key>EnvironmentVariables</key>
     <dict>
         <key>PATH</key>
-        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
         <key>PYTHONPATH</key>
         <string>/Users/joemccann/dev/apps/finance/radon</string>
     </dict>

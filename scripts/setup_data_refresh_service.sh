@@ -13,6 +13,7 @@
 #   ./scripts/setup_data_refresh_service.sh status    - Check service status
 #   ./scripts/setup_data_refresh_service.sh logs      - Tail service logs
 #   ./scripts/setup_data_refresh_service.sh start     - Run data refresh manually now
+#   ./scripts/setup_data_refresh_service.sh generate  - Regenerate checked-in plist
 
 set -e
 
@@ -24,12 +25,42 @@ PLIST_DST="$HOME/Library/LaunchAgents/$PLIST_NAME"
 LABEL="com.radon.data-refresh"
 LOG_DIR="$PROJECT_DIR/logs"
 WRAPPER="$PROJECT_DIR/scripts/run_data_refresh.sh"
+LAUNCHD_PATH="${RADON_LAUNCHD_PATH:-/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin}"
 
 # --- Helpers ---
 
+resolve_service_python() {
+    local python_bin
+    python_bin=$(PATH="$LAUNCHD_PATH" command -v python3.13 2>/dev/null) || {
+        echo "ERROR: Python 3.13 was not found in launchd PATH: $LAUNCHD_PATH"
+        return 1
+    }
+    echo "$python_bin"
+}
+
+preflight_python() {
+    local python_bin
+    python_bin=$(resolve_service_python) || return 1
+    if ! "$python_bin" - <<'PY'
+import importlib.util
+import sys
+
+required = ("ib_insync", "libsql_experimental")
+missing = [name for name in required if importlib.util.find_spec(name) is None]
+if sys.version_info < (3, 13) or missing:
+    raise SystemExit(1)
+PY
+    then
+        echo "ERROR: Python 3.13 dependency preflight failed: $python_bin"
+        return 1
+    fi
+    echo "Python preflight: OK ($python_bin)"
+}
+
 generate_plist() {
-    local entries
-    entries=$(PROJECT_DIR_ENV="$PROJECT_DIR" python3.13 - <<'PY'
+    local entries python_bin
+    python_bin=$(resolve_service_python) || return 1
+    entries=$(PROJECT_DIR_ENV="$PROJECT_DIR" "$python_bin" - <<'PY'
 import os
 import sys
 
@@ -62,6 +93,12 @@ PY
     <key>WorkingDirectory</key>
     <string>${PROJECT_DIR}</string>
 
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>${LAUNCHD_PATH}</string>
+    </dict>
+
     <key>StartCalendarInterval</key>
     <array>
 ${entries}    </array>
@@ -90,6 +127,8 @@ PLIST
 install() {
     echo "Installing Data Refresh service..."
     echo ""
+
+    preflight_python
 
     # 1. Verify wrapper script exists
     if [[ ! -f "$WRAPPER" ]]; then
@@ -221,8 +260,11 @@ case "${1:-status}" in
     start)
         start_now
         ;;
+    generate)
+        generate_plist
+        ;;
     *)
-        echo "Usage: $0 {install|uninstall|status|logs|start}"
+        echo "Usage: $0 {install|uninstall|status|logs|start|generate}"
         exit 1
         ;;
 esac

@@ -13,8 +13,6 @@ No production files are written (tmp_path is used for all file I/O).
 """
 from __future__ import annotations
 
-import csv
-import io
 import json
 import sys
 import textwrap
@@ -36,7 +34,7 @@ import monitor_daemon.handlers.preset_rebalance as pr
 # ── Helper: minimal fake SP500 HTML ──────────────────────────────────
 
 def _make_sp500_html(rows: List[Dict[str, str]]) -> str:
-    """Build the minimal Wikipedia SP500 table HTML that fetch_sp500 parses."""
+    """Build current-style Wikipedia markup with attributes and nested links."""
     inner_rows = ""
     for row in rows:
         ticker = row.get("ticker", "")
@@ -44,64 +42,70 @@ def _make_sp500_html(rows: List[Dict[str, str]]) -> str:
         sector = row.get("sector", "")
         sub = row.get("sub_industry", "")
         inner_rows += (
-            f"<tr>"
-            f"<td>{ticker}</td>"
+            f'<tr id="constituent-{ticker}" class="wikitable-row">'
+            f"<td><a href='/wiki/{ticker}'>{ticker}</a></td>"
             f"<td>{name}</td>"
             f"<td>{sector}</td>"
             f"<td>{sub}</td>"
             f"</tr>\n"
         )
-    # Header row that fetch_sp500 skips (rows[1:]).
-    header_row = "<tr><th>Symbol</th><th>Security</th><th>GICS Sector</th><th>Sub-industry</th></tr>\n"
-    return f"<table>{header_row}{inner_rows}</table>"
+    header_row = (
+        '<tr class="header"><th>Symbol</th><th>Security</th>'
+        "<th>GICS Sector</th><th>GICS Sub-Industry</th></tr>\n"
+    )
+    unrelated = "<table><tr><th>Effective Date</th><th>Change</th></tr></table>"
+    return f'{unrelated}<table id="constituents" class="wikitable">{header_row}{inner_rows}</table>'
 
 
-# ── Helper: minimal fake NDX100 HTML ─────────────────────────────────
+# ── Helper: minimal fake Nasdaq API payload ──────────────────────────
 
-def _make_ndx100_html(rows: List[Dict[str, str]]) -> str:
-    """Build fake Wikipedia NDX100 page HTML.
-
-    fetch_ndx100 uses tables[4], so we prepend 4 empty dummy tables.
-    """
-    dummy_tables = "<table></table>" * 4
-    inner_rows = ""
-    for row in rows:
-        ticker = row.get("ticker", "")
-        name = row.get("name", "")
-        sector = row.get("sector", "")
-        sub = row.get("sub_industry", "")
-        inner_rows += (
-            f"<tr>"
-            f"<td>{ticker}</td>"
-            f"<td>{name}</td>"
-            f"<td>{sector}</td>"
-            f"<td>{sub}</td>"
-            f"</tr>\n"
-        )
-    header_row = "<tr><th>Ticker</th><th>Company</th><th>ICB Industry</th><th>ICB Subsector</th></tr>\n"
-    target_table = f"<table>{header_row}{inner_rows}</table>"
-    return dummy_tables + target_table
+def _make_ndx100_payload(rows: List[Dict[str, str]]) -> str:
+    api_rows = [
+        {"symbol": row.get("ticker", ""), "companyName": row.get("name", "")}
+        for row in rows
+    ]
+    return json.dumps(
+        {
+            "data": {
+                "totalrecords": len(api_rows),
+                "date": "Jul 9, 2026",
+                "data": {"rows": api_rows},
+            },
+            "status": {"rCode": 200},
+        }
+    )
 
 
-# ── Helper: minimal fake IWM CSV content ─────────────────────────────
+# ── Helper: minimal fake BlackRock holdings payload ──────────────────
 
-def _make_iwm_csv(rows: List[Dict[str, Any]]) -> str:
-    """Build fake iShares IWM CSV content that fetch_r2k parses.
-
-    fetch_r2k skips the first 10 lines then parses CSV starting line 11
-    (0-indexed line 10). We add 9 header lines then a column-header line.
-    """
-    header_lines = "\n".join(f"IWM line {i}" for i in range(9))
-    col_header = "Ticker,Name,Sector,Asset Class,Weight (%)"
-    data_lines = []
-    for row in rows:
-        ticker = row.get("ticker", "TICK")
-        name = row.get("name", "Company Name")
-        sector = row.get("sector", "Technology")
-        asset_class = row.get("asset_class", "Equity")
-        weight = row.get("weight", "0.05")
-        data_lines.append(f"{ticker},{name},{sector},{asset_class},{weight}")
-    return "\n".join([header_lines, col_header] + data_lines)
+def _make_iwm_payload(rows: List[Dict[str, Any]]) -> str:
+    columns = {
+        "ticker": [row.get("ticker", "TICK") for row in rows],
+        "issueName": [row.get("name", "Company Name") for row in rows],
+        "sectorName": [row.get("sector", "Technology") for row in rows],
+        "assetClass": [row.get("asset_class", "Equity") for row in rows],
+        "holdingPercent": [str(row.get("weight", "0.05")) for row in rows],
+    }
+    points = {
+        name: {"name": name, "value": values, "formattedValue": values}
+        for name, values in columns.items()
+    }
+    points["asOfDate"] = {
+        "name": "asOfDate",
+        "value": 20260709,
+        "formattedValue": "Jul 09, 2026",
+    }
+    return json.dumps(
+        {
+            "componentsByNameMap": {
+                "holdings": {
+                    "containersByNameMap": {
+                        "all": {"dataPointsByNameMap": points}
+                    }
+                }
+            }
+        }
+    )
 
 
 # ── 1. Handler identity ───────────────────────────────────────────────
@@ -183,6 +187,146 @@ class TestDiffTickers:
         assert removed == {"AAPL", "MSFT"}
 
 
+class TestConstituentValidation:
+    @staticmethod
+    def _companies(prefix: str, count: int) -> List[Dict[str, Any]]:
+        return [
+            {
+                "ticker": f"{prefix}{index:04d}",
+                "name": f"Company {index}",
+                "sector": "Technology",
+                "sub_industry": "Software",
+                "weight": 0.1,
+            }
+            for index in range(count)
+        ]
+
+    def test_empty_parse_is_rejected(self):
+        with pytest.raises(pr.InvalidConstituentData, match="expected 450..550"):
+            pr.validate_constituents("sp500", [], ["AAPL"] * 500)
+
+    def test_years_from_wrong_wikipedia_table_are_rejected(self):
+        rows = self._companies("N", 100)
+        for offset, row in enumerate(rows):
+            row["ticker"] = str(1926 + offset)
+
+        with pytest.raises(pr.InvalidConstituentData, match="invalid tickers"):
+            pr.validate_constituents("ndx100", rows, ["AAPL"] * 100)
+
+    def test_valid_count_with_implausible_overlap_is_rejected(self):
+        rows = self._companies("NEW", 500)
+        current = [f"OLD{index:04d}" for index in range(500)]
+
+        with pytest.raises(pr.InvalidConstituentData, match="overlap"):
+            pr.validate_constituents("sp500", rows, current)
+
+    def test_current_ndx_count_and_churn_are_accepted(self):
+        current = [f"N{index:04d}" for index in range(101)]
+        rows = self._companies("N", 94) + self._companies("NEW", 9)
+
+        pr.validate_constituents("ndx100", rows, current)
+
+
+class TestFailClosedExecution:
+    @staticmethod
+    def _companies(prefix: str, count: int) -> List[Dict[str, Any]]:
+        return [
+            {
+                "ticker": f"{prefix}{index:04d}",
+                "name": f"Company {index}",
+                "sector": "Technology",
+                "sub_industry": "Software",
+                "weight": 0.1,
+            }
+            for index in range(count)
+        ]
+
+    @staticmethod
+    def _master(name: str, tickers: List[str]) -> dict:
+        if name == "r2k":
+            return {"name": name, "tickers": tickers, "pairs": [], "groups": {}}
+        return {
+            "name": name,
+            "description": name,
+            "tickers": tickers,
+            "pairs": [],
+            "groups": {
+                "software": {
+                    "name": "Software",
+                    "sector": "Technology",
+                    "tickers": list(tickers),
+                    "pairs": [],
+                    "vol_driver": "software",
+                }
+            },
+        }
+
+    def test_handler_validates_all_sources_before_any_preset_write(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from monitor_daemon.handlers.preset_rebalance_handler import (
+            PresetRebalanceHandler,
+        )
+
+        preset_dir = tmp_path / "presets"
+        preset_dir.mkdir()
+        sp500 = self._companies("S", 500)
+        ndx100 = self._companies("N", 100)
+        r2k = self._companies("R", 1900)
+        for name, rows in (("sp500", sp500), ("ndx100", ndx100), ("r2k", r2k)):
+            (preset_dir / f"{name}.json").write_text(
+                json.dumps(self._master(name, [row["ticker"] for row in rows]))
+            )
+
+        sp500_fresh = list(sp500[:-1]) + [
+            {
+                "ticker": "SNEW",
+                "name": "New Company",
+                "sector": "Technology",
+                "sub_industry": "Software",
+                "weight": 0.1,
+            }
+        ]
+        before = {path.name: path.read_bytes() for path in preset_dir.iterdir()}
+
+        monkeypatch.setattr(pr, "PRESETS_DIR", preset_dir)
+        monkeypatch.setattr(pr, "CHANGELOG_PATH", preset_dir / "changelog.json")
+        monkeypatch.setattr(pr, "fetch_sp500", lambda: sp500_fresh)
+        monkeypatch.setattr(pr, "fetch_ndx100", lambda: [])
+        monkeypatch.setattr(pr, "fetch_r2k", lambda: r2k)
+
+        handler = PresetRebalanceHandler()
+        with patch.object(handler, "record_cycle_health"):
+            result = handler.run()
+
+        assert result["status"] == "error"
+        assert "ndx100" in result["error"]
+        assert handler.last_run is None
+        after = {path.name: path.read_bytes() for path in preset_dir.iterdir()}
+        assert after == before
+
+
+def test_atomic_json_write_preserves_target_on_serialization_failure(tmp_path: Path):
+    target = tmp_path / "preset.json"
+    target.write_text('{"source":"canonical"}\n')
+
+    with pytest.raises(TypeError):
+        pr._write_json_atomic(target, {"bad": object()})
+
+    assert target.read_text() == '{"source":"canonical"}\n'
+    assert list(tmp_path.glob(".preset.json.*.tmp")) == []
+
+
+def test_atomic_json_write_preserves_target_permissions(tmp_path: Path):
+    target = tmp_path / "preset.json"
+    target.write_text('{"source":"canonical"}\n')
+    target.chmod(0o640)
+
+    pr._write_json_atomic(target, {"source": "updated"})
+
+    assert target.stat().st_mode & 0o777 == 0o640
+
+
 # ── 3. Fetcher parsing — SP500 ───────────────────────────────────────
 
 class TestFetchSp500Parsing:
@@ -199,12 +343,15 @@ class TestFetchSp500Parsing:
             {"ticker": "MSFT", "name": "Microsoft", "sector": "IT", "sub_industry": "Software"},
         ]
         html = _make_sp500_html(companies)
-        with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(html)):
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response(html),
+        ) as mocked_open:
             result = pr.fetch_sp500()
         tickers = [c["ticker"] for c in result]
         assert "AAPL" in tickers
         assert "MSFT" in tickers
+        assert mocked_open.call_args.kwargs["timeout"] == 30
 
     def test_deduplicates_tickers(self):
         companies = [
@@ -219,12 +366,11 @@ class TestFetchSp500Parsing:
         assert tickers.count("AAPL") == 1
 
     def test_skips_rows_with_no_ticker(self):
-        html = (
-            "<table>"
-            "<tr><th>header</th></tr>"
-            "<tr><td></td><td>No ticker</td><td>IT</td><td>SW</td></tr>"
-            "<tr><td>MSFT</td><td>Microsoft</td><td>IT</td><td>SW</td></tr>"
-            "</table>"
+        html = _make_sp500_html(
+            [
+                {"ticker": "", "name": "No ticker", "sector": "IT", "sub_industry": "SW"},
+                {"ticker": "MSFT", "name": "Microsoft", "sector": "IT", "sub_industry": "SW"},
+            ]
         )
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
                    return_value=self._mock_response(html)):
@@ -233,11 +379,8 @@ class TestFetchSp500Parsing:
         assert result[0]["ticker"] == "MSFT"
 
     def test_strips_html_tags_from_ticker(self):
-        html = (
-            "<table>"
-            "<tr><th>header</th></tr>"
-            "<tr><td><a href='/wiki/AAPL'>AAPL</a></td><td>Apple</td><td>IT</td><td>HW</td></tr>"
-            "</table>"
+        html = _make_sp500_html(
+            [{"ticker": "AAPL", "name": "Apple", "sector": "IT", "sub_industry": "HW"}]
         )
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
                    return_value=self._mock_response(html)):
@@ -255,13 +398,22 @@ class TestFetchSp500Parsing:
         assert result[0]["sector"] == "Energy"
         assert result[0]["sub_industry"] == "Oil & Gas"
 
+    def test_rejects_html_without_semantic_constituent_headers(self):
+        html = "<table><tr><th>Year</th><th>Change</th></tr><tr><td>2025</td></tr></table>"
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response(html),
+        ):
+            with pytest.raises(pr.InvalidConstituentData, match="constituent table"):
+                pr.fetch_sp500()
+
 
 # ── 4. Fetcher parsing — NDX100 ──────────────────────────────────────
 
 class TestFetchNdx100Parsing:
-    def _mock_response(self, html: str):
+    def _mock_response(self, payload: str):
         mock = MagicMock()
-        mock.read.return_value = html.encode("utf-8")
+        mock.read.return_value = payload.encode("utf-8")
         mock.__enter__ = lambda s: s
         mock.__exit__ = MagicMock(return_value=False)
         return mock
@@ -271,27 +423,44 @@ class TestFetchNdx100Parsing:
             {"ticker": "AAPL", "name": "Apple", "sector": "Technology", "sub_industry": "HW"},
             {"ticker": "AMZN", "name": "Amazon", "sector": "Consumer", "sub_industry": "Retail"},
         ]
-        html = _make_ndx100_html(companies)
+        payload = _make_ndx100_payload(companies)
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(html)):
+                   return_value=self._mock_response(payload)):
             result = pr.fetch_ndx100()
         tickers = [c["ticker"] for c in result]
         assert "AAPL" in tickers
         assert "AMZN" in tickers
+        assert result[0]["name"] == "Apple"
 
     def test_deduplicates_tickers(self):
         companies = [
             {"ticker": "AAPL", "name": "Apple", "sector": "Technology", "sub_industry": "HW"},
             {"ticker": "AAPL", "name": "Apple dup", "sector": "Technology", "sub_industry": "HW"},
         ]
-        html = _make_ndx100_html(companies)
+        payload = _make_ndx100_payload(companies)
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(html)):
+                   return_value=self._mock_response(payload)):
             result = pr.fetch_ndx100()
         assert len([c for c in result if c["ticker"] == "AAPL"]) == 1
 
+    def test_rejects_html_instead_of_nasdaq_json(self):
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response("<html>not json</html>"),
+        ):
+            with pytest.raises(pr.InvalidConstituentData, match="valid JSON"):
+                pr.fetch_ndx100()
 
-# ── 5. Fetcher parsing — R2K CSV ─────────────────────────────────────
+    def test_rejects_json_without_constituent_rows(self):
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response('{"data": {}}'),
+        ):
+            with pytest.raises(pr.InvalidConstituentData, match="rows are missing"):
+                pr.fetch_ndx100()
+
+
+# ── 5. Fetcher parsing — BlackRock R2K JSON ──────────────────────────
 
 class TestFetchR2kParsing:
     def _mock_response(self, content: str):
@@ -302,72 +471,108 @@ class TestFetchR2kParsing:
         return mock
 
     def test_parses_equity_rows(self):
-        csv_content = _make_iwm_csv([
+        payload = _make_iwm_payload([
             {"ticker": "TICK1", "name": "Company One", "sector": "Technology",
              "asset_class": "Equity", "weight": "0.10"},
             {"ticker": "TICK2", "name": "Company Two", "sector": "Healthcare",
              "asset_class": "Equity", "weight": "0.05"},
         ])
-        with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(csv_content)):
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response(payload),
+        ) as mocked_open:
             result = pr.fetch_r2k()
         tickers = [c["ticker"] for c in result]
         assert "TICK1" in tickers
         assert "TICK2" in tickers
+        assert mocked_open.call_args.kwargs["timeout"] == 30
 
     def test_skips_non_equity_rows(self):
-        csv_content = _make_iwm_csv([
+        payload = _make_iwm_payload([
             {"ticker": "TICK1", "name": "Company One", "sector": "Technology",
              "asset_class": "Equity", "weight": "0.10"},
             {"ticker": "CASH1", "name": "Cash Collateral", "sector": "",
              "asset_class": "Cash", "weight": "0.01"},
         ])
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(csv_content)):
+                   return_value=self._mock_response(payload)):
             result = pr.fetch_r2k()
         tickers = [c["ticker"] for c in result]
         assert "TICK1" in tickers
         assert "CASH1" not in tickers
 
     def test_skips_dash_tickers(self):
-        csv_content = _make_iwm_csv([
+        payload = _make_iwm_payload([
             {"ticker": "-", "name": "Placeholder", "sector": "Technology",
              "asset_class": "Equity", "weight": "0.00"},
             {"ticker": "REAL", "name": "Real Co", "sector": "Healthcare",
              "asset_class": "Equity", "weight": "0.10"},
         ])
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(csv_content)):
+                   return_value=self._mock_response(payload)):
             result = pr.fetch_r2k()
         tickers = [c["ticker"] for c in result]
         assert "REAL" in tickers
         assert "-" not in tickers
 
     def test_deduplicates_tickers(self):
-        csv_content = _make_iwm_csv([
+        payload = _make_iwm_payload([
             {"ticker": "TICK1", "name": "Company One A", "sector": "Technology",
              "asset_class": "Equity", "weight": "0.10"},
             {"ticker": "TICK1", "name": "Company One B", "sector": "Technology",
              "asset_class": "Equity", "weight": "0.05"},
         ])
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(csv_content)):
+                   return_value=self._mock_response(payload)):
             result = pr.fetch_r2k()
         assert len([c for c in result if c["ticker"] == "TICK1"]) == 1
 
     def test_filters_known_non_equity_names(self):
-        csv_content = _make_iwm_csv([
+        payload = _make_iwm_payload([
             {"ticker": "FCASH", "name": "FUTURES Overlay", "sector": "",
              "asset_class": "Equity", "weight": "0.00"},
             {"ticker": "REAL", "name": "Real Company", "sector": "Energy",
              "asset_class": "Equity", "weight": "0.08"},
         ])
         with patch("monitor_daemon.handlers.preset_rebalance.urlopen",
-                   return_value=self._mock_response(csv_content)):
+                   return_value=self._mock_response(payload)):
             result = pr.fetch_r2k()
         tickers = [c["ticker"] for c in result]
         assert "REAL" in tickers
         assert "FCASH" not in tickers
+
+    def test_rejects_html_instead_of_blackrock_json(self):
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response("<html>not json</html>"),
+        ):
+            with pytest.raises(pr.InvalidConstituentData, match="valid JSON"):
+                pr.fetch_r2k()
+
+    def test_rejects_misaligned_holdings_columns(self):
+        payload = json.loads(
+            _make_iwm_payload(
+                [
+                    {
+                        "ticker": "REAL",
+                        "name": "Real Company",
+                        "sector": "Energy",
+                        "asset_class": "Equity",
+                        "weight": "0.08",
+                    }
+                ]
+            )
+        )
+        points = payload["componentsByNameMap"]["holdings"]["containersByNameMap"][
+            "all"
+        ]["dataPointsByNameMap"]
+        points["issueName"]["formattedValue"] = []
+        with patch(
+            "monitor_daemon.handlers.preset_rebalance.urlopen",
+            return_value=self._mock_response(json.dumps(payload)),
+        ):
+            with pytest.raises(pr.InvalidConstituentData, match="column lengths"):
+                pr.fetch_r2k()
 
 
 # ── 6. Preset-file rewrite — SP500 ───────────────────────────────────
@@ -474,6 +679,7 @@ class TestUpdateNdx100Presets:
         assert "NVDA" in master["tickers"]
         # Old ticker replaced by the full fresh list
         assert "AMZN" not in master["tickers"]
+        assert master["source"].startswith("Nasdaq official Nasdaq-100 API")
 
     def test_returns_positive_file_count(self, ndx100_preset_dir):
         fresh = [

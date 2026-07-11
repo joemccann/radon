@@ -67,6 +67,7 @@ EXIT_UNHEALTHY = 2
 # whole probe comfortably under a minute even with both endpoints retried once.
 HTTP_TIMEOUT_SECONDS = 8.0
 MAX_RESPONSE_BYTES = 65536
+PROBE_RETRY_DELAY_SECONDS = 0.5
 
 
 def _now_iso() -> str:
@@ -130,6 +131,34 @@ def probe_endpoint(url: str, timeout: float = HTTP_TIMEOUT_SECONDS, headers: dic
         return {"reachable": False, "detail": "timeout"}
     except OSError as exc:
         return {"reachable": False, "detail": _classify_transport_error(exc)}
+
+
+def probe_endpoint_with_retry(
+    url: str,
+    timeout: float = HTTP_TIMEOUT_SECONDS,
+    headers: dict | None = None,
+    *,
+    probe_fn=None,
+    sleep_fn=time.sleep,
+) -> dict:
+    """Retry one transient transport/5xx failure exactly once.
+
+    Authentication and other ordinary 4xx responses are deterministic and are
+    returned immediately. Two bounded attempts keep the full scheduled probe
+    under its one-minute budget while filtering a runner/DNS blip.
+    """
+    endpoint = probe_fn or probe_endpoint
+    first = endpoint(url, timeout=timeout, headers=headers)
+    status = int(first.get("http_status", 0)) if first.get("reachable") else 0
+    retryable = (
+        not first.get("reachable")
+        or status in {408, 425, 429}
+        or status >= 500
+    )
+    if not retryable:
+        return first
+    sleep_fn(PROBE_RETRY_DELAY_SECONDS)
+    return endpoint(url, timeout=timeout, headers=headers)
 
 
 class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
@@ -210,7 +239,10 @@ def classify_user_path(raw: dict) -> dict:
         if any(marker in location for marker in SIGN_IN_LOCATION_MARKERS):
             return {"ok": 1, "detail": "clerk_redirect"}
         return {"ok": 0, "detail": "user_path_redirect_unexpected"}
-    if raw.get("clerk_auth_status"):
+    if (
+        raw.get("clerk_auth_status") == "signed-out"
+        and status in {200, 401, 404}
+    ):
         return {"ok": 1, "detail": "clerk_protect_%d" % status}
     if status == 200:
         return {"ok": 0, "detail": "user_path_http_200_no_clerk"}
@@ -222,7 +254,11 @@ def probe_freshness(url: str, token: str, timeout: float = HTTP_TIMEOUT_SECONDS)
     entirely (a tokenless 401 would be indistinguishable from a broken edge)."""
     if not token:
         return {"reachable": False, "detail": "no_token", "skipped": True}
-    return probe_endpoint(url, timeout=timeout, headers={"Authorization": "Bearer " + token})
+    return probe_endpoint_with_retry(
+        url,
+        timeout=timeout,
+        headers={"Authorization": "Bearer " + token},
+    )
 
 
 def _freshness_availability_failure(detail: str, market_state=None) -> dict:
@@ -351,22 +387,84 @@ def classify_freshness(raw: dict) -> dict:
     }
 
 
+def _legacy_status_payload_healthy(payload: dict) -> bool:
+    """Validate and classify the immediately preceding health schema.
+
+    The off-box consumer can run from ``main`` before the on-box producer has
+    restarted. Supporting one explicit predecessor avoids rollout alarms while
+    still deriving the verdict from current direct evidence. Arbitrary opaque
+    HTTP-200 bodies remain failures.
+    """
+    probes = payload.get("probes")
+    units = payload.get("units")
+    units_age_secs = payload.get("units_age_secs")
+    if (
+        payload.get("health_service") != "ok"
+        or not isinstance(payload.get("generated_at"), str)
+        or not payload["generated_at"].strip()
+        or not isinstance(probes, dict)
+        or not probes
+        or not isinstance(units, dict)
+        or not units
+        or isinstance(units_age_secs, bool)
+        or not isinstance(units_age_secs, (int, float))
+        or not math.isfinite(units_age_secs)
+        or not 0 <= units_age_secs <= 30
+    ):
+        return False
+
+    states = []
+    for collection in (probes, units):
+        for value in collection.values():
+            if not isinstance(value, dict):
+                return False
+            state = value.get("state")
+            if not isinstance(state, str):
+                return False
+            states.append(state.lower())
+
+    api_probe = probes.get("radon-api")
+    if not isinstance(api_probe, dict) or api_probe.get("state") != "up":
+        return False
+    api_payload = api_probe.get("payload")
+    if not isinstance(api_payload, dict):
+        return False
+    if (
+        api_payload.get("service_state") not in {"healthy", "up", "ok"}
+        or api_payload.get("auth_state") != "authenticated"
+        or api_payload.get("upstream_dead") is not False
+        or api_payload.get("port_listening") is not True
+    ):
+        return False
+
+    return bool(states) and all(state in {"up", "ok", "healthy"} for state in states)
+
+
 def _is_status_payload_healthy(payload: dict) -> bool:
     """The Tier-2 aggregate is healthy when its top-level state is not an error.
 
-    New health daemons publish ``ok`` plus ``overall_state``. The legacy
-    ``state`` field remains accepted during rolling deploys, but an opaque body
-    is not evidence that the aggregate is healthy.
+    Schema v2 publishes ``ok`` plus ``overall_state``. Exactly one validated
+    predecessor is accepted during producer-first rolling deploys; unknown
+    versions and opaque bodies are not evidence that the aggregate is healthy.
     """
     if not isinstance(payload, dict) or not payload:
+        return False
+    schema_version = payload.get("schema_version")
+    if schema_version is None:
+        if "ok" not in payload and "overall_state" not in payload \
+                and "state" not in payload:
+            return _legacy_status_payload_healthy(payload)
+    elif schema_version != 2:
         return False
     state = payload.get("overall_state", payload.get("state"))
     state_healthy = (
         isinstance(state, str) and state.lower() in {"up", "ok", "healthy"})
+    if schema_version == 2 and type(payload.get("ok")) is not bool:
+        return False
     if isinstance(payload.get("ok"), bool):
         if payload["ok"] is False:
             return False
-        return state is None or state_healthy
+        return state_healthy
     return state_healthy
 
 
@@ -477,8 +575,8 @@ def run_probe(source: str = PROBE_SOURCE) -> dict:
     Returns {edge_row, runs_row, exit_code}. Raises TursoHttpError if either
     write fails."""
     base = EDGE_BASE.rstrip("/")
-    ping = probe_endpoint(base + PING_PATH)
-    status = probe_endpoint(base + STATUS_PATH)
+    ping = probe_endpoint_with_retry(base + PING_PATH)
+    status = probe_endpoint_with_retry(base + STATUS_PATH)
     user_raw = _isolated("user_path", lambda: probe_user_path(base + USER_PATH))
     freshness_raw = _isolated("freshness", lambda: probe_freshness(
         base + FRESHNESS_PATH, os.environ.get("RADON_PROBE_FRESHNESS_TOKEN", "")))

@@ -7,7 +7,7 @@ Applies under `scripts/watchdog/`. Mirrors `scripts/watchdog/CLAUDE.md`.
 Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and writes always-on `service_health` rows.
 
 - `intraday`: `vcg-scan`, `cri-scan`, `orders-sync`, `portfolio-sync`.
-- `continuous`: `newsfeed-scraper`, `replica-watchdog`, `fill-monitor`, `exit-orders`, `journal-sync`.
+- `continuous`: `newsfeed-scraper`, `fill-monitor`, `exit-orders`, `journal-sync`, plus `replica-watchdog` only while `data/replica.db` exists.
 - `daily`: `cash-flow-sync`, `flex-token-check`, `cta-sync`.
 - `error`: every scheduled service except `watchdog-alerts` itself.
 
@@ -22,7 +22,7 @@ Watchdog monitors scheduled services from `web/lib/serviceHealthWindows.ts` and 
 
 - Stale `scheduled` services produce red banners.
 - Stale `on-demand` services become `state="dormant"` with amber chip.
-- Event-driven writers use 24h windows.
+- Applicable event-driven writers use 24h windows; a missing replica file disables `replica-watchdog` evaluation before historical health rows are read.
 - `service_health` row state reflects the writer's health, not the content or severity of the last event it dispatched.
 - Do not mirror dispatched alert severity into the writer's own row.
 

@@ -44,4 +44,4 @@ Full rule in `web/CLAUDE.md` §Combo / BAG Order Guardrails point 7. Python side
 
 - `cash_flow_sync` runs once per ET trading day at 17:00 ET. Throttle-aware backoff on Flex 1001/1018/1019. Reads `IB_FLEX_NAV_QUERY_ID=1497709`. Don't repurpose for trade pulls.
 - `flex_token_check` runs daily, alerts on expiry.
-- `replica_watchdog` is event-driven — only writes `service_health` when it actually heals. Use 24h staleness window (event-driven writer windows rule in `feedback_event_driven_writer_windows.md`).
+- `replica_watchdog` is disabled before subprocess or health writes when `data/replica.db` is absent. While the file exists it is event-driven — only writes `service_health` when it actually heals. Use the 24h staleness window only for that applicable state (event-driven writer windows rule in `feedback_event_driven_writer_windows.md`).

@@ -3,293 +3,293 @@
   "description": "Russell 2000 Real Estate (96 companies)",
   "tickers": [
     "CTRE",
-    "AHR",
-    "TRNO",
+    "COMP",
     "RHP",
-    "EPRT",
+    "TRNO",
     "MAC",
+    "EPRT",
     "KRG",
-    "SBRA",
-    "PECO",
     "OUT",
+    "PECO",
+    "SBRA",
+    "OPEN",
+    "CDP",
+    "BNL",
     "SKT",
     "IRT",
-    "BNL",
-    "CDP",
     "NHI",
     "APLE",
+    "HIW",
     "SLG",
     "LXP",
-    "AKR",
-    "UE",
-    "CURB",
-    "FCPT",
-    "IVT",
-    "JOE",
-    "NMRK",
-    "DRH",
     "CWK",
+    "CURB",
+    "UE",
+    "AKR",
+    "FCPT",
+    "PK",
+    "IVT",
+    "DRH",
+    "NMRK",
+    "JOE",
+    "NTST",
     "DHC",
     "SHO",
-    "GNL",
-    "LTC",
     "GTY",
-    "NTST",
-    "SILA",
-    "SMA",
-    "PEB",
+    "LTC",
     "XHR",
-    "DEI",
+    "PEB",
     "IIPR",
-    "VRE",
-    "KW",
-    "UMH",
+    "SMA",
+    "GNL",
+    "DEI",
     "RLJ",
-    "CSR",
+    "UMH",
     "AAT",
     "PDM",
     "DEA",
     "SVC",
     "CBL",
-    "JBGS",
-    "WSR",
+    "CSR",
     "SAFE",
-    "ESRT",
-    "MMI",
-    "NXRT",
+    "WSR",
+    "JBGS",
     "HPP",
+    "ESRT",
     "CTO",
-    "GOOD",
+    "MMI",
     "INN",
     "PSTL",
+    "NXRT",
+    "ALX",
+    "NHP",
+    "GOOD",
+    "FOR",
     "UHT",
+    "CLDT",
     "AHRT",
     "BDN",
-    "FOR",
-    "ALX",
-    "CLDT",
     "CHCT",
     "ILPT",
     "XRN",
     "AGNT",
-    "FPI",
-    "OLP",
-    "TRC",
     "BFS",
+    "OLP",
+    "FPI",
+    "TRC",
     "FVR",
-    "LAND",
     "RMR",
-    "SITC",
-    "FRPH",
-    "PINE",
+    "LAND",
     "REAX",
-    "NXDT",
-    "STRS",
-    "NLOP",
+    "PINE",
+    "FRPH",
+    "SITC",
     "RMAX",
-    "BRT",
+    "NXDT",
     "SEG",
-    "BHR",
     "MDV",
+    "BRT",
+    "NLOP",
     "DOUG",
+    "ONL",
+    "BHR",
     "MLP",
     "STRW",
     "TCI",
-    "FSP",
-    "CLPR",
+    "CHCI",
     "ARL"
   ],
   "pairs": [
     [
       "CTRE",
-      "AHR"
+      "COMP"
     ],
     [
-      "TRNO",
-      "RHP"
+      "RHP",
+      "TRNO"
     ],
     [
-      "EPRT",
-      "MAC"
+      "MAC",
+      "EPRT"
     ],
     [
       "KRG",
-      "SBRA"
-    ],
-    [
-      "PECO",
       "OUT"
     ],
     [
-      "SKT",
-      "IRT"
+      "PECO",
+      "SBRA"
     ],
     [
-      "BNL",
+      "OPEN",
       "CDP"
     ],
     [
-      "NHI",
-      "APLE"
+      "BNL",
+      "SKT"
+    ],
+    [
+      "IRT",
+      "NHI"
+    ],
+    [
+      "APLE",
+      "HIW"
     ],
     [
       "SLG",
       "LXP"
     ],
     [
-      "AKR",
-      "UE"
+      "CWK",
+      "CURB"
     ],
     [
-      "CURB",
-      "FCPT"
+      "UE",
+      "AKR"
+    ],
+    [
+      "FCPT",
+      "PK"
     ],
     [
       "IVT",
-      "JOE"
-    ],
-    [
-      "NMRK",
       "DRH"
     ],
     [
-      "CWK",
+      "NMRK",
+      "JOE"
+    ],
+    [
+      "NTST",
       "DHC"
     ],
     [
       "SHO",
-      "GNL"
-    ],
-    [
-      "LTC",
       "GTY"
     ],
     [
-      "NTST",
-      "SILA"
+      "LTC",
+      "XHR"
+    ],
+    [
+      "PEB",
+      "IIPR"
     ],
     [
       "SMA",
-      "PEB"
+      "GNL"
     ],
     [
-      "XHR",
-      "DEI"
+      "DEI",
+      "RLJ"
     ],
     [
-      "IIPR",
-      "VRE"
+      "UMH",
+      "AAT"
     ],
     [
-      "KW",
-      "UMH"
+      "PDM",
+      "DEA"
     ],
     [
-      "RLJ",
-      "CSR"
+      "SVC",
+      "CBL"
     ],
     [
-      "AAT",
-      "PDM"
-    ],
-    [
-      "DEA",
-      "SVC"
-    ],
-    [
-      "CBL",
-      "JBGS"
-    ],
-    [
-      "WSR",
+      "CSR",
       "SAFE"
     ],
     [
-      "ESRT",
-      "MMI"
+      "WSR",
+      "JBGS"
     ],
     [
-      "NXRT",
-      "HPP"
+      "HPP",
+      "ESRT"
     ],
     [
       "CTO",
-      "GOOD"
+      "MMI"
     ],
     [
       "INN",
       "PSTL"
     ],
     [
-      "UHT",
+      "NXRT",
+      "ALX"
+    ],
+    [
+      "NHP",
+      "GOOD"
+    ],
+    [
+      "FOR",
+      "UHT"
+    ],
+    [
+      "CLDT",
       "AHRT"
     ],
     [
       "BDN",
-      "FOR"
+      "CHCT"
     ],
     [
-      "ALX",
-      "CLDT"
+      "ILPT",
+      "XRN"
     ],
     [
-      "CHCT",
-      "ILPT"
-    ],
-    [
-      "XRN",
-      "AGNT"
-    ],
-    [
-      "FPI",
-      "OLP"
-    ],
-    [
-      "TRC",
+      "AGNT",
       "BFS"
     ],
     [
-      "FVR",
-      "LAND"
+      "OLP",
+      "FPI"
+    ],
+    [
+      "TRC",
+      "FVR"
     ],
     [
       "RMR",
-      "SITC"
-    ],
-    [
-      "FRPH",
-      "PINE"
+      "LAND"
     ],
     [
       "REAX",
-      "NXDT"
+      "PINE"
     ],
     [
-      "STRS",
-      "NLOP"
+      "FRPH",
+      "SITC"
     ],
     [
       "RMAX",
-      "BRT"
+      "NXDT"
     ],
     [
       "SEG",
-      "BHR"
+      "MDV"
     ],
     [
-      "MDV",
-      "DOUG"
+      "BRT",
+      "NLOP"
     ],
     [
-      "MLP",
-      "STRW"
+      "DOUG",
+      "ONL"
     ],
     [
-      "TCI",
-      "FSP"
+      "BHR",
+      "MLP"
     ],
     [
-      "CLPR",
+      "STRW",
+      "TCI"
+    ],
+    [
+      "CHCI",
       "ARL"
     ]
   ],

@@ -3,7 +3,8 @@
   "description": "S&P 500 Electronic Manufacturing Services (Information Technology)",
   "tickers": [
     "JBL",
-    "TEL"
+    "TEL",
+    "FLEX"
   ],
   "pairs": [
     [

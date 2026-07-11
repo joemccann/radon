@@ -14,7 +14,7 @@ export const runtime = "nodejs";
 // underlying response-caching window remained.
 export const dynamic = "force-dynamic";
 
-const PROJECT_ROOT = join(process.cwd(), "..");
+const PROJECT_ROOT = join(/* turbopackIgnore: true */ process.cwd(), "..");
 const CACHE_DIR = join(PROJECT_ROOT, "data", "menthorq_cache");
 const STATUS_PATH = join(CACHE_DIR, "health", "cta-sync-latest.json");
 const SERVICE_STATUS_PATH = join(PROJECT_ROOT, "data", "service_health", "cta-sync.json");
@@ -185,7 +185,9 @@ function normalizeSyncHealth(raw: Record<string, unknown> | null, targetDate: st
 async function readSyncHealth(targetDate: string): Promise<CtaSyncHealth | null> {
   for (const path of [STATUS_PATH, SERVICE_STATUS_PATH, LEGACY_STATUS_PATH]) {
     try {
-      const raw = JSON.parse(await readFile(path, "utf-8")) as Record<string, unknown>;
+      const raw = JSON.parse(
+        await readFile(/* turbopackIgnore: true */ path, "utf-8"),
+      ) as Record<string, unknown>;
       const looksLikeSyncHealth = typeof raw.service === "string"
         || typeof raw.state === "string"
         || typeof raw.status === "string";
@@ -236,7 +238,7 @@ async function readLatestCtaFromDisk(): Promise<{
   mtimeMs: number | null;
 }> {
   try {
-    const files = await readdir(CACHE_DIR);
+    const files = await readdir(/* turbopackIgnore: true */ CACHE_DIR);
     const ctaFiles = files
       .filter((file) => /^cta_\d{4}-\d{2}-\d{2}\.json$/.test(file))
       .sort();
@@ -250,8 +252,15 @@ async function readLatestCtaFromDisk(): Promise<{
     }
 
     const latestFile = ctaFiles[ctaFiles.length - 1];
-    const raw = JSON.parse(await readFile(join(CACHE_DIR, latestFile), "utf-8")) as Record<string, unknown>;
-    const fileStat = await stat(join(CACHE_DIR, latestFile));
+    const raw = JSON.parse(
+      await readFile(
+        /* turbopackIgnore: true */ join(CACHE_DIR, latestFile),
+        "utf-8",
+      ),
+    ) as Record<string, unknown>;
+    const fileStat = await stat(
+      /* turbopackIgnore: true */ join(CACHE_DIR, latestFile),
+    );
 
     return {
       data: {

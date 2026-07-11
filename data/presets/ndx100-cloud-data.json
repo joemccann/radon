@@ -1,9 +1,18 @@
 {
   "name": "ndx100-cloud-data",
   "description": "NASDAQ 100 Cloud & Data Platforms",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "DDOG",
+    "PLTR",
+    "SHOP"
+  ],
+  "pairs": [
+    [
+      "DDOG",
+      "PLTR"
+    ]
+  ],
   "sector": "Technology",
   "vol_driver": "Cloud adoption, DevOps, data analytics spend",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

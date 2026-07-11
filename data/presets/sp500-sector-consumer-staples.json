@@ -5,13 +5,11 @@
     "ADM",
     "BF.B",
     "BG",
-    "CAG",
     "CASY",
     "CHD",
     "CL",
     "CLX",
     "COST",
-    "CPB",
     "DG",
     "DLTR",
     "EL",
@@ -73,14 +71,6 @@
       "CL"
     ],
     [
-      "GIS",
-      "CPB"
-    ],
-    [
-      "KHC",
-      "CAG"
-    ],
-    [
       "HSY",
       "MDLZ"
     ],
@@ -91,6 +81,10 @@
     [
       "HRL",
       "TSN"
+    ],
+    [
+      "GIS",
+      "KHC"
     ],
     [
       "EL",

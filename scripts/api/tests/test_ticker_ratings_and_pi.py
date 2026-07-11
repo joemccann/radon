@@ -8,6 +8,7 @@ so we exercise the route logic without spinning up a real Python child.
 """
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 from unittest.mock import patch
@@ -28,6 +29,15 @@ def localhost_bypass(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
     yield
+
+
+@pytest.fixture(autouse=True)
+def isolated_data_dir(tmp_path, monkeypatch):
+    """Keep route cache writes out of the repository's runtime data directory."""
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "DATA_DIR", tmp_path)
+    return tmp_path
 
 
 @pytest.fixture
@@ -128,7 +138,7 @@ def test_ticker_ratings_400_on_empty_ticker(client):
 # /scan
 # ---------------------------------------------------------------------------
 
-def test_scan_route_passes_explicit_worker_count(client, monkeypatch):
+def test_scan_route_passes_explicit_worker_count(client, monkeypatch, isolated_data_dir):
     """The on-demand scanner route should use the faster bounded worker count."""
     monkeypatch.delenv("RADON_SCANNER_WORKERS", raising=False)
     fake = _fake_script_result(
@@ -153,6 +163,7 @@ def test_scan_route_passes_explicit_worker_count(client, monkeypatch):
     assert args[0] == "scanner.py"
     assert args[1] == ["--top", "25", "--workers", "24"]
     assert kwargs["timeout"] == 120
+    assert json.loads((isolated_data_dir / "scanner.json").read_text()) == fake.data
 
 
 # ---------------------------------------------------------------------------

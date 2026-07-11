@@ -137,11 +137,12 @@ class TestAwaiting2faStandDown:
         assert result.stuck_2fa_count == 0
         assert result.last_outcome == "standing_down_awaiting_2fa"
 
-    def test_incident_many_ticks_zero_restarts_one_alert(self, state_path):
+    def test_incident_many_ticks_zero_restarts_error_heartbeat_every_cycle(self, state_path):
         """Model the incident tail: the push has EXPIRED (no live lock), the
         gateway sits at awaiting_2fa with a dead upstream for hours of 60s
-        oneshot ticks. The watchdog must fire ZERO restarts and exactly ONE
-        service_health alert for the whole episode."""
+        oneshot ticks. The watchdog must fire ZERO restarts while refreshing
+        the error heartbeat every cycle so a live watchdog is not classified
+        as a stale writer. Notification deduplication belongs downstream."""
         ib_2fa_lock.acquire_2fa_push_lock(
             "scripts.api.ib_gateway.restart_ib_gateway",
             ttl_secs=1,
@@ -163,11 +164,13 @@ class TestAwaiting2faStandDown:
             alerts.extend(health.call_args_list)
             t[0] += 60
         assert total_restarts == 0
-        assert len(alerts) == 1, alerts
-        args, kwargs = alerts[0]
-        assert args[0] == "error"
-        message = kwargs.get("error_message") or (args[1] if len(args) > 1 else "")
-        assert "2FA" in message
+        assert len(alerts) == 48, alerts
+        for args, kwargs in alerts:
+            assert args[0] == "error"
+            message = kwargs.get("error_message") or (
+                args[1] if len(args) > 1 else ""
+            )
+            assert "2FA" in message
 
     def test_alert_rearms_after_auth_leaves_awaiting_2fa(self, state_path):
         # Episode 1: one alert.

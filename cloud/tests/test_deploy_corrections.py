@@ -24,7 +24,7 @@ ROOT_HELPER = ROOT / "scripts" / "deploy-root-helper.sh"
 SETUP = ROOT / "scripts" / "setup-vps.sh"
 ENV_EXAMPLE = ROOT / ".env.example"
 SUDOERS = ROOT / "config" / "sudoers.d" / "radon-deploy"
-CLOUD_CI = ROOT / ".github" / "workflows" / "ci.yml"
+ROOT_CI = ROOT.parent / ".github" / "workflows" / "ci.yml"
 GITLEAKS_CONFIG = ROOT / ".gitleaks.toml"
 REQUIRED_ENV = ROOT / "config" / "required-env.txt"
 ENV_CHECKER = ROOT / "scripts" / "check-env.py"
@@ -1306,6 +1306,42 @@ for path in paths:
         assert not active_state.exists()
         assert not Path(f"{active_state}.inventory").exists()
 
+    def test_durable_snapshot_survives_simulated_reboot_run_cleanup(
+        self, tmp_path: Path
+    ) -> None:
+        import json
+
+        env, state_file, _systemctl_log, _rm_log, _active_state = self._root_helper_fixture(
+            tmp_path
+        )
+        durable_state = tmp_path / "var" / "lib" / "radon" / "deploy" / "active-units"
+        volatile_run = tmp_path / "run"
+        volatile_run.mkdir()
+        env["RADON_TEST_ACTIVE_STATE_FILE"] = str(durable_state)
+        env["RADON_TEST_ROOT_LOCK_FILE"] = str(volatile_run / "root.lock")
+
+        stopped = subprocess.run(
+            ["bash", str(ROOT_HELPER), "stop-clean"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert stopped.returncode == 0, stopped.stdout + stopped.stderr
+        assert durable_state.exists()
+
+        shutil.rmtree(volatile_run)
+        volatile_run.mkdir()
+        recovered = subprocess.run(
+            ["bash", str(ROOT_HELPER), "recover"],
+            env=env,
+            capture_output=True,
+            text=True,
+        )
+        assert recovered.returncode == 0, recovered.stdout + recovered.stderr
+        units = json.loads(state_file.read_text(encoding="utf-8"))["units"]
+        assert units["radon-demo-mirror.service"]["state"] == "active"
+        assert units["radon-margin-debt-refresh.timer"]["state"] == "active"
+
     def test_failed_start_limited_core_is_quiescent_and_recovered(self, tmp_path: Path) -> None:
         import json
 
@@ -1563,6 +1599,7 @@ exec /bin/rm "$@"
             "restart-managed",
             "recover",
             "verify-restored",
+            "verify-control-plane",
             "commit-transition",
         ):
             assert f"/usr/local/sbin/radon-deploy-root {action}" in sudoers
@@ -1835,6 +1872,7 @@ raise SystemExit(2)
         shell = f"""
 set -euo pipefail
 source {DEPLOY!s}
+preflight_control_plane() {{ return 0; }}
 preflight_env() {{ return 0; }}
 current_commit() {{ printf '%s\\n' {sha}; }}
 git() {{
@@ -2239,26 +2277,27 @@ class TestDeploymentBudgets:
         for action in ("stop-clean", "restart-managed", "recover"):
             assert action in selector
         assert "verify-restored" in selector
+        assert "verify-control-plane" in selector
         assert "commit-transition" in selector
         supervisor = function_body(helper, "supervise_root_action")
         assert "root_action_timeout" in supervisor
 
 
 class TestCloudSecretScan:
-    def test_cloud_ci_runs_redacted_custom_gitleaks_scan(self) -> None:
-        assert CLOUD_CI.is_file()
-        workflow = yaml.safe_load(CLOUD_CI.read_text(encoding="utf-8"))
+    def test_root_ci_runs_redacted_custom_gitleaks_scan(self) -> None:
+        assert ROOT_CI.is_file()
+        workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
         steps = workflow["jobs"]["secret-scan"]["steps"]
         checkout = next(step for step in steps if "actions/checkout" in step.get("uses", ""))
         assert checkout["with"]["fetch-depth"] == 0
         commands = "\n".join(str(step.get("run", "")) for step in steps)
         assert "gitleaks" in commands
-        assert "gitleaks git" in commands
+        assert "gitleaks detect --source ." in commands
         assert "--redact" in commands
-        assert ".gitleaks.toml" in commands
+        assert "--config cloud/.gitleaks.toml" in commands
 
-    def test_cloud_ci_runs_full_python313_suite(self) -> None:
-        workflow = yaml.safe_load(CLOUD_CI.read_text(encoding="utf-8"))
+    def test_root_ci_runs_full_python313_cloud_suite(self) -> None:
+        workflow = yaml.safe_load(ROOT_CI.read_text(encoding="utf-8"))
         jobs = workflow["jobs"]
         pytest_jobs = [
             job

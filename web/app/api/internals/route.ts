@@ -17,11 +17,10 @@ import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 // first response and serves stale data until the dev server restarts.
 export const dynamic = "force-dynamic";
 
-const DATA_DIR = join(process.cwd(), "..", "data");
-const CACHE_PATH = join(DATA_DIR, "cri.json");
-const SCHEDULED_DIR = join(DATA_DIR, "cri_scheduled");
-const MENTHORQ_DIR = join(DATA_DIR, "menthorq_cache");
-const CACHE_DIR = join(DATA_DIR, "cache");
+const CACHE_PATH = join(process.cwd(), "..", "data", "cri.json");
+const SCHEDULED_DIR = join(process.cwd(), "..", "data", "cri_scheduled");
+const MENTHORQ_DIR = join(process.cwd(), "..", "data", "menthorq_cache");
+const CACHE_DIR = join(process.cwd(), "..", "data", "cache");
 
 /** Today's date in ET (YYYY-MM-DD) — the trading calendar reference */
 function todayET(): string {

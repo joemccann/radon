@@ -12,7 +12,7 @@ cd "$(dirname "$0")/.."
 # inherits shell env to children.
 #
 # Parses each line literally rather than via `set -a; . "$tmp"; set +a`
-# because the latter shell-expands `$VARNAME` substrings inside values —
+# because the latter shell-expands `$VARNAME` substrings inside values -
 # silently aborting under `set -u` when a secret contains `$` followed
 # by [a-zA-Z_]. See feedback_env_file_shell_expansion.md.
 _load_env() {
@@ -48,17 +48,31 @@ _load_env "web/.env"
 _load_env ".env"
 
 resolve_python() {
-    local candidate
-    for candidate in "${RADON_PYTHON_BIN:-}" python3.13 python3.9 /usr/bin/python3 python3; do
+    local candidate resolved
+    for candidate in \
+        "${RADON_PYTHON_BIN:-}" \
+        /opt/homebrew/bin/python3.13 \
+        /usr/local/bin/python3.13 \
+        /usr/bin/python3.13 \
+        python3.13; do
         [ -n "$candidate" ] || continue
-        command -v "$candidate" >/dev/null 2>&1 || continue
-        "$candidate" - <<'PY' >/dev/null 2>&1
+        if [[ "$candidate" == */* ]]; then
+            [ -x "$candidate" ] || continue
+            resolved="$candidate"
+        else
+            resolved=$(command -v "$candidate" 2>/dev/null) || continue
+        fi
+        "$resolved" - <<'PY' >/dev/null 2>&1
 import importlib.util
-required = ("ib_insync",)
-raise SystemExit(0 if all(importlib.util.find_spec(name) for name in required) else 1)
+import sys
+
+required = ("ib_insync", "libsql_experimental")
+version_ok = sys.version_info >= (3, 13)
+dependencies_ok = all(importlib.util.find_spec(name) for name in required)
+raise SystemExit(0 if version_ok and dependencies_ok else 1)
 PY
         if [ $? -eq 0 ]; then
-            echo "$candidate"
+            echo "$resolved"
             return 0
         fi
     done
@@ -67,7 +81,7 @@ PY
 
 PYTHON_BIN=$(resolve_python)
 if [ -z "$PYTHON_BIN" ]; then
-    echo "$(date): No Python interpreter with ib_insync available for data refresh"
+    echo "$(date): No Python 3.13 interpreter with ib_insync and libsql_experimental available for data refresh"
     exit 1
 fi
 
@@ -80,7 +94,7 @@ print('yes' if _is_trading_day(datetime.now()) else 'no')
 " 2>/dev/null || echo "yes")
 
 if [ "$IS_TRADING" = "no" ]; then
-    echo "$(date): Market holiday — skipping data refresh"
+    echo "$(date): Market holiday - skipping data refresh"
     exit 0
 fi
 
@@ -100,7 +114,7 @@ if [ "$EXIT_CODE" -eq 0 ]; then
     echo "$(date): scanner.py complete (OK)"
 else
     rm -f data/scanner.json.tmp
-    echo "$(date): scanner.py failed (exit $EXIT_CODE) — keeping existing data/scanner.json"
+    echo "$(date): scanner.py failed (exit $EXIT_CODE) - keeping existing data/scanner.json"
 fi
 
 # --- flow_analysis.py ---
@@ -113,7 +127,7 @@ if [ "$EXIT_CODE" -eq 0 ]; then
     echo "$(date): flow_analysis.py complete (OK)"
 else
     rm -f data/flow_analysis.json.tmp
-    echo "$(date): flow_analysis.py failed (exit $EXIT_CODE) — keeping existing data/flow_analysis.json"
+    echo "$(date): flow_analysis.py failed (exit $EXIT_CODE) - keeping existing data/flow_analysis.json"
 fi
 
 # --- discover.py ---
@@ -126,10 +140,8 @@ if [ "$EXIT_CODE" -eq 0 ]; then
     echo "$(date): discover.py complete (OK)"
 else
     rm -f data/discover.json.tmp
-    echo "$(date): discover.py failed (exit $EXIT_CODE) — keeping existing data/discover.json"
+    echo "$(date): discover.py failed (exit $EXIT_CODE) - keeping existing data/discover.json"
 fi
-
-echo "$(date): Data refresh complete (scanner: $SCANNER_STATUS, flow: $FLOW_STATUS, discover: $DISCOVER_STATUS)"
 
 cri_cache_has_complete_rvol() {
     "$PYTHON_BIN" - "$1" "$2" <<'PY'
@@ -170,7 +182,7 @@ refresh_cri_cache_post_close() {
 
     cache_status=$(cri_cache_has_complete_rvol "data/cri.json" "$today_et")
     if [ "$cache_status" = "yes" ]; then
-        echo "$(date): CRI cache already contains 20 RVOL history points for $today_et — skipping"
+        echo "$(date): CRI cache already contains 20 RVOL history points for $today_et - skipping"
         return
     fi
 
@@ -185,21 +197,23 @@ refresh_cri_cache_post_close() {
         cp data/cri.json "$scheduled_path"
         scan_complete=$(cri_cache_has_complete_rvol "data/cri.json" "$today_et")
         if [ "$scan_complete" = "yes" ]; then
-            echo "$(date): CRI cache refresh complete (OK) → data/cri.json, $scheduled_path"
+            echo "$(date): CRI cache refresh complete (OK): data/cri.json, $scheduled_path"
             return
         fi
-        echo "$(date): CRI scan output is still missing complete RVOL history — attempting repair fallback"
+        echo "$(date): CRI scan output is still missing complete RVOL history - attempting repair fallback"
     else
         local exit_code=$?
         rm -f "$tmp_cache"
-        echo "$(date): CRI cache refresh failed (exit $exit_code) — attempting repair fallback"
+        echo "$(date): CRI cache refresh failed (exit $exit_code) - attempting repair fallback"
     fi
 
     if "$PYTHON_BIN" scripts/repair_cri_rvol_cache.py --write --target-date "$today_et" 2>>"logs/cri-scan.err.log"; then
         echo "$(date): CRI cache repair complete (OK)"
+        return 0
     else
         local repair_exit_code=$?
         echo "$(date): CRI cache repair failed (exit $repair_exit_code)"
+        return 1
     fi
 }
 
@@ -208,9 +222,22 @@ refresh_cri_cache_post_close() {
 # this wrapper only owns the CRI post-close repair path.
 CURRENT_HOUR_ET=$(TZ=America/New_York date +%H)
 TODAY_ET=$(TZ=America/New_York date +%Y-%m-%d)
+CRI_STATUS="SKIPPED"
 
 if [ "$CURRENT_HOUR_ET" -ge 16 ]; then
-    refresh_cri_cache_post_close "$TODAY_ET"
+    if refresh_cri_cache_post_close "$TODAY_ET"; then
+        CRI_STATUS="OK"
+    else
+        CRI_STATUS="FAIL"
+    fi
 else
     echo "$(date): Post-close CRI refresh skipped (market not yet closed, hour=$CURRENT_HOUR_ET ET)"
 fi
+
+echo "$(date): Data refresh complete (scanner: $SCANNER_STATUS, flow: $FLOW_STATUS, discover: $DISCOVER_STATUS, cri: $CRI_STATUS)"
+
+if [ "$SCANNER_STATUS" != "OK" ] || [ "$FLOW_STATUS" != "OK" ] || [ "$DISCOVER_STATUS" != "OK" ] || [ "$CRI_STATUS" = "FAIL" ]; then
+    exit 1
+fi
+
+exit 0

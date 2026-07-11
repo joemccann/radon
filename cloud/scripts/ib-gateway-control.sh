@@ -12,7 +12,8 @@ if [[ $EUID -eq 0 && "${RADON_GATEWAY_CONTROL_ALLOW_ROOT:-0}" != "1" ]]; then
 fi
 
 APP_DIR="${RADON_APP_DIR:-/home/radon/radon}"
-CLOUD_DIR="${RADON_CLOUD_DIR:-/home/radon/radon-cloud}"
+CLOUD_DIR="${RADON_CLOUD_DIR:-/home/radon/radon/cloud}"
+ENV_FILE="${RADON_DEPLOY_ENV_FILE:-${RADON_GATEWAY_ENV_FILE:-/home/radon/radon-cloud/.env}}"
 # The lease/mutex code is stdlib-only. Use the immutable system interpreter
 # provisioned by setup-vps rather than the app venv swapped during deploys.
 LOCK_PYTHON="${RADON_LOCK_PYTHON:-/usr/bin/python3.13}"
@@ -198,7 +199,9 @@ PY
 }
 
 compose() {
-  run_bounded "$DOCKER_MUTATION_TIMEOUT_SECS" "$DOCKER_BIN" compose \
+  RADON_COMPOSE_ENV_FILE="$ENV_FILE" run_bounded \
+    "$DOCKER_MUTATION_TIMEOUT_SECS" "$DOCKER_BIN" compose \
+    --env-file "$ENV_FILE" \
     --project-directory "$CLOUD_DIR" \
     -f "$CLOUD_DIR/docker-compose.yml" \
     "$@"

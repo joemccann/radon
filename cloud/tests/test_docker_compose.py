@@ -46,8 +46,8 @@ class TestServiceDefinition:
     def test_restart_owned_by_lock_aware_watchdog(self, ib_service):
         assert ib_service["restart"] == "no"
 
-    def test_env_file_references_dotenv(self, ib_service):
-        assert ".env" in ib_service["env_file"]
+    def test_env_file_supports_an_external_production_path(self, ib_service):
+        assert ib_service["env_file"] == ["${RADON_COMPOSE_ENV_FILE:-.env}"]
 
 
 class TestPortBindings:

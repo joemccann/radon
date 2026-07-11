@@ -226,12 +226,21 @@ class MonitorDaemon:
         atomic_save(str(self.state_file), state)
         logger.debug(f"Saved state to {self.state_file}")
 
-        # Best-effort dual-write to Turso (direct-to-cloud by default).
+        # Best-effort dual-write to Turso (direct-to-cloud by default). Some
+        # native-driver failures inherit directly from BaseException, so guard
+        # telemetry without swallowing explicit process termination.
         try:
             from db.writer import upsert_daemon_state
-            saved_at = state["saved_at"]
-            for handler in self.handlers:
-                handler_state = handler.get_state()
+        except BaseException as exc:  # noqa: BLE001 — native driver panics bypass Exception
+            if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+                raise
+            logger.warning("daemon_state telemetry import failed: %s", exc)
+            return
+
+        saved_at = state["saved_at"]
+        for handler in self.handlers:
+            try:
+                handler_state = state["handlers"][handler.name]
                 # `last_run` shape varies per handler; flatten common fields.
                 last_run = handler_state.get("last_run") or saved_at
                 last_status = handler_state.get("last_status") or handler_state.get("status")
@@ -242,8 +251,14 @@ class MonitorDaemon:
                     last_status=last_status,
                     last_error=last_error,
                 )
-        except Exception as exc:  # noqa: BLE001 — best-effort
-            logger.warning(f"daemon_state dual-write failed: {exc}")
+            except BaseException as exc:  # noqa: BLE001 — native driver panics bypass Exception
+                if isinstance(exc, (KeyboardInterrupt, SystemExit, GeneratorExit)):
+                    raise
+                logger.warning(
+                    "daemon_state dual-write failed for %s: %s",
+                    handler.name,
+                    exc,
+                )
     
     def load_state(self) -> None:
         """Load handler states from file."""

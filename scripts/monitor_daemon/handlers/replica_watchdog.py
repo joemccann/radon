@@ -21,11 +21,13 @@ from __future__ import annotations
 import logging
 import subprocess
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Dict, Optional
 
 from monitor_daemon.handlers.base import BaseHandler
 
 logger = logging.getLogger(__name__)
+REPLICA_PATH = Path(__file__).resolve().parents[3] / "data" / "replica.db"
 
 
 class ReplicaWatchdogHandler(BaseHandler):
@@ -80,6 +82,9 @@ class ReplicaWatchdogHandler(BaseHandler):
     # Entry point.
     # ------------------------------------------------------------------
     def execute(self) -> Dict[str, Any]:
+        if not REPLICA_PATH.is_file():
+            return {"status": "disabled", "reason": "replica_absent"}
+
         conflicts = self._count_recent_wal_conflicts()
         if conflicts < self.CONFLICT_THRESHOLD:
             # Heartbeat ok on every healthy cycle. The watchdog runs every

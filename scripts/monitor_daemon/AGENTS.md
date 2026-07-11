@@ -27,4 +27,4 @@ Applies under `scripts/monitor_daemon/`. Root and `scripts/AGENTS.md` also apply
 
 - `cash_flow_sync` runs once per ET trading day at 17:00 ET and uses `IB_FLEX_NAV_QUERY_ID`.
 - Flex throttle errors require backoff; do not manually retry during throttle because it pushes reset further out.
-- `replica_watchdog` is event-driven and uses a 24h staleness window.
+- `replica_watchdog` is disabled before subprocess or health writes when `data/replica.db` is absent; while the file exists it is event-driven and uses a 24h staleness window.

@@ -1,9 +1,22 @@
 {
   "name": "ndx100-retail",
   "description": "NASDAQ 100 Retail",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "COST",
+    "WMT",
+    "ORLY"
+  ],
+  "pairs": [
+    [
+      "COST",
+      "WMT"
+    ],
+    [
+      "ORLY",
+      "COST"
+    ]
+  ],
   "sector": "Consumer Discretionary",
   "vol_driver": "Consumer spending, same-store sales",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

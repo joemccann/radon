@@ -7,6 +7,11 @@ import {
   type ReliabilityHistoryPayload,
   type ServiceHealthEventRow,
 } from "@/lib/adminReliability";
+import {
+  filterApplicableServiceHealthBaseline,
+  filterApplicableServiceHealthRows,
+  replicaDatabaseExists,
+} from "@/lib/serviceHealthApplicability";
 
 // Serves the append-only service_health_events history (migration 0011) for
 // the admin Reliability Strip's time-series tiles: bounded 7-day window of
@@ -64,11 +69,20 @@ async function readReliabilityPayload(): Promise<ReliabilityHistoryPayload> {
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
-    const payload = await cachedRead(
+    const cachedPayload = await cachedRead(
       "admin:reliability",
       READ_CACHE_TTL_MS,
       readReliabilityPayload,
     );
+    // Apply live subsystem applicability after the DB cache. Latest-state and
+    // transition rows persist after retirement, while disk state can change
+    // during the cache window.
+    const replicaPresent = replicaDatabaseExists();
+    const payload: ReliabilityHistoryPayload = {
+      ...cachedPayload,
+      events: filterApplicableServiceHealthRows(cachedPayload.events, replicaPresent),
+      baseline: filterApplicableServiceHealthBaseline(cachedPayload.baseline, replicaPresent),
+    };
     return setNoStoreResponseHeaders(NextResponse.json(payload), requestId);
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);

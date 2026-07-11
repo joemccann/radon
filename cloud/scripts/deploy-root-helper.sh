@@ -2,7 +2,7 @@
 set -euo pipefail
 
 # Installed root-owned at /usr/local/sbin/radon-deploy-root. The deploy user may
-# invoke only the five fixed actions listed in config/sudoers.d/radon-deploy.
+# invoke only the fixed actions listed in config/sudoers.d/radon-deploy.
 readonly CORE_SERVICES=(
   radon-nextjs.service
   radon-api.service
@@ -11,13 +11,64 @@ readonly CORE_SERVICES=(
   radon-newsfeed.service
 )
 readonly PREHELD_UNIT=radon-ib-gateway-preheld-restart.service
+readonly -a CONTROL_PLANE_SOURCES=(
+  scripts/deploy-root-helper.sh
+  scripts/ib-gateway-control.sh
+  scripts/operator-radon.sh
+  config/sudoers.d/radon-deploy
+  config/sudoers.d/radon-monitor
+  config/sudoers.d/radon-ops
+  config/sudoers.d/radon-caddy
+  config/polkit/50-radon-services.rules
+  services/radon-health.service
+  services/radon-ib-gateway-preheld-restart.service
+  services/radon-ib-watchdog.service
+  services/radon-ib-gateway.service
+  services/radon-api.service
+  services/radon-monitor.service
+  services/radon-relay.service
+  services/radon-portfolio-sync.service
+  services/radon-refresh.service
+  services/radon-db-backup.service
+  services/radon-drift-audit.service
+  services/radon-nextjs-db-watchdog.service
+)
+readonly -a CONTROL_PLANE_TARGETS=(
+  /usr/local/sbin/radon-deploy-root
+  /usr/local/bin/radon-ib-gateway-control
+  /usr/local/bin/radon
+  /etc/sudoers.d/radon-deploy
+  /etc/sudoers.d/radon-monitor
+  /etc/sudoers.d/radon-ops
+  /etc/sudoers.d/radon-caddy
+  /etc/polkit-1/rules.d/50-radon-services.rules
+  /etc/systemd/system/radon-health.service
+  /etc/systemd/system/radon-ib-gateway-preheld-restart.service
+  /etc/systemd/system/radon-ib-watchdog.service
+  /etc/systemd/system/radon-ib-gateway.service
+  /etc/systemd/system/radon-api.service
+  /etc/systemd/system/radon-monitor.service
+  /etc/systemd/system/radon-relay.service
+  /etc/systemd/system/radon-portfolio-sync.service
+  /etc/systemd/system/radon-refresh.service
+  /etc/systemd/system/radon-db-backup.service
+  /etc/systemd/system/radon-drift-audit.service
+  /etc/systemd/system/radon-nextjs-db-watchdog.service
+)
+readonly -a CONTROL_PLANE_MODES=(
+  755 755 755
+  440 440 440 440
+  644
+  644 644 644 644 644 644 644 644 644 644 644 644
+)
 
 if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly HELPER_TEST_MODE=1
+  readonly STATE_DIR="$(dirname "${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}")"
   readonly SYSTEMCTL="${RADON_TEST_SYSTEMCTL:?test systemctl is required}"
   readonly RM="${RADON_TEST_RM:?test rm is required}"
   readonly SYNC="${RADON_TEST_SYNC:?test sync is required}"
-  readonly ACTIVE_STATE_FILE="${RADON_TEST_ACTIVE_STATE_FILE:?test active-state file is required}"
+  readonly ACTIVE_STATE_FILE="${RADON_TEST_ACTIVE_STATE_FILE}"
   readonly FLOCK="${RADON_TEST_FLOCK:-/usr/bin/true}"
   readonly ROOT_LOCK_FILE="${RADON_TEST_ROOT_LOCK_FILE:-${ACTIVE_STATE_FILE}.lock}"
   readonly TIMEOUT="${RADON_TEST_TIMEOUT:-}"
@@ -31,6 +82,8 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly STATE_WAIT_SECONDS="${RADON_TEST_STATE_WAIT_SECONDS:-0}"
   readonly PREHELD_WAIT_SECONDS="${RADON_TEST_PREHELD_WAIT_SECONDS:-0}"
   readonly SLEEP="${RADON_TEST_SLEEP:-/bin/sleep}"
+  readonly CONTROL_PLANE_ROOT="${RADON_TEST_CONTROL_PLANE_ROOT:-}"
+  readonly SHA256SUM="${RADON_TEST_SHA256SUM:-$(command -v sha256sum)}"
   test_replica_prefix="${RADON_TEST_REPLICA_PREFIX:?test replica prefix is required}"
   readonly REPLICA_FILES=(
     "$test_replica_prefix"
@@ -47,13 +100,17 @@ else
   readonly SYSTEMCTL=/usr/bin/systemctl
   readonly RM=/usr/bin/rm
   readonly SYNC=/usr/bin/sync
-  readonly ACTIVE_STATE_FILE=/run/radon-deploy-active-units
+  readonly INSTALL=/usr/bin/install
+  readonly STATE_DIR=/var/lib/radon/deploy
+  readonly ACTIVE_STATE_FILE="${STATE_DIR}/active-units"
   readonly FLOCK=/usr/bin/flock
   readonly TIMEOUT=/usr/bin/timeout
   readonly ROOT_LOCK_FILE=/run/radon-deploy-root.lock
   readonly STATE_WAIT_SECONDS=60
   readonly PREHELD_WAIT_SECONDS=120
   readonly SLEEP=/usr/bin/sleep
+  readonly CONTROL_PLANE_ROOT=""
+  readonly SHA256SUM=/usr/bin/sha256sum
   readonly ROOT_MUTATION_ACTION_TIMEOUT=180
   readonly ROOT_VERIFY_ACTION_TIMEOUT=30
   readonly ROOT_COMMIT_ACTION_TIMEOUT=30
@@ -69,11 +126,91 @@ else
 fi
 readonly RESTORED_STATE_FILE="${ACTIVE_STATE_FILE}.restored"
 readonly INVENTORY_FILE="${ACTIVE_STATE_FILE}.inventory"
+readonly CONTROL_PLANE_MANIFEST="${CONTROL_PLANE_ROOT}/var/lib/radon/control-plane-manifest.sha256"
+
+[[ "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_TARGETS[@]}" && \
+   "${#CONTROL_PLANE_SOURCES[@]}" -eq "${#CONTROL_PLANE_MODES[@]}" ]] || {
+  echo "internal control-plane contract is inconsistent" >&2
+  exit 70
+}
+
+prepare_state_dir() {
+  if (( HELPER_TEST_MODE == 1 )); then
+    mkdir -p "$STATE_DIR"
+  else
+    "$INSTALL" -d -m 0700 -o root -g root "$STATE_DIR"
+  fi
+}
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|commit-transition}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition}" >&2
   exit 64
 fi
+
+file_mode() {
+  local mode
+  if mode="$(stat -c '%a' "$1" 2>/dev/null)"; then
+    printf '%s\n' "$mode"
+  else
+    stat -f '%Lp' "$1"
+  fi
+}
+
+root_ownership_matches() {
+  local ownership
+  (( HELPER_TEST_MODE == 1 )) && return 0
+  if ownership="$(stat -c '%U:%G' "$1" 2>/dev/null)"; then
+    [[ "$ownership" == "root:root" ]]
+  else
+    [[ "$(stat -f '%Su:%Sg' "$1")" == "root:root" ]]
+  fi
+}
+
+verify_control_plane() {
+  local line expected_hash source_rel logical_target installed_target installed_hash
+  local index=0
+
+  [[ -x "$SHA256SUM" && -f "$CONTROL_PLANE_MANIFEST" && \
+     ! -L "$CONTROL_PLANE_MANIFEST" ]] || {
+    echo "control-plane manifest is unavailable or unsafe" >&2
+    return 1
+  }
+  while IFS= read -r line; do
+    if (( index >= ${#CONTROL_PLANE_TARGETS[@]} )) || \
+       [[ ! "$line" =~ ^([0-9a-f]{64})[[:space:]][[:space:]]([^[:space:]]+)[[:space:]]-\>[[:space:]](/.+)$ ]]; then
+      echo "control-plane manifest contract is malformed" >&2
+      return 1
+    fi
+    expected_hash="${BASH_REMATCH[1]}"
+    source_rel="${BASH_REMATCH[2]}"
+    logical_target="${BASH_REMATCH[3]}"
+    if [[ "$source_rel" != "${CONTROL_PLANE_SOURCES[$index]}" || \
+          "$logical_target" != "${CONTROL_PLANE_TARGETS[$index]}" ]]; then
+      echo "control-plane manifest does not match the fixed target contract" >&2
+      return 1
+    fi
+    installed_target="${CONTROL_PLANE_ROOT}${logical_target}"
+    if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
+      echo "installed control-plane target is unavailable or unsafe: ${logical_target}" >&2
+      return 1
+    fi
+    if ! installed_hash="$("$SHA256SUM" "$installed_target" 2>/dev/null | awk '{print $1}')"; then
+      echo "installed control-plane target is unreadable: ${logical_target}" >&2
+      return 1
+    fi
+    if [[ "$installed_hash" != "$expected_hash" || \
+          "$(file_mode "$installed_target")" != "${CONTROL_PLANE_MODES[$index]}" ]] || \
+       ! root_ownership_matches "$installed_target"; then
+      echo "installed control-plane target drifted: ${logical_target}" >&2
+      return 1
+    fi
+    index=$((index + 1))
+  done < "$CONTROL_PLANE_MANIFEST"
+  if (( index != ${#CONTROL_PLANE_TARGETS[@]} )); then
+    echo "control-plane manifest is incomplete" >&2
+    return 1
+  fi
+}
 
 systemctl_bounded() {
   if (( HELPER_TEST_MODE == 1 )); then
@@ -422,7 +559,7 @@ root_action_timeout() {
     stop-clean|restart-managed|recover)
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
-    verify-restored)
+    verify-restored|verify-control-plane)
       printf '%s\n' "$ROOT_VERIFY_ACTION_TIMEOUT"
       ;;
     commit-transition)
@@ -473,6 +610,7 @@ os.execv(sys.argv[2], sys.argv[2:])
 }
 
 if [[ "${RADON_DEPLOY_ROOT_INTERNAL:-0}" != "1" ]]; then
+  prepare_state_dir
   exec 8>"$ROOT_LOCK_FILE"
   if ! "$FLOCK" -w "$ROOT_LOCK_WAIT" 8; then
     echo "timed out waiting for the root deploy lifecycle lock" >&2
@@ -506,6 +644,9 @@ case "$1" in
     ;;
   verify-restored)
     verify_restored_state
+    ;;
+  verify-control-plane)
+    verify_control_plane
     ;;
   commit-transition)
     commit_transition

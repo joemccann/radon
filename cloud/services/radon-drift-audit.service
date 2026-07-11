@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon config drift audit (live system vs radon-cloud repo)
+Description=Radon config drift audit (live system vs monorepo cloud source)
 # DUR-06 (2026-06-12): diffs live config (Caddyfile, compose, systemd units +
 # drop-ins, polkit, sudoers, /usr/local/bin/radon) against the repo copies and
 # writes the `config-drift` service_health row (ok heartbeat every clean run).
@@ -12,9 +12,9 @@ Type=oneshot
 # Turso row over HTTPS) but must read /etc/sudoers.d (0440 root) and run
 # `docker inspect` to resolve the live compose file.
 User=root
-WorkingDirectory=/home/radon/radon-cloud
+WorkingDirectory=/home/radon/radon/cloud
 EnvironmentFile=/home/radon/radon-cloud/.env
-ExecStart=/usr/bin/python3 /home/radon/radon-cloud/scripts/drift_audit.py
+ExecStart=/usr/bin/python3 /home/radon/radon/cloud/scripts/drift_audit.py
 # A oneshot with no runtime ceiling can hang forever and freeze its timer
 # (the ib-watchdog self-hang, 2026-06-10) -- bound the whole run.
 TimeoutStartSec=180

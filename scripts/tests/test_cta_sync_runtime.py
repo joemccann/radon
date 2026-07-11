@@ -19,6 +19,7 @@ def completed(returncode: int, stdout: str = "", stderr: str = "") -> SimpleName
 class TestHealthRecordHelpers:
     def test_write_sync_health_record_persists_machine_readable_status(self, tmp_path: Path):
         status_path = tmp_path / "cta-sync.json"
+        history_path = tmp_path / "cta-sync-history.jsonl"
         record = cta_sync.build_sync_health_record(
             target_date="2026-03-11",
             status="error",
@@ -33,13 +34,18 @@ class TestHealthRecordHelpers:
             artifact_log_path="logs/cta-sync-artifacts/cta-sync-20260311T220531.log",
         )
 
-        cta_sync.write_sync_health_record(record, status_path=status_path)
+        cta_sync.write_sync_health_record(
+            record,
+            status_path=status_path,
+            history_path=history_path,
+        )
 
         written = json.loads(status_path.read_text())
         assert written["service"] == "cta-sync"
         assert written["status"] == "error"
         assert written["error_type"] == "auth_rejected"
         assert written["target_date"] == "2026-03-11"
+        assert json.loads(history_path.read_text()) == record
 
     @pytest.mark.parametrize(
         ("stderr", "expected"),
@@ -109,4 +115,3 @@ class TestRunCtaSync:
         assert health["attempt_count"] == 3
         assert health["error_type"] == "auth_rejected"
         assert "incorrect" in health["error_excerpt"]
-

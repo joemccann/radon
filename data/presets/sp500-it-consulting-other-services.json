@@ -4,7 +4,6 @@
   "tickers": [
     "ACN",
     "CTSH",
-    "EPAM",
     "IT",
     "IBM"
   ],
@@ -14,11 +13,11 @@
       "IBM"
     ],
     [
-      "CTSH",
-      "EPAM"
+      "IT",
+      "ACN"
     ],
     [
-      "IT",
+      "CTSH",
       "ACN"
     ]
   ],

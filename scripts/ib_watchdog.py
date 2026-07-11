@@ -92,6 +92,10 @@ DEFAULT_RESTART_UNIT = "radon-ib-gateway-preheld-restart.service"
 # IB route then 502s "unresponsive" until radon-api is bounced once. This is
 # the documented pool-stuck-after-2FA remedy (feedback_ib_pool_stuck_after_2fa).
 DEFAULT_API_UNIT = "radon-api.service"
+# A gateway restart briefly exposed a stale authenticated sample on 2026-07-11
+# before settling at the 2FA prompt. Require consecutive samples before the
+# one-shot API pool reconnect so a transient cannot be mistaken for recovery.
+RECOVERY_CONFIRMATION_CYCLES = 2
 # Three consecutive degraded readings (60s apart) = ~3 min of hang
 # before we restart. Calibrated against today's incidents: the JVM
 # hangs we've seen each lasted 10+ minutes, so 3 cycles trips well
@@ -561,6 +565,9 @@ class WatchdogState:
     # flag. Idempotent: the api restart fires on the auth→authenticated edge,
     # never in a loop (feedback_ib_pool_stuck_after_2fa).
     pending_pool_reconnect: bool = False
+    # Consecutive authenticated samples observed while a watchdog-initiated
+    # gateway recovery is pending. Any non-authenticated sample resets it.
+    authenticated_recovery_count: int = 0
     # First epoch at which a functional failure was observed inside a scheduled
     # restart window. Suppression expires after SCHEDULED_RESTART_GRACE_SECS.
     quiet_degraded_since: float = 0.0
@@ -575,6 +582,7 @@ class WatchdogState:
             "api_hang_restart_count": self.api_hang_restart_count,
             "awaiting_2fa_alerted": self.awaiting_2fa_alerted,
             "pending_pool_reconnect": self.pending_pool_reconnect,
+            "authenticated_recovery_count": self.authenticated_recovery_count,
             "quiet_degraded_since": self.quiet_degraded_since,
         }
 
@@ -592,6 +600,9 @@ class WatchdogState:
             api_hang_restart_count=int(data.get("api_hang_restart_count", 0)),
             awaiting_2fa_alerted=bool(data.get("awaiting_2fa_alerted", False)),
             pending_pool_reconnect=bool(data.get("pending_pool_reconnect", False)),
+            authenticated_recovery_count=int(
+                data.get("authenticated_recovery_count", 0)
+            ),
             quiet_degraded_since=float(data.get("quiet_degraded_since", 0.0)),
         )
 
@@ -939,10 +950,10 @@ def _stand_down_awaiting_2fa(
     full login — a NEW push that invalidates the pending one, the exact loop
     of the 2026-07-05 storm. The watchdog stands down: no restart regardless
     of push-lock state, hang counter already reset by the caller, ONE
-    service_health alert per episode (first cycle only; the error row latches
-    until recovery heals it). Normal monitoring resumes when auth leaves
+    service_health error heartbeat every cycle. Repeated writes keep writer
+    liveness current; downstream state-transition/cooldown logic owns alert
+    deduplication. Normal monitoring resumes when auth leaves
     ``awaiting_2fa``."""
-    first_observation = not state.awaiting_2fa_alerted
     LOG.warning(
         "gateway awaiting 2FA (upstream_dead=%s) — watchdog standing down: "
         "no restart, approve the pending push on IBKR Mobile",
@@ -951,15 +962,14 @@ def _stand_down_awaiting_2fa(
     state.awaiting_2fa_alerted = True
     state.last_outcome = "standing_down_awaiting_2fa"
     save_state(state_path, state)
-    if first_observation:
-        record_service_health(
-            "error",
-            error_message=(
-                "IB Gateway parked awaiting 2FA (upstream dead) — watchdog "
-                "standing down (restarting would mint a new push); approve "
-                "the push on IBKR Mobile or force one from /admin"
-            ),
-        )
+    record_service_health(
+        "error",
+        error_message=(
+            "IB Gateway parked awaiting 2FA (upstream dead) — watchdog "
+            "standing down (restarting would mint a new push); approve "
+            "the push on IBKR Mobile or force one from /admin"
+        ),
+    )
     return state
 
 
@@ -1304,6 +1314,7 @@ def _reconnect_pool_after_recovery(
     with _timed("api_reconnect"):
         ok = trigger_restart(api_unit, dry_run=dry_run)
     state.pending_pool_reconnect = False  # one-shot — never loop
+    state.authenticated_recovery_count = 0
     state.last_outcome = f"pool_reconnect:{'ok' if ok else 'fail'}:{health.auth_state}"
     save_state(state_path, state)
     record_service_health(
@@ -1386,6 +1397,7 @@ def _run_cycle_steps(
     with _timed("probe"):
         health = fetch_health(health_url, health_timeout)
     if health is None:
+        state.authenticated_recovery_count = 0
         # Primary sensor down — fall back to the direct gateway probe
         # instead of going blind (DUR-10).
         return _handle_primary_sensor_down(
@@ -1413,6 +1425,7 @@ def _run_cycle_steps(
         state.degraded_count = 0
         state.stuck_2fa_count = 0
         state.quiet_degraded_since = 0.0
+        state.authenticated_recovery_count = 0
         return _stand_down_awaiting_2fa(
             state=state,
             state_path=state_path,
@@ -1429,6 +1442,7 @@ def _run_cycle_steps(
         )
 
     if functional_verdict in (GATEWAY_DEAD, GATEWAY_WEDGED):
+        state.authenticated_recovery_count = 0
         return _advance_api_hang(
             state=state,
             state_path=state_path,
@@ -1461,6 +1475,8 @@ def _run_cycle_steps(
     # re-arm the one-per-episode stand-down alert.
     if health.auth_state != "awaiting_2fa":
         state.awaiting_2fa_alerted = False
+    if health.auth_state != "authenticated":
+        state.authenticated_recovery_count = 0
 
     if not is_api_hang(health):
         # api-hang counter resets unconditionally — it only counts the
@@ -1516,7 +1532,27 @@ def _run_cycle_steps(
         # also re-arms the bounded api-hang remediation (consecutive-restart
         # cap + backoff reset only here, never mid-episode).
         state.stuck_2fa_count = 0
-        if health.auth_state == "authenticated":
+        # One-shot pool reconnect: if a prior watchdog-initiated gateway
+        # restart is now resolved (auth back to authenticated), the FastAPI
+        # ib_pool may still be stuck disconnected. Bounce radon-api ONCE to
+        # un-stick it, then clear the flag so this never loops.
+        if state.pending_pool_reconnect and health.auth_state == "authenticated":
+            state.authenticated_recovery_count += 1
+            if state.authenticated_recovery_count < RECOVERY_CONFIRMATION_CYCLES:
+                state.last_outcome = (
+                    "pool_reconnect_confirmation:"
+                    f"{state.authenticated_recovery_count}/"
+                    f"{RECOVERY_CONFIRMATION_CYCLES}"
+                )
+                save_state(state_path, state)
+                record_service_health(
+                    "error",
+                    error_message=(
+                        "gateway recovery has one authenticated sample; "
+                        "waiting for consecutive confirmation before API reconnect"
+                    ),
+                )
+                return state
             state.api_hang_restart_count = 0
             try:
                 ib_2fa_lock.release_2fa_push_lock(
@@ -1525,12 +1561,6 @@ def _run_cycle_steps(
                 )
             except ib_2fa_lock.GuardLockTimeout as exc:
                 LOG.warning("watchdog lease release deferred: %s", exc)
-
-        # One-shot pool reconnect: if a prior watchdog-initiated gateway
-        # restart is now resolved (auth back to authenticated), the FastAPI
-        # ib_pool may still be stuck disconnected. Bounce radon-api ONCE to
-        # un-stick it, then clear the flag so this never loops.
-        if state.pending_pool_reconnect and health.auth_state == "authenticated":
             return _reconnect_pool_after_recovery(
                 state=state,
                 state_path=state_path,
@@ -1538,6 +1568,17 @@ def _run_cycle_steps(
                 dry_run=dry_run,
                 health=health,
             )
+
+        if health.auth_state == "authenticated":
+            state.api_hang_restart_count = 0
+            state.authenticated_recovery_count = 0
+            try:
+                ib_2fa_lock.release_2fa_push_lock(
+                    expected_holder=WATCHDOG_LOCK_HOLDER,
+                    guard_timeout_secs=LOCK_OP_TIMEOUT_SECS,
+                )
+            except ib_2fa_lock.GuardLockTimeout as exc:
+                LOG.warning("watchdog lease release deferred: %s", exc)
 
         state.last_outcome = f"healthy:{health.service_state}/{health.auth_state}"
         save_state(state_path, state)
