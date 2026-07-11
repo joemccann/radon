@@ -31,14 +31,37 @@ function securityHeaders() {
   return headers;
 }
 
+// Hetzner mounts the live data tree beside the app checkout. Routes that
+// fall back to disk must not package that mutable tree into the serverless
+// function trace — production data alone is >128 MiB and fails deploy audit.
+const HOST_DATA_TRACE_EXCLUDES = ["../data/**/*"];
+const HOST_DATA_TRACE_ROUTES = [
+  "/api/breadth",
+  "/api/catalysts",
+  "/api/discover",
+  "/api/flow-analysis",
+  "/api/flow-analysis/[ticker]",
+  "/api/flow-surprise",
+  "/api/futures/chain",
+  "/api/gamma-rotation",
+  "/api/garch-convergence",
+  "/api/gex",
+  "/api/internals",
+  "/api/leap",
+  "/api/margin-debt",
+  "/api/menthorq/cta",
+  "/api/performance",
+  "/api/regime",
+  "/api/scanner",
+  "/api/ticker/seasonality",
+  "/api/vcg",
+];
+
 const config = {
   outputFileTracingRoot: resolve(__dirname, ".."),
-  // Hetzner reads the host-mounted data tree directly. Do not package that
-  // mutable runtime state into the CTA server function when its disk fallback
-  // makes Turbopack conservatively trace the entire directory.
-  outputFileTracingExcludes: {
-    "/api/menthorq/cta": ["../data/**/*"],
-  },
+  outputFileTracingExcludes: Object.fromEntries(
+    HOST_DATA_TRACE_ROUTES.map((route) => [route, HOST_DATA_TRACE_EXCLUDES]),
+  ),
   turbopack: {},
   webpack: (config) => {
     config.resolve.alias["@tools"] = resolve(__dirname, "..", "lib", "tools");

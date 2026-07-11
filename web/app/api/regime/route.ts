@@ -15,8 +15,9 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_PATH = join(process.cwd(), "..", "data", "cri.json");
-const SCHEDULED_DIR = join(process.cwd(), "..", "data", "cri_scheduled");
+const PROJECT_ROOT = join(/* turbopackIgnore: true */ process.cwd(), "..");
+const CACHE_PATH = join(PROJECT_ROOT, "data", "cri.json");
+const SCHEDULED_DIR = join(PROJECT_ROOT, "data", "cri_scheduled");
 // Upper bound on the Turso/libsql snapshot read before we fall back to disk.
 // The libsql client can hang for minutes on a reachable endpoint; this keeps
 // the route responsive (disk fallback) instead of pinning the loader.
