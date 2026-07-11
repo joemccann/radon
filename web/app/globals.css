@@ -11487,6 +11487,133 @@ tr {
   min-width: 0;
 }
 
+/* ─── Journal date range + P&L strip ──────────────────── */
+
+.journal-range-bar {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 0 12px 10px;
+  border-bottom: 1px solid var(--line-grid);
+}
+
+.journal-range-presets {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+}
+
+.journal-range-chip {
+  appearance: none;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  background: transparent;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  padding: 4px 8px;
+  min-height: 26px;
+  cursor: pointer;
+}
+
+.journal-range-chip:hover {
+  color: var(--text-primary);
+  border-color: color-mix(in srgb, var(--signal-core) 40%, var(--line-grid));
+}
+
+.journal-range-chip--active {
+  color: var(--signal-core);
+  border-color: color-mix(in srgb, var(--signal-core) 50%, var(--line-grid));
+  background: color-mix(in srgb, var(--signal-core) 8%, transparent);
+}
+
+.journal-range-custom {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.journal-range-custom__field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.journal-range-custom__field input[type="date"] {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  padding: 4px 6px;
+  min-height: 28px;
+  color-scheme: dark;
+}
+
+.journal-pnl-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 12px 20px;
+  padding: 8px 10px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+}
+
+.journal-pnl-strip__stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.journal-pnl-strip__stat--range {
+  margin-left: auto;
+}
+
+.journal-pnl-strip__label {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.journal-pnl-strip__value {
+  font-size: 13px;
+  font-weight: 650;
+  color: var(--text-primary);
+  font-variant-numeric: tabular-nums;
+}
+
+.journal-pnl-strip__value.positive {
+  color: var(--positive);
+}
+
+.journal-pnl-strip__value.negative {
+  color: var(--negative);
+}
+
+body[data-mobile="true"] .journal-range-bar {
+  padding: 0 8px 8px;
+}
+
+body[data-mobile="true"] .journal-pnl-strip__stat--range {
+  margin-left: 0;
+  width: 100%;
+}
+
 /* ─── GARCH Convergence scanner ───────────────────────── */
 
 .garch-scanner__header {
