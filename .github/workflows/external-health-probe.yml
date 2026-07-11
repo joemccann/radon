@@ -15,7 +15,8 @@ name: Tier-3 external health probe
 # hit the Clerk wall) and the bearer-auth /api/probe/freshness aggregate, and
 # appends one external_probe_runs history row per run. The probe step MUST be
 # allowed to fail the job (no `|| true`): probe.py exits nonzero when the edge
-# or user path is down (or freshness is explicitly stale during RTH), and
+# or user path is down, the freshness endpoint/database is unavailable, or
+# valid freshness data is explicitly stale during RTH, and
 # GitHub's default email on a FAILED workflow run is the operator alert that
 # closes the DUR-04 "records the outage but notifies no human" residual.
 
@@ -23,9 +24,10 @@ on:
   # TURSO_DB_URL + TURSO_AUTH_TOKEN repo secrets are configured (verified by a
   # manual smoke run landing a row in external_probe).
   schedule:
-    # Every 5 min is GitHub's minimum cron granularity; runs are best-effort
-    # and routinely lag 5-15 min under load. The reader's staleness window
-    # (20 min) absorbs that jitter without flapping.
+    # Every 5 min is GitHub's minimum cron granularity, but dispatch is
+    # best-effort. The latest 99 scheduled runs had a 41.8 min median,
+    # 78.8 min p95, and 88.1 min max interval, so readers use a two-hour
+    # dead-man window rather than treating ordinary scheduler delay as death.
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
 
@@ -56,6 +58,6 @@ jobs:
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
           RADON_PROBE_FRESHNESS_TOKEN: ${{ secrets.RADON_PROBE_FRESHNESS_TOKEN }}
           EXTERNAL_PROBE_SOURCE: github-actions/edge
-        # No `|| true` here — a nonzero exit (edge/user-path down, or stale
-        # freshness during RTH) must fail the job so GitHub emails the operator.
+        # No `|| true` here — edge/user-path/freshness availability failures
+        # always fail; valid stale data fails during RTH.
         run: PYTHONPATH=scripts python -m health_probe.probe

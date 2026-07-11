@@ -34,6 +34,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional
 from urllib import error as urllib_error
@@ -54,6 +55,29 @@ GROUPING_AUTH_STATES = frozenset({"awaiting_2fa", "unreachable"})
 GROUPING_THRESHOLD = 2
 HEALTH_URL = os.environ.get("RADON_HEALTH_URL", "http://127.0.0.1:8321/health")
 HEALTH_TIMEOUT_S = 2.0
+
+
+@dataclass(frozen=True)
+class DispatchSummary:
+    health_recorded: bool = False
+    delivery_failed: bool = False
+    suppressed_count: int = 0
+
+
+def _cooldown_allows_fire(*, service: str, severity: str, now: datetime) -> bool:
+    """Fail open for delivery when cooldown storage is unavailable."""
+    try:
+        return cooldown_mod.cooldown_allows_fire(
+            service=service, severity=severity, now=now
+        )
+    except Exception as exc:  # noqa: BLE001 - storage must not block paging
+        log.error(
+            "cooldown read failed for %s/%s; delivering without suppression: %s",
+            service,
+            severity,
+            exc,
+        )
+        return True
 
 
 # ── /health probe ──────────────────────────────────────────────────
@@ -141,7 +165,7 @@ def _format_grouped_message(*, auth_state: str, services: list[str]) -> str:
 
 # ── public entry point ────────────────────────────────────────────
 
-def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -> None:
+def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -> DispatchSummary:
     """Replacement for the per-outcome dispatch loop in __main__.
 
     Walks ``outcomes``, partitions IB-dependent vs not, fetches
@@ -152,13 +176,15 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
     """
     fired = [o for o in outcomes if o.fired]
     if not fired:
-        return
+        return DispatchSummary()
 
     ib_failing = [o for o in fired if _ib_dependent(o)]
-    non_ib_failing = [o for o in fired if not _ib_dependent(o)]
-
     grouped_handled: set[str] = set()
     grouped_dispatcher_error: Optional[str] = None
+    grouped_attempted = False
+    delivery_attempted = False
+    dispatcher_errors: list[str] = []
+    suppressed_count = 0
     if len(ib_failing) >= GROUPING_THRESHOLD:
         # fetch_health is best-effort but a raised exception (test-double
         # or future bug) must not abort the whole dispatch — fall through
@@ -182,11 +208,14 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
                 )
                 grouped_handled = {o.service for o in ib_failing}
             else:
-                grouped_handled, grouped_dispatcher_error = _dispatch_grouped(
+                grouped_handled, grouped_dispatcher_error, grouped_attempted = _dispatch_grouped(
                     ib_outcomes=ib_failing,
                     auth_state=auth_state,
                     now=now,
                 )
+                delivery_attempted = grouped_attempted
+                if grouped_dispatcher_error:
+                    dispatcher_errors.append(grouped_dispatcher_error)
 
     # Everything not absorbed into the grouped alert falls through to the
     # regular per-service path (cooldown gate + Pushover). The per-service
@@ -198,21 +227,33 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
             # Subsumed into the grouped Pushover; nothing more to do.
             notify._log_alert_event(outcome)
             continue
-        if outcome.severity and not cooldown_mod.cooldown_allows_fire(
+        if outcome.severity and not _cooldown_allows_fire(
             service=outcome.service, severity=outcome.severity, now=outcome.now
         ):
             log.info("suppressed by cooldown (%s/%s)", outcome.service, outcome.severity)
+            suppressed_count += 1
             continue
-        notify.dispatch(outcome)
+        dispatcher_error = notify.dispatch(outcome, record_health=False)
+        delivery_attempted = True
+        if dispatcher_error:
+            dispatcher_errors.append(dispatcher_error)
 
-    # If grouping fired, emit a single dispatcher-health row reflecting
-    # whether the grouped push succeeded (notify.dispatch handles its own
-    # per-outcome row for the non-grouped fallback path).
-    if grouped_handled:
-        notify._write_dispatcher_health(now=now, dispatcher_error=grouped_dispatcher_error)
+    # Suppressed outcomes need no dispatcher row. Attempted deliveries share
+    # one aggregate write so a later success cannot erase an earlier failure.
+    if not grouped_attempted and grouped_handled:
+        suppressed_count += len(grouped_handled)
 
-    # No-op for non_ib_failing — they're handled by the loop above.
-    _ = non_ib_failing
+    if delivery_attempted:
+        notify._write_dispatcher_health(
+            now=now,
+            dispatcher_error="; ".join(dispatcher_errors) or None,
+        )
+
+    return DispatchSummary(
+        health_recorded=delivery_attempted,
+        delivery_failed=bool(dispatcher_errors),
+        suppressed_count=suppressed_count,
+    )
 
 
 def _dispatch_grouped(
@@ -220,9 +261,10 @@ def _dispatch_grouped(
     ib_outcomes: list[CheckOutcome],
     auth_state: str,
     now: datetime,
-) -> tuple[set[str], Optional[str]]:
-    """Send the single grouped Pushover; return ``(suppressed_services,
-    dispatcher_error)``.
+) -> tuple[set[str], Optional[str], bool]:
+    """Send one grouped Pushover.
+
+    Returns ``(suppressed_services, dispatcher_error, attempted)``.
 
     Cooldown applies to the grouped key. If we're inside the cooldown
     window we skip the push but STILL return the suppression set —
@@ -241,24 +283,25 @@ def _dispatch_grouped(
         auth_state,
     )
 
-    if not cooldown_mod.cooldown_allows_fire(
+    if not _cooldown_allows_fire(
         service=GROUPED_ALERT_KEY,
         severity=GROUPED_ALERT_SEVERITY,
         now=now,
     ):
         log.info("grouped IB alert suppressed by cooldown")
-        return set(services), None
+        return set(services), None, False
 
     message = _format_grouped_message(auth_state=auth_state, services=services)
     title = f"radon watchdog: IB Gateway {auth_state}"
     dispatcher_error = _emit_grouped_pushover(title=title, message=message)
 
-    cooldown_mod.mark_notified(
-        service=GROUPED_ALERT_KEY,
-        severity=GROUPED_ALERT_SEVERITY,
-        now=now,
-    )
-    return set(services), dispatcher_error
+    if dispatcher_error is None:
+        notify._mark_notified_best_effort(
+            service=GROUPED_ALERT_KEY,
+            severity=GROUPED_ALERT_SEVERITY,
+            now=now,
+        )
+    return set(services), dispatcher_error, True
 
 
 def _emit_grouped_pushover(*, title: str, message: str) -> Optional[str]:

@@ -130,6 +130,30 @@ class TestServiceHealthLog:
         assert rows[0][2] is None or "vcg-scan" not in (rows[0][2] or "")
 
 
+class TestCooldownDeliverySemantics:
+    def test_failed_pushover_does_not_start_cooldown(self, db_conn, sample_alert):
+        from watchdog import notify
+
+        with (
+            patch("watchdog.notify._emit_pushover", return_value="pushover 503"),
+            patch("watchdog.notify.cooldown_mod.mark_notified") as mark_notified,
+        ):
+            notify.dispatch(sample_alert)
+
+        mark_notified.assert_not_called()
+
+    def test_successful_pushover_starts_cooldown(self, db_conn, sample_alert):
+        from watchdog import notify
+
+        with (
+            patch("watchdog.notify._emit_pushover", return_value=None),
+            patch("watchdog.notify.cooldown_mod.mark_notified") as mark_notified,
+        ):
+            notify.dispatch(sample_alert)
+
+        mark_notified.assert_called_once()
+
+
 class TestHeartbeatOk:
     """`heartbeat_ok` writes `watchdog-alerts=ok` so a single fired alert
     doesn't latch the row at state=error forever between fires. See

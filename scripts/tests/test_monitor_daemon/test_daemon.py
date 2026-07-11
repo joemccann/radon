@@ -275,6 +275,40 @@ class TestMonitorDaemonState:
         
         handler.set_state.assert_called_with({"last_run": "2026-03-04T10:00:00"})
 
+    def test_failed_atomic_replace_preserves_previous_state(self, tmp_path, monkeypatch):
+        from utils import atomic_io
+
+        state_file = tmp_path / "daemon_state.json"
+        original = '{"sentinel": true}'
+        state_file.write_text(original)
+        daemon = MonitorDaemon(state_file=state_file)
+        handler = Mock(spec=BaseHandler)
+        handler.name = "test"
+        handler.get_state.return_value = {"last_run": "2026-03-04T10:00:00"}
+        daemon.register(handler)
+        monkeypatch.setattr(
+            atomic_io.os,
+            "replace",
+            lambda *args, **kwargs: (_ for _ in ()).throw(OSError("interrupted")),
+        )
+
+        with pytest.raises(OSError, match="interrupted"):
+            daemon.save_state()
+
+        assert state_file.read_text() == original
+
+
+def test_create_daemon_uses_auto_client_ids(tmp_path, monkeypatch):
+    from monitor_daemon import run
+
+    monkeypatch.setattr(run, "STATE_FILE", tmp_path / "missing-state.json")
+    daemon = run.create_daemon()
+    handlers = {handler.name: handler for handler in daemon.handlers}
+
+    assert handlers["fill_monitor"].client_id == "auto"
+    assert handlers["exit_orders"].client_id == "auto"
+    assert handlers["journal_sync"].client_id == "auto"
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

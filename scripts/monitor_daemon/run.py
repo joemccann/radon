@@ -79,13 +79,11 @@ def create_daemon() -> MonitorDaemon:
     # Register handlers
     daemon.register(FillMonitorHandler(
         ib_port=4001,
-        client_id=70,
         send_notifications=True
     ))
     
     daemon.register(ExitOrdersHandler(
         ib_port=4001,
-        client_id=71,
         max_gap_pct=0.40
     ))
     
@@ -94,8 +92,7 @@ def create_daemon() -> MonitorDaemon:
     daemon.register(FlexTokenCheck())
 
     daemon.register(JournalSyncHandler(
-        ib_port=4001,
-        client_id=72
+        ib_port=4001
     ))
 
     daemon.register(CashFlowSyncHandler())

@@ -2,6 +2,7 @@
 
 import { getWsTicket } from "./wsTicket";
 import type { RealtimeTokenGetter } from "./RealtimeAuthContext";
+import { withRealtimeDeadline } from "./realtimeDeadline";
 
 function isLocalBrowserHost(hostname: string): boolean {
   return hostname === "localhost" ||
@@ -30,11 +31,17 @@ export async function buildAuthenticatedWebSocketUrl(
   getToken?: RealtimeTokenGetter,
 ): Promise<string> {
   if (!getToken) return baseUrl;
-  const token = await getToken();
+  const token = await withRealtimeDeadline(
+    Promise.resolve(getToken()),
+    "Realtime authentication",
+  );
   if (!token) {
     throw new Error("Realtime auth token unavailable");
   }
-  const ticket = await getWsTicket(token);
+  const ticket = await withRealtimeDeadline(
+    getWsTicket(token),
+    "Realtime ticket request",
+  );
   const separator = baseUrl.includes("?") ? "&" : "?";
   return `${baseUrl}${separator}ticket=${encodeURIComponent(ticket)}`;
 }

@@ -6,15 +6,11 @@ Covers:
      wedged/unknown). When FastAPI /health is unreachable the watchdog
      falls back to a DIRECT bounded gateway probe (TCP connect + IB API
      handshake) instead of going blind.
-  2. "api unreachable" alone can NEVER mint a new restart trigger —
-     deploys produce Connection refused routinely and every gateway
-     restart costs a 2FA push. The fallback may only CONTINUE an
-     existing api-hang episode when the handshake itself shows
-     upstream-dead.
-  3. The scheduled-restart quiet windows (default 22:30-23:05 UTC for
-     the AUTO_RESTART_TIME=22:35 UTC evening restart, 23:40-00:15 UTC
-     for the 00:00 UTC session rollover): detections are logged but
-     degraded_count does not advance and no 2FA push fires.
+  2. "api unreachable" alone can NEVER mint a new restart trigger, but
+     an independent DEAD/WEDGED protocol verdict starts or continues the
+     persisted recovery ladder.
+  3. The 23:40-00:15 UTC server-session rollover window: detections are
+     suppressed only for a bounded grace before the normal ladder resumes.
   4. service_health writes go through the bounded stdlib hrana
      transport (scripts/db/hrana_http), never sync libsql (db.writer) —
      the suspected source of the watchdog's post-refused 60s hangs.
@@ -66,6 +62,7 @@ def _payload(
     port_listening: bool = True,
     upstream_dead: bool = False,
     auth_state: str = "authenticated",
+    probe_timed_out: bool = False,
 ) -> dict:
     return {
         "ib_gateway": {
@@ -73,6 +70,7 @@ def _payload(
             "port_listening": port_listening,
             "upstream_dead": upstream_dead,
             "auth_state": auth_state,
+            "probe_timed_out": probe_timed_out,
         }
     }
 
@@ -126,17 +124,17 @@ def _drive(
 
 
 class TestDecisionTableApiUp:
-    """api up: the primary sensor rules; the direct probe must NOT run."""
+    """API health is cross-checked by the independent functional sensor."""
 
     def test_gateway_alive_resets_counters(self, state_path):
         save_state(state_path, WatchdogState(degraded_count=2))
         result, restart, probe, _ = _drive(state_path, _payload())
         assert result.degraded_count == 0
         restart.assert_not_called()
-        probe.assert_not_called()
+        probe.assert_called_once()
 
     def test_gateway_dead_port_down_resets(self, state_path):
-        # Docker restart policy owns port-down; not an api-hang.
+        # An unknown direct verdict cannot overrule the structured HTTP state.
         save_state(state_path, WatchdogState(degraded_count=2))
         result, restart, probe, _ = _drive(
             state_path,
@@ -145,14 +143,75 @@ class TestDecisionTableApiUp:
         )
         assert result.degraded_count == 0
         restart.assert_not_called()
-        probe.assert_not_called()
+        probe.assert_called_once()
 
     def test_gateway_wedged_increments_and_restarts_at_threshold(self, state_path):
         save_state(state_path, WatchdogState(degraded_count=2))
         result, restart, probe, _ = _drive(state_path, _hang_payload())
         assert restart.call_count == 1
         assert result.degraded_count == 0  # reset after restart
-        probe.assert_not_called()
+        probe.assert_called_once()
+
+
+class TestIndependentFunctionalSensor:
+    def test_health_probe_timeout_is_preserved_in_gateway_state(self):
+        state = GatewayState.from_health_payload(_payload(probe_timed_out=True))
+        assert state is not None
+        assert state.probe_timed_out is True
+
+    def test_green_http_health_cannot_mask_wedged_protocol(self, state_path):
+        result, restart, probe, _ = _drive(
+            state_path,
+            _payload(),
+            gateway_probe=GATEWAY_WEDGED,
+        )
+        assert probe.call_count == 1
+        assert result.degraded_count == 1
+        restart.assert_not_called()
+
+    def test_probe_timeout_uses_direct_wedge_to_start_episode(self, state_path):
+        result, restart, probe, _ = _drive(
+            state_path,
+            _payload(
+                service_state="unknown",
+                port_listening=False,
+                auth_state="unknown",
+                probe_timed_out=True,
+            ),
+            gateway_probe=GATEWAY_WEDGED,
+        )
+        assert probe.call_count == 1
+        assert result.degraded_count == 1
+        restart.assert_not_called()
+
+    def test_port_down_reaches_existing_restart_ladder(self, state_path):
+        save_state(state_path, WatchdogState(degraded_count=2))
+        result, restart, probe, _ = _drive(
+            state_path,
+            _payload(
+                service_state="stopped",
+                port_listening=False,
+                auth_state="unreachable",
+            ),
+            gateway_probe=GATEWAY_DEAD,
+        )
+        assert probe.call_count == 1
+        assert restart.call_count == 1
+        assert result.degraded_count == 0
+
+    def test_awaiting_2fa_still_stands_down_when_protocol_is_wedged(self, state_path):
+        result, restart, probe, _ = _drive(
+            state_path,
+            _payload(
+                service_state="unhealthy",
+                upstream_dead=True,
+                auth_state="awaiting_2fa",
+            ),
+            gateway_probe=GATEWAY_WEDGED,
+        )
+        assert probe.call_count == 1
+        assert result.last_outcome == "standing_down_awaiting_2fa"
+        restart.assert_not_called()
 
 
 class TestDecisionTableApiDown:
@@ -173,13 +232,13 @@ class TestDecisionTableApiDown:
         ]
         assert any(m and "radon-api" in m for m in messages)
 
-    def test_gateway_dead_resets_episode(self, state_path):
-        # TCP refused = port down = Docker restart policy's job.
+    def test_gateway_dead_completes_restart_at_threshold(self, state_path):
+        # TCP refused is now owned by the same lock-aware recovery ladder.
         save_state(state_path, WatchdogState(degraded_count=2))
         result, restart, _, _ = _drive(state_path, None, gateway_probe=GATEWAY_DEAD)
         assert result.degraded_count == 0
-        restart.assert_not_called()
-        assert "port_down" in result.last_outcome
+        restart.assert_called_once()
+        assert "restarted" in result.last_outcome
 
     def test_gateway_wedged_continues_existing_episode(self, state_path):
         save_state(state_path, WatchdogState(degraded_count=1))
@@ -213,14 +272,13 @@ class TestDecisionTableApiDown:
 # --- 2. api unreachable can never mint a NEW restart trigger -----------------
 
 
-class TestNoNewTriggerWhileBlind:
-    def test_wedged_with_no_episode_never_starts_counting(self, state_path):
-        for _ in range(5):
-            result, restart, _, _ = _drive(
-                state_path, None, gateway_probe=GATEWAY_WEDGED
-            )
-            assert result.degraded_count == 0
-            restart.assert_not_called()
+class TestFunctionalSensorOwnsRecovery:
+    def test_wedged_with_no_episode_starts_counting(self, state_path):
+        result, restart, _, _ = _drive(
+            state_path, None, gateway_probe=GATEWAY_WEDGED
+        )
+        assert result.degraded_count == 1
+        restart.assert_not_called()
 
     def test_repeated_api_down_cycles_never_restart(self, state_path):
         # A deploy window: /health refused for many cycles, gateway state
@@ -230,7 +288,7 @@ class TestNoNewTriggerWhileBlind:
             restart.assert_not_called()
 
 
-# --- 3. scheduled-restart quiet windows --------------------------------------
+# --- 3. server-session rollover quiet window ---------------------------------
 
 
 class TestQuietWindowParsing:
@@ -242,11 +300,11 @@ class TestQuietWindowParsing:
             ib_watchdog.QUIET_WINDOWS_ENV, ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
         )
 
-    def test_default_windows_cover_both_scheduled_restarts(self):
-        # 22:35 UTC (AUTO_RESTART_TIME, Saturday-wakeable 15:35 PT) and the
-        # 00:00 UTC session rollover re-detections.
-        assert quiet_window_active(_utc(22, 35)) is True
+    def test_default_window_only_covers_session_rollover(self):
         assert quiet_window_active(_utc(23, 45)) is True
+        # The old IBC AUTO_RESTART_TIME is disabled; there is no corresponding
+        # quiet window that could mask an unrelated outage.
+        assert quiet_window_active(_utc(22, 35)) is False
 
     def test_rollover_window_wraps_midnight(self):
         assert quiet_window_active(_utc(23, 40)) is True
@@ -258,7 +316,7 @@ class TestQuietWindowParsing:
         # The old 09:00-09:30 slot (02:05 PT push — 2026-07-05 storm) is gone.
         assert quiet_window_active(_utc(9, 5)) is False
         assert quiet_window_active(_utc(22, 29)) is False
-        assert quiet_window_active(_utc(23, 5)) is False  # exclusive end
+        assert quiet_window_active(_utc(23, 5)) is False
 
     def test_env_override(self, monkeypatch):
         monkeypatch.setenv("RADON_GW_RESTART_QUIET_WINDOWS_UTC", "09:00-09:30")
@@ -284,7 +342,7 @@ class TestQuietWindowSuppression:
             ib_watchdog.QUIET_WINDOWS_ENV, ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
         )
 
-    @pytest.mark.parametrize("now", [_utc(23, 50), _utc(0, 5), _utc(22, 40)])
+    @pytest.mark.parametrize("now", [_utc(23, 50), _utc(0, 5)])
     def test_hang_does_not_advance_counter_in_window(self, state_path, now):
         save_state(state_path, WatchdogState(degraded_count=1))
         result, restart, _, _ = _drive(state_path, _hang_payload(), now=now)
@@ -304,7 +362,7 @@ class TestQuietWindowSuppression:
         # No 2FA push may be initiated by the watchdog during the window.
         save_state(state_path, WatchdogState(stuck_2fa_count=2))
         result, restart, _, _ = _drive(
-            state_path, _stuck_2fa_payload(), now=_utc(22, 40)
+            state_path, _stuck_2fa_payload(), now=_utc(23, 50)
         )
         assert result.stuck_2fa_count == 2  # frozen
         restart.assert_not_called()
@@ -322,6 +380,11 @@ class TestQuietWindowSuppression:
         result, _, _, _ = _drive(state_path, _hang_payload(), now=NOON)
         assert result.degraded_count == 2
 
+    def test_old_ibc_restart_slot_no_longer_suppresses_failure(self, state_path):
+        save_state(state_path, WatchdogState(degraded_count=1))
+        result, _, _, _ = _drive(state_path, _hang_payload(), now=_utc(22, 40))
+        assert result.degraded_count == 2
+
     def test_episode_resumes_counting_after_window(self, state_path):
         # In-window detections freeze; the first out-of-window cycle
         # continues from the frozen value.
@@ -329,6 +392,22 @@ class TestQuietWindowSuppression:
         _drive(state_path, _hang_payload(), now=_utc(23, 50))
         result, _, _, _ = _drive(state_path, _hang_payload(), now=_utc(0, 20))
         assert result.degraded_count == 2
+
+    def test_suppression_expires_inside_a_long_quiet_window(self, state_path, monkeypatch):
+        monkeypatch.setattr(ib_watchdog, "SCHEDULED_RESTART_GRACE_SECS", 300)
+        save_state(
+            state_path,
+            WatchdogState(degraded_count=2, quiet_degraded_since=1_000.0),
+        )
+        result, restart, _, _ = _drive(
+            state_path,
+            _hang_payload(),
+            gateway_probe=GATEWAY_WEDGED,
+            now=_utc(22, 40),
+            clock=lambda: 1_301.0,
+        )
+        assert restart.call_count == 1
+        assert result.degraded_count == 0
 
 
 # --- 4. health-write transport: bounded stdlib hrana, never sync libsql ------

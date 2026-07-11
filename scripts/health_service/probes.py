@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import errno
 import json
+import math
 import socket
 import urllib.error
 import urllib.request
@@ -119,6 +120,48 @@ def parse_unit_states(raw: str) -> dict:
     return units
 
 
+UNIT_STATE_MAX_AGE_SECS = 30.0
+
+
+def _unit_evidence_current(units_age_secs) -> bool:
+    return (
+        not isinstance(units_age_secs, bool)
+        and isinstance(units_age_secs, (int, float))
+        and math.isfinite(units_age_secs)
+        and 0 <= units_age_secs <= UNIT_STATE_MAX_AGE_SECS
+    )
+
+
+def aggregate_state(probe_results: dict, units: dict,
+                    health_service: str = "ok", units_age_secs=None) -> str:
+    """Return the canonical state for this daemon's direct observations.
+
+    The off-box ``external_probe`` row is deliberately excluded: folding an old
+    off-box verdict into the endpoint it probes would create a feedback loop.
+    """
+    states = []
+    for collection in (probe_results, units):
+        for value in (collection or {}).values():
+            if isinstance(value, dict):
+                states.append(str(value.get("state", "unknown")).lower())
+
+    if any(state in {"down", "error", "failed", "unhealthy"} for state in states):
+        return "down"
+    if (
+        health_service != "ok"
+        or not states
+        or not _unit_evidence_current(units_age_secs)
+    ):
+        return "unknown"
+    if any(state == "unknown" for state in states):
+        return "unknown"
+    if any(state == "starting" for state in states):
+        return "starting"
+    if all(state in {"up", "ok", "healthy"} for state in states):
+        return "up"
+    return "unknown"
+
+
 def build_status(probes: dict, units: dict, generated_at: str,
                  health_service: str = "ok", units_age_secs=None,
                  service_health=None, external_probe=None) -> dict:
@@ -130,7 +173,15 @@ def build_status(probes: dict, units: dict, generated_at: str,
     Tier-3 off-box probe row (dict) or None when there is none / no creds. Both
     degrade without touching the response code or the rest of the body.
     """
+    overall_state = aggregate_state(
+        probes,
+        units,
+        health_service,
+        units_age_secs,
+    )
     return {
+        "ok": overall_state == "up",
+        "overall_state": overall_state,
         "health_service": health_service,
         "generated_at": generated_at,
         "probes": probes,

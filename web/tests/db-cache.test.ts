@@ -1,5 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cachedRead, invalidateCache, __clearDbCache } from "@/lib/dbCache";
+import {
+  cachedRead,
+  cachedReadResult,
+  invalidateCache,
+  __clearDbCache,
+} from "@/lib/dbCache";
 
 describe("cachedRead", () => {
   beforeEach(() => {
@@ -54,6 +59,42 @@ describe("cachedRead", () => {
     expect(await cachedRead("k", 1000, fetcher, { staleWhileError: true })).toBe("v1");
     vi.setSystemTime(2000);
     expect(await cachedRead("k", 1000, fetcher, { staleWhileError: true })).toBe("v1");
+  });
+
+  it("reports when a value came from stale-while-error fallback", async () => {
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce("v1")
+      .mockRejectedValueOnce(new Error("turso down"));
+    expect((await cachedReadResult("k", 1000, fetcher, {
+      staleWhileError: true,
+    })).staleWhileError).toBe(false);
+
+    vi.setSystemTime(2000);
+    const result = await cachedReadResult("k", 1000, fetcher, {
+      staleWhileError: true,
+    });
+
+    expect(result).toMatchObject({ value: "v1", staleWhileError: true });
+    expect(result.error).toEqual(expect.objectContaining({ message: "turso down" }));
+  });
+
+  it("serves and reports stale fallback to every concurrent caller", async () => {
+    let reject!: (error: Error) => void;
+    const fetcher = vi.fn()
+      .mockResolvedValueOnce("v1")
+      .mockImplementationOnce(() => new Promise<string>((_resolve, rejectPromise) => {
+        reject = rejectPromise;
+      }));
+    await cachedRead("k", 1000, fetcher, { staleWhileError: true });
+    vi.setSystemTime(2000);
+
+    const first = cachedReadResult("k", 1000, fetcher, { staleWhileError: true });
+    const second = cachedReadResult("k", 1000, fetcher, { staleWhileError: true });
+    reject(new Error("shared outage"));
+
+    await expect(first).resolves.toMatchObject({ value: "v1", staleWhileError: true });
+    await expect(second).resolves.toMatchObject({ value: "v1", staleWhileError: true });
+    expect(fetcher).toHaveBeenCalledTimes(2);
   });
 
   it("does not serve stale beyond maxStaleMs", async () => {

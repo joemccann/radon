@@ -51,11 +51,15 @@ export async function radonFetch<T = Record<string, unknown>>(
   if (serviceToken) {
     headers.set("X-Radon-Service-Token", serviceToken);
   }
+  const timeoutSignal = AbortSignal.timeout(timeout);
+  const signal = fetchOpts.signal
+    ? AbortSignal.any([fetchOpts.signal, timeoutSignal])
+    : timeoutSignal;
   const res = await fetch(`${RADON_API}${path}`, {
     ...fetchOpts,
     headers,
     cache: fetchOpts.cache ?? "no-store",
-    signal: AbortSignal.timeout(timeout),
+    signal,
   });
   if (!res.ok) {
     let detail: string;

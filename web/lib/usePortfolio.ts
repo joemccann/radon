@@ -3,11 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PortfolioData } from "./types";
 
-const BASE_INTERVAL_MS = 30_000;
-const MAX_INTERVAL_MS = 300_000; // 5 min cap on backoff
-// Client-side fetch ceilings so a slow/stalled server never spins the spinner
-// forever. GET is server-capped (3s Turso + 3s retry); POST drives a live IB
-// sync (server radonFetch timeout 35s) so the client allows headroom.
+const POLL_INTERVAL_MS = 30_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
 const POST_FETCH_TIMEOUT_MS = 42_000;
 
@@ -27,44 +23,73 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const syncingRef = useRef(false);
-  const intervalRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const backoffRef = useRef(BASE_INTERVAL_MS);
-  const didInitialReadRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollCachedRef = useRef<() => Promise<void>>(async () => {});
+  const warningSnapshotRef = useRef<string | null>(null);
+  const dataGenerationRef = useRef(0);
+  const readingRef = useRef(false);
   const initialLoadStartedRef = useRef(false);
-  const syncLoopArmedRef = useRef(false);
-  const doSyncRef = useRef<() => Promise<void>>(async () => {});
+  const previousActiveRef = useRef(active);
+  const mountedRef = useRef(true);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   const fetchPortfolio = useCallback(async () => {
+    if (readingRef.current) return;
+    readingRef.current = true;
+    const generation = dataGenerationRef.current;
     try {
       const res = await fetch("/api/portfolio", {
         cache: "no-store",
         signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
       });
-      if (!res.ok) throw new Error("Failed to fetch portfolio");
+      if (!res.ok) throw new Error(`Failed to fetch portfolio (${res.status})`);
       const json = (await res.json()) as PortfolioData;
+      if (!mountedRef.current || generation !== dataGenerationRef.current) return;
       setData(json);
       setLastSync(json.last_sync);
-      setError(null);
+      const warning = res.headers.get("X-Sync-Warning");
+      if (warning) {
+        warningSnapshotRef.current = json.last_sync;
+        setError(warning);
+        return;
+      }
+      if (
+        warningSnapshotRef.current == null ||
+        warningSnapshotRef.current !== json.last_sync
+      ) {
+        warningSnapshotRef.current = null;
+        setError(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Unknown error");
+      if (mountedRef.current && generation === dataGenerationRef.current) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      }
     } finally {
-      setLoading(false);
-      didInitialReadRef.current = true;
+      readingRef.current = false;
+      if (mountedRef.current) setLoading(false);
     }
   }, []);
 
   const scheduleNext = useCallback((delay: number) => {
-    if (!active) return;
-    if (intervalRef.current) clearTimeout(intervalRef.current);
-    intervalRef.current = setTimeout(() => {
-      void doSyncRef.current();
+    if (!mountedRef.current || !activeRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      void pollCachedRef.current();
     }, delay);
-  }, [active]);
+  }, []);
+
+  const pollCached = useCallback(async () => {
+    await fetchPortfolio();
+    if (mountedRef.current && activeRef.current) scheduleNext(POLL_INTERVAL_MS);
+  }, [fetchPortfolio, scheduleNext]);
+  pollCachedRef.current = pollCached;
 
   const doSync = useCallback(async () => {
     if (syncingRef.current) return;
     syncingRef.current = true;
-    setSyncing(true);
+    const syncGeneration = ++dataGenerationRef.current;
+    if (mountedRef.current) setSyncing(true);
     try {
       const res = await fetch("/api/portfolio", {
         method: "POST",
@@ -76,94 +101,68 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
         throw new Error((body as { error?: string }).error ?? "Sync failed");
       }
       const json = (await res.json()) as PortfolioData;
+      if (!mountedRef.current || syncGeneration !== dataGenerationRef.current) return;
+      dataGenerationRef.current += 1;
       setData(json);
       setLastSync(json.last_sync);
-      setError(null);
-      backoffRef.current = BASE_INTERVAL_MS;
-      scheduleNext(BASE_INTERVAL_MS);
+      const warning = res.headers.get("X-Sync-Warning");
+      if (warning) {
+        warningSnapshotRef.current = json.last_sync;
+        setError(warning);
+      } else {
+        warningSnapshotRef.current = null;
+        setError(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sync failed");
-      backoffRef.current = Math.min(backoffRef.current * 2, MAX_INTERVAL_MS);
-      scheduleNext(backoffRef.current);
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
       syncingRef.current = false;
-      setSyncing(false);
+      if (mountedRef.current) setSyncing(false);
     }
-  }, [scheduleNext]);
-
-  doSyncRef.current = doSync;
+  }, []);
 
   const syncNow = useCallback(() => {
-    backoffRef.current = BASE_INTERVAL_MS;
-    // Only arm the auto-sync loop when the market is active. Arming it from a
-    // manual "Sync Now" while inactive (e.g. a weekend) would make the
-    // becomes-active effect short-circuit on Monday and never start polling.
-    if (active) syncLoopArmedRef.current = true;
     void doSync();
-  }, [doSync, active]);
+  }, [doSync]);
 
-  // Always read the cached portfolio once on mount. `active=false` only disables
-  // polling and background sync so closed-market routes can still render.
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  // Cached snapshot reads are safe to fan out across browser tabs. Live IB
+  // synchronization is deliberately reserved for syncNow and server timers.
   useEffect(() => {
     if (initialLoadStartedRef.current) return;
     initialLoadStartedRef.current = true;
+    void fetchPortfolio();
+  }, [fetchPortfolio]);
 
-    let cancelled = false;
+  useEffect(() => {
+    const becameActive = active && !previousActiveRef.current;
+    previousActiveRef.current = active;
 
-    const init = async () => {
-      await fetchPortfolio();
-      if (cancelled) return;
-      if (active) {
-        syncLoopArmedRef.current = true;
-        scheduleNext(BASE_INTERVAL_MS);
-      }
-    };
-
-    void init();
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (active) scheduleNext(becameActive ? 500 : POLL_INTERVAL_MS);
 
     return () => {
-      cancelled = true;
-      if (intervalRef.current) {
-        clearTimeout(intervalRef.current);
-        intervalRef.current = null;
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
       }
     };
-  }, [active, fetchPortfolio, scheduleNext]);
+  }, [active, scheduleNext]);
 
-  // If the hook mounted while inactive, start syncing the first time it becomes active.
-  useEffect(() => {
-    if (!active) {
-      if (intervalRef.current) {
-        clearTimeout(intervalRef.current);
-        intervalRef.current = null;
-      }
-      syncLoopArmedRef.current = false;
-      return;
-    }
-
-    if (!didInitialReadRef.current || syncLoopArmedRef.current) return;
-    syncLoopArmedRef.current = true;
-    void doSync();
-  }, [active, doSync]);
-
-  // Reset backoff & force sync when tab becomes visible again.
-  // Prevents stale data when user returns after FastAPI outage
-  // pushed backoff to 5 min.
   useEffect(() => {
     const onVisible = () => {
       if (document.visibilityState !== "visible") return;
-      if (active) {
-        backoffRef.current = BASE_INTERVAL_MS;
-        if (!syncingRef.current) {
-          syncLoopArmedRef.current = true;
-          scheduleNext(500);
-        }
-      } else {
-        // Market closed: the poll loop never runs, so a failed initial GET
-        // would otherwise latch the banner until a full reload. Refocusing the
-        // tab re-reads the cached snapshot and clears a transient failure.
-        void fetchPortfolio();
-      }
+      if (active) scheduleNext(500);
+      else void fetchPortfolio();
     };
     document.addEventListener("visibilitychange", onVisible);
     return () => document.removeEventListener("visibilitychange", onVisible);

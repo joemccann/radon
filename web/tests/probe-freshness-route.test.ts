@@ -88,6 +88,8 @@ describe("/api/probe/freshness", () => {
     expect(body.checks.gex_scan).toEqual({ applicable: false, age_secs: null, fresh: null });
     expect(body.checks.journal).toEqual({ applicable: true, age_secs: 3600, fresh: true });
     expect(body.all_fresh).toBe(true);
+    expect(body.database_ok).toBe(true);
+    expect(body.database_failures).toEqual([]);
   });
 
   it("RTH with a stale vcg scan: all_fresh=false, still 200", async () => {
@@ -134,6 +136,8 @@ describe("/api/probe/freshness", () => {
     expect(body.checks.vcg_scan).toEqual({ applicable: true, age_secs: null, fresh: false });
     expect(body.checks.journal.fresh).toBe(true);
     expect(body.all_fresh).toBe(false);
+    expect(body.database_ok).toBe(false);
+    expect(body.database_failures).toEqual(["vcg_scan"]);
   });
 
   it("a dead DB during RTH still returns 200 — checks unproven, all_fresh=false", async () => {
@@ -148,5 +152,45 @@ describe("/api/probe/freshness", () => {
     expect(res.status).toBe(200);
     expect(body.checks.relay_tick).toEqual({ applicable: true, age_secs: null, fresh: false });
     expect(body.all_fresh).toBe(false);
+    expect(body.database_ok).toBe(false);
+  });
+
+  it("a dead DB is explicit even when the market is closed", async () => {
+    vi.setSystemTime(CLOSED_NOW);
+    mockGetDb.mockImplementation(() => {
+      throw new Error("database unavailable");
+    });
+
+    const res = await (await getRoute())();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.market_state).toBe("closed");
+    expect(body.all_fresh).toBeNull();
+    expect(body.database_ok).toBe(false);
+    expect(body.database_failures).toEqual([
+      "relay_tick",
+      "vcg_scan",
+      "gex_scan",
+      "journal",
+    ]);
+  });
+
+  it("bounds every Turso read when the client never settles", async () => {
+    vi.setSystemTime(OPEN_NOW);
+    mockGetDb.mockReturnValue({
+      execute: vi.fn(() => new Promise<never>(() => {})),
+    });
+
+    let response: Response | undefined;
+    void (await getRoute())().then((value) => {
+      response = value;
+    });
+    await vi.advanceTimersByTimeAsync(3_100);
+
+    expect(response).toBeDefined();
+    const body = await response!.json();
+    expect(body.database_ok).toBe(false);
+    expect(body.database_failures).toHaveLength(4);
   });
 });

@@ -81,6 +81,7 @@ def app_client(monkeypatch):
     # Trusted-local bypass — auth now fails CLOSED when JWKS is unset.
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "test_mode", False)
     return TestClient(server.app), server
 
 

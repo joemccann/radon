@@ -3,8 +3,8 @@
 # IBC Gateway Service Manager
 #
 # Automates IB Gateway startup via IBC (vendored at vendor/ibc/).
-# Installs a launchd service that starts Gateway Mon-Fri, handles login,
-# auto-restarts daily, and suppresses dialogs.
+# Installs a launchd service definition for lock-aware starts, login handling,
+# and dialog suppression. No launchd or IBC schedule may start it directly.
 #
 # Usage:
 #   ./scripts/setup_ibc.sh install   - Install and start service
@@ -25,6 +25,8 @@ PLIST_DST="$HOME/Library/LaunchAgents/$PLIST_NAME"
 IBC_CONFIG="$HOME/ibc/config.ini"
 IBC_LOG_DIR="$HOME/ibc/logs"
 LABEL="com.radon.ibc-gateway"
+INSTALL_LOCK_HOLDER="scripts.setup_ibc.install"
+MANUAL_LOCK_HOLDER="scripts.setup_ibc.start"
 
 # --- Helpers ---
 
@@ -50,6 +52,14 @@ patch_config_setting() {
     else
         # Setting missing — append
         echo "${key}=${value}" >> "$file"
+    fi
+}
+
+acquire_push_lease() {
+    local holder="$1"
+    if ! python3.13 "$PROJECT_DIR/scripts/utils/ib_2fa_lock.py" acquire "$holder"; then
+        echo "ERROR: another IB Gateway cycle already has a 2FA push in flight"
+        exit 1
     fi
 }
 
@@ -89,58 +99,16 @@ generate_plist() {
         <key>TWS_PATH</key>
         <string>${HOME}/Applications</string>
         <key>TWOFA_TIMEOUT_ACTION</key>
-        <string>restart</string>
+        <string>exit</string>
+        <key>RELOGIN_AFTER_TWOFA_TIMEOUT</key>
+        <string>no</string>
     </dict>
 
-    <!-- Mon=1 through Fri=5 at 00:00 -->
-    <key>StartCalendarInterval</key>
-    <array>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>1</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>2</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>3</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>4</integer>
-        </dict>
-        <dict>
-            <key>Hour</key>
-            <integer>0</integer>
-            <key>Minute</key>
-            <integer>0</integer>
-            <key>Weekday</key>
-            <integer>5</integer>
-        </dict>
-    </array>
-
+    <!-- Loaded as a definition only. FastAPI/watchdog acquire the shared
+         2FA lease before invoking launchctl start. -->
     <key>RunAtLoad</key>
-    <true/>
+    <false/>
 
-    <!-- IBC/Gateway manage their own lifecycle via AutoRestartTime -->
     <key>KeepAlive</key>
     <false/>
 
@@ -200,27 +168,30 @@ install() {
     patch_config_setting "ExistingSessionDetectedAction" "primary"
     patch_config_setting "AcceptIncomingConnectionAction" "accept"
     patch_config_setting "AcceptNonBrokerageAccountWarning" "yes"
-    patch_config_setting "AutoRestartTime" "11:58 PM"
-    patch_config_setting "ColdRestartTime" "07:05"
+    patch_config_setting "AutoRestartTime" ""
+    patch_config_setting "ColdRestartTime" ""
     patch_config_setting "CommandServerPort" "7462"
     patch_config_setting "ControlFrom" ""
-    patch_config_setting "ReloginAfterSecondFactorAuthenticationTimeout" "yes"
+    patch_config_setting "ReloginAfterSecondFactorAuthenticationTimeout" "no"
     echo "    ExistingSessionDetectedAction=primary"
     echo "    AcceptNonBrokerageAccountWarning=yes"
-    echo "    AutoRestartTime=11:58 PM"
-    echo "    ColdRestartTime=07:05"
+    echo "    AutoRestartTime=disabled"
+    echo "    ColdRestartTime=disabled"
     echo "    CommandServerPort=7462"
 
     # 7. Generate plist
     echo "  Generating plist..."
     generate_plist "$version"
 
-    # 8. Unload old service if present
+    # 8. Replacing a running launch agent is a Gateway cycle and must acquire
+    # the same cross-process lease as every other start path.
+    acquire_push_lease "$INSTALL_LOCK_HOLDER"
     launchctl unload "$PLIST_DST" 2>/dev/null || true
 
     # 9. Install and load
     cp "$PLIST_SRC" "$PLIST_DST"
     launchctl load "$PLIST_DST"
+    launchctl start "$LABEL"
 
     echo ""
     echo "Service installed and loaded."
@@ -322,13 +293,16 @@ start_gateway() {
         exit 1
     fi
 
+    acquire_push_lease "$MANUAL_LOCK_HOLDER"
+
     export APP=GATEWAY
     export TWS_MAJOR_VRSN="$version"
     export IBC_PATH="$IBC_VENDOR"
     export IBC_INI="$IBC_CONFIG"
     export LOG_PATH="$IBC_LOG_DIR"
     export TWS_PATH="$HOME/Applications"
-    export TWOFA_TIMEOUT_ACTION=restart
+    export TWOFA_TIMEOUT_ACTION=exit
+    export RELOGIN_AFTER_TWOFA_TIMEOUT=no
 
     exec "$IBC_VENDOR/scripts/displaybannerandlaunch.sh"
 }

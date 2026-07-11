@@ -23,6 +23,11 @@
 import { parseScanTime } from "./parseScanTime";
 import { withTimeout } from "./asyncTimeout";
 import { resetDb } from "./db";
+import {
+  createDbOperationIdentity,
+  runWithDbOperation,
+  type DbOperationIdentity,
+} from "./dbOperation";
 import { describeDbError } from "./dbExecute";
 
 export type TimestampedRead<T> = {
@@ -116,9 +121,12 @@ async function readSource<T>(
   label: string | undefined,
   timeoutMs: number,
 ): Promise<TimestampedRead<T> | null> {
+  const identity: DbOperationIdentity | undefined =
+    sourceName === "DB" ? createDbOperationIdentity() : undefined;
   try {
+    const pending = identity ? runWithDbOperation(identity, read) : read();
     return (await withTimeout(
-      read(),
+      pending,
       timeoutMs,
       `${sourceName} read timed out after ${timeoutMs}ms`,
     )) ?? null;
@@ -127,7 +135,7 @@ async function readSource<T>(
     // the NEXT request rebuilds a fresh pool instead of waiting for the 12s
     // stall ceiling. The disk read still serves this request. Never reset on a
     // disk-source error — that has nothing to do with the libsql client.
-    if (sourceName === "DB") resetDb();
+    if (identity) resetDb(identity);
     warnWithLabel(label, `${sourceName} read failed: ${describeDbError(err)}`);
     return null;
   }

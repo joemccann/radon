@@ -86,22 +86,10 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const { drainNotifications, setOrdersUpdater } = useOrderActions();
 
   const isOrdersPage = activeSection === "orders";
-  // Fetch orders polling on orders page (always), and on other pages only during market hours.
+  // Poll cached orders on the orders page (always), and elsewhere during market hours.
   const shouldAutoSyncOrders = isOrdersPage || isMarketActive;
-  // Fetch orders polling based on context (market hours for non-order views, always for orders)
-  // initial fetch always happens on mount
+  // Live IB refresh remains an explicit operator action; initial cached read always runs.
   const { data: orders, syncing: ordersSyncing, error: ordersError, lastSync: ordersLastSync, syncNow: ordersSyncNow, updateData: updateOrdersData } = useOrders(shouldAutoSyncOrders);
-
-  // Trigger a fresh IB sync every time the user navigates TO the orders page.
-  // place/modify/cancel all refresh the DB order snapshot immediately, so
-  // this primarily catches IB-side changes (partial fills, status updates, etc.)
-  // that happened while the user was on another page.
-  useEffect(() => {
-    if (isOrdersPage) {
-      ordersSyncNow();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOrdersPage]);
 
   const orderSymbols = useMemo(
     () => (orders?.open_orders ?? []).map((o) => o.contract.symbol),

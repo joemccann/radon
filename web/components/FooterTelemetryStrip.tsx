@@ -37,18 +37,20 @@ function ibChipFor(status: IBDisplayStatus): { text: string; cls: ChipTone } {
 }
 
 function flexChipFor(flex: FlexTokenStatus | null): { text: string; cls: ChipTone } {
-  if (!flex) return { text: "Unknown", cls: "ok" };
+  if (!flex) return { text: "Unknown", cls: "warn" };
   if (flex.expired) return { text: "Expired", cls: "dead" };
   if (flex.days_remaining == null) return { text: "Active", cls: "ok" };
   const cls: ChipTone = flex.days_remaining <= 7 ? "dead" : flex.should_warn ? "warn" : "ok";
   return { text: `${flex.days_remaining}d remaining`, cls };
 }
 
-function servicesChipFor(
+export function servicesChipFor(
   total: number | null,
   degraded: number,
+  unavailable: boolean,
 ): { text: string; cls: ChipTone } {
-  if (total == null) return { text: "Unknown", cls: "ok" };
+  if (unavailable) return { text: "Unavailable", cls: "warn" };
+  if (total == null || total <= 0) return { text: "Unknown", cls: "warn" };
   if (degraded === 0) return { text: `${total} of ${total} nominal`, cls: "ok" };
   return {
     text: `${total - degraded} of ${total} nominal · ${degraded} degraded`,
@@ -64,12 +66,12 @@ function servicesChipFor(
  */
 export default function FooterTelemetryStrip() {
   const { displayStatus } = useIBStatusContext();
-  const { data: services } = useServiceHealth();
+  const { data: services, error: servicesError } = useServiceHealth();
   const [flex, setFlex] = useState<FlexTokenStatus | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    fetch("/api/flex-token")
+    fetch("/api/flex-token", { signal: AbortSignal.timeout(10_000) })
       .then((r) => (r.ok ? r.json() : null))
       .then((d: FlexTokenStatus | null) => {
         if (!cancelled && d) setFlex(d);
@@ -85,6 +87,7 @@ export default function FooterTelemetryStrip() {
   const servicesChip = servicesChipFor(
     services?.summary?.total ?? null,
     services?.degraded_count ?? 0,
+    servicesError != null,
   );
 
   return (

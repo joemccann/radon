@@ -11,6 +11,7 @@ import subprocess
 import sys
 import threading
 import urllib.request
+from types import SimpleNamespace
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 import pytest
@@ -221,6 +222,8 @@ class TestStatusResponse:
         assert body["probes"]["radon-api"]["state"] == "up"
         assert body["units"]["radon-api.service"]["state"] == "up"
         assert body["units_age_secs"] == 1.2
+        assert body["ok"] is True
+        assert body["overall_state"] == "up"
         # service_health section present even with no cache wired in
         assert body["service_health"]["state"] == "unknown"
 
@@ -236,6 +239,54 @@ class TestStatusResponse:
         assert status == 200
         assert body["health_service"] == "degraded"
         assert body["probes"] == {}
+        assert body["ok"] is False
+        assert body["overall_state"] == "unknown"
+
+    def test_stale_unit_snapshot_cannot_keep_canonical_status_green(self):
+        status, body = serve.status_response(
+            run_probes_fn=lambda: {"radon-api": {"state": "up"}},
+            unit_cache=_FakeCache(
+                {"radon-api.service": {"state": "up"}},
+                30.1,
+            ),
+            now_fn=lambda: "t",
+        )
+
+        assert status == 200
+        assert body["ok"] is False
+        assert body["overall_state"] == "unknown"
+
+    def test_nested_down_and_unknown_states_drive_the_canonical_aggregate(self):
+        down = probes.build_status(
+            {"radon-api": {"state": "up"}, "radon-relay": {"state": "down"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+            external_probe={"ok": 1, "checked_at": "t"},
+        )
+        assert down["ok"] is False
+        assert down["overall_state"] == "down"
+
+        unknown = probes.build_status(
+            {"radon-api": {"state": "up"}, "radon-relay": {"state": "unknown"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+            external_probe={"ok": 1, "checked_at": "t"},
+        )
+        assert unknown["ok"] is False
+        assert unknown["overall_state"] == "unknown"
+
+    def test_external_probe_is_not_folded_back_into_the_aggregate(self):
+        body = probes.build_status(
+            {"radon-api": {"state": "up"}},
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+            external_probe={"ok": 0, "detail": "old off-box failure"},
+        )
+        assert body["ok"] is True
+        assert body["overall_state"] == "up"
 
     def test_service_health_section_merged_when_ok(self):
         sh = {"state": "ok", "rows": [{"service": "cri-scan", "state": "ok",
@@ -414,6 +465,40 @@ class TestUnitStateCacheRefresh:
         cache.refresh_once()
         assert cache.snapshot() == ({}, None)
 
+    def test_failed_systemctl_refresh_does_not_timestamp_empty_evidence(self, monkeypatch):
+        monkeypatch.setattr(
+            serve.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=1, stdout=""),
+        )
+        cache = serve.UnitStateCache(["radon-api.service"])
+
+        cache.refresh_once()
+
+        assert cache.snapshot() == ({}, None)
+
+    def test_partial_systemctl_refresh_does_not_replace_complete_snapshot(self, monkeypatch):
+        complete = (
+            "Id=radon-api.service\nActiveState=active\nSubState=running\nResult=success\n\n"
+            "Id=radon-relay.service\nActiveState=active\nSubState=running\nResult=success\n"
+        )
+        partial = "Id=radon-api.service\nActiveState=active\nSubState=running\nResult=success\n"
+        outputs = iter([complete, partial])
+        monkeypatch.setattr(
+            serve.subprocess,
+            "run",
+            lambda *args, **kwargs: SimpleNamespace(returncode=0, stdout=next(outputs)),
+        )
+        cache = serve.UnitStateCache(["radon-api.service", "radon-relay.service"])
+        cache.refresh_once()
+        first, _ = cache.snapshot()
+
+        cache.refresh_once()
+        second, _ = cache.snapshot()
+
+        assert set(first) == {"radon-api.service", "radon-relay.service"}
+        assert second == first
+
 
 # --- HTTP wiring smoke test (real ephemeral server) ---
 
@@ -493,6 +578,27 @@ class TestFetchExternalProbe:
         assert row["latency_ms"] == 142
         assert row["checked_at"] == "2026-05-30T13:05:22Z"
         assert "age_secs" not in row  # external_probe uses checked_at
+
+    def test_source_filter_is_applied_to_deadman_reads(self, monkeypatch):
+        monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-x.turso.io")
+        monkeypatch.setenv("TURSO_AUTH_TOKEN", "tok")
+        captured = {}
+
+        def _fake_post(origin, token, sql, timeout):
+            captured["sql"] = sql
+            return {"results": [
+                {"type": "ok", "response": {"type": "execute", "result": {
+                    "cols": [], "rows": [],
+                }}},
+                {"type": "ok", "response": {"type": "close"}},
+            ]}
+
+        monkeypatch.setattr(turso_http, "_post_pipeline", _fake_post)
+        assert turso_http.fetch_external_probe(
+            timeout=2.5,
+            source="github-actions/edge",
+        ) is None
+        assert "WHERE source = 'github-actions/edge'" in captured["sql"]
 
     def test_no_rows_is_none(self, monkeypatch):
         monkeypatch.setenv("TURSO_DB_URL", "libsql://radon-x.turso.io")

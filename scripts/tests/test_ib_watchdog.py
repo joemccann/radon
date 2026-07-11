@@ -99,7 +99,8 @@ class TestIsApiHang:
         assert is_api_hang(s) is False
 
     def test_port_down_is_not_a_hang(self):
-        # Container restart policy handles this — not our problem.
+        # The direct-probe DEAD path owns port-down recovery; this HTTP-payload
+        # classifier remains specific to port-up/API-dead hangs.
         s = GatewayState("unhealthy", False, True, "unreachable")
         assert is_api_hang(s) is False
 

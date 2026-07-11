@@ -207,6 +207,69 @@ describe("IBStatusProvider", () => {
     expect(wsInstances.length).toBeGreaterThan(beforeCount);
   });
 
+  it("closes a status socket that never reaches open", async () => {
+    renderHook(() => useIBStatusContext(), { wrapper });
+    await flushSocketOpen();
+    const stalled = latestWs();
+
+    await act(async () => {
+      vi.advanceTimersByTime(10_001);
+      await Promise.resolve();
+    });
+
+    expect(stalled.readyState).toBe(MockWebSocket.CLOSED);
+  });
+
+  it("bounds authoritative health polling with an abort signal", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ib_gateway: {
+          auth_state: "authenticated",
+          service_state: "healthy",
+          upstream_dead: false,
+        },
+      }), { status: 200, headers: { "Content-Type": "application/json" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderHook(() => useIBStatusContext(), { wrapper });
+    await flushSocketOpen();
+
+    expect(fetchMock).toHaveBeenCalled();
+    const [, options] = fetchMock.mock.calls[0] as [string, RequestInit];
+    expect(options.signal).toBeInstanceOf(AbortSignal);
+  });
+
+  it("stops reporting connected after authoritative health stays unavailable", async () => {
+    const healthy = new Response(JSON.stringify({
+      ib_gateway: {
+        auth_state: "authenticated",
+        service_state: "healthy",
+        upstream_dead: false,
+      },
+    }), { status: 200, headers: { "Content-Type": "application/json" } });
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(healthy)
+      .mockRejectedValue(new Error("health endpoint unavailable"));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useIBStatusContext(), { wrapper });
+    await flushSocketOpen();
+    act(() => latestWs().simulateOpen());
+    expect(result.current.displayStatus).toBe("connected");
+
+    for (let poll = 0; poll < 3; poll += 1) {
+      await act(async () => {
+        vi.advanceTimersByTime(15_000);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+    }
+
+    expect(result.current.displayStatus).toBe("unhealthy");
+    expect(result.current.authState).toBe("unknown");
+  });
+
   it("cleans up WebSocket on unmount", async () => {
     const { unmount } = renderHook(() => useIBStatusContext(), { wrapper });
     await flushSocketOpen();

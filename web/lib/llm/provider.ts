@@ -175,6 +175,12 @@ async function readErrorDetail(response: Response): Promise<string> {
   }
 }
 
+const LLM_REQUEST_TIMEOUT_MS = 45_000;
+
+function llmRequestSignal(): AbortSignal {
+  return AbortSignal.timeout(LLM_REQUEST_TIMEOUT_MS);
+}
+
 // --- Anthropic (native Messages API) -------------------------------------
 
 type AnthropicContentBlock = {
@@ -218,6 +224,7 @@ async function callAnthropic(request: LlmChatRequest): Promise<LlmChatResponse> 
       accept: "application/json",
     },
     body: JSON.stringify(body),
+    signal: llmRequestSignal(),
   });
 
   if (!response.ok) {
@@ -388,6 +395,7 @@ async function callOpenAiCompatible(
       accept: "application/json",
     },
     body: JSON.stringify(body),
+    signal: llmRequestSignal(),
   });
 
   if (!response.ok) {
@@ -461,6 +469,7 @@ async function callGemini(request: LlmChatRequest): Promise<LlmChatResponse> {
     method: "POST",
     headers: { "content-type": "application/json", accept: "application/json" },
     body: JSON.stringify(body),
+    signal: llmRequestSignal(),
   });
 
   if (!response.ok) {

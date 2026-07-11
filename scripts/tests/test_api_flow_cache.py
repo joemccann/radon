@@ -60,6 +60,10 @@ def app_client(monkeypatch):
 
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    # ``test_mode`` is computed at module import. API tests collected earlier
+    # may have imported the shared module with RADON_API_TEST_MODE=1; changing
+    # the environment afterward does not update this process-global value.
+    monkeypatch.setattr(server, "test_mode", False)
 
     return TestClient(server.app), server
 

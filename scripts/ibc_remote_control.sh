@@ -9,6 +9,9 @@ START_CMD="$IBC_BIN_DIR/start-secure-ibc-service.sh"
 STOP_CMD="$IBC_BIN_DIR/stop-secure-ibc-service.sh"
 RESTART_CMD="$IBC_BIN_DIR/restart-secure-ibc-service.sh"
 STATUS_CMD="$IBC_BIN_DIR/status-secure-ibc-service.sh"
+LOCK_PYTHON="${IB_2FA_LOCK_PYTHON:-python3.13}"
+LOCK_CLI="$PROJECT_DIR/scripts/utils/ib_2fa_lock.py"
+LOCK_HOLDER="scripts.ibc_remote_control"
 
 print_usage() {
   cat <<'EOF'
@@ -279,6 +282,19 @@ run_wrapper() {
   exec "$cmd"
 }
 
+run_cycle_wrapper() {
+  local cmd="$1"
+  if [[ ! -x "$cmd" ]]; then
+    echo "Missing executable: $cmd" >&2
+    exit 1
+  fi
+  if ! "$LOCK_PYTHON" "$LOCK_CLI" acquire "$LOCK_HOLDER"; then
+    echo "Refusing IB Gateway cycle: shared 2FA push lease unavailable or already held." >&2
+    exit 1
+  fi
+  exec "$cmd"
+}
+
 show_remote_help() {
   cat <<EOF
 Remote command examples
@@ -286,9 +302,7 @@ Remote command examples
 Once Tailscale is connected and macOS Remote Login is enabled:
 
   ssh ${USER}@<tailscale-host-or-ip> '~/ibc/bin/status-secure-ibc-service.sh'
-  ssh ${USER}@<tailscale-host-or-ip> '~/ibc/bin/start-secure-ibc-service.sh'
   ssh ${USER}@<tailscale-host-or-ip> '~/ibc/bin/stop-secure-ibc-service.sh'
-  ssh ${USER}@<tailscale-host-or-ip> '~/ibc/bin/restart-secure-ibc-service.sh'
 
 Repo convenience wrapper:
 
@@ -317,13 +331,13 @@ main() {
       run_wrapper "$STATUS_CMD"
       ;;
     ibc-start)
-      run_wrapper "$START_CMD"
+      run_cycle_wrapper "$START_CMD"
       ;;
     ibc-stop)
       run_wrapper "$STOP_CMD"
       ;;
     ibc-restart)
-      run_wrapper "$RESTART_CMD"
+      run_cycle_wrapper "$RESTART_CMD"
       ;;
     remote-help)
       show_remote_help

@@ -23,9 +23,10 @@ Symptoms before the lock:
 Every restart path that fires a push acquires the lock first. While held, restart requests REJECTED with `reason="2fa_push_in_flight"`.
 
 Required participants:
-- `restart_ib_gateway` in `scripts/api/ib_gateway.py`
-- `radon-ib-watchdog` cycle in `scripts/ib_watchdog.py`
-- Any manual `systemctl restart radon-ib-gateway.service` path that the operator triggers via the admin panel
+- Local Docker recovery in `scripts/api/ib_gateway.py` and `scripts/docker_ib_gateway.sh`
+- The production `/usr/local/bin/radon-ib-gateway-control` helper installed from `radon-cloud`
+- `radon-ib-watchdog`, which acquires the lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter exactly once
+- Boot, operator, admin-panel, and laptop cloud starts, all of which delegate to the production helper instead of acquiring independently
 
 This is what defends against stacked-push rejection.
 
@@ -44,7 +45,7 @@ Backoff applies to the next restart attempt by THIS process. Cross-process backo
 - `push_lock_active == false`
 - `next_attempt_in_secs <= 0`
 
-After **3 consecutive stuck cycles (~3 min)**, watchdog acquires the push lock and triggers `systemctl restart radon-ib-gateway.service`.
+After **3 consecutive stuck cycles (~3 min)**, the watchdog acquires the push lock and starts `radon-ib-gateway-preheld-restart.service`. That fixed adapter verifies the exact watchdog holder, consumes that lease fingerprint once, and delegates the Docker cycle to the production helper without acquiring a second lease.
 
 `stuck_2fa_count` freezes during push-in-flight or active backoff. Resets only on `auth_state == "authenticated"`.
 
@@ -95,7 +96,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 
 `POST /ib/reset-backoff` clears BOTH in-memory backoff AND the cross-process push lock. Use after manually approving 2FA on the phone.
 
-`systemctl restart radon-ib-gateway.service` (via the operator-radon CLI or admin panel) goes through the push lock — won't fire if a push is already in flight.
+`/usr/local/bin/radon restart` and the admin Gateway controls delegate to `/usr/local/bin/radon-ib-gateway-control`. A healthy start is a no-op with no lease; a stopped/missing start or any restart atomically acquires the lease before touching Docker.
 
 `radon restart` (whole-stack) restarts all `radon-*` units. Use after a sustained outage.
 
@@ -106,7 +107,7 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 - **Do not re-enable IBC-side relogin on 2FA timeout** (`TWOFA_TIMEOUT_ACTION: exit`, `RELOGIN_AFTER_TWOFA_TIMEOUT: "no"` in `docker/ib-gateway/docker-compose.yml`). VPS counterpart uses IBC default (`no`). IBC's relogin bypasses the push lock and reintroduces the stacked-push bug.
 - **Do not piecemeal `systemctl stop radon-<one>`** — it cascade-stops dependents (relay + monitor + api) and `Restart=always` does NOT fire because cascade-stop is a clean stop. Use `radon restart` instead. See `feedback_use_radon_restart_not_piecemeal_systemctl.md`.
 - **Do not assume `auth_state=authenticated` means the pool is healthy.** After 2FA resolves, the FastAPI `ib_pool` can stay stuck disconnected. As of 2026-06-24 (46ba1e1) the `recover_stuck_pool` self-heal (Gate 5) reconnects it in ~15-60s with no operator action, so **do not reflexively restart radon-api** — give the heartbeat a minute. `systemctl restart radon-api.service` remains the emergency override if the self-heal genuinely fails. See `feedback_ib_pool_stuck_after_2fa.md`.
-- **Do not run a whole-stack `radon restart` to recover a 2FA situation.** It does NOT hold the push lock, so the watchdog self-heal can stack a second push and IBKR rejects every approval ("unsuccessful"). Prefer the lock-holding `POST /ib/restart` for a gateway-only 2FA cycle. If approvals are already failing: `POST /ib/reset-backoff` (clears the stale lock) → single `POST /ib/restart` → approve ONE push → `systemctl restart radon-api`. See `feedback_radon_restart_stacks_2fa_with_watchdog`.
+- **Do not call `docker compose`, `docker restart`, or `systemctl restart radon-ib-gateway.service` directly.** Those paths bypass real-container inspection or split one logical cycle across multiple control planes. Use the admin Gateway action or `/usr/local/bin/radon restart`; both use the authoritative helper and refuse while any 2FA lease is active. Clear a lease with `POST /ib/reset-backoff` only after verifying no push is actually in flight.
 - **Do not run a synchronous libsql write on the FastAPI event loop.** A hung Turso write freezes the whole API (`/health` times out, which also fails `deploy.sh`'s gateway-ready gate). Offload to a thread. See `feedback_no_sync_libsql_on_fastapi_event_loop`.
 
 ---
@@ -118,6 +119,8 @@ Next.js footer reads via `useIBStatusContext().displayStatus` (polls `/api/admin
 - `scripts/api/server.py:_recover_stuck_pool_guarded` + `_ib_recovery_heartbeat_tick` (the 15s driver)
 - `scripts/ib_watchdog.py:run_cycle`
 - `scripts/utils/ib_2fa_lock.py`
+- `radon-cloud/scripts/ib-gateway-control.sh`
+- `radon-cloud/services/radon-ib-gateway-preheld-restart.service`
 - `scripts/api/auth.py:51-54` (localhost bypass for Next.js → FastAPI)
 
 ---

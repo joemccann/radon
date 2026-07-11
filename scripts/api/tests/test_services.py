@@ -10,7 +10,9 @@ These pin down the security-relevant pieces:
 from __future__ import annotations
 
 import asyncio
+import fcntl
 import sys
+import time
 from pathlib import Path
 from unittest.mock import patch
 
@@ -23,7 +25,6 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 
 from scripts.api import services as admin_services  # noqa: E402
-from utils import ib_2fa_lock  # noqa: E402
 
 
 class TestIsValidUnit:
@@ -55,6 +56,7 @@ class TestIsValidUnit:
             ".",
             "",
             "../radon-api.service",
+            "radon-ib-gateway-preheld-restart.service",
         ],
     )
     def test_rejects_non_radon_units(self, unit: str) -> None:
@@ -269,6 +271,33 @@ class TestUnitStatusEnrichment:
         assert status.last_exit_code == 2
         assert status.active_state == "failed"
 
+    def test_gateway_status_uses_real_container_not_active_oneshot(self) -> None:
+        output = self._make_show_output(
+            ActiveState="active",
+            SubState="exited",
+            Type="oneshot",
+            ExecMainStatus="0",
+        )
+
+        async def fake_systemctl(*_args: str, **_kwargs: object) -> tuple[str, str, int]:
+            return (output, "", 0)
+
+        async def fake_gateway_helper(
+            _action: str, *, timeout: float
+        ) -> tuple[str, str, int]:
+            assert timeout == 15.0
+            return ("stopped", "", 1)
+
+        with patch.object(admin_services, "is_systemd_available", return_value=True), \
+             patch.object(admin_services, "is_gateway_control_available", return_value=True), \
+             patch.object(admin_services, "_systemctl", side_effect=fake_systemctl), \
+             patch.object(admin_services, "_run_gateway_helper", side_effect=fake_gateway_helper):
+            status = asyncio.run(admin_services.show_unit("radon-ib-gateway.service"))
+
+        assert status.active_state == "inactive"
+        assert status.sub_state == "dead"
+        assert status.can_control is True
+
 
 class TestDeriveHelpers:
     """Lower-level helpers used inside show_unit; pin behaviour directly."""
@@ -308,15 +337,27 @@ class TestDeriveHelpers:
 
 
 class TestControlUnitGatewayPushLock:
-    """Gateway start/restart from the admin panel must hold the shared 2FA
-    push lock — the same lock the FastAPI restart path and the watchdog use —
-    so the panel can never stack a second IBKR push (DUR-03)."""
+    """Gateway actions must use the installed helper as the sole lease owner."""
 
     GATEWAY = "radon-ib-gateway.service"
 
     @pytest.fixture(autouse=True)
-    def _redirect_lock_path(self, tmp_path, monkeypatch):
-        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "ib-2fa-push-lock.json"))
+    def _deploy_lock_path(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(admin_services, "DEPLOY_LOCK_FILE", tmp_path / "deploy.lock")
+
+    @staticmethod
+    def _install_helper(tmp_path: Path, monkeypatch, *, rc: int = 0, detail: str = "ok") -> Path:
+        log = tmp_path / "gateway-helper.log"
+        helper = tmp_path / "radon-ib-gateway-control"
+        helper.write_text(
+            "#!/bin/sh\n"
+            f"printf '%s\\n' \"$*\" >> '{log}'\n"
+            f"printf '%s\\n' '{detail}' >&2\n"
+            f"exit {rc}\n"
+        )
+        helper.chmod(0o755)
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        return log
 
     def _control(self, unit: str, action: str, systemctl_calls: list) -> admin_services.ActionResult:
         async def fake_systemctl(*args: str, **_kw: object) -> tuple[str, str, int]:
@@ -327,55 +368,195 @@ class TestControlUnitGatewayPushLock:
              patch.object(admin_services, "_systemctl", side_effect=fake_systemctl):
             return asyncio.run(admin_services.control_unit(unit, action))
 
-    def test_restart_refused_while_lock_held_by_another_holder(self) -> None:
-        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+    @pytest.mark.parametrize("action", ["start", "restart", "stop"])
+    def test_gateway_action_routes_only_through_helper(
+        self, tmp_path: Path, monkeypatch, action: str
+    ) -> None:
+        lock_path = tmp_path / "ib-2fa-push-lock.json"
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(lock_path))
+        helper_log = self._install_helper(tmp_path, monkeypatch)
+        calls: list = []
+        result = self._control(self.GATEWAY, action, calls)
+
+        assert result.ok is True
+        assert helper_log.read_text().splitlines() == [action]
+        assert calls == []
+        assert not lock_path.exists(), "admin API must not pre-acquire the helper's lease"
+
+    def test_helper_lease_refusal_maps_to_conflict(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        helper_log = self._install_helper(
+            tmp_path,
+            monkeypatch,
+            rc=admin_services.GATEWAY_LEASE_HELD_RC,
+            detail="REFUSING Gateway cycle: held holder=ib-watchdog",
+        )
         calls: list = []
         result = self._control(self.GATEWAY, "restart", calls)
+
         assert result.ok is False
         assert result.returncode == admin_services.PUSH_LOCK_HELD_RC
         assert "ib-watchdog" in result.detail
-        assert calls == []  # systemctl must never fire under a foreign lock
-        # Lock untouched.
-        held = ib_2fa_lock.check_2fa_push_lock()
-        assert held is not None and held.holder == "ib-watchdog"
-
-    def test_start_refused_while_lock_held_by_another_holder(self) -> None:
-        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
-        calls: list = []
-        result = self._control(self.GATEWAY, "start", calls)
-        assert result.ok is False
-        assert result.returncode == admin_services.PUSH_LOCK_HELD_RC
+        assert helper_log.read_text().splitlines() == ["restart"]
         assert calls == []
 
-    def test_restart_acquires_lock_and_keeps_it_after_systemctl(self) -> None:
-        """The push is still pending when systemctl returns — the lock must
-        stay held (crash-safe TTL clears it), never released inline."""
+    def test_helper_deploy_lock_refusal_maps_to_conflict(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        self._install_helper(
+            tmp_path,
+            monkeypatch,
+            rc=admin_services.GATEWAY_CONTROL_BUSY_RC,
+            detail="REFUSING Gateway mutation: deploy/control lock held",
+        )
+        calls: list = []
+
+        result = self._control(self.GATEWAY, "restart", calls)
+
+        assert result.ok is False
+        assert result.returncode == admin_services.PUSH_LOCK_HELD_RC
+        assert "deploy/control lock held" in result.detail
+        assert calls == []
+
+    def test_missing_helper_fails_closed(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setattr(
+            admin_services,
+            "GATEWAY_CONTROL_PATH",
+            str(tmp_path / "missing-gateway-helper"),
+        )
         calls: list = []
         result = self._control(self.GATEWAY, "restart", calls)
-        assert result.ok is True
-        assert calls == [("restart", self.GATEWAY)]
-        held = ib_2fa_lock.check_2fa_push_lock()
-        assert held is not None
-        assert held.holder == admin_services.ADMIN_PANEL_LOCK_HOLDER
 
-    def test_stop_is_never_gated_by_the_lock(self) -> None:
-        """Stopping the gateway fires no 2FA push — must proceed even while
-        another holder owns the lock."""
-        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
+        assert result.ok is False
+        assert "helper unavailable" in result.detail
+        assert calls == []
+
+    def test_timeout_kills_helper_descendants(self, tmp_path: Path, monkeypatch) -> None:
+        marker = tmp_path / "orphan-survived"
+        helper = tmp_path / "hanging-gateway-helper"
+        helper.write_text(
+            "#!/bin/sh\n"
+            f"(trap '' TERM; sleep 0.5; printf survived > '{marker}') &\n"
+            "trap '' TERM\n"
+            "wait\n"
+        )
+        helper.chmod(0o755)
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(admin_services, "PROCESS_TERM_GRACE_S", 0.05)
         calls: list = []
-        result = self._control(self.GATEWAY, "stop", calls)
-        assert result.ok is True
-        assert calls == [("stop", self.GATEWAY)]
+
+        result = self._control(self.GATEWAY, "restart", calls)
+        time.sleep(0.6)
+
+        assert result.ok is False
+        assert "timed out" in result.detail
+        assert not marker.exists(), "timed-out helper descendant survived its process group"
+        assert calls == []
+
+    @pytest.mark.asyncio
+    async def test_cancellation_kills_helper_descendants(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        marker = tmp_path / "cancelled-orphan-survived"
+        helper = tmp_path / "cancelled-gateway-helper"
+        helper.write_text(
+            "#!/bin/sh\n"
+            f"(trap '' TERM; sleep 0.5; printf survived > '{marker}') &\n"
+            "trap '' TERM\n"
+            "wait\n"
+        )
+        helper.chmod(0o755)
+        monkeypatch.setattr(admin_services, "GATEWAY_CONTROL_PATH", str(helper))
+        monkeypatch.setattr(admin_services, "PROCESS_TERM_GRACE_S", 0.05)
+
+        task = asyncio.create_task(
+            admin_services._run_gateway_helper("restart", timeout=60.0)
+        )
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0.6)
+
+        assert not marker.exists(), "cancelled helper descendant survived its process group"
 
     def test_non_gateway_units_are_never_gated(self) -> None:
-        ib_2fa_lock.acquire_2fa_push_lock("ib-watchdog", ttl_secs=600)
         calls: list = []
         result = self._control("radon-api.service", "restart", calls)
         assert result.ok is True
         assert calls == [("restart", "radon-api.service")]
-        # And the foreign lock is untouched.
-        held = ib_2fa_lock.check_2fa_push_lock()
-        assert held is not None and held.holder == "ib-watchdog"
+
+    def test_non_gateway_mutation_refuses_while_deploy_lock_is_held(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        lock_path = tmp_path / "held-deploy.lock"
+        monkeypatch.setattr(admin_services, "DEPLOY_LOCK_FILE", lock_path)
+        calls: list = []
+        with lock_path.open("a+") as held:
+            fcntl.flock(held.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            result = self._control("radon-api.service", "restart", calls)
+
+        assert result.ok is False
+        assert result.returncode == admin_services.PUSH_LOCK_HELD_RC
+        assert "deploy/control lock held" in result.detail
+        assert calls == []
+
+    def test_timed_out_systemctl_job_is_cancelled_before_lock_release(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        lock_path = tmp_path / "timeout-deploy.lock"
+        monkeypatch.setattr(admin_services, "DEPLOY_LOCK_FILE", lock_path)
+        calls = []
+
+        async def fake_systemctl(*args: str, **_kwargs: object):
+            calls.append(args)
+            # Every cleanup subprocess must still run under the held lock.
+            with lock_path.open("a+") as contender:
+                with pytest.raises(BlockingIOError):
+                    fcntl.flock(
+                        contender.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB
+                    )
+            if args[0] == "restart":
+                return "", "systemctl timed out", -1
+            if args[0] == "list-jobs":
+                return "42 radon-api.service start running", "", 0
+            if args[0] == "cancel":
+                return "", "", 0
+            raise AssertionError(args)
+
+        with patch.object(admin_services, "is_systemd_available", return_value=True), \
+             patch.object(admin_services, "_systemctl", side_effect=fake_systemctl):
+            result = asyncio.run(
+                admin_services.control_unit("radon-api.service", "restart")
+            )
+
+        assert result.ok is False
+        assert "cancelled pending systemd jobs 42" in result.detail
+        assert calls == [
+            ("restart", "radon-api.service"),
+            ("list-jobs", "--no-legend", "--plain", "--no-pager"),
+            ("cancel", "42"),
+        ]
+        with lock_path.open("a+") as after:
+            fcntl.flock(after.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+
+
+def test_list_units_filters_watchdog_only_gateway_adapter() -> None:
+    async def fake_systemctl(*_args: str, **_kwargs: object) -> tuple[str, str, int]:
+        return (
+            "radon-api.service loaded active running API\n"
+            "radon-ib-gateway-preheld-restart.service loaded inactive dead Internal",
+            "",
+            0,
+        )
+
+    with patch.object(admin_services, "is_systemd_available", return_value=True), \
+         patch.object(admin_services, "_systemctl", side_effect=fake_systemctl):
+        units = asyncio.run(admin_services.list_units())
+
+    assert units == ["radon-api.service"]
 
 
 class TestRestartFullStack:
@@ -425,27 +606,25 @@ class TestRestartFullStack:
         assert result.returncode == 1
         assert "permission denied" in result.detail
 
-    def test_timeout_reports_clearly(self) -> None:
-        kill_called = {"value": False}
+    def test_timeout_kills_full_stack_descendants(self, tmp_path: Path, monkeypatch) -> None:
+        marker = tmp_path / "stack-orphan-survived"
+        operator = tmp_path / "hanging-radon"
+        operator.write_text(
+            "#!/bin/sh\n"
+            f"(trap '' TERM; sleep 0.5; printf survived > '{marker}') &\n"
+            "trap '' TERM\n"
+            "wait\n"
+        )
+        operator.chmod(0o755)
+        monkeypatch.setattr(admin_services, "OPERATOR_CLI_PATH", str(operator))
+        monkeypatch.setattr(admin_services, "STACK_RESTART_TIMEOUT_S", 0.05)
+        monkeypatch.setattr(admin_services, "PROCESS_TERM_GRACE_S", 0.05)
 
-        class _HangProc:
-            returncode = None
-
-            async def communicate(self):
-                await asyncio.sleep(10)  # longer than the timeout we will set
-                return (b"", b"")
-
-            def kill(self) -> None:
-                kill_called["value"] = True
-
-        async def _fake_exec(*_args, **_kw):
-            return _HangProc()
-
-        with patch.object(admin_services, "is_operator_cli_available", return_value=True), \
-             patch.object(admin_services, "STACK_RESTART_TIMEOUT_S", 0.05), \
-             patch.object(admin_services.asyncio, "create_subprocess_exec", side_effect=_fake_exec):
+        with patch.object(admin_services, "is_operator_cli_available", return_value=True):
             result = asyncio.run(admin_services.restart_full_stack())
+        time.sleep(0.6)
+
         assert result.ok is False
         assert result.returncode == -1
         assert "timed out" in result.detail.lower()
-        assert kill_called["value"] is True
+        assert not marker.exists(), "timed-out full-stack descendant survived its process group"

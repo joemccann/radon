@@ -20,8 +20,9 @@ from datetime import datetime, timedelta, timezone
 import sys
 import time
 from contextlib import asynccontextmanager
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Iterable, List, Optional, Tuple
+from typing import Any, Awaitable, Callable, Iterable, List, Optional, Tuple
 
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -118,6 +119,145 @@ def _bounded_env_int(name: str, default: int, *, minimum: int = 1, maximum: int 
     except (TypeError, ValueError):
         return default
     return max(minimum, min(maximum, parsed))
+
+
+@dataclass(frozen=True)
+class _IBSyncOutcome:
+    result: Any
+    payload: Optional[dict] = None
+    error: Optional[str] = None
+
+    @property
+    def ok(self) -> bool:
+        return bool(getattr(self.result, "ok", False)) and self.error is None
+
+
+class _IBSyncCoordinator:
+    """Per-resource single-flight with a short successful-result minimum age."""
+
+    def __init__(self, *, min_age_secs: float) -> None:
+        self.min_age_secs = max(0.0, float(min_age_secs))
+        self._loop: Optional[asyncio.AbstractEventLoop] = None
+        self._lock: Optional[asyncio.Lock] = None
+        self._states: dict[str, dict[str, Any]] = {}
+
+    def _bind_running_loop(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._loop is not loop:
+            active = [
+                state["task"]
+                for state in self._states.values()
+                if state.get("task") is not None and not state["task"].done()
+            ]
+            if active:
+                raise RuntimeError("IB sync coordinator cannot move loops with work in flight")
+            self._loop = loop
+            self._lock = asyncio.Lock()
+            # A new event loop means a new application/test lifecycle. Avoid
+            # carrying cached results across independent TestClient portals.
+            self._states = {}
+        assert self._lock is not None
+        return self._lock
+
+    async def run(
+        self,
+        key: str,
+        operation: Callable[[], Awaitable[_IBSyncOutcome]],
+    ) -> _IBSyncOutcome:
+        lock = self._bind_running_loop()
+        async with lock:
+            state = self._states.setdefault(
+                key,
+                {"task": None, "last_success_at": 0.0, "last_outcome": None},
+            )
+            cached = state["last_outcome"]
+            if (
+                cached is not None
+                and time.monotonic() - state["last_success_at"] < self.min_age_secs
+            ):
+                return cached
+            task = state["task"]
+            if task is None:
+                task = asyncio.create_task(self._execute(key, operation))
+                state["task"] = task
+        # A disconnected browser must not cancel the shared subprocess for all
+        # other callers. The coordinator task owns its own cleanup.
+        return await asyncio.shield(task)
+
+    async def _execute(
+        self,
+        key: str,
+        operation: Callable[[], Awaitable[_IBSyncOutcome]],
+    ) -> _IBSyncOutcome:
+        outcome: Optional[_IBSyncOutcome] = None
+        try:
+            outcome = await operation()
+            return outcome
+        finally:
+            lock = self._bind_running_loop()
+            async with lock:
+                state = self._states.setdefault(
+                    key,
+                    {"task": None, "last_success_at": 0.0, "last_outcome": None},
+                )
+                if outcome is not None and outcome.ok:
+                    state["last_success_at"] = time.monotonic()
+                    state["last_outcome"] = outcome
+                state["task"] = None
+
+
+IB_SYNC_MIN_AGE_SECS = _bounded_env_int(
+    "RADON_IB_SYNC_MIN_AGE_SECS", 30, minimum=1, maximum=300
+)
+_ib_sync_coordinator = _IBSyncCoordinator(min_age_secs=IB_SYNC_MIN_AGE_SECS)
+
+
+async def _portfolio_sync_operation() -> _IBSyncOutcome:
+    result = await _run_ib_script_with_recovery(
+        "ib_sync.py",
+        ["--sync", "--json-output", "--db-optional", "--port", str(DEFAULT_GATEWAY_PORT)],
+        timeout=30,
+        raw=False,
+    )
+    if not result.ok:
+        return _IBSyncOutcome(result=result, error=result.error or "Portfolio sync failed")
+    if isinstance(result.data, dict) and result.data:
+        return _IBSyncOutcome(result=result, payload=result.data)
+    try:
+        payload = await _read_latest_portfolio_snapshot_from_db()
+    except Exception as exc:
+        return _IBSyncOutcome(
+            result=result,
+            error=f"Failed to read synced portfolio from Turso: {exc}",
+        )
+    return _IBSyncOutcome(result=result, payload=payload)
+
+
+async def _orders_sync_operation() -> _IBSyncOutcome:
+    result = await _run_ib_script_with_recovery(
+        "ib_orders.py",
+        ["--sync", "--port", str(DEFAULT_GATEWAY_PORT)],
+        timeout=30,
+        raw=True,
+    )
+    if not result.ok:
+        return _IBSyncOutcome(result=result, error=result.error or "Orders sync failed")
+    try:
+        payload = await _read_orders_snapshot_from_db()
+    except Exception as exc:
+        return _IBSyncOutcome(
+            result=result,
+            error=f"Failed to read synced orders from Turso: {exc}",
+        )
+    return _IBSyncOutcome(result=result, payload=payload)
+
+
+async def _coordinated_portfolio_sync() -> _IBSyncOutcome:
+    return await _ib_sync_coordinator.run("portfolio", _portfolio_sync_operation)
+
+
+async def _coordinated_orders_sync() -> _IBSyncOutcome:
+    return await _ib_sync_coordinator.run("orders", _orders_sync_operation)
 
 
 # Pool-recovery escalation guard. Mirrors ib_gateway._auth_transition_state but
@@ -280,13 +420,11 @@ async def _orders_sync_tick() -> None:
         logger.debug("orders-sync loop: pool disconnected — skipping tick")
         return
     logger.info("orders-sync loop: running ib_orders.py --sync")
-    result = await _run_ib_script_with_recovery(
-        "ib_orders.py", ["--sync", "--port", str(DEFAULT_GATEWAY_PORT)], timeout=30, raw=True
-    )
-    if result.ok:
+    outcome = await _coordinated_orders_sync()
+    if outcome.ok:
         logger.info("orders-sync loop: sync complete")
     else:
-        logger.warning("orders-sync loop: sync failed: %s", result.error)
+        logger.warning("orders-sync loop: sync failed: %s", outcome.error)
 
 
 async def _orders_sync_loop(interval: float = ORDERS_SYNC_INTERVAL_SECS) -> None:
@@ -338,17 +476,17 @@ async def lifespan(app: FastAPI):
         except Exception:
             logger.exception("IB pool background connect failed")
 
-    asyncio.create_task(_connect_ib_pool())
+    lifecycle_tasks = [asyncio.create_task(_connect_ib_pool())]
 
     # Server-side 2FA-recovery heartbeat. Consumers now poll the read-only
     # /edge-health surface, so the mutating recovery path can no longer ride a
     # browser /health poll — drive it here on a fixed cadence instead.
-    asyncio.create_task(_ib_recovery_heartbeat_loop())
+    lifecycle_tasks.append(asyncio.create_task(_ib_recovery_heartbeat_loop()))
 
     # Autonomous orders-sync loop — keeps the orders-sync service_health row
     # fresh during market hours so the watchdog's intraday bucket (10-min
     # window) does not fire stale alerts when no browser has visited /orders.
-    asyncio.create_task(_orders_sync_loop())
+    lifecycle_tasks.append(asyncio.create_task(_orders_sync_loop()))
 
     # UW client — just verify token exists
     uw_available = bool(os.environ.get("UW_TOKEN"))
@@ -362,14 +500,17 @@ async def lifespan(app: FastAPI):
     # FastAPI server no longer needs to bootstrap those caches at boot.
     # Journal reconciliation still runs once at startup because trade-fill
     # rehydration is lifecycle-bound, not periodic.
-    asyncio.create_task(_warm_journal_reconciliation_on_startup())
+    lifecycle_tasks.append(asyncio.create_task(_warm_journal_reconciliation_on_startup()))
 
-    yield
-
-    # Shutdown
-    if ib_pool:
-        await ib_pool.disconnect_all()
-    logger.info("Radon API shut down")
+    try:
+        yield
+    finally:
+        for task in lifecycle_tasks:
+            task.cancel()
+        await asyncio.gather(*lifecycle_tasks, return_exceptions=True)
+        if ib_pool:
+            await ib_pool.disconnect_all()
+        logger.info("Radon API shut down")
 
 
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
@@ -1777,20 +1918,10 @@ async def portfolio_sync():
     Scripts auto-allocate client IDs from subprocess range (20-49).
     Auto-restarts IB Gateway on ECONNREFUSED and retries once.
     """
-    result = await _run_ib_script_with_recovery(
-        "ib_sync.py",
-        ["--sync", "--json-output", "--db-optional", "--port", str(DEFAULT_GATEWAY_PORT)],
-        timeout=30,
-        raw=False,
-    )
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    if isinstance(result.data, dict) and result.data:
-        return result.data
-    try:
-        return await _read_latest_portfolio_snapshot_from_db()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to read synced portfolio from Turso: {e}")
+    outcome = await _coordinated_portfolio_sync()
+    if not outcome.ok:
+        raise HTTPException(status_code=502, detail=outcome.error)
+    return outcome.payload or {}
 
 
 @app.post("/portfolio/background-sync", status_code=202)
@@ -1802,13 +1933,11 @@ async def portfolio_background_sync(bg: BackgroundTasks):
 
 async def _bg_sync_via_subprocess():
     """Background task: run ib_sync.py as subprocess with auto-recovery."""
-    result = await _run_ib_script_with_recovery(
-        "ib_sync.py", ["--sync", "--port", str(DEFAULT_GATEWAY_PORT)], timeout=30, raw=True
-    )
-    if result.ok:
+    outcome = await _coordinated_portfolio_sync()
+    if outcome.ok:
         logger.info("Background portfolio sync complete")
     else:
-        logger.error("Background portfolio sync failed: %s", result.error)
+        logger.error("Background portfolio sync failed: %s", outcome.error)
 
 
 @app.post("/orders/refresh")
@@ -1821,15 +1950,10 @@ async def orders_refresh():
     if test_mode:
         return {"status": "ok", "orders": []}
 
-    result = await _run_ib_script_with_recovery(
-        "ib_orders.py", ["--sync", "--port", str(DEFAULT_GATEWAY_PORT)], timeout=30, raw=True
-    )
-    if not result.ok:
-        raise HTTPException(status_code=502, detail=result.error)
-    try:
-        return await _read_orders_snapshot_from_db()
-    except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Failed to read synced orders from Turso: {e}")
+    outcome = await _coordinated_orders_sync()
+    if not outcome.ok:
+        raise HTTPException(status_code=502, detail=outcome.error)
+    return outcome.payload or {}
 
 
 # ---------------------------------------------------------------------------
@@ -3337,30 +3461,26 @@ async def _run_ib_script_with_recovery(
             return result
 
         if not _should_auto_restart_ib_gateway_after_runtime_failure():
-            if is_cloud_mode() or is_docker_mode():
-                # Cloud/Docker manages Gateway reliability — don't attempt restart.
-                mode = "cloud" if is_cloud_mode() else "Docker"
+            if is_cloud_mode():
                 logger.warning(
-                    "IB Gateway unreachable in %s mode (port=%s, upstream_dead=%s) — not restarting (%s handles it)",
-                    mode, port_ok, upstream_dead, mode,
-                )
-                msg = (
-                    f"IB Gateway is not responding ({mode} mode). "
-                    + ("Check remote host and Tailscale." if is_cloud_mode()
-                       else "Docker will auto-restart the container. Check IBKR Mobile for 2FA approval.")
-                )
-                result = ScriptResult(ok=False, error=msg)
-            else:
-                logger.warning(
-                    "IB Gateway unreachable in local launchd mode (port=%s, upstream_dead=%s) — not auto-restarting to avoid repeated 2FA prompts",
+                    "IB Gateway unreachable in cloud mode (port=%s, upstream_dead=%s) — remote host owns recovery",
                     port_ok, upstream_dead,
                 )
                 result = ScriptResult(
                     ok=False,
+                    error="IB Gateway is not responding (cloud mode). Check remote host and Tailscale.",
+                )
+            else:
+                logger.warning(
+                    "IB Gateway unreachable in managed mode (port=%s, upstream_dead=%s) — lock-aware watchdog owns recovery",
+                    port_ok,
+                    upstream_dead,
+                )
+                result = ScriptResult(
+                    ok=False,
                     error=(
-                        "IB Gateway is not responding (local launchd mode). "
-                        "Manual restart required to avoid repeated 2FA prompts. "
-                        "Use ~/ibc/bin/restart-secure-ibc-service.sh and approve IBKR Mobile 2FA if prompted."
+                        "IB Gateway is not responding. Lock-aware watchdog recovery is pending; "
+                        "approve any existing IBKR Mobile 2FA prompt."
                     ),
                 )
         else:

@@ -161,4 +161,23 @@ describe("readOrdersFromDb", () => {
     await readOrdersFromDb();
     expect(counters.syncCalls).toBe(1);
   });
+
+  it("scopes replica-sync recovery to the failed DB operation", async () => {
+    const resetDb = vi.fn();
+    const execute = vi.fn().mockResolvedValue({ rows: [] });
+    vi.doMock("@/lib/db", () => ({
+      getDb: () => ({ execute }),
+      syncDb: vi.fn().mockRejectedValue(new Error("replica sync failed")),
+      resetDb,
+    }));
+
+    const { readOrdersFromDb } = await import("../lib/orders/readOrdersFromDb");
+    await readOrdersFromDb();
+
+    expect(resetDb).toHaveBeenCalledTimes(1);
+    expect(resetDb).toHaveBeenCalledWith(expect.objectContaining({
+      id: expect.any(Number),
+      poolGeneration: null,
+    }));
+  });
 });

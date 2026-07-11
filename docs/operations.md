@@ -60,13 +60,13 @@ Three deployment modes selected by `IB_GATEWAY_MODE`:
 
 | Mode | Description |
 |------|-------------|
-| `docker` (default; Hetzner production) | `ghcr.io/gnzsnz/ib-gateway` via Docker Compose, `restart: unless-stopped`, healthcheck. Unhealthy/API-wedge recovery is handled by `scripts/ib_watchdog.py` (lock-respectful restart), NOT an autoheal sidecar — removed 2026-07-02, it bypassed the 2FA push lock and required a root `docker.sock` mount. |
-| `cloud` (laptop dev) | Gateway on the Hetzner VM at `ib-gateway:4001` over Tailscale MagicDNS. Health check is a TCP port probe; local restart returns 503. |
+| `docker` (default; local development) | Local `ghcr.io/gnzsnz/ib-gateway` via Docker Compose with `restart: "no"`. Local start/restart paths acquire the shared lease. |
+| `cloud` (Hetzner services and laptop dev) | Lifecycle is externally owned by `/usr/local/bin/radon-ib-gateway-control` on the Hetzner VM. FastAPI performs TCP/API health checks only; local restart returns 503. |
 | `launchd` (legacy) | IBC under macOS launchd. |
 
-**2FA-aware restart.** After every restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket already open, so port probes alone falsely report success. `restart_ib_gateway()` runs an explicit `managedAccounts()` probe; non-empty resets backoff, empty advances it (1m → 2m → 5m → 15m → 30m → 60m capped). `/health` exposes `auth_state` (`authenticated | awaiting_2fa | unreachable | unknown | remote`), `service_state` (`healthy | unhealthy | starting | unknown`), `upstream_dead`, and `restart_backoff` (attempt count, next attempt in seconds, push lock holder/TTL, last outcome). `POST /ib/reset-backoff` is the operator escape hatch after manually approving 2FA. **Watchdog stuck-2FA self-heal (2026-05-20):** `ib_watchdog.is_stuck_awaiting_2fa()` fires `systemctl restart radon-ib-gateway.service` after 3 consecutive cycles of `auth_state=awaiting_2fa` with no push lock holder and no scheduled retry — so the system no longer sits stuck overnight waiting for an operator to notice. Respects the cross-process push lock to avoid stacked pushes (IBKR rejects every approval when multiple pushes are pending).
+**2FA-aware restart.** After every restart, IB Gateway sits at the IBKR Mobile push prompt with the API socket already open, so port probes alone falsely report success. `restart_ib_gateway()` runs an explicit `managedAccounts()` probe; non-empty resets backoff, empty advances it (1m → 2m → 5m → 15m → 30m → 60m capped). `/health` exposes `auth_state` (`authenticated | awaiting_2fa | unreachable | unknown | remote`), `service_state` (`healthy | unhealthy | starting | unknown`), `upstream_dead`, and `restart_backoff` (attempt count, next attempt in seconds, push lock holder/TTL, last outcome). `POST /ib/reset-backoff` is the operator escape hatch after manually approving 2FA. **Watchdog stuck-2FA self-heal (2026-05-20):** after 3 consecutive `auth_state=awaiting_2fa` cycles with no active push or scheduled retry, the watchdog acquires the cross-process lease and invokes the fixed `radon-ib-gateway-preheld-restart.service` adapter. The adapter consumes that exact lease once and calls `/usr/local/bin/radon-ib-gateway-control`; boot, admin, operator, and laptop cloud starts use the same helper. Never run raw Docker or `systemctl restart radon-ib-gateway.service` commands.
 
-**Hetzner gotcha.** On Hetzner, `radon-ib-gateway.service` launches the container from `/home/radon/radon-cloud/`, not the in-tree `docker/ib-gateway/`. `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon-cloud` is required to point FastAPI's `_check_docker()` at the right compose project. Without it, `container_state` reports `not_found` while the container is actually running.
+**Hetzner control boundary.** `radon-ib-gateway.service`, the watchdog adapter, admin controls, boot, and operator commands all call the installed radon-cloud helper. FastAPI runs with `IB_GATEWAY_MODE=cloud` and must not inspect or mutate the production Compose project directly.
 
 **ib_insync request bounding.** `ib_insync` has no built-in timeout on its async API calls — `qualifyContractsAsync`, `reqHistoricalDataAsync`, and `reqMktData` will block forever when the gateway is logged in but the user session isn't authenticated (the 2FA-pending state). Any script that imports `ib_insync` directly must wrap each await in `asyncio.wait_for(..., timeout=15)` and pre-check `auth_state == "authenticated"` against FastAPI `/health` before instantiating `IB()`. `cri_scan.py` is the reference implementation.
 
@@ -186,15 +186,30 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 ## Deployment
 
-`git push origin main` triggers `.github/workflows/deploy.yml`. The workflow SSHes to Hetzner as the `radon` user and runs `bash scripts/deploy.sh` from `~/radon-cloud/`:
+`git push origin main` triggers `.github/workflows/ci.yml`. Superseded test jobs
+may cancel independently, but the production deploy job uses a non-canceling
+`deploy-production` concurrency group. It SSHes to Hetzner as `radon` and passes
+the tested `${{ github.sha }}` to `radon-cloud/scripts/deploy.sh`:
 
-1. `git fetch --all && git reset --hard origin/main`
-2. `pip install -r requirements.txt`
-3. `npm install && npx playwright install chromium`
-4. `next build --experimental-build-mode=compile` (Next.js 16 prerender workaround)
-5. `sudo systemctl restart radon-{nextjs,api,relay,monitor}` (health-gated rollback)
+1. Acquire a nonblocking host-level `flock` in the outer supervisor; the inner process group and descendants do not inherit the lock.
+2. Require the explicit SHA to equal the freshly fetched `origin/main` tip. Divergent tracked host changes fail closed; tracked changes that byte-match the target are reset safely, and untracked runtime data is untouched.
+3. Require mode `0600` on the cloud env, enforce `TRADING_MODE`/`IB_GATEWAY_PORT` consistency, validate Compose without printing values, and write only literal `NEXT_PUBLIC_*` lines to mode-`0600` `web/.env`.
+4. Build frozen Bun workspaces and Python wheels in a detached target-SHA worktree before teardown. Fsync a transition journal, then back up the exact dependency trees, Next.js output, public web environment, and Python virtual environment.
+5. Use the five-action root helper to snapshot and quiesce every discovered non-beta Radon service and timer except Gateway-owned units. Timers stop first, oneshots are never replayed, failed core units are reset before controlled activation, and only the prior active persistent topology is restored.
+6. Gate topology, FastAPI `/health/lite`, Next.js HTTP, and relay TCP/HTTP. IB state remains advisory. The five core services must then stay active with unchanged `NRestarts` for 40 seconds.
+7. Fsync the `verified` journal phase, write the green marker, commit the topology transition, and only then delete rollback state. A fresh process resolves any surviving journal before new work.
 
-Confirm with `gh run list --workflow=deploy.yml --limit 1`. The `radon-cloud` repo lives separately and owns systemd unit files, Caddy config, the Docker Compose project for IB Gateway, and `setup-vps.sh` / `wipe-vps.sh`.
+The deploy job is capped at 60 minutes and SSH at 55 minutes. The inner deploy
+gets 900 seconds plus a 30-second kill window. Root mutation actions get 180
+seconds, verify/commit actions get 30 seconds, and lifecycle-lock contention may
+consume 190 seconds once per recovery. The tested double-recovery bound is
+2,150 seconds, leaving at least ten minutes inside SSH for file restoration and
+gate overhead.
+
+Git HEAD equality alone is not success. Confirm the durable release with
+`gh run list --workflow=ci.yml --limit 1`. The `radon-cloud` repo lives
+separately and owns systemd unit files, Caddy config, the Docker Compose project
+for IB Gateway, and `setup-vps.sh` / `wipe-vps.sh`.
 
 ## Production Build Constraint
 

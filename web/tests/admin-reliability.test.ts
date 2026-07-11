@@ -153,6 +153,11 @@ describe("externalProbeSummary", () => {
     expect(externalProbeSummary(at("2026-05-30T11:59:30Z"), now)).toEqual({ state: "healthy", latencyMs: 142 }));
   it("down when recent + not ok", () =>
     expect(externalProbeSummary(at("2026-05-30T11:59:30Z", 0), now)).toEqual({ state: "down", latencyMs: 142 }));
+  it("does not flap or hide failure across an observed 90-minute scheduler delay", () => {
+    const delayed = "2026-05-30T10:30:00Z";
+    expect(externalProbeSummary(at(delayed), now).state).toBe("healthy");
+    expect(externalProbeSummary(at(delayed, 0), now).state).toBe("down");
+  });
   it("stale past the dead-man window regardless of ok", () => {
     const old = new Date(now - (EXTERNAL_PROBE_STALE_AFTER_SECONDS + 60) * 1000).toISOString();
     expect(externalProbeSummary(at(old), now).state).toBe("stale");

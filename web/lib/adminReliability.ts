@@ -70,7 +70,9 @@ export function ibAuthSummary(health: AdminHealthPayload | null | undefined): Ib
 export type ExternalProbeState = "healthy" | "down" | "stale" | "unknown";
 export type ExternalProbeSummary = { state: ExternalProbeState; latencyMs: number | null };
 
-export const EXTERNAL_PROBE_STALE_AFTER_SECONDS = 1200; // 20 min — see scripts/health_probe/reader.py
+// GitHub's five-minute cron is best-effort. The latest 99 scheduled runs had
+// an 88.1-minute maximum dispatch interval; match the Python dead-man contract.
+export const EXTERNAL_PROBE_STALE_AFTER_SECONDS = 2 * 60 * 60;
 
 export function externalProbeSummary(
   probe: ExternalProbeRow | null | undefined,

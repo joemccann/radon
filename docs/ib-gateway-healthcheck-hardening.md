@@ -65,6 +65,11 @@ radon-ib-watchdog.timer  →  radon-ib-watchdog.service  →  scripts/ib_watchdo
 
 ### Algorithm
 
+> Historical design record: the original pseudocode below predated the shared
+> 2FA lease and is not an executable runbook. Production now uses the fixed
+> preheld-lease unit and `/usr/local/bin/radon-ib-gateway-control`; direct
+> restarts of the main Gateway unit are forbidden.
+
 ```
 counter = read_state('ib_watchdog_degraded_count', 0)
 health  = GET http://localhost:8321/health  (5s timeout)
@@ -80,15 +85,14 @@ if health.ib_gateway.port_listening and health.ib_gateway.upstream_dead:
     log_warn(f"IB gateway API-degraded for {counter} cycles")
     if counter >= 3:
         # 3 cycles × 60s = 3 minutes of sustained API hang.
-        log_warn("Triggering ib-gateway docker restart via systemd")
-        run("systemctl restart radon-ib-gateway.service")
+        log_warn("Triggering lease-preheld gateway recovery")
+        run("systemctl restart radon-ib-gateway-preheld-restart.service")
         write_state('ib_watchdog_degraded_count', 0)
-        # The existing 2FA backoff in `restart_ib_gateway()` does NOT
-        # gate systemctl, but it does gate the FastAPI in-process
-        # restart path. We're bypassing that on purpose — if 2FA backoff
-        # is active, the container is already broken and Docker's
-        # `restart: always` plus our manual restart will both fire
-        # safely. Worst case: extra 2FA push at restart time.
+        # Current production flow: the watchdog already owns the shared
+        # 2FA lease. The fixed preheld adapter verifies that exact holder,
+        # consumes the lease fingerprint once, and calls the authoritative
+        # helper without re-acquiring. Docker uses restart: "no"; an extra
+        # push is never considered safe.
     exit 0
 
 # Anything else (auth_state == awaiting_2fa, etc.) is NOT this bug.
@@ -118,7 +122,8 @@ So `ib_watchdog` now handles BOTH failure modes (commit 68c6e57):
 
    Threshold = 3 cycles (`DEFAULT_STUCK_2FA_THRESHOLD`). On the third
    cycle the watchdog acquires the cross-process 2FA push lock and
-   triggers `systemctl restart radon-ib-gateway.service` — which sends
+   triggers `radon-ib-gateway-preheld-restart.service`, which verifies and
+   consumes that exact lease once before the authoritative helper sends
    a fresh IBKR Mobile push. Counter freezes (does NOT reset) when a
    push lock holder appears or a backoff retry gets scheduled — that
    way the next cycle after the lock clears acts immediately rather

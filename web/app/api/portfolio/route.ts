@@ -5,9 +5,8 @@ import {
   jsonApiError,
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
-import { resetDb } from "@/lib/db";
 import { dbExecute } from "@/lib/dbExecute";
-import { cachedRead } from "@/lib/dbCache";
+import { cachedRead, cachedReadResult } from "@/lib/dbCache";
 import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
 
 // Disable Next.js static caching: this handler reads live Turso state.
@@ -19,11 +18,9 @@ export const runtime = "nodejs";
 
 const CACHE_TTL_MS = 60_000; // 1 minute
 const DB_READ_TIMEOUT_MS = 3_000;
-const LIVE_SYNC_TIMEOUT_MS = 35_000;
-const LIVE_FALLBACK_CACHE_TTL_MS = 30_000;
 // Server-side coalescing of the polled GET reads. The snapshot is the hot one;
 // staleWhileError serves the last good portfolio through a brief Turso stall
-// (longer outages exceed maxStale and fall through to the live-IB fallback).
+// without turning a browser read into an IB synchronization request.
 // Trade-log dates are day-granularity, so a longer TTL is invisible.
 const SNAPSHOT_CACHE_TTL_MS = 3_000;
 const SNAPSHOT_MAX_STALE_MS = 60_000;
@@ -64,19 +61,6 @@ function isPortfolioSnapshotStale(snapshot: PortfolioSnapshot | null): boolean {
     return true;
   }
   return Date.now() - snapshot.timestampMs > CACHE_TTL_MS;
-}
-
-function snapshotFromLiveSyncData(data: unknown): PortfolioSnapshot {
-  if (!data || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("Live portfolio sync returned invalid payload");
-  }
-  const portfolio = data as Record<string, unknown>;
-  const takenAt = typeof portfolio.last_sync === "string" ? portfolio.last_sync : new Date().toISOString();
-  return {
-    data: portfolio,
-    takenAt,
-    timestampMs: parseTimestampMs(portfolio.last_sync) ?? Date.now(),
-  };
 }
 
 /** Load ticker → latest trade date.
@@ -181,62 +165,6 @@ async function loadPortfolioEntryDates(): Promise<{
   return { trade_log_dates, contract_open_dates };
 }
 
-let bgSyncInFlight = false;
-let bgSyncLastTriggeredMs = 0;
-const BG_SYNC_MIN_INTERVAL_MS = 60_000;
-let liveFallbackInFlight: Promise<PortfolioSnapshot> | null = null;
-let liveFallbackSnapshot: PortfolioSnapshot | null = null;
-let liveFallbackCachedAtMs = 0;
-
-/** Fire-and-forget: call FastAPI background sync endpoint.
- *
- * FastAPI returns 202 in ~50ms so `bgSyncInFlight` clears almost immediately —
- * which on its own gives no rate limit when every stale GET fires this. The
- * wall-clock guard caps it to one trigger per minute regardless. */
-function triggerBackgroundSync(): void {
-  if (bgSyncInFlight) return;
-  if (Date.now() - bgSyncLastTriggeredMs < BG_SYNC_MIN_INTERVAL_MS) return;
-  bgSyncInFlight = true;
-  bgSyncLastTriggeredMs = Date.now();
-
-  console.log("[Portfolio] Background sync triggered via FastAPI");
-  radonFetch("/portfolio/background-sync", { method: "POST", timeout: 5_000 })
-    .then(() => {
-      console.log("[Portfolio] Background sync accepted");
-    })
-    .catch((err) => {
-      console.warn("[Portfolio] Background sync trigger failed:", err.message);
-    })
-    .finally(() => {
-      bgSyncInFlight = false;
-    });
-}
-
-async function getLiveFallbackPortfolio(): Promise<PortfolioSnapshot> {
-  const now = Date.now();
-  if (liveFallbackSnapshot && now - liveFallbackCachedAtMs < LIVE_FALLBACK_CACHE_TTL_MS) {
-    return liveFallbackSnapshot;
-  }
-
-  if (!liveFallbackInFlight) {
-    liveFallbackInFlight = radonFetch("/portfolio/sync", {
-      method: "POST",
-      timeout: LIVE_SYNC_TIMEOUT_MS,
-    })
-      .then((data) => {
-        const snapshot = snapshotFromLiveSyncData(data);
-        liveFallbackSnapshot = snapshot;
-        liveFallbackCachedAtMs = Date.now();
-        return snapshot;
-      })
-      .finally(() => {
-        liveFallbackInFlight = null;
-      });
-  }
-
-  return liveFallbackInFlight;
-}
-
 async function portfolioResponseFromSnapshot(
   snapshot: PortfolioSnapshot,
   requestId: string,
@@ -246,65 +174,66 @@ async function portfolioResponseFromSnapshot(
   const response = NextResponse.json({ ...snapshot.data, ...entryDates });
   if (warning) {
     response.headers.set("X-Sync-Warning", warning);
-    response.headers.set("X-Portfolio-Source", "ib-live-fallback");
+    response.headers.set("X-Portfolio-Source", "turso-stale");
   }
   return setNoStoreResponseHeaders(response, requestId);
 }
 
-async function serveLiveFallback(
+function unavailablePortfolioResponse(
   requestId: string,
-  reason: string,
-  fallbackFailureStatus = 502,
+  message: string,
 ): Promise<Response> {
-  try {
-    const snapshot = await getLiveFallbackPortfolio();
-    return portfolioResponseFromSnapshot(snapshot, requestId, `${reason} - served live IB sync`);
-  } catch (fallbackError) {
-    const detail = fallbackError instanceof Error ? fallbackError.message : String(fallbackError);
-    return setNoStoreResponseHeaders(
-      jsonApiError({
-        message: `${reason}; live IB sync failed: ${detail}`,
-        status: fallbackFailureStatus,
-        code: "UPSTREAM_ERROR",
-        requestId,
-      }),
+  return Promise.resolve(setNoStoreResponseHeaders(
+    jsonApiError({
+      message,
+      status: 503,
+      code: "DB_UNAVAILABLE",
       requestId,
-    );
-  }
+    }),
+    requestId,
+  ));
 }
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   try {
-    const snapshot = await cachedRead(
+    const cachedSnapshot = await cachedReadResult(
       "portfolio:snapshot",
       SNAPSHOT_CACHE_TTL_MS,
       readPortfolioFromDb,
       { staleWhileError: true, maxStaleMs: SNAPSHOT_MAX_STALE_MS },
     );
+    const snapshot = cachedSnapshot.value;
     if (!snapshot) {
-      return serveLiveFallback(requestId, "Turso portfolio snapshot unavailable");
+      return unavailablePortfolioResponse(requestId, "Portfolio snapshot unavailable");
+    }
+    const warnings: string[] = [];
+    if (cachedSnapshot.staleWhileError) {
+      warnings.push("Turso read failed; serving last in-memory portfolio snapshot");
     }
     if (isPortfolioSnapshotStale(snapshot)) {
-      triggerBackgroundSync();
+      warnings.push("Portfolio snapshot is stale; live sync was not requested");
+    }
+    if (warnings.length > 0) {
+      return portfolioResponseFromSnapshot(
+        snapshot,
+        requestId,
+        warnings.join("; "),
+      );
     }
 
     return portfolioResponseFromSnapshot(snapshot, requestId);
   } catch (error) {
-    // A read timeout almost always means the cached libsql client's pool went
-    // stale. Drop it, then RETRY the read once with the fresh pool before
-    // spending up to 35s on a live IB sync — a valid (even stale) snapshot
-    // reads in <200ms on the new client, so a transient blip never lights the
-    // "LIVE DATA DEGRADED" banner when good data exists in Turso.
-    resetDb();
+    // dbExecute has already invalidated a failed client operation. Retry once
+    // without turning a browser GET into live IB work.
     try {
       const retry = await readPortfolioFromDb();
       if (retry) return portfolioResponseFromSnapshot(retry, requestId);
     } catch {
-      // fall through to the live IB fallback below
+      // fall through to the explicit unavailable response below
     }
     const message = error instanceof Error ? error.message : "Failed to read portfolio";
-    return serveLiveFallback(requestId, `Turso portfolio read failed: ${message}`);
+    return unavailablePortfolioResponse(requestId, `Turso portfolio read failed: ${message}`);
   }
 }
 

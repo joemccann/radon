@@ -8,18 +8,20 @@ cp .env.example .env        # Edit TWS_USERID
 mkdir -p secrets
 echo "YOUR_IB_PASSWORD" > secrets/ib_password.txt
 chmod 600 secrets/ib_password.txt
+cd ../..
 scripts/docker_ib_gateway.sh start
 ```
 
-Approve 2FA on IBKR Mobile when prompted. Docker's `restart: unless-stopped` handles reliability.
+Approve 2FA on IBKR Mobile when prompted. Docker automatic restart is disabled;
+the lock-aware FastAPI/watchdog control plane owns recovery.
 
 ## Commands
 
 | Command | Action |
 |---------|--------|
-| `scripts/docker_ib_gateway.sh start` | Start (validates secrets, checks launchd not running) |
+| `scripts/docker_ib_gateway.sh start` | Acquire the 2FA lease, then start (validates secrets and checks launchd) |
 | `scripts/docker_ib_gateway.sh stop` | Stop and remove container |
-| `scripts/docker_ib_gateway.sh restart` | Restart container |
+| `scripts/docker_ib_gateway.sh restart` | Acquire the 2FA lease, then restart the container |
 | `scripts/docker_ib_gateway.sh status` | Show container status and healthcheck |
 | `scripts/docker_ib_gateway.sh logs` | Tail container logs |
 
@@ -92,9 +94,10 @@ If you prefer to keep precautions active instead of bypassing, increase the limi
 ## 2FA Authentication
 
 - **First start**: Approve 2FA on IBKR Mobile app
-- **Daily restart** (23:58 ET): Auto-restarts via `AUTO_RESTART_TIME`, no 2FA needed
-- **2FA timeout**: Container auto-restarts and re-sends 2FA notification (`TWOFA_TIMEOUT_ACTION: restart`)
-- **Manual restart**: `scripts/docker_ib_gateway.sh restart` triggers new 2FA
+- **IBC schedules**: Disabled (`AUTO_RESTART_TIME` and `TWS_COLD_RESTART` are blank)
+- **2FA timeout**: IBC exits (`TWOFA_TIMEOUT_ACTION: exit`) and does not relogin
+- **Manual restart**: `scripts/docker_ib_gateway.sh restart` first acquires the
+  shared 10-minute lease; a held or unreadable lease fails closed
 
 ## Healthcheck
 
@@ -111,9 +114,12 @@ bash -c 'echo > /dev/tcp/localhost/4001'
 
 Check via: `scripts/docker_ib_gateway.sh status` or `curl localhost:8321/health`
 
-## Unhealthy-container recovery (NO autoheal sidecar)
+## Unhealthy-container recovery (no Docker restart policy or autoheal)
 
-Docker's `restart: unless-stopped` only restarts containers that **exit**. When IB Gateway's API becomes unresponsive (session drop, 2FA expiry) the Java process stays alive but the healthcheck fails — the container goes `unhealthy` but never exits.
+The service uses `restart: "no"` because Docker cannot participate in the 2FA
+lease. If IB Gateway exits or its API becomes unresponsive, the independent
+protocol watchdog owns the persisted debounce, backoff, restart cap, and
+lease-aware recovery.
 
 **This is NOT handled by an autoheal sidecar.** The `willfarrell/autoheal` container was removed 2026-07-02 (security posture audit M1) for two reasons:
 
@@ -146,16 +152,17 @@ The unhealthy/API-wedge case is handled instead by **`scripts/ib_watchdog.py`** 
 - Port 5900 may be in use by macOS Screen Sharing; use 5901 instead
 - macOS Screen Sharing app doesn't work; use TigerVNC
 
-### Container keeps restarting
-- Check logs for login errors
-- May need to wait for IB's login cooldown after failed attempts
+### Container exited and remains stopped
+- Check logs for login and 2FA timeout errors
+- Check the active lease: `python3.13 scripts/utils/ib_2fa_lock.py check`
+- Let the watchdog recover it; do not run raw `docker compose up/restart`
 
 ### Switching back to launchd (rollback)
 ```bash
 scripts/docker_ib_gateway.sh stop
 export IB_GATEWAY_MODE=launchd
-launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/local.ibc-gateway.plist
-~/ibc/bin/start-secure-ibc-service.sh
+launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.radon.ibc-gateway.plist
+scripts/ibc_remote_control.sh ibc-start
 ```
 
 ## Architecture

@@ -36,6 +36,27 @@ export interface CachedReadOpts {
   maxStaleMs?: number;
 }
 
+export interface CachedReadResult<T> {
+  value: T;
+  /** True only when the fetch failed and the bounded last-good value was served. */
+  staleWhileError: boolean;
+  error?: unknown;
+}
+
+function staleResult<T>(
+  hit: Entry<T> | undefined,
+  opts: CachedReadOpts,
+  error: unknown,
+): CachedReadResult<T> {
+  if (opts.staleWhileError && hit) {
+    const maxStale = opts.maxStaleMs ?? DEFAULT_MAX_STALE_MS;
+    if (Date.now() - hit.storedAt <= maxStale) {
+      return { value: hit.value, staleWhileError: true, error };
+    }
+  }
+  throw error;
+}
+
 /**
  * Read `key` through the cache. Returns the cached value while fresh; otherwise
  * runs `fetcher` (single-flighted across concurrent callers), caches the result
@@ -47,20 +68,40 @@ export async function cachedRead<T>(
   fetcher: () => Promise<T>,
   opts: CachedReadOpts = {},
 ): Promise<T> {
+  return (await cachedReadResult(key, ttlMs, fetcher, opts)).value;
+}
+
+/** Read through the cache while preserving whether stale-on-error was used.
+ * Routes that display operational data must propagate this bit to the client
+ * instead of making an error-backed snapshot look authoritative. */
+export async function cachedReadResult<T>(
+  key: string,
+  ttlMs: number,
+  fetcher: () => Promise<T>,
+  opts: CachedReadOpts = {},
+): Promise<CachedReadResult<T>> {
   // Bypass entirely under test so route handlers (which mock @/lib/db and call
   // their GET repeatedly) see a fresh read each call. The cache's own unit test
   // sets RADON_DB_CACHE_FORCE=1 to exercise real caching. Mirrors the
   // NODE_ENV!=="test" replica guard in db.ts.
   if (process.env.NODE_ENV === "test" && process.env.RADON_DB_CACHE_FORCE !== "1") {
-    return fetcher();
+    return { value: await fetcher(), staleWhileError: false };
   }
 
   const now = Date.now();
   const hit = store.get(key) as Entry<T> | undefined;
-  if (hit && now < hit.freshUntil) return hit.value;
+  if (hit && now < hit.freshUntil) {
+    return { value: hit.value, staleWhileError: false };
+  }
 
   const existing = inflight.get(key) as Promise<T> | undefined;
-  if (existing) return existing;
+  if (existing) {
+    try {
+      return { value: await existing, staleWhileError: false };
+    } catch (error) {
+      return staleResult(hit, opts, error);
+    }
+  }
 
   const fetchPromise = (async () => {
     const value = await fetcher();
@@ -70,13 +111,9 @@ export async function cachedRead<T>(
   inflight.set(key, fetchPromise);
 
   try {
-    return await fetchPromise;
-  } catch (err) {
-    if (opts.staleWhileError && hit) {
-      const maxStale = opts.maxStaleMs ?? DEFAULT_MAX_STALE_MS;
-      if (Date.now() - hit.storedAt <= maxStale) return hit.value;
-    }
-    throw err;
+    return { value: await fetchPromise, staleWhileError: false };
+  } catch (error) {
+    return staleResult(hit, opts, error);
   } finally {
     inflight.delete(key);
   }

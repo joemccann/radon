@@ -5,7 +5,7 @@
  * tick/scan/journal freshness into external_probe_runs. The contract shape
  * is FIXED (the prober is built against it):
  *
- *   { generated_at, market_state,
+ *   { generated_at, market_state, database_ok, database_failures,
  *     checks: { relay_tick, vcg_scan, gex_scan, journal },
  *     all_fresh }
  *
@@ -43,6 +43,8 @@ export type ProbeFreshnessPayload = {
     journal: ProbeCheck;
   };
   all_fresh: boolean | null;
+  database_ok: boolean;
+  database_failures: string[];
 };
 
 /** The relay's service_health row, as read from Turso. */
@@ -62,6 +64,8 @@ export type ProbeFreshnessInputs = {
   gexScanTime: string | null;
   /** MAX(written_at) from journal. */
   journalWrittenAt: string | null;
+  /** Query labels that failed, distinct from valid empty result sets. */
+  databaseFailures?: string[];
 };
 
 /** Tick age beyond this during RTH (with active demand) is not fresh.
@@ -191,6 +195,7 @@ export function buildFreshnessPayload(
     journal: evaluateJournalCheck(inputs.journalWrittenAt, market, nowMs),
   };
   const applicable = Object.values(checks).filter((check) => check.applicable);
+  const database_failures = [...(inputs.databaseFailures ?? [])];
   const all_fresh =
     applicable.length === 0 ? null : applicable.every((check) => check.fresh === true);
   return {
@@ -198,5 +203,7 @@ export function buildFreshnessPayload(
     market_state: market,
     checks,
     all_fresh,
+    database_ok: database_failures.length === 0,
+    database_failures,
   };
 }

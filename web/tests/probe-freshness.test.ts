@@ -206,13 +206,34 @@ describe("buildFreshnessPayload", () => {
 
   it("matches the fixed contract shape", () => {
     const payload = buildFreshnessPayload(FRESH_INPUTS, new Date(OPEN_NOW));
-    expect(Object.keys(payload).sort()).toEqual(["all_fresh", "checks", "generated_at", "market_state"]);
+    expect(Object.keys(payload).sort()).toEqual([
+      "all_fresh",
+      "checks",
+      "database_failures",
+      "database_ok",
+      "generated_at",
+      "market_state",
+    ]);
     expect(Object.keys(payload.checks).sort()).toEqual(["gex_scan", "journal", "relay_tick", "vcg_scan"]);
     for (const check of Object.values(payload.checks)) {
       expect(Object.keys(check).sort()).toEqual(["age_secs", "applicable", "fresh"]);
     }
     expect(payload.generated_at).toBe(iso(OPEN_NOW));
     expect(payload.market_state).toBe("open");
+    expect(payload.database_ok).toBe(true);
+    expect(payload.database_failures).toEqual([]);
+  });
+
+  it("surfaces database collection failures independently of market applicability", () => {
+    const payload = buildFreshnessPayload(
+      { ...FRESH_INPUTS, databaseFailures: ["relay_tick", "journal"] },
+      new Date(CLOSED_NOW),
+    );
+
+    expect(payload.market_state).toBe("closed");
+    expect(payload.all_fresh).toBeNull();
+    expect(payload.database_ok).toBe(false);
+    expect(payload.database_failures).toEqual(["relay_tick", "journal"]);
   });
 
   it("all_fresh is true when every APPLICABLE check is fresh (gex null-skipped)", () => {

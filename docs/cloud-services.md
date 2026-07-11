@@ -227,7 +227,7 @@ marked deprecated. Don't extend them.
 | Scenario | Recovery |
 |----------|----------|
 | Cold-start a new laptop | Clone repo, `bun install`, set `TURSO_DB_URL` + `TURSO_AUTH_TOKEN`, run `bun run db:migrate`, then `scripts/cloud.sh`. No replica file to seed — every process talks directly to the cloud DB. |
-| Cold-start a new VPS | `docker compose up -d` against `docker/ib-gateway/docker-compose.yml`. `setup-vps.sh` installs every `radon-*.service` from `radon-cloud/services/` (which all set `Environment=RADON_DB_NO_REPLICA=1`). Laptop's `scripts/cloud.sh` flips IB host to the new VPS. |
+| Cold-start a new VPS | Run `radon-cloud/scripts/setup-vps.sh`, configure the production `.env`, then use `/usr/local/bin/radon start`. Setup installs the lease-aware Gateway helper and every `radon-*.service`; no raw Compose start is permitted. Laptop's `scripts/cloud.sh` flips IB host to the new VPS through the same helper. |
 | Stale `data/replica.db` from a pre-2026-05-20 host | `rm data/replica.db*` — nothing reads from it anymore. The libsql client opens cloud connections regardless of whether the file exists. |
 | Turso outage | Read paths fall through to JSON files (dual-write retains them). Writes queue in the libsql client and replay when cloud returns. |
 | Hetzner outage | Switch to `scripts/local.sh`. Laptop becomes self-sufficient against local Docker IB Gateway. |

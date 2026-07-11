@@ -561,34 +561,38 @@ Use `ib_order_manage.py` for cancel/modify operations — it connects as master 
 
 ## IBC Gateway Automation
 
-IB Gateway is managed by a **machine-global secure IBC service** (`local.ibc-gateway`) with IBC installed under `~/ibc-install/` and wrappers under `~/ibc/bin/`.
+IB Gateway is managed by the launchd definition `com.radon.ibc-gateway`. It has
+no autonomous start or restart schedule. Every start path that can mint a 2FA
+push must acquire `scripts/utils/ib_2fa_lock.py` first.
 
 ### Service Management
 ```bash
-~/ibc/bin/start-secure-ibc-service.sh    # Start Gateway via launchd
 ~/ibc/bin/stop-secure-ibc-service.sh     # Stop Gateway
-~/ibc/bin/restart-secure-ibc-service.sh  # Restart Gateway
 ~/ibc/bin/status-secure-ibc-service.sh   # Show launchd state
+scripts/ibc_remote_control.sh ibc-start  # Lease-gated start
+scripts/ibc_remote_control.sh ibc-restart # Lease-gated restart
 tail -f ~/ibc/logs/ibc-gateway-service.log
 ```
 
 ### Lifecycle
-| Time | Action | 2FA Required |
-|------|--------|-------------|
-| Mon-Fri 00:00 | launchd starts Gateway via IBC | First login only |
-| Daily 11:58 PM | IBC auto-restart (reuses auth session) | No |
-| Sunday 07:05 | Cold restart (full re-auth) | Yes |
+| Trigger | Action |
+|---------|--------|
+| FastAPI startup with Gateway stopped | Acquire lease, then start launchd service |
+| Watchdog sustained functional failure | Persisted debounce/backoff/cap, acquire lease, then restart |
+| Operator start/restart | Use `scripts/ibc_remote_control.sh`; held/unreadable lease fails closed |
+| 2FA timeout | IBC exits with no relogin; watchdog owns the next bounded attempt |
 
 ### Config (`~/ibc/config.secure.ini`)
 Credentials are not stored in this file. The secure runner reads them from Keychain at launch, writes a temporary `0600` runtime config, and removes it after exit.
 - `ExistingSessionDetectedAction=primary` — Gateway reconnects if bumped
 - `AcceptIncomingConnectionAction=accept` — suppress API connection prompt
-- `AutoRestartTime=11:58 PM` — before IB's forced restart window
-- `ColdRestartTime=07:05` — Sunday re-auth
-- `CommandServerPort=7462` — enables `echo "STOP" | nc localhost 7462`
+- `AutoRestartTime=` - disabled; bypasses the shared lease
+- `ColdRestartTime=` - disabled; a cold restart can mint an unleased push
+- `ReloginAfterSecondFactorAuthenticationTimeout=no`
+- `CommandServerPort=7462` - permits STOP only; do not issue RESTART directly
 
 ### LaunchAgent and Runner
-- LaunchAgent: `~/Library/LaunchAgents/local.ibc-gateway.plist`
+- LaunchAgent: `~/Library/LaunchAgents/com.radon.ibc-gateway.plist`
 - Runner: `~/ibc/bin/run-secure-ibc-gateway.sh`
 - Logs: `~/ibc/logs/ibc-gateway-service.log` and IBC diagnostics in `~/ibc/logs/`
 
@@ -601,12 +605,12 @@ Credentials are not stored in this file. The secure runner reads them from Keych
 
 ### Phase 1 Remote Access Usage
 ```bash
-# Direct secure service commands over SSH
+# Read-only/stop service commands may be called directly over SSH
 ssh joemccann@macbook-pro '~/ibc/bin/status-secure-ibc-service.sh'
-ssh joemccann@macbook-pro '~/ibc/bin/restart-secure-ibc-service.sh'
 
-# Optional repo helper
-ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/convex-scavenger && ./scripts/ibc_remote_control.sh ibc-status'
+# Start/restart through the lease-gated repo helper
+ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-status'
+ssh joemccann@macbook-pro 'cd /Users/joemccann/dev/apps/finance/radon && ./scripts/ibc_remote_control.sh ibc-restart'
 ```
 
 Reference: `docs/ibc-remote-access.md`

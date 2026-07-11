@@ -215,6 +215,7 @@ class TestHappyPathUnaffected:
 
         with (
             patch("ib_watchdog.fetch_health", side_effect=fake_fetch),
+            patch("ib_watchdog.probe_gateway_direct", return_value="alive"),
             patch("ib_watchdog.trigger_restart", return_value=True) as restart_mock,
             patch(
                 "ib_watchdog._write_service_health",

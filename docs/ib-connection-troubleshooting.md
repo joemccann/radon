@@ -49,7 +49,7 @@ Match your diagnostic results to one of these scenarios:
 
 **Fix:**
 ```bash
-~/ibc/bin/start-secure-ibc-service.sh
+scripts/ibc_remote_control.sh ibc-start
 # Wait 15-30s for Java startup
 # Approve 2FA on IBKR Mobile when prompted
 ```
@@ -72,21 +72,22 @@ tail -50 ~/ibc/logs/ibc-gateway-service.log
 **Root cause:** Gateway is in a zombie/CLOSE_WAIT state -- Java process is alive and the socket is bound, but the API layer is not accepting connections. This happens when:
 1. **2FA expired** -- IB session timed out, Gateway needs re-authentication
 2. **IB server-side disconnect** -- IB's servers terminated the session (maintenance, compliance), leaving CLOSE_WAIT sockets
-3. **IBC auto-restart failed** -- The 11:58 PM nightly restart left Gateway in a bad state
+3. **Session transition failed** -- IB server maintenance or token expiry left Gateway in a bad state
 4. **Memory/GC pressure** -- Java process is alive but unresponsive
 
 **This is the most common failure mode.**
 
-**Automated detection:** FastAPI detects this at startup and runtime:
-- Startup: `ensure_ib_gateway()` checks for CLOSE_WAIT via `lsof` — auto-restarts if found
-- Runtime: `_is_ib_connection_error()` matches `TimeoutError` and `API connection failed` — triggers auto-restart + retry
+**Automated detection and recovery:**
+- FastAPI reports container/process, auth, and upstream state without blindly restarting an in-flight 2FA prompt
+- `ib_watchdog.py` performs an independent bounded IB protocol handshake on every cycle
+- Sustained DEAD/WEDGED verdicts enter the persisted debounce, backoff, hard-cap, and 2FA lease gates
 - Health: `GET /health` returns `ib_gateway.upstream_dead: true` when CLOSE_WAIT detected
-- WS relay: stale tick detection (45s no data during market hours) triggers restart
+- WS relay: stale tick recovery requests the lock-aware FastAPI restart endpoint
 
 **Manual fix (if auto-recovery fails):**
 ```bash
-# Restart the Gateway (kills lingering IB/IBC Java processes first)
-~/ibc/bin/restart-secure-ibc-service.sh
+# Lease-gated restart (refuses while another push is in flight)
+scripts/ibc_remote_control.sh ibc-restart
 
 # Wait 30-60s for Java startup + IBC login sequence
 # Approve 2FA push notification on IBKR Mobile
@@ -104,7 +105,7 @@ sleep 5
 pgrep -f 'ibgateway|IBC|ibcontroller'
 # If still running:
 # pkill -9 -f 'ibgateway|IBC|ibcontroller'
-~/ibc/bin/start-secure-ibc-service.sh
+scripts/ibc_remote_control.sh ibc-start
 ```
 
 ---
@@ -181,10 +182,17 @@ lsof -iTCP:8765 -sTCP:LISTEN
 3. Wait 10-15s for Gateway to complete login
 4. Verify with connect test
 
-**If you missed the notification:** IBC config has `TWOFA_TIMEOUT_ACTION=restart`, so it will auto-retry. Check logs:
+**If you missed the notification:** do not force another login while the lease
+is active. IBC exits and does not retry, because another login would invalidate
+the pending token. Check the lease and logs:
 ```bash
+python3.13 scripts/utils/ib_2fa_lock.py check
 tail -20 ~/ibc/logs/ibc-gateway-service.log
 ```
+After the lease expires, the watchdog can acquire a fresh lease and make one
+bounded recovery attempt. Operator starts/restarts must use
+`scripts/docker_ib_gateway.sh` or `scripts/ibc_remote_control.sh`, never raw
+Docker/IBC commands.
 
 ---
 
@@ -226,16 +234,17 @@ These mechanisms handle transient failures without intervention:
 
 | Mechanism | Where | Behavior |
 |-----------|-------|----------|
-| CLOSE_WAIT detection | `ib_gateway.py` | `lsof` detects dead upstream at startup + health checks; auto-restart |
-| Health-gated recovery | `server.py` | Subprocess error → verify Gateway health first → restart only if genuinely down |
+| Direct protocol sensor | `ib_watchdog.py` | Independent bounded IB handshake detects port-down and JVM wedges |
+| Persisted recovery ladder | `ib_watchdog.py` | Debounce, backoff, hard cap, auth-aware 2FA stand-down, then lease-gated restart |
+| Atomic push lease | `ib_2fa_lock.py` | OS-locked compare/write; all active leases reject reentry, including same holder |
 | Process cleanup | `restart-secure-ibc-service.sh` | Snapshots pre-existing PIDs, force-kills only survivors after SIGTERM |
 | `_on_disconnect()` | `IBClient` (Python) | 5 attempts, exponential backoff (2^n, cap 30s), restores subscriptions |
 | Stale tick detection | `ib_realtime_server.js` | No ticks for 45s during market hours → restart Gateway (120s cooldown) |
 | Reconnect loop | `ib_realtime_server.js` | 5s interval, client ID rotation on collision, subscription restoration |
-| `syncMutex` | API routes | Coalesces concurrent sync calls, prevents stampede |
+| `_IBSyncCoordinator` | FastAPI | Coalesces portfolio/orders subprocesses and caches only successful outcomes briefly |
 | Cached fallback | API routes | Serves `data/*.json` when sync fails, returns 200 not 502 |
-| IBC auto-restart | launchd + IBC | Nightly 11:58 PM restart, weekly cold restart Sunday 07:05 |
-| 2FA retry | IBC config | `TWOFA_TIMEOUT_ACTION=restart` -- retries if 2FA missed |
+| IBC schedules | launchd + IBC | Disabled: no RunAtLoad/calendar, AutoRestartTime, or ColdRestartTime |
+| 2FA timeout | IBC config | Exit with no relogin; watchdog owns the next bounded attempt after lease expiry |
 
 ---
 

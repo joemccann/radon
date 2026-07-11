@@ -11,6 +11,7 @@ The lock is filesystem-backed (so the FastAPI process and the
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 
 import pytest
 
@@ -74,16 +75,54 @@ def test_second_holder_can_acquire_after_lock_expires():
     assert lock.holder == "ib-watchdog"
 
 
-def test_same_holder_reacquire_refreshes_expiry():
-    """Two restart calls from the same caller must not deadlock each other —
-    they're the same logical operation. The lock's lease is renewed instead
-    of refusing the call."""
+def test_same_holder_reacquire_is_rejected_while_lease_is_active():
+    """Holder names identify components, not individual restart operations.
+
+    A second call from the same component is still a second 2FA push and must
+    remain blocked until the first lease expires or is explicitly released.
+    """
     ok1, lock1 = ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=60, now=1000.0)
     ok2, lock2 = ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=60, now=1030.0)
-    assert ok1 is True and ok2 is True
+    assert ok1 is True and ok2 is False
     assert lock2 is not None
-    assert lock2.acquired_at == 1030.0
-    assert lock2.expires_at == 1090.0
+    assert lock2.acquired_at == 1000.0
+    assert lock2.expires_at == 1060.0
+
+
+def test_concurrent_acquire_serializes_read_modify_write(monkeypatch):
+    """Two contenders that both reach the read boundary must not both win."""
+    original_read = ib_2fa_lock._read_lock_file
+    barrier = threading.Barrier(2)
+
+    def synchronized_read():
+        value = original_read()
+        try:
+            barrier.wait(timeout=0.2)
+        except threading.BrokenBarrierError:
+            pass
+        return value
+
+    monkeypatch.setattr(ib_2fa_lock, "_read_lock_file", synchronized_read)
+    results = []
+    errors = []
+
+    def acquire(holder):
+        try:
+            results.append(
+                ib_2fa_lock.acquire_2fa_push_lock(holder, ttl_secs=60, now=1000.0)
+            )
+        except BaseException as exc:  # pragma: no cover - assertion reports detail
+            errors.append(exc)
+
+    threads = [threading.Thread(target=acquire, args=(holder,)) for holder in ("api", "watchdog")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=2)
+
+    assert not errors
+    assert len(results) == 2
+    assert sum(1 for acquired, _lock in results if acquired) == 1
 
 
 # --- release ---------------------------------------------------------------
@@ -133,15 +172,18 @@ def test_lock_persists_via_filesystem(_redirect_lock_path: Path):
     assert data["reason"] == "user restart"
 
 
-def test_corrupt_lock_file_is_treated_as_free(_redirect_lock_path: Path):
-    """A garbled JSON byte on disk must NOT wedge the system — better
-    to allow a restart than to hang in perpetuity. The next acquire
-    overwrites the corrupt content."""
+def test_recent_corrupt_lock_file_fails_closed(_redirect_lock_path: Path):
+    """A recently corrupted lease may represent a push already in flight."""
     _redirect_lock_path.parent.mkdir(parents=True, exist_ok=True)
     _redirect_lock_path.write_text("{not valid json")
-    assert ib_2fa_lock.check_2fa_push_lock(now=1000.0) is None
-    ok, lock = ib_2fa_lock.acquire_2fa_push_lock("restart-cli", ttl_secs=60, now=1000.0)
-    assert ok is True
+    stat_now = _redirect_lock_path.stat().st_mtime
+    held = ib_2fa_lock.check_2fa_push_lock(now=stat_now)
+    assert held is not None
+    assert held.holder == "unreadable-lock-state"
+    ok, lock = ib_2fa_lock.acquire_2fa_push_lock(
+        "restart-cli", ttl_secs=60, now=stat_now
+    )
+    assert ok is False
     assert lock is not None
 
 
@@ -200,9 +242,9 @@ def test_cli_acquire_refused_names_holder_and_remaining(capsys):
     assert held is not None and held.holder == "ib-watchdog"
 
 
-def test_cli_acquire_same_holder_refreshes_lease():
+def test_cli_acquire_same_holder_is_refused_while_lease_active():
     ib_2fa_lock.acquire_2fa_push_lock("radon-cli", ttl_secs=600)
-    assert ib_2fa_lock.main(["acquire", "radon-cli"]) == 0
+    assert ib_2fa_lock.main(["acquire", "radon-cli"]) == 1
 
 
 def test_cli_release_own_lock(capsys):

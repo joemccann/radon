@@ -572,14 +572,14 @@ describe("GET /api/portfolio", () => {
     expect(mockReadDataFile).not.toHaveBeenCalled();
   });
 
-  it("returns 502 when no Turso snapshot exists and live sync is unavailable", async () => {
+  it("returns 503 without live sync when no Turso snapshot exists", async () => {
     mockPortfolioDb(null);
 
     const res = await GET();
-    expect(res.status).toBe(502);
+    expect(res.status).toBe(503);
     const body = await res.json();
-    expect(body.error).toContain("Turso portfolio snapshot unavailable");
-    expect(body.error).toContain("live IB sync failed");
+    expect(body.error).toContain("Portfolio snapshot unavailable");
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 });
 

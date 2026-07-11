@@ -20,8 +20,8 @@ The three fixes these tests pin down:
      doubling, 1h cap) with a hard cap of 3 without an intervening
      recovery to ``authenticated``; past the cap it alerts and stands down.
      Attempt state persists in the state file (oneshot process model).
-  3. The 09:00-09:30 UTC quiet window moves to 22:30-23:05 UTC to match the
-     new Saturday-wakeable AUTO_RESTART_TIME (22:35 UTC = 15:35 PT).
+  3. IBC AutoRestartTime is disabled entirely because it cannot acquire the
+     shared lease. The only default quiet window covers server-session rollover.
 """
 
 from __future__ import annotations
@@ -332,14 +332,14 @@ class TestApiHangBoundedRemediation:
         assert result.api_hang_restart_count == 1
 
 
-# --- FIX 3 (main-repo half): quiet window follows the new AUTO_RESTART_TIME ---
+# --- FIX 3: unmanaged IBC schedule removed -----------------------------------
 
 
 def _utc(hour: int, minute: int) -> datetime:
     return datetime(2026, 7, 5, hour, minute, tzinfo=timezone.utc)
 
 
-class TestQuietWindowMovedToEveningRestart:
+class TestQuietWindowExcludesRemovedIbcRestart:
     @pytest.fixture(autouse=True)
     def _default_windows(self, monkeypatch):
         # conftest neutralizes the windows for determinism; pin the shipped
@@ -348,14 +348,13 @@ class TestQuietWindowMovedToEveningRestart:
             ib_watchdog.QUIET_WINDOWS_ENV, ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC
         )
 
-    def test_default_spec_is_evening_restart_plus_session_rollover(self):
-        assert ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC == "22:30-23:05,23:40-00:15"
+    def test_default_spec_is_session_rollover_only(self):
+        assert ib_watchdog.DEFAULT_QUIET_WINDOWS_UTC == "23:40-00:15"
 
-    def test_new_auto_restart_time_is_covered(self):
-        # AUTO_RESTART_TIME 22:35 UTC (15:35 PT, Saturday-wakeable).
-        assert quiet_window_active(_utc(22, 35)) is True
-        assert quiet_window_active(_utc(22, 30)) is True
-        assert quiet_window_active(_utc(23, 4)) is True
+    def test_removed_auto_restart_time_is_not_suppressed(self):
+        assert quiet_window_active(_utc(22, 35)) is False
+        assert quiet_window_active(_utc(22, 30)) is False
+        assert quiet_window_active(_utc(23, 4)) is False
 
     def test_session_rollover_window_kept(self):
         assert quiet_window_active(_utc(23, 45)) is True
@@ -368,5 +367,5 @@ class TestQuietWindowMovedToEveningRestart:
 
     def test_window_edges(self):
         assert quiet_window_active(_utc(22, 29)) is False
-        assert quiet_window_active(_utc(23, 5)) is False  # exclusive end
-        assert quiet_window_active(_utc(23, 20)) is False  # gap between windows
+        assert quiet_window_active(_utc(23, 5)) is False
+        assert quiet_window_active(_utc(23, 20)) is False

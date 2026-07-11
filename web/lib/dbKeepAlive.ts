@@ -1,4 +1,8 @@
 import { getDb, resetDb } from "@/lib/db";
+import {
+  createDbOperationIdentity,
+  runWithDbOperation,
+} from "@/lib/dbOperation";
 
 // undici (the @libsql HTTP client's transport) closes idle sockets after ~4s,
 // but the app polls Turso on ~60s intervals — so without warming, every
@@ -20,18 +24,31 @@ const KEEPALIVE_INTERVAL_MS = 3_000;
  * Node process alive on its own.
  */
 export function startDbKeepAlive(intervalMs: number = KEEPALIVE_INTERVAL_MS): () => void {
-  const timer = setInterval(async () => {
+  let stopped = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const schedule = () => {
+    if (stopped) return;
+    timer = setTimeout(run, intervalMs);
+    timer.unref?.();
+  };
+
+  const run = async () => {
+    const identity = createDbOperationIdentity();
     try {
-      await getDb().execute("SELECT 1");
+      await runWithDbOperation(identity, () => getDb().execute("SELECT 1"));
     } catch {
-      // Wedged/closed socket — drop the client so the next request rebuilds.
-      try {
-        resetDb();
-      } catch {
-        /* next real request will rebuild */
-      }
+      // Shares its identity with the proxy, so this prompt recovery is counted
+      // once even though both layers observe the same rejection.
+      resetDb(identity);
+    } finally {
+      schedule();
     }
-  }, intervalMs);
-  (timer as { unref?: () => void }).unref?.();
-  return () => clearInterval(timer);
+  };
+
+  schedule();
+  return () => {
+    stopped = true;
+    if (timer) clearTimeout(timer);
+  };
 }

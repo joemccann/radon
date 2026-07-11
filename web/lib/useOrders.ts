@@ -3,7 +3,9 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OrdersData } from "./types";
 
-const SYNC_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 30_000;
+const GET_FETCH_TIMEOUT_MS = 12_000;
+const POST_FETCH_TIMEOUT_MS = 42_000;
 
 type UseOrdersReturn = {
   data: OrdersData | null;
@@ -21,25 +23,96 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const didInitialSync = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncingRef = useRef(false);
+  const readingRef = useRef(false);
+  const warningSnapshotRef = useRef<string | null>(null);
+  const dataGenerationRef = useRef(0);
+  const pollCachedRef = useRef<() => Promise<void>>(async () => {});
+  const initialLoadStartedRef = useRef(false);
+  const previousActiveRef = useRef(active);
+  const mountedRef = useRef(true);
+  const activeRef = useRef(active);
+  activeRef.current = active;
+
+  const fetchOrders = useCallback(async () => {
+    if (readingRef.current) return;
+    readingRef.current = true;
+    const generation = dataGenerationRef.current;
+    try {
+      const res = await fetch("/api/orders", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
+      });
+      if (!res.ok) throw new Error(`Failed to fetch orders (${res.status})`);
+      const json = (await res.json()) as OrdersData;
+      if (!mountedRef.current || generation !== dataGenerationRef.current) return;
+      setData(json);
+      setLastSync(json.last_sync || null);
+      if (
+        warningSnapshotRef.current == null ||
+        warningSnapshotRef.current !== json.last_sync
+      ) {
+        warningSnapshotRef.current = null;
+        setError(null);
+      }
+    } catch (err) {
+      if (mountedRef.current && generation === dataGenerationRef.current) {
+        setError(err instanceof Error ? err.message : "Unknown error");
+      }
+    } finally {
+      readingRef.current = false;
+      if (mountedRef.current) setLoading(false);
+    }
+  }, []);
+
+  const scheduleNext = useCallback((delay: number) => {
+    if (!mountedRef.current || !activeRef.current) return;
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      void pollCachedRef.current();
+    }, delay);
+  }, []);
+
+  const pollCached = useCallback(async () => {
+    await fetchOrders();
+    if (mountedRef.current && activeRef.current) scheduleNext(POLL_INTERVAL_MS);
+  }, [fetchOrders, scheduleNext]);
+  pollCachedRef.current = pollCached;
 
   const triggerSync = useCallback(async () => {
-    setSyncing(true);
+    if (syncingRef.current) return;
+    syncingRef.current = true;
+    const syncGeneration = ++dataGenerationRef.current;
+    if (mountedRef.current) setSyncing(true);
     try {
-      const res = await fetch("/api/orders", { method: "POST", cache: "no-store" });
+      const res = await fetch("/api/orders", {
+        method: "POST",
+        cache: "no-store",
+        signal: AbortSignal.timeout(POST_FETCH_TIMEOUT_MS),
+      });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? "Sync failed");
       }
       const json = (await res.json()) as OrdersData;
+      if (!mountedRef.current || syncGeneration !== dataGenerationRef.current) return;
+      dataGenerationRef.current += 1;
       setData(json);
       setLastSync(json.last_sync || null);
-      setError(null);
+      const warning = res.headers.get("X-Sync-Warning");
+      if (warning) {
+        warningSnapshotRef.current = json.last_sync || null;
+        setError(warning);
+      } else {
+        warningSnapshotRef.current = null;
+        setError(null);
+      }
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Sync failed");
+      if (mountedRef.current) setError(err instanceof Error ? err.message : "Sync failed");
     } finally {
-      setSyncing(false);
+      syncingRef.current = false;
+      if (mountedRef.current) setSyncing(false);
     }
   }, []);
 
@@ -47,64 +120,42 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
     void triggerSync();
   }, [triggerSync]);
 
-  // Always read cached orders on mount (needed by ticker detail modal on any page).
-  // Only auto-sync from IB when active (orders page).
   useEffect(() => {
-    const init = async () => {
-      try {
-        const res = await fetch("/api/orders", { cache: "no-store" });
-        if (!res.ok) throw new Error("Failed to fetch orders");
-        const json = (await res.json()) as OrdersData;
-        setData(json);
-        setLastSync(json.last_sync || null);
-        setError(null);
-        setLoading(false);
-
-        // Sync fresh from IB on first load of orders page
-        if (active && !didInitialSync.current) {
-          didInitialSync.current = true;
-          void triggerSync();
-        }
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Unknown error");
-        setLoading(false);
-      }
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
     };
-
-    void init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // When orders page becomes active, trigger IB sync if we haven't yet
   useEffect(() => {
-    if (active && !didInitialSync.current && data != null) {
-      didInitialSync.current = true;
-      void triggerSync();
-    }
-  }, [active, data, triggerSync]);
+    if (initialLoadStartedRef.current) return;
+    initialLoadStartedRef.current = true;
+    void fetchOrders();
+  }, [fetchOrders]);
 
-  // Auto-sync interval (only when active)
   useEffect(() => {
-    if (!active) {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      return;
-    }
+    const becameActive = active && !previousActiveRef.current;
+    previousActiveRef.current = active;
 
-    intervalRef.current = setInterval(() => {
-      void triggerSync();
-    }, SYNC_INTERVAL_MS);
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = null;
+    }
+    if (active) scheduleNext(becameActive ? 500 : POLL_INTERVAL_MS);
 
     return () => {
-      if (intervalRef.current) clearInterval(intervalRef.current);
+      if (timerRef.current) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
-  }, [active, triggerSync]);
+  }, [active, scheduleNext]);
 
   const updateData = useCallback((newData: OrdersData) => {
+    dataGenerationRef.current += 1;
     setData(newData);
     setLastSync(newData.last_sync || null);
+    warningSnapshotRef.current = null;
     setError(null);
   }, []);
 

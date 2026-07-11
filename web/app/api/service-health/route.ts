@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { resetDb } from "@/lib/db";
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead } from "@/lib/dbCache";
 import {
@@ -167,9 +166,7 @@ export async function GET(): Promise<Response> {
   } catch (error) {
     // DB unreachable — return a synthetic degraded provider row instead of
     // hanging or shipping an empty healthy-looking service list. Drop the
-    // cached libsql client first: a read timeout here is the same wedged-socket
-    // failure that fires the "1 DEGRADED" banner, so let the next poll rebuild.
-    resetDb();
+    // dbExecute owns failure identity, timeout, and cache recovery.
     const message = scrubSecrets(
       error instanceof Error ? error.message : "service_health read failed",
     );

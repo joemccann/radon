@@ -1,5 +1,5 @@
 """``ib_watchdog`` must consult the shared 2FA push lock before
-issuing ``systemctl restart radon-ib-gateway.service``.
+issuing the fixed preheld-lease Gateway restart unit.
 
 The bug this guards against (incident 2026-05-19): the user manually
 ran ``radon restart`` at ~14:10 UTC. The IB Gateway came up at
@@ -25,6 +25,7 @@ import pytest
 
 from ib_watchdog import (  # type: ignore[import-not-found]
     GatewayState,
+    WATCHDOG_LOCK_HOLDER,
     WatchdogState,
     run_cycle,
     save_state,
@@ -72,6 +73,7 @@ def _drive(state_path: Path, payload: dict | None, **kwargs):
         patch("ib_watchdog.fetch_health", side_effect=fake_fetch),
         patch("ib_watchdog.trigger_restart", return_value=True) as restart_mock,
         patch("ib_watchdog.record_service_health"),
+        patch("ib_watchdog.probe_gateway_direct", return_value="unknown"),
     ):
         result = run_cycle(state_path=state_path, dry_run=True, **kwargs)
     return result, restart_mock
@@ -117,6 +119,23 @@ def test_watchdog_does_not_advance_lock_holder_clock(state_path):
     assert held is not None
     assert held.holder == holder
     assert held.expires_at == original.expires_at  # unchanged
+
+
+def test_prior_watchdog_lease_blocks_same_holder_reentry(state_path):
+    ok, original = ib_2fa_lock.acquire_2fa_push_lock(
+        WATCHDOG_LOCK_HOLDER,
+        ttl_secs=600,
+        reason="prior watchdog restart awaiting authentication",
+    )
+    assert ok is True
+    save_state(state_path, WatchdogState(degraded_count=2))
+
+    result, restart_mock = _drive(state_path, _hang_payload())
+
+    restart_mock.assert_not_called()
+    assert "2fa_push_in_flight" in result.last_outcome
+    held = ib_2fa_lock.check_2fa_push_lock()
+    assert held == original
 
 
 # --- Lock free → restart fires (regression check) --------------------------
@@ -172,8 +191,8 @@ def test_awaiting_2fa_payload_increments_stuck_counter_without_lock(state_path):
     increment `stuck_2fa_count` toward the 3-cycle threshold WITHOUT
     acquiring the push lock yet — the threshold gates the lock acquire."""
     # Genuine stuck-2FA: upstream_dead is False (container running + healthy,
-    # parked at the prompt). upstream_dead=True is the JVM acceptor hang →
-    # is_api_hang owns it (2026-06-15 loop fix).
+    # parked at the prompt). awaiting_2fa + upstream_dead=True uses the hard
+    # stand-down path and never restarts (2026-07-05 storm fix).
     payload = {
         "ib_gateway": {
             "service_state": "unhealthy",

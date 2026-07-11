@@ -142,6 +142,32 @@ class TestFlapDetection:
         # NRestarts +1 since last cycle still surfaces as the P3 delta signal.
         assert all(o.severity != "P1" for o in outcomes)
 
+    def test_recovered_p1_condition_emits_a_healthy_observation(self):
+        previous = {
+            "radon-nextjs.service": {
+                "nrestarts": 10,
+                "auto_restart": True,
+                "active_state": "activating",
+            },
+        }
+        current = units.parse_show_output(
+            _show_output(
+                _block(
+                    "radon-nextjs.service",
+                    active="active",
+                    sub="running",
+                    nrestarts=11,
+                )
+            )
+        )
+
+        outcomes = units.evaluate(current=current, previous=previous, now=NOW)
+
+        recovered = [o for o in outcomes if o.status == "healthy"]
+        assert len(recovered) == 1
+        assert recovered[0].service == "radon-nextjs.service"
+        assert recovered[0].fired is False
+
 
 # ── evaluation: NRestarts delta ──────────────────────────────────────
 
@@ -271,6 +297,7 @@ class TestContinuousBucketWiring:
 
         def fake_dispatch(*, outcomes, now):
             captured["outcomes"] = list(outcomes)
+            return wired_grouping.DispatchSummary()
 
         monkeypatch.setattr(wired_grouping, "dispatch_with_grouping", fake_dispatch)
 
@@ -279,6 +306,66 @@ class TestContinuousBucketWiring:
         assert any(o.service == "radon-relay.service" for o in captured["outcomes"])
         out = capsys.readouterr().out
         assert "radon-relay.service" in out
+
+    def test_continuous_bucket_cancels_unit_emergency_on_recovery(
+        self, db_conn, monkeypatch
+    ):
+        from watchdog.__main__ import main
+        from watchdog.check import CheckOutcome
+        from watchdog import cooldown as wired_cooldown
+        from watchdog import notify as wired_notify
+        import scripts.watchdog.units as wired_units
+        import scripts.watchdog.grouping as wired_grouping
+        import scripts.watchdog.external_probe as wired_external_probe
+
+        recovered = CheckOutcome(
+            service="radon-relay.service",
+            kind="unit",
+            status="healthy",
+            severity=None,
+            fired=False,
+            message="systemd unit recovered",
+            consecutive_failures=0,
+            now=NOW,
+        )
+        monkeypatch.setattr(wired_units, "check_units", lambda **kw: [recovered])
+        monkeypatch.setattr(
+            wired_external_probe,
+            "check_external_probe",
+            lambda **kw: CheckOutcome(
+                service="external-health-probe",
+                kind="deadman",
+                status="healthy",
+                severity=None,
+                fired=False,
+                message="off-box observer current",
+                consecutive_failures=0,
+                now=NOW,
+            ),
+        )
+        monkeypatch.setattr(
+            wired_grouping,
+            "dispatch_with_grouping",
+            lambda **kw: wired_grouping.DispatchSummary(),
+        )
+        monkeypatch.setattr(
+            wired_cooldown,
+            "active_emergency_services",
+            lambda **kw: ["radon-relay.service"],
+        )
+        cancelled = []
+        resolved = []
+        monkeypatch.setattr(wired_notify, "cancel_emergency", cancelled.append)
+        monkeypatch.setattr(
+            wired_cooldown,
+            "mark_emergency_resolved",
+            lambda **kw: resolved.append(kw["service"]),
+        )
+
+        assert main(["--bucket", "continuous"]) == 0
+
+        assert cancelled == ["radon-relay.service"]
+        assert resolved == ["radon-relay.service"]
 
     def test_other_buckets_do_not_run_units_check(self, db_conn, monkeypatch):
         from watchdog.__main__ import main
@@ -289,7 +376,11 @@ class TestContinuousBucketWiring:
             raise AssertionError("units check must not run outside continuous")
 
         monkeypatch.setattr(wired_units, "check_units", fail)
-        monkeypatch.setattr(wired_grouping, "dispatch_with_grouping", lambda **kw: None)
+        monkeypatch.setattr(
+            wired_grouping,
+            "dispatch_with_grouping",
+            lambda **kw: wired_grouping.DispatchSummary(),
+        )
 
         rc = main(["--bucket", "daily"])
         assert rc == 0

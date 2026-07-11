@@ -18,8 +18,8 @@ path consults BEFORE issuing a restart:
      ``systemctl restart`` the gateway). It writes a JSON record with
      the holder's identity and an expiry timestamp.
   2. ``check_2fa_push_lock()`` returns the active lock if one is held,
-     or ``None`` if free. Restart paths refuse to act when a lock is
-     held by another holder.
+     or ``None`` if free. Start paths refuse to act while any active lease
+     exists, including one carrying the same component holder name.
   3. ``release_2fa_push_lock()`` clears the lock — called when an
      authenticated probe confirms login completed, or when the operator
      hits ``POST /ib/reset-backoff``.
@@ -31,13 +31,13 @@ path consults BEFORE issuing a restart:
 
 The lock is *advisory* — any caller that doesn't consult it can still
 fire a push. The discipline is "every code path that can spawn a 2FA
-push MUST consult this module first." Today that means
-``scripts.api.ib_gateway.restart_ib_gateway`` and
-``scripts.ib_watchdog.trigger_restart``.
+push MUST consult this module first." That includes API ensure/restart,
+the watchdog, operator control, and launchd setup/manual starts. Docker,
+launchd, and IBC automatic restart schedules must remain disabled.
 
 State file path: ``IB_2FA_LOCK_PATH`` env, defaulting to
-``/var/lib/radon/ib-2fa-push-lock.json`` on production and a
-test-friendly tmp path otherwise.
+``/var/lib/radon/ib-2fa-push-lock.json`` on Linux and the per-user
+Application Support directory on macOS.
 """
 
 from __future__ import annotations
@@ -46,12 +46,20 @@ import json
 import logging
 import os
 import sys
+import tempfile
 import time
+from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Optional
 
+import fcntl
+
 logger = logging.getLogger("radon.ib_2fa_lock")
+
+
+class GuardLockTimeout(TimeoutError):
+    """The canonical lease guard could not be acquired before its deadline."""
 
 
 # How long a single 2FA push notification is allowed to "own" the lock.
@@ -62,13 +70,24 @@ logger = logging.getLogger("radon.ib_2fa_lock")
 DEFAULT_LOCK_TTL_SECS = 600
 
 # /var/lib/radon is owned by the radon user on Hetzner (and writable by
-# the systemd-managed FastAPI + ib_watchdog services). Override via env
-# for dev/test.
+# the systemd-managed FastAPI + ib_watchdog services). macOS launch agents use
+# the per-user Application Support directory so every local control plane can
+# share the lease without root privileges. Override via env for dev/test.
 DEFAULT_LOCK_PATH = "/var/lib/radon/ib-2fa-push-lock.json"
 
 
 def _lock_path() -> Path:
-    return Path(os.environ.get("IB_2FA_LOCK_PATH", DEFAULT_LOCK_PATH))
+    configured = os.environ.get("IB_2FA_LOCK_PATH")
+    if configured:
+        return Path(configured)
+    if sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "Radon" / "ib-2fa-push-lock.json"
+    return Path(DEFAULT_LOCK_PATH)
+
+
+def _guard_path() -> Path:
+    path = _lock_path()
+    return path.with_suffix(path.suffix + ".guard")
 
 
 @dataclass(frozen=True)
@@ -103,21 +122,88 @@ class PushLock:
 
 
 def _write_lock_file(lock: PushLock) -> None:
-    """Persist a lock via temp-file + os.replace() so concurrent readers
-    never observe a partial JSON document."""
+    """Durably replace the lease file. Caller must hold the guard lock."""
     path = _lock_path()
     path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    with tmp.open("w") as fh:
-        json.dump(lock.to_dict(), fh)
-    os.replace(tmp, path)
+    fd, tmp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(lock.to_dict(), fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _write_consumed_marker(path: Path, fingerprint: dict) -> None:
+    """Durably replace a consumed-lease marker under its own guard."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=path.parent,
+    )
+    try:
+        with os.fdopen(fd, "w") as fh:
+            json.dump(fingerprint, fh, sort_keys=True)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except FileNotFoundError:
+            pass
+        raise
+
+
+@contextmanager
+def _guard(*, exclusive: bool, timeout_secs: Optional[float] = None):
+    """Serialize lease transactions across processes with ``flock``."""
+    path = _guard_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a+") as guard:
+        operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+        if timeout_secs is None:
+            fcntl.flock(guard.fileno(), operation)
+        else:
+            deadline = time.monotonic() + max(0.0, timeout_secs)
+            while True:
+                try:
+                    fcntl.flock(guard.fileno(), operation | fcntl.LOCK_NB)
+                    break
+                except BlockingIOError:
+                    if time.monotonic() >= deadline:
+                        raise GuardLockTimeout(
+                            f"2FA lease guard busy after {timeout_secs:g}s"
+                        )
+                    time.sleep(min(0.01, max(0.0, deadline - time.monotonic())))
+        try:
+            yield
+        finally:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
 
 
 def _read_lock_file() -> Optional[PushLock]:
-    """Load the lock file. Returns None on missing/corrupt.
+    """Load the lease file. Caller must hold the shared or exclusive guard.
 
-    Corrupt files are treated as "no lock" — better to allow a restart
-    than to wedge the system on a malformed JSON byte.
+    A recently unreadable lease fails closed for one normal TTL based on its
+    mtime. It may represent a push already in flight; treating it as free would
+    turn disk corruption into a second IBKR push. An old corrupt file naturally
+    ages out through the same expiry rule as a valid crashed-holder lease.
     """
     path = _lock_path()
     if not path.exists():
@@ -126,17 +212,31 @@ def _read_lock_file() -> Optional[PushLock]:
         with path.open() as fh:
             return PushLock.from_dict(json.load(fh))
     except (OSError, json.JSONDecodeError, TypeError, ValueError) as exc:
-        logger.warning("2FA lock file unreadable (%s); treating as free", exc)
-        return None
+        try:
+            modified_at = path.stat().st_mtime
+        except OSError:
+            modified_at = time.time()
+        logger.error("2FA lock file unreadable (%s); failing closed until TTL", exc)
+        return PushLock(
+            holder="unreadable-lock-state",
+            acquired_at=modified_at,
+            expires_at=modified_at + DEFAULT_LOCK_TTL_SECS,
+            reason=f"lease file unreadable: {type(exc).__name__}",
+        )
 
 
-def check_2fa_push_lock(now: Optional[float] = None) -> Optional[PushLock]:
+def check_2fa_push_lock(
+    now: Optional[float] = None,
+    *,
+    guard_timeout_secs: Optional[float] = None,
+) -> Optional[PushLock]:
     """Return the active lock if one is held, else None.
 
     An expired lock counts as free — the caller may proceed and will
     typically acquire a fresh lock as part of their restart sequence.
     """
-    lock = _read_lock_file()
+    with _guard(exclusive=False, timeout_secs=guard_timeout_secs):
+        lock = _read_lock_file()
     if lock is None:
         return None
     if lock.is_expired(now):
@@ -150,6 +250,7 @@ def acquire_2fa_push_lock(
     ttl_secs: int = DEFAULT_LOCK_TTL_SECS,
     reason: str = "",
     now: Optional[float] = None,
+    guard_timeout_secs: Optional[float] = None,
 ) -> tuple[bool, Optional[PushLock]]:
     """Take the 2FA push lock for ``ttl_secs``. Returns (acquired, current_lock).
 
@@ -158,55 +259,99 @@ def acquire_2fa_push_lock(
       • (False, holder)   — refused. ``holder`` is the lock currently in
                             force; the caller must NOT fire a restart.
 
-    The lock file is rewritten on every acquire so subsequent readers see
-    the most recent expiry. ``acquired_at`` reflects the new acquisition.
-
-    Idempotency: re-acquiring while you already hold the lock REFRESHES
-    the expiry rather than blocking. Two restart paths racing through the
-    same holder identifier (e.g. two watchdog cycles) won't deadlock each
-    other.
+    Holder identity names a component, not a logical operation. Re-acquiring an
+    active lease is therefore refused even for the same holder: another call is
+    another Gateway cycle and may mint another push.
     """
     now = now if now is not None else time.time()
-    existing = _read_lock_file()
+    with _guard(exclusive=True, timeout_secs=guard_timeout_secs):
+        existing = _read_lock_file()
+        if existing is not None and not existing.is_expired(now):
+            return (False, existing)
 
-    if existing is not None and not existing.is_expired(now):
-        if existing.holder == holder:
-            # Same holder — refresh the lease.
-            refreshed = PushLock(
-                holder=holder,
-                acquired_at=now,
-                expires_at=now + ttl_secs,
-                reason=reason or existing.reason,
-            )
-            _write_lock_file(refreshed)
-            return (True, refreshed)
-        return (False, existing)
-
-    lock = PushLock(
-        holder=holder,
-        acquired_at=now,
-        expires_at=now + ttl_secs,
-        reason=reason,
-    )
-    _write_lock_file(lock)
-    return (True, lock)
+        lock = PushLock(
+            holder=holder,
+            acquired_at=now,
+            expires_at=now + ttl_secs,
+            reason=reason,
+        )
+        _write_lock_file(lock)
+        return (True, lock)
 
 
-def release_2fa_push_lock() -> Optional[PushLock]:
+def release_2fa_push_lock(
+    *,
+    expected_holder: Optional[str] = None,
+    guard_timeout_secs: Optional[float] = None,
+) -> Optional[PushLock]:
     """Clear the lock file. Returns the lock that was held (if any).
 
     Idempotent — calling on an already-free lock is a no-op that returns
     None.
     """
     path = _lock_path()
-    existing = _read_lock_file()
-    if existing is None:
-        return None
-    try:
-        path.unlink()
-    except FileNotFoundError:
-        pass
-    return existing
+    with _guard(exclusive=True, timeout_secs=guard_timeout_secs):
+        existing = _read_lock_file()
+        if existing is None:
+            return None
+        if expected_holder is not None and existing.holder != expected_holder:
+            return None
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            return None
+        dir_fd = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(dir_fd)
+        finally:
+            os.close(dir_fd)
+        return existing
+
+
+def consume_2fa_push_lock(
+    expected_holder: str,
+    consumed_path: Path,
+    *,
+    now: Optional[float] = None,
+) -> tuple[bool, Optional[PushLock]]:
+    """Atomically verify and mark one exact active lease as consumed.
+
+    The canonical lease guard remains exclusively held from the holder/expiry
+    check through the durable consumed-marker replace. A concurrent reset,
+    release, or reacquire therefore occurs entirely before or after this CAS,
+    never between validation and marking.
+    """
+    now = now if now is not None else time.time()
+    consumed_path = Path(consumed_path)
+    consumed_guard = consumed_path.with_suffix(consumed_path.suffix + ".guard")
+    with _guard(exclusive=True):
+        existing = _read_lock_file()
+        if (
+            existing is None
+            or existing.is_expired(now)
+            or existing.holder != expected_holder
+        ):
+            return False, existing
+
+        fingerprint = {
+            "holder": existing.holder,
+            "acquired_at": existing.acquired_at,
+            "expires_at": existing.expires_at,
+        }
+        consumed_guard.parent.mkdir(parents=True, exist_ok=True)
+        with consumed_guard.open("a+") as guard:
+            fcntl.flock(guard.fileno(), fcntl.LOCK_EX)
+            try:
+                try:
+                    prior = json.loads(consumed_path.read_text())
+                except (FileNotFoundError, json.JSONDecodeError, OSError):
+                    prior = None
+                if prior == fingerprint:
+                    return False, existing
+                _write_consumed_marker(consumed_path, fingerprint)
+            finally:
+                fcntl.flock(guard.fileno(), fcntl.LOCK_UN)
+        return True, existing
 
 
 def remaining_lock_secs(now: Optional[float] = None) -> int:
@@ -233,7 +378,10 @@ def remaining_lock_secs(now: Optional[float] = None) -> int:
 # stdout; refusals print holder + remaining seconds to stderr so callers
 # can surface them verbatim.
 
-_CLI_USAGE = "usage: python3 -m scripts.utils.ib_2fa_lock {check|acquire <holder>|release <holder>}"
+_CLI_USAGE = (
+    "usage: python3 -m scripts.utils.ib_2fa_lock "
+    "{check|acquire <holder>|release <holder>|consume <holder> <marker-path>}"
+)
 
 
 def _print_held(lock: PushLock) -> None:
@@ -270,9 +418,23 @@ def _cli_release(holder: str) -> int:
     if lock.holder != holder:
         _print_held(lock)
         return 1
-    release_2fa_push_lock()
+    release_2fa_push_lock(expected_holder=holder)
     print(f"released holder={holder}")
     return 0
+
+
+def _cli_consume(holder: str, marker_path: str) -> int:
+    consumed, current = consume_2fa_push_lock(holder, Path(marker_path))
+    if consumed:
+        print(f"consumed holder={holder}")
+        return 0
+    if current is None or current.is_expired():
+        print(f"cannot consume holder={holder}: lease is free or expired", file=sys.stderr)
+    elif current.holder != holder:
+        _print_held(current)
+    else:
+        print(f"cannot consume holder={holder}: lease already consumed", file=sys.stderr)
+    return 1
 
 
 def main(argv: list[str]) -> int:
@@ -282,6 +444,8 @@ def main(argv: list[str]) -> int:
         return _cli_acquire(argv[1])
     if len(argv) == 2 and argv[0] == "release":
         return _cli_release(argv[1])
+    if len(argv) == 3 and argv[0] == "consume":
+        return _cli_consume(argv[1], argv[2])
     print(_CLI_USAGE, file=sys.stderr)
     return 2
 
