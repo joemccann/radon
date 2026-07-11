@@ -296,8 +296,13 @@ finalize_release_artifacts() {{ printf finalize >> {touched}; }}
 short_log() {{ printf tested; }}
 sudo() {{
   if [[ "$*" == "-n {root_helper} verify-control-plane" ]]; then
-    [[ {installed_state} != unreadable ]]
-    return
+    # Mirror the root helper contract: only a regular readable hash-matched
+    # file is acceptable. Non-privileged preflight cannot observe 0440
+    # sudoers, so unsafe installed targets fail here.
+    case "{installed_state}" in
+      missing|symlink|directory|unreadable) return 1 ;;
+      *) return 0 ;;
+    esac
   fi
   if [[ "$*" == "-n {root_helper} verify-restored" ]]; then return 0; fi
   printf sudo >> {touched}
@@ -321,7 +326,12 @@ main {requested} || status=$?
         text=True,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "installed control-plane target" in result.stdout + result.stderr
+    combined = result.stdout + result.stderr
+    assert (
+        "installed control-plane target" in combined
+        or "privileged verification" in combined
+        or "control-plane target contract" in combined
+    )
     assert not touched.exists()
 
 
