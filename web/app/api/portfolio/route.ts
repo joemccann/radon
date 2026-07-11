@@ -8,6 +8,10 @@ import {
 import { dbExecute } from "@/lib/dbExecute";
 import { cachedRead, cachedReadResult } from "@/lib/dbCache";
 import { buildContractEntryDates, type JournalEntryRow } from "@/lib/entryDates";
+import {
+  isPortfolioSnapshotUnexpectedlyStale,
+  PORTFOLIO_SNAPSHOT_STALE_WARNING,
+} from "@/lib/portfolioSnapshotFreshness";
 
 // Disable Next.js static caching: this handler reads live Turso state.
 // Without this, the framework freezes the first response and serves stale
@@ -16,7 +20,6 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const CACHE_TTL_MS = 60_000; // 1 minute
 const DB_READ_TIMEOUT_MS = 3_000;
 // Server-side coalescing of the polled GET reads. The snapshot is the hot one;
 // staleWhileError serves the last good portfolio through a brief Turso stall
@@ -54,13 +57,6 @@ async function readPortfolioFromDb(): Promise<PortfolioSnapshot | null> {
     takenAt,
     timestampMs: parseTimestampMs(data.last_sync) ?? parseTimestampMs(takenAt),
   };
-}
-
-function isPortfolioSnapshotStale(snapshot: PortfolioSnapshot | null): boolean {
-  if (!snapshot?.timestampMs) {
-    return true;
-  }
-  return Date.now() - snapshot.timestampMs > CACHE_TTL_MS;
 }
 
 /** Load ticker → latest trade date.
@@ -211,8 +207,10 @@ export async function GET(): Promise<Response> {
     if (cachedSnapshot.staleWhileError) {
       warnings.push("Turso read failed; serving last in-memory portfolio snapshot");
     }
-    if (isPortfolioSnapshotStale(snapshot)) {
-      warnings.push("Portfolio snapshot is stale; live sync was not requested");
+    // Age relative to portfolio-sync schedule (RTH tight, weekend wide).
+    // Do not treat expected off-hours lag as LIVE DATA DEGRADED.
+    if (isPortfolioSnapshotUnexpectedlyStale(snapshot.timestampMs)) {
+      warnings.push(PORTFOLIO_SNAPSHOT_STALE_WARNING);
     }
     if (warnings.length > 0) {
       return portfolioResponseFromSnapshot(

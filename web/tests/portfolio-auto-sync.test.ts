@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 /**
  * Verifies that GET /api/portfolio is a read-only snapshot surface. Browser
  * polling must never initiate IB work; scheduled jobs and explicit POST own
- * synchronization.
+ * synchronization. Snapshot age warnings follow portfolio-sync market windows.
  */
 
 const mockRadonFetch = vi.fn();
@@ -31,10 +31,6 @@ function makePortfolio(lastSync: string) {
   };
 }
 
-function ageAgo(ageMs: number): string {
-  return new Date(Date.now() - ageMs).toISOString();
-}
-
 function mockDbPortfolio(portfolio: Record<string, unknown> | null) {
   mockExecute.mockImplementation(async ({ sql }: { sql: string }) => {
     if (/FROM\s+portfolio_snapshots/i.test(sql)) {
@@ -56,33 +52,66 @@ describe("GET /api/portfolio — cache-only polling", () => {
     vi.resetModules();
     vi.clearAllMocks();
     mockRadonFetch.mockResolvedValue({ ok: true });
-    mockDbPortfolio(makePortfolio(ageAgo(10_000)));
   });
 
-  it("serves stale Turso data with a warning without triggering IB sync", async () => {
-    const portfolio = makePortfolio(ageAgo(90_000));
-    mockDbPortfolio(portfolio);
+  it("serves RTH-stale Turso data with a warning without triggering IB sync", async () => {
+    // Friday 15:00 ET (19:00 UTC) RTH; snapshot 15 minutes old > 10m open window
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T19:00:00.000Z"));
+    try {
+      const lastSync = new Date(Date.now() - 15 * 60_000).toISOString();
+      const portfolio = makePortfolio(lastSync);
+      mockDbPortfolio(portfolio);
 
-    const { GET } = await import("../app/api/portfolio/route");
-    const response = await GET();
-    const body = await response.json();
+      const { GET } = await import("../app/api/portfolio/route");
+      const response = await GET();
+      const body = await response.json();
 
-    expect(response.status).toBe(200);
-    expect(body.last_sync).toBe(portfolio.last_sync);
-    expect(response.headers.get("X-Sync-Warning")).toContain("stale");
-    expect(response.headers.get("X-Portfolio-Source")).toBe("turso-stale");
-    expect(mockRadonFetch).not.toHaveBeenCalled();
-    expect(mockReadDataFile).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(body.last_sync).toBe(portfolio.last_sync);
+      expect(response.headers.get("X-Sync-Warning")).toContain("scheduled refresh window");
+      expect(response.headers.get("X-Portfolio-Source")).toBe("turso-stale");
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+      expect(mockReadDataFile).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
-  it("does NOT trigger FastAPI sync when the Turso snapshot is <60 s old", async () => {
-    mockDbPortfolio(makePortfolio(ageAgo(10_000)));
+  it("does not degrade on weekend when Friday snapshot is within closed window", async () => {
+    // Saturday afternoon ET; Friday close snapshot is expected silence
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-11T18:00:00.000Z"));
+    try {
+      const fridayClose = "2026-07-10T20:00:00.000Z";
+      mockDbPortfolio(makePortfolio(fridayClose));
 
-    const { GET } = await import("../app/api/portfolio/route");
-    await GET();
+      const { GET } = await import("../app/api/portfolio/route");
+      const response = await GET();
 
-    expect(mockRadonFetch).not.toHaveBeenCalled();
-    expect(mockReadDataFile).not.toHaveBeenCalled();
+      expect(response.status).toBe(200);
+      expect(response.headers.get("X-Sync-Warning")).toBeNull();
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does NOT trigger FastAPI sync when the Turso snapshot is fresh for RTH", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-10T19:00:00.000Z"));
+    try {
+      mockDbPortfolio(makePortfolio(new Date(Date.now() - 10_000).toISOString()));
+
+      const { GET } = await import("../app/api/portfolio/route");
+      const response = await GET();
+
+      expect(response.headers.get("X-Sync-Warning")).toBeNull();
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+      expect(mockReadDataFile).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("returns unavailable without touching IB when no Turso snapshot exists", async () => {
@@ -95,23 +124,30 @@ describe("GET /api/portfolio — cache-only polling", () => {
     expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
-  it("keeps repeated stale GETs free of IB side effects", async () => {
-    mockDbPortfolio(makePortfolio(ageAgo(90_000)));
+  it("keeps repeated weekend GETs free of IB side effects", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-07-11T18:00:00.000Z"));
+    try {
+      mockDbPortfolio(makePortfolio("2026-07-10T20:00:00.000Z"));
 
-    const { GET } = await import("../app/api/portfolio/route");
+      const { GET } = await import("../app/api/portfolio/route");
 
-    await GET();
-    await GET();
+      await GET();
+      await GET();
 
-    expect(mockRadonFetch).not.toHaveBeenCalled();
+      expect(mockRadonFetch).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("warns when a recent snapshot is served from memory after a Turso failure", async () => {
     vi.useFakeTimers();
+    // Friday RTH so a fresh snapshot is not age-stale; only Turso error warns
     vi.setSystemTime(new Date("2026-07-10T20:00:00Z"));
     process.env.RADON_DB_CACHE_FORCE = "1";
     try {
-      mockDbPortfolio(makePortfolio(ageAgo(10_000)));
+      mockDbPortfolio(makePortfolio(new Date(Date.now() - 10_000).toISOString()));
       const { GET } = await import("../app/api/portfolio/route");
 
       const fresh = await GET();
