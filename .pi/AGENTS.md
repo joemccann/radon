@@ -88,5 +88,5 @@ Specialized feeds like Cboe may be used where a script explicitly documents that
 
 - Turso libSQL embedded replicas were retired on 2026-05-20. Direct-to-cloud is the code default (replica opt-in only via `RADON_DB_USE_REPLICA=1`; `RADON_DB_NO_REPLICA=1` remains the kill switch); `data/replica.db` must not exist.
 - Trades canonical store is the Turso `journal` table. `/journal` and `/orders` derive from it, with JSON fallback only for legacy rows.
-- Push to `main` auto-deploys through `.github/workflows/deploy.yml`; verify with `gh run list --workflow=deploy.yml --limit 1` when deployment matters.
+- Push to `main` runs CI then the Production-environment deploy job (required reviewer). Approve pending deployments before the SSH release finishes. Verify with `gh run list --workflow=ci.yml --limit 1`. Monorepo cutover state and env contract: `docs/monorepo-cloud-migration.md`. Live reliability lessons: `tasks/lessons.md` (2026-07-11).
 - Local HTML reports that embed images must inline images as base64 `data:` URIs; Chrome blocks `file://` image loading.

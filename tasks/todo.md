@@ -211,7 +211,36 @@ Local monitor launchd:      idle as scheduled, exit 0, 42 runs, fresh heartbeat
 3. Complete a fresh IBKR 2FA approval and verify two consecutive authenticated samples, API/pool recovery, Gateway health, and a green external aggregate.
 4. Enable GitHub `main`/Production protections and required reviewers. These repository settings are not enforceable from source alone.
 
-Confidence: high for the traced root causes, source fixes, regression coverage, cloud preflight, and local monitor behavior; moderate for live cutover until the first privileged bootstrap/deploy is exercised; current live broker availability is conclusively unhealthy, not unknown.
+#### Operational cutover (2026-07-11) — executed and closed green
+
+1. **Committed and deployed** the reliability package plus cutover fixes through production SHA `06e683e5` (green marker matches HEAD).
+2. **Root bootstrap** published `/var/lib/radon/control-plane-ready` (20 artifacts) without restarting Gateway. Required preseed of shell helpers before `systemd-analyze verify`.
+3. **IBKR 2FA recovered** after gateway-control root-demotion cwd fix; pool 3/3 connected. Production enums: `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud`.
+4. **Schema-v2 aggregate green** after accepting cloud-mode `service_state=reachable` in the nested broker classifier.
+5. **First post-ready immutable-runner deploy succeeded** (CI run `29157182912`). Intermediate failures fixed in tree: unreadable-sudoers preflight, Bun 1.3.14 host pin, best-effort backup cleanup, writable prune of a-w runners.
+6. **GitHub control plane**: Production required reviewer + main-only deploy branches; main blocks force-push/delete without blocking solo direct push via required pre-push status checks.
+
+**Live verification (2026-07-11 ~15:07 UTC):**
+```
+HEAD / green marker:    06e683e5160eee043ad9e5ba5279141ec0b1e419
+control-plane-ready:    present
+/health:                authenticated reachable cloud upstream_dead=false
+ib_pool:                sync/orders/data connected
+/status:                schema_version=2 ok=true overall_state=up
+.env:                   0600; IB_GATEWAY_MODE=cloud; RADON_MODE=hetzner
+compose dir:            /home/radon/radon/cloud
+CI deploy:              success (all jobs including Deploy to VPS)
+```
+
+**Cutover defects found only under live fire (now fixed + documented in tasks/lessons.md):**
+bootstrap helper preseed; gateway-control demotion cwd; radon-side sudoers `-f` probes; env invariants cloud vs hetzner/docker; nested `reachable`; host Bun pin; a-w runner prune; post-green backup permission noise.
+
+**Still open (non-blocking):**
+- Forced pre-cloud SHA rollback drill.
+- Operator-owned local WIP (journal-range, WorkspaceSections, globals, serena, tag_taxonomy) intentionally excluded from reliability commits.
+- Host notes pending kernel upgrade on the VPS.
+
+Confidence: high for root causes, source fixes, tests, live bootstrap, 2FA recovery, schema-v2 green aggregate, and a completed immutable-runner deploy.
 
 ---
 
