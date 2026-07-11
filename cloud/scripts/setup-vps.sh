@@ -18,6 +18,7 @@ fi
 # overridable via RADON_CLOUD_DIR=/home/radon/radon-cloud during migration.
 readonly RADON_DIR="${RADON_APP_DIR:-/home/radon/radon}"
 readonly CLOUD_DIR="${RADON_CLOUD_DIR:-${RADON_DIR}/cloud}"
+readonly ENV_FILE="${RADON_DEPLOY_ENV_FILE:-/home/radon/radon-cloud/.env}"
 readonly RADON_REPO="git@github.com:joemccann/radon.git"
 readonly CLOUD_REPO="git@github.com:joemccann/radon-cloud.git"  # legacy only
 readonly PYTHON_BIN="python3.13"
@@ -387,12 +388,12 @@ setup_node() {
 
   # Persist only browser-safe build variables. Server-side values are injected
   # into the build process by run_with_env.py and never copied into web/.env.
-  if [[ -f "${CLOUD_DIR}/.env" ]]; then
-    chmod 0600 "${CLOUD_DIR}/.env"
-    chown radon:radon "${CLOUD_DIR}/.env"
+  if [[ -f "$ENV_FILE" ]]; then
+    chmod 0600 "$ENV_FILE"
+    chown radon:radon "$ENV_FILE"
     local public_env_tmp
     public_env_tmp="$(mktemp)"
-    grep -E '^NEXT_PUBLIC_[A-Z0-9_]+=' "${CLOUD_DIR}/.env" > "$public_env_tmp" || true
+    grep -E '^NEXT_PUBLIC_[A-Z0-9_]+=' "$ENV_FILE" > "$public_env_tmp" || true
     install -m 0600 -o radon -g radon "$public_env_tmp" "${RADON_DIR}/web/.env"
     rm -f "$public_env_tmp"
   fi
@@ -410,7 +411,7 @@ setup_node() {
   run_as_radon "cd ${RADON_DIR} && ./node_modules/.bin/playwright install chromium chromium-headless-shell >/dev/null"
   run_as_radon "cd ${RADON_DIR}/web && bun install --frozen-lockfile"
   run_as_radon "cd ${RADON_DIR}/web && ./node_modules/.bin/playwright install chromium chromium-headless-shell >/dev/null"
-  run_as_radon "cd ${RADON_DIR}/web && ${VENV_DIR}/bin/python ${CLOUD_DIR}/scripts/run_with_env.py ${CLOUD_DIR}/.env -- bun run build"
+  run_as_radon "cd ${RADON_DIR}/web && ${VENV_DIR}/bin/python ${CLOUD_DIR}/scripts/run_with_env.py ${ENV_FILE} -- bun run build"
   log_success "Next.js built"
 }
 
@@ -724,19 +725,19 @@ install_admin_polkit_rule() {
 # -- Environment validation -------------------------------------------------
 
 validate_env() {
-  local env_file="${CLOUD_DIR}/.env"
+  local env_file="$ENV_FILE"
 
   if [[ ! -f "$env_file" ]]; then
     log_error ".env file not found at ${env_file}"
     echo "  Copy the example and fill in your values:"
-    echo "    cp ${CLOUD_DIR}/.env.example ${env_file}"
+    echo "    install -m 0600 -o radon -g radon ${CLOUD_DIR}/.env.example ${env_file}"
     return 1
   fi
 
   chmod 0600 "$env_file"
   chown radon:radon "$env_file"
 
-  if ! run_as_radon "${VENV_DIR}/bin/python" "${CLOUD_DIR}/scripts/check-env.py" \
+  if ! run_as_radon "$PYTHON_BIN" "${CLOUD_DIR}/scripts/check-env.py" \
     "$env_file" "${CLOUD_DIR}/config/required-env.txt"; then
     log_error "Environment does not satisfy config/required-env.txt"
     return 1
@@ -756,6 +757,7 @@ main() {
   validate_versions
   preflight_checks
   clone_repos
+  validate_env
   setup_python
   setup_node
   install_caddy
@@ -770,7 +772,7 @@ main() {
   install_operator_cli
   configure_sudoers
   install_admin_polkit_rule
-  validate_env && start_services
+  start_services
 
   echo ""
   log_success "Bootstrap complete."

@@ -9,7 +9,7 @@ Service-health monitor + alert dispatcher. Loaded when cwd is under `scripts/wat
 Monitors every `scheduled` service in `web/lib/serviceHealthWindows.ts`, notifies via Pushover (P1 only) + always-on `service_health` row.
 
 - **`intraday`**: `vcg-scan`, `cri-scan`, `orders-sync`, `portfolio-sync` — 5 min cadence, Mon–Fri 13:00–21:00 UTC.
-- **`continuous`**: `newsfeed-scraper`, `replica-watchdog`, `fill-monitor`, `exit-orders`, `journal-sync`, `ib-watchdog` — 5 min, 24/7.
+- **`continuous`**: `newsfeed-scraper`, `fill-monitor`, `exit-orders`, `journal-sync`, `ib-watchdog`, plus `replica-watchdog` only while `data/replica.db` exists — 5 min, 24/7.
 - **`daily`**: `cash-flow-sync`, `flex-token-check`, `cta-sync`, `llm-token-index`, `leap-scan`, `garch-scan`, `catalysts`, `config-drift`, `db-backup`, `preset-rebalance`, `journal-reconcile`, `portfolio-archive` — hourly, 24/7.
 - **`error`**: every scheduled service except `watchdog-alerts` itself (recursive-alert prevention) — 5 min, 24/7.
 
@@ -37,7 +37,7 @@ Services tagged `scheduled` or `on-demand`:
 - Stale `scheduled` → red banner.
 - Stale `on-demand` → `state="dormant"`, amber chip.
 
-**Event-driven writers** (`replica-watchdog`, `watchdog-alerts`) use 24h windows. Tight windows treat quiet healthy periods as stale — see `feedback_event_driven_writer_windows.md`.
+**Applicable event-driven writers** (`replica-watchdog` while `data/replica.db` exists, and `watchdog-alerts`) use 24h windows. A missing replica file disables `replica-watchdog` before historical health rows are evaluated. Tight windows treat quiet healthy periods as stale — see `feedback_event_driven_writer_windows.md`.
 
 ---
 

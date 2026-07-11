@@ -14,8 +14,7 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const DATA_DIR = join(process.cwd(), "..", "data");
-const CACHE_PATH = join(DATA_DIR, "vcg.json");
+const CACHE_PATH = join(process.cwd(), "..", "data", "vcg.json");
 
 const EMPTY_VCG = {
   scan_time: "",

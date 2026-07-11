@@ -2,240 +2,240 @@
   "name": "r2k-communication",
   "description": "Russell 2000 Communication (77 companies)",
   "tickers": [
-    "SATS",
     "LUMN",
-    "TDS",
-    "GSAT",
     "SPHR",
+    "TDS",
     "CNK",
+    "MGNI",
     "MSGE",
     "LION",
     "CARG",
+    "STUB",
     "BATRK",
-    "UNIT",
-    "MGNI",
-    "ZD",
-    "WLY",
-    "IMAX",
     "BAND",
-    "YELP",
+    "WLY",
+    "UNIT",
+    "ZD",
+    "IMAX",
+    "DV",
     "TRIP",
-    "LILAK",
-    "TDAY",
-    "RUM",
-    "IDT",
-    "SCHL",
-    "SHEN",
-    "CCOI",
-    "AMC",
-    "STGW",
+    "DJT",
+    "YELP",
     "ATEX",
+    "AMC",
+    "TDAY",
+    "IDT",
+    "CCO",
     "QNST",
-    "IHRT",
+    "LILAK",
+    "STGW",
     "EVC",
-    "SBGI",
-    "CARS",
+    "RUM",
+    "GTM",
+    "TBLA",
+    "GLIBK",
     "EVER",
+    "SCHL",
+    "SBGI",
+    "CCOI",
+    "SHEN",
     "NXDR",
-    "GRND",
-    "BATRA",
-    "MCS",
-    "SSTK",
     "PUBM",
-    "GTN",
-    "IBTA",
+    "CARS",
+    "MCS",
+    "IHRT",
+    "MNTN",
+    "GRND",
+    "MAX",
     "NMAX",
+    "BATRA",
+    "STRZ",
+    "GTN",
+    "AMCX",
+    "IBTA",
+    "BMBL",
+    "BOC",
+    "NEXN",
     "GOGO",
     "FUBO",
-    "MAX",
-    "AMCX",
-    "STRZ",
-    "ATNI",
-    "CABO",
-    "NEXN",
-    "BOC",
-    "LILA",
-    "WBTN",
-    "BMBL",
-    "SSP",
+    "NCMI",
     "ZIP",
-    "OPTU",
+    "WBTN",
+    "LILA",
+    "SSTK",
+    "ATNI",
     "PLTK",
+    "OPTU",
     "SPOK",
     "RSVR",
-    "NCMI",
     "ANGI",
-    "TTGT",
-    "CURI",
+    "CABO",
+    "SSP",
     "ADV",
-    "THRY",
-    "GAMB",
+    "CURI",
+    "TTGT",
+    "GLIBA",
     "EEX",
-    "GETY",
-    "TZOO",
-    "SEAT",
-    "TEAD",
-    "MYPS",
-    "GAIA",
-    "AREN",
-    "MRDN"
+    "KORE",
+    "LEE",
+    "AREN"
   ],
   "pairs": [
     [
-      "SATS",
-      "LUMN"
+      "LUMN",
+      "SPHR"
     ],
     [
       "TDS",
-      "GSAT"
-    ],
-    [
-      "SPHR",
       "CNK"
     ],
     [
-      "MSGE",
-      "LION"
+      "MGNI",
+      "MSGE"
     ],
     [
-      "CARG",
+      "LION",
+      "CARG"
+    ],
+    [
+      "STUB",
       "BATRK"
     ],
     [
-      "UNIT",
-      "MGNI"
-    ],
-    [
-      "ZD",
+      "BAND",
       "WLY"
     ],
     [
+      "UNIT",
+      "ZD"
+    ],
+    [
       "IMAX",
-      "BAND"
+      "DV"
+    ],
+    [
+      "TRIP",
+      "DJT"
     ],
     [
       "YELP",
-      "TRIP"
-    ],
-    [
-      "LILAK",
-      "TDAY"
-    ],
-    [
-      "RUM",
-      "IDT"
-    ],
-    [
-      "SCHL",
-      "SHEN"
-    ],
-    [
-      "CCOI",
-      "AMC"
-    ],
-    [
-      "STGW",
       "ATEX"
     ],
     [
+      "AMC",
+      "TDAY"
+    ],
+    [
+      "IDT",
+      "CCO"
+    ],
+    [
       "QNST",
+      "LILAK"
+    ],
+    [
+      "STGW",
+      "EVC"
+    ],
+    [
+      "RUM",
+      "GTM"
+    ],
+    [
+      "TBLA",
+      "GLIBK"
+    ],
+    [
+      "EVER",
+      "SCHL"
+    ],
+    [
+      "SBGI",
+      "CCOI"
+    ],
+    [
+      "SHEN",
+      "NXDR"
+    ],
+    [
+      "PUBM",
+      "CARS"
+    ],
+    [
+      "MCS",
       "IHRT"
     ],
     [
-      "EVC",
-      "SBGI"
-    ],
-    [
-      "CARS",
-      "EVER"
-    ],
-    [
-      "NXDR",
+      "MNTN",
       "GRND"
     ],
     [
+      "MAX",
+      "NMAX"
+    ],
+    [
       "BATRA",
-      "MCS"
-    ],
-    [
-      "SSTK",
-      "PUBM"
-    ],
-    [
-      "GTN",
-      "IBTA"
-    ],
-    [
-      "NMAX",
-      "GOGO"
-    ],
-    [
-      "FUBO",
-      "MAX"
-    ],
-    [
-      "AMCX",
       "STRZ"
     ],
     [
-      "ATNI",
-      "CABO"
+      "GTN",
+      "AMCX"
     ],
     [
-      "NEXN",
-      "BOC"
+      "IBTA",
+      "BMBL"
     ],
     [
-      "LILA",
-      "WBTN"
+      "BOC",
+      "NEXN"
     ],
     [
-      "BMBL",
-      "SSP"
+      "GOGO",
+      "FUBO"
     ],
     [
-      "ZIP",
-      "OPTU"
+      "NCMI",
+      "ZIP"
+    ],
+    [
+      "WBTN",
+      "LILA"
+    ],
+    [
+      "SSTK",
+      "ATNI"
     ],
     [
       "PLTK",
-      "SPOK"
+      "OPTU"
     ],
     [
-      "RSVR",
-      "NCMI"
+      "SPOK",
+      "RSVR"
     ],
     [
       "ANGI",
-      "TTGT"
+      "CABO"
     ],
     [
-      "CURI",
+      "SSP",
       "ADV"
     ],
     [
-      "THRY",
-      "GAMB"
+      "CURI",
+      "TTGT"
     ],
     [
-      "EEX",
-      "GETY"
+      "GLIBA",
+      "EEX"
     ],
     [
-      "TZOO",
-      "SEAT"
+      "KORE",
+      "LEE"
     ],
     [
-      "TEAD",
-      "MYPS"
-    ],
-    [
-      "GAIA",
-      "AREN"
-    ],
-    [
-      "MRDN",
-      "SATS"
+      "AREN",
+      "LUMN"
     ]
   ],
   "sector": "Communication",

@@ -12,8 +12,7 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const DATA_DIR = join(process.cwd(), "..", "data");
-const CACHE_PATH = join(DATA_DIR, "breadth.json");
+const CACHE_PATH = join(process.cwd(), "..", "data", "breadth.json");
 
 // Contract: absent breadth data is HTTP 200 with missing:true, never a 4xx.
 const MISSING_BREADTH = {

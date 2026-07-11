@@ -2,13 +2,12 @@
   "name": "sp500-distributors",
   "description": "S&P 500 Distributors (Consumer Discretionary)",
   "tickers": [
-    "GPC",
-    "POOL"
+    "GPC"
   ],
   "pairs": [
     [
       "GPC",
-      "POOL"
+      "GPC"
     ]
   ],
   "sector": "Consumer Discretionary",

@@ -13,8 +13,7 @@ export const dynamic = "force-dynamic";
 
 export const runtime = "nodejs";
 
-const DATA_DIR = join(process.cwd(), "..", "data");
-const CACHE_PATH = join(DATA_DIR, "gex.json");
+const CACHE_PATH = join(process.cwd(), "..", "data", "gex.json");
 
 const EMPTY_GEX = {
   scan_time: "",

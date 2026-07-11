@@ -9,7 +9,7 @@ services:
     restart: "no"
 
     env_file:
-      - .env
+      - ${RADON_COMPOSE_ENV_FILE:-.env}
 
     environment:
       - VNC_SERVER_PASSWORD=${VNC_SERVER_PASSWORD:-}

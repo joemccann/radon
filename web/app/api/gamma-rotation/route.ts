@@ -10,8 +10,7 @@ import { isGammaRotationStale } from "@/lib/gammaRotationStaleness";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-const DATA_DIR = join(process.cwd(), "..", "data");
-const CACHE_PATH = join(DATA_DIR, "gamma_rotation_gap.json");
+const CACHE_PATH = join(process.cwd(), "..", "data", "gamma_rotation_gap.json");
 
 const EMPTY_ASSET = {
   ticker: "",

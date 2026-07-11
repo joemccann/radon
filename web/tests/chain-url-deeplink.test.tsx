@@ -55,6 +55,17 @@ const ORDERS: OrdersData = {
 
 const fetchMock = vi.fn<typeof fetch>();
 
+function futureExpiry(days: number) {
+  const date = new Date();
+  date.setUTCHours(0, 0, 0, 0);
+  date.setUTCDate(date.getUTCDate() + days);
+  const dashed = date.toISOString().slice(0, 10);
+  return { dashed, compact: dashed.replaceAll("-", "") };
+}
+
+const NEAR_EXPIRY = futureExpiry(14);
+const FAR_EXPIRY = futureExpiry(42);
+
 function jsonResponse(body: unknown) {
   return Promise.resolve(
     new Response(JSON.stringify(body), { status: 200, headers: { "Content-Type": "application/json" } }),
@@ -101,10 +112,10 @@ describe("Options chain URL deep-link", () => {
     fetchMock.mockImplementation((input) => {
       const url = typeof input === "string" ? input : input instanceof URL ? input.toString() : String(input.url);
       if (url.includes("/api/options/expirations")) {
-        return jsonResponse({ symbol: "MU", expirations: ["20260717", "20260814"] });
+        return jsonResponse({ symbol: "MU", expirations: [NEAR_EXPIRY.compact, FAR_EXPIRY.compact] });
       }
       if (url.includes("/api/options/chain")) {
-        return jsonResponse({ symbol: "MU", expiry: "20260717", strikes: [950, 960, 970] });
+        return jsonResponse({ symbol: "MU", expiry: NEAR_EXPIRY.compact, strikes: [950, 960, 970] });
       }
       if (url.includes("/api/risk-free-rate")) return jsonResponse({ rate: 0 });
       // TickerDetailContent fetches stock-state for the after-hours quote-bar fallback.
@@ -119,14 +130,14 @@ describe("Options chain URL deep-link", () => {
   });
 
   it("hydrates expiry, side, and strikes from the URL", async () => {
-    searchParamsString = "tab=chain&expiry=2026-07-17&side=calls&strikes=100";
+    searchParamsString = `tab=chain&expiry=${NEAR_EXPIRY.dashed}&side=calls&strikes=100`;
     renderChain();
 
     const comboboxes = await screen.findAllByRole("combobox");
     const expirySelect = comboboxes[0] as HTMLSelectElement;
     const strikesSelect = comboboxes[comboboxes.length - 1] as HTMLSelectElement;
 
-    await waitFor(() => expect(expirySelect.value).toBe("20260717"));
+    await waitFor(() => expect(expirySelect.value).toBe(NEAR_EXPIRY.compact));
     expect(strikesSelect.value).toBe("100");
     // CALLS side button is the active one.
     const callsBtn = screen.getByRole("button", { name: "CALLS" });
@@ -141,8 +152,8 @@ describe("Options chain URL deep-link", () => {
     const expirySelect = comboboxes[0] as HTMLSelectElement;
     const strikesSelect = comboboxes[comboboxes.length - 1] as HTMLSelectElement;
 
-    // Invalid expiry → auto-select first >=7d (20260717); invalid strikes → 15; invalid side → ALL.
-    await waitFor(() => expect(expirySelect.value).toBe("20260717"));
+    // Invalid expiry -> auto-select first >=7d; invalid strikes -> 15; invalid side -> ALL.
+    await waitFor(() => expect(expirySelect.value).toBe(NEAR_EXPIRY.compact));
     expect(strikesSelect.value).toBe("15");
     expect(screen.getByRole("button", { name: "ALL" }).className).toContain("active");
   });
@@ -153,7 +164,7 @@ describe("Options chain URL deep-link", () => {
 
     // Wait for expiry to resolve (init effect gates the URL writer).
     const expirySelect = (await screen.findAllByRole("combobox"))[0] as HTMLSelectElement;
-    await waitFor(() => expect(expirySelect.value).toBe("20260717"));
+    await waitFor(() => expect(expirySelect.value).toBe(NEAR_EXPIRY.compact));
 
     replaceMock.mockClear();
     fireEvent.click(screen.getByRole("button", { name: "PUTS" }));
@@ -165,7 +176,7 @@ describe("Options chain URL deep-link", () => {
   });
 
   it("hydrates theta harvester short-strangle legs into the order builder", async () => {
-    searchParamsString = "deck=c&expiry=2026-07-17&strikes=100&legs=SELL:1x950P,SELL:1x970C";
+    searchParamsString = `deck=c&expiry=${NEAR_EXPIRY.dashed}&strikes=100&legs=SELL:1x950P,SELL:1x970C`;
     renderChain();
 
     await screen.findByText("PREFILLED FROM THETA HARVESTER");
@@ -174,7 +185,7 @@ describe("Options chain URL deep-link", () => {
     expect(builder!.textContent).toContain("ORDER BUILDER : Short Strangle");
     expect(builder!.textContent).toContain("1x $950 Put");
     expect(builder!.textContent).toContain("1x $970 Call");
-    expect(builder!.textContent).toContain("2026-07-17");
+    expect(builder!.textContent).toContain(NEAR_EXPIRY.dashed);
 
     const sellButtons = within(builder as HTMLElement).getAllByRole("button", { name: "SELL" });
     expect(sellButtons.length).toBe(2);

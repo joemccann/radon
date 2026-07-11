@@ -179,7 +179,7 @@ class TestIBGateway:
 
     def test_working_directory(self, unit):
         svc = unit(self.FILENAME)["Service"]
-        assert svc["workingdirectory"] == "/home/radon/radon-cloud"
+        assert svc["workingdirectory"] == "/home/radon/radon/cloud"
 
     def test_exec_start_uses_gateway_control_helper(self, unit):
         svc = unit(self.FILENAME)["Service"]

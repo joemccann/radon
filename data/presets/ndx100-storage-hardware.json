@@ -1,9 +1,17 @@
 {
   "name": "ndx100-storage-hardware",
   "description": "NASDAQ 100 Storage & Hardware",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "STX",
+    "WDC"
+  ],
+  "pairs": [
+    [
+      "STX",
+      "WDC"
+    ]
+  ],
   "sector": "Technology",
   "vol_driver": "HDD/SSD demand, data storage cycles",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

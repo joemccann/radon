@@ -14,7 +14,7 @@ User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon-cloud/scripts/db_backup.py
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/db_backup.py
 StandardOutput=journal
 StandardError=journal
 # libsql_experimental exposes NO client-side timeouts (DUR-09); this

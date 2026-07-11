@@ -2,8 +2,6 @@
   "name": "sp500-packaged-foods-meats",
   "description": "S&P 500 Packaged Foods & Meats (Consumer Staples)",
   "tickers": [
-    "CPB",
-    "CAG",
     "GIS",
     "HSY",
     "HRL",
@@ -15,14 +13,6 @@
   ],
   "pairs": [
     [
-      "GIS",
-      "CPB"
-    ],
-    [
-      "KHC",
-      "CAG"
-    ],
-    [
       "HSY",
       "MDLZ"
     ],
@@ -33,6 +23,10 @@
     [
       "HRL",
       "TSN"
+    ],
+    [
+      "GIS",
+      "KHC"
     ]
   ],
   "sector": "Consumer Staples",

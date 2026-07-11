@@ -222,6 +222,7 @@ class TestStatusResponse:
         assert body["probes"]["radon-api"]["state"] == "up"
         assert body["units"]["radon-api.service"]["state"] == "up"
         assert body["units_age_secs"] == 1.2
+        assert body["schema_version"] == 2
         assert body["ok"] is True
         assert body["overall_state"] == "up"
         # service_health section present even with no cache wired in
@@ -276,6 +277,29 @@ class TestStatusResponse:
         )
         assert unknown["ok"] is False
         assert unknown["overall_state"] == "unknown"
+
+    def test_nested_api_payload_cannot_hide_broker_outage_behind_http_200(self):
+        body = probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "http_status": 200,
+                    "payload": {
+                        "status": "ok",
+                        "auth_state": "awaiting_2fa",
+                        "service_state": "unhealthy",
+                        "upstream_dead": True,
+                        "port_listening": True,
+                    },
+                }
+            },
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+
+        assert body["ok"] is False
+        assert body["overall_state"] == "down"
 
     def test_external_probe_is_not_folded_back_into_the_aggregate(self):
         body = probes.build_status(

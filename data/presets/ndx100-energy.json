@@ -1,9 +1,17 @@
 {
   "name": "ndx100-energy",
   "description": "NASDAQ 100 Energy",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "BKR",
+    "FANG"
+  ],
+  "pairs": [
+    [
+      "BKR",
+      "FANG"
+    ]
+  ],
   "sector": "Energy",
   "vol_driver": "Oil/gas prices, drilling activity",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

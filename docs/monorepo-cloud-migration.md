@@ -1,7 +1,7 @@
 # Monorepo migration: fold `radon-cloud` into `radon/cloud`
 
 **Date:** 2026-07-10  
-**Status:** shipped (Phase 1)  
+**Status:** Phase 1 shipped; privileged VPS cutover pending
 **Goal:** One git SHA for app + production infra so deploy tooling, systemd, Compose, and application code cannot drift.
 
 ---
@@ -37,8 +37,10 @@ radon/                          # sole product repo
 |---|---|
 | `/home/radon/radon` | Monorepo checkout (app + `cloud/`) |
 | `/home/radon/radon/cloud` | Infra + deploy scripts (same SHA as app) |
-| `/home/radon/radon-cloud/.env` | **Stable secrets location** (symlink or `RADON_DEPLOY_ENV_FILE`) |
-| `/home/radon/radon-cloud` | Legacy path; optional symlink to `radon/cloud` |
+| `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud` | Immutable support bundle; current plus four newest inactive bundles retained |
+| `/home/radon/radon-cloud/.env` | Temporary stable secrets location only (`0600`, `radon:radon`) |
+| `/var/lib/radon/deploy` | Reboot-durable root topology transition state |
+| `/var/lib/radon/control-plane-ready` | Root-published compatibility marker for monorepo deploys |
 
 ---
 
@@ -48,21 +50,35 @@ radon/                          # sole product repo
 
 1. Copy `radon-cloud` tree into `radon/cloud/` (exclude `.git`, `.venv`, caches, `media/`, `state/`, secrets, and `security-archive/` which remains only in the legacy cloud history).
 2. Detect monorepo layout in `cloud/scripts/deploy.sh` defaults.
-3. CI deploy prefers monorepo `cloud/scripts/deploy.sh` when present at the release SHA; keeps env file at `~/radon-cloud/.env`.
+3. CI contains a readiness-gated monorepo deploy path and keeps the secret file
+   at `~/radon-cloud/.env`; the legacy runner remains active until root
+   bootstrap publishes compatibility.
 4. CI runs `cloud/` pytest alongside app tests.
 5. Document; do **not** delete the `radon-cloud` GitHub repo yet.
 
 ### Phase 2 — VPS cutover (operator, post-green deploy)
 
-1. After first monorepo deploy lands `cloud/` on the box:
+1. Let the readiness-gated compatibility deploy land `cloud/` and restart the
+   isolated health producer. It uses the legacy runner only while the root
+   readiness marker is absent, then validates that `/status` publishes `ok`
+   and `overall_state` without requiring the broker to be healthy.
+2. From a root session, install the exact target control-plane bundle without
+   restarting any service or IB Gateway:
    ```bash
-   # optional convenience
-   ln -sfn /home/radon/radon/cloud /home/radon/radon-cloud-mono
-   # keep .env where it is; export RADON_DEPLOY_ENV_FILE=/home/radon/radon-cloud/.env
+   cd /home/radon/radon
+   bash cloud/scripts/bootstrap-control-plane.sh
    ```
-2. Re-install systemd units from `cloud/services/` via setup/operator path when units change.
-3. Confirm `IB_GATEWAY_COMPOSE_DIR` points at monorepo compose dir.
-4. Archive `radon-cloud` repo as read-only with README pointing here.
+   The script acquires the deploy lock, refuses pending app/Gateway
+   transitions, validates and atomically installs root-owned helpers, policies,
+   and changed units, performs `systemctl daemon-reload`, verifies hashes, and
+   only then publishes `/var/lib/radon/control-plane-ready`.
+3. Verify `/usr/local/bin/radon-ib-gateway-control` uses
+   `/home/radon/radon/cloud` and the external env path. Do not restart Gateway
+   during cutover; a restart can trigger IB 2FA.
+4. Confirm the next deploy uses an immutable exact-SHA runner and passes the
+   installed-control-plane manifest preflight.
+5. Archive `radon-cloud` as read-only only after rollback and probe checks are
+   green.
 
 ### Phase 3 — Contract collapse (follow-up)
 
@@ -81,13 +97,17 @@ git revert <monorepo-merge-sha>   # or reset --hard pre-merge if not shared
 git push origin main
 ```
 
-CI falls back to:
+Before the root readiness marker exists, CI falls back to:
 
 ```bash
 cd ~/radon-cloud && bash scripts/deploy.sh '$SHA'
 ```
 
-when `cloud/scripts/deploy.sh` is absent at the requested SHA (legacy path).
+The compatibility wrapper then explicitly restarts `radon-health` and validates
+the aggregate payload schema. It never gates on IB/broker state. After root
+bootstrap publishes readiness, CI refuses new releases whose SHA predates
+`cloud/`; rollback inside an in-flight immutable runner retains a compatibility
+copy of `cloud/` so canonical installed unit paths remain valid.
 
 ### B. VPS rollback (if monorepo deploy path misbehaves)
 
@@ -101,12 +121,25 @@ when `cloud/scripts/deploy.sh` is absent at the requested SHA (legacy path).
    cd ~/radon-cloud
    bash scripts/deploy.sh <known-good-radon-sha>
    ```
-3. If app tree was hard-reset badly, restore from green marker / previous release artifacts per `docs/operations.md` and `cloud/scripts/deploy.sh` journal recovery.
+3. If the app tree was hard-reset badly, restore from the green marker and
+   release artifacts per `docs/operations.md`. Deploy journal operations run
+   from the retained immutable runner, so recovery remains available even when
+   the previous commit has no `cloud/` tree.
+
+Successful deploys serialize runner retention with extraction, hold an activity
+lock on the current runner, keep it plus the four newest other runners, and
+remove only inactive older runners. Failed deploys do not prune recovery
+evidence; the next successful deploy performs bounded cleanup.
 
 ### C. Do not
 
 - Do not delete `~/radon-cloud/.env` during migration.
-- Do not `rm -rf ~/radon-cloud` until at least one monorepo deploy is green and units are reinstalled from `cloud/`.
+- Do not symlink the whole `~/radon-cloud` path to the monorepo while `.env`
+  lives inside the legacy directory.
+- Do not `rm -rf ~/radon-cloud` until at least one readiness-gated monorepo
+  deploy and a pre-cloud rollback exercise are green.
+- Do not run full `setup-vps.sh` as a live control-plane upgrade; it mutates
+  packages, Caddy, firewall, and service state.
 - Do not force-push monorepo history rewrites to `main` after the first production deploy from it.
 
 ---
@@ -117,7 +150,10 @@ when `cloud/scripts/deploy.sh` is absent at the requested SHA (legacy path).
 - [x] CI deploy script monorepo-aware with legacy fallback
 - [x] Documented rollback path
 - [x] Full app pytest + web vitest + cloud pytest green (4054 / 4082 / 556)
-- [ ] First production deploy after push succeeds (operator verify via `gh run list`)
+- [ ] Compatibility deploy publishes the new health schema
+- [ ] Root bootstrap publishes a verified readiness marker without a Gateway restart
+- [ ] First immutable-runner deploy succeeds (operator verify via `gh run list`)
+- [ ] Forced rollback to a pre-cloud SHA restores artifacts and clears its journal
 
 ---
 

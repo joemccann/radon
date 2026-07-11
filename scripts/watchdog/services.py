@@ -25,11 +25,13 @@ right batch at the right interval:
 """
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TypedDict
 
 _MIN = 60
 _HOUR = 60 * _MIN
 _DAY = 24 * _HOUR
+REPLICA_PATH = Path(__file__).resolve().parents[2] / "data" / "replica.db"
 
 
 class FreshnessWindow(TypedDict):
@@ -105,9 +107,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # the relay error IS the IB-data-plane-dead signal, so grouping it under
     # IB-outage suppression would mute the alert.
     "ib-realtime-relay": {"open": 5 * _MIN, "closed": 24 * _HOUR, "requires_ib": False},
-    # Event-driven writer — only records a row when it heals. Match
-    # the 24h window from web/lib/serviceHealthWindows.ts so the dash
-    # banner and the watchdog agree on what "stale" means here.
+    # Event-driven writer when a replica file exists. Match the 24h window
+    # from web/lib/serviceHealthWindows.ts; applicability is checked at
+    # evaluation time so a retired replica's historical row cannot alert.
     "replica-watchdog": {"open": 24 * _HOUR, "closed": 24 * _HOUR, "requires_ib": False},
     # ``watchdog-alerts`` is the meta-row this very service writes when
     # alerting on OTHER services. Same event-driven shape as
@@ -222,6 +224,13 @@ def freshness_window_for(service: str, market_state: str) -> int:
     if window is None:
         return 1 * _HOUR
     return window["open"] if market_state == "open" else window["closed"]
+
+
+def is_service_monitored(service: str) -> bool:
+    """Whether the service is applicable to this host's active architecture."""
+    if service == "replica-watchdog":
+        return REPLICA_PATH.is_file()
+    return True
 
 
 def requires_ib(service: str) -> bool:

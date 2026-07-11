@@ -70,7 +70,7 @@ const DAY = 24 * HOUR;
  *   gex-scan             30m open, 1d closed
  *   vcg-scan             15m open, 1d closed   (5-min cadence; 3 missed cycles)
  *   cta-sync             35m open, 1d closed
- *   replica-watchdog     5m always (continuous)
+ *   replica-watchdog     24h while the replica file exists
  *
  * Service names MUST match the canonical writer name (no ``ib-`` prefix
  * for orders/portfolio — the writers record under ``orders-sync`` /
@@ -224,15 +224,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // mid-session cadence). UW-only data flow, no IB dependency.
   "garch-scan": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
 
-  // ``replica-watchdog`` and ``watchdog-alerts`` are EVENT-DRIVEN
-  // writers: they only record a service_health row when something
-  // actually happens (a replica heal in the watchdog's case; an alert
-  // fire in the alerts row's case). A healthy cycle returns early
-  // without writing, so a tight 5-min window would flip them to stale
-  // within minutes of the last event — even though "nothing happened"
-  // is the desired healthy state. Use a 24h window so we still notice
-  // when the writer process itself is down for a full day.
+  // Retain the watchdog's 24h window for installations that still have an
+  // embedded replica. Server response boundaries suppress this row entirely
+  // when data/replica.db is absent; the static entry remains so a present
+  // replica is still monitored and the Python/TypeScript catalogs stay aligned.
   "replica-watchdog": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
+  // ``watchdog-alerts`` is event-driven: a quiet interval is healthy, so a
+  // tight window would turn the last dispatched alert into false stale noise.
   "watchdog-alerts": { open: 24 * HOUR, extended: 24 * HOUR, closed: 24 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``ib-watchdog`` polls FastAPI /health every 60s and is event-driven

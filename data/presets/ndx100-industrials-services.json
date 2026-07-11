@@ -1,9 +1,29 @@
 {
   "name": "ndx100-industrials-services",
   "description": "NASDAQ 100 Industrial Services",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "HON",
+    "AXON",
+    "CTAS",
+    "FAST",
+    "ADP",
+    "PAYX"
+  ],
+  "pairs": [
+    [
+      "HON",
+      "AXON"
+    ],
+    [
+      "CTAS",
+      "FAST"
+    ],
+    [
+      "ADP",
+      "PAYX"
+    ]
+  ],
   "sector": "Industrials",
   "vol_driver": "Industrial activity, employment, B2B services",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

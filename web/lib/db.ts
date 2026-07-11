@@ -339,8 +339,9 @@ function projectRoot(): string {
   // Resolve relative to the calling Next.js process. `process.cwd()` is
   // the `web/` dir under `npm run dev`; in `app-radon-run` Docker it's
   // `/app`. Either way, putting the replica next to `data/` matches the
-  // repo layout and keeps the file out of git.
-  return path.resolve(process.cwd(), "..", "data");
+  // repo layout and keeps the file out of git. Replica mode is opt-in; keep
+  // its host path opaque so Turbopack does not package the entire data tree.
+  return path.resolve(/* turbopackIgnore: true */ process.cwd(), "..", "data");
 }
 
 export function getDb(): Client {

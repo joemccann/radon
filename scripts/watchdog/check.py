@@ -27,7 +27,7 @@ from . import services as services_mod
 class CheckOutcome:
     service: str
     kind: str                     # 'stale' | 'error'
-    status: str                   # 'healthy' | 'stale' | 'error' | 'acked'
+    status: str                   # 'healthy' | 'stale' | 'error' | 'acked' | 'disabled'
     severity: Optional[str]       # 'P1' | 'P2' | 'P3' | None when healthy
     fired: bool
     message: str
@@ -175,6 +175,18 @@ def check_service(*, service: str, kind: str, now: datetime, market_state: str) 
 
     Hysteresis (2 consecutive failures) gates ``fired``.
     """
+    if not services_mod.is_service_monitored(service):
+        return CheckOutcome(
+            service=service,
+            kind=kind,
+            status="disabled",
+            severity=None,
+            fired=False,
+            message="replica file absent",
+            consecutive_failures=0,
+            now=now,
+        )
+
     if ack_mod.is_acked(service=service, now=now):
         return CheckOutcome(
             service=service,

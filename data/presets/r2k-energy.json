@@ -1,325 +1,326 @@
 {
   "name": "r2k-energy",
-  "description": "Russell 2000 Energy (105 companies)",
+  "description": "Russell 2000 Energy (106 companies)",
   "tickers": [
     "SM",
+    "KGS",
+    "AROC",
+    "PBF",
+    "RIG",
+    "GLNG",
     "UEC",
     "NE",
-    "VAL",
-    "AROC",
-    "RIG",
-    "KGS",
-    "GLNG",
-    "MUR",
-    "LBRT",
     "MGY",
+    "MUR",
     "CNX",
-    "UUUU",
-    "CRC",
+    "VAL",
     "CNR",
-    "PTEN",
-    "TDW",
-    "WHD",
-    "HP",
     "OII",
-    "STNG",
+    "LBRT",
+    "CRC",
+    "WHD",
     "SEI",
+    "TDW",
+    "STNG",
     "INSW",
-    "PBF",
-    "CRGY",
-    "LEU",
-    "SDRL",
-    "PARR",
-    "BTU",
-    "GPOR",
     "DK",
-    "DHT",
-    "KNTK",
-    "NOG",
+    "UUUU",
+    "PTEN",
+    "LEU",
+    "PARR",
+    "HP",
+    "BTU",
     "CLMT",
-    "TALO",
-    "TNK",
-    "BORR",
+    "GPOR",
+    "SDRL",
+    "KNTK",
+    "DHT",
+    "CRGY",
     "WTTR",
-    "NESR",
-    "SOC",
-    "PUMP",
-    "NEXT",
+    "NOG",
+    "TALO",
     "WKC",
+    "TNK",
+    "NESR",
     "LPG",
-    "SFL",
-    "NBR",
-    "AESI",
     "REX",
-    "HLX",
+    "NEXT",
+    "SFL",
     "KOS",
-    "TTI",
+    "PUMP",
+    "HLX",
     "XPRO",
-    "VTOL",
-    "GPRE",
+    "TTI",
     "NAT",
-    "CRK",
+    "AESI",
+    "GPRE",
+    "VTOL",
+    "NBR",
     "INVX",
-    "CVI",
+    "BORR",
+    "CRK",
     "DEC",
-    "FLNG",
     "EE",
+    "CVI",
+    "FLNG",
     "BKV",
-    "TK",
-    "NVGS",
-    "ASC",
-    "CLB",
-    "RES",
-    "EGY",
-    "FET",
     "FLOC",
-    "REPX",
+    "NVGS",
+    "TK",
+    "RES",
+    "SOC",
+    "EGY",
+    "ASC",
+    "FET",
+    "CLB",
     "VTS",
+    "REPX",
+    "URG",
     "OIS",
-    "SD",
-    "WTI",
     "NGS",
-    "GEVO",
-    "LTBR",
-    "RNGR",
+    "SD",
+    "NUAI",
     "CLNE",
+    "GEVO",
+    "WTI",
+    "RNGR",
+    "LODE",
+    "LTBR",
     "EU",
-    "GRNT",
     "SMC",
-    "INR",
-    "ACDC",
+    "GRNT",
     "ESOA",
+    "REI",
+    "INR",
+    "HMH",
     "NC",
-    "KGEI",
-    "HPK",
     "SMHI",
-    "BOOM",
+    "HPK",
+    "AREC",
+    "KGEI",
+    "ACDC",
+    "AMPY",
+    "SND",
+    "FF",
     "PNRG",
     "EPM",
-    "NFE",
+    "AMTX",
     "EPSN",
-    "FF",
-    "TUSK",
     "OPAL",
-    "EP",
-    "PROP",
-    "SAFX",
-    "NXXT",
-    "VGAS",
     "P5N994"
   ],
   "pairs": [
     [
       "SM",
-      "UEC"
-    ],
-    [
-      "NE",
-      "VAL"
+      "KGS"
     ],
     [
       "AROC",
-      "RIG"
-    ],
-    [
-      "KGS",
-      "GLNG"
-    ],
-    [
-      "MUR",
-      "LBRT"
-    ],
-    [
-      "MGY",
-      "CNX"
-    ],
-    [
-      "UUUU",
-      "CRC"
-    ],
-    [
-      "CNR",
-      "PTEN"
-    ],
-    [
-      "TDW",
-      "WHD"
-    ],
-    [
-      "HP",
-      "OII"
-    ],
-    [
-      "STNG",
-      "SEI"
-    ],
-    [
-      "INSW",
       "PBF"
     ],
     [
-      "CRGY",
-      "LEU"
+      "RIG",
+      "GLNG"
     ],
     [
-      "SDRL",
+      "UEC",
+      "NE"
+    ],
+    [
+      "MGY",
+      "MUR"
+    ],
+    [
+      "CNX",
+      "VAL"
+    ],
+    [
+      "CNR",
+      "OII"
+    ],
+    [
+      "LBRT",
+      "CRC"
+    ],
+    [
+      "WHD",
+      "SEI"
+    ],
+    [
+      "TDW",
+      "STNG"
+    ],
+    [
+      "INSW",
+      "DK"
+    ],
+    [
+      "UUUU",
+      "PTEN"
+    ],
+    [
+      "LEU",
       "PARR"
     ],
     [
-      "BTU",
-      "GPOR"
-    ],
-    [
-      "DK",
-      "DHT"
-    ],
-    [
-      "KNTK",
-      "NOG"
+      "HP",
+      "BTU"
     ],
     [
       "CLMT",
-      "TALO"
+      "GPOR"
     ],
     [
-      "TNK",
-      "BORR"
+      "SDRL",
+      "KNTK"
+    ],
+    [
+      "DHT",
+      "CRGY"
     ],
     [
       "WTTR",
-      "NESR"
+      "NOG"
     ],
     [
-      "SOC",
-      "PUMP"
-    ],
-    [
-      "NEXT",
+      "TALO",
       "WKC"
     ],
     [
+      "TNK",
+      "NESR"
+    ],
+    [
       "LPG",
+      "REX"
+    ],
+    [
+      "NEXT",
       "SFL"
     ],
     [
-      "NBR",
-      "AESI"
-    ],
-    [
-      "REX",
-      "HLX"
-    ],
-    [
       "KOS",
-      "TTI"
+      "PUMP"
     ],
     [
-      "XPRO",
-      "VTOL"
+      "HLX",
+      "XPRO"
     ],
     [
-      "GPRE",
+      "TTI",
       "NAT"
     ],
     [
-      "CRK",
-      "INVX"
+      "AESI",
+      "GPRE"
     ],
     [
-      "CVI",
+      "VTOL",
+      "NBR"
+    ],
+    [
+      "INVX",
+      "BORR"
+    ],
+    [
+      "CRK",
       "DEC"
     ],
     [
+      "EE",
+      "CVI"
+    ],
+    [
       "FLNG",
-      "EE"
-    ],
-    [
-      "BKV",
-      "TK"
-    ],
-    [
-      "NVGS",
-      "ASC"
-    ],
-    [
-      "CLB",
-      "RES"
-    ],
-    [
-      "EGY",
-      "FET"
+      "BKV"
     ],
     [
       "FLOC",
-      "REPX"
+      "NVGS"
     ],
     [
-      "VTS",
-      "OIS"
+      "TK",
+      "RES"
+    ],
+    [
+      "SOC",
+      "EGY"
+    ],
+    [
+      "ASC",
+      "FET"
+    ],
+    [
+      "CLB",
+      "VTS"
+    ],
+    [
+      "REPX",
+      "URG"
+    ],
+    [
+      "OIS",
+      "NGS"
     ],
     [
       "SD",
-      "WTI"
-    ],
-    [
-      "NGS",
-      "GEVO"
-    ],
-    [
-      "LTBR",
-      "RNGR"
+      "NUAI"
     ],
     [
       "CLNE",
-      "EU"
+      "GEVO"
     ],
     [
-      "GRNT",
+      "WTI",
+      "RNGR"
+    ],
+    [
+      "LODE",
+      "LTBR"
+    ],
+    [
+      "EU",
       "SMC"
     ],
     [
-      "INR",
-      "ACDC"
+      "GRNT",
+      "ESOA"
     ],
     [
-      "ESOA",
+      "REI",
+      "INR"
+    ],
+    [
+      "HMH",
       "NC"
     ],
     [
-      "KGEI",
+      "SMHI",
       "HPK"
     ],
     [
-      "SMHI",
-      "BOOM"
+      "AREC",
+      "KGEI"
+    ],
+    [
+      "ACDC",
+      "AMPY"
+    ],
+    [
+      "SND",
+      "FF"
     ],
     [
       "PNRG",
       "EPM"
     ],
     [
-      "NFE",
+      "AMTX",
       "EPSN"
     ],
     [
-      "FF",
-      "TUSK"
-    ],
-    [
       "OPAL",
-      "EP"
-    ],
-    [
-      "PROP",
-      "SAFX"
-    ],
-    [
-      "NXXT",
-      "VGAS"
-    ],
-    [
-      "P5N994",
-      "SM"
+      "P5N994"
     ]
   ],
   "sector": "Energy",

@@ -30,7 +30,7 @@ RemainAfterExit=yes
 User=radon
 StateDirectory=radon
 StateDirectoryMode=0750
-WorkingDirectory=/home/radon/radon-cloud
+WorkingDirectory=/home/radon/radon/cloud
 # Boot and dependency-driven starts use the same state-aware lease gate as
 # operator recovery. A healthy container is a no-op with no lease; a missing or
 # stopped container must acquire the atomic cross-process lease before start.

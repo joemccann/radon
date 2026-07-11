@@ -118,6 +118,39 @@ class TestProbeEndpoint:
         assert result["reachable"] is False
         assert result["detail"] == "unreachable"
 
+    def test_transient_transport_failure_is_retried_once(self, monkeypatch):
+        responses = iter([
+            {"reachable": False, "detail": "timeout"},
+            {"reachable": True, "http_status": 200, "payload": {"ok": True}},
+        ])
+        endpoint = lambda *_a, **_k: next(responses)
+        sleep = lambda _seconds: None
+
+        result = probe.probe_endpoint_with_retry(
+            "https://app.radon.run/edge-health/status",
+            probe_fn=endpoint,
+            sleep_fn=sleep,
+        )
+
+        assert result["reachable"] is True
+        assert result["http_status"] == 200
+
+    def test_nontransient_http_error_is_not_retried(self):
+        calls = []
+
+        def endpoint(*_a, **_k):
+            calls.append(1)
+            return {"reachable": True, "http_status": 401, "payload": {}}
+
+        result = probe.probe_endpoint_with_retry(
+            "https://app.radon.run/edge-health/status",
+            probe_fn=endpoint,
+            sleep_fn=lambda _seconds: None,
+        )
+
+        assert result["http_status"] == 401
+        assert len(calls) == 1
+
 
 # ── classify_probes ──────────────────────────────────────────────────────────
 
@@ -150,6 +183,13 @@ class TestClassifyProbes:
 
     def test_aggregate_ok_false_fails(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"ok": False}))
+        assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
+
+    def test_unversioned_ok_without_aggregate_state_fails_closed(self):
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(payload={"ok": True}),
+        )
         assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
 
     def test_contradictory_aggregate_fields_fail_closed(self):
@@ -187,6 +227,64 @@ class TestClassifyProbes:
         assert probe.classify_probes(_ok_probe(), _ok_probe(payload=down))["ok"] == 0
         assert probe.classify_probes(_ok_probe(), _ok_probe(payload=unknown))["ok"] == 0
 
+    def test_validated_legacy_payload_is_supported_during_producer_first_rollout(self):
+        legacy = {
+            "health_service": "ok",
+            "generated_at": "2026-07-11T12:00:00+00:00",
+            "probes": {
+                "radon-api": {
+                    "state": "up",
+                    "http_status": 200,
+                    "payload": {
+                        "auth_state": "authenticated",
+                        "service_state": "healthy",
+                        "upstream_dead": False,
+                        "port_listening": True,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+            },
+            "units": {"radon-api.service": {"state": "up"}},
+            "units_age_secs": 2.5,
+        }
+
+        assert probe.classify_probes(_ok_probe(), _ok_probe(payload=legacy)) == {
+            "ok": 1,
+            "detail": "edge_ok",
+        }
+
+    def test_legacy_http_200_with_nested_broker_outage_fails_closed(self):
+        legacy = {
+            "health_service": "ok",
+            "generated_at": "2026-07-11T12:00:00+00:00",
+            "probes": {
+                "radon-api": {
+                    "state": "up",
+                    "http_status": 200,
+                    "payload": {
+                        "auth_state": "awaiting_2fa",
+                        "service_state": "unhealthy",
+                        "upstream_dead": True,
+                        "port_listening": True,
+                    },
+                }
+            },
+            "units": {"radon-api.service": {"state": "up"}},
+            "units_age_secs": 2.5,
+        }
+
+        assert probe.classify_probes(_ok_probe(), _ok_probe(payload=legacy)) == {
+            "ok": 0,
+            "detail": "aggregate_unhealthy",
+        }
+
+    def test_unknown_schema_version_fails_closed(self):
+        payload = {"schema_version": 99, "ok": True, "overall_state": "up"}
+        assert probe.classify_probes(_ok_probe(), _ok_probe(payload=payload)) == {
+            "ok": 0,
+            "detail": "aggregate_unhealthy",
+        }
+
     def test_opaque_200_payload_fails_closed(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={}))
         assert result["ok"] == 0
@@ -197,7 +295,8 @@ class TestClassifyProbes:
 class TestBuildProbeRow:
     def test_healthy_row_uses_status_code_and_max_latency(self):
         ping = {"reachable": True, "http_status": 200, "latency_ms": 30, "payload": {}}
-        status = {"reachable": True, "http_status": 200, "latency_ms": 90, "payload": {"ok": True}}
+        status = {"reachable": True, "http_status": 200, "latency_ms": 90,
+                  "payload": {"ok": True, "overall_state": "up"}}
         row = probe.build_probe_row("src", ping, status, "2026-05-29T12:00:00Z")
         assert row == {
             "source": "src",
@@ -339,6 +438,17 @@ class TestClassifyUserPath:
     def test_200_sign_in_served_inline_with_clerk_header_is_ok(self):
         raw = _user_path_raw(status=200, location=None)
         assert probe.classify_user_path(raw)["ok"] == 1
+
+    def test_arbitrary_clerk_header_value_does_not_turn_500_green(self):
+        raw = _user_path_raw(
+            status=500,
+            location=None,
+            clerk_auth_status="middleware-error",
+        )
+        assert probe.classify_user_path(raw) == {
+            "ok": 0,
+            "detail": "user_path_http_500",
+        }
 
     def test_200_without_clerk_header_is_a_perimeter_failure(self):
         raw = _user_path_raw(status=200, location=None, clerk_auth_status=None)
@@ -737,7 +847,11 @@ class TestBuildInsertRunPipeline:
 
 def _patch_happy_network(monkeypatch):
     monkeypatch.setattr(probe, "probe_endpoint",
-                        lambda url, **k: _ok_probe(payload={"ok": True}))
+                        lambda url, **k: _ok_probe(payload={
+                            "schema_version": 2,
+                            "ok": True,
+                            "overall_state": "up",
+                        }))
     monkeypatch.setattr(probe, "probe_user_path", lambda url, **k: _user_path_raw())
     monkeypatch.setattr(probe, "probe_freshness", lambda url, token, **k: _freshness_raw())
 

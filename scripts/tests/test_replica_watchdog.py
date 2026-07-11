@@ -53,7 +53,19 @@ def fake_db_writer():
     yield record_mock, now_iso_mock
 
 
-from monitor_daemon.handlers.replica_watchdog import ReplicaWatchdogHandler  # noqa: E402
+import monitor_daemon.handlers.replica_watchdog as replica_watchdog  # noqa: E402
+
+ReplicaWatchdogHandler = replica_watchdog.ReplicaWatchdogHandler
+
+
+@pytest.fixture(autouse=True)
+def existing_replica(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Exercise legacy watchdog behavior only when a replica actually exists."""
+    replica_path = tmp_path / "data" / "replica.db"
+    replica_path.parent.mkdir()
+    replica_path.touch()
+    monkeypatch.setattr(replica_watchdog, "REPLICA_PATH", replica_path)
+    return replica_path
 
 
 # ---------------------------------------------------------------------------
@@ -106,6 +118,41 @@ def _build_subprocess_router(conflict_count: int):
         return _ok_result()
 
     return _route
+
+
+# ---------------------------------------------------------------------------
+# Disabled path.
+# ---------------------------------------------------------------------------
+class TestDisabled:
+    def test_missing_replica_returns_disabled_without_subprocess(
+        self, existing_replica: Path
+    ) -> None:
+        existing_replica.unlink()
+        handler = ReplicaWatchdogHandler()
+
+        with patch(
+            "monitor_daemon.handlers.replica_watchdog.subprocess.run"
+        ) as run_mock:
+            result = handler.execute()
+
+        assert result == {"status": "disabled", "reason": "replica_absent"}
+        run_mock.assert_not_called()
+
+    def test_missing_replica_does_not_write_service_health(
+        self, existing_replica: Path, fake_db_writer
+    ) -> None:
+        existing_replica.unlink()
+        record_mock, now_iso_mock = fake_db_writer
+
+        result = ReplicaWatchdogHandler().run()
+
+        assert result["status"] == "ok"
+        assert result["data"] == {
+            "status": "disabled",
+            "reason": "replica_absent",
+        }
+        record_mock.assert_not_called()
+        now_iso_mock.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

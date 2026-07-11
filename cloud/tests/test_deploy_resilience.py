@@ -13,6 +13,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -56,12 +57,17 @@ class TestDeployOwnership:
     )
     def test_second_process_cannot_acquire_held_lock(self, tmp_path: Path) -> None:
         lock = tmp_path / "deploy.lock"
-        env = {**os.environ, "RADON_DEPLOY_LOCK_FILE": str(lock)}
+        ready = tmp_path / "holder.ready"
+        env = {
+            **os.environ,
+            "RADON_DEPLOY_LOCK_FILE": str(lock),
+            "DEPLOY_TIMEOUT": "30",
+        }
         holder = subprocess.Popen(
             [
                 "bash",
                 "-c",
-                f"source {DEPLOY!s}; DEPLOY_TIMEOUT=30 supervise_deploy_command bash -c 'echo LOCKED; sleep 30'",
+                f"source {DEPLOY!s}; supervise_deploy_command bash -c 'printf ready > {ready!s}; sleep 30'",
             ],
             env=env,
             stdout=subprocess.PIPE,
@@ -69,15 +75,23 @@ class TestDeployOwnership:
             text=True,
         )
         try:
-            assert holder.stdout is not None
-            assert any("LOCKED" in holder.stdout.readline() for _ in range(3))
+            deadline = time.monotonic() + 5
+            while not ready.exists() and holder.poll() is None and time.monotonic() < deadline:
+                time.sleep(0.05)
+            if not ready.exists():
+                holder.terminate()
+                stdout, stderr = holder.communicate(timeout=3)
+                pytest.fail(
+                    "lock holder never entered the supervised command\n"
+                    f"returncode={holder.returncode}\nstdout={stdout}\nstderr={stderr}"
+                )
             contender = subprocess.run(
                 [
                     "bash",
                     "-c",
-                    f"source {DEPLOY!s}; if DEPLOY_TIMEOUT=3 supervise_deploy_command bash -c true; then exit 0; else exit $?; fi",
+                    f"source {DEPLOY!s}; if supervise_deploy_command bash -c true; then exit 0; else exit $?; fi",
                 ],
-                env=env,
+                env={**env, "DEPLOY_TIMEOUT": "3"},
                 capture_output=True,
                 text=True,
                 timeout=3,

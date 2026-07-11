@@ -58,7 +58,7 @@ jobs:
       # therefore blocks deploy (see the deploy `needs:`). --redact keeps the
       # actual secret value out of the public Actions log on a real hit.
       - name: Scan repo history for committed secrets
-        run: gitleaks detect --source . --redact --no-banner --verbose
+        run: gitleaks detect --source . --config cloud/.gitleaks.toml --redact --no-banner --verbose
 
   web-tests:
     name: Vitest (full config)
@@ -313,19 +313,106 @@ jobs:
           script: |
             set -euo pipefail
             SHA='${{ github.sha }}'
+            RUN_ID='${{ github.run_id }}.${{ github.run_attempt }}'
             RADON="${HOME}/radon"
             LEGACY_CLOUD="${HOME}/radon-cloud"
             ENV_FILE="${LEGACY_CLOUD}/.env"
+            RUNNER_ROOT="${HOME}/.radon-deploy-runners"
+            RUNNER="${RUNNER_ROOT}/${SHA}.${RUN_ID}"
+            RUNNER_KEEP_NEWEST=4
+            RUNNER_INDEX_LOCK="${RUNNER_ROOT}/.index.lock"
+            RADON_CONTROL_PLANE_READY="${RADON_CONTROL_PLANE_READY:-/var/lib/radon/control-plane-ready}"
             git -C "$RADON" fetch --prune origin main
-            # Monorepo: materialize cloud/ from the release SHA and deploy with
-            # stable host secrets at ~/radon-cloud/.env. Legacy dual-checkout
-            # remains the fallback when the SHA predates the monorepo fold.
-            if git -C "$RADON" cat-file -e "${SHA}:cloud/scripts/deploy.sh" 2>/dev/null; then
-              git -C "$RADON" checkout -f "$SHA" -- cloud
-              export RADON_DIR="$RADON"
-              export RADON_CLOUD_DIR="$RADON/cloud"
-              export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
-              bash "$RADON/cloud/scripts/deploy.sh" "$SHA"
-            else
+
+            verify_health_status_schema() {
+              local attempt body
+              for attempt in $(seq 1 15); do
+                body="$(curl -fsS --max-time 5 http://127.0.0.1:8330/status 2>/dev/null || true)"
+                if printf '%s' "$body" | /usr/bin/python3.13 -c '
+            import json, sys
+            try:
+                payload = json.load(sys.stdin)
+            except Exception:
+                raise SystemExit(1)
+            healthy_contract = (
+                isinstance(payload.get("ok"), bool)
+                and isinstance(payload.get("overall_state"), str)
+            )
+            raise SystemExit(0 if healthy_contract else 1)
+            '; then
+                  echo "health status schema is current (broker state is advisory)"
+                  return 0
+                fi
+                sleep 2
+              done
+              echo "radon-health did not publish the required status schema" >&2
+              return 1
+            }
+
+            deploy_with_legacy_runner() {
               bash "$LEGACY_CLOUD/scripts/deploy.sh" "$SHA"
+              # The legacy runner restarts only five app units. Restart the
+              # isolated schema producer explicitly so a new scheduled probe
+              # consumer can never outrun it again. This checks schema only;
+              # IB/broker health may legitimately be degraded.
+              if [[ -r "$RADON_CONTROL_PLANE_READY" ]]; then
+                sudo -n /usr/local/bin/radon unit restart radon-health.service
+              else
+                sudo -n /usr/bin/systemctl restart radon-health.service
+              fi
+              verify_health_status_schema
+            }
+
+            # Until a root operator installs the target control-plane bundle,
+            # keep the already-proven legacy runner.
+            if [[ ! -e "$RADON_CONTROL_PLANE_READY" && ! -L "$RADON_CONTROL_PLANE_READY" ]]; then
+              deploy_with_legacy_runner
+              exit 0
             fi
+            if [[ ! -f "$RADON_CONTROL_PLANE_READY" \
+              || -L "$RADON_CONTROL_PLANE_READY" \
+              || ! -r "$RADON_CONTROL_PLANE_READY" ]]; then
+              echo "refusing an invalid control-plane readiness marker" >&2
+              exit 78
+            fi
+            if ! git -C "$RADON" cat-file -e "${SHA}:cloud/scripts/deploy.sh" 2>/dev/null; then
+              echo "refusing a new pre-cloud release after control-plane cutover" >&2
+              exit 78
+            fi
+
+            # Extract support code from the tested SHA into a retained runner.
+            # Never rewrite live cloud/ before deploy.sh owns its production lock;
+            # recovery can keep using this bundle even after Git rolls live code
+            # back to a commit that predates the monorepo import.
+            umask 077
+            mkdir -p "$RUNNER_ROOT"
+            exec {RUNNER_INDEX_FD}>"$RUNNER_INDEX_LOCK"
+            flock "$RUNNER_INDEX_FD"
+            if [[ ! -d "$RUNNER" ]]; then
+              RUNNER_TMP="$(mktemp -d "${RUNNER_ROOT}/.runner.XXXXXX")"
+              trap 'rm -rf -- "$RUNNER_TMP"' EXIT
+              git -C "$RADON" archive "$SHA" cloud | tar -x -C "$RUNNER_TMP"
+              printf '%s\n' "$SHA" > "$RUNNER_TMP/.target-sha"
+              chmod -R a-w "$RUNNER_TMP/cloud" "$RUNNER_TMP/.target-sha"
+              mv "$RUNNER_TMP" "$RUNNER"
+              trap - EXIT
+            fi
+            # Hold this through deploy and pruning. The pruner takes the same
+            # lock non-blocking before removing any older runner.
+            exec {RUNNER_ACTIVE_FD}>"$RUNNER/.active.lock"
+            flock "$RUNNER_ACTIVE_FD"
+            exec {RUNNER_INDEX_FD}>&-
+            [[ "$(cat "$RUNNER/.target-sha")" == "$SHA" ]]
+            [[ -x "$RUNNER/cloud/scripts/deploy.sh" ]]
+            [[ -x "$RUNNER/cloud/scripts/prune-deploy-runners.py" ]]
+
+            export RADON_DIR="$RADON"
+            export RADON_CLOUD_DIR="$RUNNER/cloud"
+            export RADON_DEPLOY_SUPPORT_DIR="$RUNNER/cloud/scripts"
+            export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
+            export RADON_CONTROL_PLANE_READY
+            bash "$RUNNER/cloud/scripts/deploy.sh" "$SHA"
+            "$RUNNER/cloud/scripts/prune-deploy-runners.py" \
+              --root "$RUNNER_ROOT" \
+              --current "$RUNNER" \
+              --keep-newest "$RUNNER_KEEP_NEWEST"

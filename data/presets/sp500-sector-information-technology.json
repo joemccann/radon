@@ -24,9 +24,9 @@
     "CTSH",
     "DDOG",
     "DELL",
-    "EPAM",
     "FFIV",
     "FICO",
+    "FLEX",
     "FSLR",
     "FTNT",
     "GDDY",
@@ -45,6 +45,7 @@
     "LRCX",
     "MCHP",
     "MPWR",
+    "MRVL",
     "MSFT",
     "MSI",
     "MU",
@@ -142,11 +143,11 @@
       "IBM"
     ],
     [
-      "CTSH",
-      "EPAM"
+      "IT",
+      "ACN"
     ],
     [
-      "IT",
+      "CTSH",
       "ACN"
     ],
     [

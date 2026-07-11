@@ -15,8 +15,8 @@
     "AXP",
     "BAC",
     "BEN",
-    "BK",
     "BLK",
+    "BNY",
     "BRK.B",
     "BRO",
     "BX",
@@ -93,16 +93,16 @@
       "ARES"
     ],
     [
-      "BK",
-      "NTRS"
-    ],
-    [
       "AMP",
       "TROW"
     ],
     [
       "BEN",
       "IVZ"
+    ],
+    [
+      "NTRS",
+      "AMP"
     ],
     [
       "AXP",

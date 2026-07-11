@@ -1,9 +1,23 @@
 {
   "name": "ndx100-semi-equipment",
   "description": "NASDAQ 100 Semiconductor Equipment",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "ASML",
+    "AMAT",
+    "KLAC",
+    "LRCX"
+  ],
+  "pairs": [
+    [
+      "ASML",
+      "LRCX"
+    ],
+    [
+      "AMAT",
+      "KLAC"
+    ]
+  ],
   "sector": "Technology",
   "vol_driver": "Wafer fab capex, chip manufacturing capacity",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

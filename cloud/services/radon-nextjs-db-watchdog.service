@@ -18,7 +18,7 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 # Direct-to-cloud only; never resurrect the retired embedded replica.
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon-cloud/scripts/nextjs_db_watchdog.py
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/nextjs_db_watchdog.py
 # Type=oneshot has NO start timeout by default — a hung probe would stall
 # the every-minute timer forever. The in-script bounds (10s probe, 8s
 # canary, 30s restart) all fit under 60s.

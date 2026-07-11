@@ -1,9 +1,22 @@
 {
   "name": "ndx100-payments-fintech",
   "description": "NASDAQ 100 Payments & Fintech",
-  "tickers": [],
-  "pairs": [],
+  "tickers": [
+    "PYPL",
+    "MSTR",
+    "APP"
+  ],
+  "pairs": [
+    [
+      "PYPL",
+      "APP"
+    ],
+    [
+      "MSTR",
+      "PYPL"
+    ]
+  ],
   "sector": "Technology",
   "vol_driver": "Digital payments, crypto, ad-tech monetization",
-  "source": "NASDAQ 100 Index"
+  "source": "Nasdaq official Nasdaq-100 API"
 }

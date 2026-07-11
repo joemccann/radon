@@ -10,8 +10,16 @@ regex = '''\bTWS_(?:USERID|PASSWORD)[ \t]*=[ \t]*["']?[A-Za-z0-9][A-Za-z0-9_.$!@
 keywords = ["TWS_"]
 
 [[rules.allowlists]]
-description = "Known synthetic fixture in the pre-secret-scan baseline"
-commits = ["3ee6e6e8a50c24944c1983a75f5bf6dda9048f67"]
+description = "Vetted TWS literals in immutable pre-secret-scan commits"
+commits = [
+  "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
+  "c0ed4bfaae362621201f006e5ce7eef1c26e6047",
+  "f66d78ff431e3d12b42fef55e81fca6c7d0e995a",
+  "586e3270ba8eea1cf67235692d8e6a73595f2a3a",
+  "40cfff2aba495320ee1bb4d8d179c362d909a46a",
+  "af72046d0ce1d80417ccbc6ea150cbcb8c810505",
+  "dfa5f948e4812376ebdd860d9b12e520c851488c",
+]
 
 [[rules]]
 id = "credential-shaped-example"
@@ -20,8 +28,12 @@ regex = '''(?i)\b(?:credential|password)s?\s+(?:example|like)\s*[:=]?\s*["'`]?[A
 keywords = ["credential", "password"]
 
 [[rules.allowlists]]
-description = "Known credential-shaped prose in the pre-secret-scan baseline"
-commits = ["3ee6e6e8a50c24944c1983a75f5bf6dda9048f67"]
+description = "Vetted credential-shaped prose in immutable pre-secret-scan commits"
+commits = [
+  "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
+  "90daa01986c377ac20ba682021d77372fd030393",
+  "25ef348f1eb882bdc4a7d735fd8e3206b2711c2e",
+]
 
 [allowlist]
 description = "Generated local artifacts are not source"
