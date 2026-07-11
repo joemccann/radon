@@ -122,6 +122,9 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt -r scripts/requirements-api.txt
           pip install pytest pytest-asyncio pytest-cov
+          if [ -f cloud/requirements-test.txt ]; then
+            pip install -r cloud/requirements-test.txt
+          fi
       # Run from the repo ROOT — pyproject.toml pins pythonpath so `import
       # ib_sync` / `from api.*` / trade_blotter all resolve. addopts already
       # applies `-m 'not integration'`, so the live MenthorQ suite is skipped.
@@ -139,6 +142,8 @@ jobs:
           python -m pytest scripts/tests scripts/api/tests scripts/trade_blotter
           --cov=scripts --cov=api --cov-branch --cov-report=term-missing
           --cov-fail-under=64
+      - name: Cloud infra pytest
+        run: python -m pytest cloud/tests -q
 
   perimeter-smoke:
     name: Perimeter smoke (next start + curl)
@@ -306,5 +311,21 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           command_timeout: 55m
           script: |
-            cd ~/radon-cloud
-            bash scripts/deploy.sh '${{ github.sha }}'
+            set -euo pipefail
+            SHA='${{ github.sha }}'
+            RADON="${HOME}/radon"
+            LEGACY_CLOUD="${HOME}/radon-cloud"
+            ENV_FILE="${LEGACY_CLOUD}/.env"
+            git -C "$RADON" fetch --prune origin main
+            # Monorepo: materialize cloud/ from the release SHA and deploy with
+            # stable host secrets at ~/radon-cloud/.env. Legacy dual-checkout
+            # remains the fallback when the SHA predates the monorepo fold.
+            if git -C "$RADON" cat-file -e "${SHA}:cloud/scripts/deploy.sh" 2>/dev/null; then
+              git -C "$RADON" checkout -f "$SHA" -- cloud
+              export RADON_DIR="$RADON"
+              export RADON_CLOUD_DIR="$RADON/cloud"
+              export RADON_DEPLOY_ENV_FILE="$ENV_FILE"
+              bash "$RADON/cloud/scripts/deploy.sh" "$SHA"
+            else
+              bash "$LEGACY_CLOUD/scripts/deploy.sh" "$SHA"
+            fi

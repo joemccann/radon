@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon watchdog intraday timer — every 5m during ET trading hours
+
+[Timer]
+# Fires every 5 minutes Mon-Fri 13:00-21:00 UTC.
+# Covers ET trading hours 09:30-16:00 across both DST shoulders
+# (winter 14:30-21:00 UTC, summer 13:30-20:00 UTC). The Python
+# check_bucket() re-validates the ET market gate at runtime and
+# no-ops if the calendar happens to be off.
+OnCalendar=Mon..Fri *-*-* 13..21:00,05,10,15,20,25,30,35,40,45,50,55
+Persistent=false
+
+[Install]
+WantedBy=timers.target

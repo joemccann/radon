@@ -1,0 +1,29 @@
+[Unit]
+Description=Radon portfolio refresh (ib_sync via FastAPI /portfolio/sync)
+After=network.target radon-api.service radon-ib-gateway.service
+# Prefer API for /portfolio/sync, but never pull Gateway under the deploy lock.
+Wants=radon-api.service
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+# Burst=10 (not 5): this unit fires on a 60s timer, so healthy operation is
+# already 5 starts per 300s — Burst=5 would start-limit-hit a HEALTHY unit.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python
+ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_portfolio_refresh.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=120
+
+[Install]
+WantedBy=multi-user.target

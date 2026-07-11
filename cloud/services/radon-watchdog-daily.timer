@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon watchdog daily timer — once per hour, 24/7
+
+[Timer]
+# Daily writers (cash-flow-sync, flex-token-check) have a 25h freshness
+# window. Firing the watchdog hourly means an outage surfaces within 1h
+# of the window expiring — well inside human-reaction time.
+OnCalendar=*-*-* *:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon watchdog error timer — every 5m, 24/7
+
+[Timer]
+# Orthogonal to staleness: this bucket flags any scheduled service whose
+# service_health row is in state=error past hysteresis. Fires every 5 min
+# around the clock so an error surfaces inside 10 min (2 cycles).
+OnCalendar=*-*-* *:00,05,10,15,20,25,30,35,40,45,50,55
+Persistent=false
+
+[Install]
+WantedBy=timers.target

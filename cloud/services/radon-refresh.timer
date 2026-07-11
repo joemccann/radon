@@ -1,0 +1,18 @@
+[Unit]
+Description=Radon data refresh timer (ET trading hours only)
+
+[Timer]
+# Fires every 15 minutes Mon-Fri 13:00-21:45 UTC only.
+# Covers ET trading hours 09:30-16:00 across both DST shoulders
+# (winter 14:30-21:00 UTC, summer 13:30-20:00 UTC) plus the post-close
+# window so CRI captures the official Cboe daily close. The previous
+# `Mon..Fri *:0/15` fired 24h on weekdays, re-running scripts.data_refresh
+# overnight; data_refresh skips weekends/holidays at runtime and the
+# cri_scan/vcg_scan it calls now serve cache when the market is closed, but
+# the off-hours fires were still pointless subprocess churn. data_refresh
+# re-checks the trading calendar at runtime, so holiday weekdays exit early.
+OnCalendar=Mon..Fri *-*-* 13..21:00,15,30,45
+Persistent=false
+
+[Install]
+WantedBy=timers.target

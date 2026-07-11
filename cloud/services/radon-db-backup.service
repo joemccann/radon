@@ -1,0 +1,27 @@
+[Unit]
+Description=Radon nightly Turso DB backup (full sqlite_master dump + 30d prune)
+After=network.target
+# DUR-02 pattern: brake crash loops -- after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed instead of
+# restarting forever. The db-backup service_health heartbeat (48h window)
+# surfaces a parked/silent backup on the dashboard + watchdog daily bucket.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon-cloud/scripts/db_backup.py
+StandardOutput=journal
+StandardError=journal
+# libsql_experimental exposes NO client-side timeouts (DUR-09); this
+# process-level bound is the only real one for a wedged cloud connection.
+# The DB is ~1.4 GB and direct-to-cloud reads run ~1 MB/s, so a healthy
+# full dump takes ~20-25 min; 1h is ~2.5x normal.
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

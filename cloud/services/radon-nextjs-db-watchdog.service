@@ -1,0 +1,30 @@
+[Unit]
+Description=Radon Next.js DB-read deep-probe watchdog (catches in-process Turso wedges the TCP liveness probe misses)
+After=network.target radon-nextjs.service
+Wants=radon-nextjs.service
+
+# DUR-02: brake crash loops. Burst=10 (not 5): this unit fires on a 60s
+# timer, so healthy operation is already 5 starts per 300s — Burst=5 would
+# start-limit-hit a HEALTHY unit (see radon-ib-watchdog.service).
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+# root: the restart action is systemctl restart radon-nextjs.service.
+# The probe itself is read-only against localhost:3000.
+User=root
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Direct-to-cloud only; never resurrect the retired embedded replica.
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon-cloud/scripts/nextjs_db_watchdog.py
+# Type=oneshot has NO start timeout by default — a hung probe would stall
+# the every-minute timer forever. The in-script bounds (10s probe, 8s
+# canary, 30s restart) all fit under 60s.
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

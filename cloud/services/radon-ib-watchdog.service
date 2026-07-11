@@ -1,0 +1,43 @@
+[Unit]
+Description=Radon IB Gateway API-aware watchdog (catches JVM API-thread hangs that Docker's TCP healthcheck misses)
+After=network.target radon-api.service
+Wants=radon-api.service
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+# Burst=10 (not 5): this unit fires on a 60s timer, so healthy operation is
+# already 5 starts per 300s — Burst=5 would start-limit-hit a HEALTHY unit.
+StartLimitIntervalSec=300
+StartLimitBurst=10
+
+[Service]
+Type=oneshot
+# Run as radon so the watchdog, API, boot helper, and operator all create the
+# lease/guard files with the same ownership. Its only privileged systemd action
+# is the exact preheld-restart unit granted by the scoped polkit rule.
+User=radon
+StateDirectory=radon
+StateDirectoryMode=0750
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Direct-to-cloud only; never resurrect the retired embedded replica
+# (every other radon-* unit sets this). See feedback_libsql_replica_one_writer.
+Environment=RADON_DB_NO_REPLICA=1
+# IBC scheduled/cold restarts are disabled. Retain only the observed 00:00 UTC
+# server-session rollover grace, matching the in-code default.
+Environment=RADON_GW_RESTART_QUIET_WINDOWS_UTC=23:40-00:15
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.ib_watchdog --restart-unit radon-ib-gateway-preheld-restart.service
+# Type=oneshot has NO start timeout by default, so a hung cycle (e.g. a
+# blocked probe/DB write against a wedged gateway) runs forever and, since
+# oneshot cannot overlap, permanently stalls the every-minute timer. Bound
+# it: TimeoutStartSec kills a hung ExecStart so the next tick can run. 60s
+# is above the in-code 45s cycle guard, so the clean path fires first.
+TimeoutStartSec=60
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

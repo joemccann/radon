@@ -1,0 +1,19 @@
+[Unit]
+Description=Radon catalyst feed refresh (fetch_catalysts.py via run_catalysts.sh)
+After=network.target
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python3
+ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_catalysts.sh
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

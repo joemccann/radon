@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon portfolio refresh - every minute during ET trading hours
+
+[Timer]
+# Fires every minute Mon-Fri 13:00-21:00 UTC. Covers ET trading hours
+# 09:30-16:00 across both DST shoulders (winter 14:30-21:00 UTC,
+# summer 13:30-20:00 UTC). run_portfolio_refresh.sh re-checks the
+# trading calendar at runtime and exits 0 on US trading holidays.
+OnCalendar=Mon..Fri *-*-* 13..21:*:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

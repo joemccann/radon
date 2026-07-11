@@ -1,0 +1,1 @@
+radon ALL=(ALL) NOPASSWD: /bin/systemctl reload caddy, /bin/cp /home/radon/radon-cloud/caddy/Caddyfile /etc/caddy/Caddyfile

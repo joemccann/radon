@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon Next.js DB-read watchdog timer — every 60s, 24/7
+
+[Timer]
+# Every 60s, 24/7 (a DB wedge is not market-hours bound). K=3 consecutive
+# wedge cycles before action → ~3 min to a solo radon-nextjs restart,
+# versus the 30-111 min outages the wedge produced unwatched.
+OnCalendar=*-*-* *:*:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

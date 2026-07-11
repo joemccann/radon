@@ -1,0 +1,15 @@
+[Unit]
+Description=Consume one watchdog-held IB 2FA lease and restart Gateway
+After=docker.service
+Requires=docker.service
+
+[Service]
+Type=oneshot
+User=radon
+StateDirectory=radon
+StateDirectoryMode=0750
+WorkingDirectory=/home/radon/radon-cloud
+ExecStart=/usr/local/bin/radon-ib-gateway-control restart-preheld scripts.ib_watchdog.trigger_restart
+TimeoutStartSec=90
+StandardOutput=journal
+StandardError=journal

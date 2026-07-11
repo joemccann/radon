@@ -1,0 +1,31 @@
+[Unit]
+Description=Radon newsfeed scraper (themarketear.com headless Playwright loop)
+After=network-online.target
+Wants=network-online.target
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Newsfeed is write-only — it never reads its own rows. Embedded replica
+# would force it to compete with radon-nextjs for the WAL checkpoint
+# lock; see CLAUDE.md "Trades canonical store" and the libsql one-writer
+# rule. Stream writes straight to Turso.
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/usr/bin/node /home/radon/radon/scripts/newsfeed/index.js
+Restart=on-failure
+RestartSec=30
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

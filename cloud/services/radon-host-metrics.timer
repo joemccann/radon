@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon host metrics -- every minute, 24/7
+
+[Timer]
+# Every minute at :17s -- deliberately off :00 to stay clear of the
+# top-of-minute scheduler herd (portfolio-sync, ib-watchdog). AccuracySec=1
+# pins the off-second; the default 1min coalescing window would smear it
+# right back onto the herd. Persistent=false: a missed minute of host
+# metrics is worthless to replay.
+OnCalendar=*-*-* *:*:17
+AccuracySec=1s
+Persistent=false
+
+[Install]
+WantedBy=timers.target

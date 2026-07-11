@@ -1,0 +1,20 @@
+[Unit]
+Description=Radon data refresh (CRI/VCG scans)
+After=network.target radon-ib-gateway.service
+# Ordering only: a timer-owned oneshot must not pull or cascade-stop Gateway
+# under the deploy lock or during deliberate 2FA recovery.
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.data_refresh

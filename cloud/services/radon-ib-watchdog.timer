@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon IB Gateway API watchdog timer — every 60s, 24/7
+
+[Timer]
+# Every 60s, 24/7. The probe is read-only against FastAPI and the
+# threshold-based restart only fires after 3 consecutive degraded
+# cycles, so 60s polling × 3 = ~3 min before action. Fast enough to
+# beat the 10+ min hang windows we've seen, slow enough to skip
+# transient network blips.
+OnCalendar=*-*-* *:*:00
+Persistent=false
+
+[Install]
+WantedBy=timers.target

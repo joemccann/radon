@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon LLM Token Index — daily Artificial Analysis pull
+
+[Timer]
+# Fires once daily at 06:30 UTC. By then most providers have refreshed
+# their pricing pages from any overnight model launches and AA's daily
+# crawl has reconciled. Persistent=true so a missed firing (host down at
+# 06:30) replays on next boot rather than skipping the day.
+OnCalendar=*-*-* 06:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

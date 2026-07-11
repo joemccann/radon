@@ -1,0 +1,142 @@
+{$DOMAIN:app.radon.run} {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/radon.log
+        format json
+    }
+
+    handle /ws* {
+        reverse_proxy localhost:8765
+    }
+
+    handle_path /api/ib/* {
+        reverse_proxy localhost:8321
+    }
+
+    # Tier-2 edge health surface. Reached Caddy->daemon DIRECTLY (never via
+    # Next.js), so the health surface never re-enters the radon-nextjs cascade.
+    # /edge-health/ping is a static 200 served entirely by Caddy — the never-502
+    # liveness floor that depends only on Caddy being alive. /edge-health/status
+    # proxies the standalone health daemon (radon-health.service :8330) and maps
+    # any upstream 5xx to 200 {reachable:false} so a degraded daemon doesn't
+    # surface as a raw 502.
+    @edge_health_ping path /edge-health/ping
+    handle @edge_health_ping {
+        respond "ok" 200
+    }
+    @edge_health_status path /edge-health/status
+    handle @edge_health_status {
+        rewrite * /status
+        reverse_proxy 127.0.0.1:8330 {
+            @down status 502 503 504
+            handle_response @down {
+                header Content-Type application/json
+                respond `{"reachable":false,"observer":"caddy"}` 200
+            }
+        }
+    }
+
+    handle {
+        reverse_proxy localhost:3000
+    }
+}
+
+# media.radon.run — static image host for newsfeed thumbnails.
+# Fed by laptop newsfeed scraper via rsync over Tailscale; both
+# localhost:3000 (laptop dev) and app.radon.run (Hetzner prod) read
+# from this host. Caddy auto-issues Let's Encrypt TLS on first request.
+media.radon.run {
+    encode zstd gzip
+
+    header {
+        Strict-Transport-Security "max-age=31536000; includeSubDomains"
+        X-Content-Type-Options nosniff
+        Referrer-Policy strict-origin-when-cross-origin
+        Access-Control-Allow-Origin "*"
+        # Image filenames are content-derived (slug+index) → immutable.
+        Cache-Control "public, max-age=31536000, immutable"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/media.log
+        format json
+    }
+
+    @health path /healthz
+    handle @health {
+        respond "ok" 200
+    }
+
+    handle {
+        root * /home/radon/radon-cloud/media
+        file_server {
+            precompressed gzip
+        }
+    }
+}
+
+# beta.radon.run — staging clone of the app.radon.run site block.
+# APPEND this to /etc/caddy/Caddyfile (the LIVE config — system caddy.service,
+# NOT the drifted repo copy radon-cloud/caddy/Caddyfile). After appending:
+#     sudo caddy validate --config /etc/caddy/Caddyfile
+#     sudo systemctl reload caddy
+# Caddy auto-issues a Let's Encrypt cert on first request once DNS points here.
+#
+# Differences from the app.radon.run block:
+#   - hardcoded hostname (not {$DOMAIN}) so it never collides with the prod block
+#   - reverse_proxy → :3001 (beta Next.js) and /api/ib/* → 127.0.0.1:8322 (beta API)
+#   - NO /ws* block: beta has no relay (no IB), so there is nothing to proxy.
+#     The UI degrades to no live prices, which is expected for the no-IB staging env.
+#   - /edge-health/status proxies the beta health daemon on :8331.
+
+beta.radon.run {
+    encode zstd gzip
+
+    header {
+        X-Content-Type-Options nosniff
+        X-Frame-Options DENY
+        Referrer-Policy strict-origin-when-cross-origin
+        # Keep staging out of search results.
+        X-Robots-Tag "noindex, nofollow"
+        -Server
+    }
+
+    log {
+        output file /var/log/caddy/beta.log
+        format json
+    }
+
+    handle_path /api/ib/* {
+        reverse_proxy 127.0.0.1:8322
+    }
+
+    @edge_health_ping path /edge-health/ping
+    handle @edge_health_ping {
+        respond "ok" 200
+    }
+    @edge_health_status path /edge-health/status
+    handle @edge_health_status {
+        rewrite * /status
+        reverse_proxy 127.0.0.1:8331 {
+            @down status 502 503 504
+            handle_response @down {
+                header Content-Type application/json
+                respond `{"reachable":false,"observer":"caddy","env":"beta"}` 200
+            }
+        }
+    }
+
+    handle {
+        reverse_proxy localhost:3001
+    }
+}

@@ -1,0 +1,23 @@
+[Unit]
+Description=Radon CTA sync - twice daily during ET trading hours
+
+[Timer]
+# MenthorQ publishes CTA positioning updates mid-session and post-close.
+# Mirrors the laptop launchd schedule (com.radon.cta-sync.plist) but in
+# UTC so the schedule is correct across DST shifts:
+#   - 18:15 UTC = 13:15 EST / 14:15 EDT
+#   - 19:00 UTC = 14:00 EST / 15:00 EDT
+#   - 20:10 UTC = 15:10 EST / 16:10 EDT (session-roll catch; CTA-02)
+#   - 21:30 UTC = 16:30 EST / 17:30 EDT (post-close catch)
+# run_cta_sync.sh is idempotent against the latest closed trading day, so
+# repeated fires within a session are safe and the script returns fast
+# when there is nothing new to pull.
+OnCalendar=Mon..Fri *-*-* 18:15:00
+OnCalendar=Mon..Fri *-*-* 19:00:00
+OnCalendar=Mon..Fri *-*-* 20:10:00
+OnCalendar=Mon..Fri *-*-* 21:30:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

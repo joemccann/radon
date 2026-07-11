@@ -75,6 +75,18 @@ def test_deploy_passes_the_explicit_workflow_sha() -> None:
     assert "${{ github.sha }}" in script, (
         "deploy.sh must receive the tested commit, not fetch an implicit moving main"
     )
+    # Monorepo path: materialize cloud/ from the release SHA; legacy dual-checkout
+    # remains the fallback when the SHA predates the fold.
+    assert "cloud/scripts/deploy.sh" in script
+    assert "cat-file -e" in script
+    assert "LEGACY_CLOUD" in script
+    assert "RADON_DEPLOY_ENV_FILE" in script
+
+
+def test_ci_runs_cloud_infra_pytest() -> None:
+    py_tests = _workflow()["jobs"]["py-tests"]
+    commands = "\n".join(str(step.get("run", "")) for step in py_tests["steps"])
+    assert "pytest cloud/tests" in commands
 
 
 def test_ci_uses_frozen_bun_lockfile_contract_for_both_workspaces() -> None:

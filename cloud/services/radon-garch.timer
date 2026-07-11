@@ -1,0 +1,20 @@
+[Unit]
+Description=Radon GARCH scan — 3x per US trading day (open / mid-day / near-close)
+
+[Timer]
+# Fires three times per US trading day at 14:00, 17:00, and 20:00 UTC:
+#   - 14:00 UTC (~09:00 ET / 10:00 EDT) — captures the open dislocation
+#   - 17:00 UTC (~12:00 ET / 13:00 EDT) — mid-day repricing window
+#   - 20:00 UTC (~15:00 ET / 16:00 EDT) — near-close, pre-settlement
+# The run_garch_refresh.sh wrapper re-checks the trading calendar at
+# runtime and exits 0 on US holidays. FastAPI cooldown (600s) is the
+# real rate guard — the timer can't fire faster than every 10 minutes
+# even with manual triggers in between.
+OnCalendar=Mon..Fri *-*-* 14:00:00 UTC
+OnCalendar=Mon..Fri *-*-* 17:00:00 UTC
+OnCalendar=Mon..Fri *-*-* 20:00:00 UTC
+Persistent=true
+RandomizedDelaySec=180
+
+[Install]
+WantedBy=timers.target

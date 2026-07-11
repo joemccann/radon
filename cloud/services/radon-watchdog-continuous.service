@@ -1,0 +1,31 @@
+[Unit]
+Description=Radon watchdog (continuous bucket — newsfeed/replica/fill/exit/journal always-on writers)
+After=network.target
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever (radon-beta-nextjs hit 160k restarts in 10 days).
+# The unit watchdog (radon main repo scripts/watchdog/units.py, continuous bucket)
+# alerts on failed/start-limit-hit so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# 2026-07-02: sync libsql (libsql_experimental 0.0.55) exposes no request
+# timeout, so a wedged Turso connection hangs the cycle forever. Type=oneshot
+# has NO start timeout by default and cannot overlap, so one hung cycle
+# permanently stalls the timer (all four watchdog buckets hung 2026-06-23
+# 13:00:01 UTC for 9 days -> watchdog-alerts went silent). Bound it, same as
+# radon-ib-watchdog (TimeoutStartSec=60): a normal cycle is ~2-5s, 120s is
+# far above clean-path latency and well under the 5-min timer period.
+TimeoutStartSec=120
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.watchdog --bucket continuous
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

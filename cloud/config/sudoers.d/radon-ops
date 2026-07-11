@@ -1,0 +1,27 @@
+# /etc/sudoers.d/radon-ops
+# Allows the radon user to invoke the root-owned, argument-validating operator.
+# No direct service mutation capability is granted here.
+#
+# Install:  sudo visudo -c -f /tmp/radon-ops-sudoers && sudo cp /tmp/radon-ops-sudoers /etc/sudoers.d/radon-ops && sudo chmod 0440 /etc/sudoers.d/radon-ops
+# Verify:   sudo -l -U radon | grep -A20 'NOPASSWD'
+
+# --- authoritative stack and single-unit operator paths ---
+radon ALL=(root) NOPASSWD: /usr/local/bin/radon start, /usr/local/bin/radon stop, /usr/local/bin/radon restart
+radon ALL=(root) NOPASSWD: /usr/local/bin/radon unit start radon-*.service, /usr/local/bin/radon unit stop radon-*.service, /usr/local/bin/radon unit restart radon-*.service
+radon ALL=(root) NOPASSWD: /usr/local/bin/radon unit start radon-*.timer, /usr/local/bin/radon unit stop radon-*.timer, /usr/local/bin/radon unit restart radon-*.timer
+
+# Host lifecycle remains explicit operator-only maintenance.
+radon ALL=(root) NOPASSWD: /usr/sbin/reboot
+radon ALL=(root) NOPASSWD: /usr/sbin/shutdown -r now
+radon ALL=(root) NOPASSWD: /usr/sbin/shutdown -h now
+
+# --- faillock self-recovery (cannot lock yourself out forever) ---
+radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon --reset
+radon ALL=(root) NOPASSWD: /usr/sbin/faillock --user radon
+
+# --- read-only diagnostic helpers ---
+radon ALL=(root) NOPASSWD: /usr/bin/journalctl -u radon-*
+radon ALL=(root) NOPASSWD: /usr/bin/docker logs ib-gateway
+
+# Anything else still requires the password; no blanket NOPASSWD or direct
+# systemctl/docker mutator is authorized.

@@ -1,0 +1,813 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Radon Cloud — Deployment Guide</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --card: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --green: #3fb950;
+    --blue: #58a6ff;
+    --orange: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 2rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.5rem; margin-top: 2.5rem; margin-bottom: 1rem; color: var(--blue); border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  h3 { font-size: 1.15rem; margin-top: 1.5rem; margin-bottom: 0.5rem; color: var(--cyan); }
+  .subtitle { color: var(--muted); font-size: 1rem; margin-bottom: 2rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--blue);
+    color: var(--bg);
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-right: 0.75rem;
+    flex-shrink: 0;
+  }
+  .step-header {
+    display: flex;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .step-title { font-size: 1.1rem; font-weight: 600; }
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin: 0.75rem 0;
+  }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Fira Mono', Menlo, Consolas, monospace;
+    font-size: 0.85rem;
+  }
+  p code, li code {
+    background: rgba(110,118,129,0.2);
+    padding: 0.15em 0.4em;
+    border-radius: 4px;
+  }
+  p { margin-bottom: 0.75rem; }
+  ul, ol { margin: 0.5rem 0 0.75rem 1.5rem; }
+  li { margin-bottom: 0.35rem; }
+  .warn {
+    background: rgba(210,153,34,0.1);
+    border-left: 3px solid var(--orange);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  .info {
+    background: rgba(88,166,255,0.08);
+    border-left: 3px solid var(--blue);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  .danger {
+    background: rgba(248,81,73,0.08);
+    border-left: 3px solid var(--red);
+    padding: 0.75rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  table { width: 100%; border-collapse: collapse; margin: 0.75rem 0; font-size: 0.9rem; }
+  th, td { padding: 0.5rem 0.75rem; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .tag {
+    display: inline-block;
+    padding: 0.15em 0.5em;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    font-weight: 600;
+  }
+  .tag-green { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag-orange { background: rgba(210,153,34,0.15); color: var(--orange); }
+  .tag-red { background: rgba(248,81,73,0.15); color: var(--red); }
+  .tag-blue { background: rgba(88,166,255,0.15); color: var(--blue); }
+  .arch-diagram {
+    font-family: 'SF Mono', Menlo, monospace;
+    font-size: 0.8rem;
+    line-height: 1.7;
+    padding: 1.5rem;
+    text-align: center;
+  }
+  .checklist { list-style: none; margin-left: 0; }
+  .checklist li::before { content: "[ ] "; font-family: monospace; color: var(--muted); }
+  .separator { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  a { color: var(--blue); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .toc { margin: 1rem 0 2rem; }
+  .toc a { display: block; padding: 0.25rem 0; color: var(--muted); }
+  .toc a:hover { color: var(--blue); }
+  .footer { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--border); color: var(--muted); font-size: 0.85rem; text-align: center; }
+</style>
+</head>
+<body>
+
+<h1>Radon Cloud Deployment Guide</h1>
+<p class="subtitle">Migrate app.radon.run from Vercel to a self-hosted Hetzner VPS</p>
+
+<div class="card">
+  <strong>Goal:</strong> Move the Radon trading terminal from Vercel (Next.js only) to a single Hetzner VPS running the full stack &mdash; Next.js, FastAPI, WebSocket relay, IB Gateway, monitor daemon, and data refresh &mdash; behind Caddy with auto-TLS.
+</div>
+
+<!-- TABLE OF CONTENTS -->
+<h2 id="toc">Table of Contents</h2>
+<div class="toc">
+  <a href="#overview">0. Architecture Overview</a>
+  <a href="#step1">1. Provision the Hetzner VPS</a>
+  <a href="#step2">2. DNS &mdash; Point app.radon.run to the VPS</a>
+  <a href="#step3">3. SSH Access &amp; User Setup</a>
+  <a href="#step4">4. Prepare the Environment File</a>
+  <a href="#step5">5. Run the Bootstrap Script</a>
+  <a href="#step6">6. Configure IB Gateway (Docker)</a>
+  <a href="#step7">7. Start All Services</a>
+  <a href="#step8">8. Verify the Stack</a>
+  <a href="#step9">9. Migrate Runtime Data</a>
+  <a href="#step10">10. Set Up CI/CD (GitHub Actions)</a>
+  <a href="#step11">11. Update Clerk &amp; Vercel Configuration</a>
+  <a href="#step12">12. Cut Over &mdash; Go Live</a>
+  <a href="#step13">13. Post-Launch Verification Checklist</a>
+  <a href="#step14">14. Rollback Plan</a>
+  <a href="#step15">15. Ongoing Operations</a>
+</div>
+
+<!-- ARCHITECTURE OVERVIEW -->
+<h2 id="overview">0. Architecture Overview</h2>
+
+<div class="card arch-diagram">
+<pre style="border:none; text-align:left; padding:0;">
+Internet (HTTPS)
+      |
+      v
+   Caddy :443  (auto-TLS, app.radon.run)
+      |
+      +--  /          -->  Next.js      :3000
+      +--  /api/ib/*  -->  FastAPI      :8321
+      +--  /ws*       -->  Node relay   :8765
+                                |
+                           IB Gateway   :4001 (localhost only, Docker)
+                                |
+                           +-- Monitor daemon (fill tracking, exit orders)
+                           +-- Refresh timer  (CRI/VCG scans, market hours)
+</pre>
+</div>
+
+<div class="card">
+<table>
+  <tr><th>Service</th><th>Port</th><th>Runtime</th><th>Notes</th></tr>
+  <tr><td>Caddy</td><td>443 / 80</td><td>System</td><td>Reverse proxy, auto-TLS via Let's Encrypt</td></tr>
+  <tr><td>Next.js</td><td>3000</td><td>Node.js</td><td>Web terminal UI + API routes</td></tr>
+  <tr><td>FastAPI</td><td>8321</td><td>Python 3.13</td><td>IB-backed REST API, order management</td></tr>
+  <tr><td>Node relay</td><td>8765</td><td>Node.js</td><td>Realtime WebSocket price streaming</td></tr>
+  <tr><td>IB Gateway</td><td>4001</td><td>Docker</td><td>Interactive Brokers API (localhost only)</td></tr>
+  <tr><td>Monitor</td><td>&mdash;</td><td>Python 3.13</td><td>Fill tracking, exit order placement</td></tr>
+  <tr><td>Refresh timer</td><td>&mdash;</td><td>Python 3.13</td><td>CRI/VCG scans, Mon&ndash;Fri 9:30&ndash;16:00 every 15m</td></tr>
+</table>
+</div>
+
+<hr class="separator">
+
+<!-- STEP 1 -->
+<h2 id="step1">Step 1 &mdash; Provision the Hetzner VPS</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">1</span><span class="step-title">Create the server</span></div>
+
+  <ol>
+    <li>Go to <a href="https://console.hetzner.cloud">Hetzner Cloud Console</a></li>
+    <li>Create a new project (or use existing)</li>
+    <li>Add a server:
+      <ul>
+        <li><strong>Location:</strong> Ashburn, VA (closest to US East / IB servers)</li>
+        <li><strong>Image:</strong> Ubuntu 24.04</li>
+        <li><strong>Type:</strong> CPX11 (2 vCPU, 2 GB RAM) &mdash; ~$5&ndash;7/month</li>
+        <li><strong>Networking:</strong> Public IPv4 enabled</li>
+        <li><strong>SSH Key:</strong> Add your public key</li>
+        <li><strong>Name:</strong> <code>ib-gateway</code></li>
+      </ul>
+    </li>
+    <li>Note the public IP address (e.g., <code>5.78.xx.xx</code>)</li>
+  </ol>
+
+  <div class="info">
+    The CPX11 (shared vCPU) is sufficient for single-tenant use. Upgrade to CPX21 (3 vCPU, 4 GB) if you need headroom for larger scans.
+  </div>
+</div>
+
+<!-- STEP 2 -->
+<h2 id="step2">Step 2 &mdash; DNS: Point app.radon.run to the VPS</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">2</span><span class="step-title">Update DNS records</span></div>
+
+  <p>In your DNS provider (Vercel Domains, Cloudflare, etc.):</p>
+
+  <table>
+    <tr><th>Type</th><th>Name</th><th>Value</th><th>TTL</th></tr>
+    <tr><td>A</td><td><code>app.radon.run</code></td><td><code>&lt;VPS_IP&gt;</code></td><td>300</td></tr>
+  </table>
+
+  <div class="warn">
+    <strong>Important:</strong> If using Cloudflare, set the proxy status to <strong>DNS only</strong> (grey cloud). Caddy handles TLS directly via Let's Encrypt &mdash; Cloudflare's proxy will interfere with certificate issuance.
+  </div>
+
+  <div class="warn">
+    <strong>CAA Records:</strong> If your domain has existing CAA records (check with <code>dig CAA radon.run</code>), add a CAA record: <code>0 issue "letsencrypt.org"</code>. Without this, Caddy cannot provision TLS certificates via Let's Encrypt.
+  </div>
+
+  <p>Verify propagation:</p>
+  <pre><code>dig +short app.radon.run
+# Should return your VPS IP</code></pre>
+
+  <div class="info">
+    Set TTL to 300s (5 min) before cutover so you can revert quickly. Increase to 3600 after the migration is stable.
+  </div>
+</div>
+
+<!-- STEP 3 -->
+<h2 id="step3">Step 3 &mdash; SSH Access &amp; User Setup</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">3</span><span class="step-title">Configure the deploy user</span></div>
+
+  <p>SSH in as root and create the <code>radon</code> service user:</p>
+
+<pre><code># SSH as root (first time)
+ssh root@&lt;VPS_IP&gt;
+
+# Create deploy user
+adduser --disabled-password --gecos "" radon
+mkdir -p /home/radon/.ssh
+cp ~/.ssh/authorized_keys /home/radon/.ssh/
+chown -R radon:radon /home/radon/.ssh
+chmod 700 /home/radon/.ssh
+chmod 600 /home/radon/.ssh/authorized_keys
+
+# Grant sudo for systemctl
+echo "radon ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart radon-*" \
+  | tee /etc/sudoers.d/radon-deploy
+echo "radon ALL=(ALL) NOPASSWD: /usr/bin/systemctl daemon-reload" \
+  | tee -a /etc/sudoers.d/radon-deploy
+
+# Install base prerequisites
+apt update && apt install -y \
+  ufw git curl software-properties-common
+
+# Install Docker (official repo — includes compose plugin)
+curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
+  | gpg --dearmor -o /usr/share/keyrings/docker.gpg
+echo "deb [arch=$(dpkg --print-architecture) \
+  signed-by=/usr/share/keyrings/docker.gpg] \
+  https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
+  | tee /etc/apt/sources.list.d/docker.list > /dev/null
+apt update
+apt install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+
+# Install Python 3.13 (deadsnakes PPA)
+add-apt-repository -y ppa:deadsnakes/ppa
+apt update
+apt install -y python3.13 python3.13-venv python3.13-dev
+
+# Install Node.js
+apt install -y nodejs npm
+
+# Add radon to docker group
+usermod -aG docker radon
+
+# Firewall
+ufw allow OpenSSH
+ufw allow 80/tcp
+ufw allow 443/tcp
+ufw --force enable</code></pre>
+
+  <p>Verify:</p>
+  <pre><code>ssh radon@&lt;VPS_IP&gt; whoami
+# radon</code></pre>
+
+  <div class="info">
+    Add your local SSH config alias for convenience:<br>
+    <code>Host ib-gateway</code><br>
+    <code>&nbsp;&nbsp;HostName &lt;VPS_IP&gt;</code><br>
+    <code>&nbsp;&nbsp;User radon</code><br>
+    <code>&nbsp;&nbsp;IdentityFile ~/.ssh/id_ed25519</code>
+  </div>
+</div>
+
+<!-- STEP 4 -->
+<h2 id="step4">Step 4 &mdash; Prepare the Environment File</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">4</span><span class="step-title">Create .env on the VPS</span></div>
+
+  <p>Copy <code>.env.example</code> to the VPS and fill in all secrets:</p>
+
+<pre><code>scp .env.example radon@ib-gateway:~/radon-cloud/.env
+ssh radon@ib-gateway 'chmod 600 ~/radon-cloud/.env &amp;&amp; nano ~/radon-cloud/.env'</code></pre>
+
+  <h3>Required values</h3>
+  <table>
+    <tr><th>Variable</th><th>Value</th><th>Notes</th></tr>
+    <tr><td><code>DOMAIN</code></td><td><code>app.radon.run</code></td><td>Used by Caddyfile for TLS cert</td></tr>
+    <tr><td><code>TWS_USERID</code></td><td>Your IB username</td><td>Interactive Brokers login</td></tr>
+    <tr><td><code>TWS_PASSWORD</code></td><td>Your IB password</td><td>Keep special chars quoted</td></tr>
+    <tr><td><code>TRADING_MODE</code></td><td><code>paper</code> or <code>live</code></td><td>Start with paper, switch after validation</td></tr>
+    <tr><td><code>IB_GATEWAY_PORT</code></td><td><code>4002</code> for paper or <code>4001</code> for live</td><td>Must match <code>TRADING_MODE</code></td></tr>
+    <tr><td><code>VNC_SERVER_PASSWORD</code></td><td>Any password (e.g. <code>demo</code>)</td><td>For VNC access to IB Gateway GUI</td></tr>
+    <tr><td><code>EXISTING_SESSION_DETECTED_ACTION</code></td><td><code>primary</code></td><td>Auto-takeover if another IB session exists</td></tr>
+    <tr><td><code>CLERK_SECRET_KEY</code></td><td><code>sk_live_...</code></td><td>From Clerk dashboard</td></tr>
+    <tr><td><code>NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY</code></td><td><code>pk_live_...</code></td><td>From Clerk dashboard</td></tr>
+    <tr><td><code>CLERK_JWKS_URL</code></td><td><code>https://&lt;your-app&gt;.clerk.accounts.dev/.well-known/jwks.json</code></td><td></td></tr>
+    <tr><td><code>CLERK_ISSUER</code></td><td><code>https://&lt;your-app&gt;.clerk.accounts.dev</code></td><td></td></tr>
+    <tr><td><code>ALLOWED_USER_IDS</code></td><td><code>user_xxx,user_yyy</code></td><td>Comma-separated Clerk user IDs</td></tr>
+    <tr><td><code>RADON_API_URL</code></td><td><code>http://127.0.0.1:8321</code></td><td>Internal, no change needed</td></tr>
+    <tr><td><code>NEXT_PUBLIC_RADON_API_URL</code></td><td><code>https://app.radon.run/api/ib</code></td><td>Public-facing API endpoint</td></tr>
+    <tr><td><code>NEXT_PUBLIC_IB_REALTIME_WS_URL</code></td><td><code>wss://app.radon.run/ws</code></td><td>Public-facing WebSocket</td></tr>
+    <tr><td><code>UW_TOKEN</code></td><td>Your Unusual Whales token</td><td>External data service</td></tr>
+    <tr><td><code>NODE_ENV</code></td><td><code>production</code></td><td></td></tr>
+    <tr><td><code>PORT</code></td><td><code>3000</code></td><td>Next.js port</td></tr>
+  </table>
+
+  <div class="info">
+    Never copy the production <code>.env</code> into the application or web tree.
+    <code>post-setup.sh</code> writes a mode-<code>0600</code> web environment that
+    contains only literal <code>NEXT_PUBLIC_*</code> assignments. Server-only build
+    values are passed directly to the build process by <code>run_with_env.py</code>.
+  </div>
+
+  <div class="danger">
+    <strong>Never commit <code>.env</code></strong> &mdash; it contains IB credentials, Clerk secrets, and API tokens. The <code>.gitignore</code> already excludes it.
+  </div>
+</div>
+
+<!-- STEP 5 -->
+<h2 id="step5">Step 5 &mdash; Run the Bootstrap Script</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">5</span><span class="step-title">One-time VPS setup</span></div>
+
+  <p>The full setup is 3 commands from your Mac:</p>
+
+<pre><code># First run — installs everything, generates SSH key, exits
+ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+
+# Add the printed SSH key to GitHub (Settings → SSH keys)
+
+# Second run — clones repos, builds, configures services
+ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+
+# Complete setup — env, build, IB Gateway (auto-retry 2FA), services, data, verify
+scripts/post-setup.sh</code></pre>
+
+  <div class="info">
+    <strong>Two-pass setup:</strong> On first run, the script generates an SSH deploy key for the <code>radon</code> user and prints it. Add the key to GitHub (Settings &rarr; SSH keys), then re-run the same command to continue.
+  </div>
+
+  <h3>What the script does</h3>
+  <ol>
+    <li><strong>Base packages:</strong> Installs git, curl, gnupg, ufw, etc.</li>
+    <li><strong>Prerequisites:</strong> Docker CE from official repo, Python 3.13 from deadsnakes PPA, Node.js 22 from NodeSource</li>
+    <li><strong>Version validation:</strong> Verifies all tools are at correct versions</li>
+    <li><strong>SSH key:</strong> Generates deploy key for GitHub access (first run exits here)</li>
+    <li><strong>Clone repos:</strong>
+      <ul>
+        <li><code>git clone git@github.com:joemccann/radon.git ~/radon</code></li>
+        <li><code>git clone git@github.com:joemccann/radon-cloud.git ~/radon-cloud</code></li>
+      </ul>
+    </li>
+    <li><strong>Python venv:</strong> Creates <code>~/radon/.venv</code>, installs <code>requirements.txt</code></li>
+    <li><strong>Node build:</strong> <code>cd ~/radon/web && npm ci && npm run build</code></li>
+    <li><strong>Caddy:</strong> Installs from official repos, copies Caddyfile to <code>/etc/caddy/Caddyfile</code></li>
+    <li><strong>Systemd:</strong> Copies all 7 unit files to <code>/etc/systemd/system/</code> (root-owned), runs <code>daemon-reload</code></li>
+    <li><strong>Firewall:</strong> Opens ports 80 and 443</li>
+    <li><strong>Privileges:</strong> Installs fixed deploy helpers and scoped polkit rules; IB Gateway lifecycle commands remain behind the lease-aware control helper</li>
+    <li><strong>.env validation:</strong> Checks required keys exist &mdash; skips service startup if missing</li>
+  </ol>
+
+  <div class="warn">
+    <strong>Root required:</strong> The setup script must be run as root. It creates the <code>radon</code> user, installs system packages, and writes to <code>/etc/systemd/system/</code>.
+  </div>
+
+  <p>If the script fails partway, it is safe to re-run &mdash; all operations are idempotent.</p>
+</div>
+
+<!-- STEP 6 -->
+<h2 id="step6">Step 6 &mdash; Configure IB Gateway (Docker)</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">6</span><span class="step-title">Start and verify IB Gateway</span></div>
+
+<pre><code># SSH to VPS
+ssh radon@ib-gateway
+
+# Start the stack (IB Gateway is started through the 2FA lease gate)
+/usr/local/bin/radon start
+
+# Verify container is running and healthy
+cd ~/radon-cloud
+docker compose ps
+docker compose logs --tail 50</code></pre>
+
+  <h3>Verify connectivity</h3>
+<pre><code># Check the configured live (4001) or paper (4002) host port
+ss -tlnp | grep -E ':(4001|4002) '
+
+# Test the configured IB API connection without sourcing the secret env file
+python3.13 scripts/run_with_env.py .env bash -c \
+  'echo > /dev/tcp/127.0.0.1/${IB_GATEWAY_PORT}' &amp;&amp; echo "OK" || echo "FAIL"</code></pre>
+
+  <h3>VNC access (for IB Gateway GUI)</h3>
+  <p>If you need to interact with the IB Gateway GUI (e.g., accept agreements):</p>
+<pre><code># SSH tunnel to VNC
+ssh -L 5900:127.0.0.1:5900 radon@ib-gateway
+
+# Connect with any VNC client to localhost:5900</code></pre>
+
+  <div class="info">
+    The Docker container image is pinned by digest and Docker auto-restart is disabled. The lease-aware boot helper and API watchdog are the only automated recovery paths. Health checks run every 30s with a 60s startup grace period and select internal port 4001 for live or 4002 for paper. Host port 4001 is bound to loopback and the Tailscale address; host port 4002 is loopback-only. Neither is exposed on the public interface.
+  </div>
+
+  <h3>IB Gateway 2FA</h3>
+  <p>On first login, IB Gateway requires second-factor authentication. Approve the push notification on the IBKR mobile app. If the 2FA times out:</p>
+<pre><code># This command refuses to cycle the Gateway while another 2FA lease is active.
+/usr/local/bin/radon restart
+cd ~/radon-cloud && docker compose logs -f</code></pre>
+  <p>Set <code>VNC_SERVER_PASSWORD</code> in <code>.env</code> to enable GUI access for debugging login issues.</p>
+
+  <div class="info">
+    <code>EXISTING_SESSION_DETECTED_ACTION=primary</code> ensures the VPS gateway takes over if another IB session (e.g., local Mac) is active. This avoids the "Existing session detected" dialog blocking headless login.
+  </div>
+</div>
+
+<!-- STEP 7 -->
+<h2 id="step7">Step 7 &mdash; Start All Services</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">7</span><span class="step-title">Enable and start systemd services</span></div>
+
+  <p>The setup script starts services automatically, but if you need to do it manually:</p>
+
+<pre><code># Enable all services to start on boot
+sudo systemctl enable radon-ib-gateway
+sudo systemctl enable radon-nextjs
+sudo systemctl enable radon-api
+sudo systemctl enable radon-relay
+sudo systemctl enable radon-monitor
+sudo systemctl enable radon-refresh.timer
+
+# Start in dependency order through the installed operator. The Gateway helper
+# checks real container liveness and acquires the shared 2FA lease before a cycle.
+/usr/local/bin/radon start
+
+# Reload Caddy with the Caddyfile
+sudo systemctl reload caddy</code></pre>
+
+  <h3>Service dependency chain</h3>
+  <table>
+    <tr><th>Service</th><th>Depends on</th><th>Type</th></tr>
+    <tr><td><code>radon-ib-gateway</code></td><td><code>docker.service</code></td><td>oneshot (RemainAfterExit)</td></tr>
+    <tr><td><code>radon-api</code></td><td><code>radon-ib-gateway</code></td><td>simple (auto-restart 5s)</td></tr>
+    <tr><td><code>radon-relay</code></td><td><code>radon-ib-gateway</code></td><td>simple (auto-restart 5s)</td></tr>
+    <tr><td><code>radon-monitor</code></td><td><code>radon-ib-gateway</code>, <code>radon-api</code></td><td>simple (auto-restart 10s)</td></tr>
+    <tr><td><code>radon-nextjs</code></td><td><code>network.target</code></td><td>simple (auto-restart 5s)</td></tr>
+    <tr><td><code>radon-refresh.timer</code></td><td>&mdash;</td><td>timer (Mon&ndash;Fri 9:30&ndash;16:00 / 15m)</td></tr>
+  </table>
+</div>
+
+<!-- STEP 8 -->
+<h2 id="step8">Step 8 &mdash; Verify the Stack</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">8</span><span class="step-title">Health checks</span></div>
+
+<pre><code># Check all service statuses
+sudo systemctl status radon-{ib-gateway,nextjs,api,relay,monitor}
+sudo systemctl status radon-refresh.timer
+
+# Health endpoint (FastAPI)
+curl -s http://localhost:8321/health
+
+# Next.js
+curl -s -o /dev/null -w "%{http_code}" http://localhost:3000
+
+# WebSocket relay (should upgrade or return 400)
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8765
+
+# External HTTPS (after DNS propagation)
+curl -s -o /dev/null -w "%{http_code}" https://app.radon.run
+curl -s https://app.radon.run/api/ib/health
+
+# WebSocket test
+wscat -c wss://app.radon.run/ws
+# Should connect (will need auth ticket for data)</code></pre>
+
+  <h3>Check Caddy TLS</h3>
+<pre><code># Verify certificate
+echo | openssl s_client -connect app.radon.run:443 -servername app.radon.run 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -dates</code></pre>
+
+  <h3>View logs</h3>
+<pre><code># Tail specific service logs
+journalctl -u radon-api -f
+journalctl -u radon-nextjs -f
+journalctl -u radon-relay -f
+journalctl -u radon-monitor -f
+
+# Caddy access logs
+tail -f /var/log/caddy/radon.log | jq .</code></pre>
+</div>
+
+<!-- STEP 9 -->
+<h2 id="step9">Step 9 &mdash; Migrate Runtime Data</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">9</span><span class="step-title">Transfer data/*.json from local/existing server</span></div>
+
+  <p>Use the migration script to snapshot and transfer all runtime data (cached market data, trade history, MenthorQ cache):</p>
+
+<pre><code># From your local machine (where data currently lives)
+scripts/migrate-data.sh
+
+# Or with explicit source/target
+scripts/migrate-data.sh \
+  --source /Users/joemccann/dev/apps/finance/radon \
+  --target radon@ib-gateway:~/radon</code></pre>
+
+  <h3>What gets transferred</h3>
+  <ul>
+    <li><code>data/*.json</code> &mdash; all cached JSON files</li>
+    <li><code>data/menthorq_cache/</code> &mdash; CTA daily cache files</li>
+    <li><code>data/service_health/</code> &mdash; health status markers</li>
+  </ul>
+
+  <h3>Verify on VPS</h3>
+<pre><code>ssh radon@ib-gateway 'ls ~/radon/data/ | head -20'
+ssh radon@ib-gateway 'cat ~/radon/data/service_health/cta-sync.json | python3 -m json.tool'</code></pre>
+</div>
+
+<!-- STEP 10 -->
+<h2 id="step10">Step 10 &mdash; Set Up CI/CD (GitHub Actions)</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">10</span><span class="step-title">Automated deploys on push to main</span></div>
+
+  <p>Create <code>.github/workflows/deploy.yml</code> in the <strong>radon</strong> repo:</p>
+
+<pre><code>name: Deploy to VPS
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            cd ~/radon-cloud
+            bash scripts/deploy.sh</code></pre>
+
+  <h3>Required GitHub Secrets</h3>
+  <p>Set these in the <code>radon</code> repo under Settings &rarr; Secrets and variables &rarr; Actions:</p>
+  <table>
+    <tr><th>Secret</th><th>Value</th></tr>
+    <tr><td><code>VPS_HOST</code></td><td>VPS IP address (e.g., <code>5.78.xx.xx</code>)</td></tr>
+    <tr><td><code>VPS_USER</code></td><td><code>radon</code></td></tr>
+    <tr><td><code>VPS_SSH_KEY</code></td><td>Private SSH key for the <code>radon</code> user</td></tr>
+  </table>
+
+  <h3>Deploy flow</h3>
+  <ol>
+    <li>Push to <code>radon</code> repo <code>main</code> branch</li>
+    <li>GitHub Actions SSHs to VPS, runs <code>deploy.sh</code></li>
+    <li><code>deploy.sh</code>: <code>git pull</code> &rarr; <code>pip install</code> &rarr; <code>npm build</code> &rarr; restart services &rarr; health check</li>
+    <li>On health check failure: <strong>auto-rollback</strong> to previous commit</li>
+  </ol>
+
+  <div class="info">
+    <code>deploy.sh</code> has built-in rollback: if the FastAPI health endpoint (<code>/health</code>) fails after 3 retries, it resets to the previous commit, reinstalls, rebuilds, and restarts services automatically.
+  </div>
+</div>
+
+<!-- STEP 11 -->
+<h2 id="step11">Step 11 &mdash; Update Clerk &amp; Vercel Configuration</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">11</span><span class="step-title">Reconfigure auth and remove Vercel</span></div>
+
+  <h3>A. Update Clerk</h3>
+  <ol>
+    <li>Go to <a href="https://dashboard.clerk.com">Clerk Dashboard</a></li>
+    <li>Update allowed redirect URLs to include <code>https://app.radon.run</code></li>
+    <li>Add <code>https://app.radon.run</code> to your Clerk application's allowed origins</li>
+    <li>Remove any Vercel-specific URLs if they're no longer needed</li>
+  </ol>
+
+  <h3>B. Update Next.js config</h3>
+  <p>In <code>radon/web/next.config.mjs</code>, the HSTS header currently only activates when <code>VERCEL=1</code>. Update for self-hosted:</p>
+
+<pre><code>// In radon/web/next.config.mjs — update the HSTS condition:
+if (process.env.VERCEL === "1" || process.env.RADON_ENABLE_HSTS === "1") {
+  // HSTS header added
+}
+
+// Add to your .env on the VPS:
+RADON_ENABLE_HSTS=1</code></pre>
+
+  <h3>C. Remove Vercel deployment</h3>
+  <ol>
+    <li>Go to Vercel Dashboard &rarr; <code>radon</code> project</li>
+    <li>Settings &rarr; Domains &rarr; Remove <code>app.radon.run</code></li>
+    <li>Optionally delete the Vercel project or pause it</li>
+    <li>Remove <code>@vercel/analytics</code> from <code>web/package.json</code> if not using Vercel Analytics</li>
+  </ol>
+
+  <h3>Clerk Production DNS Records</h3>
+  <p>Production Clerk requires 5 CNAME records on your domain:</p>
+  <table>
+    <tr><th>Name</th><th>Type</th><th>Value</th></tr>
+    <tr><td><code>clerk</code></td><td>CNAME</td><td><code>frontend-api.clerk.services</code></td></tr>
+    <tr><td><code>accounts</code></td><td>CNAME</td><td><code>accounts.clerk.services</code></td></tr>
+    <tr><td><code>clkmail</code></td><td>CNAME</td><td><code>mail.&lt;instance&gt;.clerk.services</code></td></tr>
+    <tr><td><code>clk._domainkey</code></td><td>CNAME</td><td><code>dkim1.&lt;instance&gt;.clerk.services</code></td></tr>
+    <tr><td><code>clk2._domainkey</code></td><td>CNAME</td><td><code>dkim2.&lt;instance&gt;.clerk.services</code></td></tr>
+  </table>
+  <p>Also configure your own Google/GitHub OAuth credentials in Clerk with redirect URI: <code>https://clerk.yourdomain.com/v1/oauth_callback</code></p>
+
+  <div class="warn">
+    <strong>Timing:</strong> Do steps 11A and 11C <em>after</em> you've verified the VPS is serving correctly (Step 8). This ensures zero downtime &mdash; DNS points to VPS, Clerk accepts the new origin, and Vercel is removed only after the cutover is confirmed.
+  </div>
+</div>
+
+<!-- STEP 12 -->
+<h2 id="step12">Step 12 &mdash; Cut Over: Go Live</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">12</span><span class="step-title">Switch production traffic</span></div>
+
+  <h3>Pre-cutover checklist</h3>
+  <ul class="checklist">
+    <li>VPS is provisioned and accessible via SSH</li>
+    <li>All 7 services are running and healthy</li>
+    <li>IB Gateway Docker container is healthy on its configured live or paper host port</li>
+    <li><code>.env</code> is populated with all production secrets</li>
+    <li>Runtime data has been migrated</li>
+    <li>Caddy is serving HTTPS with a valid Let's Encrypt cert</li>
+    <li><code>https://app.radon.run</code> loads the terminal UI</li>
+    <li><code>https://app.radon.run/api/ib/health</code> returns healthy</li>
+    <li>WebSocket connects at <code>wss://app.radon.run/ws</code></li>
+    <li>Clerk authentication works (sign in, sign out)</li>
+    <li>GitHub Actions deploy workflow is configured</li>
+    <li>Rollback has been tested (trigger a failed health check)</li>
+  </ul>
+
+  <h3>Cutover sequence</h3>
+  <ol>
+    <li>Lower DNS TTL to 60s (if not already done)</li>
+    <li>Update A record for <code>app.radon.run</code> &rarr; VPS IP</li>
+    <li>Wait for DNS propagation (<code>dig +short app.radon.run</code>)</li>
+    <li>Verify HTTPS, auth, and IB data flow in browser</li>
+    <li>Remove the domain from Vercel</li>
+    <li>Increase DNS TTL to 3600s</li>
+  </ol>
+</div>
+
+<!-- STEP 13 -->
+<h2 id="step13">Step 13 &mdash; Post-Launch Verification</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">13</span><span class="step-title">Full functional verification</span></div>
+
+  <table>
+    <tr><th>Check</th><th>Command / Action</th><th>Expected</th></tr>
+    <tr><td>Homepage loads</td><td>Visit <code>https://app.radon.run</code></td><td>Terminal UI renders</td></tr>
+    <tr><td>Auth works</td><td>Sign in via Clerk</td><td>Redirects to dashboard</td></tr>
+    <tr><td>Allowlist enforced</td><td>Sign in with non-allowlisted user</td><td>Access denied</td></tr>
+    <tr><td>API health</td><td><code>curl https://app.radon.run/api/ib/health</code></td><td>200 + healthy JSON</td></tr>
+    <tr><td>Realtime prices</td><td>Open any ticker page</td><td>WebSocket connects, prices stream</td></tr>
+    <tr><td>Order placement</td><td>Place a paper order</td><td>Order accepted, appears in /orders</td></tr>
+    <tr><td>Portfolio loads</td><td>Visit /portfolio</td><td>Account data renders (cached or live)</td></tr>
+    <tr><td>CTA data</td><td>Visit /cta</td><td>MenthorQ CTA tables + briefing render</td></tr>
+    <tr><td>VCG signal</td><td>Visit /regime</td><td>VCG tab shows current signal</td></tr>
+    <tr><td>Scanner</td><td>Visit /scanner</td><td>CRI/VCG scan results appear</td></tr>
+    <tr><td>Data refresh</td><td><code>systemctl status radon-refresh.timer</code></td><td>Timer active, last run recent</td></tr>
+    <tr><td>Monitor daemon</td><td><code>journalctl -u radon-monitor --since "1 hour ago"</code></td><td>Fill tracking logs</td></tr>
+    <tr><td>CI deploy</td><td>Push a trivial change to <code>radon</code> main</td><td>GitHub Actions deploys, health passes</td></tr>
+    <tr><td>Auto-rollback</td><td>Push a change that breaks /health</td><td>deploy.sh rolls back automatically</td></tr>
+  </table>
+</div>
+
+<!-- STEP 14 -->
+<h2 id="step14">Step 14 &mdash; Rollback Plan</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">14</span><span class="step-title">If something goes wrong</span></div>
+
+  <h3>A. Rollback to Vercel (full revert)</h3>
+<pre><code># 1. Point DNS back to Vercel
+#    Update A record for app.radon.run → Vercel's IP / CNAME
+
+# 2. Re-add domain in Vercel dashboard
+
+# 3. Redeploy on Vercel (push to main or trigger manual deploy)</code></pre>
+
+  <h3>B. Rollback a bad deploy (VPS stays live)</h3>
+<pre><code># deploy.sh handles this automatically, but if manual:
+ssh radon@ib-gateway
+cd ~/radon
+git log --oneline -5                     # Find the good commit
+git reset --hard &lt;good-commit&gt;
+pip install -r requirements-deploy.txt
+cd web && npm ci && npm run build && cd ..
+sudo systemctl restart radon-nextjs radon-api radon-relay radon-monitor</code></pre>
+
+  <h3>C. Restart a single crashed service</h3>
+<pre><code>ssh radon@ib-gateway 'sudo systemctl restart radon-api'
+ssh radon@ib-gateway 'journalctl -u radon-api -n 50'</code></pre>
+</div>
+
+<!-- STEP 15 -->
+<h2 id="step15">Step 15 &mdash; Ongoing Operations</h2>
+
+<div class="card">
+  <div class="step-header"><span class="step-num">15</span><span class="step-title">Day-to-day management</span></div>
+
+  <h3>Common commands</h3>
+  <table>
+    <tr><th>Task</th><th>Command</th></tr>
+    <tr><td>Check all services</td><td><code>ssh radon@ib-gateway 'sudo systemctl status radon-{ib-gateway,nextjs,api,relay,monitor}'</code></td></tr>
+    <tr><td>View API logs</td><td><code>ssh radon@ib-gateway 'journalctl -u radon-api -f'</code></td></tr>
+    <tr><td>Restart a service</td><td><code>ssh radon@ib-gateway 'sudo systemctl restart radon-api'</code></td></tr>
+    <tr><td>View Caddy logs</td><td><code>ssh radon@ib-gateway 'tail -f /var/log/caddy/radon.log | jq .'</code></td></tr>
+    <tr><td>IB Gateway logs</td><td><code>ssh radon@ib-gateway 'cd ~/radon-cloud && docker compose logs --tail 100'</code></td></tr>
+    <tr><td>Start the full stack</td><td><code>ssh radon@ib-gateway '/usr/local/bin/radon start'</code></td></tr>
+    <tr><td>Restart the full stack</td><td><code>ssh radon@ib-gateway '/usr/local/bin/radon restart'</code></td></tr>
+    <tr><td>IB Gateway VNC</td><td><code>ssh -L 5900:127.0.0.1:5900 radon@ib-gateway</code></td></tr>
+    <tr><td>Manual deploy</td><td><code>ssh radon@ib-gateway 'cd ~/radon-cloud && bash scripts/deploy.sh'</code></td></tr>
+    <tr><td>Check disk usage</td><td><code>ssh radon@ib-gateway 'df -h / && du -sh ~/radon/data'</code></td></tr>
+  </table>
+
+  <h3>After changing config files</h3>
+  <table>
+    <tr><th>Changed</th><th>Action</th></tr>
+    <tr><td>Systemd service files</td><td><code>sudo systemctl daemon-reload && sudo systemctl restart radon-&lt;name&gt;</code></td></tr>
+    <tr><td>Caddyfile</td><td><code>sudo systemctl reload caddy</code></td></tr>
+    <tr><td><code>.env</code></td><td>Restart affected services</td></tr>
+    <tr><td><code>docker-compose.yml</code></td><td><code>/usr/local/bin/radon restart</code> (requires a free 2FA lease)</td></tr>
+  </table>
+
+  <h3>Estimated costs</h3>
+  <table>
+    <tr><th>Item</th><th>Monthly</th></tr>
+    <tr><td>Hetzner CPX11 (2 vCPU, 2 GB)</td><td>~$5&ndash;7</td></tr>
+    <tr><td>Domain (radon.run)</td><td>~$1</td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>~$6&ndash;8/month</strong></td></tr>
+  </table>
+</div>
+
+<div class="footer">
+  Generated 2026-03-29 &nbsp;&mdash;&nbsp; Radon Cloud Deployment Guide &nbsp;&mdash;&nbsp; <code>radon-cloud</code> repo
+</div>
+
+</body>
+</html>

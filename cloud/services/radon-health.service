@@ -1,0 +1,33 @@
+[Unit]
+Description=Radon standalone health daemon (isolated from the trading stack)
+# DELIBERATELY no Requires=/BindsTo=/PartOf=/After= on radon-ib-gateway or ANY
+# radon-* unit. Zero shared fate is the entire point: the cascade-stop in
+# feedback_systemd_cascade_stop_no_autorecover.md (stop radon-ib-gateway ->
+# clean-stops api/relay/monitor, Restart=always does NOT re-fire) must never be
+# able to take this down. It only orders after the network.
+After=network-online.target
+Wants=network-online.target
+# Make a crash-loop VISIBLE as `failed` instead of an invisible hot-loop:
+# after 5 restarts in 60s, systemd parks the unit so an operator can see it.
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=radon
+WorkingDirectory=/home/radon/radon
+# Turso creds for the service_health read (stdlib HTTP — no libsql import, so
+# the stdlib-only isolation contract is preserved). systemd EnvironmentFile is a
+# literal parser, so $-containing values are safe (feedback_env_file_shell_expansion.md).
+# Individual upstream read failures degrade the relevant /status section to
+# "unknown". The environment file itself is mandatory so a missing production
+# secret contract cannot silently launch a permanently blind observer.
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_HEALTH_PORT=8330
+Environment=RADON_HEALTH_BIND=127.0.0.1
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.health_service.serve
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

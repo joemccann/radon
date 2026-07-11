@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon DB backup -- nightly full Turso dump
+
+[Timer]
+# 07:52 UTC (03:52 ET): off-hours for US markets, after the 06:30
+# (llm-index) and 06:40 (drift-audit) nightly jobs, and deliberately NOT
+# :00/:30 to stay clear of the top-of-hour scheduler herd. Persistent so a
+# missed firing (host down) replays on next boot instead of skipping the
+# day. The main repo's serviceHealthWindows.ts gives `db-backup` a 48h
+# window: one missed night pages before the second is lost.
+OnCalendar=*-*-* 07:52:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
