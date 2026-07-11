@@ -167,7 +167,8 @@ def _nested_api_state(probe_results: dict) -> str | None:
     if port_listening is not None and type(port_listening) is not bool:
         return "unknown"
     if isinstance(service_state, str) and service_state.lower() not in {
-        "up", "ok", "healthy",
+        # cloud mode reports "reachable" (port probe only; no Docker health).
+        "up", "ok", "healthy", "reachable",
     }:
         return "unknown"
     if isinstance(auth_state, str) and auth_state.lower() not in {

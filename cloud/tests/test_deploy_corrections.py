@@ -2149,7 +2149,7 @@ class TestRequiredEnvironment:
             {
                 "IB_GATEWAY_MODE": "cloud",
                 "IB_GATEWAY_HOST": "127.0.0.1",
-                "RADON_MODE": "cloud",
+                "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
             }
         )
@@ -2186,7 +2186,7 @@ class TestRequiredEnvironment:
             {
                 "IB_GATEWAY_MODE": "cloud",
                 "IB_GATEWAY_HOST": "127.0.0.1",
-                "RADON_MODE": "cloud",
+                "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
             }
         )
@@ -2231,7 +2231,7 @@ class TestRequiredEnvironment:
             {
                 "IB_GATEWAY_MODE": "cloud",
                 "IB_GATEWAY_HOST": "127.0.0.1",
-                "RADON_MODE": "cloud",
+                "RADON_MODE": "hetzner",
                 "NODE_ENV": "production",
                 "TRADING_MODE": "live",
                 "IB_GATEWAY_PORT": "4001",

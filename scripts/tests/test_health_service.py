@@ -671,3 +671,22 @@ class TestExternalProbeInStatus:
         status, body = serve.status_response(
             run_probes_fn=lambda: {}, unit_cache=_FakeCache({}, None), now_fn=lambda: "t")
         assert body["external_probe"] is None
+
+
+def test_nested_api_state_accepts_cloud_mode_reachable() -> None:
+    from scripts.health_service.probes import _nested_api_state
+
+    probes = {
+        "radon-api": {
+            "state": "up",
+            "http_status": 200,
+            "payload": {
+                "status": "ok",
+                "auth_state": "authenticated",
+                "service_state": "reachable",
+                "upstream_dead": False,
+                "port_listening": True,
+            },
+        }
+    }
+    assert _nested_api_state(probes) == "up"
