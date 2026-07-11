@@ -297,8 +297,37 @@ for index in "${!SOURCES[@]}"; do
   INSTALLED_TARGETS+=("$(root_path "${LOGICAL_TARGETS[$index]}")")
 done
 
-"$SYSTEMD_ANALYZE_BIN" verify "${SYSTEMD_CANDIDATES[@]}" >/dev/null || \
+# systemd-analyze verify resolves absolute ExecStart paths. On the first live
+# cutover those helpers are not installed yet, so seed staged shell artifacts
+# at their final paths before unit validation. On failure, remove only the
+# helpers this run created so a partial seed cannot linger.
+declare -a PRESEEDED_HELPERS=()
+for index in "${!KINDS[@]}"; do
+  if [[ "${KINDS[$index]}" != "shell" ]]; then
+    continue
+  fi
+  helper_target="${INSTALLED_TARGETS[$index]}"
+  if [[ -e "$helper_target" || -L "$helper_target" ]]; then
+    continue
+  fi
+  mkdir -p "$(dirname "$helper_target")"
+  if [[ "$TEST_MODE" == "1" ]]; then
+    install -m "${MODES[$index]}" "${STAGED[$index]}" "$helper_target" || \
+      die "failed to preseed helper for unit validation: ${LOGICAL_TARGETS[$index]}"
+  else
+    install -m "${MODES[$index]}" -o root -g root \
+      "${STAGED[$index]}" "$helper_target" || \
+      die "failed to preseed helper for unit validation: ${LOGICAL_TARGETS[$index]}"
+  fi
+  PRESEEDED_HELPERS+=("$helper_target")
+done
+
+if ! "$SYSTEMD_ANALYZE_BIN" verify "${SYSTEMD_CANDIDATES[@]}" >/dev/null; then
+  for helper_target in "${PRESEEDED_HELPERS[@]}"; do
+    rm -f -- "$helper_target"
+  done
   die "systemd unit validation failed"
+fi
 
 STAGED_MANIFEST="$STAGE_DIR/control-plane-manifest.sha256"
 for index in "${!SOURCES[@]}"; do
