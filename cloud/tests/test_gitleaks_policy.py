@@ -20,11 +20,13 @@ LITERAL_TWS_BASELINE_COMMITS = {
     "40cfff2aba495320ee1bb4d8d179c362d909a46a",
     "af72046d0ce1d80417ccbc6ea150cbcb8c810505",
     "dfa5f948e4812376ebdd860d9b12e520c851488c",
+    "65213d976eb3b4d835761c0b3f639581a533a27a",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
     "90daa01986c377ac20ba682021d77372fd030393",
     "25ef348f1eb882bdc4a7d735fd8e3206b2711c2e",
+    "65213d976eb3b4d835761c0b3f639581a533a27a",
 }
 
 
@@ -73,8 +75,15 @@ def test_custom_rules_still_match_new_literals_but_not_empty_placeholders() -> N
     literal = re.compile(rules["literal-tws-credential-assignment"]["regex"])
     example = re.compile(rules["credential-shaped-example"]["regex"])
 
-    assert literal.search("TWS_PASSWORD=fresh_literal_credential")
-    assert literal.search("TWS_USERID='fresh_literal_user'")
-    assert not literal.search("TWS_PASSWORD=")
-    assert not literal.search("TWS_USERID=${TWS_USERID}")
-    assert example.search("credential example: fresh_literal_credential")
+    # Build positive fixtures at runtime so the file never contains a full
+    # TWS_* assignment or credential-example literal that full-history gitleaks
+    # would treat as a real finding.
+    password_assignment = "TWS_" + "PASSWORD" + "=" + "fresh_literal_credential"
+    userid_assignment = "TWS_" + "USERID" + "='" + "fresh_literal_user" + "'"
+    example_phrase = "credential " + "example: " + "fresh_literal_credential"
+
+    assert literal.search(password_assignment)
+    assert literal.search(userid_assignment)
+    assert not literal.search("TWS_" + "PASSWORD" + "=")
+    assert not literal.search("TWS_" + "USERID" + "=${TWS_USERID}")
+    assert example.search(example_phrase)
