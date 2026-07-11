@@ -1,8 +1,9 @@
 # Monorepo migration: fold `radon-cloud` into `radon/cloud`
 
 **Date:** 2026-07-10  
-**Status:** Phase 1 shipped; privileged VPS cutover pending
+**Status:** Phase 2 cutover complete on production (2026-07-11). Pre-cloud rollback drill still open.
 **Goal:** One git SHA for app + production infra so deploy tooling, systemd, Compose, and application code cannot drift.
+**Production green SHA at cutover close:** `06e683e5` (control-plane ready, schema-v2 `ok=true`, IB authenticated).
 
 ---
 
@@ -152,8 +153,41 @@ evidence; the next successful deploy performs bounded cleanup.
 - [x] Full app pytest + web vitest + cloud pytest green (4054 / 4082 / 556)
 - [x] Compatibility deploy publishes the new health schema
 - [x] Root bootstrap publishes a verified readiness marker without a Gateway restart
-- [ ] First immutable-runner deploy succeeds (operator verify via `gh run list`)
+- [x] First immutable-runner deploy succeeds (CI `29157182912`, SHA `06e683e5`)
 - [ ] Forced rollback to a pre-cloud SHA restores artifacts and clears its journal
+
+---
+
+## Live cutover notes (2026-07-11)
+
+### Order of operations that worked
+
+1. Deploy a readiness-gated release so `cloud/` and schema-v2 `radon-health` land (broker health advisory).
+2. As root, from `/home/radon/radon`: `bash cloud/scripts/bootstrap-control-plane.sh` (no Gateway restart).
+3. Recover IBKR 2FA via `/usr/local/bin/radon-ib-gateway-control` only.
+4. Confirm `/status` `schema_version=2 ok=true overall_state=up` and pool 3/3 connected.
+5. Subsequent deploys use immutable runners under `~/.radon-deploy-runners/` and require Production environment approval.
+
+### Production env contract after cutover
+
+| Key | Value |
+|---|---|
+| Secrets file | `/home/radon/radon-cloud/.env` mode `0600` |
+| `IB_GATEWAY_MODE` | `cloud` |
+| `RADON_MODE` | `hetzner` |
+| `IB_GATEWAY_COMPOSE_DIR` | `/home/radon/radon/cloud` |
+| Readiness marker | `/var/lib/radon/control-plane-ready` |
+| Green deploy marker | `/home/radon/.radon-last-green-deploy` |
+
+### Defects that only appeared on the live host
+
+Documented fully in `tasks/lessons.md` (2026-07-11). Short list:
+
+- Bootstrap must preseed shell helpers before `systemd-analyze verify`.
+- Gateway control root demotion must `cd` to a radon-readable home; `/root` cwd breaks Compose.
+- Deploy preflight must not require radon-readable installed sudoers; root helper owns that contract.
+- Output-trace excludes for host `data/**` are mandatory on disk-fallback API routes (VPS data >> local).
+- Host needs Bun 1.3.14 on radon PATH; prune must chmod u+w before deleting a-w runners.
 
 ---
 

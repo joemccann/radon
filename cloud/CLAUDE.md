@@ -79,6 +79,12 @@ validates candidates, atomically installs helpers/policies/changed units,
 performs one `systemctl daemon-reload`, verifies hashes, and publishes the
 readiness marker.
 
+First-time cutover must preseed staged shell helpers at their final paths
+before `systemd-analyze verify` (units reference absolute ExecStart paths that
+do not exist yet). Remove only those seeds if verification fails. After any
+live hot-patch of an installed control-plane file, re-run bootstrap so the
+readiness manifest hashes match the next release.
+
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.
@@ -97,16 +103,34 @@ shortcut; setup also provisions packages, firewall, Caddy, and service state.
 Never add a second Gateway restart owner. Docker restart policy remains `no`;
 IBC self-restart knobs remain disabled; deploys exclude Gateway-owned units.
 
+Root demotion of gateway control must run with a radon-readable cwd
+(`HOME=/home/radon` and `cd /home/radon`). Demoting while cwd is `/root` makes
+Compose fail with `stat .: permission denied` and can leave
+`/var/lib/radon/ib-gateway-transition.json` stuck.
+
+Deploy preflight runs as `radon`. Installed `0440` sudoers are not
+radon-readable; source-to-manifest matching is non-privileged, and installed
+target existence/hash/mode is verified only by
+`sudo -n /usr/local/sbin/radon-deploy-root verify-control-plane`.
+
+Immutable runners under `~/.radon-deploy-runners/` are extracted `a-w`.
+`prune-deploy-runners.py` must restore write bits before deletion.
+
 ## Environment Handling
 
 - `config/required-env.txt` is the shared required-key contract.
 - `scripts/check-env.py` validates names, permissions, literal values, and mode
   consistency without sourcing secrets.
+- Production invariants on Hetzner monorepo hosts:
+  `IB_GATEWAY_MODE=cloud`, `RADON_MODE=hetzner`, `IB_GATEWAY_HOST=127.0.0.1`,
+  `NODE_ENV=production`.
 - Compose interpolation and service `env_file` both receive the explicit
-  external env path through `RADON_COMPOSE_ENV_FILE`.
+  external env path through `RADON_COMPOSE_ENV_FILE` (stable file:
+  `/home/radon/radon-cloud/.env`).
 - `web/.env` contains only `NEXT_PUBLIC_*` build values and is mode `0600`.
   Never copy the complete production env into the web tree.
 - Setup validates the stable env before dependency installation or builds.
+- Host needs the exact Bun pin on radon PATH for staged Next builds.
 
 ## Systemd And Drift
 

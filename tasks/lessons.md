@@ -1,5 +1,54 @@
 # Lessons
 
+## 2026-07-11 — production reliability cutover (monorepo + broker)
+
+Source-green is not production-green. After source hardening, live recovery still required deploy, bootstrap, 2FA, env invariants, host packages (Bun), and GitHub control-plane settings.
+
+### Health schema and aggregate
+
+- HTTP 200 on FastAPI `/health` is transport truth only. Nested `auth_state`, `service_state`, and `upstream_dead` must drive the aggregate. Version `/status` with `schema_version`, boolean `ok`, and `overall_state`; off-box consumers fail closed on opaque bodies.
+- Cloud-mode FastAPI reports `service_state=reachable` (TCP/API only; no Docker health). The nested classifier must treat `reachable` as healthy alongside `up`/`ok`/`healthy`, or a fully authenticated cloud gateway stays `overall_state=unknown`.
+- Compatibility deploy gates validate schema field types only, never a healthy broker verdict. IB outage must not roll back app code.
+
+### Control-plane bootstrap and deploy
+
+- First-time bootstrap fails `systemd-analyze verify` when ExecStart helpers are not installed yet. Seed staged shell helpers at their final paths before unit validation; remove only those seeds if verification fails.
+- Root demotion of `radon-ib-gateway-control` must land in a radon-readable cwd. Demoting while cwd is `/root` yields Compose `stat .: permission denied` and leaves durable transition journals that block later mutations.
+- Deploy preflight runs as `radon`. `0440 root:root` sudoers under root-only directories are invisible to non-privileged `-f`/`-r` probes. Match release sources to the readiness manifest as radon; leave installed-target existence/hash/mode to the fixed no-argument root helper `verify-control-plane`.
+- After any live hot-patch of an installed control-plane target, re-run bootstrap so the readiness manifest hashes match the next release, or deploy preflight will refuse "incompatible with scripts/…".
+- Immutable runners are extracted with `chmod a-w`. Prune must restore write bits before `rmtree`, or a green deploy fails after success on runner retention.
+- Post-gate backup cleanup of managed release trees is best-effort. Root-owned venv files (e.g. py-spy) must not turn a gated green release into a hard failure.
+- Production VPS needs the exact Bun pin in PATH for radon (currently 1.3.14). Missing Bun fails staged builds after control-plane and env preflight already passed.
+
+### Production env invariants (Hetzner monorepo)
+
+| Key | Production value | Notes |
+|---|---|---|
+| `IB_GATEWAY_MODE` | `cloud` | FastAPI must not own Compose lifecycle; helper owns it. |
+| `RADON_MODE` | `hetzner` | Monorepo host topology (not `local`, not the cloud-package label `cloud`). |
+| `IB_GATEWAY_COMPOSE_DIR` | `/home/radon/radon/cloud` | Not `~/radon-cloud`. Wrong path yields `container_state=not_found` while the container is healthy. |
+| Secrets file | `/home/radon/radon-cloud/.env` mode `0600` | Temporary stable path; do not delete during migration. |
+| Host data excludes | `outputFileTracingExcludes` for disk-fallback API routes | Production data trees exceed the 128 MiB output-trace audit; local builds can pass while VPS deploy fails. |
+
+### IBKR 2FA recovery (operator)
+
+1. Freeze `radon-ib-watchdog.timer` during manual work.
+2. `POST /ib/reset-backoff` to clear leases.
+3. Lifecycle only via `/usr/local/bin/radon-ib-gateway-control` from a radon-readable cwd (never raw docker/systemctl if the helper is installed).
+4. Approve the IBKR Mobile push immediately (~3 min expiry).
+5. Confirm `auth_state=authenticated`, then ensure pool reconnect (API restart or recovery heartbeat).
+6. Re-enable the watchdog timer.
+7. Stuck transition journal at `/var/lib/radon/ib-gateway-transition.json` means complete the desired state or clear only after the daemon has converged — do not delete blindly mid-mutation.
+
+### GitHub control plane
+
+- `Production` environment required reviewer is the human deploy gate. `git push origin main` does not finish deploy until approval.
+- Branch protection on `main`: block force-push and deletion. Do not require pre-existing status checks on direct push for a solo push-to-main model; that bricks deploy until a PR workflow exists. Tests still gate deploy via the workflow `needs:`.
+
+### Gitleaks policy self-tests
+
+- Policy fixtures that assert the TWS-credential regex must build positive strings at runtime (`"TWS_" + "PASSWORD" + "=" + ...`). Full-history scan treats literals in the test file as findings. Allowlist only immutable already-pushed commits that contained the old fixtures.
+
 ## 2026-06-27
 
 - Portfolio sync endpoints must return the freshly reconstructed live IB payload directly; persistence to Turso is a separate best-effort step. Never make `/portfolio/sync` prove success by rereading Turso, because a DB read outage turns a successful IB sync into a dashboard blank.
