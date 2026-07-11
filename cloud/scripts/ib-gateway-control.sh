@@ -7,13 +7,26 @@ set -euo pipefail
 # Running the helper as root would create root-owned lease guard files and
 # break the radon-owned API/watchdog control planes. Self-demote defensively;
 # tests may opt out when their harness itself runs as root.
+#
+# Docker Compose validates against the process cwd (stat "."). Root sessions
+# often start in /root, which radon cannot read after demotion — that surfaces
+# as: validating .../docker-compose.yml: error in parsing "compose-spec.json":
+# stat .: permission denied. Always demote with an explicit home cwd.
 if [[ $EUID -eq 0 && "${RADON_GATEWAY_CONTROL_ALLOW_ROOT:-0}" != "1" ]]; then
-  exec "${RADON_RUNUSER_BIN:-/usr/sbin/runuser}" -u radon -- "$0" "$@"
+  exec "${RADON_RUNUSER_BIN:-/usr/sbin/runuser}" -u radon -- \
+    /usr/bin/env HOME=/home/radon \
+    /bin/bash -c 'cd /home/radon && exec "$0" "$@"' "$0" "$@"
 fi
 
 APP_DIR="${RADON_APP_DIR:-/home/radon/radon}"
 CLOUD_DIR="${RADON_CLOUD_DIR:-/home/radon/radon/cloud}"
 ENV_FILE="${RADON_DEPLOY_ENV_FILE:-${RADON_GATEWAY_ENV_FILE:-/home/radon/radon-cloud/.env}}"
+
+# Non-root callers can also inherit an unreadable cwd (for example a leftover
+# root shell). Move to a path the radon user owns before any Compose call.
+if ! cd "$CLOUD_DIR" 2>/dev/null; then
+  cd /home/radon || cd /tmp || true
+fi
 # The lease/mutex code is stdlib-only. Use the immutable system interpreter
 # provisioned by setup-vps rather than the app venv swapped during deploys.
 LOCK_PYTHON="${RADON_LOCK_PYTHON:-/usr/bin/python3.13}"

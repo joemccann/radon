@@ -293,6 +293,9 @@ def test_boot_and_watchdog_units_use_authoritative_control_path():
     assert 'install -d -m 0750 -o radon -g radon "$state_dir"' in setup
     control = CONTROL.read_text()
     assert 'exec "${RADON_RUNUSER_BIN:-/usr/sbin/runuser}" -u radon' in control
+    # Root demotion must land in a radon-readable cwd; Compose stats "." and
+    # fails with "stat .: permission denied" when cwd remains /root.
+    assert "cd /home/radon && exec" in control
     assert 'LOCK_PYTHON="${RADON_LOCK_PYTHON:-/usr/bin/python3.13}"' in control
     assert "${APP_DIR}/.venv/bin/python" not in control
     assert "System Python 3.13 is required by the Gateway control plane" in setup

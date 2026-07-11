@@ -150,8 +150,8 @@ evidence; the next successful deploy performs bounded cleanup.
 - [x] CI deploy script monorepo-aware with legacy fallback
 - [x] Documented rollback path
 - [x] Full app pytest + web vitest + cloud pytest green (4054 / 4082 / 556)
-- [ ] Compatibility deploy publishes the new health schema
-- [ ] Root bootstrap publishes a verified readiness marker without a Gateway restart
+- [x] Compatibility deploy publishes the new health schema
+- [x] Root bootstrap publishes a verified readiness marker without a Gateway restart
 - [ ] First immutable-runner deploy succeeds (operator verify via `gh run list`)
 - [ ] Forced rollback to a pre-cloud SHA restores artifacts and clears its journal
 
