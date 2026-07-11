@@ -13,9 +13,11 @@ KEY_PATTERN = re.compile(r"[A-Z][A-Z0-9_]*")
 DOLLAR_REFERENCE = re.compile(r"\$\{?[A-Za-z_][A-Za-z0-9_]*\}?")
 GATEWAY_PORT_BY_MODE = {"live": "4001", "paper": "4002"}
 PRODUCTION_INVARIANTS = {
+    # cloud = FastAPI must not own Compose lifecycle; the installed helper does.
     "IB_GATEWAY_MODE": "cloud",
     "IB_GATEWAY_HOST": "127.0.0.1",
-    "RADON_MODE": "cloud",
+    # Monorepo Hetzner host topology (schedulers on VPS). Not "local".
+    "RADON_MODE": "hetzner",
     "NODE_ENV": "production",
 }
 

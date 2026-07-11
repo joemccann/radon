@@ -64,7 +64,8 @@ write_complete_env() {
     case "$var" in
       TRADING_MODE) echo "${var}=paper" >> "$target" ;;
       IB_GATEWAY_PORT) echo "${var}=4002" >> "$target" ;;
-      IB_GATEWAY_MODE|RADON_MODE) echo "${var}=cloud" >> "$target" ;;
+      IB_GATEWAY_MODE) echo "${var}=cloud" >> "$target" ;;
+      RADON_MODE) echo "${var}=hetzner" >> "$target" ;;
       IB_GATEWAY_HOST) echo "${var}=127.0.0.1" >> "$target" ;;
       NODE_ENV) echo "${var}=production" >> "$target" ;;
       *) echo "${var}=placeholder_value_${var}" >> "$target" ;;
