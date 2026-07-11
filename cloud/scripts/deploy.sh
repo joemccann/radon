@@ -223,11 +223,11 @@ preflight_control_plane() {
       log_error "[preflight] installed control plane is incompatible with ${source_rel}"
       return 1
     fi
-    if [[ ! -f "$installed_target" || -L "$installed_target" ]]; then
-      log_error "[preflight] installed control-plane target is unavailable or unsafe: ${installed_target}"
-      return 1
-    fi
-    if [[ -r "$installed_target" ]]; then
+    # Installed targets are verified by the root helper below. radon cannot
+    # read 0440 sudoers under root-only directories, and a failed -f/-r test
+    # there is not evidence of absence. When the target is radon-readable,
+    # still hash it early for a clearer non-privileged drift signal.
+    if [[ -r "$installed_target" && -f "$installed_target" && ! -L "$installed_target" ]]; then
       installed_hash="$("$SHA256SUM" "$installed_target" | awk '{print $1}')" || return 1
       if [[ "$installed_hash" != "$expected_hash" ]]; then
         log_error "[preflight] installed control-plane target drifted: ${installed_target}"

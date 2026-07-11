@@ -114,6 +114,11 @@ def test_control_plane_compatibility_preflight_precedes_build_and_journal() -> N
     assert "DEPLOY_ROOT_HELPER" in preflight
     assert "sha256" in preflight.lower() or "cmp" in preflight
     assert "sudo" in preflight
+    # 0440 sudoers under root-only dirs are invisible to radon. Preflight must
+    # not require a non-privileged -f existence probe on installed targets;
+    # the root helper owns that contract.
+    assert "unavailable or unsafe" not in preflight
+    assert "verify-control-plane" in preflight
     assert main.index("preflight_control_plane") < main.index("build_staged_release")
     assert main.index("preflight_control_plane") < main.index("restart_services")
 
