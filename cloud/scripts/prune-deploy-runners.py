@@ -16,11 +16,31 @@ INDEX_LOCK = ".index.lock"
 ACTIVE_LOCK = ".active.lock"
 
 
+def _make_writable_tree(path: Path) -> None:
+    """Immutable runners are extracted with chmod a-w; restore write before rm."""
+    if not path.exists():
+        return
+    for root, dirs, files in os.walk(path, topdown=False):
+        for name in files + dirs:
+            target = Path(root) / name
+            try:
+                mode = target.stat().st_mode
+                os.chmod(target, mode | 0o200)
+            except OSError:
+                continue
+    try:
+        mode = path.stat().st_mode
+        os.chmod(path, mode | 0o200)
+    except OSError:
+        pass
+
+
 def _remove(path: Path) -> None:
     if path.is_symlink() or not path.is_dir():
         path.unlink(missing_ok=True)
-    else:
-        shutil.rmtree(path)
+        return
+    _make_writable_tree(path)
+    shutil.rmtree(path, ignore_errors=False)
 
 
 def prune(root: Path, current: Path, keep_newest: int) -> tuple[int, int]:
@@ -68,7 +88,7 @@ def prune(root: Path, current: Path, keep_newest: int) -> tuple[int, int]:
                 except BlockingIOError:
                     active += 1
                     continue
-                shutil.rmtree(candidate)
+                _remove(candidate)
                 removed += 1
             finally:
                 os.close(candidate_fd)
