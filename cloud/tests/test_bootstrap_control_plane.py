@@ -168,13 +168,25 @@ fi
 [[ "${RADON_BOOTSTRAP_TEST_FAIL_POLKIT:-0}" != "1" ]]
 """,
     )
+    gateway_helper = rootfs / "usr/local/bin/radon-ib-gateway-control"
     _write_executable(
         fake_bin / "systemd-analyze",
-        """#!/bin/bash
+        f"""#!/bin/bash
 set -euo pipefail
 printf 'systemd-analyze\\t%s\\n' "$*" >> "$RADON_BOOTSTRAP_TEST_COMMAND_LOG"
-[[ "$1" == "verify" ]]
-[[ "${RADON_BOOTSTRAP_TEST_FAIL_SYSTEMD:-0}" != "1" ]]
+if [[ "$#" -lt 1 || "$1" != "verify" ]]; then
+  exit 94
+fi
+if [[ "${{RADON_BOOTSTRAP_TEST_FAIL_SYSTEMD:-0}}" == "1" ]]; then
+  exit 1
+fi
+# Mirror production systemd-analyze: unit files reference absolute helpers
+# that must already exist when verify runs.
+helper="{gateway_helper}"
+if [[ ! -x "$helper" ]]; then
+  printf 'Command %s is not executable: No such file or directory\\n' "$helper" >&2
+  exit 1
+fi
 """,
     )
     _write_executable(
