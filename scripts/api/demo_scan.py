@@ -39,7 +39,7 @@ _SNAPSHOT_SQL: dict[str, str] = {
     "vcg-scan": "SELECT payload FROM vcg_snapshots ORDER BY scan_time DESC LIMIT 1",
     "gex-scan": "SELECT payload FROM gex_snapshots ORDER BY scan_time DESC LIMIT 1",
     "gamma-rotation": "SELECT payload FROM gamma_rotation_snapshots ORDER BY scan_time DESC LIMIT 1",
-    "regime": "SELECT payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1",
+    "regime": "SELECT payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1",
     "breadth-scan": "SELECT payload FROM breadth_snapshots ORDER BY taken_at DESC LIMIT 1",
 }
 

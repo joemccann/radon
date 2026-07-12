@@ -107,12 +107,16 @@ FASTAPI_PORT="${RADON_PORTFOLIO_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/portfolio/sync"
 
 echo "$(date): POST ${FASTAPI_URL}"
-if curl -fsS -X POST -m 35 -o /dev/null -w "%{http_code}" "${FASTAPI_URL}" 2>/tmp/portfolio-refresh.curl.err | grep -q '^2'; then
+HTTP_CODE=$(curl -fsS -X POST -m 35 -o /dev/null -w "%{http_code}" \
+    "${FASTAPI_URL}" 2>/tmp/portfolio-refresh.curl.err)
+CURL_EXIT=$?
+if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
     echo "$(date): Portfolio refresh via FastAPI complete (OK)"
     exit 0
 fi
 
-EXIT_CODE=$?
+EXIT_CODE="$CURL_EXIT"
+[ "$EXIT_CODE" -ne 0 ] || EXIT_CODE=22
 echo "$(date): Portfolio refresh FAILED (exit ${EXIT_CODE})" >&2
 cat /tmp/portfolio-refresh.curl.err 2>/dev/null >&2 || true
 exit "${EXIT_CODE}"

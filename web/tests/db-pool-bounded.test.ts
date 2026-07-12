@@ -94,8 +94,9 @@ describe("bounded pool wiring", () => {
     expect(agents).toHaveLength(1);
     expect(agents[0].opts.connections).toBe(db.DB_POOL_MAX_CONNECTIONS);
     expect(db.DB_POOL_MAX_CONNECTIONS).toBeLessThanOrEqual(16);
+    expect(db.DB_TRANSPORT_TIMEOUT_MS).toBeLessThan(3_000);
     // Idle sockets must be reaped (no unbounded accumulation), but not before
-    // the 3s dbKeepAlive heartbeat can keep the warm socket alive.
+    // the 30s dbKeepAlive heartbeat can keep the warm socket alive.
     expect(agents[0].opts.keepAliveTimeout).toBe(db.DB_POOL_KEEP_ALIVE_TIMEOUT_MS);
     expect(db.DB_POOL_KEEP_ALIVE_TIMEOUT_MS).toBeGreaterThan(3_000);
 

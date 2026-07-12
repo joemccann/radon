@@ -231,7 +231,7 @@ async function readLatestCriUncached(): Promise<{ data: object; path: string } |
       // forever. dbExecute caps the read AND drops the wedged client so the next
       // request heals (replaces the old hand-rolled Promise.race band-aid).
       const result = await dbExecute({
-        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
+        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1`,
         args: [],
       }, { label: "regime-cri", timeoutMs: DB_READ_TIMEOUT_MS });
       if (result.rows.length === 0) return null;
