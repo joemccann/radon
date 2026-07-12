@@ -148,12 +148,14 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # normal run days so no wide closed window is needed.
     "journal-reconcile": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # portfolio-archive — portfolio_snapshots cold-archive oneshot
-    # (scripts/archive_portfolio_snapshots.py via laptop launchd
-    # run.radon.archive, weekly Sun 03:00 but laptop-awake gated, so real
-    # gaps stretch to ~monthly). Uniform 35-day window mirrors
-    # web/lib/serviceHealthWindows.ts. Turso HTTP + local disk + rsync
-    # only — no IB dependency.
-    "portfolio-archive": {"open": 35 * _DAY, "closed": 35 * _DAY, "requires_ib": False},
+    # (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
+    # on the VPS, 06:52 UTC daily). 48h window mirrors
+    # web/lib/serviceHealthWindows.ts and db-backup. Turso + local disk
+    # (+ optional S3) — no IB dependency.
+    "portfolio-archive": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
+    # db-retention — daily keep-latest sweep for append-only scan tables
+    # (scripts/db_retention_sweep.py via radon-db-retention.timer).
+    "db-retention": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
 }
 
 
@@ -203,9 +205,10 @@ BUCKETS: dict[str, list[str]] = {
         # Daily journal reconcile (monitor daemon) — hourly check surfaces a
         # missed run within 1h of the 26h window expiring.
         "journal-reconcile",
-        # Weekly-to-monthly cold archive — hourly check surfaces a dead job
-        # within 1h of the 35-day window expiring.
+        # Nightly portfolio_snapshots cold-archive on the VPS — 48h window.
         "portfolio-archive",
+        # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.
+        "db-retention",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

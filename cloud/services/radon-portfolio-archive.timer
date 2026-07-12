@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon portfolio_snapshots cold-archive — nightly before DB backup
+
+[Timer]
+# 06:52 UTC: off-hours for US markets, AFTER llm-index (06:30) / drift-audit
+# (06:40) and BEFORE db-backup (07:52) so the nightly dump captures the
+# already-pruned hot set. Deliberately not :00/:30. Persistent so a missed
+# firing (host down) replays on next boot. service_health window is 48h:
+# one missed night pages before the second archive is lost.
+OnCalendar=*-*-* 06:52:00 UTC
+RandomizedDelaySec=180
+Persistent=true
+
+[Install]
+WantedBy=timers.target

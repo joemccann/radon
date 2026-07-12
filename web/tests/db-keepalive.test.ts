@@ -39,13 +39,21 @@ describe("startDbKeepAlive", () => {
     stop();
   });
 
-  it("never overlaps pings when the current heartbeat is still pending", async () => {
+  it("bounds a hung ping at 3s then continues the metronome", async () => {
+    // R3: keepalive goes through dbExecute (3s timeout). A bare hanging
+    // getDb().execute would block the metronome forever and never heal.
     execute.mockImplementation(() => new Promise<never>(() => {}));
     const stop = startDbKeepAlive(1000);
 
-    await vi.advanceTimersByTimeAsync(10_000);
-
+    await vi.advanceTimersByTimeAsync(1000); // first fire
     expect(execute).toHaveBeenCalledTimes(1);
+
+    // While the underlying execute is still pending, the 3s dbExecute
+    // timeout must fire so the finally-schedule can arm the next ping.
+    await vi.advanceTimersByTimeAsync(3000);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(execute).toHaveBeenCalledTimes(2);
+    expect(resetDb).toHaveBeenCalled();
     stop();
   });
 

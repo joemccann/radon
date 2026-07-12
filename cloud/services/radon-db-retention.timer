@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon Turso snapshot retention sweep — daily off-hours
+
+[Timer]
+# 07:22 UTC: after portfolio-archive (06:52) and before db-backup (07:52).
+# Prunes non-portfolio append-only snapshot tables so the nightly dump
+# does not re-ship months of superseded scan JSON.
+OnCalendar=*-*-* 07:22:00 UTC
+RandomizedDelaySec=180
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -10,7 +10,7 @@ Monitors every `scheduled` service in `web/lib/serviceHealthWindows.ts`, notifie
 
 - **`intraday`**: `vcg-scan`, `cri-scan`, `orders-sync`, `portfolio-sync` — 5 min cadence, Mon–Fri 13:00–21:00 UTC.
 - **`continuous`**: `newsfeed-scraper`, `fill-monitor`, `exit-orders`, `journal-sync`, `ib-watchdog`, plus `replica-watchdog` only while `data/replica.db` exists — 5 min, 24/7.
-- **`daily`**: `cash-flow-sync`, `flex-token-check`, `cta-sync`, `llm-token-index`, `leap-scan`, `garch-scan`, `catalysts`, `config-drift`, `db-backup`, `preset-rebalance`, `journal-reconcile`, `portfolio-archive` — hourly, 24/7.
+- **`daily`**: `cash-flow-sync`, `flex-token-check`, `cta-sync`, `llm-token-index`, `leap-scan`, `garch-scan`, `catalysts`, `config-drift`, `db-backup`, `preset-rebalance`, `journal-reconcile`, `portfolio-archive`, `db-retention` — hourly, 24/7.
 - **`error`**: every scheduled service except `watchdog-alerts` itself (recursive-alert prevention) — 5 min, 24/7.
 
 ---

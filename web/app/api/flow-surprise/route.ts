@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
-import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
+import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 // Disable Next.js static caching: this handler reads live disk state
@@ -55,11 +55,11 @@ interface FlowSurpriseFile {
 }
 
 async function readFlowSurpriseFromDb(): Promise<TimestampedRead<FlowSurpriseFile> | null> {
-  const result = await getDb().execute({
+  const result = await dbExecute({
     sql: `SELECT scan_time, payload FROM scan_snapshots
           WHERE service = 'flow-surprise' ORDER BY scan_time DESC LIMIT 1`,
     args: [],
-  });
+  }, { label: "flow-surprise" });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   return {

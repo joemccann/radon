@@ -323,15 +323,18 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "journal-reconcile": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
-  // (scripts/archive_portfolio_snapshots.py) — heartbeats ok/error on
-  // every completed run. Triggered by the laptop launchd job
-  // run.radon.archive (weekly Sun 03:00), which only fires while the
-  // laptop is awake, so real gaps stretch to ~monthly in practice
-  // (2026-06-28 run archived the 2026-05 month). Uniform 35-day window =
-  // the observed monthly gap + drift, so the banner never fires between
-  // runs but still catches a job dead for over a month. Turso HTTP +
-  // local disk + rsync only — no IB dependency.
-  "portfolio-archive": { open: 35 * DAY, extended: 35 * DAY, closed: 35 * DAY, category: "scheduled", requires_ib: false },
+  // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
+  // on the VPS, 06:52 UTC daily, before db-backup). Heartbeats ok/error on
+  // every completed run. 48h window matches db-backup: one missed night
+  // pages before the second archive is lost. Turso + local partitions
+  // (+ optional S3) — no IB dependency.
+  "portfolio-archive": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
+
+  // ``db-retention`` is the daily keep-latest sweep for append-only scan
+  // snapshot tables (scripts/db_retention_sweep.py via
+  // radon-db-retention.timer, 07:22 UTC). Does not touch portfolio_snapshots
+  // or journal. 48h window matches other nightly DB jobs.
+  "db-retention": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
 };
 
 const DEFAULT_WINDOW: Window = {

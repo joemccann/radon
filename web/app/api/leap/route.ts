@@ -2,8 +2,8 @@ import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
 import { join } from "path";
-import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
+import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 
@@ -51,11 +51,11 @@ function buildCacheMeta(filePath: string): CacheMeta {
 }
 
 async function readLeapFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
-  const result = await getDb().execute({
+  const result = await dbExecute({
     sql: `SELECT scan_time, payload FROM scan_snapshots
           WHERE service = 'leap-scan' ORDER BY scan_time DESC LIMIT 1`,
     args: [],
-  });
+  }, { label: "leap" });
   if (result.rows.length === 0) return null;
   const row = result.rows[0] as unknown as { scan_time: string; payload: string };
   return {

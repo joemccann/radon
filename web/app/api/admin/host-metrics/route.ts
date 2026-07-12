@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
+import { dbExecute } from "@/lib/dbExecute";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import {
   HOST_METRICS_WINDOW_MS,
@@ -25,7 +25,7 @@ const READ_CACHE_TTL_MS = 10_000;
 
 async function readHostMetricsPayload(): Promise<HostMetricsPayload> {
   const since = new Date(Date.now() - HOST_METRICS_WINDOW_MS).toISOString();
-  const result = await getDb().execute({
+  const result = await dbExecute({
     sql: `SELECT taken_at, cpu_pct, mem_used_mb, mem_avail_mb, load1,
                  swap_used_mb, loop_lag_ms, units_json
           FROM host_metrics
@@ -33,7 +33,7 @@ async function readHostMetricsPayload(): Promise<HostMetricsPayload> {
           ORDER BY taken_at ASC
           LIMIT ?`,
     args: [since, MAX_SAMPLE_ROWS],
-  });
+  }, { label: "admin-host-metrics" });
 
   const rows: HostMetricsRow[] = result.rows.map((row) => ({
     taken_at: String(row.taken_at),
