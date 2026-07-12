@@ -33,4 +33,4 @@ export function isPortfolioSnapshotUnexpectedlyStale(
 
 /** Operator-facing copy when the writer should have refreshed but did not. */
 export const PORTFOLIO_SNAPSHOT_STALE_WARNING =
-  "Portfolio snapshot is older than the scheduled refresh window; live sync was not requested";
+  "Portfolio snapshot is stale (older than the scheduled refresh window); live sync was not requested";

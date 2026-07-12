@@ -470,3 +470,24 @@ tsc clean
 - Validation: focused config/systemd/setup `231 passed`; final drift tests `18 passed`; final full cloud suite `624 passed, 2 skipped`; `systemd-analyze verify` has no actionable errors.
 - Rollback archive: `/var/lib/radon/config-drift-backup-20260712T162915Z`.
 - External residual: Turso service-health writes time out from the VPS, so the remote dashboard row may remain latched until that independent transport recovers. The audit retries three bounded times, logs the failure, and does not turn a proven-clean configuration into a recursive unit alert.
+# 2026-07-12 Turso read-stall root cause and repair
+
+## Dependency graph
+
+- `TS1` depends_on: [] - Measure VPS DNS/TCP/TLS, HTTP pipeline, native libSQL, actual portfolio query, concurrency, and production failure history.
+- `TS2` depends_on: [`TS1`] - Add regressions for caller/transport deadline alignment, pool-slot release, keepalive cadence, and truthful portfolio writer failure exit.
+- `TS3` depends_on: [`TS2`] - Align transport abort with the 3s database deadline, reduce keepalive amplification, and fix writer exit propagation.
+- `TS4` depends_on: [`TS3`] - Deploy Next.js and writer fixes, then soak direct and application reads under concurrency and verify pool/error logs.
+- `TS5` depends_on: [`TS4`] - Run focused/full web and Python suites and verify portfolio freshness on the next eligible writer cycle.
+
+## Checklist
+
+- [x] `TS1` Isolate network, provider, client, query, and writer behavior.
+- [x] `TS2` Add regression coverage.
+- [x] `TS3` Implement root-cause fixes.
+- [ ] `TS4` Deploy and soak production.
+- [ ] `TS5` Complete verification and review.
+
+## Review
+
+- Pending.

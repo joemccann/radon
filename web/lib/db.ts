@@ -54,12 +54,12 @@ let cached: Client | null = null;
 //      orphaning them behind a fresh client.
 export const DB_POOL_MAX_CONNECTIONS = 8;
 // Idle sockets are reaped after this window instead of accumulating. Must stay
-// ABOVE the 3s `dbKeepAlive` heartbeat interval so the heartbeat keeps one
+// ABOVE the 30s `dbKeepAlive` heartbeat interval so the heartbeat keeps one
 // socket on the warm path (~12ms) between 60s polls.
-export const DB_POOL_KEEP_ALIVE_TIMEOUT_MS = 10_000;
+export const DB_POOL_KEEP_ALIVE_TIMEOUT_MS = 40_000;
 /** Hard transport deadline. Unlike a Promise.race timeout, this aborts undici
  * and releases the socket occupied by the libSQL request. */
-export const DB_TRANSPORT_TIMEOUT_MS = 12_000;
+export const DB_TRANSPORT_TIMEOUT_MS = 2_750;
 // ── Destroy cooldown (2026-07-02 incident, second wave) ──────────────────
 // Agent.destroy() aborts every in-flight request on the shared pool; each
 // aborted request rejects TypeError('fetch failed') and its catch calls
@@ -226,7 +226,7 @@ export async function pooledDbFetch(
 // client so the NEXT caller rebuilds a fresh pool rather than queueing behind
 // the stalled one. Larger than every caller-side read timeout (hot reads use
 // 3000ms) so it only fires on a genuine stall.
-const STALL_CEILING_MS = 12_000;
+const STALL_CEILING_MS = DB_TRANSPORT_TIMEOUT_MS;
 
 /** Rewrite a Turso URL onto the stateless HTTP transport.
  *

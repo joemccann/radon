@@ -524,7 +524,7 @@ async function readLatestCri(): Promise<{ data: object; path: string } | null> {
       // Same bounded read as the regime route: dbExecute caps the read and
       // drops a wedged client so the disk fallback still serves this request.
       const result = await dbExecute({
-        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY taken_at DESC LIMIT 1`,
+        sql: `SELECT taken_at, payload FROM cri_snapshots ORDER BY date DESC, taken_at DESC LIMIT 1`,
         args: [],
       }, { label: "internals-cri", timeoutMs: 2500 });
       if (result.rows.length === 0) return null;

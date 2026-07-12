@@ -4,9 +4,9 @@ import { dbExecute } from "@/lib/dbExecute";
 // but the app polls Turso on ~60s intervals — so without warming, every
 // uncached read/write opens a fresh connection and pays the full TLS handshake.
 // Measured on the VPS: cold ~60-80ms vs warm ~11-15ms per query. A cheap
-// SELECT 1 every few seconds keeps one socket alive so ALL uncached DB
+// SELECT 1 every 30 seconds keeps one socket alive so ALL uncached DB
 // operations stay on the warm path (~5x faster than cold), not just cache hits.
-const KEEPALIVE_INTERVAL_MS = 3_000;
+export const DB_KEEPALIVE_INTERVAL_MS = 30_000;
 
 /**
  * Start a background heartbeat that keeps the Turso connection pool warm.
@@ -19,7 +19,7 @@ const KEEPALIVE_INTERVAL_MS = 3_000;
  * Returns a stop function. The interval is ``unref``'d so it never keeps the
  * Node process alive on its own.
  */
-export function startDbKeepAlive(intervalMs: number = KEEPALIVE_INTERVAL_MS): () => void {
+export function startDbKeepAlive(intervalMs: number = DB_KEEPALIVE_INTERVAL_MS): () => void {
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
 

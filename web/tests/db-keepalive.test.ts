@@ -10,13 +10,23 @@ vi.mock("@/lib/db", () => ({
   resetDb,
 }));
 
-import { startDbKeepAlive } from "@/lib/dbKeepAlive";
+import { DB_KEEPALIVE_INTERVAL_MS, startDbKeepAlive } from "@/lib/dbKeepAlive";
 
 describe("startDbKeepAlive", () => {
   beforeEach(() => {
     vi.useFakeTimers();
     execute.mockReset();
     resetDb.mockReset();
+  });
+
+  it("defaults to a low-amplification 30s cadence", async () => {
+    execute.mockResolvedValue({ rows: [] });
+    const stop = startDbKeepAlive();
+    await vi.advanceTimersByTimeAsync(DB_KEEPALIVE_INTERVAL_MS - 1);
+    expect(execute).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(execute).toHaveBeenCalledTimes(1);
+    stop();
   });
   afterEach(() => {
     vi.useRealTimers();
