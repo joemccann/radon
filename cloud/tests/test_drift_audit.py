@@ -189,3 +189,17 @@ class TestSummary:
         assert summary["drift_count"] == 0
         assert "radon-beta-api.service" in summary["note"]
         assert summary["allowed_count"] == 1
+
+
+def test_health_write_retries_transport_failures(monkeypatch):
+    calls = []
+    monkeypatch.setattr(da.time, "sleep", lambda seconds: None)
+
+    def flaky(*args):
+        calls.append(args)
+        if len(calls) < 3:
+            raise TimeoutError("slow")
+
+    monkeypatch.setattr(da, "write_service_health", flaky)
+    da.write_service_health_with_retry("ok", None, "start")
+    assert len(calls) == 3
