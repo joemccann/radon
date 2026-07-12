@@ -485,9 +485,13 @@ tsc clean
 - [x] `TS1` Isolate network, provider, client, query, and writer behavior.
 - [x] `TS2` Add regression coverage.
 - [x] `TS3` Implement root-cause fixes.
-- [ ] `TS4` Deploy and soak production.
-- [ ] `TS5` Complete verification and review.
+- [x] `TS4` Deploy and soak production.
+- [x] `TS5` Complete verification and review.
 
 ## Review
 
-- Pending.
+- Root cause: the latest-CRI query ordered only by `taken_at`, forcing a full scan and temporary sort of 14,924 rows with roughly 47 KB payloads. Production latency was 6.8-7.6s and caused repeated caller timeouts plus shared-pool resets.
+- Repair: order by `date DESC, taken_at DESC` to use `idx_cri_latest`; abort transport at 2.75s, reduce keepalive cadence to 30s, and propagate portfolio refresh HTTP failures truthfully.
+- Validation: focused web `27 passed`; full web `4115 passed, 26 skipped`; focused retention `6 passed`; CI Vitest, pytest, perimeter, and secret-scan gates passed. Local full Python was `3682 passed, 13 skipped` plus the two subsequently repaired Hrana fixture failures.
+- Production: deployed `ea24c66c1e337cbd4e2c28bd66142f9c936f8e42`; query plan uses `idx_cri_latest`; 20 live reads p50 8.3ms, p95 28.1ms, max 29.7ms. Post-deploy `nextjs-db-read` is `ok`, overall health is `up`, and `radon-nextjs` has `NRestarts=0`.
+- Drift: archived the runtime-enriched `data/tag_taxonomy.json` at `/home/radon/.config-drift-backups/20260712T200352Z` before restoring the tested release version.
