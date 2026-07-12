@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
+import { dbExecute } from "@/lib/dbExecute";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import {
   SLO_WINDOW_MS,
@@ -32,7 +32,7 @@ const READ_CACHE_TTL_MS = 10_000;
 
 async function readSloPayload(): Promise<SloPayload> {
   const since = new Date(Date.now() - SLO_WINDOW_MS).toISOString();
-  const result = await getDb().execute({
+  const result = await dbExecute({
     sql: `SELECT run_at, edge_ok, user_path_ok, freshness_ok,
                  tick_fresh, scan_fresh, latency_ms
           FROM external_probe_runs
@@ -40,7 +40,7 @@ async function readSloPayload(): Promise<SloPayload> {
           ORDER BY run_at ASC
           LIMIT ?`,
     args: [since, MAX_RUN_ROWS],
-  });
+  }, { timeoutMs: 6_000, label: "admin-slo" });
 
   const rows: ExternalProbeRunRow[] = result.rows.map((row) => ({
     run_at: String(row.run_at),

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
+import { dbExecute } from "@/lib/dbExecute";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -52,13 +52,15 @@ function rowToPost(row: PostRow) {
 }
 
 async function fetchPosts() {
-  const result = await getDb().execute({
+  // 500 wide rows — give the bounded chokepoint more headroom than the
+  // default 3s single-row path without removing the hang ceiling.
+  const result = await dbExecute({
     sql: `SELECT id, title, content, timestamp, images, raw_images, tags, tags_text, tags_vision, created_at, updated_at
           FROM posts
           ORDER BY timestamp DESC
           LIMIT 500`,
     args: [],
-  });
+  }, { timeoutMs: 8_000, label: "newsfeed-posts" });
   return result.rows.map((r) => rowToPost(r as unknown as PostRow));
 }
 

@@ -1,8 +1,4 @@
-import { getDb, resetDb } from "@/lib/db";
-import {
-  createDbOperationIdentity,
-  runWithDbOperation,
-} from "@/lib/dbOperation";
+import { dbExecute } from "@/lib/dbExecute";
 
 // undici (the @libsql HTTP client's transport) closes idle sockets after ~4s,
 // but the app polls Turso on ~60s intervals — so without warming, every
@@ -34,13 +30,13 @@ export function startDbKeepAlive(intervalMs: number = KEEPALIVE_INTERVAL_MS): ()
   };
 
   const run = async () => {
-    const identity = createDbOperationIdentity();
+    // dbExecute is the only chokepoint that both bounds the call (3s) and
+    // self-heals a wedged undici pool. A bare getDb().execute here would hang
+    // to undici's ~300s body timeout and never recover until process restart.
     try {
-      await runWithDbOperation(identity, () => getDb().execute("SELECT 1"));
+      await dbExecute("SELECT 1", { timeoutMs: 3_000, label: "keepalive" });
     } catch {
-      // Shares its identity with the proxy, so this prompt recovery is counted
-      // once even though both layers observe the same rejection.
-      resetDb(identity);
+      // dbExecute already called resetDb on failure.
     } finally {
       schedule();
     }

@@ -31,6 +31,10 @@ EXPECTED_SERVICE_FILES = [
     "radon-watchdog-error.timer",
     "radon-db-backup.service",
     "radon-db-backup.timer",
+    "radon-portfolio-archive.service",
+    "radon-portfolio-archive.timer",
+    "radon-db-retention.service",
+    "radon-db-retention.timer",
     "radon-breadth.service",
     "radon-breadth.timer",
     "radon-catalysts.service",
@@ -193,6 +197,40 @@ class TestIBGateway:
 # ---------------------------------------------------------------------------
 # radon-api.service
 # ---------------------------------------------------------------------------
+
+
+class TestPortfolioArchive:
+    """R1: nightly portfolio_snapshots cold-archive before db-backup."""
+
+    def test_oneshot_with_timeout(self, unit):
+        svc = unit("radon-portfolio-archive.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "3600"
+        assert "archive_portfolio_snapshots.py" in svc["execstart"]
+        assert "--allow-delete-without-upload" in svc["execstart"]
+        env = svc.get("environment", "")
+        # configparser may only keep the last Environment= line
+        assert "RADON_DB_NO_REPLICA=1" in env or "RADON_DB_NO_REPLICA" in env
+
+    def test_timer_before_backup(self, unit):
+        timer = unit("radon-portfolio-archive.timer")["Timer"]
+        assert "06:52" in timer["oncalendar"]
+        assert timer.get("persistent") == "true"
+
+
+class TestDbRetention:
+    """R2: keep-latest sweep for append-only scan tables."""
+
+    def test_oneshot_with_timeout(self, unit):
+        svc = unit("radon-db-retention.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "1800"
+        assert "db_retention_sweep.py" in svc["execstart"]
+
+    def test_timer_between_archive_and_backup(self, unit):
+        timer = unit("radon-db-retention.timer")["Timer"]
+        assert "07:22" in timer["oncalendar"]
+        assert timer.get("persistent") == "true"
 
 
 class TestAPI:

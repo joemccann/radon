@@ -68,6 +68,10 @@ readonly SERVICE_FILES=(
   radon-drift-audit.timer
   radon-db-backup.service
   radon-db-backup.timer
+  radon-portfolio-archive.service
+  radon-portfolio-archive.timer
+  radon-db-retention.service
+  radon-db-retention.timer
   radon-host-metrics.service
   radon-host-metrics.timer
   radon-breadth.service

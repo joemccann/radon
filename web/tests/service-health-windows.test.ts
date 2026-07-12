@@ -309,11 +309,9 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
  *    on-demand, 30m open/extended, 3d closed.
  *
  *  - ``portfolio-archive`` (scripts/archive_portfolio_snapshots.py) is the
- *    cold-archive oneshot triggered by the laptop launchd job
- *    ``run.radon.archive`` (weekly Sun 03:00, fires only when the laptop is
- *    awake — real gaps stretch to ~monthly; last run 2026-06-28 archived
- *    the 2026-05 month). Scheduled, uniform 35-day window so it never
- *    fires between runs. Turso HTTP + disk + rsync only — no IB.
+ *    cold-archive oneshot on the VPS (radon-portfolio-archive.timer,
+ *    06:52 UTC daily). Scheduled, uniform 48h window matching db-backup.
+ *  - ``db-retention`` is the daily keep-latest sweep (radon-db-retention.timer).
  */
 describe("unregistered-writer regression — informed-flow and portfolio-archive", () => {
   const MIN = 60_000;
@@ -346,29 +344,40 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(getServiceCategory("portfolio-archive")).toBe("scheduled");
   });
 
-  it("portfolio-archive has a uniform 35-day window", () => {
+  it("portfolio-archive has a uniform 48h window matching db-backup", () => {
     for (const state of ["open", "extended", "closed"] as MarketState[]) {
-      expect(getFreshnessWindowMs("portfolio-archive", state)).toBe(35 * DAY);
+      expect(getFreshnessWindowMs("portfolio-archive", state)).toBe(48 * HOUR);
+      expect(getFreshnessWindowMs("portfolio-archive", state)).toBe(
+        getFreshnessWindowMs("db-backup", state),
+      );
     }
   });
 
-  it("portfolio-archive: a run 30 days ago does not flip to stale in any market state", () => {
-    // 2026-06-28 run checked on 2026-07-28 — the observed ~monthly gap.
+  it("portfolio-archive: a run 36h ago is still fresh", () => {
     const NOW = Date.parse("2026-07-28T10:00:00Z");
-    const monthAgo = new Date(NOW - 30 * DAY).toISOString();
+    const recent = new Date(NOW - 36 * HOUR).toISOString();
     for (const state of ["open", "extended", "closed"] as MarketState[]) {
-      expect(isStale("portfolio-archive", monthAgo, state, NOW)).toBe(false);
+      expect(isStale("portfolio-archive", recent, state, NOW)).toBe(false);
     }
   });
 
-  it("portfolio-archive: still fires once silence exceeds the 35-day window", () => {
+  it("portfolio-archive: still fires once silence exceeds the 48h window", () => {
     const NOW = Date.parse("2026-07-28T10:00:00Z");
-    const overWindow = new Date(NOW - 36 * DAY).toISOString();
+    const overWindow = new Date(NOW - 49 * HOUR).toISOString();
     expect(isStale("portfolio-archive", overWindow, "closed", NOW)).toBe(true);
   });
 
   it("portfolio-archive has no IB dependency — requires_ib = false", () => {
     expect(requiresIb("portfolio-archive")).toBe(false);
+  });
+
+  it("db-retention is registered as scheduled with a 48h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["db-retention"]).toBeDefined();
+    expect(getServiceCategory("db-retention")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("db-retention", state)).toBe(48 * HOUR);
+    }
+    expect(requiresIb("db-retention")).toBe(false);
   });
 });
 

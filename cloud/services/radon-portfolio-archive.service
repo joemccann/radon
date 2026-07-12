@@ -1,0 +1,38 @@
+[Unit]
+Description=Radon portfolio_snapshots cold-archive (tiered storage + Turso prune)
+After=network.target
+# DUR-02 pattern: brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed instead of
+# restarting forever. The portfolio-archive service_health heartbeat
+# (48h window) surfaces a parked/silent archive on the dashboard +
+# watchdog daily bucket.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+# Script ships with the MAIN repo and lands on the next deploy. Until then
+# this condition skips the run CLEANLY (unit ends inactive, not failed).
+ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/archive_portfolio_snapshots.py
+# Local partitions under RADON_ARCHIVE_DIR (default
+# /home/radon/radon-cloud/archive/portfolio_snapshots) are always written and
+# verified before DELETE. --allow-delete-without-upload is intentional until
+# RADON_ARCHIVE_S3_* is configured: recovery remains via (1) local monthly
+# jsonl.gz partitions and (2) the 30-day nightly full Turso dumps. When S3 is
+# set, the script still uploads; remove the flag only if you want delete to
+# hard-fail without off-box upload.
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py --allow-delete-without-upload
+StandardOutput=journal
+StandardError=journal
+# libsql_experimental has no client-side timeouts (DUR-09). A healthy archive
+# of a fat backlog can run tens of minutes of paged SELECTs + batched DELETEs;
+# 1h matches db-backup and is ~2-3x a normal catch-up run after retention is
+# already current.
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

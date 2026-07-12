@@ -374,12 +374,21 @@ plan includes point-in-time restore is unverified. Operator: `turso auth
 login && turso org show` / check the Turso dashboard. Until verified,
 treat the nightly dumps as the only restore path.
 
+## Portfolio archive + snapshot retention (R1 / R2)
+
+| Piece | When (UTC) | What |
+|---|---|---|
+| `radon-portfolio-archive.timer` | 06:52 daily | Cold-archives `portfolio_snapshots` older than 30d to local monthly `jsonl.gz` partitions, then DELETEs from Turso (optional S3 via `RADON_ARCHIVE_S3_*`). Heartbeat: `portfolio-archive`. |
+| `radon-db-retention.timer` | 07:22 daily | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. |
+| `radon-db-backup.timer` | 07:52 daily | Full dump **after** archive + retention so the dump reflects the pruned hot set. |
+
 ## Known gaps
 
 | # | Item | Owner |
 |---|------|-------|
-| 1 | Nightly retention sweep on snapshot tables (`portfolio_snapshots` is ~680 MB and dominates the nightly dump) | Future |
+| 1 | ~~Nightly retention sweep on snapshot tables~~ | **Done** — `radon-portfolio-archive` + `radon-db-retention` (2026-07-11) |
 | 2 | restic backup of `radon_media` volume to B2/S3 (DB backups shipped 2026-06-12 — see "DB backup & restore" above; media volume still unbacked) | Future |
 | 3 | systemd timer for `oi_changes` (currently on-demand only) | Future |
 | 4 | Vercel Edge replica for a public read-only dashboard | Future |
 | 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |
+| 6 | Configure `RADON_ARCHIVE_S3_*` so portfolio archive uploads off-box (unit currently allows local-verified delete until S3 is set) | Operator |
