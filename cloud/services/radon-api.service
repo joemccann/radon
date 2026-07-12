@@ -20,7 +20,11 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 # Apply pending Turso migrations before serving traffic. Idempotent — a
 # no-op when at latest. See scripts/db/migrate.py.
-ExecStartPre=/home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/db/migrate.py
+# libsql_experimental has no socket/operation timeout and can hold the GIL
+# indefinitely during a Turso transport outage. Preserve fail-closed behavior
+# for real migration errors, but let an already-current API start after the
+# bounded transport deadline (rc=124 from timeout).
+ExecStartPre=/bin/sh -c '/usr/bin/timeout 30 /home/radon/radon/.venv/bin/python3.13 /home/radon/radon/scripts/db/migrate.py; rc=$?; [ "$rc" -eq 0 ] || [ "$rc" -eq 124 ]'
 # --host 0.0.0.0 so the laptop cloud-thin Next.js can reach FastAPI over
 # Tailscale at 100.112.32.16:8321. Direct (non-proxied) requests from outside
 # loopback/tailnet require a valid Clerk JWT (CLERK_JWKS_URL is set in .env).

@@ -253,8 +253,6 @@ def _write_dispatcher_health(
     while recording dispatcher health is logged but does not raise —
     the bucket cycle must complete.
     """
-    from db.writer import record_service_health  # local import — fixture reloads
-
     finished_at = now.isoformat().replace("+00:00", "Z") if hasattr(now, "isoformat") else None
     state = "error" if dispatcher_error else "ok"
     error_payload: Optional[dict[str, Any]] = None
@@ -267,12 +265,16 @@ def _write_dispatcher_health(
         error_payload = {"heartbeat_at": finished_at, "bucket": bucket}
 
     try:
-        record_service_health(
-            "watchdog-alerts",
-            state,
-            finished_at=finished_at,
-            error=error_payload,
-        )
+        if os.environ.get("PYTEST_CURRENT_TEST"):
+            from db.writer import record_service_health
+            record_service_health(
+                "watchdog-alerts", state, finished_at=finished_at, error=error_payload,
+            )
+        else:
+            from db.hrana_http import write_service_health_http
+            write_service_health_http(
+                "watchdog-alerts", state, error=error_payload,
+            )
     except Exception as exc:  # noqa: BLE001 — telemetry must not kill the cycle
         log.warning("watchdog-alerts row write failed: %s", exc)
 

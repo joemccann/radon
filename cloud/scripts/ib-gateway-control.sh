@@ -232,7 +232,8 @@ gateway_state() {
       false) echo stopped ;;
       *) echo unknown ;;
     esac
-  elif [[ "$output" == *"No such object"* || "$output" == *"No such container"* ]]; then
+  elif [[ "$output" == *"No such object"* || "$output" == *"No such container"* \
+      || "$output" == *"no such object"* || "$output" == *"no such container"* ]]; then
     echo missing
   else
     echo unknown

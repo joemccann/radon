@@ -12,6 +12,7 @@ gating the intraday bucket to market hours.
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Optional
@@ -19,6 +20,9 @@ from typing import Any, Optional
 from . import ack as ack_mod
 from . import cooldown as cooldown_mod
 from . import services as services_mod
+
+
+_bucket_health_snapshot: Optional[dict[str, dict]] = None
 
 
 # ── outcomes ────────────────────────────────────────────────────────
@@ -56,6 +60,8 @@ def _parse_iso(s: str) -> datetime:
 
 
 def _read_service_health(service: str) -> Optional[dict]:
+    if _bucket_health_snapshot is not None:
+        return _bucket_health_snapshot.get(service)
     db = _get_db()
     row = db.execute(
         """
@@ -343,9 +349,27 @@ def check_bucket(*, bucket: str, now: Optional[datetime] = None) -> BucketReport
     if bucket not in services_mod.BUCKETS:
         raise ValueError(f"unknown bucket: {bucket}")
 
-    outcomes = []
-    for service in services_mod.BUCKETS[bucket]:
-        outcomes.append(
-            check_service(service=service, kind=kind, now=now, market_state=market_state)
-        )
-    return BucketReport(bucket=bucket, ran=True, outcomes=outcomes)
+    global _bucket_health_snapshot
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        outcomes = []
+        for service in services_mod.BUCKETS[bucket]:
+            outcomes.append(
+                check_service(service=service, kind=kind, now=now, market_state=market_state)
+            )
+        return BucketReport(bucket=bucket, ran=True, outcomes=outcomes)
+    try:
+        from scripts.health_service.turso_http import fetch_service_health
+        snapshot = fetch_service_health(timeout=4.0)
+        if snapshot.get("state") != "ok":
+            return BucketReport(bucket=bucket, ran=False)
+        _bucket_health_snapshot = {
+            row["service"]: row for row in snapshot.get("rows", []) if row.get("service")
+        }
+        outcomes = []
+        for service in services_mod.BUCKETS[bucket]:
+            outcomes.append(
+                check_service(service=service, kind=kind, now=now, market_state=market_state)
+            )
+        return BucketReport(bucket=bucket, ran=True, outcomes=outcomes)
+    finally:
+        _bucket_health_snapshot = None

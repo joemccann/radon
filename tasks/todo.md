@@ -411,3 +411,32 @@ tsc --noEmit: clean
 ## Verify
 vitest: order-builder-layout, combo-skew-panel, chain-url-deeplink, order-unified-components green
 tsc clean
+# 2026-07-12 app.radon.run overnight reliability incident
+
+## Dependency graph
+
+- `T1` depends_on: [] - Correlate Pushover notifications, production journals, edge health, GitHub probes, and service-health history into a timestamped incident graph.
+- `T2` depends_on: [`T1`] - Add failing regression coverage for every confirmed code/config defect in the Turso, watchdog, and IB Gateway recovery paths.
+- `T3` depends_on: [`T2`] - Implement bounded database operations and crash-safe, convergent Gateway transition recovery with surgical changes.
+- `T4` depends_on: [`T3`] - Run focused tests, full Python and web suites, static/unit configuration checks, and review the change for a simpler design.
+- `T5` depends_on: [`T3`, `T4`] - Deploy/recover production through managed controls, clear only proven stale failed states, and verify edge health plus notification silence.
+- `T6` depends_on: [`T1`, `T4`, `T5`] - Document root causes, evidence, validation results, residual risks, and final production state.
+
+## Checklist
+
+- [x] `T1` Complete incident evidence and root-cause graph.
+- [x] `T2` Add regression tests for confirmed defects.
+- [x] `T3` Implement minimal fixes.
+- [x] `T4` Pass focused validation and full cloud suite; record unrelated baseline failures.
+- [x] `T5` Restore production broker, API, watchdog buckets, and control-plane manifest.
+- [x] `T6` Add review record and report.
+
+## Review
+
+- Root cause: Docker 29.3.1 emits lowercase `error: no such object`; the Gateway helper treated it as unknown after a successful scheduled shutdown, left `desired=stopped`, and blocked every up phase. The asynchronous watchdog handoff then counted three launches as successful recovery attempts and exhausted its cap.
+- Amplifiers: watchdog decision/cooldown/heartbeat state used unbounded native libSQL; Pushover cancellation failures were marked resolved; the off-box probe replaced the actual health verdict with a ledger-write failure; API migration startup had no hard deadline.
+- Fixes: case-insensitive missing-container convergence, synchronous recovery result accounting, bounded HTTP health/heartbeat I/O, host-local SQLite watchdog control state, retryable emergency cancellation, best-effort probe persistence, and a 30s API migration transport boundary that still fails closed on immediate schema errors.
+- Production: Gateway authenticated; sync/orders/data pools connected; API active; continuous/daily/error watchdog buckets complete successfully; all four watchdog timers active; control-plane bootstrap verified 20 artifacts.
+- Validation: focused reliability `283 passed`; watchdog `158 passed`; cloud full suite `611 passed, 2 skipped`; systemd focused `181 passed`; Gateway control focused included in `39 passed` run.
+- Baseline failures unrelated to this change: full Python `3660 passed, 13 skipped, 18 failed` before the test seam correction; two remaining failures are the known portfolio-retention Hrana fixture pollution seen in overnight CI. The prior `bun test --run` invocation is invalid for this repo because it loads Playwright specs as Bun unit tests; CI's configured Vitest baseline already has an unrelated stale-warning assertion failure.
+- Remaining batch state: config drift still reports legacy live-only timer dependencies/untracked units and production checkout ownership; batch jobs backed by native libSQL require separate migration to bounded Hrana. These did not prevent app/API/broker/watchdog recovery and were not cosmetically cleared.

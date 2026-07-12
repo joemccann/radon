@@ -129,9 +129,12 @@ def _reconcile_recovered_emergencies(*, outcomes, now) -> None:
         else:
             recovered = svc in healthy
         if recovered:
-            notify.cancel_emergency(svc)
-            cooldown.mark_emergency_resolved(service=svc)
-            print(f"  [recovery] cancelled emergency push for {svc}")
+            cancel_error = notify.cancel_emergency(svc)
+            if not isinstance(cancel_error, str):
+                cooldown.mark_emergency_resolved(service=svc)
+                print(f"  [recovery] cancelled emergency push for {svc}")
+            else:
+                print(f"  [recovery] emergency cancellation failed for {svc}: {cancel_error}")
 
 
 def _cmd_ack(args: argparse.Namespace) -> int:
