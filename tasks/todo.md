@@ -456,10 +456,17 @@ tsc clean
 - [x] `CD1` Classify all current drift with provenance.
 - [x] `CD2` Add regression coverage.
 - [x] `CD3` Implement canonical audit/install policy.
-- [ ] `CD4` Reconcile production units and drop-ins.
-- [ ] `CD5` Prove clean audit and healthy runtime.
-- [ ] `CD6` Complete review record.
+- [x] `CD4` Reconcile production units and drop-ins.
+- [x] `CD5` Prove clean audit and healthy runtime.
+- [x] `CD6` Complete review record.
 
 ## Review
 
-- Pending.
+- Adopted intentional `radon-demo-mirror` and `radon-margin-debt` service/timer pairs into the monorepo; neither feature was deleted.
+- Reinstalled every canonical Radon service/timer as a regular `root:root 0644` artifact. Removed all legacy unit symlinks into `/home/radon/radon-cloud` and all obsolete per-unit `50-start-limit.conf` mirrors; retained the fleet `radon-.service.d/common.conf` invariant.
+- Preserved timer topology: 22 enabled before, 22 enabled/active after. The Artificial Analysis-gated LLM units remain deliberately absent and exactly allowlisted. Beta staging units remain visible as known-untracked compatibility state.
+- Optimized drift semantics: legacy symlinks and stale drop-ins are explicit drift; setup cannot follow retired-tree symlinks; runtime config comparison no longer conflates unrelated application/data worktree changes; clean audit verdict is independent of Turso telemetry transport.
+- Production result: `config-drift audit: state=ok`, `Result=success`, `ExecMainStatus=0`; zero failed systemd units; zero legacy symlinks; zero stale drop-ins; public aggregate `up` with authenticated IB pools.
+- Validation: focused config/systemd/setup `231 passed`; final drift tests `18 passed`; final full cloud suite `624 passed, 2 skipped`; `systemd-analyze verify` has no actionable errors.
+- Rollback archive: `/var/lib/radon/config-drift-backup-20260712T162915Z`.
+- External residual: Turso service-health writes time out from the VPS, so the remote dashboard row may remain latched until that independent transport recovers. The audit retries three bounded times, logs the failure, and does not turn a proven-clean configuration into a recursive unit alert.
