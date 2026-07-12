@@ -595,7 +595,7 @@ def run_probe(source: str = PROBE_SOURCE) -> dict:
     ):
         try:
             writer(row)
-        except TursoHttpError as exc:
+        except Exception as exc:  # ledger persistence must not replace the observed verdict
             write_errors.append("%s: %s" % (label, exc))
     return {
         "edge_row": edge_row,

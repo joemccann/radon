@@ -923,6 +923,15 @@ class TestRunProbe:
         monkeypatch.setattr(probe, "insert_external_probe_run", _boom)
         assert probe.main() == 0
 
+    def test_main_preserves_healthy_verdict_on_raw_urllib_timeout(self, monkeypatch):
+        _patch_happy_network(monkeypatch)
+        monkeypatch.setattr(
+            probe, "upsert_external_probe",
+            lambda _row: (_ for _ in ()).throw(TimeoutError("SSL read timed out")),
+        )
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 0
+
 
 # ── dead-man's-switch reader ─────────────────────────────────────────────────
 
