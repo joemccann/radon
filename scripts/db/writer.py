@@ -159,39 +159,121 @@ def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> 
     return deleted if isinstance(deleted, int) and deleted >= 0 else 0
 
 
-PORTFOLIO_DELETE_BATCH = 2000
+# libsql_experimental has NO client timeout and holds the GIL while blocked.
+# Fleet archive 2026-07-12: multi-row ``DELETE ... WHERE taken_at IN (...)``
+# over fat JSON rows timed out / closed the Hrana connection. Single-key
+# DELETEs complete in ~40ms. SELECT keys in pages, delete one key at a time
+# over the bounded HTTP pipeline.
+PORTFOLIO_DELETE_BATCH = 100
+# Per-key deletes are ~40ms when Turso is healthy; keep the bound tight so a
+# wedged key is skipped quickly instead of burning minutes of retries.
+_DELETE_HTTP_TIMEOUT_S = 12.0
+_DELETE_MAX_ATTEMPTS = 2
+_DELETE_TRANSPORT_MARKERS = (
+    "hrana",
+    "connection",
+    "stream",
+    "timeout",
+    "timed out",
+    "closed",
+    "reset",
+    "urlerror",
+    "brokenpipe",
+)
+
+
+def _is_delete_transport_error(exc: BaseException) -> bool:
+    message = str(exc).lower()
+    return any(marker in message for marker in _DELETE_TRANSPORT_MARKERS)
+
+
+def _hrana_with_retry(fn, *, attempts: int = _DELETE_MAX_ATTEMPTS):
+    import time
+
+    last: BaseException | None = None
+    for attempt in range(attempts):
+        try:
+            return fn()
+        except Exception as exc:  # noqa: BLE001 — transport class only retried
+            last = exc
+            try:
+                from .hrana_http import HranaHttpError
+            except ImportError:  # pragma: no cover
+                from db.hrana_http import HranaHttpError  # type: ignore[no-redef]
+            if (
+                not isinstance(exc, HranaHttpError)
+                and not _is_delete_transport_error(exc)
+            ) or attempt + 1 >= attempts:
+                raise
+            time.sleep(0.5 * (attempt + 1))
+    assert last is not None
+    raise last
 
 
 def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_DELETE_BATCH) -> int:
-    """Delete portfolio_snapshots rows with ``taken_at < cutoff``, in committed
-    batches.
+    """Delete portfolio_snapshots rows with ``taken_at < cutoff``.
 
-    Time-based deletion owned by the archive pipeline
-    (scripts/archive_portfolio_snapshots.py), which exports rows off-box BEFORE
-    calling this. ``cutoff`` is an ISO-8601 string in the same format as the
-    ``taken_at`` PK (indexed range). Batched + COUNT-driven because the libsql
-    client has no timeout: a single huge DELETE of fat rows can run long enough
-    for an unattended runner to kill it mid-transaction (which then rolls back
-    and never makes progress). Each batch is its own small transaction, so the
-    job is resumable. Returns total rows deleted.
+    Owned by the archive pipeline (export off-box BEFORE calling this).
+    Pages key SELECTs, then issues one DELETE per key over bounded Hrana
+    HTTP. Multi-key IN-lists hang Turso on fat payload rows. Keys that keep
+    timing out are skipped and the scan floor advances past them so one
+    stuck row cannot block the rest of the cutoff range. Resumable.
     """
-    db = get_db()
+    try:
+        from .hrana_http import hrana_execute, hrana_query
+    except ImportError:  # pragma: no cover
+        from db.hrana_http import hrana_execute, hrana_query  # type: ignore[no-redef]
+
     total = 0
+    # Exclusive lower bound so skipped keys at the front of the ORDER BY
+    # cannot be re-selected forever (2026-07-12 fleet archive hang class).
+    after: str | None = None
     while True:
-        remaining = db.execute(
-            "SELECT COUNT(*) FROM portfolio_snapshots WHERE taken_at < ?",
-            (cutoff,),
-        ).fetchone()[0]
-        if not remaining:
-            break
-        db.execute(
-            "DELETE FROM portfolio_snapshots WHERE taken_at IN ("
-            "SELECT taken_at FROM portfolio_snapshots WHERE taken_at < ? "
-            "ORDER BY taken_at LIMIT ?)",
-            (cutoff, batch_size),
-        )
-        db.commit()
-        total += min(batch_size, remaining)
+        if after is None:
+            rows = _hrana_with_retry(
+                lambda: hrana_query(
+                    "SELECT taken_at FROM portfolio_snapshots "
+                    "WHERE taken_at < ? ORDER BY taken_at LIMIT ?",
+                    (cutoff, batch_size),
+                    timeout=_DELETE_HTTP_TIMEOUT_S,
+                )
+            )
+        else:
+            rows = _hrana_with_retry(
+                lambda a=after: hrana_query(
+                    "SELECT taken_at FROM portfolio_snapshots "
+                    "WHERE taken_at < ? AND taken_at > ? "
+                    "ORDER BY taken_at LIMIT ?",
+                    (cutoff, a, batch_size),
+                    timeout=_DELETE_HTTP_TIMEOUT_S,
+                )
+            )
+        ids = [str(r[0]) for r in rows if r and r[0] is not None]
+        if not ids:
+            return total
+
+        page_deleted = 0
+        for taken_at in ids:
+            try:
+                _hrana_with_retry(
+                    lambda ta=taken_at: hrana_execute(
+                        "DELETE FROM portfolio_snapshots WHERE taken_at = ?",
+                        (ta,),
+                        timeout=_DELETE_HTTP_TIMEOUT_S,
+                    )
+                )
+                total += 1
+                page_deleted += 1
+            except Exception as exc:  # noqa: BLE001 — advance past wedged keys
+                print(
+                    f"[portfolio-delete] skip {taken_at}: {exc}",
+                    flush=True,
+                )
+            after = taken_at
+
+        if page_deleted == 0 and len(ids) < batch_size:
+            # Final page was all skips — nothing left reachable under cutoff.
+            return total
     return total
 
 
