@@ -430,9 +430,9 @@ treat the nightly dumps as the only restore path.
 
 | Piece | When (UTC) | What |
 |---|---|---|
-| `radon-portfolio-archive.timer` | 06:52 daily | Cold-archives `portfolio_snapshots` older than 30d to local monthly `jsonl.gz` partitions, then DELETEs from Turso (optional S3 via `RADON_ARCHIVE_S3_*`). Heartbeat: `portfolio-archive`. |
-| `radon-db-retention.timer` | 07:22 daily | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. |
-| `radon-db-backup.timer` | 07:52 daily | Full dump **after** archive + retention so the dump reflects the pruned hot set. |
+| `radon-portfolio-archive.timer` | **05:40** daily | Cold-archives `portfolio_snapshots` older than 30d to local monthly `jsonl.gz` partitions, then DELETEs from Turso (optional S3 via `RADON_ARCHIVE_S3_*`). Heartbeat: `portfolio-archive`. TimeoutStartSec=7200. |
+| `radon-db-retention.timer` | **08:10** daily | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. Must not overlap archive (2026-07-12 concurrent DELETE storm). |
+| `radon-db-backup.timer` | **09:00** daily | Full dump **after** archive + retention so the dump reflects the pruned hot set. |
 
 ## Known gaps
 

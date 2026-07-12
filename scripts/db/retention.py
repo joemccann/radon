@@ -194,21 +194,25 @@ def run_retention_sweep_http(
     *,
     timeout: float = RETENTION_HTTP_TIMEOUT_S,
     on_policy: Optional[Callable[[Policy, int], None]] = None,
-) -> dict[str, int]:
+) -> tuple[dict[str, int], list[str]]:
     """Apply every policy over bounded Hrana HTTP (production oneshot path).
 
-    Per-policy failures are logged and skipped so one timed-out table cannot
-    abort the rest of the sweep (Turso saturation class, 2026-07-12).
+    Returns ``(results, failed_tables)``. Per-policy failures are logged and
+    collected so one timed-out table cannot abort the rest of the sweep
+    (Turso saturation class, 2026-07-12) while the caller can still fail the
+    unit when every policy failed.
     """
     results: dict[str, int] = {}
+    failed: list[str] = []
     for policy in policies:
         try:
             deleted = apply_policy_http(policy, timeout=timeout)
         except Exception as exc:  # noqa: BLE001 — continue across tables
             print(f"[db-retention] skip {policy.table}: {exc}", flush=True)
-            results[policy.table] = results.get(policy.table, 0)
+            results[policy.table] = 0
+            failed.append(policy.table)
             continue
         results[policy.table] = results.get(policy.table, 0) + deleted
         if on_policy is not None:
             on_policy(policy, deleted)
-    return results
+    return results, failed

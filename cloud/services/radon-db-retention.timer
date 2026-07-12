@@ -2,11 +2,11 @@
 Description=Radon Turso snapshot retention sweep — daily off-hours
 
 [Timer]
-# 07:22 UTC: after portfolio-archive (06:52) and before db-backup (07:52).
-# Prunes non-portfolio append-only snapshot tables so the nightly dump
-# does not re-ship months of superseded scan JSON.
-OnCalendar=*-*-* 07:22:00 UTC
-RandomizedDelaySec=180
+# 08:10 UTC: AFTER portfolio-archive's TimeoutStartSec=7200 window (05:40 +
+# 2h = 07:40) so the two never contend on Turso DELETEs (2026-07-12
+# concurrent storm). BEFORE db-backup (09:00) so the dump sees pruned tables.
+OnCalendar=*-*-* 08:10:00 UTC
+RandomizedDelaySec=120
 Persistent=true
 
 [Install]

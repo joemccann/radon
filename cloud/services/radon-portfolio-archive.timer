@@ -1,14 +1,13 @@
 [Unit]
-Description=Radon portfolio_snapshots cold-archive — nightly before DB backup
+Description=Radon portfolio_snapshots cold-archive — nightly before retention/backup
 
 [Timer]
-# 06:52 UTC: off-hours for US markets, AFTER llm-index (06:30) / drift-audit
-# (06:40) and BEFORE db-backup (07:52) so the nightly dump captures the
-# already-pruned hot set. Deliberately not :00/:30. Persistent so a missed
-# firing (host down) replays on next boot. service_health window is 48h:
-# one missed night pages before the second archive is lost.
-OnCalendar=*-*-* 06:52:00 UTC
-RandomizedDelaySec=180
+# 05:40 UTC: off-hours, alone on the Turso write path. Must NOT overlap
+# db-retention (was 07:22 while archive still ran to 07:54 on 2026-07-12 —
+# concurrent DELETE storms timed out every key for ~1h). Deliberately not
+# :00/:30. Persistent so a missed firing replays on next boot.
+OnCalendar=*-*-* 05:40:00 UTC
+RandomizedDelaySec=120
 Persistent=true
 
 [Install]

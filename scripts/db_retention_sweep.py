@@ -117,7 +117,7 @@ def main() -> int:
     # Bounded Hrana HTTP only — never libsql_experimental (no client timeout;
     # first fleet retention run hung with 74ms CPU for 10+ minutes).
     try:
-        results = run_retention_sweep_http()
+        results, failed = run_retention_sweep_http()
     except Exception as exc:
         detail = {"error": str(exc)[:SUMMARY_CAP]}
         write_service_health("error", detail, started_at)
@@ -130,7 +130,14 @@ def main() -> int:
         "tables": results,
         "rows_deleted": total,
         "elapsed_s": elapsed,
+        "failed_tables": failed,
     }
+    # 2026-07-12: every policy timed out yet the unit reported ok with
+    # rows_deleted=0. Fail the oneshot when NO policy succeeded.
+    if failed and len(failed) == len(results):
+        write_service_health("error", summary, started_at)
+        print(json.dumps({"ok": False, **summary}, indent=2), file=sys.stderr)
+        return 1
     write_service_health("ok", summary, started_at)
     print(json.dumps({"ok": True, **summary}, indent=2))
     return 0
