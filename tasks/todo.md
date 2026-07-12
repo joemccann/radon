@@ -495,3 +495,22 @@ tsc clean
 - Validation: focused web `27 passed`; full web `4115 passed, 26 skipped`; focused retention `6 passed`; CI Vitest, pytest, perimeter, and secret-scan gates passed. Local full Python was `3682 passed, 13 skipped` plus the two subsequently repaired Hrana fixture failures.
 - Production: deployed `ea24c66c1e337cbd4e2c28bd66142f9c936f8e42`; query plan uses `idx_cri_latest`; 20 live reads p50 8.3ms, p95 28.1ms, max 29.7ms. Post-deploy `nextjs-db-read` is `ok`, overall health is `up`, and `radon-nextjs` has `NRestarts=0`.
 - Drift: archived the runtime-enriched `data/tag_taxonomy.json` at `/home/radon/.config-drift-backups/20260712T200352Z` before restoring the tested release version.
+
+# 2026-07-12 Turso incident documentation and memory
+
+## Dependency graph
+
+- `TD1` depends_on: [] - Consolidate the verified RCA, repair, and production measurements.
+- `TD2` depends_on: [`TD1`] - Update the cloud-services runbook and persistent incident lessons.
+- `TD3` depends_on: [`TD2`] - Commit and push the scoped documentation update.
+
+## Checklist
+
+- [x] `TD1` Preserve the verified incident facts and distinguish the separate IB refresh failure.
+- [x] `TD2` Update runbook and memory with reusable diagnosis and prevention rules.
+- [x] `TD3` Commit and push documentation only; leave unrelated workspace state untouched.
+
+## Review
+
+- Added the 2026-07-12 CRI query-plan incident, indexed SQL, timeout/keepalive contract, diagnosis order, production latency evidence, and portfolio refresh exit-code semantics to `docs/cloud-services.md`.
+- Added durable query-planning, timeout ordering, pool diagnosis, keepalive, shell-exit, test-path, and drift-preservation lessons to `tasks/lessons.md`.

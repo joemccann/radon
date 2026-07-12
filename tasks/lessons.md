@@ -384,3 +384,14 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - Disabling a retired writer is incomplete while its historical health row remains in alert or rendering catalogs. Gate alert evaluation, current-health APIs, and historical reliability scoring on the same concrete applicability signal, while retaining enabled-path tests for installations where the subsystem exists.
 - Best-effort telemetry around native extensions must account for non-termination `BaseException` failures. Catch per telemetry item, continue independent writes, and explicitly re-raise `KeyboardInterrupt`, `SystemExit`, and `GeneratorExit`.
+
+## 2026-07-12 - Turso read-stall RCA
+
+- Before blaming Turso or the VPS network for a database timeout, time the exact production SQL and run `EXPLAIN QUERY PLAN`; a latest-row query that omits the leading column of a composite index can turn a nominal lookup into a multi-second full scan and temporary sort.
+- Caller and transport deadlines must be ordered: the transport abort must fire before the caller timeout so a failed request releases its pool slot. A long transport timeout behind a short `Promise.race` creates invisible queued work and amplifies a single slow query.
+- Do not infer original pool saturation from collateral failures after a shared-client reset. Measure running and queued counts before the reset and independently benchmark fresh Hrana/native reads to separate query cost, provider latency, and client amplification.
+- Keepalive cadence is load, not free insurance. Use the slowest cadence that preserves the desired warm-socket window; a 3-second heartbeat multiplied incident traffic, while 30 seconds retained warm connections without constant dependency pressure.
+- Shell refresh wrappers must capture the command's status directly. Reading `$?` after an `if` compound command can convert a failed curl into exit 0 and suppress the only reliable signal that a scheduled writer did not refresh its snapshot.
+- A cache-only portfolio GET saying “live sync was not requested” is describing request policy, not root cause. Investigate the scheduled writer separately; in this incident the stale snapshot came from an IB connection timeout, while the visible Turso errors were collateral damage from the CRI query/reset loop.
+- Source-contract tests must derive repository paths from the test file (`import.meta.url`), not `process.cwd()`, because local package scripts and root-level CI invoke Vitest from different working directories.
+- When production drift blocks an immutable deploy, archive the divergent artifact before restoring the tested version. Runtime-enriched tracked data is evidence worth preserving even when it cannot be allowed to overwrite a reviewed release.

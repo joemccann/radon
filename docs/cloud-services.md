@@ -265,6 +265,58 @@ so a restart will actually help) → solo `systemctl restart radon-nextjs`
 `radon-cloud/state/nextjs-db-watchdog.json`. Script:
 `radon-cloud/scripts/nextjs_db_watchdog.py`.
 
+### CRI read-stall incident (2026-07-12)
+
+Repeated Next.js Turso timeouts were caused by a query-plan regression, not a
+Turso outage or the VPS network path. The latest-CRI query used
+`ORDER BY taken_at DESC LIMIT 1`; `cri_snapshots` has no index beginning with
+`taken_at`, so SQLite scanned 14,924 rows and built a temporary sort over rows
+whose payload averaged roughly 47 KB. Production latency was 6.8-7.6 seconds.
+The route's 2.5-3 second caller deadlines expired first, reset the shared
+undici/libSQL client, and created collateral portfolio, internals, gamma, and
+service-health read failures.
+
+The durable query is:
+
+```sql
+SELECT taken_at, payload
+FROM cri_snapshots
+ORDER BY date DESC, taken_at DESC
+LIMIT 1;
+```
+
+This uses the existing `idx_cri_latest(date DESC, taken_at DESC)` index. After
+deploying `ea24c66c1e337cbd4e2c28bd66142f9c936f8e42`, `EXPLAIN QUERY PLAN`
+reported `SCAN cri_snapshots USING INDEX idx_cri_latest`; 20 live reads measured
+p50 8.3 ms, p95 28.1 ms, and max 29.7 ms.
+
+Transport containment is intentionally aligned with caller behavior:
+`DB_TRANSPORT_TIMEOUT_MS=2750` aborts and releases the socket before the common
+3-second route deadline, while the keepalive runs every 30 seconds with a
+40-second idle-socket window. Do not set a transport timeout longer than its
+caller deadline: a timed-out caller otherwise leaves the pool slot occupied and
+turns one slow query into queue amplification. Do not respond to every isolated
+timeout by destroying the shared Agent; the cooldown/evidence rules from the
+2026-07-02 incident remain mandatory.
+
+Diagnosis order for a recurrence:
+
+1. Measure the exact hot SQL and run `EXPLAIN QUERY PLAN` against production.
+2. Measure fresh native-libSQL and Hrana `SELECT 1` reads from the VPS to
+   separate provider/network latency from query cost.
+3. Inspect pool running/queued counts before attributing the event to pool
+   saturation.
+4. Confirm `nextjs-db-read` refreshes cleanly after deployment; TCP or HTTP
+   liveness alone does not prove the application can read Turso.
+
+The portfolio snapshot warning seen during this incident had a separate writer
+failure: IB connection timeout prevented the scheduled refresh. The shell
+wrapper also captured `$?` after an `if`, falsely printing `FAILED (exit 0)` and
+returning success. `scripts/run_portfolio_refresh.sh` now preserves curl's exit
+status and returns 22 for non-2xx responses. A stale snapshot with “live sync was
+not requested” means the cache-only GET path deliberately did not contact IB; it
+does not mean Turso necessarily failed.
+
 ### Host metrics (DUR-12)
 
 `scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (radon-cloud) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
