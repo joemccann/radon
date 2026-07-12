@@ -1,0 +1,10 @@
+[Unit]
+Description=Radon Margin Debt Indicator - daily FINRA margin statistics pull
+
+[Timer]
+OnCalendar=*-*-* 13:10:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

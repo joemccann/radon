@@ -82,6 +82,10 @@ readonly SERVICE_FILES=(
   radon-forecast-nightly.timer
   radon-nextjs-db-watchdog.service
   radon-nextjs-db-watchdog.timer
+  radon-demo-mirror.service
+  radon-demo-mirror.timer
+  radon-margin-debt.service
+  radon-margin-debt.timer
 )
 
 run_as_radon() {
@@ -486,7 +490,11 @@ configure_caddy() {
 copy_systemd_services() {
   log_info "Copying systemd service files..."
   for svc in "${SERVICE_FILES[@]}"; do
-    cp "${CLOUD_DIR}/services/${svc}" "/etc/systemd/system/${svc}"
+    # Never follow a legacy /home/radon/radon-cloud symlink and mutate the
+    # retired source tree. Every managed unit is a regular canonical artifact.
+    rm -f "/etc/systemd/system/${svc}"
+    install -m 0644 -o root -g root \
+      "${CLOUD_DIR}/services/${svc}" "/etc/systemd/system/${svc}"
   done
   systemctl daemon-reload
   log_success "Systemd units copied and daemon reloaded"
