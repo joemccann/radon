@@ -192,6 +192,10 @@ def cancel_emergency(tag: str) -> Optional[str]:
     except Exception as exc:  # noqa: BLE001
         log.warning("pushover cancel_by_tag transport failure: %s", exc)
         return f"pushover cancel transport failed: {exc}"
+    if status == 404:
+        # Idempotent recovery: no active receipt with this tag remains.
+        log.info("emergency push tag=%s already absent", tag)
+        return None
     if status >= 400:
         log.warning("pushover cancel non-2xx (%s): %r", status, body[:200])
         return f"pushover cancel {status}"

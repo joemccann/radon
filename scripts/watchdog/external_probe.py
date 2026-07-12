@@ -1,7 +1,9 @@
 """On-box dead-man check for the independent GitHub edge probe."""
 from __future__ import annotations
 
+import json
 from datetime import datetime, timezone
+import urllib.request
 
 from health_probe import reader
 from health_service import turso_http
@@ -12,6 +14,36 @@ from .check import CheckOutcome
 SERVICE = "external-health-probe"
 FETCH_TIMEOUT_SECONDS = 2.5
 EXPECTED_SOURCE = "github-actions/edge"
+GITHUB_RUNS_URL = (
+    "https://api.github.com/repos/joemccann/radon/actions/workflows/"
+    "external-health-probe.yml/runs?per_page=1"
+)
+
+
+def _latest_github_run(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
+    """Independent witness when Turso persistence is stale or unavailable."""
+    request = urllib.request.Request(
+        GITHUB_RUNS_URL,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "radon-watchdog"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            payload = json.loads(response.read(262_144).decode("utf-8"))
+        runs = payload.get("workflow_runs") or []
+        return runs[0] if runs else None
+    except Exception:  # noqa: BLE001 - preserve the primary Turso verdict
+        return None
+
+
+def _github_run_is_current_and_green(run: dict | None, now: datetime) -> bool:
+    if not run or run.get("status") != "completed" or run.get("conclusion") != "success":
+        return False
+    updated = str(run.get("updated_at") or "")
+    try:
+        timestamp = datetime.fromisoformat(updated.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    return 0 <= (now - timestamp).total_seconds() <= reader.STALE_AFTER_SECONDS
 
 
 def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
@@ -24,6 +56,11 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
         verdict = reader.classify_external_probe(row, now=checked_at)
     except Exception as exc:  # malformed rows and DB failures must fail closed
         verdict = {"verdict": reader.VERDICT_STALE, "reason": f"probe_read_failed: {exc}"}
+
+    if verdict["verdict"] == reader.VERDICT_STALE:
+        github_run = _latest_github_run()
+        if _github_run_is_current_and_green(github_run, checked_at):
+            verdict = {"verdict": reader.VERDICT_HEALTHY, "reason": "github_workflow_current"}
 
     state = verdict["verdict"]
     if state == reader.VERDICT_HEALTHY:

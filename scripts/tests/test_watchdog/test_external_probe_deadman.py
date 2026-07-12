@@ -47,12 +47,37 @@ def test_stale_external_probe_pages_the_operator(monkeypatch) -> None:
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=1, age_minutes=121),
     )
+    monkeypatch.setattr(external_probe, "_latest_github_run", lambda: None)
     outcome = external_probe.check_external_probe(now=NOW)
 
     assert outcome.status == "stale"
     assert outcome.fired is True
     assert outcome.severity == "P1"
     assert "silent" in outcome.message.lower()
+
+
+def test_stale_turso_row_uses_recent_green_github_run(monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=300, detail="old failure"),
+    )
+    monkeypatch.setattr(
+        external_probe,
+        "_latest_github_run",
+        lambda: {
+            "status": "completed",
+            "conclusion": "success",
+            "updated_at": (NOW - timedelta(minutes=10)).isoformat().replace("+00:00", "Z"),
+        },
+    )
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
 
 
 def test_fresh_red_external_probe_pages_the_operator(monkeypatch) -> None:
