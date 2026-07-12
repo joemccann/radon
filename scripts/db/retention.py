@@ -143,10 +143,34 @@ def _rowcount(cursor: Any) -> int:
 
 
 def apply_policy(db: Any, policy: Policy) -> int:
-    """Execute one policy's DELETE and commit. Returns rows deleted (best-effort)."""
+    """Execute one policy's DELETE and commit. Returns rows deleted (best-effort).
+
+    Prefer :func:`apply_policy_http` in production oneshots — the sync libsql
+    client has no timeout and hung the first fleet retention run (2026-07-12).
+    """
     cursor = db.execute(policy.delete_sql(), policy.delete_args())
     db.commit()
     return _rowcount(cursor)
+
+
+# Bounded HTTP deletes. Window-function keep-latest DELETEs on scan tables are
+# usually small; 60s absorbs a slow tail without hanging the oneshot forever.
+RETENTION_HTTP_TIMEOUT_S = 60.0
+
+
+def apply_policy_http(policy: Policy, *, timeout: float = RETENTION_HTTP_TIMEOUT_S) -> int:
+    """Apply one policy over the bounded Hrana HTTP pipeline.
+
+    Rowcount is unavailable on this transport (returns 0); success is the
+    absence of an exception.
+    """
+    try:
+        from .hrana_http import hrana_execute
+    except ImportError:  # pragma: no cover
+        from db.hrana_http import hrana_execute  # type: ignore[no-redef]
+
+    hrana_execute(policy.delete_sql(), policy.delete_args(), timeout=timeout)
+    return 0
 
 
 def run_retention_sweep(
@@ -155,10 +179,35 @@ def run_retention_sweep(
     *,
     on_policy: Optional[Callable[[Policy, int], None]] = None,
 ) -> dict[str, int]:
-    """Apply every policy; return {table: rows_deleted}. Raises on DB errors."""
+    """Apply every policy via ``db``; return {table: rows_deleted}. Raises on DB errors."""
     results: dict[str, int] = {}
     for policy in policies:
         deleted = apply_policy(db, policy)
+        results[policy.table] = results.get(policy.table, 0) + deleted
+        if on_policy is not None:
+            on_policy(policy, deleted)
+    return results
+
+
+def run_retention_sweep_http(
+    policies: Sequence[Policy] = SNAPSHOT_RETENTION_POLICIES,
+    *,
+    timeout: float = RETENTION_HTTP_TIMEOUT_S,
+    on_policy: Optional[Callable[[Policy, int], None]] = None,
+) -> dict[str, int]:
+    """Apply every policy over bounded Hrana HTTP (production oneshot path).
+
+    Per-policy failures are logged and skipped so one timed-out table cannot
+    abort the rest of the sweep (Turso saturation class, 2026-07-12).
+    """
+    results: dict[str, int] = {}
+    for policy in policies:
+        try:
+            deleted = apply_policy_http(policy, timeout=timeout)
+        except Exception as exc:  # noqa: BLE001 — continue across tables
+            print(f"[db-retention] skip {policy.table}: {exc}", flush=True)
+            results[policy.table] = results.get(policy.table, 0)
+            continue
         results[policy.table] = results.get(policy.table, 0) + deleted
         if on_policy is not None:
             on_policy(policy, deleted)

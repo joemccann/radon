@@ -104,3 +104,18 @@ class TestRunSweep:
             retention.run_retention_sweep(
                 db, [retention.KeepLatestPolicy("oi_changes", "scan_time", 5)]
             )
+
+    def test_http_sweep_invokes_each_policy(self, retention, monkeypatch):
+        calls: list[str] = []
+        monkeypatch.setattr(
+            retention,
+            "apply_policy_http",
+            lambda policy, timeout=60.0: (calls.append(policy.table) or 0),
+        )
+        policies = [
+            retention.KeepLatestPolicy("scanner_snapshots", "scan_time", 10),
+            retention.KeepLatestPolicy("vcg_snapshots", "scan_time", 10),
+        ]
+        results = retention.run_retention_sweep_http(policies)
+        assert results == {"scanner_snapshots": 0, "vcg_snapshots": 0}
+        assert calls == ["scanner_snapshots", "vcg_snapshots"]
