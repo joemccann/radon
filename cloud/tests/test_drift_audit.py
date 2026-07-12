@@ -121,6 +121,26 @@ class TestUntrackedClassification:
         assert da.classify_untracked_unit("radon-mystery.service") == "drift"
 
 
+def test_git_repo_is_parent_of_cloud_root():
+    assert da.GIT_REPO == da.REPO.parent
+
+
+def test_symlinked_unit_is_not_a_canonical_regular_artifact(tmp_path, monkeypatch):
+    services = tmp_path / "services"
+    live = tmp_path / "systemd"
+    services.mkdir()
+    live.mkdir()
+    (services / "radon-x.timer").write_text("[Timer]\nOnCalendar=hourly\n")
+    legacy = tmp_path / "legacy.timer"
+    legacy.write_text("[Timer]\nOnCalendar=hourly\n")
+    (live / "radon-x.timer").symlink_to(legacy)
+    monkeypatch.setattr(da, "REPO", tmp_path)
+    monkeypatch.setattr(da, "SYSTEMD_DIR", live)
+    drifts, known = [], []
+    da._check_units(drifts, known)
+    assert drifts[0]["id"] == "symlink-unit:radon-x.timer"
+
+
 class TestEnvFileGuard:
     def test_audit_never_touches_env_files(self):
         assert da.is_env_path("/home/radon/radon-cloud/.env")

@@ -440,3 +440,26 @@ tsc clean
 - Validation: focused reliability `283 passed`; watchdog `158 passed`; cloud full suite `611 passed, 2 skipped`; systemd focused `181 passed`; Gateway control focused included in `39 passed` run.
 - Baseline failures unrelated to this change: full Python `3660 passed, 13 skipped, 18 failed` before the test seam correction; two remaining failures are the known portfolio-retention Hrana fixture pollution seen in overnight CI. The prior `bun test --run` invocation is invalid for this repo because it loads Playwright specs as Bun unit tests; CI's configured Vitest baseline already has an unrelated stale-warning assertion failure.
 - Remaining batch state: config drift still reports legacy live-only timer dependencies/untracked units and production checkout ownership; batch jobs backed by native libSQL require separate migration to bounded Hrana. These did not prevent app/API/broker/watchdog recovery and were not cosmetically cleared.
+# 2026-07-12 config-drift elimination
+
+## Dependency graph
+
+- `CD1` depends_on: [] - Inventory every live/repo unit and drop-in mismatch, establish provenance, and classify intentional versus obsolete state.
+- `CD2` depends_on: [`CD1`] - Add regressions for audit normalization, symlink/untracked policy, repository ownership, and remediation safety.
+- `CD3` depends_on: [`CD1`, `CD2`] - Optimize the auditor and canonical install/removal policy without allowlisting actionable drift.
+- `CD4` depends_on: [`CD3`] - Apply production cleanup atomically: install canonical units, remove proven obsolete drop-ins/units, daemon-reload, and preserve active timer topology.
+- `CD5` depends_on: [`CD4`] - Run focused/full cloud tests, rerun production drift audit to `state=ok`, and verify app/watchdog health remains green.
+- `CD6` depends_on: [`CD5`] - Document the final zero-drift inventory, deletions/adoptions, validation, and residual intentional exceptions.
+
+## Checklist
+
+- [x] `CD1` Classify all current drift with provenance.
+- [x] `CD2` Add regression coverage.
+- [x] `CD3` Implement canonical audit/install policy.
+- [ ] `CD4` Reconcile production units and drop-ins.
+- [ ] `CD5` Prove clean audit and healthy runtime.
+- [ ] `CD6` Complete review record.
+
+## Review
+
+- Pending.

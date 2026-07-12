@@ -70,6 +70,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
+GIT_REPO = REPO.parent
 SYSTEMD_DIR = Path("/etc/systemd/system")
 SUDOERS_DIR = Path("/etc/sudoers.d")
 SERVICE_NAME = "config-drift"
@@ -350,11 +351,31 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
         if live_path is None:
             drifts.append({"id": f"not-installed:{name}", "detail": f"services/{name}"})
             continue
+        if live_path.is_symlink():
+            drifts.append(
+                {
+                    "id": f"symlink-unit:{name}",
+                    "detail": f"{live_path} -> {os.readlink(live_path)}; install canonical regular file",
+                }
+            )
+            continue
         detail = unit_counter_diff(
             _live_unit_counter(live_path), merge_unit_counters([_read(repo_path) or ""])
         )
         if detail:
             drifts.append({"id": f"unit-mismatch:{name}", "detail": detail})
+
+        live_dropin = live_path.with_name(live_path.name + ".d")
+        repo_dropin = repo_path.with_name(repo_path.name + ".d")
+        for conf in sorted(live_dropin.glob("*.conf")) if live_dropin.is_dir() else []:
+            counterpart = repo_dropin / conf.name
+            if not counterpart.is_file():
+                drifts.append(
+                    {
+                        "id": f"stale-dropin:{name}:{conf.name}",
+                        "detail": f"remove {conf}; canonical base owns these directives",
+                    }
+                )
 
     for name in sorted(set(live_units) - set(repo_units)):
         if classify_untracked_unit(name) == "known-untracked":
@@ -407,7 +428,10 @@ def _check_repo_dirty(drifts: list[dict]) -> None:
     never made it into git. Untracked files (e.g. .env*) are ignored."""
     try:
         proc = _run(
-            ["git", "-c", f"safe.directory={REPO}", "-C", str(REPO), "status", "--porcelain"]
+            [
+                "git", "-c", f"safe.directory={GIT_REPO}", "-C", str(GIT_REPO),
+                "status", "--porcelain=v1", "--untracked-files=no", "--", "cloud",
+            ]
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
         drifts.append({"id": "repo-dirty:unresolvable", "detail": str(exc)[:DETAIL_CAP]})

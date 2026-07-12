@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily demo snapshot mirror after US close scans settle
+
+[Timer]
+OnCalendar=Mon..Fri 21:45 UTC
+Persistent=true
+
+[Install]
+WantedBy=timers.target

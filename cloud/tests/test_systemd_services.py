@@ -56,6 +56,10 @@ EXPECTED_SERVICE_FILES = [
     "radon-llm-index.timer",
     "radon-nextjs-db-watchdog.service",
     "radon-nextjs-db-watchdog.timer",
+    "radon-demo-mirror.service",
+    "radon-demo-mirror.timer",
+    "radon-margin-debt.service",
+    "radon-margin-debt.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
