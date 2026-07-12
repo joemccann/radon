@@ -54,13 +54,8 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
         setError(warning);
         return;
       }
-      if (
-        warningSnapshotRef.current == null ||
-        warningSnapshotRef.current !== json.last_sync
-      ) {
-        warningSnapshotRef.current = null;
-        setError(null);
-      }
+      warningSnapshotRef.current = null;
+      setError(null);
     } catch (err) {
       if (mountedRef.current && generation === dataGenerationRef.current) {
         setError(err instanceof Error ? err.message : "Unknown error");

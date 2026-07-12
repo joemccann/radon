@@ -514,3 +514,25 @@ tsc clean
 
 - Added the 2026-07-12 CRI query-plan incident, indexed SQL, timeout/keepalive contract, diagnosis order, production latency evidence, and portfolio refresh exit-code semantics to `docs/cloud-services.md`.
 - Added durable query-planning, timeout ordering, pool diagnosis, keepalive, shell-exit, test-path, and drift-preservation lessons to `tasks/lessons.md`.
+
+# 2026-07-12 Latched live-data warning
+
+## Dependency graph
+
+- `LW1` depends_on: [] - Compare the screenshot timestamp with deployment and current application DB health.
+- `LW2` depends_on: [`LW1`] - Trace warning state through portfolio and orders polling hooks.
+- `LW3` depends_on: [`LW2`] - Make clean polls clear transient warnings and add same-snapshot regressions.
+- `LW4` depends_on: [`LW3`] - Validate, deploy, and verify the banner clears against healthy production reads.
+
+## Checklist
+
+- [x] `LW1` Prove the screenshot warning predates the fixed deployment while current `nextjs-db-read` is healthy.
+- [x] `LW2` Identify the same-`last_sync` warning latch in both hooks.
+- [x] `LW3` Implement clean-response recovery and regression coverage.
+- [ ] `LW4` Validate and deploy.
+
+## Review
+
+- Root cause: successful portfolio and orders GET polls only cleared warnings when `last_sync` changed, so the pre-deploy Turso warning remained latched against an unchanged off-hours snapshot.
+- Focused hook regression: `11 passed`; TypeScript: clean. The local parallel full suite hit unrelated load-induced timeouts (`4074 passed`, `43 timed out`, `26 skipped`); CI remains the authoritative isolated full-suite gate.
+- Pending CI and production verification.
