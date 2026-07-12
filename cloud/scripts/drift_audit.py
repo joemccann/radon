@@ -67,6 +67,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.request
 from collections import Counter
 from datetime import datetime, timezone
@@ -82,6 +83,7 @@ DETAIL_CAP = 200
 MAX_DRIFTS_IN_ROW = 10
 SUBPROCESS_TIMEOUT = 10
 TURSO_TIMEOUT = 10
+HEALTH_WRITE_ATTEMPTS = 3
 
 # (live absolute path, repo-relative path, drift label)
 FILE_PAIRS = [
@@ -541,6 +543,23 @@ def write_service_health(
         raise RuntimeError(f"service_health upsert rejected: {json.dumps(first)[:300]}")
 
 
+def write_service_health_with_retry(
+    state: str, last_error: dict | None, started_at: str
+) -> None:
+    """Retry bounded telemetry transport without changing the audit verdict."""
+    last_exc: Exception | None = None
+    for attempt in range(HEALTH_WRITE_ATTEMPTS):
+        try:
+            write_service_health(state, last_error, started_at)
+            return
+        except Exception as exc:  # noqa: BLE001 - preserve final transport detail
+            last_exc = exc
+            if attempt + 1 < HEALTH_WRITE_ATTEMPTS:
+                time.sleep(attempt + 1)
+    assert last_exc is not None
+    raise last_exc
+
+
 # ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
@@ -554,7 +573,7 @@ def main() -> int:
         crash = {"summary": f"audit crashed: {exc.__class__.__name__}: {exc}"[:SUMMARY_CAP]}
         print(crash["summary"], file=sys.stderr)
         try:
-            write_service_health("error", crash, started_at)
+            write_service_health_with_retry("error", crash, started_at)
         except Exception as write_exc:  # noqa: BLE001
             print(f"service_health write failed: {write_exc}", file=sys.stderr)
         return 1
@@ -571,10 +590,13 @@ def main() -> int:
         print(f"  known-untracked  {name}")
 
     try:
-        write_service_health(state, last_error, started_at)
+        write_service_health_with_retry(state, last_error, started_at)
     except Exception as exc:  # noqa: BLE001 - bounded write, surface the failure
         print(f"service_health write failed: {exc}", file=sys.stderr)
-        return 1
+        # The audit result is authoritative and was printed above. Telemetry
+        # transport has its own watchdog/dead-man path; do not turn a clean
+        # configuration into a failed systemd unit and recursive alert storm.
+        return 1 if drifts else 0
     print("service_health row written: config-drift =", state)
     return 0
 
