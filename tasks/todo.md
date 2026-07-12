@@ -529,10 +529,11 @@ tsc clean
 - [x] `LW1` Prove the screenshot warning predates the fixed deployment while current `nextjs-db-read` is healthy.
 - [x] `LW2` Identify the same-`last_sync` warning latch in both hooks.
 - [x] `LW3` Implement clean-response recovery and regression coverage.
-- [ ] `LW4` Validate and deploy.
+- [x] `LW4` Validate and deploy.
 
 ## Review
 
 - Root cause: successful portfolio and orders GET polls only cleared warnings when `last_sync` changed, so the pre-deploy Turso warning remained latched against an unchanged off-hours snapshot.
 - Focused hook regression: `11 passed`; TypeScript: clean. The local parallel full suite hit unrelated load-induced timeouts (`4074 passed`, `43 timed out`, `26 skipped`); CI remains the authoritative isolated full-suite gate.
-- Pending CI and production verification.
+- CI Vitest, pytest, perimeter, and secret-scan gates passed. Deployed `d9808fa68da2341d0e3873b666c9b49c9bac3708`; all health gates passed, `nextjs-db-read` is `ok`, overall health is `up`, and `radon-nextjs` is active with `NRestarts=0`.
+- Existing browser tabs must reload once to receive the corrected client bundle; subsequent transient warnings clear on the next clean 30-second poll even when `last_sync` is unchanged.
