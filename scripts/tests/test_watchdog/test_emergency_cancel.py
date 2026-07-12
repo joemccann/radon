@@ -46,6 +46,15 @@ def test_cancel_emergency_posts_cancel_by_tag(monkeypatch):
     assert calls[0][1] == {"token": "t"}
 
 
+def test_cancel_emergency_treats_missing_tag_as_resolved(monkeypatch):
+    from watchdog import notify
+
+    monkeypatch.setenv("PUSHOVER_USER", "u")
+    monkeypatch.setenv("PUSHOVER_TOKEN", "t")
+    with patch("watchdog.notify._http_post", return_value=(404, b'{"errors":["not found"]}')):
+        assert notify.cancel_emergency("external-health-probe") is None
+
+
 def test_emergency_payload_carries_tag():
     from watchdog import notify
 
