@@ -130,6 +130,46 @@ describe("cached polling does not amplify IB live sync", () => {
     expect(result.current.error).toContain("snapshot is stale");
   });
 
+  it("clears a transient portfolio warning after a clean poll of the same snapshot", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(portfolio, "Turso read failed; serving last in-memory portfolio snapshot"))
+      .mockResolvedValueOnce(response(portfolio));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => usePortfolio(true));
+    await flush();
+    expect(result.current.error).toContain("Turso read failed");
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.data?.last_sync).toBe(portfolio.last_sync);
+    expect(result.current.error).toBeNull();
+  });
+
+  it("clears a transient orders warning after a clean poll of the same snapshot", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(response(orders, "Turso read failed; serving cached orders"))
+      .mockResolvedValueOnce(response(orders));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const { result } = renderHook(() => useOrders(true));
+    await flush();
+    expect(result.current.error).toContain("Turso read failed");
+
+    await act(async () => {
+      vi.advanceTimersByTime(30_000);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(result.current.data?.last_sync).toBe(orders.last_sync);
+    expect(result.current.error).toBeNull();
+  });
+
   it("orders manual sync keeps a stale fallback visible as degraded", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(response(orders))

@@ -49,13 +49,14 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
       if (!mountedRef.current || generation !== dataGenerationRef.current) return;
       setData(json);
       setLastSync(json.last_sync || null);
-      if (
-        warningSnapshotRef.current == null ||
-        warningSnapshotRef.current !== json.last_sync
-      ) {
-        warningSnapshotRef.current = null;
-        setError(null);
+      const warning = res.headers.get("X-Sync-Warning");
+      if (warning) {
+        warningSnapshotRef.current = json.last_sync || null;
+        setError(warning);
+        return;
       }
+      warningSnapshotRef.current = null;
+      setError(null);
     } catch (err) {
       if (mountedRef.current && generation === dataGenerationRef.current) {
         setError(err instanceof Error ? err.message : "Unknown error");

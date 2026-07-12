@@ -395,3 +395,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - A cache-only portfolio GET saying “live sync was not requested” is describing request policy, not root cause. Investigate the scheduled writer separately; in this incident the stale snapshot came from an IB connection timeout, while the visible Turso errors were collateral damage from the CRI query/reset loop.
 - Source-contract tests must derive repository paths from the test file (`import.meta.url`), not `process.cwd()`, because local package scripts and root-level CI invoke Vitest from different working directories.
 - When production drift blocks an immutable deploy, archive the divergent artifact before restoring the tested version. Runtime-enriched tracked data is evidence worth preserving even when it cannot be allowed to overwrite a reviewed release.
+
+## 2026-07-12 - transient warning recovery
+
+- A successful cache poll must clear a prior transport warning even when the snapshot identifier or `last_sync` is unchanged. Tying error recovery to new data makes one transient failure latch indefinitely during weekends, closed markets, or any quiet period.
+- When a global degraded banner combines errors from multiple hooks, audit every producer in the fallback chain. Fixing portfolio alone is insufficient if orders uses the same same-snapshot latch.
+- Separate backend recovery from frontend recovery explicitly: a green deep probe proves reads work now, but it does not prove an already-mounted client cleared warning state. Verify both state transitions before declaring the incident resolved.
