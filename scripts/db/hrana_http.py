@@ -89,6 +89,35 @@ def _check_statement_ok(body: dict) -> None:
         raise HranaHttpError(str(error.get("message") or "statement failed"))
 
 
+def _execute_result(body: dict) -> dict:
+    results = body.get("results") or []
+    if not results:
+        raise HranaHttpError("empty pipeline response")
+    first = results[0]
+    if first.get("type") != "ok":
+        error = first.get("error") or {}
+        raise HranaHttpError(str(error.get("message") or "statement failed"))
+    response = first.get("response") or {}
+    if response.get("type") != "execute":
+        raise HranaHttpError("unexpected pipeline response type")
+    return response.get("result") or {}
+
+
+def _cell_value(cell: Any) -> Any:
+    if not isinstance(cell, dict):
+        return cell
+    if cell.get("type") == "null":
+        return None
+    return cell.get("value")
+
+
+def _rows_as_tuples(result: dict) -> list[tuple]:
+    return [
+        tuple(_cell_value(cell) for cell in raw_row)
+        for raw_row in (result.get("rows") or [])
+    ]
+
+
 def _refuse_pytest_pollution() -> None:
     """Same guard as ``db.client``: a test that forgets to mock this
     transport must never reach production Turso
@@ -120,6 +149,29 @@ def hrana_execute(
         raise HranaHttpError("TURSO_DB_URL / TURSO_AUTH_TOKEN not configured")
     try:
         _check_statement_ok(_post_pipeline(http_origin, token, sql, tuple(args), timeout))
+    except HranaHttpError:
+        raise
+    except Exception as exc:
+        raise HranaHttpError(f"{type(exc).__name__}: {exc}") from exc
+
+
+def hrana_query(
+    sql: str, args: Sequence[Any] = (), timeout: float = HRANA_TIMEOUT_S
+) -> list[tuple]:
+    """Bounded SELECT (or any row-returning statement) over Hrana HTTP.
+
+    Returns rows as positional tuples. Same timeout/error contract as
+    :func:`hrana_execute`. Prefer this over ``libsql_experimental`` for any
+    call that must not hang the process indefinitely.
+    """
+    _refuse_pytest_pollution()
+    db_url, token = read_env()
+    http_origin = http_url_from_libsql(db_url)
+    if not http_origin or not token:
+        raise HranaHttpError("TURSO_DB_URL / TURSO_AUTH_TOKEN not configured")
+    try:
+        body = _post_pipeline(http_origin, token, sql, tuple(args), timeout)
+        return _rows_as_tuples(_execute_result(body))
     except HranaHttpError:
         raise
     except Exception as exc:
