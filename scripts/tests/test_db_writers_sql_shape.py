@@ -55,6 +55,19 @@ def db_with_schema(monkeypatch: pytest.MonkeyPatch) -> Iterator[sqlite3.Connecti
     monkeypatch.setattr(client_mod, "_cached", conn, raising=False)
     monkeypatch.setattr(client_mod, "get_db", lambda: conn)
 
+    import db.hrana_http as hrana_mod
+
+    def local_hrana_query(sql, params=(), **_kwargs):
+        return conn.execute(sql, params).fetchall()
+
+    def local_hrana_execute(sql, params=(), **_kwargs):
+        cursor = conn.execute(sql, params)
+        conn.commit()
+        return cursor.rowcount
+
+    monkeypatch.setattr(hrana_mod, "hrana_query", local_hrana_query)
+    monkeypatch.setattr(hrana_mod, "hrana_execute", local_hrana_execute)
+
     import importlib
     import db.writer as writer_mod
     importlib.reload(writer_mod)
