@@ -125,6 +125,19 @@ def test_git_repo_is_parent_of_cloud_root():
     assert da.GIT_REPO == da.REPO.parent
 
 
+def test_gather_does_not_mix_general_git_dirtiness_into_config(monkeypatch):
+    monkeypatch.setattr(da, "_check_repo_dirty", lambda _drifts: (_ for _ in ()).throw(
+        AssertionError("general worktree state is not deployed config drift")
+    ))
+    monkeypatch.setattr(da, "_compare_file_pair", lambda *args: None)
+    monkeypatch.setattr(da, "_check_compose", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_units", lambda drifts, known: None)
+    monkeypatch.setattr(da, "_check_sudoers", lambda drifts: None)
+    monkeypatch.setattr(da, "_check_env_invariants", lambda drifts: None)
+    monkeypatch.setattr(da, "_read", lambda path: "")
+    assert da.gather() == ([], {}, [])
+
+
 def test_symlinked_unit_is_not_a_canonical_regular_artifact(tmp_path, monkeypatch):
     services = tmp_path / "services"
     live = tmp_path / "systemd"

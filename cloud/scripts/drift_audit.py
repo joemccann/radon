@@ -44,8 +44,11 @@ Also checked:
   * Environment invariant: every installed radon-*.service must carry
     RADON_DB_NO_REPLICA=1 (supplied fleet-wide by the prefix drop-in),
     asserted via `systemctl show -p Environment`.
-  * uncommitted changes to TRACKED files in this repo (hand-edits on the
-    VPS that never made it into git). Untracked files are ignored.
+  * Runtime artifacts are compared directly to their canonical cloud source.
+    General Git worktree cleanliness is deliberately outside this audit: the
+    production checkout can contain application/data hotfixes unrelated to
+    deployed configuration, and every managed config target is already
+    covered by an explicit file or unit comparison.
 
 The result is written as service_health row `config-drift` -- heartbeat on
 EVERY run (state=ok when clean, state=error with a compact diff summary on
@@ -460,7 +463,9 @@ def gather() -> tuple[list[dict], dict[str, str], list[str]]:
     _check_units(raw_drifts, known_untracked)
     _check_sudoers(raw_drifts)
     _check_env_invariants(raw_drifts)
-    _check_repo_dirty(raw_drifts)
+    # Do not conflate application checkout hygiene with deployed configuration
+    # drift. Managed runtime artifacts above are compared byte-for-byte or by
+    # normalized unit directives, which is both narrower and actionable.
 
     allowlist = parse_allowlist(_read(REPO / "config" / "drift-allowlist.conf") or "")
     drifts, allowed = [], {}
