@@ -110,15 +110,14 @@ def main() -> int:
     os.environ.setdefault("RADON_DB_NO_REPLICA", "1")
 
     try:
-        from scripts.db.client import get_db
-        from scripts.db.retention import run_retention_sweep
+        from scripts.db.retention import run_retention_sweep_http
     except ImportError:
-        from db.client import get_db  # type: ignore
-        from db.retention import run_retention_sweep  # type: ignore
+        from db.retention import run_retention_sweep_http  # type: ignore
 
+    # Bounded Hrana HTTP only — never libsql_experimental (no client timeout;
+    # first fleet retention run hung with 74ms CPU for 10+ minutes).
     try:
-        db = get_db()
-        results = run_retention_sweep(db)
+        results = run_retention_sweep_http()
     except Exception as exc:
         detail = {"error": str(exc)[:SUMMARY_CAP]}
         write_service_health("error", detail, started_at)
