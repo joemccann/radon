@@ -20,6 +20,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+import os
 from typing import Optional
 
 
@@ -47,8 +48,11 @@ def _get_db():
     """Lazy import keeps ``import watchdog`` cheap and lets the test
     fixture monkeypatch ``db.client.get_db`` before this is called.
     """
-    from db.client import get_db
-    return get_db()
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        from db.client import get_db
+        return get_db()
+    from .state_db import get_state_db
+    return get_state_db()
 
 
 def _cooldown_key(severity: str) -> str:

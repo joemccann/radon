@@ -630,17 +630,18 @@ def save_state(path: Path, state: WatchdogState) -> None:
 
 
 def trigger_restart(unit: str, dry_run: bool = False) -> bool:
-    """Queue Gateway recovery or restart one non-Gateway unit.
+    """Run Gateway recovery or restart one non-Gateway unit.
 
-    The fixed preheld adapter owns the long-running Gateway cycle, so the
-    watchdog queues it with ``systemctl --no-block start`` and returns before
-    its 45-second cycle ceiling. Other unit restarts route through the locked,
+    The fixed preheld adapter owns the Gateway cycle. Wait for the oneshot so
+    a successful systemd handoff is not mistaken for a successful recovery;
+    otherwise failed helpers consume the bounded restart budget while the
+    broker remains down. Other unit restarts route through the locked,
     root-owned operator instead of broad systemctl privilege.
     """
     is_preheld_gateway = unit == DEFAULT_RESTART_UNIT
     if is_preheld_gateway:
-        cmd = ["systemctl", "--no-block", "start", unit]
-        timeout = 10
+        cmd = ["systemctl", "start", unit]
+        timeout = 40
     else:
         cmd = ["/usr/local/bin/radon", "unit", "restart", unit]
         timeout = 40

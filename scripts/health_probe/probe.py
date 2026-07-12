@@ -588,11 +588,19 @@ def run_probe(source: str = PROBE_SOURCE) -> dict:
     runs_row = build_runs_row(edge_row, user_path, freshness, checked_at,
                               _worst_latency_ms(ping, status, user_raw, freshness_raw))
 
-    upsert_external_probe(edge_row)
-    insert_external_probe_run(runs_row)
+    write_errors = []
+    for label, writer, row in (
+        ("latest", upsert_external_probe, edge_row),
+        ("history", insert_external_probe_run, runs_row),
+    ):
+        try:
+            writer(row)
+        except TursoHttpError as exc:
+            write_errors.append("%s: %s" % (label, exc))
     return {
         "edge_row": edge_row,
         "runs_row": runs_row,
+        "write_errors": write_errors,
         "exit_code": exit_code_for(edge_row["ok"], user_path["ok"],
                                    freshness["freshness_ok"], freshness["market_state"],
                                    freshness.get("availability_ok")),
@@ -600,11 +608,9 @@ def run_probe(source: str = PROBE_SOURCE) -> dict:
 
 
 def main() -> int:
-    try:
-        outcome = run_probe()
-    except TursoHttpError as exc:
-        sys.stderr.write("[health_probe] FAILED to write probe rows: %s\n" % exc)
-        return 1
+    outcome = run_probe()
+    if outcome["write_errors"]:
+        sys.stderr.write("[health_probe] probe ledger degraded: %s\n" % "; ".join(outcome["write_errors"]))
     sys.stdout.write(json.dumps({"edge": outcome["edge_row"], "run": outcome["runs_row"]}) + "\n")
     if outcome["exit_code"] != 0:
         sys.stderr.write("[health_probe] UNHEALTHY (arming the workflow-failure email): %s\n"

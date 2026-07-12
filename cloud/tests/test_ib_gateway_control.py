@@ -50,7 +50,7 @@ if [ "${1:-}" = inspect ]; then
   # Mirror real docker inspect: exit 0 with true/false for known containers,
   # non-zero + No such object only when the container does not exist.
   if [ ! -f "$FAKE_DOCKER_STATE" ]; then
-    printf 'Error: No such object: ib-gateway\\n' >&2
+    printf '%s\\n' "${FAKE_DOCKER_MISSING_MESSAGE:-Error: No such object: ib-gateway}" >&2
     exit 1
   fi
   if [ "$(cat "$FAKE_DOCKER_STATE")" = running ]; then
@@ -132,6 +132,21 @@ def test_dead_container_start_acquires_lease_before_compose(control_env):
     assert re.search(r"compose .* up -d", log.read_text())
     assert lock.exists()
     assert "radon-cloud.ib-gateway-control" in lock.read_text()
+
+
+def test_lowercase_missing_container_reconciles_stopped_transition(control_env):
+    env, state, log, _lock = control_env
+    transition = Path(env["RADON_IB_TRANSITION_PATH"])
+    transition.write_text('{"desired":"stopped","action":"preheld-down"}\n')
+    env["FAKE_DOCKER_STATE"] = str(state)
+    env["FAKE_DOCKER_MISSING_MESSAGE"] = "error: no such object: ib-gateway"
+
+    result = _run_control(env, "start")
+
+    assert result.returncode == 0, result.stderr
+    assert "Reconciled prior Docker transition at desired=stopped" in result.stdout
+    assert state.read_text().strip() == "running"
+    assert not transition.exists()
 
 
 def test_held_lease_refuses_dead_container_start(control_env):

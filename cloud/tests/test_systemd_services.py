@@ -484,3 +484,9 @@ class TestCrossCutting:
         # contention; cascading stops black out recovery surfaces.
         assert "radon-ib-gateway.service" not in u.get("wants", "")
         assert "radon-ib-gateway.service" not in u.get("requires", "")
+def test_api_migration_transport_stall_is_bounded_without_masking_errors(services_dir):
+    service = (services_dir / "radon-api.service").read_text()
+    command = next(line for line in service.splitlines() if line.startswith("ExecStartPre="))
+    assert "/usr/bin/timeout 30" in command
+    assert '"$rc" -eq 124' in command
+    assert '"$rc" -eq 0' in command

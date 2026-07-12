@@ -101,3 +101,27 @@ def test_reconcile_leaves_still_failing_service_alone(db_conn):
         )
 
     assert cancelled == [], "must NOT cancel an emergency while the service is still failing"
+
+
+def test_reconcile_retries_after_cancel_transport_failure(db_conn):
+    from watchdog import cooldown, check
+    from watchdog import __main__ as wd_main
+
+    cooldown.mark_notified(service="cri-scan", severity="P1", now=NOW)
+    healthy = check.CheckOutcome(
+        service="cri-scan", kind="stale", status="healthy", severity=None,
+        fired=False, message="fresh", consecutive_failures=0, now=NOW,
+    )
+
+    with patch("watchdog.notify.cancel_emergency", return_value="pushover 503") as cancel:
+        wd_main._reconcile_recovered_emergencies(
+            outcomes=[healthy], now=NOW + timedelta(minutes=5)
+        )
+        wd_main._reconcile_recovered_emergencies(
+            outcomes=[healthy], now=NOW + timedelta(minutes=6)
+        )
+
+    assert cancel.call_count == 2
+    assert "cri-scan" in cooldown.active_emergency_services(
+        now=NOW + timedelta(minutes=7)
+    )

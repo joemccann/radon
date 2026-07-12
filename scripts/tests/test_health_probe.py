@@ -905,22 +905,23 @@ class TestRunProbe:
         assert probe.main() == probe.EXIT_UNHEALTHY
         assert history["freshness_ok"] == 0
 
-    def test_main_returns_1_when_write_fails(self, monkeypatch):
+    def test_main_preserves_healthy_verdict_when_latest_write_fails(self, monkeypatch):
         _patch_happy_network(monkeypatch)
 
         def _boom(_row):
             raise turso_http.TursoHttpError("down")
         monkeypatch.setattr(probe, "upsert_external_probe", _boom)
-        assert probe.main() == 1
+        monkeypatch.setattr(probe, "insert_external_probe_run", lambda row: None)
+        assert probe.main() == 0
 
-    def test_main_returns_1_when_history_write_fails(self, monkeypatch):
+    def test_main_preserves_healthy_verdict_when_history_write_fails(self, monkeypatch):
         _patch_happy_network(monkeypatch)
         monkeypatch.setattr(probe, "upsert_external_probe", lambda row: None)
 
         def _boom(_row):
             raise turso_http.TursoHttpError("down")
         monkeypatch.setattr(probe, "insert_external_probe_run", _boom)
-        assert probe.main() == 1
+        assert probe.main() == 0
 
 
 # ── dead-man's-switch reader ─────────────────────────────────────────────────

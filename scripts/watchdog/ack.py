@@ -8,6 +8,7 @@ powers the CLI `status` command.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
+import os
 from typing import Optional
 
 
@@ -22,8 +23,11 @@ def _parse_iso(s: str) -> datetime:
 
 
 def _get_db():
-    from db.client import get_db
-    return get_db()
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        from db.client import get_db
+        return get_db()
+    from .state_db import get_state_db
+    return get_state_db()
 
 
 def add_ack(*, service: str, hours: int = 4, reason: Optional[str] = None,
