@@ -160,14 +160,14 @@ def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> 
 
 
 # libsql_experimental has NO client timeout and holds the GIL while blocked.
-# Fleet archive 2026-07-12: multi-row ``DELETE ... WHERE taken_at IN (...)``
-# over fat JSON rows timed out / closed the Hrana connection. Single-key
-# DELETEs complete in ~40ms. SELECT keys in pages, delete one key at a time
-# over the bounded HTTP pipeline.
-PORTFOLIO_DELETE_BATCH = 100
-# Per-key deletes are ~40ms when Turso is healthy; keep the bound tight so a
-# wedged key is skipped quickly instead of burning minutes of retries.
-_DELETE_HTTP_TIMEOUT_S = 12.0
+# Fleet archive 2026-07-12 lessons:
+#   * multi-row DELETE IN (...) of fat JSON can hang Turso under load
+#   * concurrent archive + retention oneshots saturate Turso → every op
+#     times out for ~1h until systemd kills the unit
+#   * single-key DELETE is ~40ms when the DB is quiet
+# Prefer a small subquery batch first; fall back to single-key on timeout.
+PORTFOLIO_DELETE_BATCH = 50
+_DELETE_HTTP_TIMEOUT_S = 20.0
 _DELETE_MAX_ATTEMPTS = 2
 _DELETE_TRANSPORT_MARKERS = (
     "hrana",
@@ -214,10 +214,10 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
     """Delete portfolio_snapshots rows with ``taken_at < cutoff``.
 
     Owned by the archive pipeline (export off-box BEFORE calling this).
-    Pages key SELECTs, then issues one DELETE per key over bounded Hrana
-    HTTP. Multi-key IN-lists hang Turso on fat payload rows. Keys that keep
-    timing out are skipped and the scan floor advances past them so one
-    stuck row cannot block the rest of the cutoff range. Resumable.
+    Strategy (quiet Turso, measured 2026-07-12):
+      1. DELETE ... WHERE taken_at IN (SELECT ... LIMIT N)  — fast path
+      2. on transport timeout, fall back to single-key DELETEs for that page
+    Bounded Hrana HTTP only. Resumable across process restarts.
     """
     try:
         from .hrana_http import hrana_execute, hrana_query
@@ -225,33 +225,54 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
         from db.hrana_http import hrana_execute, hrana_query  # type: ignore[no-redef]
 
     total = 0
-    # Exclusive lower bound so skipped keys at the front of the ORDER BY
-    # cannot be re-selected forever (2026-07-12 fleet archive hang class).
-    after: str | None = None
+    use_batch = True
     while True:
-        if after is None:
-            rows = _hrana_with_retry(
-                lambda: hrana_query(
-                    "SELECT taken_at FROM portfolio_snapshots "
-                    "WHERE taken_at < ? ORDER BY taken_at LIMIT ?",
-                    (cutoff, batch_size),
-                    timeout=_DELETE_HTTP_TIMEOUT_S,
-                )
+        # Probe remaining work cheaply — also the loop exit when empty.
+        probe = _hrana_with_retry(
+            lambda: hrana_query(
+                "SELECT taken_at FROM portfolio_snapshots "
+                "WHERE taken_at < ? ORDER BY taken_at LIMIT 1",
+                (cutoff,),
+                timeout=_DELETE_HTTP_TIMEOUT_S,
             )
-        else:
-            rows = _hrana_with_retry(
-                lambda a=after: hrana_query(
-                    "SELECT taken_at FROM portfolio_snapshots "
-                    "WHERE taken_at < ? AND taken_at > ? "
-                    "ORDER BY taken_at LIMIT ?",
-                    (cutoff, a, batch_size),
-                    timeout=_DELETE_HTTP_TIMEOUT_S,
+        )
+        if not probe:
+            return total
+
+        if use_batch:
+            try:
+                _hrana_with_retry(
+                    lambda: hrana_execute(
+                        "DELETE FROM portfolio_snapshots WHERE taken_at IN ("
+                        "SELECT taken_at FROM portfolio_snapshots "
+                        "WHERE taken_at < ? ORDER BY taken_at LIMIT ?)",
+                        (cutoff, batch_size),
+                        timeout=_DELETE_HTTP_TIMEOUT_S,
+                    )
                 )
+                # Best-effort progress accounting (Hrana has no rowcount).
+                total += batch_size
+                continue
+            except Exception as exc:  # noqa: BLE001
+                print(
+                    f"[portfolio-delete] batch={batch_size} failed ({exc}); "
+                    "falling back to single-key for this page",
+                    flush=True,
+                )
+                use_batch = False
+
+        # Single-key fallback page.
+        rows = _hrana_with_retry(
+            lambda: hrana_query(
+                "SELECT taken_at FROM portfolio_snapshots "
+                "WHERE taken_at < ? ORDER BY taken_at LIMIT ?",
+                (cutoff, batch_size),
+                timeout=_DELETE_HTTP_TIMEOUT_S,
             )
+        )
         ids = [str(r[0]) for r in rows if r and r[0] is not None]
         if not ids:
             return total
-
         page_deleted = 0
         for taken_at in ids:
             try:
@@ -264,16 +285,19 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
                 )
                 total += 1
                 page_deleted += 1
-            except Exception as exc:  # noqa: BLE001 — advance past wedged keys
-                print(
-                    f"[portfolio-delete] skip {taken_at}: {exc}",
-                    flush=True,
-                )
-            after = taken_at
-
-        if page_deleted == 0 and len(ids) < batch_size:
-            # Final page was all skips — nothing left reachable under cutoff.
+            except Exception as exc:  # noqa: BLE001 — leave for next run
+                print(f"[portfolio-delete] skip {taken_at}: {exc}", flush=True)
+        if page_deleted == 0:
+            # Entire page wedged — stop so the unit does not thrash for 1h.
+            print(
+                f"[portfolio-delete] abort: 0/{len(ids)} keys deleted in page "
+                f"(cutoff={cutoff}); will retry next run",
+                flush=True,
+            )
             return total
+        # If single-key is working, try batch again next loop.
+        if page_deleted == len(ids):
+            use_batch = True
     return total
 
 

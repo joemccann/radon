@@ -28,11 +28,11 @@ ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/archive_portfolio_snaps
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py --allow-delete-without-upload
 StandardOutput=journal
 StandardError=journal
-# libsql_experimental has no client-side timeouts (DUR-09). A healthy archive
-# of a fat backlog can run tens of minutes of paged SELECTs + batched DELETEs;
-# 1h matches db-backup and is ~2-3x a normal catch-up run after retention is
-# already current.
-TimeoutStartSec=3600
+# Healthy steady-state prune is minutes; a first catch-up of a fat backlog
+# needs room for paged archive + single-key delete fallback. 2h is the
+# scheduling contract with db-retention (08:10 UTC) — do not raise without
+# also moving that timer later.
+TimeoutStartSec=7200
 
 [Install]
 WantedBy=multi-user.target

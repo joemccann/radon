@@ -8,8 +8,11 @@ Description=Radon DB backup -- nightly full Turso dump
 # missed firing (host down) replays on next boot instead of skipping the
 # day. The main repo's serviceHealthWindows.ts gives `db-backup` a 48h
 # window: one missed night pages before the second is lost.
-OnCalendar=*-*-* 07:52:00 UTC
-RandomizedDelaySec=300
+# 09:00 UTC: after portfolio-archive (05:40, max 2h) and db-retention (08:10)
+# so the dump captures the pruned hot set. Was 07:52; moved when archive +
+# retention were deconflicted (2026-07-12 concurrent Turso storm).
+OnCalendar=*-*-* 09:00:00 UTC
+RandomizedDelaySec=180
 Persistent=true
 
 [Install]

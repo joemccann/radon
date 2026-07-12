@@ -116,6 +116,22 @@ class TestRunSweep:
             retention.KeepLatestPolicy("scanner_snapshots", "scan_time", 10),
             retention.KeepLatestPolicy("vcg_snapshots", "scan_time", 10),
         ]
-        results = retention.run_retention_sweep_http(policies)
+        results, failed = retention.run_retention_sweep_http(policies)
         assert results == {"scanner_snapshots": 0, "vcg_snapshots": 0}
+        assert failed == []
         assert calls == ["scanner_snapshots", "vcg_snapshots"]
+
+    def test_http_sweep_collects_failed_tables(self, retention, monkeypatch):
+        def boom(policy, timeout=60.0):
+            if policy.table == "vcg_snapshots":
+                raise TimeoutError("timed out")
+            return 0
+
+        monkeypatch.setattr(retention, "apply_policy_http", boom)
+        policies = [
+            retention.KeepLatestPolicy("scanner_snapshots", "scan_time", 10),
+            retention.KeepLatestPolicy("vcg_snapshots", "scan_time", 10),
+        ]
+        results, failed = retention.run_retention_sweep_http(policies)
+        assert results == {"scanner_snapshots": 0, "vcg_snapshots": 0}
+        assert failed == ["vcg_snapshots"]

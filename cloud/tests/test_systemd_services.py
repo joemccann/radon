@@ -209,16 +209,16 @@ class TestPortfolioArchive:
     def test_oneshot_with_timeout(self, unit):
         svc = unit("radon-portfolio-archive.service")["Service"]
         assert svc["type"] == "oneshot"
-        assert svc["timeoutstartsec"] == "3600"
+        assert svc["timeoutstartsec"] == "7200"
         assert "archive_portfolio_snapshots.py" in svc["execstart"]
         assert "--allow-delete-without-upload" in svc["execstart"]
         env = svc.get("environment", "")
         # configparser may only keep the last Environment= line
         assert "RADON_DB_NO_REPLICA=1" in env or "RADON_DB_NO_REPLICA" in env
 
-    def test_timer_before_backup(self, unit):
+    def test_timer_alone_before_retention(self, unit):
         timer = unit("radon-portfolio-archive.timer")["Timer"]
-        assert "06:52" in timer["oncalendar"]
+        assert "05:40" in timer["oncalendar"]
         assert timer.get("persistent") == "true"
 
 
@@ -231,9 +231,9 @@ class TestDbRetention:
         assert svc["timeoutstartsec"] == "1800"
         assert "db_retention_sweep.py" in svc["execstart"]
 
-    def test_timer_between_archive_and_backup(self, unit):
+    def test_timer_after_archive_window(self, unit):
         timer = unit("radon-db-retention.timer")["Timer"]
-        assert "07:22" in timer["oncalendar"]
+        assert "08:10" in timer["oncalendar"]
         assert timer.get("persistent") == "true"
 
 
