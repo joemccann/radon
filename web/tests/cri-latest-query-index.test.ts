@@ -1,8 +1,9 @@
 import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-const ROOT = join(process.cwd(), "..");
+const ROOT = fileURLToPath(new URL("../../", import.meta.url));
 const indexedOrder = "ORDER BY date DESC, taken_at DESC LIMIT 1";
 
 describe("latest CRI queries use the existing composite index", () => {
