@@ -467,6 +467,21 @@ RADON_ARCHIVE_S3_PREFIX=portfolio_snapshots/
 
 Smoke: `python3 scripts/archive_portfolio_snapshots.py --dry-run` must print `"s3_configured": true` when env is loaded.
 
+Export streams keyset pages into monthly partitions (bounded `batch_size` in-flight
+payloads — never materializes the full fat table). Crash-safe order is always
+archive + verify + B2 upload, then `delete_portfolio_snapshots_before`.
+
+**Catch-up DELETE only** (archive already on disk + B2 — e.g. unit OOM’d during
+the Turso prune phase):
+
+```bash
+python3 scripts/archive_portfolio_snapshots.py --delete-only
+```
+
+Skips re-export/upload; only runs the batched payload-free DELETE for rows older
+than the retention cutoff. Do not use unless partitions for those months are
+already verified off-box.
+
 ### Recovering cold portfolio history from B2
 
 ```bash

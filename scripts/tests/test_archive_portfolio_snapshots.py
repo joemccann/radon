@@ -45,6 +45,35 @@ def test_group_by_month():
     assert len(grouped["2026-06"]) == 1
 
 
+def test_stream_month_chunks_breaks_on_month_and_max_chunk():
+    """ASC rows yield (month, chunk) without ever holding more than max_chunk."""
+    rows = [
+        ("2026-05-01T00:00:00Z", "a"),
+        ("2026-05-02T00:00:00Z", "b"),
+        ("2026-05-03T00:00:00Z", "c"),
+        ("2026-06-01T00:00:00Z", "d"),
+        ("2026-06-02T00:00:00Z", "e"),
+    ]
+    chunks = list(arch.stream_month_chunks(rows, max_chunk=2))
+    assert chunks == [
+        ("2026-05", [("2026-05-01T00:00:00Z", "a"), ("2026-05-02T00:00:00Z", "b")]),
+        ("2026-05", [("2026-05-03T00:00:00Z", "c")]),
+        ("2026-06", [("2026-06-01T00:00:00Z", "d"), ("2026-06-02T00:00:00Z", "e")]),
+    ]
+    assert all(len(chunk) <= 2 for _, chunk in chunks)
+
+
+def test_stream_month_chunks_empty():
+    assert list(arch.stream_month_chunks([], max_chunk=10)) == []
+
+
+def test_stream_month_chunks_single_row():
+    rows = [("2026-05-01T00:00:00Z", "{}")]
+    assert list(arch.stream_month_chunks(rows, max_chunk=500)) == [
+        ("2026-05", [("2026-05-01T00:00:00Z", "{}")]),
+    ]
+
+
 def test_rows_to_jsonl_bytes_parses_payload():
     rows = [("2026-05-03T00:00:00Z", '{"nav": 100}')]
     out = arch.rows_to_jsonl_bytes(rows).decode()
@@ -267,3 +296,112 @@ def test_run_archive_is_idempotent_dedup(db, tmp_path):
     arch.run_archive(db, cutoff=cutoff, **common)
     may = arch.read_partition_rows(tmp_path / "2026-05.jsonl.gz")
     assert len(may) == 2  # not 4
+
+
+def test_run_archive_streams_without_materializing_all_rows(db, tmp_path, monkeypatch):
+    """Peak in-flight payload buffer must stay at batch_size, never full table."""
+    peaks: list[int] = []
+    real_stream = arch.stream_month_chunks
+
+    def tracking_stream(rows, max_chunk):
+        for month, chunk in real_stream(rows, max_chunk):
+            peaks.append(len(chunk))
+            yield month, chunk
+
+    monkeypatch.setattr(arch, "stream_month_chunks", tracking_stream)
+    summary = arch.run_archive(
+        db,
+        cutoff="2026-06-26T00:00:00.000000Z",
+        archive_dir=tmp_path,
+        batch_size=1,
+        s3_cfg=None,
+        do_delete=False,
+        allow_delete_without_upload=False,
+        delete_fn=_delete_fn(db),
+    )
+    assert summary["archived"] == 3
+    assert peaks == [1, 1, 1]
+    assert max(peaks) == 1
+    assert arch.read_partition_rows(tmp_path / "2026-05.jsonl.gz").keys() == {
+        "2026-05-03T00:00:00.000000Z",
+        "2026-05-20T00:00:00.000000Z",
+    }
+
+
+def test_run_archive_delete_only_skips_export(db, tmp_path, monkeypatch):
+    """--delete-only: no partition writes / uploads; only DELETE catch-up."""
+    writes: list[Path] = []
+    monkeypatch.setattr(
+        arch,
+        "write_partition_atomic",
+        lambda path, data: writes.append(path),
+    )
+    uploads: list[str] = []
+    monkeypatch.setattr(
+        arch, "upload_partition", lambda path, key, cfg: uploads.append(key)
+    )
+    # Pre-seed partitions so operator assumption "already archived" holds for
+    # local inspection; delete-only must not re-read or rewrite them.
+    (tmp_path / "2026-05.jsonl.gz").write_bytes(b"pre-existing")
+
+    summary = arch.run_archive(
+        db,
+        cutoff="2026-06-26T00:00:00.000000Z",
+        archive_dir=tmp_path,
+        batch_size=500,
+        s3_cfg={
+            "endpoint_url": "https://x",
+            "bucket": "b",
+            "access_key": "a",
+            "secret_key": "s",
+            "region": "auto",
+            "prefix": "portfolio_snapshots/",
+        },
+        do_delete=True,
+        allow_delete_without_upload=False,
+        delete_fn=_delete_fn(db),
+        delete_only=True,
+    )
+    assert summary["archived"] == 0
+    assert summary["months"] == []
+    assert summary["uploaded"] == 0
+    assert summary["deleted"] == 3
+    assert summary["delete_only"] is True
+    assert writes == []
+    assert uploads == []
+    remaining = db.execute("SELECT taken_at FROM portfolio_snapshots").fetchall()
+    assert remaining == [("2026-06-27T00:00:00.000000Z",)]
+    # Pre-existing partition untouched.
+    assert (tmp_path / "2026-05.jsonl.gz").read_bytes() == b"pre-existing"
+
+
+def test_run_archive_delete_only_refuses_without_upload(db, tmp_path):
+    with pytest.raises(RuntimeError, match="off-box upload not configured"):
+        arch.run_archive(
+            db,
+            cutoff="2026-06-26T00:00:00.000000Z",
+            archive_dir=tmp_path,
+            batch_size=500,
+            s3_cfg=None,
+            do_delete=True,
+            allow_delete_without_upload=False,
+            delete_fn=_delete_fn(db),
+            delete_only=True,
+        )
+    assert db.execute("SELECT COUNT(*) FROM portfolio_snapshots").fetchone()[0] == 4
+
+
+def test_run_archive_delete_only_with_allow_flag(db, tmp_path):
+    summary = arch.run_archive(
+        db,
+        cutoff="2026-06-26T00:00:00.000000Z",
+        archive_dir=tmp_path,
+        batch_size=500,
+        s3_cfg=None,
+        do_delete=True,
+        allow_delete_without_upload=True,
+        delete_fn=_delete_fn(db),
+        delete_only=True,
+    )
+    assert summary["deleted"] == 3
+    assert summary["archived"] == 0

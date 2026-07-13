@@ -213,7 +213,9 @@ def _hrana_with_retry(fn, *, attempts: int = _DELETE_MAX_ATTEMPTS):
 def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_DELETE_BATCH) -> int:
     """Delete portfolio_snapshots rows with ``taken_at < cutoff``.
 
-    Owned by the archive pipeline (export off-box BEFORE calling this).
+    Owned by the archive pipeline (export + verify off-box BEFORE calling this).
+    Payload-free: only selects/deletes ``taken_at`` keys in batches so catch-up
+    ``--delete-only`` runs stay memory-cheap after B2 already holds the archive.
     Strategy (quiet Turso, measured 2026-07-12):
       1. DELETE ... WHERE taken_at IN (SELECT ... LIMIT N)  — fast path
       2. on transport timeout, fall back to single-key DELETEs for that page
