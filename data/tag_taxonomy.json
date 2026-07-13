@@ -185,6 +185,19 @@
     "BERKSHIRE",
     "REAL-GDP",
     "EMERGING-MARKETS",
-    "TECHNOLOGY"
+    "TECHNOLOGY",
+    "SIREN",
+    "FINANCIALS",
+    "SX7E",
+    "BOFA-BULL-BEAR",
+    "SELL-SIGNAL",
+    "BOFA-BULL-BEAR-INDICATOR",
+    "XLK",
+    "HEALTH-CARE",
+    "HEALTHCARE",
+    "MERGERS-ACQUISITIONS",
+    "BIOTECH",
+    "M&A",
+    "HEAD-SHOULDERS"
   ]
 }

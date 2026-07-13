@@ -6,50 +6,50 @@
     "TMHC",
     "LTH",
     "GTX",
-    "FTDR",
     "VSXY",
+    "FTDR",
     "IBP",
     "MTH",
-    "LAUR",
     "BOOT",
+    "LAUR",
     "KTB",
     "SKY",
     "CVSA",
     "CVCO",
     "ABG",
-    "URBN",
     "ANF",
+    "URBN",
+    "CAKE",
     "LRN",
     "MHO",
-    "CAKE",
-    "GHC",
     "DORM",
+    "GHC",
     "PII",
+    "AAP",
     "GPI",
     "KBH",
-    "AAP",
     "SIG",
     "RSI",
-    "GOLF",
-    "WRBY",
-    "RRR",
     "SHOO",
+    "GOLF",
+    "RRR",
+    "WRBY",
+    "DAN",
     "ASO",
     "VGNT",
-    "DAN",
     "PHIN",
     "VC",
     "HGV",
     "VAC",
-    "PATK",
     "NAVN",
-    "RH",
-    "PENN",
+    "PATK",
     "AEO",
     "CALY",
+    "PENN",
+    "RH",
     "SGHC",
-    "PTON",
     "LCII",
+    "PTON",
     "OSW",
     "UTI",
     "SHAK",
@@ -58,110 +58,110 @@
     "CPRI",
     "PRDO",
     "GT",
-    "STRA",
     "FUN",
     "KSS",
+    "STRA",
     "SONO",
-    "LINC",
     "CCS",
+    "LINC",
     "LZB",
+    "ADNT",
     "EYE",
     "MCRI",
-    "LEG",
-    "ADNT",
-    "GENI",
     "SBH",
+    "LEG",
+    "GENI",
     "WWW",
     "CRI",
     "BKE",
     "LIND",
-    "GIII",
     "UAA",
+    "GIII",
     "COUR",
-    "WEN",
     "LGIH",
-    "DCH",
-    "GBTG",
-    "REAL",
+    "WEN",
     "BJRI",
-    "SAH",
-    "XPEL",
-    "WINA",
+    "DCH",
+    "REAL",
+    "GBTG",
     "CBRL",
+    "UPBD",
+    "SAH",
+    "WINA",
+    "XPEL",
     "PRSU",
     "PZZA",
-    "UPBD",
-    "THRM",
     "UA",
+    "THRM",
     "HOG",
-    "BRSL",
     "APEI",
+    "BRSL",
     "SBET",
-    "FIGS",
     "RVLV",
+    "FIGS",
     "PTRN",
     "DRVN",
     "SMP",
-    "GCT",
     "PRKS",
     "SG",
-    "GOLD",
+    "GCT",
     "WGO",
     "MATW",
+    "GOLD",
     "BZH",
     "FWRG",
-    "LCID",
     "TH",
-    "FOXF",
+    "LCID",
     "BLMN",
+    "FOXF",
     "SWBI",
     "TDUP",
     "HZO",
     "SABR",
     "ACEL",
-    "HELE",
-    "GRPN",
     "ZGN",
+    "GRPN",
+    "HELE",
     "HOV",
     "MOV",
     "ARKO",
     "CSV",
-    "XMAX",
     "RGR",
     "OXM",
     "ETD",
+    "XMAX",
     "MBUU",
-    "SLDP",
     "CPS",
     "LOCO",
     "DIN",
+    "SLDP",
     "DFH",
     "MNRO",
-    "SERV",
     "MCFT",
     "SFIX",
+    "SERV",
+    "BBW",
     "ARHS",
     "BBBY",
-    "CWH",
     "CAL",
-    "BBW",
+    "CWH",
     "SVV",
     "KRUS",
     "HVT",
     "GCO",
     "STRT",
-    "PTLO",
     "SWIM",
+    "PTLO",
     "CTRN",
-    "PLAY",
     "SHOE",
-    "BH",
     "RCKY",
+    "PLAY",
     "JOUT",
-    "DNUT",
     "CRCT",
-    "JACK",
+    "DNUT",
     "BOBS",
+    "BH",
+    "JACK",
     "NATH",
     "POWW",
     "MH",
@@ -169,36 +169,36 @@
     "EVGO",
     "ZUMZ",
     "XPOF",
-    "LOVE",
-    "WOOF",
     "FNKO",
+    "WOOF",
+    "LOVE",
     "HLLY",
     "JAKK",
+    "BNED",
     "FOSL",
     "WEYS",
     "MPAA",
     "LEGH",
-    "APC",
     "DBI",
-    "BNED",
-    "PXED",
-    "SRI",
+    "APC",
     "RICK",
     "INSE",
+    "SRI",
+    "PXED",
     "KLC",
     "ESCA",
-    "ELA",
     "HBB",
+    "ELA",
     "SGC",
     "BRCB",
     "BALY",
-    "ONEW",
     "JILL",
-    "VENU",
+    "ONEW",
     "LE",
+    "VENU",
     "GPRO",
-    "BHA",
     "DIBS",
+    "BHA",
     "LCUT",
     "FLWS",
     "TRON",
@@ -218,16 +218,16 @@
       "GTX"
     ],
     [
-      "FTDR",
-      "VSXY"
+      "VSXY",
+      "FTDR"
     ],
     [
       "IBP",
       "MTH"
     ],
     [
-      "LAUR",
-      "BOOT"
+      "BOOT",
+      "LAUR"
     ],
     [
       "KTB",
@@ -239,46 +239,46 @@
     ],
     [
       "ABG",
-      "URBN"
+      "ANF"
     ],
     [
-      "ANF",
-      "LRN"
-    ],
-    [
-      "MHO",
+      "URBN",
       "CAKE"
     ],
     [
-      "GHC",
-      "DORM"
+      "LRN",
+      "MHO"
+    ],
+    [
+      "DORM",
+      "GHC"
     ],
     [
       "PII",
-      "GPI"
+      "AAP"
     ],
     [
-      "KBH",
-      "AAP"
+      "GPI",
+      "KBH"
     ],
     [
       "SIG",
       "RSI"
     ],
     [
-      "GOLF",
-      "WRBY"
+      "SHOO",
+      "GOLF"
     ],
     [
       "RRR",
-      "SHOO"
-    ],
-    [
-      "ASO",
-      "VGNT"
+      "WRBY"
     ],
     [
       "DAN",
+      "ASO"
+    ],
+    [
+      "VGNT",
       "PHIN"
     ],
     [
@@ -287,23 +287,23 @@
     ],
     [
       "VAC",
-      "PATK"
+      "NAVN"
     ],
     [
-      "NAVN",
-      "RH"
-    ],
-    [
-      "PENN",
+      "PATK",
       "AEO"
     ],
     [
       "CALY",
+      "PENN"
+    ],
+    [
+      "RH",
       "SGHC"
     ],
     [
-      "PTON",
-      "LCII"
+      "LCII",
+      "PTON"
     ],
     [
       "OSW",
@@ -322,31 +322,31 @@
       "GT"
     ],
     [
-      "STRA",
-      "FUN"
+      "FUN",
+      "KSS"
     ],
     [
-      "KSS",
+      "STRA",
       "SONO"
     ],
     [
-      "LINC",
-      "CCS"
+      "CCS",
+      "LINC"
     ],
     [
       "LZB",
-      "EYE"
+      "ADNT"
     ],
     [
-      "MCRI",
-      "LEG"
-    ],
-    [
-      "ADNT",
-      "GENI"
+      "EYE",
+      "MCRI"
     ],
     [
       "SBH",
+      "LEG"
+    ],
+    [
+      "GENI",
       "WWW"
     ],
     [
@@ -355,54 +355,54 @@
     ],
     [
       "LIND",
-      "GIII"
+      "UAA"
     ],
     [
-      "UAA",
+      "GIII",
       "COUR"
     ],
     [
-      "WEN",
-      "LGIH"
+      "LGIH",
+      "WEN"
     ],
     [
-      "DCH",
-      "GBTG"
+      "BJRI",
+      "DCH"
     ],
     [
       "REAL",
-      "BJRI"
+      "GBTG"
+    ],
+    [
+      "CBRL",
+      "UPBD"
     ],
     [
       "SAH",
-      "XPEL"
+      "WINA"
     ],
     [
-      "WINA",
-      "CBRL"
+      "XPEL",
+      "PRSU"
     ],
     [
-      "PRSU",
-      "PZZA"
+      "PZZA",
+      "UA"
     ],
     [
-      "UPBD",
-      "THRM"
-    ],
-    [
-      "UA",
+      "THRM",
       "HOG"
     ],
     [
-      "BRSL",
-      "APEI"
+      "APEI",
+      "BRSL"
     ],
     [
       "SBET",
-      "FIGS"
+      "RVLV"
     ],
     [
-      "RVLV",
+      "FIGS",
       "PTRN"
     ],
     [
@@ -410,28 +410,28 @@
       "SMP"
     ],
     [
+      "PRKS",
+      "SG"
+    ],
+    [
       "GCT",
-      "PRKS"
+      "WGO"
     ],
     [
-      "SG",
+      "MATW",
       "GOLD"
-    ],
-    [
-      "WGO",
-      "MATW"
     ],
     [
       "BZH",
       "FWRG"
     ],
     [
-      "LCID",
-      "TH"
+      "TH",
+      "LCID"
     ],
     [
-      "FOXF",
-      "BLMN"
+      "BLMN",
+      "FOXF"
     ],
     [
       "SWBI",
@@ -443,11 +443,11 @@
     ],
     [
       "ACEL",
-      "HELE"
+      "ZGN"
     ],
     [
       "GRPN",
-      "ZGN"
+      "HELE"
     ],
     [
       "HOV",
@@ -458,43 +458,43 @@
       "CSV"
     ],
     [
-      "XMAX",
-      "RGR"
+      "RGR",
+      "OXM"
     ],
     [
-      "OXM",
-      "ETD"
+      "ETD",
+      "XMAX"
     ],
     [
       "MBUU",
-      "SLDP"
+      "CPS"
     ],
     [
-      "CPS",
-      "LOCO"
+      "LOCO",
+      "DIN"
     ],
     [
-      "DIN",
+      "SLDP",
       "DFH"
     ],
     [
       "MNRO",
+      "MCFT"
+    ],
+    [
+      "SFIX",
       "SERV"
     ],
     [
-      "MCFT",
-      "SFIX"
+      "BBW",
+      "ARHS"
     ],
     [
-      "ARHS",
-      "BBBY"
-    ],
-    [
-      "CWH",
+      "BBBY",
       "CAL"
     ],
     [
-      "BBW",
+      "CWH",
       "SVV"
     ],
     [
@@ -506,28 +506,28 @@
       "STRT"
     ],
     [
-      "PTLO",
-      "SWIM"
+      "SWIM",
+      "PTLO"
     ],
     [
       "CTRN",
-      "PLAY"
-    ],
-    [
-      "SHOE",
-      "BH"
+      "SHOE"
     ],
     [
       "RCKY",
-      "JOUT"
+      "PLAY"
     ],
     [
-      "DNUT",
+      "JOUT",
       "CRCT"
     ],
     [
-      "JACK",
+      "DNUT",
       "BOBS"
+    ],
+    [
+      "BH",
+      "JACK"
     ],
     [
       "NATH",
@@ -543,46 +543,46 @@
     ],
     [
       "XPOF",
-      "LOVE"
+      "FNKO"
     ],
     [
       "WOOF",
-      "FNKO"
+      "LOVE"
     ],
     [
       "HLLY",
       "JAKK"
     ],
     [
-      "FOSL",
-      "WEYS"
+      "BNED",
+      "FOSL"
     ],
     [
-      "MPAA",
-      "LEGH"
+      "WEYS",
+      "MPAA"
     ],
     [
-      "APC",
+      "LEGH",
       "DBI"
     ],
     [
-      "BNED",
-      "PXED"
-    ],
-    [
-      "SRI",
+      "APC",
       "RICK"
     ],
     [
       "INSE",
+      "SRI"
+    ],
+    [
+      "PXED",
       "KLC"
     ],
     [
       "ESCA",
-      "ELA"
+      "HBB"
     ],
     [
-      "HBB",
+      "ELA",
       "SGC"
     ],
     [
@@ -590,19 +590,19 @@
       "BALY"
     ],
     [
-      "ONEW",
-      "JILL"
+      "JILL",
+      "ONEW"
     ],
     [
-      "VENU",
-      "LE"
+      "LE",
+      "VENU"
     ],
     [
       "GPRO",
-      "BHA"
+      "DIBS"
     ],
     [
-      "DIBS",
+      "BHA",
       "LCUT"
     ],
     [

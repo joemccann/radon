@@ -5,203 +5,203 @@
     "MOGA",
     "BTSG",
     "CYTK",
-    "HUT",
     "UMBF",
+    "HUT",
     "FROG",
     "KRYS",
-    "AGX",
-    "CTRE",
-    "ONB",
-    "FCFS",
-    "ALKS",
-    "GKOS",
     "VSAT",
-    "SNEX",
+    "ONB",
+    "CTRE",
+    "FCFS",
+    "GKOS",
     "ESE",
+    "ALKS",
     "CRNX",
-    "TGTX",
+    "AGX",
+    "SNEX",
     "COMP",
+    "TGTX",
     "PRAX",
     "PTGX",
-    "MXL",
-    "HQY",
-    "PCVX",
-    "RHP",
-    "CIFR",
     "EAT",
-    "QBTS",
-    "ENS",
-    "RIOT",
-    "HIMS",
-    "OSCR",
-    "CORZ",
-    "KYMR",
+    "HQY",
+    "MXL",
+    "RHP",
     "TEX",
-    "PTCT",
-    "SYRE",
+    "PCVX",
+    "ENS",
+    "CIFR",
+    "RIOT",
+    "KYMR",
     "TRNO",
-    "PLXS",
+    "HIMS",
+    "QBTS",
+    "CORZ",
+    "OSCR",
+    "FLR",
+    "SYRE",
     "SLAB",
     "JBTM",
-    "FLR",
+    "PLXS",
     "ACA",
     "VLY",
-    "FSS",
-    "MAC",
-    "NPO",
     "ZWS",
-    "XENE",
+    "NPO",
+    "CMC",
+    "MAC",
+    "FSS",
+    "PTCT",
+    "JXN",
     "IDCC",
-    "ORA",
     "LNTH",
-    "SM",
+    "ORA",
     "EPRT",
+    "KGS",
     "TMHC",
     "GBCI",
-    "KGS",
-    "CMC",
+    "SM",
+    "XENE",
     "CVLT",
-    "COGT",
-    "MYRG",
     "SWX",
     "AROC",
     "NUVL",
-    "JXN",
+    "MYRG",
     "LUMN",
+    "COGT",
+    "GATX",
     "SSRM",
     "LGND",
     "SRRK",
-    "MRCY",
-    "DFTX",
-    "RYTM",
-    "GATX",
-    "MATX",
     "HWC",
     "POR",
+    "MATX",
+    "DFTX",
+    "CWST",
     "UBSI",
     "LTH",
-    "CWST",
-    "VSEC",
-    "MIRM",
-    "APGE",
+    "MRCY",
     "VSH",
+    "APGE",
     "NJR",
-    "TXNM",
-    "ESNT",
-    "KRG",
+    "VSEC",
+    "RYTM",
     "AUB",
-    "SIGI",
-    "TWST",
-    "ACIW",
-    "QLYS",
+    "TXNM",
     "KLIC",
-    "ENVA",
-    "LQDA",
-    "ACMR",
-    "BKH",
-    "RGTI",
-    "GTX",
+    "ESNT",
     "ABCB",
-    "GVA",
+    "KRG",
+    "BKH",
+    "SIGI",
+    "ACIW",
+    "ENVA",
+    "MIRM",
     "NOVT",
-    "AIR",
-    "FTDR",
-    "OUT",
-    "JOBY",
-    "HOMB",
+    "GTX",
+    "TWST",
+    "QLYS",
+    "ACMR",
     "CGON",
-    "PECO",
-    "BCPC",
-    "MTRN",
+    "RGTI",
     "VSXY",
-    "YOU",
-    "PRM",
-    "PBF",
+    "LQDA",
+    "GVA",
+    "HOMB",
+    "AIR",
+    "MTRN",
+    "FTDR",
+    "PECO",
     "IBP",
-    "CRSP",
-    "VRNS",
-    "TVTX",
-    "TXG",
-    "PIPR",
-    "SXT",
-    "RDN",
-    "MARA",
-    "RIG",
-    "SBRA",
-    "LMND",
-    "GLNG",
-    "SYNA",
-    "AX",
-    "OGS",
+    "BCPC",
+    "OUT",
+    "YOU",
+    "PBF",
+    "JOBY",
+    "PRM",
     "UEC",
-    "BIPC",
-    "NE",
-    "MTH",
-    "OPEN",
-    "ZETA",
+    "RDN",
     "PSMT",
-    "INDV",
-    "LAUR",
-    "TTAN",
+    "TXG",
+    "NE",
+    "RIG",
+    "PIPR",
+    "GLNG",
+    "VRNS",
+    "LMND",
+    "TVTX",
+    "BIPC",
+    "OGS",
+    "AX",
+    "MTH",
     "BOOT",
-    "CNO",
+    "SBRA",
+    "SXT",
     "HRI",
+    "CRSP",
+    "LAUR",
+    "SYNA",
+    "MARA",
+    "ZETA",
     "HASI",
+    "UFPI",
+    "INDV",
+    "TTAN",
+    "KTB",
+    "CNO",
     "MGY",
-    "VCYT",
     "SR",
     "UCTT",
-    "TENB",
-    "UFPI",
-    "DNTH",
-    "KTB",
-    "RDNT",
-    "MUR",
-    "FFIN",
-    "LIVN",
-    "SKY",
-    "ROAD",
-    "FLG",
-    "EBC",
-    "RUSHA",
-    "KNF",
-    "CVSA",
-    "SFBS",
-    "CNX",
-    "CVCO",
-    "ORKA",
-    "RXO",
-    "TCBI",
-    "ACLS",
-    "CBT",
-    "MRX",
-    "CSW",
-    "CECO",
-    "NWE",
-    "ASB",
-    "VAL",
-    "FULT",
-    "CELC",
-    "BMI",
-    "DIOD",
-    "TNGX",
-    "OPLN",
-    "LGN",
-    "XMTR",
-    "MMSI",
     "REZI",
-    "BCO",
-    "EXTR",
-    "HCC",
-    "BDC",
+    "KNF",
+    "RDNT",
+    "FLG",
+    "MUR",
+    "RUSHA",
+    "LIVN",
+    "FFIN",
+    "DNTH",
+    "VCYT",
+    "CSW",
+    "EBC",
+    "ROAD",
+    "TENB",
+    "CBT",
+    "NWE",
+    "SFBS",
+    "SKY",
+    "CVSA",
+    "CVCO",
+    "ACLS",
+    "OPEN",
+    "TCBI",
+    "VAL",
+    "ASB",
+    "MMSI",
+    "XMTR",
+    "TNGX",
+    "DIOD",
+    "ORKA",
+    "CNX",
+    "CECO",
     "AZZ",
-    "LASR",
-    "CDP",
-    "PI",
-    "SPHR",
+    "FULT",
+    "RXO",
+    "EXTR",
+    "BCO",
+    "BMI",
+    "LGN",
+    "HCC",
+    "OPLN",
     "BNL",
+    "OII",
+    "CDP",
     "ATMU",
-    "IBOC"
+    "PI",
+    "BDC",
+    "IBOC",
+    "SKT",
+    "MRX",
+    "ABG"
   ],
   "pairs": [
     [
@@ -210,399 +210,399 @@
     ],
     [
       "CYTK",
-      "HUT"
+      "UMBF"
     ],
     [
-      "UMBF",
+      "HUT",
       "FROG"
     ],
     [
       "KRYS",
-      "AGX"
-    ],
-    [
-      "CTRE",
-      "ONB"
-    ],
-    [
-      "FCFS",
-      "ALKS"
-    ],
-    [
-      "GKOS",
       "VSAT"
     ],
     [
-      "SNEX",
-      "ESE"
+      "ONB",
+      "CTRE"
+    ],
+    [
+      "FCFS",
+      "GKOS"
+    ],
+    [
+      "ESE",
+      "ALKS"
     ],
     [
       "CRNX",
-      "TGTX"
+      "AGX"
     ],
     [
-      "COMP",
+      "SNEX",
+      "COMP"
+    ],
+    [
+      "TGTX",
       "PRAX"
     ],
     [
       "PTGX",
-      "MXL"
+      "EAT"
     ],
     [
       "HQY",
-      "PCVX"
+      "MXL"
     ],
     [
       "RHP",
-      "CIFR"
+      "TEX"
     ],
     [
-      "EAT",
-      "QBTS"
+      "PCVX",
+      "ENS"
     ],
     [
-      "ENS",
+      "CIFR",
       "RIOT"
     ],
     [
-      "HIMS",
-      "OSCR"
-    ],
-    [
-      "CORZ",
-      "KYMR"
-    ],
-    [
-      "TEX",
-      "PTCT"
-    ],
-    [
-      "SYRE",
+      "KYMR",
       "TRNO"
     ],
     [
+      "HIMS",
+      "QBTS"
+    ],
+    [
+      "CORZ",
+      "OSCR"
+    ],
+    [
+      "FLR",
+      "SYRE"
+    ],
+    [
+      "SLAB",
+      "JBTM"
+    ],
+    [
       "PLXS",
-      "SLAB"
+      "ACA"
     ],
     [
-      "JBTM",
-      "FLR"
-    ],
-    [
-      "ACA",
-      "VLY"
-    ],
-    [
-      "FSS",
-      "MAC"
-    ],
-    [
-      "NPO",
+      "VLY",
       "ZWS"
     ],
     [
-      "XENE",
-      "IDCC"
-    ],
-    [
-      "ORA",
-      "LNTH"
-    ],
-    [
-      "SM",
-      "EPRT"
-    ],
-    [
-      "TMHC",
-      "GBCI"
-    ],
-    [
-      "KGS",
+      "NPO",
       "CMC"
     ],
     [
-      "CVLT",
+      "MAC",
+      "FSS"
+    ],
+    [
+      "PTCT",
+      "JXN"
+    ],
+    [
+      "IDCC",
+      "LNTH"
+    ],
+    [
+      "ORA",
+      "EPRT"
+    ],
+    [
+      "KGS",
+      "TMHC"
+    ],
+    [
+      "GBCI",
+      "SM"
+    ],
+    [
+      "XENE",
+      "CVLT"
+    ],
+    [
+      "SWX",
+      "AROC"
+    ],
+    [
+      "NUVL",
+      "MYRG"
+    ],
+    [
+      "LUMN",
       "COGT"
     ],
     [
-      "MYRG",
-      "SWX"
-    ],
-    [
-      "AROC",
-      "NUVL"
-    ],
-    [
-      "JXN",
-      "LUMN"
-    ],
-    [
-      "SSRM",
-      "LGND"
-    ],
-    [
-      "SRRK",
-      "MRCY"
-    ],
-    [
-      "DFTX",
-      "RYTM"
-    ],
-    [
       "GATX",
-      "MATX"
+      "SSRM"
+    ],
+    [
+      "LGND",
+      "SRRK"
     ],
     [
       "HWC",
       "POR"
     ],
     [
-      "UBSI",
-      "LTH"
+      "MATX",
+      "DFTX"
     ],
     [
       "CWST",
-      "VSEC"
+      "UBSI"
     ],
     [
-      "MIRM",
-      "APGE"
+      "LTH",
+      "MRCY"
     ],
     [
       "VSH",
-      "NJR"
+      "APGE"
     ],
     [
-      "TXNM",
-      "ESNT"
+      "NJR",
+      "VSEC"
     ],
     [
-      "KRG",
+      "RYTM",
       "AUB"
     ],
     [
-      "SIGI",
-      "TWST"
+      "TXNM",
+      "KLIC"
     ],
     [
-      "ACIW",
-      "QLYS"
-    ],
-    [
-      "KLIC",
-      "ENVA"
-    ],
-    [
-      "LQDA",
-      "ACMR"
-    ],
-    [
-      "BKH",
-      "RGTI"
-    ],
-    [
-      "GTX",
+      "ESNT",
       "ABCB"
     ],
     [
-      "GVA",
-      "NOVT"
+      "KRG",
+      "BKH"
     ],
     [
-      "AIR",
-      "FTDR"
+      "SIGI",
+      "ACIW"
     ],
     [
-      "OUT",
-      "JOBY"
+      "ENVA",
+      "MIRM"
     ],
     [
-      "HOMB",
+      "NOVT",
+      "GTX"
+    ],
+    [
+      "TWST",
+      "QLYS"
+    ],
+    [
+      "ACMR",
       "CGON"
     ],
     [
-      "PECO",
-      "BCPC"
-    ],
-    [
-      "MTRN",
+      "RGTI",
       "VSXY"
     ],
     [
-      "YOU",
-      "PRM"
+      "LQDA",
+      "GVA"
     ],
     [
-      "PBF",
+      "HOMB",
+      "AIR"
+    ],
+    [
+      "MTRN",
+      "FTDR"
+    ],
+    [
+      "PECO",
       "IBP"
     ],
     [
-      "CRSP",
-      "VRNS"
+      "BCPC",
+      "OUT"
     ],
     [
-      "TVTX",
+      "YOU",
+      "PBF"
+    ],
+    [
+      "JOBY",
+      "PRM"
+    ],
+    [
+      "UEC",
+      "RDN"
+    ],
+    [
+      "PSMT",
       "TXG"
     ],
     [
+      "NE",
+      "RIG"
+    ],
+    [
       "PIPR",
-      "SXT"
-    ],
-    [
-      "RDN",
-      "MARA"
-    ],
-    [
-      "RIG",
-      "SBRA"
-    ],
-    [
-      "LMND",
       "GLNG"
     ],
     [
-      "SYNA",
-      "AX"
+      "VRNS",
+      "LMND"
+    ],
+    [
+      "TVTX",
+      "BIPC"
     ],
     [
       "OGS",
-      "UEC"
-    ],
-    [
-      "BIPC",
-      "NE"
+      "AX"
     ],
     [
       "MTH",
-      "OPEN"
-    ],
-    [
-      "ZETA",
-      "PSMT"
-    ],
-    [
-      "INDV",
-      "LAUR"
-    ],
-    [
-      "TTAN",
       "BOOT"
     ],
     [
-      "CNO",
-      "HRI"
+      "SBRA",
+      "SXT"
+    ],
+    [
+      "HRI",
+      "CRSP"
+    ],
+    [
+      "LAUR",
+      "SYNA"
+    ],
+    [
+      "MARA",
+      "ZETA"
     ],
     [
       "HASI",
-      "MGY"
+      "UFPI"
     ],
     [
-      "VCYT",
+      "INDV",
+      "TTAN"
+    ],
+    [
+      "KTB",
+      "CNO"
+    ],
+    [
+      "MGY",
       "SR"
     ],
     [
       "UCTT",
-      "TENB"
-    ],
-    [
-      "UFPI",
-      "DNTH"
-    ],
-    [
-      "KTB",
-      "RDNT"
-    ],
-    [
-      "MUR",
-      "FFIN"
-    ],
-    [
-      "LIVN",
-      "SKY"
-    ],
-    [
-      "ROAD",
-      "FLG"
-    ],
-    [
-      "EBC",
-      "RUSHA"
-    ],
-    [
-      "KNF",
-      "CVSA"
-    ],
-    [
-      "SFBS",
-      "CNX"
-    ],
-    [
-      "CVCO",
-      "ORKA"
-    ],
-    [
-      "RXO",
-      "TCBI"
-    ],
-    [
-      "ACLS",
-      "CBT"
-    ],
-    [
-      "MRX",
-      "CSW"
-    ],
-    [
-      "CECO",
-      "NWE"
-    ],
-    [
-      "ASB",
-      "VAL"
-    ],
-    [
-      "FULT",
-      "CELC"
-    ],
-    [
-      "BMI",
-      "DIOD"
-    ],
-    [
-      "TNGX",
-      "OPLN"
-    ],
-    [
-      "LGN",
-      "XMTR"
-    ],
-    [
-      "MMSI",
       "REZI"
     ],
     [
-      "BCO",
-      "EXTR"
+      "KNF",
+      "RDNT"
+    ],
+    [
+      "FLG",
+      "MUR"
+    ],
+    [
+      "RUSHA",
+      "LIVN"
+    ],
+    [
+      "FFIN",
+      "DNTH"
+    ],
+    [
+      "VCYT",
+      "CSW"
+    ],
+    [
+      "EBC",
+      "ROAD"
+    ],
+    [
+      "TENB",
+      "CBT"
+    ],
+    [
+      "NWE",
+      "SFBS"
+    ],
+    [
+      "SKY",
+      "CVSA"
+    ],
+    [
+      "CVCO",
+      "ACLS"
+    ],
+    [
+      "OPEN",
+      "TCBI"
+    ],
+    [
+      "VAL",
+      "ASB"
+    ],
+    [
+      "MMSI",
+      "XMTR"
+    ],
+    [
+      "TNGX",
+      "DIOD"
+    ],
+    [
+      "ORKA",
+      "CNX"
+    ],
+    [
+      "CECO",
+      "AZZ"
+    ],
+    [
+      "FULT",
+      "RXO"
+    ],
+    [
+      "EXTR",
+      "BCO"
+    ],
+    [
+      "BMI",
+      "LGN"
     ],
     [
       "HCC",
-      "BDC"
+      "OPLN"
     ],
     [
-      "AZZ",
-      "LASR"
+      "BNL",
+      "OII"
     ],
     [
       "CDP",
-      "PI"
+      "ATMU"
     ],
     [
-      "SPHR",
-      "BNL"
+      "PI",
+      "BDC"
     ],
     [
-      "ATMU",
-      "IBOC"
+      "IBOC",
+      "SKT"
+    ],
+    [
+      "MRX",
+      "ABG"
     ]
   ],
   "sector": "Multi-Sector",
