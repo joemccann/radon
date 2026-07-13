@@ -33,8 +33,6 @@ EXPECTED_SERVICE_FILES = [
     "radon-db-backup.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
-    "radon-media-backup.service",
-    "radon-media-backup.timer",
     "radon-db-retention.service",
     "radon-db-retention.timer",
     "radon-breadth.service",
@@ -62,6 +60,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-demo-mirror.timer",
     "radon-margin-debt.service",
     "radon-margin-debt.timer",
+    "radon-oi-changes.service",
+    "radon-oi-changes.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -240,23 +240,28 @@ class TestDbRetention:
         assert timer.get("persistent") == "true"
 
 
-class TestMediaBackup:
-    """Nightly media.radon.run tree backup to B2 (prefix media/)."""
+class TestOiChanges:
+    """P3: market-wide OI-changes oneshot 3x per RTH day."""
 
-    def test_oneshot_with_timeout(self, unit):
-        svc = unit("radon-media-backup.service")["Service"]
+    def test_oneshot_with_timeout_and_env(self, unit, services_dir):
+        svc = unit("radon-oi-changes.service")["Service"]
         assert svc["type"] == "oneshot"
-        assert svc["timeoutstartsec"] == "3600"
-        assert "media_backup.py" in svc["execstart"]
         assert svc["user"] == "radon"
-        assert "/home/radon/radon-cloud/.env" in svc["environmentfile"]
-        env = svc.get("environment", "")
-        assert "RADON_MEDIA_DIR" in env or "RADON_DB_NO_REPLICA" in env
+        assert svc["timeoutstartsec"] == "180"
+        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert svc["workingdirectory"] == "/home/radon/radon"
+        assert "run_oi_changes_refresh.sh" in svc["execstart"]
+        raw = (services_dir / "radon-oi-changes.service").read_text()
+        assert "Environment=RADON_DB_NO_REPLICA=1" in raw
 
-    def test_timer_after_db_backup(self, unit):
-        timer = unit("radon-media-backup.timer")["Timer"]
-        assert "10:15" in timer["oncalendar"]
+    def test_timer_three_rth_slots(self, unit, services_dir):
+        timer = unit("radon-oi-changes.timer")["Timer"]
         assert timer.get("persistent") == "true"
+        assert "Mon..Fri" in timer.get("oncalendar", "")
+        raw = (services_dir / "radon-oi-changes.timer").read_text()
+        assert "14:00:00 UTC" in raw
+        assert "17:00:00 UTC" in raw
+        assert "20:00:00 UTC" in raw
 
 
 class TestAPI:
