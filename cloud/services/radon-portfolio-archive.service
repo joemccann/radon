@@ -18,14 +18,10 @@ Environment=RADON_DB_NO_REPLICA=1
 # Script ships with the MAIN repo and lands on the next deploy. Until then
 # this condition skips the run CLEANLY (unit ends inactive, not failed).
 ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/archive_portfolio_snapshots.py
-# Local partitions under RADON_ARCHIVE_DIR (default
-# /home/radon/radon-cloud/archive/portfolio_snapshots) are always written and
-# verified before DELETE. --allow-delete-without-upload is intentional until
-# RADON_ARCHIVE_S3_* is configured: recovery remains via (1) local monthly
-# jsonl.gz partitions and (2) the 30-day nightly full Turso dumps. When S3 is
-# set, the script still uploads; remove the flag only if you want delete to
-# hard-fail without off-box upload.
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py --allow-delete-without-upload
+# Off-box upload required: RADON_ARCHIVE_S3_* (Backblaze B2) in EnvironmentFile.
+# Local partitions still written under RADON_ARCHIVE_DIR; job fails closed if
+# S3 is unset (no --allow-delete-without-upload).
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py
 StandardOutput=journal
 StandardError=journal
 # Healthy steady-state prune is minutes; a first catch-up of a fat backlog

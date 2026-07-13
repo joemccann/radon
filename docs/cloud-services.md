@@ -443,4 +443,4 @@ treat the nightly dumps as the only restore path.
 | 3 | systemd timer for `oi_changes` (currently on-demand only) | Future |
 | 4 | Vercel Edge replica for a public read-only dashboard | Future |
 | 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |
-| 6 | Configure `RADON_ARCHIVE_S3_*` so portfolio archive uploads off-box (unit currently allows local-verified delete until S3 is set) | Operator |
+| 6 | Configure `RADON_ARCHIVE_S3_*` (Backblaze B2 preferred — Cloudflare R2 blocked by billing lock) so portfolio archive uploads off-box; unit still has `--allow-delete-without-upload` until keys land in VPS `.env` | Operator |

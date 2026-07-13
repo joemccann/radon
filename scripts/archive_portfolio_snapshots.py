@@ -161,6 +161,10 @@ def s3_config_from_env(env: dict[str, str] | None = None) -> dict[str, str] | No
     }
     if not all(required.values()):
         return None
+    # B2 console often copies host-only; boto3 requires a scheme.
+    ep = required["endpoint_url"].strip()
+    if ep and not ep.startswith(("http://", "https://")):
+        required["endpoint_url"] = "https://" + ep
     required["region"] = env.get("RADON_ARCHIVE_S3_REGION", "auto")
     required["prefix"] = env.get("RADON_ARCHIVE_S3_PREFIX", "portfolio_snapshots/")
     return required
