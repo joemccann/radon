@@ -138,8 +138,10 @@ describe("site SEO contract", () => {
     );
 
     const routes = sitemap();
-    expect(routes).toHaveLength(9);
-    expect(routes).toHaveLength(1 + clusterPages.length + legalPages.length);
+    // home + clusters + legal + public /status surface map
+    expect(routes).toHaveLength(
+      1 + clusterPages.length + legalPages.length + 1,
+    );
     expect(routes[0]).toMatchObject({
       url: siteUrl,
       changeFrequency: "weekly",
@@ -167,6 +169,15 @@ describe("site SEO contract", () => {
       });
       expect(route.lastModified).toEqual(new Date(page.lastModified));
     });
+    const statusRoute = routes[1 + clusterPages.length + legalPages.length];
+    expect(statusRoute).toMatchObject({
+      url: `${siteUrl}/status`,
+      changeFrequency: "monthly",
+      priority: 0.4,
+    });
+    expect(statusRoute.lastModified).toEqual(
+      new Date(SITE_CONTENT_LAST_MODIFIED),
+    );
     for (const route of routes) {
       const lastModified = new Date(route.lastModified!);
       expect(Number.isNaN(lastModified.getTime())).toBe(false);
