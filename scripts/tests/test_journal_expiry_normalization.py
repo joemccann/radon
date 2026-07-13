@@ -69,9 +69,18 @@ def writer_with_sqlite(monkeypatch):
     monkeypatch.setattr(client_mod, "get_db", lambda: conn)
     monkeypatch.setattr(client_mod, "_cached", conn, raising=False)
 
+    import db.hrana_http as hrana_mod
+
+    def local_hrana_execute(sql, args=(), timeout=None):
+        conn.execute(sql, args)
+        conn.commit()
+
+    monkeypatch.setattr(hrana_mod, "hrana_execute", local_hrana_execute)
+
     import db.writer as writer_mod
 
     writer_mod = importlib.reload(writer_mod)
+    monkeypatch.setattr(hrana_mod, "hrana_execute", local_hrana_execute)
     return writer_mod, conn
 
 

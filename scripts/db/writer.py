@@ -19,17 +19,43 @@ from typing import Any, Optional
 try:
     # When imported as `scripts.db.writer` from project root.
     from .client import get_db
-    from .service_health_sql import SERVICE_HEALTH_UPSERT_SQL, service_health_upsert_args
     from ..clients.journal_basis import normalize_expiry_compact
 except ImportError:  # pragma: no cover
     # When imported flat after sys.path.insert(scripts/) like the existing
     # services do (cta_sync_service.py et al).
     from db.client import get_db  # type: ignore[no-redef]
-    from db.service_health_sql import (  # type: ignore[no-redef]
-        SERVICE_HEALTH_UPSERT_SQL,
-        service_health_upsert_args,
-    )
     from clients.journal_basis import normalize_expiry_compact  # type: ignore[no-redef]
+
+
+def _hrana_execute(sql: str, args: tuple = (), *, timeout: float | None = None) -> None:
+    """Bounded single-statement write via ``db.hrana_http`` (real socket timeout).
+
+    Lazy import keeps stripped envs importable and lets tests monkeypatch
+    ``db.hrana_http.hrana_execute`` without reloading this module.
+    """
+    try:
+        from .hrana_http import HRANA_TIMEOUT_S, hrana_execute
+    except ImportError:  # pragma: no cover
+        from db.hrana_http import HRANA_TIMEOUT_S, hrana_execute  # type: ignore[no-redef]
+
+    hrana_execute(sql, args, timeout=HRANA_TIMEOUT_S if timeout is None else timeout)
+
+
+# Shared SQL for the daemon journal path (fill_monitor / journal_sync). Kept
+# as a module constant so mock tests assert shape without parsing source.
+JOURNAL_UPSERT_SQL = """
+INSERT INTO journal (trade_id, payload, filled_at, written_at)
+VALUES (?, ?, ?, ?)
+ON CONFLICT(trade_id) DO UPDATE SET
+  payload    = excluded.payload,
+  filled_at  = excluded.filled_at,
+  written_at = excluded.written_at
+"""
+
+PORTFOLIO_SNAPSHOT_UPSERT_SQL = """
+INSERT OR REPLACE INTO portfolio_snapshots (taken_at, payload)
+VALUES (?, ?)
+"""
 
 
 def ensure_no_replica_for_writers() -> None:
@@ -304,15 +330,16 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
 
 
 def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
-    db = get_db()
-    db.execute(
-        """
-        INSERT OR REPLACE INTO portfolio_snapshots (taken_at, payload)
-        VALUES (?, ?)
-        """,
+    """Single-row portfolio snapshot upsert over bounded Hrana HTTP.
+
+    High-volume path (``ib_sync`` dual-write). The bulk DELETE / prune paths
+    already ride hrana; keeping the INSERT on the same transport means a slow
+    Turso cannot hang the sync subprocess without a socket bound.
+    """
+    _hrana_execute(
+        PORTFOLIO_SNAPSHOT_UPSERT_SQL,
         (taken_at, json.dumps(payload)),
     )
-    db.commit()
 
 
 def upsert_cash_flow(
@@ -364,20 +391,18 @@ def _journal_payload_with_compact_expiry(payload: dict[str, Any]) -> dict[str, A
 
 
 def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Optional[str] = None) -> None:
+    """Upsert one journal row over bounded Hrana HTTP (real socket timeout).
+
+    Used by the long-lived monitor daemon (fill_monitor / journal_sync) and
+    oneshot rehydrate/backfill scripts. Sync ``libsql_experimental`` has no
+    client timeouts and holds the GIL while blocked — a hung Turso call here
+    would stall the entire daemon cycle.
+    """
     payload = _journal_payload_with_compact_expiry(payload)
-    db = get_db()
-    db.execute(
-        """
-        INSERT INTO journal (trade_id, payload, filled_at, written_at)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(trade_id) DO UPDATE SET
-          payload    = excluded.payload,
-          filled_at  = excluded.filled_at,
-          written_at = excluded.written_at
-        """,
+    _hrana_execute(
+        JOURNAL_UPSERT_SQL,
         (trade_id, json.dumps(payload), filled_at, _now_iso()),
     )
-    db.commit()
 
 
 def upsert_discover_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
@@ -846,22 +871,23 @@ def record_service_health(
 ) -> None:
     """state ∈ {'ok', 'syncing', 'error', 'paused'}.
 
-    The statement + arg serialization live in ``db.service_health_sql`` so
-    the FastAPI heal path (which runs the same upsert over the bounded hrana
-    HTTP pipeline — sync libsql is banned in scripts/api) stays in lockstep.
+    Bounded Hrana HTTP via ``write_service_health_http`` (shared SQL in
+    ``db.service_health_sql``). Critical path for the monitor daemon,
+    ``service_cycle``, and ``scan_mirror`` — must not use sync libsql, which
+    has no client timeouts and holds the GIL while blocked.
     """
-    db = get_db()
-    db.execute(
-        SERVICE_HEALTH_UPSERT_SQL,
-        service_health_upsert_args(
-            service,
-            state,
-            started_at=started_at,
-            finished_at=finished_at,
-            error=error,
-        ),
+    try:
+        from .hrana_http import write_service_health_http
+    except ImportError:  # pragma: no cover
+        from db.hrana_http import write_service_health_http  # type: ignore[no-redef]
+
+    write_service_health_http(
+        service,
+        state,
+        started_at=started_at,
+        finished_at=finished_at,
+        error=error,
     )
-    db.commit()
 
 
 SERVICE_HEALTH_EVENTS_RETENTION_DAYS = 90

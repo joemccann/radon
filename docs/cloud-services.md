@@ -328,6 +328,19 @@ does not mean Turso necessarily failed.
 
 `scripts/host_metrics_sampler.py` (main repo, stdlib-only) runs every minute on the VPS via `radon-host-metrics.timer` (radon-cloud) and writes one row per run to the Turso `host_metrics` table (migration 0012): CPU % from a 1s `/proc/stat` delta, memory + swap from `/proc/meminfo`, `load1`, per-`radon-*`-unit ActiveState/NRestarts, and the FastAPI event-loop lag exposed as `loop_lag_ms` on `/health/lite`. Writes ride the bounded hrana path (`scripts/db/hrana_http.py`) with a capped JSONL fallback at `data/host_metrics_fallback.jsonl`; every run heartbeats `service_health[host-metrics]` (10-min freshness window). Retention is 14 days, pruned hourly by the sampler. The `/admin` page renders the latest values + 1h sparkline via `GET /api/admin/host-metrics`.
 
+### Bounded vs process-bound Turso writes (R5 partial)
+
+`libsql_experimental` has **no client timeouts** and holds the GIL while blocked. Prefer `scripts/db/hrana_http.py` (real `urllib` socket timeout) for hang-risk writers; leave bulk/oneshot scan writers on sync libsql under process supervision. Full inventory: module docstring of `scripts/db/client.py`.
+
+| Path | Transport | Why |
+|---|---|---|
+| `record_service_health` (daemon / service_cycle / scan_mirror) | hrana (`write_service_health_http` + `service_health_sql`) | Long-lived + frequent heartbeats |
+| `upsert_journal_entry` (fill_monitor / journal_sync) | hrana | Daemon fill path |
+| `upsert_portfolio_snapshot` | hrana | High-volume single-row dual-write |
+| portfolio DELETE / retention sweep / host_metrics / ib_watchdog | hrana | Already migrated |
+| FastAPI Turso I/O | `api.db_http` only | Sync libsql banned in process |
+| Other scan/snapshot upserts, cash_flows, prunes | sync libsql | Process-bound: `run_script` timeout / `TimeoutStartSec` / `RuntimeMaxSec` |
+
 ### Log shipping (DUR-12)
 
 journald on the VPS is on-box only (capped at 1G). A laptop launchd job (`~/Library/LaunchAgents/com.radon.journal-pull.plist`, daily + RunAtLoad) runs `scripts/journal_pull.sh`, which ssh-pulls `journalctl --since yesterday -o export | gzip` into `data/journal_archive/` (gitignored) and prunes local snapshots older than 30 days. Laptop-initiated by design — VPS-push to a sleeping laptop fails silently (media-rsync precedent). Inspect a snapshot with `zcat <file> | journalctl --file=- ...` or `gunzip` + `journalctl --root` import tooling.
@@ -506,7 +519,7 @@ gunzip -c /tmp/2026-06.jsonl.gz | head
 |---|------|-------|
 | 1 | ~~Nightly retention sweep on snapshot tables~~ | **Done** — `radon-portfolio-archive` + `radon-db-retention` |
 | 2 | restic backup of `radon_media` volume to B2 (DB dumps + portfolio cold-archive already on B2 / laptop pull) | Future |
-| 3 | systemd timer for `oi_changes` (currently on-demand only) | Future |
+| 3 | ~~systemd timer for `oi_changes` (currently on-demand only)~~ | **Done** — `radon-oi-changes.timer` 3x/RTH day (14/17/20 UTC Mon-Fri) via `run_oi_changes_refresh.sh` |
 | 4 | Vercel Edge replica for a public read-only dashboard | Future |
 | 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |
 | 6 | ~~Off-box portfolio archive (`RADON_ARCHIVE_S3_*`)~~ | **Done** — Backblaze B2 `radon-archive` (2026-07-13) |

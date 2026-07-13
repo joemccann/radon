@@ -64,6 +64,21 @@ def db_conn(monkeypatch: pytest.MonkeyPatch) -> Iterator[sqlite3.Connection]:
     monkeypatch.setattr(client_mod, "_cached", conn, raising=False)
     monkeypatch.setattr(client_mod, "get_db", lambda: conn)
 
+    # Hang-risk writers + watchdog heartbeats use bounded hrana (not get_db).
+    # Route the transport into the same in-memory sqlite so service_health
+    # upserts still land in db_conn for assertions.
+    import db.hrana_http as hrana_mod
+
+    def local_hrana_execute(sql, args=(), timeout=None):
+        conn.execute(sql, args)
+        conn.commit()
+
+    def local_hrana_query(sql, args=(), timeout=None):
+        return conn.execute(sql, args).fetchall()
+
+    monkeypatch.setattr(hrana_mod, "hrana_execute", local_hrana_execute)
+    monkeypatch.setattr(hrana_mod, "hrana_query", local_hrana_query)
+
     import importlib
     import db.writer as writer_mod
     importlib.reload(writer_mod)

@@ -1,11 +1,15 @@
 """Single source of truth for the ``service_health`` upsert statement.
 
-Shared by the sync writer (``scripts/db/writer.py:record_service_health``,
-used by subprocess scans / monitor daemon / watchdog) and the FastAPI heal
-path (``scripts/api/ib_gateway.py``), which executes the SAME statement over
-the bounded libSQL HTTP pipeline because the API process must never import
-sync libsql (see ``scripts/api/db_http.py`` and the
-``test_no_sync_libsql_in_api.py`` lint).
+Shared by:
+  - ``db.writer.record_service_health`` → ``db.hrana_http.write_service_health_http``
+    (monitor daemon / service_cycle / scan_mirror — bounded socket timeout)
+  - FastAPI heal path (``scripts/api/ib_gateway.py``) over ``api.db_http``
+  - Direct callers of ``write_service_health_http`` (ib_watchdog, host_metrics,
+    watchdog.notify)
+
+All production paths execute this SAME statement over bounded HTTP — never
+sync libsql on the critical path. The API process must never import
+``db.client`` / ``db.writer`` (see ``test_no_sync_libsql_in_api.py``).
 
 This module must stay free of libsql / db.client imports so scripts/api can
 import it.
