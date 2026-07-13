@@ -458,6 +458,7 @@ treat the nightly dumps as the only restore path.
 | `radon-portfolio-archive.timer` | **05:40** | Cold-archive `portfolio_snapshots` older than 30d → local monthly `jsonl.gz` → **Backblaze B2** upload → DELETE from Turso. Heartbeat: `portfolio-archive`. `TimeoutStartSec=7200`. |
 | `radon-db-retention.timer` | **08:10** | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. |
 | `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
+| `radon-media-backup.timer` | **10:15** | Mirror `media.radon.run` tree (`/home/radon/radon-cloud/media`) → B2 prefix `media/`. Heartbeat: `media-backup`. `TimeoutStartSec=3600`. |
 
 ### Backblaze B2 dependency (production required)
 
@@ -513,12 +514,48 @@ aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 cp \
 gunzip -c /tmp/2026-06.jsonl.gz | head
 ```
 
+## Media backup (media.radon.run → B2)
+
+Nightly off-box mirror of the Caddy static tree for `media.radon.run`.
+
+| | |
+|---|---|
+| Local root | `/home/radon/radon-cloud/media` (Caddy `file_server` root; also `RADON_MEDIA_REMOTE` on Hetzner) |
+| Object store | Same Backblaze B2 bucket as portfolio archive (`radon-archive`) |
+| Object prefix | `media/` (override with `RADON_MEDIA_BACKUP_PREFIX`) |
+| Script | `cloud/scripts/media_backup.py` |
+| Unit | `radon-media-backup.service` + `.timer` (**10:15 UTC**, after db-backup) |
+| Heartbeat | `service_health` row `media-backup` (48h freshness window) |
+| Credentials | Reuses `RADON_ARCHIVE_S3_*`; optional full override via `RADON_MEDIA_BACKUP_S3_*` |
+| Fail-closed | Missing credentials → unit exit 1 + `error` heartbeat (never silent green) |
+
+```bash
+# smoke (no upload): credentials must still be present in env
+python3 cloud/scripts/media_backup.py --dry-run
+# list remote
+aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 ls "s3://${RADON_ARCHIVE_S3_BUCKET}/media/"
+# restore one file
+aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 cp \
+  "s3://${RADON_ARCHIVE_S3_BUCKET}/media/<file>.png" /tmp/
+# full restore into a staging dir
+aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 sync \
+  "s3://${RADON_ARCHIVE_S3_BUCKET}/media/" /tmp/media-restore/
+```
+
+Enable on VPS (after deploy lands the unit files):
+
+```bash
+sudo systemctl enable --now radon-media-backup.timer
+sudo systemctl start radon-media-backup.service   # optional immediate run
+journalctl -u radon-media-backup -n 50 --no-pager
+```
+
 ## Known gaps
 
 | # | Item | Owner |
 |---|------|-------|
 | 1 | ~~Nightly retention sweep on snapshot tables~~ | **Done** — `radon-portfolio-archive` + `radon-db-retention` |
-| 2 | restic backup of `radon_media` volume to B2 (DB dumps + portfolio cold-archive already on B2 / laptop pull) | Future |
+| 2 | ~~restic backup of `radon_media` volume to B2~~ | **Done** — `radon-media-backup` (boto3/S3 to B2 prefix `media/`, 2026-07-13); restic not required at solo-operator scale |
 | 3 | ~~systemd timer for `oi_changes` (currently on-demand only)~~ | **Done** — `radon-oi-changes.timer` 3x/RTH day (14/17/20 UTC Mon-Fri) via `run_oi_changes_refresh.sh` |
 | 4 | Vercel Edge replica for a public read-only dashboard | Future |
 | 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |

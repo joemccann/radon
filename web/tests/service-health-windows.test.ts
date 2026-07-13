@@ -381,6 +381,18 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     }
     expect(requiresIb("db-retention")).toBe(false);
   });
+
+  it("media-backup is registered as scheduled with a 48h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["media-backup"]).toBeDefined();
+    expect(getServiceCategory("media-backup")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("media-backup", state)).toBe(48 * HOUR);
+      expect(getFreshnessWindowMs("media-backup", state)).toBe(
+        getFreshnessWindowMs("db-backup", state),
+      );
+    }
+    expect(requiresIb("media-backup")).toBe(false);
+  });
 });
 
 describe("getServiceCategory", () => {

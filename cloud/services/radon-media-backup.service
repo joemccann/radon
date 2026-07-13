@@ -1,0 +1,33 @@
+[Unit]
+Description=Radon media volume backup to Backblaze B2 (media.radon.run tree)
+After=network.target
+# DUR-02 pattern: brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed instead of
+# restarting forever. The media-backup service_health heartbeat
+# (48h window) surfaces a parked/silent backup on the dashboard +
+# watchdog daily bucket.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+# Default media root matches Caddy media.radon.run file_server root.
+Environment=RADON_MEDIA_DIR=/home/radon/radon-cloud/media
+# Script ships with the monorepo cloud/ tree and lands on the next deploy.
+# Until present, skip cleanly (unit ends inactive, not failed).
+ExecCondition=/usr/bin/test -f /home/radon/radon/cloud/scripts/media_backup.py
+# Off-box upload required: RADON_ARCHIVE_S3_* (or RADON_MEDIA_BACKUP_S3_*)
+# in EnvironmentFile. Job fails closed if credentials are missing.
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/media_backup.py
+StandardOutput=journal
+StandardError=journal
+# Solo-operator media tree is small (newsfeed images); 1h bounds a wedged
+# B2 upload without overlapping the next night's run.
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

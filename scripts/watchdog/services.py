@@ -164,6 +164,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # db-retention — daily keep-latest sweep for append-only scan tables
     # (scripts/db_retention_sweep.py via radon-db-retention.timer).
     "db-retention": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
+    # media-backup — nightly B2 mirror of media.radon.run tree
+    # (cloud/scripts/media_backup.py via radon-media-backup.timer,
+    # 10:15 UTC). 48h window mirrors web/lib/serviceHealthWindows.ts and
+    # db-backup. Local disk + B2 only — no IB dependency.
+    "media-backup": {"open": 48 * _HOUR, "closed": 48 * _HOUR, "requires_ib": False},
 }
 
 
@@ -220,6 +225,8 @@ BUCKETS: dict[str, list[str]] = {
         "portfolio-archive",
         # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.
         "db-retention",
+        # Nightly media.radon.run tree backup to B2 — 48h window.
+        "media-backup",
     ],
     # Every scheduled service EXCEPT watchdog-alerts. Including
     # watchdog-alerts here would create a recursive alerting loop:

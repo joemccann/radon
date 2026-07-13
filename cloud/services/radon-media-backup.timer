@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon media volume backup — nightly after DB dump window
+
+[Timer]
+# 10:15 UTC: after portfolio-archive (05:40), db-retention (08:10), and
+# db-backup (09:00). Media backup is independent of Turso writes but
+# scheduled after the dump so operator attention stays on one nightly
+# reliability cluster. Deliberately not :00/:30. Persistent so a missed
+# firing replays on next boot. service_health media-backup has a 48h
+# window — one missed night pages before the second is lost.
+OnCalendar=*-*-* 10:15:00 UTC
+RandomizedDelaySec=180
+Persistent=true
+
+[Install]
+WantedBy=timers.target
