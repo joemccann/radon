@@ -344,6 +344,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // or journal. 48h window matches other nightly DB jobs.
   "db-retention": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``media-backup`` is the nightly off-box mirror of the media.radon.run
+  // tree (cloud/scripts/media_backup.py via radon-media-backup.timer,
+  // 10:15 UTC). Uploads /home/radon/radon-cloud/media to B2 prefix media/
+  // using RADON_ARCHIVE_S3_* (or RADON_MEDIA_BACKUP_S3_*). Heartbeats
+  // ok/error every run. 48h window matches db-backup: one missed night
+  // pages before the second is lost. Local disk + B2 only — no IB.
+  "media-backup": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
+
 };
 
 const DEFAULT_WINDOW: Window = {

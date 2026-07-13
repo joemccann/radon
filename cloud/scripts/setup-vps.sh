@@ -70,6 +70,8 @@ readonly SERVICE_FILES=(
   radon-db-backup.timer
   radon-portfolio-archive.service
   radon-portfolio-archive.timer
+  radon-media-backup.service
+  radon-media-backup.timer
   radon-db-retention.service
   radon-db-retention.timer
   radon-host-metrics.service

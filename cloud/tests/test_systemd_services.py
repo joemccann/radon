@@ -33,6 +33,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-db-backup.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
+    "radon-media-backup.service",
+    "radon-media-backup.timer",
     "radon-db-retention.service",
     "radon-db-retention.timer",
     "radon-breadth.service",
@@ -262,6 +264,26 @@ class TestOiChanges:
         assert "14:00:00 UTC" in raw
         assert "17:00:00 UTC" in raw
         assert "20:00:00 UTC" in raw
+
+
+
+class TestMediaBackup:
+    """Nightly media.radon.run tree backup to B2 (prefix media/)."""
+
+    def test_oneshot_with_timeout(self, unit):
+        svc = unit("radon-media-backup.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "3600"
+        assert "media_backup.py" in svc["execstart"]
+        assert svc["user"] == "radon"
+        assert "/home/radon/radon-cloud/.env" in svc["environmentfile"]
+        env = svc.get("environment", "")
+        assert "RADON_MEDIA_DIR" in env or "RADON_DB_NO_REPLICA" in env
+
+    def test_timer_after_db_backup(self, unit):
+        timer = unit("radon-media-backup.timer")["Timer"]
+        assert "10:15" in timer["oncalendar"]
+        assert timer.get("persistent") == "true"
 
 
 class TestAPI:
