@@ -21,13 +21,40 @@ on prod): `libsql.connect()` exposes NO connect/execute/commit timeout
 sync_interval, auth_token, encryption_key, autocommit), and the native
 calls hold the GIL while blocked — so a thread-timeout wrapper around
 them is a lie (the "timed-out" call keeps starving the process). DO NOT
-add one. The bound for the subprocess/daemon consumers of this module
-must come from process-level supervision instead:
-  - subprocess scans: the FastAPI `run_script` timeout already kills them
-  - systemd services/oneshots (monitor daemon, watchdog, timers): set
-    `RuntimeMaxSec=` on the radon-cloud unit (precedent: 2fbc73f /
-    TimeoutStartSec=60 on radon-ib-watchdog). Recommended: RuntimeMaxSec
-    sized to ~3x the unit's normal cycle for oneshots/timers.
+add one.
+
+BOUNDED VS PROCESS-BOUND WRITE PATHS (R5 partial — expand hrana surgically)
+===========================================================================
+Paths with a REAL socket timeout ride ``scripts/db/hrana_http.py``
+(``HRANA_TIMEOUT_S`` default 4s) or ``scripts/api/db_http.py`` (API only):
+
+  Bounded (hrana / stdlib HTTP — prefer for long-lived or frequent writers)
+  -----------------------------------------------------------------------
+  - ``db.writer.record_service_health`` → ``write_service_health_http``
+    (shared SQL: ``db.service_health_sql``). Monitor daemon heartbeats,
+    ``service_cycle``, ``scan_mirror``.
+  - ``db.writer.upsert_journal_entry`` — fill_monitor / journal_sync daemon.
+  - ``db.writer.upsert_portfolio_snapshot`` — single-row ib_sync dual-write.
+  - ``db.writer.delete_portfolio_snapshots_before`` — archive DELETE batches.
+  - ``db.retention.run_retention_sweep_http`` — daily snapshot keep-latest.
+  - ``host_metrics_sampler`` host_metrics INSERT + service_health heartbeat.
+  - ``ib_watchdog`` / ``watchdog.notify`` service_health heartbeats.
+  - FastAPI: all Turso I/O via ``api.db_http`` (lint: test_no_sync_libsql_in_api).
+
+  Process-bound (still use this module / sync libsql)
+  ---------------------------------------------------
+  Remaining scan/snapshot upserts (cri/gex/vcg/scanner/discover/…),
+  cash_flows, open_orders, analyst_ratings, menthorq, forecast tables,
+  ``prune_portfolio_snapshots`` / ``prune_service_health_events`` keep
+  libsql. Bounds come from process supervision, NOT client timeouts:
+  - subprocess scans: FastAPI ``run_script`` timeout kills the child
+  - systemd oneshots/timers: ``TimeoutStartSec=`` / ``RuntimeMaxSec=``
+    (precedent: TimeoutStartSec=60 on radon-ib-watchdog; archive 7200;
+    db-backup 3600). Size ~3x the unit's normal cycle for oneshots.
+  Why not full rewrite: bulk multi-row scan payloads + many writers;
+  oneshots already die on TimeoutStartSec; expand hrana only for hang
+  risk inside long-lived daemons or high-frequency single-row paths.
+
 The FastAPI process must NEVER import this module at all — it uses the
 bounded HTTP pipeline in scripts/api/db_http.py (enforced by the
 test_no_sync_libsql_in_api.py lint).

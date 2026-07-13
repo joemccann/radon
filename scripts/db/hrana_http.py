@@ -12,6 +12,11 @@ days). urllib's socket timeout is a REAL bound.
 The ``service_health`` upsert statement stays single-source in
 ``scripts/db/service_health_sql.py``; this module only supplies the
 transport plus the :func:`write_service_health_http` convenience command.
+
+Also used by hang-risk writers in ``db.writer`` (``record_service_health``,
+``upsert_journal_entry``, ``upsert_portfolio_snapshot``, portfolio DELETE)
+and by ``db.retention`` / host_metrics / ib_watchdog. Inventory of bounded
+vs process-bound paths: ``scripts/db/client.py`` module docstring.
 """
 
 from __future__ import annotations

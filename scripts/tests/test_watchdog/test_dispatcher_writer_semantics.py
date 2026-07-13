@@ -144,7 +144,7 @@ class TestRowFlipsErrorOnDispatcherFailure:
 
 
 class TestDbWriteFailureIsBestEffort:
-    """When ``record_service_health`` itself raises (DB unreachable,
+    """When the bounded service_health write raises (DB unreachable,
     schema drift, etc.), the dispatcher cannot write its own error row
     — there is no DB to write to. Per
     ``feedback_service_health_heartbeat.md`` the failure is logged and
@@ -164,7 +164,7 @@ class TestDbWriteFailureIsBestEffort:
 
         with caplog.at_level(logging.WARNING, logger="watchdog.notify"):
             with patch("watchdog.notify._http_post", return_value=(200, b"")), \
-                 patch("db.writer.record_service_health", side_effect=boom):
+                 patch("db.hrana_http.write_service_health_http", side_effect=boom):
                 # Must not raise.
                 notify.dispatch(p1_outcome)
 

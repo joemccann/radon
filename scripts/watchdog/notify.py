@@ -26,7 +26,7 @@ emits an INFO line on every dispatch with structured fields
 
 The row only flips to ``state=error`` when:
   - Pushover returns a non-2xx code (channel transport failure)
-  - ``record_service_health`` itself raises (DB write failure)
+  - ``write_service_health_http`` itself raises (DB write failure)
 
 In both cases ``last_error`` carries a dispatcher-specific string
 (``"pushover 500: …"``, ``"db write failed: …"``) so the banner
@@ -269,16 +269,17 @@ def _write_dispatcher_health(
         error_payload = {"heartbeat_at": finished_at, "bucket": bucket}
 
     try:
-        if os.environ.get("PYTEST_CURRENT_TEST"):
-            from db.writer import record_service_health
-            record_service_health(
-                "watchdog-alerts", state, finished_at=finished_at, error=error_payload,
-            )
-        else:
-            from db.hrana_http import write_service_health_http
-            write_service_health_http(
-                "watchdog-alerts", state, error=error_payload,
-            )
+        # Always bounded hrana (same as prod). Tests patch
+        # ``db.hrana_http.hrana_execute`` onto in-memory sqlite (see
+        # test_watchdog/conftest.py) — never fall back to sync libsql.
+        from db.hrana_http import write_service_health_http
+
+        write_service_health_http(
+            "watchdog-alerts",
+            state,
+            finished_at=finished_at,
+            error=error_payload,
+        )
     except Exception as exc:  # noqa: BLE001 — telemetry must not kill the cycle
         log.warning("watchdog-alerts row write failed: %s", exc)
 
