@@ -88,6 +88,7 @@ Radon is glued together from a long list of third-party services. The full env-v
 | **Clerk** | JWT auth for the terminal + FastAPI. Localhost auto-bypassed in dev. | `CLERK_ISSUER`, `CLERK_JWKS_URL`, `CLERK_SECRET_KEY`, `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `ALLOWED_USER_IDS` | [clerk.com](https://clerk.com/) |
 | **Turso (libSQL)** | Cloud-hosted SQLite. Canonical store for journal, service_health, snapshots. | `TURSO_DB_URL`, `TURSO_AUTH_TOKEN` | [turso.tech](https://turso.tech/) |
 | **Anthropic Claude API** | Assistant chat, share-card OG renders, vision tagger (newsfeed), seasonality vision fallback. | `ANTHROPIC_API_KEY` (aliases `CLAUDE_CODE_API_KEY`, `CLAUDE_API_KEY`) | [console.anthropic.com](https://console.anthropic.com/) |
+| **Backblaze B2** | Off-box cold archive for `portfolio_snapshots` older than ~30d (`radon-portfolio-archive` oneshot). S3-compatible API via `boto3`. Required on the production VPS; unit fails closed without keys. | `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` | [backblaze.com/b2](https://www.backblaze.com/b2/cloud-storage.html) · bucket `radon-archive` |
 
 ### Required for specific subsystems
 
@@ -104,7 +105,8 @@ Radon is glued together from a long list of third-party services. The full env-v
 
 | Service | Purpose | Notes |
 |---|---|---|
-| **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. | Resolved as `ib-gateway` via Tailscale on the laptop |
+| **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. Host secrets in `/home/radon/radon-cloud/.env` include Turso + **Backblaze B2** archive keys. | Resolved as `ib-gateway` via Tailscale on the laptop |
+| **Backblaze B2** | Cold storage for archived portfolio snapshot months (`portfolio_snapshots/YYYY-MM.jsonl.gz`). See required table above. | Bucket `radon-archive` |
 | **Tailscale** | Mesh VPN between laptop and VPS. Laptop reaches `ib-gateway:4001` over Tailscale; FastAPI on the VPS binds to localhost-only. | [tailscale.com](https://tailscale.com/) |
 | **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Config in the sibling `radon-cloud` repo |
 | **GitHub Actions** | `git push origin main` triggers `.github/workflows/ci.yml` which runs the Vitest + pytest gate then deploys on green: it SSHes to Hetzner and runs `bash scripts/deploy.sh`. | Confirm: `gh run list --workflow=ci.yml --limit 1` |

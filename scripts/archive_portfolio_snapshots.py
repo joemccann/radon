@@ -5,8 +5,12 @@ Tiered storage. Only the newest portfolio_snapshots row is ever read at
 runtime (ORDER BY taken_at DESC LIMIT 1), but the full intraday history is
 worth keeping. So: keep ~30 days live in Turso and move everything older into
 append-only, gzip'd, monthly JSONL partitions
-(``archive/portfolio_snapshots/YYYY-MM.jsonl.gz``), each uploaded to off-box
-S3-compatible object storage, then deleted from Turso.
+(``archive/portfolio_snapshots/YYYY-MM.jsonl.gz``), each uploaded to **Backblaze
+B2** (S3-compatible via boto3), then deleted from Turso.
+
+Production dependency: ``RADON_ARCHIVE_S3_*`` pointing at B2 bucket
+``radon-archive`` (see root ``.env.example``). Cloudflare R2 is not used.
+``radon-portfolio-archive.service`` fails closed without these vars.
 
 Mirrors db_backup.py conventions: stdlib gzip, batched paging (never a
 fetchall on the fat table), bounded stdlib ``service_health`` heartbeat (the
@@ -19,8 +23,8 @@ Crash-safe ordering — a crash never loses a row:
   2. Page rows WHERE taken_at < cutoff (Rust client), grouped by month.
   3. Merge each month into its .jsonl.gz, deduped + sorted by taken_at, written
      atomically (temp + os.replace).
-  4. Upload each touched partition off-box (REQUIRED unless
-     --allow-delete-without-upload).
+  4. Upload each touched partition off-box to B2 (REQUIRED unless
+     --allow-delete-without-upload — emergency/dev only).
   5. Verify every fetched taken_at is present in its on-disk partition.
   6. DELETE FROM portfolio_snapshots WHERE taken_at < cutoff.
 
@@ -34,7 +38,7 @@ Usage::
         [--allow-delete-without-upload]
 
 Off-box upload is configured entirely via environment
-(``RADON_ARCHIVE_S3_*``); see ``s3_config_from_env``.
+(``RADON_ARCHIVE_S3_*`` → Backblaze B2); see ``s3_config_from_env``.
 """
 from __future__ import annotations
 

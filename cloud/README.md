@@ -252,6 +252,12 @@ The radon codebase supports three IB Gateway modes (`docker`, `cloud`, `launchd`
 IB_GATEWAY_MODE=cloud
 ```
 
+Production `.env` also requires **Backblaze B2** keys for portfolio cold-archive
+(`RADON_ARCHIVE_S3_*` — S3-compatible API to bucket `radon-archive`). Listed in
+`config/required-env.txt` and documented in root `.env.example` /
+`docs/cloud-services.md`. `radon-portfolio-archive.service` fails closed without
+them. Cloudflare R2 is not used.
+
 The production environment checker also requires `TRADING_MODE=live` with
 `IB_GATEWAY_PORT=4001`, or `TRADING_MODE=paper` with `IB_GATEWAY_PORT=4002`.
 Unsupported or mismatched pairs fail before any service transition. The

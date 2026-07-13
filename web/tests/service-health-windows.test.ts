@@ -310,8 +310,10 @@ describe("SERVICE_FRESHNESS_WINDOWS — category field", () => {
  *
  *  - ``portfolio-archive`` (scripts/archive_portfolio_snapshots.py) is the
  *    cold-archive oneshot on the VPS (radon-portfolio-archive.timer,
- *    06:52 UTC daily). Scheduled, uniform 48h window matching db-backup.
- *  - ``db-retention`` is the daily keep-latest sweep (radon-db-retention.timer).
+ *    05:40 UTC daily; uploads to Backblaze B2 then prunes Turso). Scheduled,
+ *    uniform 48h window matching db-backup.
+ *  - ``db-retention`` is the daily keep-latest sweep (radon-db-retention.timer,
+ *    08:10 UTC).
  */
 describe("unregistered-writer regression — informed-flow and portfolio-archive", () => {
   const MIN = 60_000;
