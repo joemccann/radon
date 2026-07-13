@@ -76,13 +76,15 @@ Never skip to Yahoo / web without trying IB → UW first. Clients live in `scrip
 
 | File | Loaded by | Contains |
 |---|---|---|
-| `.env` (root) | python-dotenv | MenthorQ creds, Clerk JWKS / issuer / allowlist |
+| `.env` (root) | python-dotenv | MenthorQ creds, Clerk JWKS / issuer / allowlist, optional local archive keys |
 | `.env.ib-mode` (root, gitignored) | overlayed after `.env` | `IB_GATEWAY_MODE`, `IB_GATEWAY_HOST` — toggled by `scripts/ib mode local\|cloud` |
 | `web/.env` | Next.js | `ANTHROPIC_API_KEY`, `UW_TOKEN`, `EXA_API_KEY`, `CEREBRAS_API_KEY`, Clerk keys |
 
 **Clerk MFA (operator-scoped):** MFA is scoped to the operator account, not required instance-wide. Clerk's MFA policy is set to "available/optional" and the operator account has a second factor (TOTP) enrolled. Clerk always challenges a user who has an enrolled factor, so the operator is MFA-gated on every app.radon.run sign-in; demo trial users (same instance, no enrolled factor) sign in with the first factor only, keeping the demo frictionless. Clerk enforces the challenge server-side and only mints a complete session JWT once any enrolled factor is satisfied, so the Next.js middleware and FastAPI Bearer auth need no MFA-specific code. Do NOT flip the instance policy to "required for all users" — that would force every demo signup through second-factor enrollment.
 
 **IB Flex / Gateway env (Hetzner `/home/radon/radon-cloud/.env` mode `0600`):** `IB_FLEX_TOKEN`, `IB_FLEX_QUERY_ID=1422766` (blotter), `IB_FLEX_NAV_QUERY_ID=1497709` (CashTransactions — don't repurpose for trade pulls), `IB_GATEWAY_MODE=cloud` (production; FastAPI must not own Compose), `IB_GATEWAY_COMPOSE_DIR=/home/radon/radon/cloud` (monorepo path; not `~/radon-cloud`), `RADON_MODE=hetzner`. Journal rehydrate uses query `1442520` via `IB_FLEX_QUERY_ID` at runtime.
+
+**Backblaze B2 (portfolio cold-archive, production required):** `RADON_ARCHIVE_S3_ENDPOINT`, `RADON_ARCHIVE_S3_BUCKET`, `RADON_ARCHIVE_S3_ACCESS_KEY_ID`, `RADON_ARCHIVE_S3_SECRET_ACCESS_KEY`, `RADON_ARCHIVE_S3_REGION` (+ optional `RADON_ARCHIVE_S3_PREFIX`). S3-compatible API to bucket `radon-archive`. Used by `radon-portfolio-archive.service` / `scripts/archive_portfolio_snapshots.py`. Not Cloudflare R2. Full contract: root `.env.example`, `docs/cloud-services.md` "Portfolio archive".
 
 **`.env` values with `$` need single-quoting.** Bash `set -a; . file; set +a` shell-expands `$VAR` under `set -u` and aborts silently from systemd. Single-quote (`PASS='RX$abc!xyz'`) or use systemd `EnvironmentFile=` / `python-dotenv`. See `feedback_env_file_shell_expansion.md`.
 

@@ -364,17 +364,20 @@ When MenthorQ's session cookie rotates, the headless Playwright run will fail. T
 
 The Turso `journal` table is the canonical trade store; the JSON mirrors
 in `data/` are frequently stale and are NOT a disaster-recovery story.
-Nightly full-database dumps are the recovery story.
+Nightly full-database dumps are the recovery story for the whole DB.
+Portfolio snapshot **history** older than ~30d is additionally cold-archived
+to **Backblaze B2** (see Portfolio archive below) so the hot Turso table stays
+bounded.
 
 ### Architecture
 
 | Piece | Where | What |
 |---|---|---|
-| `radon-db-backup.timer` | VPS (`radon-cloud/services/`) | Nightly 07:52 UTC (off-hours, deliberately not :00/:30), `Persistent=true` |
+| `radon-db-backup.timer` | VPS | Nightly **09:00 UTC** (after archive 05:40 + retention 08:10), `Persistent=true` |
 | `radon-db-backup.service` | VPS | Oneshot, `User=radon`, `TimeoutStartSec=3600` (libsql has no client timeouts — the unit bound is the real one) |
-| `radon-cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page; the DB is ~1.4 GB, direct-to-cloud reads run ~1 MB/s ⇒ ~20–25 min). Emits portable SQL (schema + INSERTs, `sqlite3 .dump`-style), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than 30 days in-script. |
-| `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window (`web/lib/serviceHealthWindows.ts` + `scripts/watchdog/services.py` daily bucket), so ONE missed night alerts before the second dump is lost. A backup timer with no liveness signal is the canonical silently-dead backup. |
-| `com.radon.db-backup-pull` | laptop launchd (`~/Library/LaunchAgents/`) | `RunAtLoad` + daily 08:37 local (after the 08:23 journal pull); runs `scripts/db_backup_pull.sh` (journal-pull pattern): rsyncs the dump dir over Tailscale (`radon@ib-gateway`, same key as the media push) into `data/db_backups/` (gitignored), fails loudly if no non-empty dump landed, prunes local copies older than 30 days. Deliberately NO `--delete`: a wiped/compromised VPS must not be able to empty the off-box copy on the next pull. |
+| `radon-cloud/scripts/db_backup.py` / monorepo `cloud/scripts/db_backup.py` | VPS | Iterates `sqlite_master` — the ENTIRE DB, no hand-picked table list, so new migration tables are captured automatically. Paged `SELECT`s (500 rows/page). Emits portable SQL (schema + INSERTs), gzip'd to `/home/radon/radon-cloud/backups/db/radon-<UTC>.sql.gz`. Prunes dumps older than 30 days in-script. |
+| `service_health` heartbeat | row `db-backup` | Written on EVERY run — `ok` with `{size_bytes, duration_secs, tables, rows, pruned}` detail, `error` with the failure summary. 48h freshness window. |
+| `com.radon.db-backup-pull` | laptop launchd | Daily rsync of dump dir over Tailscale into `data/db_backups/` (no `--delete`). |
 
 ### Restore runbook
 
@@ -428,19 +431,60 @@ treat the nightly dumps as the only restore path.
 
 ## Portfolio archive + snapshot retention (R1 / R2)
 
+### Nightly schedule (do not overlap on Turso writes)
+
 | Piece | When (UTC) | What |
 |---|---|---|
-| `radon-portfolio-archive.timer` | **05:40** daily | Cold-archives `portfolio_snapshots` older than 30d to local monthly `jsonl.gz` partitions, then DELETEs from Turso (optional S3 via `RADON_ARCHIVE_S3_*`). Heartbeat: `portfolio-archive`. TimeoutStartSec=7200. |
-| `radon-db-retention.timer` | **08:10** daily | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. Must not overlap archive (2026-07-12 concurrent DELETE storm). |
-| `radon-db-backup.timer` | **09:00** daily | Full dump **after** archive + retention so the dump reflects the pruned hot set. |
+| `radon-portfolio-archive.timer` | **05:40** | Cold-archive `portfolio_snapshots` older than 30d → local monthly `jsonl.gz` → **Backblaze B2** upload → DELETE from Turso. Heartbeat: `portfolio-archive`. `TimeoutStartSec=7200`. |
+| `radon-db-retention.timer` | **08:10** | Keep-latest prune on append-only scan tables (gex/vcg/scanner/…); never touches journal or portfolio. Heartbeat: `db-retention`. |
+| `radon-db-backup.timer` | **09:00** | Full Turso dump after archive + retention. |
+
+### Backblaze B2 dependency (production required)
+
+Off-box store for cold portfolio history. **Not** Cloudflare R2 (account billing/R2 enablement blocked). Uses S3-compatible API via `boto3`.
+
+| | |
+|---|---|
+| Provider | [Backblaze B2](https://secure.backblaze.com) |
+| Bucket | `radon-archive` (private) |
+| Object prefix | `portfolio_snapshots/` (monthly `YYYY-MM.jsonl.gz`) |
+| Local mirror | `/home/radon/radon-cloud/archive/portfolio_snapshots/` |
+| Script | `scripts/archive_portfolio_snapshots.py` |
+| Unit | `radon-portfolio-archive.service` — **fails closed** if B2 env is unset |
+| Env contract | root `.env.example`, `cloud/.env.example`, `cloud/config/required-env.txt` |
+| VPS secrets | `/home/radon/radon-cloud/.env` (`EnvironmentFile=` on the unit) |
+
+Required vars (all five keys + region; endpoint must include `https://`):
+
+```bash
+RADON_ARCHIVE_S3_ENDPOINT=https://s3.us-west-004.backblazeb2.com
+RADON_ARCHIVE_S3_BUCKET=radon-archive
+RADON_ARCHIVE_S3_ACCESS_KEY_ID=...
+RADON_ARCHIVE_S3_SECRET_ACCESS_KEY=...
+RADON_ARCHIVE_S3_REGION=us-west-004
+RADON_ARCHIVE_S3_PREFIX=portfolio_snapshots/
+```
+
+Smoke: `python3 scripts/archive_portfolio_snapshots.py --dry-run` must print `"s3_configured": true` when env is loaded.
+
+### Recovering cold portfolio history from B2
+
+```bash
+# list (needs AWS CLI or B2 S3-compatible client with the same endpoint/keys)
+aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 ls "s3://${RADON_ARCHIVE_S3_BUCKET}/portfolio_snapshots/"
+# download a month
+aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 cp \
+  "s3://${RADON_ARCHIVE_S3_BUCKET}/portfolio_snapshots/2026-06.jsonl.gz" /tmp/
+gunzip -c /tmp/2026-06.jsonl.gz | head
+```
 
 ## Known gaps
 
 | # | Item | Owner |
 |---|------|-------|
-| 1 | ~~Nightly retention sweep on snapshot tables~~ | **Done** — `radon-portfolio-archive` + `radon-db-retention` (2026-07-11) |
-| 2 | restic backup of `radon_media` volume to B2/S3 (DB backups shipped 2026-06-12 — see "DB backup & restore" above; media volume still unbacked) | Future |
+| 1 | ~~Nightly retention sweep on snapshot tables~~ | **Done** — `radon-portfolio-archive` + `radon-db-retention` |
+| 2 | restic backup of `radon_media` volume to B2 (DB dumps + portfolio cold-archive already on B2 / laptop pull) | Future |
 | 3 | systemd timer for `oi_changes` (currently on-demand only) | Future |
 | 4 | Vercel Edge replica for a public read-only dashboard | Future |
 | 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |
-| 6 | Configure `RADON_ARCHIVE_S3_*` (Backblaze B2 preferred — Cloudflare R2 blocked by billing lock) so portfolio archive uploads off-box; unit still has `--allow-delete-without-upload` until keys land in VPS `.env` | Operator |
+| 6 | ~~Off-box portfolio archive (`RADON_ARCHIVE_S3_*`)~~ | **Done** — Backblaze B2 `radon-archive` (2026-07-13) |

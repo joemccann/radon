@@ -4,6 +4,13 @@ TWS_PASSWORD
 TRADING_MODE
 TURSO_DB_URL
 TURSO_AUTH_TOKEN
+# Backblaze B2 (S3 API) — portfolio_snapshots cold-archive off-box store.
+# Required for radon-portfolio-archive.service (fails closed without these).
+RADON_ARCHIVE_S3_ENDPOINT
+RADON_ARCHIVE_S3_BUCKET
+RADON_ARCHIVE_S3_ACCESS_KEY_ID
+RADON_ARCHIVE_S3_SECRET_ACCESS_KEY
+RADON_ARCHIVE_S3_REGION
 UW_TOKEN
 IB_FLEX_TOKEN
 IB_FLEX_QUERY_ID
