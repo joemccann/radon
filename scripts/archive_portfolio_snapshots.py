@@ -12,29 +12,36 @@ Production dependency: ``RADON_ARCHIVE_S3_*`` pointing at B2 bucket
 ``radon-archive`` (see root ``.env.example``). Cloudflare R2 is not used.
 ``radon-portfolio-archive.service`` fails closed without these vars.
 
-Mirrors db_backup.py conventions: stdlib gzip, batched paging (never a
-fetchall on the fat table), bounded stdlib ``service_health`` heartbeat (the
-libsql client is never used for liveness), standalone oneshot whose real wall
-bound is the unit's ``TimeoutStartSec``.
+Mirrors db_backup.py conventions: stdlib gzip, keyset paging + month-chunk
+streaming (never ``list``/fetchall the fat table into memory), bounded stdlib
+``service_health`` heartbeat (the libsql client is never used for liveness),
+standalone oneshot whose real wall bound is the unit's ``TimeoutStartSec``.
 
 Crash-safe ordering — a crash never loses a row:
   1. cutoff = now - RETENTION_DAYS. Rows are only ever inserted at "now", so
      nothing new ever lands < cutoff after this instant.
-  2. Page rows WHERE taken_at < cutoff (Rust client), grouped by month.
-  3. Merge each month into its .jsonl.gz, deduped + sorted by taken_at, written
-     atomically (temp + os.replace).
+  2. Stream pages WHERE taken_at < cutoff (keyset), chunk by month with a
+     bounded in-flight buffer (``batch_size`` rows max — never the full table).
+  3. Merge each chunk into its monthly .jsonl.gz, deduped + sorted by
+     taken_at, written atomically (temp + os.replace).
   4. Upload each touched partition off-box to B2 (REQUIRED unless
      --allow-delete-without-upload — emergency/dev only).
-  5. Verify every fetched taken_at is present in its on-disk partition.
-  6. DELETE FROM portfolio_snapshots WHERE taken_at < cutoff.
+  5. Verify every streamed taken_at is present in its on-disk partition.
+  6. DELETE FROM portfolio_snapshots WHERE taken_at < cutoff
+     (``delete_portfolio_snapshots_before`` — batched, payload-free).
 
 A crash after step 3 but before step 6 simply leaves the rows in BOTH places;
 re-running re-archives them (dedup makes the merge a no-op) and proceeds.
 
+``--delete-only`` skips steps 2–5 and only runs the Turso DELETE. Use when
+monthly partitions are already on disk and verified on B2 (e.g. after an OOM
+or timeout during the delete phase, or after a manual re-export). Assumes
+archive already done — does not re-verify partitions.
+
 Usage::
 
     archive_portfolio_snapshots.py [--retention-days 30] [--archive-dir DIR]
-        [--batch-size 500] [--dry-run] [--no-delete]
+        [--batch-size 500] [--dry-run] [--no-delete] [--delete-only]
         [--allow-delete-without-upload]
 
 Off-box upload is configured entirely via environment
@@ -92,6 +99,31 @@ def group_by_month(rows: Iterable[tuple[str, str]]) -> dict[str, list[tuple[str,
     for taken_at, payload in rows:
         grouped.setdefault(month_key(taken_at), []).append((taken_at, payload))
     return grouped
+
+
+def stream_month_chunks(
+    rows: Iterable[tuple[str, str]],
+    max_chunk: int,
+) -> Iterator[tuple[str, list[tuple[str, str]]]]:
+    """Yield ``(YYYY-MM, rows_chunk)`` from ASC-sorted ``(taken_at, payload)``.
+
+    Chunks break on month boundary or when ``max_chunk`` is reached so callers
+    never hold more than ``max_chunk`` fat rows in memory. Input must be
+    ordered by ``taken_at`` ascending (keyset page order).
+    """
+    if max_chunk < 1:
+        raise ValueError("max_chunk must be >= 1")
+    current_month: str | None = None
+    chunk: list[tuple[str, str]] = []
+    for taken_at, payload in rows:
+        mk = month_key(taken_at)
+        if current_month is not None and (mk != current_month or len(chunk) >= max_chunk):
+            yield current_month, chunk
+            chunk = []
+        current_month = mk
+        chunk.append((taken_at, payload))
+    if current_month is not None and chunk:
+        yield current_month, chunk
 
 
 def _payload_to_jsonable(payload: str) -> Any:
@@ -301,6 +333,52 @@ def write_service_health(state: str, detail: dict | None, started_at: str) -> No
 # ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
+def _require_delete_safety(
+    s3_cfg: dict[str, str] | None,
+    allow_delete_without_upload: bool,
+) -> None:
+    if s3_cfg is None and not allow_delete_without_upload:
+        raise RuntimeError(
+            "refusing to delete: off-box upload not configured "
+            "(set RADON_ARCHIVE_S3_* or pass --allow-delete-without-upload)"
+        )
+
+
+def _write_and_verify_chunk(
+    archive_dir: Path,
+    month: str,
+    chunk: list[tuple[str, str]],
+) -> Path:
+    """Merge ``chunk`` into the month partition and verify keys on disk.
+
+    Returns the partition path. Upload is deferred until the month is fully
+    flushed so B2 receives the complete merge (not a partial mid-month chunk).
+    """
+    path = archive_dir / f"{month}.jsonl.gz"
+    existing = read_partition_rows(path)
+    merged = merge_partition_bytes(existing, chunk)
+    write_partition_atomic(path, merged)
+
+    on_disk = set(read_partition_rows(path))
+    fetched = {ta for ta, _ in chunk}
+    missing = fetched - on_disk
+    if missing:
+        raise RuntimeError(
+            f"archive verify failed for {month}: {len(missing)} rows missing on disk"
+        )
+    return path
+
+
+def _upload_month(
+    archive_dir: Path,
+    month: str,
+    s3_cfg: dict[str, str],
+) -> None:
+    path = archive_dir / f"{month}.jsonl.gz"
+    key = s3_cfg["prefix"].lstrip("/") + f"{month}.jsonl.gz"
+    upload_partition(path, key, s3_cfg)
+
+
 def run_archive(
     db,
     *,
@@ -311,49 +389,75 @@ def run_archive(
     do_delete: bool,
     allow_delete_without_upload: bool,
     delete_fn,
+    delete_only: bool = False,
 ) -> dict:
     """Archive + (optionally) delete rows older than ``cutoff``. Returns a
-    summary dict. ``delete_fn(cutoff) -> int`` performs the Turso DELETE."""
-    rows = list(fetch_archivable_rows(db, cutoff, batch_size))
-    if not rows:
+    summary dict. ``delete_fn(cutoff) -> int`` performs the Turso DELETE.
+
+    Streams archivable rows in bounded month chunks (never materializes the
+    full fat table). ``delete_only=True`` skips export/upload/verify and only
+    runs the DELETE — operator asserts archive is already on disk + B2.
+    """
+    if delete_only:
+        if not do_delete:
+            return {
+                "archived": 0,
+                "months": [],
+                "uploaded": 0,
+                "deleted": 0,
+                "delete_only": True,
+            }
+        _require_delete_safety(s3_cfg, allow_delete_without_upload)
+        deleted = delete_fn(cutoff)
+        return {
+            "archived": 0,
+            "months": [],
+            "uploaded": 0,
+            "deleted": deleted,
+            "delete_only": True,
+        }
+
+    archived = 0
+    months_written: list[str] = []
+    months_seen: set[str] = set()
+    uploaded = 0
+    prev_month: str | None = None
+
+    for month, chunk in stream_month_chunks(
+        fetch_archivable_rows(db, cutoff, batch_size),
+        max_chunk=batch_size,
+    ):
+        # Upload the previous month only after its last chunk is on disk.
+        if prev_month is not None and month != prev_month:
+            if s3_cfg is not None:
+                _upload_month(archive_dir, prev_month, s3_cfg)
+                uploaded += 1
+        _write_and_verify_chunk(archive_dir, month, chunk)
+        archived += len(chunk)
+        if month not in months_seen:
+            months_seen.add(month)
+            months_written.append(month)
+        prev_month = month
+
+    if prev_month is not None and s3_cfg is not None:
+        _upload_month(archive_dir, prev_month, s3_cfg)
+        uploaded += 1
+
+    if archived == 0:
         return {"archived": 0, "months": [], "uploaded": 0, "deleted": 0}
 
-    grouped = group_by_month(rows)
-    months_written: list[str] = []
-    uploaded = 0
-    for month in sorted(grouped):
-        path = archive_dir / f"{month}.jsonl.gz"
-        existing = read_partition_rows(path)
-        merged = merge_partition_bytes(existing, grouped[month])
-        write_partition_atomic(path, merged)
-        months_written.append(month)
-
-        # Verify every fetched taken_at for this month is now on disk.
-        on_disk = set(read_partition_rows(path))
-        fetched = {ta for ta, _ in grouped[month]}
-        missing = fetched - on_disk
-        if missing:
-            raise RuntimeError(
-                f"archive verify failed for {month}: {len(missing)} rows missing on disk"
-            )
-
-        if s3_cfg is not None:
-            key = s3_cfg["prefix"].lstrip("/") + f"{month}.jsonl.gz"
-            upload_partition(path, key, s3_cfg)
-            uploaded += 1
-
     if not do_delete:
-        return {"archived": len(rows), "months": months_written, "uploaded": uploaded, "deleted": 0}
+        return {
+            "archived": archived,
+            "months": months_written,
+            "uploaded": uploaded,
+            "deleted": 0,
+        }
 
-    if s3_cfg is None and not allow_delete_without_upload:
-        raise RuntimeError(
-            "refusing to delete: off-box upload not configured "
-            "(set RADON_ARCHIVE_S3_* or pass --allow-delete-without-upload)"
-        )
-
+    _require_delete_safety(s3_cfg, allow_delete_without_upload)
     deleted = delete_fn(cutoff)
     return {
-        "archived": len(rows),
+        "archived": archived,
         "months": months_written,
         "uploaded": uploaded,
         "deleted": deleted,
@@ -367,8 +471,19 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--batch-size", type=int, default=BATCH_SIZE)
     parser.add_argument("--dry-run", action="store_true", help="report what would be archived; touch nothing")
     parser.add_argument("--no-delete", action="store_true", help="archive + upload but keep rows in Turso")
+    parser.add_argument(
+        "--delete-only",
+        action="store_true",
+        help=(
+            "skip re-export/upload; only run Turso DELETE for rows older than "
+            "cutoff. Use when monthly partitions are already on disk and B2 "
+            "(catch-up after OOM/timeout during delete phase)."
+        ),
+    )
     parser.add_argument("--allow-delete-without-upload", action="store_true")
     args = parser.parse_args(argv)
+    if args.delete_only and args.no_delete:
+        parser.error("--delete-only and --no-delete are mutually exclusive")
 
     sys.path.insert(0, str(REPO_ROOT))
     started_at = datetime.now(timezone.utc).isoformat()
@@ -417,6 +532,7 @@ def main(argv: list[str] | None = None) -> int:
             do_delete=not args.no_delete,
             allow_delete_without_upload=args.allow_delete_without_upload,
             delete_fn=delete_portfolio_snapshots_before,
+            delete_only=args.delete_only,
         )
     except Exception as exc:
         detail = {"cutoff": cutoff, "error": str(exc)[:SUMMARY_CAP]}
