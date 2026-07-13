@@ -2,76 +2,76 @@
   "name": "r2k-energy",
   "description": "Russell 2000 Energy (106 companies)",
   "tickers": [
-    "SM",
     "KGS",
+    "SM",
     "AROC",
     "PBF",
-    "RIG",
-    "GLNG",
     "UEC",
     "NE",
+    "RIG",
+    "GLNG",
     "MGY",
     "MUR",
-    "CNX",
     "VAL",
-    "CNR",
+    "CNX",
     "OII",
+    "CNR",
     "LBRT",
     "CRC",
     "WHD",
     "SEI",
+    "INSW",
     "TDW",
     "STNG",
-    "INSW",
-    "DK",
     "UUUU",
+    "DK",
     "PTEN",
-    "LEU",
     "PARR",
     "HP",
+    "LEU",
     "BTU",
     "CLMT",
-    "GPOR",
+    "DHT",
     "SDRL",
     "KNTK",
-    "DHT",
     "CRGY",
+    "GPOR",
     "WTTR",
     "NOG",
-    "TALO",
     "WKC",
     "TNK",
     "NESR",
+    "TALO",
     "LPG",
+    "SFL",
     "REX",
     "NEXT",
-    "SFL",
-    "KOS",
-    "PUMP",
     "HLX",
+    "PUMP",
     "XPRO",
-    "TTI",
     "NAT",
+    "KOS",
+    "TTI",
     "AESI",
     "GPRE",
-    "VTOL",
     "NBR",
+    "VTOL",
     "INVX",
     "BORR",
-    "CRK",
-    "DEC",
     "EE",
-    "CVI",
     "FLNG",
+    "DEC",
+    "CRK",
+    "CVI",
     "BKV",
-    "FLOC",
     "NVGS",
+    "FLOC",
     "TK",
-    "RES",
-    "SOC",
-    "EGY",
     "ASC",
+    "RES",
+    "EGY",
     "FET",
+    "SOC",
     "CLB",
     "VTS",
     "REPX",
@@ -87,8 +87,8 @@
     "LODE",
     "LTBR",
     "EU",
-    "SMC",
     "GRNT",
+    "SMC",
     "ESOA",
     "REI",
     "INR",
@@ -97,8 +97,8 @@
     "SMHI",
     "HPK",
     "AREC",
-    "KGEI",
     "ACDC",
+    "KGEI",
     "AMPY",
     "SND",
     "FF",
@@ -111,32 +111,32 @@
   ],
   "pairs": [
     [
-      "SM",
-      "KGS"
+      "KGS",
+      "SM"
     ],
     [
       "AROC",
       "PBF"
     ],
     [
-      "RIG",
-      "GLNG"
-    ],
-    [
       "UEC",
       "NE"
+    ],
+    [
+      "RIG",
+      "GLNG"
     ],
     [
       "MGY",
       "MUR"
     ],
     [
-      "CNX",
-      "VAL"
+      "VAL",
+      "CNX"
     ],
     [
-      "CNR",
-      "OII"
+      "OII",
+      "CNR"
     ],
     [
       "LBRT",
@@ -147,108 +147,108 @@
       "SEI"
     ],
     [
-      "TDW",
-      "STNG"
-    ],
-    [
       "INSW",
-      "DK"
+      "TDW"
     ],
     [
-      "UUUU",
+      "STNG",
+      "UUUU"
+    ],
+    [
+      "DK",
       "PTEN"
     ],
     [
-      "LEU",
-      "PARR"
+      "PARR",
+      "HP"
     ],
     [
-      "HP",
+      "LEU",
       "BTU"
     ],
     [
       "CLMT",
-      "GPOR"
+      "DHT"
     ],
     [
       "SDRL",
       "KNTK"
     ],
     [
-      "DHT",
-      "CRGY"
+      "CRGY",
+      "GPOR"
     ],
     [
       "WTTR",
       "NOG"
     ],
     [
-      "TALO",
-      "WKC"
+      "WKC",
+      "TNK"
     ],
     [
-      "TNK",
-      "NESR"
+      "NESR",
+      "TALO"
     ],
     [
       "LPG",
-      "REX"
-    ],
-    [
-      "NEXT",
       "SFL"
     ],
     [
-      "KOS",
-      "PUMP"
+      "REX",
+      "NEXT"
     ],
     [
       "HLX",
-      "XPRO"
+      "PUMP"
     ],
     [
-      "TTI",
+      "XPRO",
       "NAT"
+    ],
+    [
+      "KOS",
+      "TTI"
     ],
     [
       "AESI",
       "GPRE"
     ],
     [
-      "VTOL",
-      "NBR"
+      "NBR",
+      "VTOL"
     ],
     [
       "INVX",
       "BORR"
     ],
     [
-      "CRK",
-      "DEC"
-    ],
-    [
       "EE",
-      "CVI"
+      "FLNG"
     ],
     [
-      "FLNG",
+      "DEC",
+      "CRK"
+    ],
+    [
+      "CVI",
       "BKV"
     ],
     [
-      "FLOC",
-      "NVGS"
+      "NVGS",
+      "FLOC"
     ],
     [
       "TK",
-      "RES"
+      "ASC"
     ],
     [
-      "SOC",
+      "RES",
       "EGY"
     ],
     [
-      "ASC",
-      "FET"
+      "FET",
+      "SOC"
     ],
     [
       "CLB",
@@ -280,10 +280,10 @@
     ],
     [
       "EU",
-      "SMC"
+      "GRNT"
     ],
     [
-      "GRNT",
+      "SMC",
       "ESOA"
     ],
     [
@@ -300,10 +300,10 @@
     ],
     [
       "AREC",
-      "KGEI"
+      "ACDC"
     ],
     [
-      "ACDC",
+      "KGEI",
       "AMPY"
     ],
     [

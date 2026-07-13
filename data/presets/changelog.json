@@ -812,5 +812,17 @@
     ],
     "added_count": 246,
     "removed_count": 181
+  },
+  {
+    "timestamp": "2026-07-13T06:21:09.201896",
+    "index": "r2k",
+    "added": [],
+    "removed": [
+      "AREN",
+      "ESPR",
+      "TBRG"
+    ],
+    "added_count": 0,
+    "removed_count": 3
   }
 ]

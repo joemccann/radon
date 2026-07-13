@@ -9,18 +9,18 @@
     "MAC",
     "EPRT",
     "KRG",
-    "OUT",
     "PECO",
+    "OUT",
     "SBRA",
     "OPEN",
-    "CDP",
     "BNL",
+    "CDP",
     "SKT",
     "IRT",
     "NHI",
     "APLE",
-    "HIW",
     "SLG",
+    "HIW",
     "LXP",
     "CWK",
     "CURB",
@@ -33,9 +33,9 @@
     "NMRK",
     "JOE",
     "NTST",
-    "DHC",
     "SHO",
     "GTY",
+    "DHC",
     "LTC",
     "XHR",
     "PEB",
@@ -65,31 +65,31 @@
     "NHP",
     "GOOD",
     "FOR",
-    "UHT",
     "CLDT",
+    "UHT",
     "AHRT",
     "BDN",
     "CHCT",
     "ILPT",
     "XRN",
-    "AGNT",
     "BFS",
     "OLP",
+    "AGNT",
     "FPI",
     "TRC",
-    "FVR",
     "RMR",
+    "FVR",
     "LAND",
     "REAX",
     "PINE",
     "FRPH",
     "SITC",
-    "RMAX",
     "NXDT",
+    "RMAX",
     "SEG",
     "MDV",
-    "BRT",
     "NLOP",
+    "BRT",
     "DOUG",
     "ONL",
     "BHR",
@@ -114,18 +114,18 @@
     ],
     [
       "KRG",
-      "OUT"
+      "PECO"
     ],
     [
-      "PECO",
+      "OUT",
       "SBRA"
     ],
     [
       "OPEN",
-      "CDP"
+      "BNL"
     ],
     [
-      "BNL",
+      "CDP",
       "SKT"
     ],
     [
@@ -134,10 +134,10 @@
     ],
     [
       "APLE",
-      "HIW"
+      "SLG"
     ],
     [
-      "SLG",
+      "HIW",
       "LXP"
     ],
     [
@@ -162,11 +162,11 @@
     ],
     [
       "NTST",
-      "DHC"
+      "SHO"
     ],
     [
-      "SHO",
-      "GTY"
+      "GTY",
+      "DHC"
     ],
     [
       "LTC",
@@ -226,10 +226,10 @@
     ],
     [
       "FOR",
-      "UHT"
+      "CLDT"
     ],
     [
-      "CLDT",
+      "UHT",
       "AHRT"
     ],
     [
@@ -241,19 +241,19 @@
       "XRN"
     ],
     [
-      "AGNT",
-      "BFS"
+      "BFS",
+      "OLP"
     ],
     [
-      "OLP",
+      "AGNT",
       "FPI"
     ],
     [
       "TRC",
-      "FVR"
+      "RMR"
     ],
     [
-      "RMR",
+      "FVR",
       "LAND"
     ],
     [
@@ -265,16 +265,16 @@
       "SITC"
     ],
     [
-      "RMAX",
-      "NXDT"
+      "NXDT",
+      "RMAX"
     ],
     [
       "SEG",
       "MDV"
     ],
     [
-      "BRT",
-      "NLOP"
+      "NLOP",
+      "BRT"
     ],
     [
       "DOUG",

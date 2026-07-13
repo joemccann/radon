@@ -4,9 +4,9 @@
   "tickers": [
     "PSMT",
     "CALM",
+    "WDFC",
     "CHEF",
     "COCO",
-    "WDFC",
     "UNFI",
     "ANDE",
     "MZTI",
@@ -16,26 +16,26 @@
     "TPB",
     "FLO",
     "BRBR",
-    "IMKTA",
     "SAM",
+    "IMKTA",
     "HLF",
-    "UVV",
     "ENR",
+    "UVV",
     "EPC",
     "JJSF",
-    "SMPL",
     "DOLE",
+    "SMPL",
     "ODC",
     "WMK",
-    "GO",
     "DMC",
-    "SENEA",
+    "GO",
     "FIZZ",
-    "AVO",
+    "SENEA",
     "COTY",
+    "AVO",
+    "MAMA",
     "JBSS",
     "ODD",
-    "MAMA",
     "UTZ",
     "VITL",
     "NGVC",
@@ -63,11 +63,11 @@
       "CALM"
     ],
     [
-      "CHEF",
-      "COCO"
+      "WDFC",
+      "CHEF"
     ],
     [
-      "WDFC",
+      "COCO",
       "UNFI"
     ],
     [
@@ -87,44 +87,44 @@
       "BRBR"
     ],
     [
-      "IMKTA",
-      "SAM"
+      "SAM",
+      "IMKTA"
     ],
     [
       "HLF",
-      "UVV"
+      "ENR"
     ],
     [
-      "ENR",
+      "UVV",
       "EPC"
     ],
     [
       "JJSF",
-      "SMPL"
+      "DOLE"
     ],
     [
-      "DOLE",
+      "SMPL",
       "ODC"
     ],
     [
       "WMK",
-      "GO"
+      "DMC"
     ],
     [
-      "DMC",
-      "SENEA"
+      "GO",
+      "FIZZ"
     ],
     [
-      "FIZZ",
-      "AVO"
+      "SENEA",
+      "COTY"
     ],
     [
-      "COTY",
-      "JBSS"
-    ],
-    [
-      "ODD",
+      "AVO",
       "MAMA"
+    ],
+    [
+      "JBSS",
+      "ODD"
     ],
     [
       "UTZ",
