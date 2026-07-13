@@ -298,15 +298,17 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // /health/lite only — no IB dependency.
   "host-metrics": { open: 10 * MIN, extended: 10 * MIN, closed: 10 * MIN, category: "scheduled", requires_ib: false },
 
-  // ``performance`` and ``oi-changes`` are mirror-fed scans (db.scan_mirror
-  // SNAPSHOT_UPSERTS) that wrote heartbeats since DUR-01 but were never
-  // registered here — they silently inherited the 1h default and would flap
-  // the banner overnight. Both only run when a user hits their FastAPI scan
-  // endpoint, so they're on-demand like scanner/discover. performance is
-  // IB-primary with cache/UW/Yahoo fallbacks and still records ok when IB
-  // is unreachable, so requires_ib=false (same rationale as analyst-ratings).
+  // ``performance`` is a mirror-fed scan (db.scan_mirror SNAPSHOT_UPSERTS)
+  // that only runs when a user hits its FastAPI scan endpoint — on-demand
+  // like scanner/discover. IB-primary with cache/UW/Yahoo fallbacks and
+  // still records ok when IB is unreachable, so requires_ib=false.
   "performance": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
-  "oi-changes": { open: 30 * MIN, extended: 30 * MIN, closed: 3 * DAY, category: "on-demand", requires_ib: false },
+  // ``oi-changes`` is mirror-fed (fetch_oi_changes.py --market →
+  // mirror_scan_snapshot → upsert_oi_changes + service_health). Scheduled
+  // by radon-oi-changes.timer 3x per US trading day (14:00 / 17:00 / 20:00
+  // UTC Mon-Fri); run_oi_changes_refresh.sh heartbeats ok on holiday skips.
+  // UW-only. 26h open covers a missed mid-day fire; closed 3d absorbs Fri→Mon.
+  "oi-changes": { open: 26 * HOUR, extended: 26 * HOUR, closed: 3 * DAY, category: "scheduled", requires_ib: false },
 
   // ``preset-rebalance`` runs WEEKLY inside the monitor daemon (index
   // constituent refresh, Sundays). It shipped for months with no
@@ -341,6 +343,7 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // radon-db-retention.timer, 07:22 UTC). Does not touch portfolio_snapshots
   // or journal. 48h window matches other nightly DB jobs.
   "db-retention": { open: 48 * HOUR, extended: 48 * HOUR, closed: 48 * HOUR, category: "scheduled", requires_ib: false },
+
 };
 
 const DEFAULT_WINDOW: Window = {

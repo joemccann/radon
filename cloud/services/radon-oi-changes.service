@@ -1,0 +1,30 @@
+[Unit]
+Description=Radon market-wide OI-changes refresh (fetch_oi_changes.py --market)
+After=network.target
+
+# DUR-02 (2026-06-12): brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed (Result=start-limit-hit)
+# instead of restarting forever. The unit watchdog (radon main repo
+# scripts/watchdog/units.py, continuous bucket) alerts on failed/start-limit-hit
+# so the brake never becomes a silent outage.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Put RADON_DB_NO_REPLICA last: configparser (unit tests) keeps only the
+# final Environment= line when keys duplicate; fleet drop-in also sets it.
+Environment=RADON_PYTHON_BIN=/home/radon/radon/.venv/bin/python3
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_oi_changes_refresh.sh
+StandardOutput=journal
+StandardError=journal
+# UW market-wide OI change pull is normally seconds; 180s absorbs rate-limit
+# retries and Turso mirror latency without letting a hung client pin the unit.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target
