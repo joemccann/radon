@@ -443,11 +443,42 @@ sqlite3 /tmp/radon_restore.db "SELECT ib_exec_id FROM journal" | sort > /tmp/goo
 # writers are live against it.
 ```
 
-**4. Platform PITR** — OPEN QUESTION. The `turso` CLI is not
-authenticated on the laptop and absent on the VPS, so whether the current
-plan includes point-in-time restore is unverified. Operator: `turso auth
-login && turso org show` / check the Turso dashboard. Until verified,
-treat the nightly dumps as the only restore path.
+**4. Platform PITR (Turso Point-in-Time Recovery)** — **documented 2026-07-13**
+
+Turso provides platform PITR independent of Radon's nightly dumps
+([docs](https://docs.turso.tech/features/point-in-time-recovery),
+[pricing](https://turso.tech/pricing)):
+
+| Plan | PITR window |
+|---|---|
+| Free | 1 day |
+| Developer | 10 days |
+| Scaler | 30 days |
+| Pro | 90 days |
+
+Restore creates a **new** database (does not rewrite live in place):
+
+```bash
+turso auth login
+turso db create radon-pitr-$(date +%Y%m%d) \
+  --from-db radon-joemccann \
+  --timestamp 2026-07-12T16:00:00Z
+turso db tokens create radon-pitr-$(date +%Y%m%d)
+turso db show radon-pitr-$(date +%Y%m%d) --url
+```
+
+Then inspect read-only or swap `TURSO_DB_URL` / `TURSO_AUTH_TOKEN` like full-restore step 2.
+
+**Radon RPO (defense in depth):**
+
+| Layer | RPO (worst case) | Covers |
+|---|---|---|
+| Turso platform PITR | Plan window (1–90d) | Cloud DB to a commit timestamp |
+| Nightly SQL dump + laptop pull | ~24h (+ pull lag) | Full logical DB if Turso account is gone |
+| B2 portfolio cold-archive | Continuous for pruned months | `portfolio_snapshots` history |
+| B2 media backup | Nightly | `media.radon.run` tree |
+
+Operator: `turso auth login` once and record the org plan so the PITR window is known. Nightly dumps remain mandatory.
 
 ## Portfolio archive + snapshot retention (R1 / R2)
 
@@ -557,6 +588,7 @@ journalctl -u radon-media-backup -n 50 --no-pager
 | 1 | ~~Nightly retention sweep on snapshot tables~~ | **Done** — `radon-portfolio-archive` + `radon-db-retention` |
 | 2 | ~~restic backup of `radon_media` volume to B2~~ | **Done** — `radon-media-backup` (boto3/S3 to B2 prefix `media/`, 2026-07-13); restic not required at solo-operator scale |
 | 3 | ~~systemd timer for `oi_changes` (currently on-demand only)~~ | **Done** — `radon-oi-changes.timer` 3x/RTH day (14/17/20 UTC Mon-Fri) via `run_oi_changes_refresh.sh` |
-| 4 | Vercel Edge replica for a public read-only dashboard | Future |
-| 5 | Verify Turso plan PITR (see restore runbook §4) | Operator |
+| 4 | ~~Vercel Edge replica for a public read-only dashboard~~ | **Resolved** — public product surface is `demo.radon.run` (synthetic data, separate Turso); marketing site `radon.run` on Vercel. No Edge replica of **prod** Turso (PII / account figures). See `docs/demo-environment.md`. |
+| 5 | ~~Verify Turso plan PITR~~ | **Documented** — procedure + plan windows in restore §4; operator records plan after `turso auth login` |
 | 6 | ~~Off-box portfolio archive (`RADON_ARCHIVE_S3_*`)~~ | **Done** — Backblaze B2 `radon-archive` (2026-07-13) |
+| 7 | Continuous journal-gap SLI | **Done** — `journal-gap-sli` monitor handler (5m) |
