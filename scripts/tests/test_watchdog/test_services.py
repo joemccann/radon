@@ -197,6 +197,7 @@ class TestBuckets:
         assert "fill-monitor" in cont
         assert "exit-orders" in cont
         assert "journal-sync" in cont
+        assert "journal-gap-sli" in cont
 
     def test_daily_bucket_lists_daily_services(self):
         from watchdog import services as svc_mod

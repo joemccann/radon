@@ -322,6 +322,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // are normal run days so no wide closed window is needed.
   "journal-reconcile": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``journal-gap-sli`` is the continuous gap SLI (R6): same executed_orders
+  // vs journal detection as journal-reconcile, every 5 minutes, with
+  // structured missing_exec_id_count in service_health.last_error. Pure
+  // Turso — no IB. 15-min window = 3 missed cycles before stale.
+  "journal-gap-sli": { open: 15 * MIN, extended: 15 * MIN, closed: 15 * MIN, category: "scheduled", requires_ib: false },
+
   // ``portfolio-archive`` is the portfolio_snapshots cold-archive oneshot
   // (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
   // on the VPS, 06:52 UTC daily, before db-backup). Heartbeats ok/error on

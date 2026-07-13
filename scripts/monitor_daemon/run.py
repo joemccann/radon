@@ -33,6 +33,7 @@ from monitor_daemon.handlers import FillMonitorHandler, ExitOrdersHandler, Prese
 from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
 from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
 from monitor_daemon.handlers.journal_reconcile import JournalReconcileHandler
+from monitor_daemon.handlers.journal_gap_sli import JournalGapSliHandler
 from monitor_daemon.handlers.replica_watchdog import ReplicaWatchdogHandler
 
 # Paths
@@ -98,6 +99,8 @@ def create_daemon() -> MonitorDaemon:
     daemon.register(CashFlowSyncHandler())
 
     daemon.register(JournalReconcileHandler())
+
+    daemon.register(JournalGapSliHandler())
 
     daemon.register(ReplicaWatchdogHandler())
 

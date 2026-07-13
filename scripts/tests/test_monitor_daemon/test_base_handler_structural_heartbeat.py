@@ -183,6 +183,8 @@ class TestExistingHandlersDeclareServiceNames:
             ("monitor_daemon.handlers.flex_token_check", "FlexTokenCheck", "flex-token-check"),
             ("monitor_daemon.handlers.cash_flow_sync", "CashFlowSyncHandler", "cash-flow-sync"),
             ("monitor_daemon.handlers.preset_rebalance_handler", "PresetRebalanceHandler", "preset-rebalance"),
+            ("monitor_daemon.handlers.journal_reconcile", "JournalReconcileHandler", "journal-reconcile"),
+            ("monitor_daemon.handlers.journal_gap_sli", "JournalGapSliHandler", "journal-gap-sli"),
         ],
     )
     def test_handler_declares_service_name(self, module_name, class_name, expected):

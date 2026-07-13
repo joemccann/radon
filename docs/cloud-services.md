@@ -212,6 +212,13 @@ the `/journal` and `/orders` pages derive their view from the same rows:
   (live IB session fills via `client.get_fills()`). Both dual-write to
   `data/trade_log.json` and the `journal` table; both use `ib_exec_id`
   for idempotent dedupe.
+- Gap sensors (alert-only, pure Turso): daily `journal-reconcile`
+  (monitor daemon, 26h window) and continuous `journal-gap-sli` (every
+  5m; `service_health.last_error` carries structured
+  `missing_exec_id_count` + sample `gap_exec_ids` over the same 7d
+  rolling window, with a 10m min-age so live fills racing
+  `journal_sync` do not false-positive). Repair with
+  `scripts/backfill_journal_from_executed_orders.py`.
 
 `data/blotter.json` (Flex Query 1422766, broken IB-side at 2026-03-26)
 and `data/trade_log.json` are **file mirrors / fallbacks** — the
