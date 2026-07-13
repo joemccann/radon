@@ -1,0 +1,20 @@
+[Unit]
+Description=Radon OI-changes scan — 3x per US trading day (open / mid-day / near-close)
+
+[Timer]
+# Fires three times per US trading day at 14:00, 17:00, and 20:00 UTC:
+#   - 14:00 UTC (~09:00 ET / 10:00 EDT) — morning after prior-session OI settles
+#   - 17:00 UTC (~12:00 ET / 13:00 EDT) — mid-day refresh for the dashboard
+#   - 20:00 UTC (~15:00 ET / 16:00 EDT) — near-close, pre-settlement
+# OI is primarily a once-daily UW snapshot, but a few RTH firings keep the
+# oi_changes table + service_health[oi-changes] heartbeat fresh without
+# waiting for on-demand evaluation. run_oi_changes_refresh.sh re-checks the
+# trading calendar at runtime and exits 0 (with ok heartbeat) on US holidays.
+OnCalendar=Mon..Fri *-*-* 14:00:00 UTC
+OnCalendar=Mon..Fri *-*-* 17:00:00 UTC
+OnCalendar=Mon..Fri *-*-* 20:00:00 UTC
+Persistent=true
+RandomizedDelaySec=180
+
+[Install]
+WantedBy=timers.target

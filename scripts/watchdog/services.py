@@ -80,8 +80,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     #    practice; closed widened to 4d to cover Fri-06:30 → Mon-06:30 gap.
     #  * leap-scan       — radon-leap.timer, once daily 14:00 UTC + on-demand;
     #    UW-only. 26h open covers a weekend, 3d closed the long gap.
-    #  * garch-scan      — on-demand dashboard refresh (+ optional timer, not
-    #    yet shipped); UW-only. Same daily windows as leap-scan.
+    #  * garch-scan      — radon-garch.timer 3x/RTH day + on-demand dashboard;
+    #    UW-only. Same daily windows as leap-scan.
+    #  * oi-changes      — radon-oi-changes.timer 3x/RTH day (14/17/20 UTC
+    #    Mon-Fri); market-wide fetch_oi_changes.py --market heartbeats via
+    #    mirror_scan_snapshot; holiday skips heartbeat ok. UW-only.
     #  * catalysts      — radon-catalysts.timer, Mon-Fri 10:30 UTC; heartbeats
     #    ok on holiday skips (run_catalysts.sh), so the longest legit gap is
     #    the Fri→Mon weekend. UW-only, no IB.
@@ -92,6 +95,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
+    "oi-changes":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "catalysts":        {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # ib-watchdog polls FastAPI /health every 60s and heartbeats a row each
     # cycle; 5-min window catches a dead watchdog process within minutes.
@@ -198,6 +202,7 @@ BUCKETS: dict[str, list[str]] = {
         "margin-debt",
         "leap-scan",
         "garch-scan",
+        "oi-changes",
         "catalysts",
         # Daily drift audit on the VPS — hourly check surfaces a missed
         # run within 1h of the 26h window expiring.

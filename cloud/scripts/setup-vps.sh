@@ -86,6 +86,8 @@ readonly SERVICE_FILES=(
   radon-demo-mirror.timer
   radon-margin-debt.service
   radon-margin-debt.timer
+  radon-oi-changes.service
+  radon-oi-changes.timer
 )
 
 run_as_radon() {

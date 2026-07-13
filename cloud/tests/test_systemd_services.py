@@ -33,6 +33,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-db-backup.timer",
     "radon-portfolio-archive.service",
     "radon-portfolio-archive.timer",
+    "radon-media-backup.service",
+    "radon-media-backup.timer",
     "radon-db-retention.service",
     "radon-db-retention.timer",
     "radon-breadth.service",
@@ -211,7 +213,8 @@ class TestPortfolioArchive:
         assert svc["type"] == "oneshot"
         assert svc["timeoutstartsec"] == "7200"
         assert "archive_portfolio_snapshots.py" in svc["execstart"]
-        assert "--allow-delete-without-upload" in svc["execstart"]
+        # Fails closed without RADON_ARCHIVE_S3_* — no allow-delete-without-upload.
+        assert "--allow-delete-without-upload" not in svc["execstart"]
         env = svc.get("environment", "")
         # configparser may only keep the last Environment= line
         assert "RADON_DB_NO_REPLICA=1" in env or "RADON_DB_NO_REPLICA" in env
@@ -234,6 +237,25 @@ class TestDbRetention:
     def test_timer_after_archive_window(self, unit):
         timer = unit("radon-db-retention.timer")["Timer"]
         assert "08:10" in timer["oncalendar"]
+        assert timer.get("persistent") == "true"
+
+
+class TestMediaBackup:
+    """Nightly media.radon.run tree backup to B2 (prefix media/)."""
+
+    def test_oneshot_with_timeout(self, unit):
+        svc = unit("radon-media-backup.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == "3600"
+        assert "media_backup.py" in svc["execstart"]
+        assert svc["user"] == "radon"
+        assert "/home/radon/radon-cloud/.env" in svc["environmentfile"]
+        env = svc.get("environment", "")
+        assert "RADON_MEDIA_DIR" in env or "RADON_DB_NO_REPLICA" in env
+
+    def test_timer_after_db_backup(self, unit):
+        timer = unit("radon-media-backup.timer")["Timer"]
+        assert "10:15" in timer["oncalendar"]
         assert timer.get("persistent") == "true"
 
 
