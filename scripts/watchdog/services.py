@@ -147,6 +147,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # dependency. 26h window = daily cadence + timer jitter; weekends are
     # normal run days so no wide closed window is needed.
     "journal-reconcile": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # journal-gap-sli — continuous (5m) executed_orders vs journal gap SLI.
+    # Structured missing_exec_id_count in last_error. Pure Turso, no IB.
+    # 15m window = 3 missed cycles before stale.
+    "journal-gap-sli": {"open": 15 * _MIN, "closed": 15 * _MIN, "requires_ib": False},
     # portfolio-archive — portfolio_snapshots cold-archive oneshot
     # (scripts/archive_portfolio_snapshots.py via radon-portfolio-archive.timer
     # on the VPS, 06:52 UTC daily). 48h window mirrors
@@ -181,6 +185,8 @@ BUCKETS: dict[str, list[str]] = {
         # Minute-cadence host sampler heartbeat — the 10-min staleness
         # window flags a dead sampler within one continuous cycle.
         "host-metrics",
+        # Continuous journal gap SLI (5m) — error when missing_exec_id_count > 0.
+        "journal-gap-sli",
     ],
     "daily": [
         "cash-flow-sync",
