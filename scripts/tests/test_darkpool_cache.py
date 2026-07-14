@@ -139,21 +139,31 @@ class TestFetchFlowUsesCache:
         # And it fetched strictly fewer days than the cold run.
         assert len(run2) < len(run1)
 
-    def test_cache_only_history_skips_cold_immutable_days(self):
+    def test_cache_only_history_skips_cold_immutable_days(self, monkeypatch):
         from unittest.mock import patch
         import fetch_flow
 
-        today = dpc._today_et()
-        prior = _yesterday()
+        # Freeze the US session day. CI runners are UTC: after midnight UTC but
+        # before the ET date rolls, wall-clock "today" disagrees with ET and
+        # used to inject an extra calendar day into the fetch list.
+        session_today = "2026-06-10"  # Wednesday
+        session_prior = "2026-06-09"  # Tuesday
+        session_now = dpc._ET.localize(datetime(2026, 6, 10, 15, 0, 0))
+        monkeypatch.setattr(dpc, "_today_et", lambda: session_today)
+        monkeypatch.setattr(fetch_flow, "_session_now_et", lambda: session_now)
         calls = []
 
         def fake_darkpool(ticker, date, _client=None, **_kwargs):
             calls.append(date)
             return [{"price": 1.0, "size": 100, "premium": 100}]
 
-        with patch.object(fetch_flow, "get_last_n_trading_days", return_value=[today, prior]), \
-             patch.object(fetch_flow, "fetch_darkpool", side_effect=fake_darkpool), \
-             patch.object(fetch_flow, "fetch_flow_alerts", return_value=[]):
+        with patch.object(
+            fetch_flow,
+            "get_last_n_trading_days",
+            return_value=[session_today, session_prior],
+        ), patch.object(
+            fetch_flow, "fetch_darkpool", side_effect=fake_darkpool
+        ), patch.object(fetch_flow, "fetch_flow_alerts", return_value=[]):
             result = fetch_flow.fetch_flow(
                 "AAPL",
                 lookback_days=2,
@@ -162,5 +172,5 @@ class TestFetchFlowUsesCache:
                 fetch_missing_history=False,
             )
 
-        assert calls == [today]
-        assert result["history_backfill_skipped"] == [prior]
+        assert calls == [session_today]
+        assert result["history_backfill_skipped"] == [session_prior]
