@@ -46,6 +46,17 @@ logger = logging.getLogger(__name__)
 # retry covers the common transient case without amplifying the throttle.
 _UW_TRANSIENT_RETRY_SLEEP_S = 2.0
 
+# Session calendar is always US/Eastern. Host-local/UTC datetime.now() on CI
+# runners (and the VPS after 20:00 ET) invents an extra "today" that is not
+# yet a US session day and breaks the darkpool cache immutability contract.
+_ET = pytz.timezone("America/New_York")
+
+
+def _session_now_et() -> datetime:
+    """Current instant in America/New_York for trading-day membership."""
+    return datetime.now(_ET)
+
+
 # Trading day constants
 MARKET_OPEN = time(9, 30)  # 9:30 AM ET
 MARKET_CLOSE = time(16, 0)  # 4:00 PM ET
@@ -498,11 +509,12 @@ def fetch_flow(ticker: str, lookback_days: int = 5, _client: Optional[UWClient] 
     all_dp_trades = []
     daily_signals = []
     skipped_history_dates = []
-    today = datetime.now()
+    today = _session_now_et()
 
     trading_days = get_last_n_trading_days(lookback_days, today)
 
-    # Always include today if it's a trading day and not already in the list
+    # Always include the US session day if it is a trading day and missing.
+    # Must match darkpool_cache.is_immutable's ET anchor (never host-local UTC).
     today_str = today.strftime("%Y-%m-%d")
     if _is_trading_day(today) and today_str not in trading_days:
         trading_days.insert(0, today_str)
