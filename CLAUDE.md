@@ -140,7 +140,7 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 | `data/portfolio.json` | Open positions, bankroll, exposure |
 | `data/trade_log.json` | **Append-only** trade journal |
 | `data/watchlist.json` | Surveillance tickers |
-| `data/tag_taxonomy.json` | Auto-growing UPPERCASE tag list (force-tracked) |
+| `data/tag_taxonomy.json` | Auto-growing UPPERCASE tag list (gitignored, runtime-owned by newsfeed; canonical tags in Turso `tag_taxonomy`). Untracked 2026-07-15 — was force-tracked, but runtime mutation drifted it and tripped `deploy.sh`'s tracked-drift guard, blocking deploys. |
 | `data/{vcg,gex}.json` | Scan caches |
 | `data/leap.json` | LEAP IV-mispricing cache |
 | `data/price_history_cache/` | Auto-pruned at 500 |
