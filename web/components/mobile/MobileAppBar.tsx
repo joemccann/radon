@@ -127,7 +127,7 @@ function MobileAppBarView({
       <div className="mobile-app-bar__inner">
         <div className="mobile-app-bar__brand">
           <span className="mobile-app-bar__logo" aria-hidden />
-          <span className="mobile-app-bar__title">{title}</span>
+          <span className="mobile-app-bar__title" title={title}>{title}</span>
         </div>
         <div className="mobile-app-bar__actions">
           <span

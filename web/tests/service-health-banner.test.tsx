@@ -80,6 +80,9 @@ describe("<ServiceHealthBanner />", () => {
     // Banner now humanizes "WAL locked" into "Database temporarily busy".
     expect(banner.textContent).toContain("Database temporarily busy");
     expect(banner.textContent).not.toContain("WAL");
+    expect(
+      banner.querySelector(".service-health-banner__message")?.getAttribute("title"),
+    ).toBe("Background sync degraded: portfolio-sync - Database temporarily busy");
   });
 
   it("lists multiple failing services up to 3 + truncates rest with +N more", async () => {

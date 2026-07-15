@@ -99,9 +99,10 @@ function renderDegradedMessage(degraded: ServiceHealthRow[]) {
   const more =
     degraded.length > MAX_LISTED ? ` +${degraded.length - MAX_LISTED} more` : "";
   const detail = resolveDetailCopy(degraded[0]);
+  const fullMessage = `${headline} ${names}${more}${detail ? ` - ${detail}` : ""}`;
 
   return (
-    <div className="service-health-banner__message">
+    <div className="service-health-banner__message" title={fullMessage}>
       <strong>{headline}</strong> {names}
       {more}
       {detail ? (

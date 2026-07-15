@@ -252,7 +252,7 @@ function RowGroup({
           {hasLegs && <span className="eb-expand">{isExpanded ? "▼" : "▶"}</span>}
           {row.ticker}
         </td>
-        <td className="eb-structure">{row.structure}</td>
+        <td className="eb-structure" title={row.structure}>{row.structure}</td>
         <td className="eb-mono">{fmtSpot(row.spot)}</td>
         <td className="eb-mono">{fmtDelta(row.delta)}</td>
         <td className="eb-mono">{formatContribution(contribution)}</td>

@@ -270,7 +270,10 @@ export function OpportunitiesCard() {
                 <Link href={`/${encodeURIComponent(s.ticker)}`} className="snapshot-row__ticker">
                   {s.ticker}
                 </Link>
-                <span className="snapshot-row__signal">
+                <span
+                  className="snapshot-row__signal"
+                  title={`${s.signal}${s.forecast ? ` · forecast ${formatForecastBand(s.forecast)}` : ""}`}
+                >
                   {s.signal}
                   {s.forecast ? (
                     <span
@@ -299,7 +302,10 @@ export function OpportunitiesCard() {
                 <Link href={`/${encodeURIComponent(c.ticker)}`} className="snapshot-row__ticker">
                   {c.ticker}
                 </Link>
-                <span className="snapshot-row__signal">
+                <span
+                  className="snapshot-row__signal"
+                  title={`${c.options_bias?.toUpperCase() ?? "—"} · ${c.dp_direction || "DP"} ${c.dp_strength?.toFixed(1) ?? ""}`}
+                >
                   {c.options_bias?.toUpperCase() ?? "—"} · {c.dp_direction || "DP"} {c.dp_strength?.toFixed(1) ?? ""}
                 </span>
                 <span className={`snapshot-row__direction snapshot-row__direction--${(c.dp_direction || "").toLowerCase()}`}>
@@ -338,7 +344,10 @@ export function OpportunitiesCard() {
                   <Link href={`/${encodeURIComponent(r.ticker)}?tab=chain`} className="snapshot-row__ticker">
                     {r.ticker}
                   </Link>
-                  <span className="snapshot-row__signal">
+                  <span
+                    className="snapshot-row__signal"
+                    title={`${r.structure.short_put.strike.toFixed(0)}P/${r.structure.short_call.strike.toFixed(0)}C · Δ ${(r.structure.net_delta * 100).toFixed(1)}`}
+                  >
                     {r.structure.short_put.strike.toFixed(0)}P/{r.structure.short_call.strike.toFixed(0)}C · Δ {(r.structure.net_delta * 100).toFixed(1)}
                   </span>
                   <span className={`snapshot-row__direction snapshot-row__direction--${direction}`}>
@@ -362,7 +371,10 @@ export function OpportunitiesCard() {
                 <Link href={`/${encodeURIComponent(r.ticker)}`} className="snapshot-row__ticker">
                   {r.ticker}
                 </Link>
-                <span className="snapshot-row__signal">
+                <span
+                  className="snapshot-row__signal"
+                  title={`${r.current_iv != null ? `IV ${r.current_iv.toFixed(1)}` : "IV —"} · ${r.hv_20 != null ? `HV20 ${r.hv_20.toFixed(1)}` : "HV20 —"}`}
+                >
                   {r.current_iv != null ? `IV ${r.current_iv.toFixed(1)}` : "IV —"}
                   {" · "}
                   {r.hv_20 != null ? `HV20 ${r.hv_20.toFixed(1)}` : "HV20 —"}
@@ -409,7 +421,7 @@ export function OpportunitiesCard() {
                 >
                   {p.pair[0]}↔{p.pair[1]}
                 </Link>
-                <span className="snapshot-row__signal">
+                <span className="snapshot-row__signal" title={`Lag ${p.lagger} · gap ${gapText}`}>
                   Lag {p.lagger} · gap {gapText}
                 </span>
                 <span className={`snapshot-row__direction snapshot-row__direction--${direction}`}>

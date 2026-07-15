@@ -111,7 +111,7 @@ export default function GarchConvergenceScanner({
   return (
     <section className="section garch-scanner" data-testid="garch-scanner-section">
       <div className="section-header garch-scanner__header">
-        <div className="section-title">
+        <h2 className="section-title">
           <GitCompareArrows size={14} />
           GARCH Convergence
           <InfoTooltip
@@ -120,7 +120,7 @@ export default function GarchConvergenceScanner({
             triggerTestId="garch-scanner-title-tooltip"
             contentTestId="garch-scanner-title-tooltip-content"
           />
-        </div>
+        </h2>
         <div className="theta-harvester__meta garch-scanner__meta">
           {lastSync && (
             <span className="report-meta" title={lastSync}>

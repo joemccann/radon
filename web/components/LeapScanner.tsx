@@ -64,7 +64,7 @@ export default function LeapScanner({
   return (
     <section className="section leap-scanner" data-testid="leap-scanner-section">
       <div className="section-header">
-        <div className="section-title">
+        <h2 className="section-title">
           <Telescope size={14} />
           LEAP IV Mispricing
           <InfoTooltip
@@ -73,7 +73,7 @@ export default function LeapScanner({
             triggerTestId="leap-scanner-title-tooltip"
             contentTestId="leap-scanner-title-tooltip-content"
           />
-        </div>
+        </h2>
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{mispricedCount} MISPRICED</span>

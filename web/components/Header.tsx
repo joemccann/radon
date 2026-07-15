@@ -8,6 +8,9 @@ import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext"
 
 type HeaderProps = {
   activeLabel: string;
+  /** The telemetry route label owns the page heading on workspace routes
+   *  whose content surface does not render its own h1. */
+  isPageHeading?: boolean;
   isFullscreen: boolean;
   onToggleFullscreen: () => void;
   onToggleTheme: () => void;
@@ -56,6 +59,7 @@ function integrityFor(status: IBDisplayStatus): { text: string; cls: IntegrityCl
 
 export default function Header({
   activeLabel,
+  isPageHeading = false,
   isFullscreen,
   onToggleFullscreen,
   onToggleTheme,
@@ -93,7 +97,11 @@ export default function Header({
   return (
     <header className="header">
       <div className="telemetry-rail" aria-label="Workspace telemetry">
-        <span className="rail-section">{activeLabel}</span>
+        {isPageHeading ? (
+          <h1 className="rail-section" title={activeLabel}>{activeLabel}</h1>
+        ) : (
+          <span className="rail-section" title={activeLabel}>{activeLabel}</span>
+        )}
         <span className="rail-sep" aria-hidden>·</span>
         <span className="rail-meta">
           <span className="rail-k">sample</span>
