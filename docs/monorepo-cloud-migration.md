@@ -166,7 +166,7 @@ evidence; the next successful deploy performs bounded cleanup.
 2. As root, from `/home/radon/radon`: `bash cloud/scripts/bootstrap-control-plane.sh` (no Gateway restart).
 3. Recover IBKR 2FA via `/usr/local/bin/radon-ib-gateway-control` only.
 4. Confirm `/status` `schema_version=2 ok=true overall_state=up` and pool 3/3 connected.
-5. Subsequent deploys use immutable runners under `~/.radon-deploy-runners/` and require Production environment approval.
+5. Subsequent deploys use immutable runners under `~/.radon-deploy-runners/` and start automatically after the required CI jobs pass; the non-blocking Production environment retains its main-only deployment policy.
 
 ### Production env contract after cutover
 

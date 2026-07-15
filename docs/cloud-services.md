@@ -130,10 +130,11 @@ From the laptop: `ssh root@ib-gateway radon stop`. Useful for off-hours shutdown
 ### Day-to-day deploys
 
 The deploy job is bound to the **`Production` GitHub Environment** (added
-2026-07-03; its manual-approval rule was removed the same week at the
-operator's request, so a green push deploys automatically again). The
-environment remains as a non-blocking label; re-adding a required-reviewers
-rule in repo Settings > Environments re-enables the gate without any yaml
+2026-07-03; its required-reviewer rule was removed on 2026-07-15 at the
+operator's request, so a green push deploys automatically). The environment
+remains for deployment history, URL metadata, environment-scoped configuration,
+and a custom branch policy that allows only `main`. Re-adding a required-reviewers
+rule in repo Settings > Environments would re-enable the gate without any YAML
 change. On green, CI runs `bash scripts/deploy.sh` (from `radon-cloud`):
 
 1. `git fetch origin main && git reset --hard origin/main` → applies repo changes.
