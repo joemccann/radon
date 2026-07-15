@@ -50,6 +50,7 @@ Source-green is not production-green. After source hardening, live recovery stil
 ### GitHub control plane
 
 - Superseded 2026-07-15: the `Production` environment required-reviewer rule was removed at the operator's request. A green push to `main` now deploys automatically after all workflow `needs:` gates pass. Keep the environment binding and its separate main-only branch policy; deleting the environment or setting `deployment_branch_policy` to `null` would weaken unrelated controls.
+- For mutable GitHub control-plane changes, do not add a repository regression test that cannot observe the changed setting. Verify the actual environment state through the GitHub API; keep source tests only for repository-owned behavior.
 - Branch protection on `main`: block force-push and deletion. Do not require pre-existing status checks on direct push for a solo push-to-main model; that bricks deploy until a PR workflow exists. Tests still gate deploy via the workflow `needs:`.
 
 ### Gitleaks policy self-tests
