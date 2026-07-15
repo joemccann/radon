@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { OpenOrder, PortfolioData } from "@/lib/types";
+import type { OpenOrder, PortfolioData, PortfolioLeg } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import type { ModifyComboLeg, ModifyOrderRequest } from "@/lib/orderModify";
@@ -54,6 +54,38 @@ function normalizeExpiry(expiry?: string | null): string {
     return `${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}`;
   }
   return expiry;
+}
+
+function resolveClosingOptionLeg(
+  order: OpenOrder,
+  quantity: number,
+  portfolio?: PortfolioData | null,
+): PortfolioLeg | null {
+  const contract = order.contract;
+  if (!portfolio || contract.secType !== "OPT" || contract.strike == null || !contract.expiry) {
+    return null;
+  }
+
+  const right = contract.right === "P" || contract.right === "PUT"
+    ? "P"
+    : contract.right === "C" || contract.right === "CALL"
+      ? "C"
+      : null;
+  if (!right) return null;
+  const expiry = contract.expiry.replace(/-/g, "");
+  const symbol = contract.symbol.toUpperCase();
+  for (const position of portfolio.positions) {
+    if (position.ticker.toUpperCase() !== symbol) continue;
+    if (position.expiry.replace(/-/g, "") !== expiry) continue;
+    for (const leg of position.legs) {
+      if (leg.strike !== contract.strike) continue;
+      if (leg.type !== (right === "C" ? "Call" : "Put")) continue;
+      if (!Number.isFinite(leg.avg_cost) || quantity > Math.abs(leg.contracts)) continue;
+      if (order.action === "SELL" && leg.direction === "LONG") return leg;
+      if (order.action === "BUY" && leg.direction === "SHORT") return leg;
+    }
+  }
+  return null;
 }
 
 function buildEditableComboLegs(order: OpenOrder | null): EditableComboLeg[] {
@@ -331,6 +363,20 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
     const expiry = order.contract.expiry ?? "";
     if (!strikeNum || !expiry) return null;
     const totalCost = parsedNewLocal * parsedQtyLocal * 100;
+    const closingLeg = resolveClosingOptionLeg(order, parsedQtyLocal, portfolio);
+    if (closingLeg) {
+      const basisMagnitude = parsedQtyLocal * Math.abs(closingLeg.avg_cost);
+      const closingLong = closingLeg.direction === "LONG";
+      return {
+        ticker: symbol,
+        chainLegs: [],
+        netPremium: action === "SELL" ? -parsedNewLocal : parsedNewLocal,
+        description: `${action} ${parsedQtyLocal}x ${symbol} ${right} @ ${fmtPrice(parsedNewLocal)}`,
+        totalCost: closingLong ? totalCost : -totalCost,
+        totalLabel: closingLong ? "Proceeds:" : "Close Debit:",
+        closeOut: { entryCostDollars: closingLong ? basisMagnitude : -basisMagnitude },
+      };
+    }
     return {
       ticker: symbol,
       chainLegs: [
@@ -342,7 +388,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
       // FU7: single-leg quote for net-of-cost risk on the post-modify shape.
       quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
     };
-  }, [order, editableLegs, newPrice, newQuantity, priceData]);
+  }, [order, editableLegs, newPrice, newQuantity, priceData, portfolio]);
 
   if (!order) return null;
 
