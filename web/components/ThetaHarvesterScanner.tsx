@@ -248,7 +248,7 @@ export default function ThetaHarvesterScanner({
   return (
     <section className="section theta-harvester" data-testid="theta-harvester-section">
       <div className="section-header">
-        <div className="section-title">
+        <h2 className="section-title">
           <Sparkles size={14} />
           Theta Harvester
           <InfoTooltip
@@ -257,7 +257,7 @@ export default function ThetaHarvesterScanner({
             triggerTestId="theta-harvester-title-tooltip"
             contentTestId="theta-harvester-title-tooltip-content"
           />
-        </div>
+        </h2>
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{data?.theta_harvest_count ?? 0} TRUE THETA</span>
@@ -417,7 +417,12 @@ export default function ThetaHarvesterScanner({
                   <span className="theta-card__ticker">{row.ticker}</span>
                   <RowStatus row={row} />
                 </div>
-                <div className="theta-card__structure">SHORT {structureLabel(row)} · {row.structure.dte}D</div>
+                <div
+                  className="theta-card__structure"
+                  title={`SHORT ${structureLabel(row)} · ${row.structure.dte}D`}
+                >
+                  SHORT {structureLabel(row)} · {row.structure.dte}D
+                </div>
                 <div className="theta-card__stats">
                   <span><b>{row.score.toFixed(0)}</b><em>SCORE</em></span>
                   <span><b>{fmtTheta(row.structure.theta)}</b><em>THETA</em></span>

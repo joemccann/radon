@@ -16,8 +16,11 @@ const inter = localFont({
 
 const plexMono = localFont({
   src: [
-    { path: "../public/fonts/IBMPlexMono-Regular.woff", weight: "400" },
-    { path: "../public/fonts/IBMPlexMono-Bold.woff", weight: "700" },
+    { path: "../public/fonts/IBMPlexMono-400.woff2", weight: "400", style: "normal" },
+    { path: "../public/fonts/IBMPlexMono-400-Italic.woff2", weight: "400", style: "italic" },
+    { path: "../public/fonts/IBMPlexMono-500.woff2", weight: "500", style: "normal" },
+    { path: "../public/fonts/IBMPlexMono-600.woff2", weight: "600", style: "normal" },
+    { path: "../public/fonts/IBMPlexMono-700.woff2", weight: "700", style: "normal" },
   ],
   variable: "--font-mono",
   display: "swap",

@@ -1300,11 +1300,11 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
     return (
       <div className="section">
         <div className="section-header">
-          <div className="section-title">
+          <h2 className="section-title">
             <Circle size={14} />
             Portfolio
             <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
-          </div>
+          </h2>
           <span className="pill neutral">LOADING</span>
         </div>
         <div className="section-body">
@@ -1319,11 +1319,11 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
       {definedPositions.length > 0 && (
         <div className="section">
           <div className="section-header">
-            <div className="section-title">
+            <h2 className="section-title">
               <CheckCircle2 size={14} />
               Defined Risk Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Defined Risk Positions"]} />
-            </div>
+            </h2>
             <div className="section-header-actions">
               <ColumnsToggle<PositionToggleableColumnKey>
                 columns={definedColEntries}
@@ -1350,11 +1350,11 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
       {undefinedPositions.length > 0 && (
         <div className="section">
           <div className="section-header">
-            <div className="section-title">
+            <h2 className="section-title">
               <TriangleAlert size={14} />
               Undefined Risk Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Undefined Risk Positions"]} />
-            </div>
+            </h2>
             <div className="section-header-actions">
               <ColumnsToggle<PositionToggleableColumnKey>
                 columns={undefinedColEntries}
@@ -1381,11 +1381,11 @@ function PortfolioSections({ portfolio, prices }: { portfolio: PortfolioData | n
       {equityPositions.length > 0 && (
         <div className="section">
           <div className="section-header">
-            <div className="section-title">
+            <h2 className="section-title">
               <Circle size={14} />
               Equity Positions
               <InfoTooltip text={SECTION_TOOLTIPS["Equity Positions"]} />
-            </div>
+            </h2>
             <div className="section-header-actions">
               <ColumnsToggle<PositionToggleableColumnKey>
                 columns={equityColEntries}
@@ -1906,11 +1906,11 @@ function ScannerSections({ defaultMode }: { defaultMode?: ScannerMode } = {}) {
       {modeTabs}
       <div className="section">
         <div className="section-header">
-          <div className="section-title">
+          <h2 className="section-title">
             <Sparkles size={14} />
             Scanner Signals
             <InfoTooltip text={SECTION_TOOLTIPS["Scanner Signals"]} />
-          </div>
+          </h2>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {lastSync && (
               <span className="report-meta" style={{ margin: 0 }}>
@@ -2142,11 +2142,11 @@ function DiscoverSections() {
     <>
       <div className="section">
         <div className="section-header">
-          <div className="section-title">
+          <h2 className="section-title">
             <Search size={14} />
             Discovery Candidates
             <InfoTooltip text={SECTION_TOOLTIPS["Discovery Candidates"]} />
-          </div>
+          </h2>
           <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
             {lastSync && (
               <span className="report-meta" style={{ margin: 0 }}>
@@ -3105,11 +3105,11 @@ function OrdersSections({
     return (
       <div className="section" data-testid="orders-loading">
         <div className="section-header">
-          <div className="section-title">
+          <h2 className="section-title">
             <ClipboardList size={14} />
             Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Open Orders"]} />
-          </div>
+          </h2>
           <span className="pill neutral">LOADING</span>
         </div>
         <div className="section-body p-6">
@@ -3172,11 +3172,11 @@ function OrdersSections({
 
       <div className="section" id="orders-open">
         <div className="section-header">
-          <div className="section-title">
+          <h2 className="section-title">
             <ClipboardList size={14} />
             Open Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Open Orders"]} />
-          </div>
+          </h2>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {!showMobileOrders && bulkSelectedKeys.size > 0 && (
               <button
@@ -3597,11 +3597,11 @@ function OrdersSections({
 
       <div className="section" id="orders-executed">
         <div className="section-header">
-          <div className="section-title">
+          <h2 className="section-title">
             <CheckCircle2 size={14} />
             Today&apos;s Executed Orders
             <InfoTooltip text={SECTION_TOOLTIPS["Today's Executed Orders"]} />
-          </div>
+          </h2>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             <TableSearch query={execFilter.query} setQuery={execFilter.setQuery} placeholder="Filter fills..." resultCount={execFilter.filtered.length} totalCount={positionGroups.length} />
             <span className="pill neutral">{positionGroups.length} {positionGroups.length === 1 ? "POSITION" : "POSITIONS"}</span>
@@ -3851,7 +3851,7 @@ export function HistoricalTradesSection({
         }}
         style={{ cursor: "pointer", userSelect: "none" }}
       >
-        <div className="section-title">
+        <h2 className="section-title">
           <ChevronDown
             size={12}
             style={{
@@ -3862,7 +3862,7 @@ export function HistoricalTradesSection({
           <ClipboardList size={14} />
           Historical Trades (30 Days)
           <InfoTooltip text={SECTION_TOOLTIPS["Historical Trades (30 Days)"]} />
-        </div>
+        </h2>
         <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
           {data?.as_of && (
             <span className="report-meta" style={{ margin: 0, padding: 0, border: "none" }}>

@@ -206,7 +206,7 @@ export default function StrengthConfirmationScanner({
   return (
     <section className="section strength-confirmation" data-testid="strength-confirmation-section">
       <div className="section-header">
-        <div className="section-title">
+        <h2 className="section-title">
           <ShieldCheck size={14} />
           7-Step Strength
           <InfoTooltip
@@ -215,7 +215,7 @@ export default function StrengthConfirmationScanner({
             triggerTestId="strength-title-tooltip"
             contentTestId="strength-title-tooltip-content"
           />
-        </div>
+        </h2>
         <div className="strength-confirmation__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{data?.confirmed_strength_count ?? 0} CONFIRMED</span>

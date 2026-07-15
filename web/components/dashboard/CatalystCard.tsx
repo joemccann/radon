@@ -81,7 +81,7 @@ export function CatalystCard() {
               ) : (
                 <span className="snapshot-row__ticker">MKT</span>
               )}
-              <span className="snapshot-row__signal">{r.title}</span>
+              <span className="snapshot-row__signal" title={r.title}>{r.title}</span>
               <span style={badgeStyle(r.days_until)}>{catalystBadge(r.days_until).label}</span>
             </li>
           ))}

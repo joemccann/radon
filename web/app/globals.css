@@ -1,8 +1,6 @@
-/* Typography is self-hosted via next/font/google in app/layout.tsx
-   (MOVE 6). The old `@import url("https://fonts.googleapis.com/...")`
-   line lived here and made a render-blocking third-party request for
-   Inter on every cold load. next/font fingerprints the woff2 files at
-   build time and serves them from the same origin. */
+/* Typography is self-hosted via next/font/local in app/layout.tsx.
+   next/font fingerprints the WOFF2 files at build time and serves them
+   from the same origin without a render-blocking third-party request. */
 
 @tailwind base;
 @tailwind components;
@@ -11,11 +9,23 @@
 :root {
   --sidebar-width: 220px;
   --header-height: 48px;
-  /* next/font/google injects `--font-sans` and `--font-mono` on <html>.
+  /* next/font/local injects `--font-sans` and `--font-mono` on <html>.
      Fallback values here keep the cascade sane when CSS loads before
      hydration; the next/font variable will override on mount. */
-  --font-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  /* Semantic typography roles. Component primitives should consume these
+     instead of introducing new one-off sizes and tracking values. */
+  --text-meta: 11px;
+  --text-label: 12px;
+  --text-body: 13px;
+  --text-table: 13px;
+  --text-prose: 14px;
+  --text-panel-title: 14px;
+  --text-view-title: 18px;
+  --text-metric: 28px;
+  --tracking-meta: 0.03em;
+  --tracking-label: 0.02em;
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
@@ -113,7 +123,7 @@
   --neutral: #878787;
   --text-primary: #000000;
   --text-secondary: #636363;
-  --text-muted: #878787;
+  --text-muted: #737373; /* 4.74:1 against white; passes WCAG AA for UI text. */
   /* Accent TEXT on white: base core #05AD98 = 2.82 and warn #D4910A = 2.67 fail AA.
      These darkened variants pass (#037066 = 5.98, #9f5d00 = 5.20). Fills keep the base. */
   --signal-core-text: #037066;
@@ -162,6 +172,22 @@
   padding: 0;
 }
 
+::selection {
+  background: color-mix(in srgb, var(--signal-core) 30%, transparent);
+  color: var(--text-primary);
+}
+
+::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+a {
+  text-decoration-thickness: from-font;
+  text-decoration-skip-ink: auto;
+  text-underline-offset: 0.15em;
+}
+
 :focus-visible {
   outline: 2px solid var(--text-primary);
   outline-offset: 2px;
@@ -201,11 +227,17 @@ body,
   height: 100%;
 }
 
+html {
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
 body {
   background: var(--bg-base);
   color: var(--text-primary);
   font-family: var(--font-sans);
-  font-size: 13px;
+  font-size: var(--text-body);
   line-height: 1.5;
 }
 
@@ -934,6 +966,7 @@ body {
   font-family: var(--font-sans);
   font-size: 14px;
   font-weight: 600;
+  line-height: 1.1;
   letter-spacing: 0;
   color: var(--text-primary);
   text-transform: none;
@@ -1270,10 +1303,11 @@ body {
 .watchlist-empty h1 {
   margin: 0;
   font-size: clamp(28px, 4vw, 56px);
-  line-height: 0.95;
+  line-height: 1.08;
   font-weight: 720;
   color: var(--text-primary);
   letter-spacing: 0;
+  text-wrap: balance;
 }
 
 .watchlist-hero p,
@@ -1624,6 +1658,12 @@ body[data-mobile="true"] .watchlist-row {
 
 .dashboard-section {
   min-width: 0;
+}
+
+.dashboard-section__heading {
+  font: inherit;
+  line-height: 1.1;
+  margin: 0;
 }
 
 .dashboard-section__toggle {
@@ -2444,9 +2484,10 @@ body[data-mobile="true"] .watchlist-row {
 }
 
 .metric-value {
-  font-family: var(--font-mono);
-  font-size: 24px;
-  font-weight: 500;
+  font-family: var(--font-sans);
+  font-size: var(--text-metric);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   margin-bottom: 8px;
   transition: color 300ms ease-in-out;
@@ -2573,11 +2614,14 @@ body[data-mobile="true"] .watchlist-row {
 }
 
 .section-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  font-weight: 600;
+  line-height: 1.1;
+  margin: 0;
+  text-wrap: balance;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -3031,18 +3075,18 @@ table {
 
 th {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-muted);
-  text-align: left;
+  text-align: start;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-dim);
   font-weight: 500;
 }
 
 th.right {
-  text-align: right;
+  text-align: end;
 }
 
 td {
@@ -3054,7 +3098,7 @@ td {
 }
 
 td.right {
-  text-align: right;
+  text-align: end;
 }
 
 tr:hover {
@@ -3115,7 +3159,7 @@ td.last-price-cell {
 .pill {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 3px 6px;
@@ -3887,14 +3931,17 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   letter-spacing: 0.01em;
   line-height: 1.3;
   color: var(--text-primary);
+  text-wrap: balance;
 }
 
 .news-feed-summary {
   margin: 0;
-  font-size: 13px;
+  max-inline-size: 70ch;
+  font-size: var(--text-prose);
   line-height: 1.6;
   color: var(--text-secondary);
   white-space: pre-wrap;
+  text-wrap: pretty;
 }
 
 .news-feed-image-wrapper {
@@ -4205,6 +4252,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   font-size: 22px;
   font-weight: 600;
   letter-spacing: -0.005em;
+  text-wrap: balance;
   line-height: 1.2;
   color: var(--text-primary);
 }
@@ -4818,9 +4866,11 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
 .chat-markdown p {
   white-space: pre-wrap;
   overflow-wrap: break-word;
-  font-size: 12px;
-  line-height: 1.45;
+  max-inline-size: 70ch;
+  font-size: var(--text-prose);
+  line-height: 1.55;
   margin: 0;
+  text-wrap: pretty;
 }
 
 .chat-markdown ul,
@@ -4836,8 +4886,9 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
 }
 
 .chat-markdown-list-item {
-  font-size: 12px;
-  line-height: 1.45;
+  max-inline-size: 70ch;
+  font-size: var(--text-prose);
+  line-height: 1.55;
 }
 
 .chat-markdown p + .chat-markdown-list,
@@ -4853,6 +4904,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   margin: 0;
   text-transform: uppercase;
   letter-spacing: 0.06em;
+  text-wrap: balance;
 }
 
 .chat-markdown-heading-1 {
@@ -4927,8 +4979,10 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
 
 .chat-message p {
   white-space: pre-wrap;
-  font-size: 12px;
-  line-height: 1.45;
+  max-inline-size: 70ch;
+  font-size: var(--text-prose);
+  line-height: 1.55;
+  text-wrap: pretty;
 }
 
 .chat-message-body {
@@ -4942,9 +4996,10 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
 }
 
 .chat-line {
-  font-size: 12px;
-  line-height: 1.45;
+  font-size: var(--text-prose);
+  line-height: 1.55;
   white-space: pre-wrap;
+  text-wrap: pretty;
 }
 
 .chat-line.chat-gap {
@@ -5489,7 +5544,7 @@ tr.leg-row td {
 
 .service-health-banner {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: 12px;
   padding: 8px 20px;
   background: var(--warning);
@@ -5537,9 +5592,8 @@ tr.leg-row td {
 .service-health-banner__message {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 /*
@@ -5550,9 +5604,8 @@ tr.leg-row td {
 .service-health-banner__dormant {
   flex: 1;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
   opacity: 0.9;
 }
 
@@ -5696,11 +5749,11 @@ tr.leg-row td {
 }
 
 .modal-title {
-  font-family: var(--font-mono);
-  font-size: 11px;
+  font-family: var(--font-sans);
+  font-size: var(--text-label);
   text-transform: uppercase;
-  letter-spacing: 0.1em;
-  font-weight: 500;
+  letter-spacing: var(--tracking-label);
+  font-weight: 600;
 }
 
 .modal-close {
@@ -5736,8 +5789,8 @@ tr.leg-row td {
 .demo-welcome-modal .modal-content { width: 460px; }
 
 .demo-welcome-lead {
-  font-size: 13px;
-  line-height: 1.6;
+  font-size: var(--text-prose);
+  line-height: 1.55;
   color: var(--text-secondary);
   margin: 0 0 16px;
 }
@@ -5755,7 +5808,7 @@ tr.leg-row td {
 
 .demo-welcome-expiry-label {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.12em;
   color: var(--text-muted);
@@ -5768,8 +5821,8 @@ tr.leg-row td {
 }
 
 .demo-welcome-note {
-  font-size: 12px;
-  line-height: 1.5;
+  font-size: var(--text-prose);
+  line-height: 1.55;
   color: var(--text-muted);
   margin: 0 0 18px;
 }
@@ -5872,11 +5925,11 @@ tr.leg-row td {
 
 .actions-th {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-muted);
-  text-align: right;
+  text-align: end;
   padding: 12px 16px;
   border-bottom: 1px solid var(--border-dim);
   font-weight: 500;
@@ -5890,7 +5943,7 @@ tr.leg-row td {
 .btn-order-action {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   min-height: 32px;
@@ -5899,11 +5952,11 @@ tr.leg-row td {
   background: transparent;
   cursor: pointer;
   transition: all 150ms ease-in-out;
-  margin-left: 4px;
+  margin-inline-start: 4px;
 }
 
 .btn-order-action:first-child {
-  margin-left: 0;
+  margin-inline-start: 0;
 }
 
 .btn-order-action:disabled {
@@ -5957,7 +6010,7 @@ tr.leg-row td {
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  font-size: 10px;
+  font-size: var(--text-meta);
 }
 
 .orders-command-strip__value {
@@ -5975,7 +6028,7 @@ tr.leg-row td {
 
 .orders-command-strip__jump {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   color: var(--text-secondary);
@@ -5997,7 +6050,7 @@ tr.leg-row td {
 .order-status-pill {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.04em;
   padding: 2px 6px;
@@ -6172,7 +6225,7 @@ tr.leg-row td {
 
 .cancel-label {
   color: var(--text-muted);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -6291,7 +6344,7 @@ tr.leg-row td {
 
 .modify-market-label {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
@@ -6346,7 +6399,7 @@ tr.leg-row td {
 
 .modify-price-label {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-label);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-muted);
@@ -6413,7 +6466,7 @@ tr.leg-row td {
 .btn-quick {
   flex: 1;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   padding: 6px 0;
@@ -6463,14 +6516,14 @@ tr.leg-row td {
 }
 .modify-rth-label {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   text-transform: uppercase;
   letter-spacing: 0.05em;
   color: var(--text-primary);
 }
 .modify-rth-hint {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--text-meta);
   color: var(--text-muted);
   letter-spacing: 0.03em;
 }
@@ -6498,9 +6551,9 @@ tr.leg-row td {
 
 .modify-section-hint {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--text-meta);
   color: var(--text-muted);
-  text-align: right;
+  text-align: end;
 }
 
 .modify-combo-legs {
@@ -7794,7 +7847,7 @@ tr.leg-row td {
 .company-meta { font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
 .company-name { font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--text-primary); }
 .company-description { position: relative; }
-.company-description p { font-family: var(--font-sans); font-size: 12px; line-height: 1.5; color: var(--text-secondary); margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.company-description p { font-family: var(--font-sans); font-size: var(--text-prose); line-height: 1.55; color: var(--text-secondary); margin: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; text-wrap: pretty; }
 .company-description.expanded p { display: block; -webkit-line-clamp: unset; }
 .company-show-more { background: none; border: none; padding: 0; margin-top: 4px; font-family: var(--font-mono); font-size: 10px; color: var(--text-muted); cursor: pointer; text-transform: uppercase; letter-spacing: 0.05em; }
 .company-show-more:hover { color: var(--text-primary); }
@@ -7954,7 +8007,7 @@ tr.leg-row td {
   width: 120px;
   letter-spacing: 0.04em;
 }
-.table-search-input::placeholder { color: var(--text-secondary); opacity: 0.6; }
+.table-search-input::placeholder { color: var(--text-muted); opacity: 1; }
 .table-search-clear {
   display: flex;
   align-items: center;
@@ -10955,7 +11008,7 @@ tr {
   color: var(--signal-core-text);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -11033,7 +11086,7 @@ tr {
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
   cursor: pointer;
@@ -11358,7 +11411,7 @@ tr {
   font-family: var(--font-mono);
   font-size: 13px;
   line-height: 1.15;
-  font-weight: 650;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   color: var(--text-primary);
 }
@@ -11419,7 +11472,7 @@ tr {
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 10px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.08em;
   line-height: 1;
   text-transform: uppercase;
@@ -11605,7 +11658,7 @@ tr {
 
 .journal-pnl-strip__value {
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--text-primary);
   font-variant-numeric: tabular-nums;
 }
@@ -11764,12 +11817,12 @@ body[data-mobile="true"] .journal-pnl-strip__stat--range {
 
 .garch-pair-cell__lagger-name {
   color: var(--text-primary);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .garch-lagger-link {
   font-family: var(--font-mono);
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.03em;
 }
 
@@ -11777,7 +11830,7 @@ body[data-mobile="true"] .journal-pnl-strip__stat--range {
   display: inline-block;
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 2px 6px;
@@ -11957,7 +12010,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   border-radius: 4px;
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.08em;
   line-height: 1.25;
   text-transform: uppercase;
@@ -12052,7 +12105,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 .theta-card__ticker {
   font-family: var(--font-mono);
   font-size: 18px;
-  font-weight: 750;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -12133,7 +12186,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   color: var(--text-secondary);
   font-family: var(--font-mono);
   font-size: 9px;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.06em;
   line-height: 1.25;
   text-transform: uppercase;
@@ -12215,7 +12268,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 .strength-card__score span {
   color: var(--text-primary);
   font-size: 22px;
-  font-weight: 760;
+  font-weight: 700;
   letter-spacing: 0;
 }
 
@@ -12223,7 +12276,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   color: var(--text-secondary);
   font-size: 9px;
   font-style: normal;
-  font-weight: 650;
+  font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
@@ -12686,7 +12739,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   margin-top: 10px;
   font-family: var(--font-mono);
   font-size: clamp(48px, 6vw, 78px);
-  font-weight: 800;
+  font-weight: 700;
   line-height: 0.95;
   letter-spacing: -0.08em;
 }
@@ -12732,7 +12785,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 24px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.06em;
 }
 
@@ -12765,7 +12818,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   color: var(--text-primary);
   font-family: var(--font-mono);
   font-size: 26px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.06em;
 }
 
@@ -12773,7 +12826,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   margin-top: 14px;
   font-family: var(--font-mono);
   font-size: 30px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: -0.07em;
 }
 
@@ -12859,7 +12912,7 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
 .grg-gate-status {
   font-family: var(--font-mono);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 700;
   letter-spacing: 0.08em;
   text-align: right;
 }
@@ -14814,6 +14867,10 @@ body[data-mobile="true"] input[type="email"],
 body[data-mobile="true"] input[type="password"],
 body[data-mobile="true"] input[type="tel"],
 body[data-mobile="true"] input[type="url"],
+body[data-mobile="true"] input[type="date"],
+body[data-mobile="true"] input[type="datetime-local"],
+body[data-mobile="true"] input[type="time"],
+body[data-mobile="true"] input[type="month"],
 body[data-mobile="true"] textarea,
 body[data-mobile="true"] select {
   font-size: max(16px, 1em);
@@ -15952,7 +16009,7 @@ body[data-mobile="true"] td.right {
   align-items: center;
   gap: 8px;
   font-size: 18px;
-  font-weight: 650;
+  font-weight: 600;
   color: var(--text-primary);
   font-family: var(--font-mono, ui-monospace, monospace);
 }

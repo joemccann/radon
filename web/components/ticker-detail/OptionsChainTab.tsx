@@ -633,7 +633,10 @@ function OrderBuilder({
                 >
                   {leg.action}
                 </button>
-                <span className="order-builder-leg-contract">
+                <span
+                  className="order-builder-leg-contract"
+                  title={`${ticker} ${formatExpiry(leg.expiry)} ${leg.quantity}x $${leg.strike} ${leg.right === "C" ? "Call" : "Put"}`}
+                >
                   {leg.quantity}x ${leg.strike} {leg.right === "C" ? "Call" : "Put"}
                 </span>
                 <span className="order-builder-leg-expiry">{formatExpiry(leg.expiry)}</span>

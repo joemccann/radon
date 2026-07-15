@@ -102,12 +102,11 @@ afterEach(() => {
 describe("FU3 panel mounts", () => {
   it("DashboardSurface mounts the CatalystCard surface", async () => {
     render(<DashboardSurface portfolio={null} orders={null} />);
-    // The CatalystCard renders its title as an <h3> (the dashboard section label
-    // is a button span of the same text) — target the heading to disambiguate.
     await waitFor(() =>
-      expect(screen.getByRole("heading", { name: /upcoming catalysts/i })).toBeTruthy(),
+      expect(screen.getByRole("heading", { level: 2, name: /upcoming catalysts/i })).toBeTruthy(),
     );
-    expect(screen.getByText("APPLE INC")).toBeTruthy();
+    expect(screen.getByRole("heading", { level: 3, name: /upcoming catalysts/i })).toBeTruthy();
+    expect(screen.getByText("APPLE INC").getAttribute("title")).toBe("APPLE INC");
   });
 
   it("flow-analysis surface mounts InformedFlowPanel for the active ticker", async () => {

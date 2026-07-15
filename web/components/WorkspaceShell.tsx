@@ -56,6 +56,10 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const activeSection: WorkspaceSection = section ?? resolveSectionFromPath(pathname, "dashboard");
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
+  const headerOwnsPageHeading = activeSection !== "ticker-detail"
+    && activeSection !== "watchlist"
+    && activeSection !== "admin"
+    && activeSection !== "workflow";
   const { toasts, addToast, removeToast } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
@@ -449,6 +453,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       <main className="main">
         <Header
           activeLabel={activeLabel}
+          isPageHeading={headerOwnsPageHeading}
           isFullscreen={isFullscreen}
           onToggleFullscreen={toggleFullscreen}
           onToggleTheme={toggleTheme}
