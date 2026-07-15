@@ -156,7 +156,7 @@ export function ListedContractOrderForm({
           fontSize: "10px",
           letterSpacing: "0.12em",
           textTransform: "uppercase",
-          color: "var(--signal-core)",
+          color: "var(--signal-core-text)",
           marginBottom: "12px",
         }}
       >

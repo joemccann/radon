@@ -44,18 +44,18 @@ This document is the enforced reference for all UI and asset work. The full bran
 |-------|-----|------|
 | `bg.canvas` | `#0a0f14` | Primary background |
 | `bg.panel` | `#0f1519` | Instrument panels |
-| `bg.panelRaised` | `#151c22` | Hover / focus panel |
-| `line.grid` | `#1e293b` | Grid and borders |
+| `bg.panelRaised` | `#1e252b` | Hover / focus panel |
+| `line.grid` | `#2e3947` | Grid and borders |
 | `text.primary` | `#e2e8f0` | Primary text |
 | `text.secondary` | `#94a3b8` | Secondary text |
-| `text.muted` | `#475569` | Meta / supporting text |
+| `text.muted` | `#758192` | Meta / supporting text |
 | `signal.core` | **`#05AD98`** | **Core Radon discovery layer (flagship accent)** |
 | `signal.strong` | `#0FCFB5` | High-confidence signal |
-| `signal.deep` | `#048A7A` | Deep data / selected states |
+| `signal.deep` | `#33a090` | Deep data / selected states |
 | `warn` | `#F5A623` | Quality / caution |
 | `fault` | `#E85D6C` | Feed fault / integrity problem |
-| `violet.extreme` | `#8B5CF6` | Extreme dislocation / rare state |
-| `magenta.dislocation` | `#D946A8` | Structural dislocation |
+| `violet.extreme` | `#9e80f6` | Extreme dislocation / rare state |
+| `magenta.dislocation` | `#e55fb5` | Structural dislocation |
 | `neutral` | `#94a3b8` | Neutral comparative states |
 
 ### CSS Variable Mapping
@@ -66,9 +66,9 @@ The palette is implemented as CSS custom properties in `web/app/globals.css` wit
 |-------------|------|-------|-------|
 | `--signal-core` | `#05AD98` | `#05AD98` | `signal.core` |
 | `--signal-strong` | `#0FCFB5` | `#048A7A` | `signal.strong` |
-| `--signal-deep` | `#048A7A` | `#037066` | `signal.deep` |
-| `--dislocation` | `#D946A8` | `#C026A0` | `magenta.dislocation` |
-| `--extreme` | `#8B5CF6` | `#7C3AED` | `violet.extreme` |
+| `--signal-deep` | `#33a090` | `#037066` | `signal.deep` |
+| `--dislocation` | `#e55fb5` | `#C026A0` | `magenta.dislocation` |
+| `--extreme` | `#9e80f6` | `#7C3AED` | `violet.extreme` |
 | `--fault` | `#E85D6C` | `#D4183D` | `fault` |
 | `--neutral` | `#94a3b8` | `#475569` | `neutral` |
 | `--text-secondary` | `#94a3b8` | `#636363` | `text.secondary` |

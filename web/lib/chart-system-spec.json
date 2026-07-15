@@ -38,12 +38,12 @@
     },
     "dislocation": {
       "cssVar": "--dislocation",
-      "fallback": "#D946A8",
+      "fallback": "#e55fb5",
       "description": "Structural dislocation"
     },
     "extreme": {
       "cssVar": "--extreme",
-      "fallback": "#8B5CF6",
+      "fallback": "#9e80f6",
       "description": "Extreme regime or rare state"
     },
     "fault": {

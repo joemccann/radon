@@ -84,7 +84,7 @@ export default function FlexTokenBanner() {
           display: "inline-flex",
           alignItems: "center",
           gap: "4px",
-          color: "var(--signal-core, #05AD98)",
+          color: "var(--signal-core-text, #05AD98)",
           textDecoration: "none",
           fontWeight: 600,
         }}

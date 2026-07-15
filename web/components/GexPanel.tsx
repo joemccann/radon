@@ -63,9 +63,9 @@ function levelColor(gamma: number | undefined): string {
 
 function SourceBadge({ source }: { source: "uw" | "mq" | "both" }) {
   const styles: Record<string, React.CSSProperties> = {
-    uw:   { background: "color-mix(in srgb, var(--signal-core) 18%, transparent)",  color: "var(--signal-core)",  border: "1px solid color-mix(in srgb, var(--signal-core) 40%, transparent)" },
+    uw:   { background: "color-mix(in srgb, var(--signal-core) 18%, transparent)",  color: "var(--signal-core-text)",  border: "1px solid color-mix(in srgb, var(--signal-core) 40%, transparent)" },
     mq:   { background: "color-mix(in srgb, var(--gex-mq-accent) 15%, transparent)", color: "var(--gex-mq-accent)", border: "1px solid color-mix(in srgb, var(--gex-mq-accent) 35%, transparent)" },
-    both: { background: "color-mix(in srgb, var(--signal-core) 12%, transparent)", color: "var(--signal-core)",  border: "1px solid color-mix(in srgb, var(--signal-core) 30%, transparent)" },
+    both: { background: "color-mix(in srgb, var(--signal-core) 12%, transparent)", color: "var(--signal-core-text)",  border: "1px solid color-mix(in srgb, var(--signal-core) 30%, transparent)" },
   };
   const labels = { uw: "UW", mq: "MQ", both: "UW+MQ" };
   return (
@@ -163,9 +163,9 @@ function ExpectedRangeBar({ data }: { data: GexData }) {
   const anchors: Anchor[] = [];
   anchors.push({ pct: pct(low), value: low, label: "RANGE LOW" });
   if (accel) anchors.push({ pct: pct(accel), value: accel, label: "MAX ACCEL", color: "var(--accelerator, var(--fault))" });
-  if (flip) anchors.push({ pct: pct(flip), value: flip, label: "GEX FLIP", color: "var(--warning)" });
+  if (flip) anchors.push({ pct: pct(flip), value: flip, label: "GEX FLIP", color: "var(--warn-text)" });
   anchors.push({ pct: pct(spot), value: spot, label: "CLOSE", color: "var(--signal-strong)" });
-  if (magnet) anchors.push({ pct: pct(magnet), value: magnet, label: "MAX MAGNET", color: "var(--signal-core)" });
+  if (magnet) anchors.push({ pct: pct(magnet), value: magnet, label: "MAX MAGNET", color: "var(--signal-core-text)" });
   anchors.push({ pct: pct(high), value: high, label: "RANGE HIGH" });
   anchors.sort((a, b) => a.pct - b.pct);
 
@@ -232,8 +232,8 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
 
   function deltaStyle(d: number | undefined): React.CSSProperties {
     if (d == null) return {};
-    if (Math.abs(d) <= 2)  return { color: "var(--signal-core)" };
-    if (Math.abs(d) <= 10) return { color: "var(--warning)" };
+    if (Math.abs(d) <= 2)  return { color: "var(--signal-core-text)" };
+    if (Math.abs(d) <= 10) return { color: "var(--warn-text)" };
     return { color: "var(--fault)" };
   }
 
@@ -243,7 +243,7 @@ function MqLevelsPanel({ mq, sourceDelta }: { mq: MqLevels; sourceDelta: SourceD
     return (
       <span style={deltaStyle(e.delta)}>
         {sign}{e.delta.toFixed(1)} &nbsp;
-        <span style={{ color: "var(--signal-core)", fontSize: 9 }}>{e.uw.toFixed(0)}</span>
+        <span style={{ color: "var(--signal-core-text)", fontSize: 9 }}>{e.uw.toFixed(0)}</span>
         <span style={{ color: "var(--text-muted)", fontSize: 9 }}> vs </span>
         <span style={{ color: "var(--gex-mq-accent)", fontSize: 9 }}>{e.mq.toFixed(0)}</span>
       </span>
@@ -619,7 +619,7 @@ export default function GexPanel({ marketState }: GexPanelProps) {
           <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 8 }}>
             <span className="gex-chart-title">GEX Profile &mdash; curvature field by strike</span>
             <span className="gex-chart-legend">
-              <span style={{ color: "var(--signal-core)" }}>&#9632; Positive curvature (stabilizing)</span>
+              <span style={{ color: "var(--signal-core-text)" }}>&#9632; Positive curvature (stabilizing)</span>
               {" "}
               <span style={{ color: "var(--dislocation)" }}>&#9632; Negative curvature (destabilizing)</span>
             </span>

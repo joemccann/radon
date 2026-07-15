@@ -7,29 +7,29 @@
       "bg": {
         "canvas": "#0a0f14",
         "panel": "#0f1519",
-        "panelRaised": "#151c22"
+        "panelRaised": "#1e252b"
       },
       "line": {
-        "grid": "#1e293b",
+        "grid": "#2e3947",
         "focus": "#05AD98"
       },
       "text": {
         "primary": "#e2e8f0",
         "secondary": "#94a3b8",
-        "muted": "#475569"
+        "muted": "#758192"
       },
       "signal": {
         "core": "#05AD98",
         "strong": "#0FCFB5",
-        "deep": "#048A7A"
+        "deep": "#33a090"
       },
       "semantic": {
         "positive": "#05AD98",
         "negative": "#E85D6C",
         "warn": "#F5A623",
         "fault": "#E85D6C",
-        "dislocation": "#D946A8",
-        "extreme": "#8B5CF6",
+        "dislocation": "#e55fb5",
+        "extreme": "#9e80f6",
         "neutral": "#94a3b8"
       }
     },
