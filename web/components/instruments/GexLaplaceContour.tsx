@@ -212,7 +212,7 @@ function buildLevelMarkers({
 }): LevelMarker[] {
   const candidates: LevelMarker[] = [];
   if (maxMagnet != null) {
-    candidates.push({ testId: "gex-level-marker-max-magnet", label: "MAGNET", strike: maxMagnet, color: "var(--signal-core)" });
+    candidates.push({ testId: "gex-level-marker-max-magnet", label: "MAGNET", strike: maxMagnet, color: "var(--signal-core-text)" });
   }
   if (maxAccelerator != null) {
     candidates.push({ testId: "gex-level-marker-max-accelerator", label: "ACCEL", strike: maxAccelerator, color: "var(--fault)" });
@@ -224,7 +224,7 @@ function buildLevelMarkers({
     candidates.push({ testId: "gex-level-marker-call-wall", label: "CALL WALL", strike: callWall, color: "var(--signal-strong)" });
   }
   if (flipStrike != null) {
-    candidates.push({ testId: "gex-level-marker-flip", label: "FLIP", strike: flipStrike, color: "var(--warn)" });
+    candidates.push({ testId: "gex-level-marker-flip", label: "FLIP", strike: flipStrike, color: "var(--warn-text)" });
   }
   return candidates.filter((m) => m.strike >= domain.minStrike && m.strike <= domain.maxStrike);
 }

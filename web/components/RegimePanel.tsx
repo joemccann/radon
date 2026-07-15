@@ -470,7 +470,7 @@ export default function RegimePanel({
                 gap: "8px",
                 padding: "6px 12px",
                 background: "color-mix(in srgb, var(--warning) 12%, transparent)",
-                color: "var(--warning)",
+                color: "var(--warn-text)",
                 fontSize: "11px",
                 fontFamily: "var(--font-mono, monospace)",
                 letterSpacing: "0.08em",

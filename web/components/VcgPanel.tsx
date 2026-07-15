@@ -424,7 +424,7 @@ export default function VcgPanel({ marketState }: VcgPanelProps) {
             <div style={{ fontFamily: "var(--font-mono)", fontSize: "10px", color: "var(--text-muted)", borderTop: "1px solid var(--line-grid)", paddingTop: "8px" }}>
               β₁(VVIX) = {fmtNum(sig.beta1_vvix, 6)} | β₂(VIX) = {fmtNum(sig.beta2_vix, 6)}
               {sig.sign_suppressed && (
-                <span style={{ color: "var(--warning)", marginLeft: "8px" }}>SIGN REVERSED</span>
+                <span style={{ color: "var(--warn-text)", marginLeft: "8px" }}>SIGN REVERSED</span>
               )}
             </div>
             {/* VVIX level */}

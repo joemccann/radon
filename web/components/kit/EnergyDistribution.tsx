@@ -55,7 +55,7 @@ export function EnergyDistribution({
             fontSize: 10,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
-            color: "var(--signal-core)",
+            color: "var(--signal-core-text)",
           }}
         >
           {engine}

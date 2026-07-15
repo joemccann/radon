@@ -85,7 +85,7 @@ export function DenseNumericTable({ data = SAMPLE_DATA }: DenseNumericTableProps
             fontSize: 10,
             letterSpacing: "0.1em",
             textTransform: "uppercase",
-            color: "var(--signal-core)",
+            color: "var(--signal-core-text)",
           }}
         >
           Array

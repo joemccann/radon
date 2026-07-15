@@ -154,7 +154,7 @@ function MobileTickerFlowReport({
             </span>
           )}
           {isAnalyzing && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--warn)" }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--warn-text)" }}>
               {status === "scanning" ? "ANALYZING" : "LOADING"}
             </span>
           )}

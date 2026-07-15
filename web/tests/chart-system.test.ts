@@ -18,7 +18,7 @@ describe("radon chart system spec", () => {
   test("maps semantic series roles to CSS variables with fallbacks", () => {
     expect(chartSeriesColor("primary")).toBe("var(--signal-core, #05AD98)");
     expect(chartSeriesColor("comparison")).toBe("var(--chart-series-comparison, rgba(148, 163, 184, 0.72))");
-    expect(chartSeriesFallback("dislocation")).toBe("#D946A8");
+    expect(chartSeriesFallback("dislocation")).toBe("#e55fb5");
     expect(resolveChartSeriesColor("fault")).toBe("#E85D6C");
   });
 

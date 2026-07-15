@@ -115,7 +115,7 @@ export function MicrostructureStrip({
       <Metric label="MICROPRICE">
         {micro.microprice != null ? (
           <>
-            <span style={{ color: "var(--signal-core)" }}>
+            <span style={{ color: "var(--signal-core-text)" }}>
               {micro.microprice.toFixed(2)}
             </span>
             {micro.microPremium != null && (

@@ -205,7 +205,7 @@ export default function ShareReportModal({
                   background: "color-mix(in srgb, var(--warn) 8%, transparent)",
                   fontFamily: "var(--font-mono, monospace)",
                   fontSize: "10px",
-                  color: "var(--warn)",
+                  color: "var(--warn-text)",
                 }}
               >
                 {staleNotice}

@@ -368,7 +368,7 @@ export default function CtaBriefing({ tables, estSellingBn, dayChangeBn = null }
         {crowded.length > 0 && (
           <div className="cta-briefing-metric">
             <div className="cta-briefing-metric-label">CROWDED LONGS</div>
-            <div className="cta-briefing-metric-value" style={{ color: "var(--signal-core)" }}>
+            <div className="cta-briefing-metric-value" style={{ color: "var(--signal-core-text)" }}>
               {crowded.length}
             </div>
           </div>
