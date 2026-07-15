@@ -27,6 +27,7 @@
   --tracking-meta: 0.03em;
   --tracking-label: 0.02em;
   --ease-out: cubic-bezier(0.25, 1, 0.5, 1);
+  --transition-controls: background-color 150ms var(--ease-out), border-color 150ms var(--ease-out), color 150ms var(--ease-out);
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-right: env(safe-area-inset-right, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -307,7 +308,7 @@ body {
   font-size: 13px;
   color: var(--text-muted);
   cursor: default;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls);
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1186,7 +1187,7 @@ body {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls);
 }
 
 .theme-toggle:hover,
@@ -3110,11 +3111,11 @@ tr:last-child td {
 }
 
 .last-price-up {
-  animation: last-price-flash-up 2.5s ease-out;
+  animation: last-price-flash-up 800ms ease-out;
 }
 
 .last-price-down {
-  animation: last-price-flash-down 2.5s ease-out;
+  animation: last-price-flash-down 800ms ease-out;
 }
 
 /* Price cells with trend arrows: flex keeps value + arrow on one line, right-aligned.
@@ -3346,7 +3347,6 @@ td.last-price-cell {
 .flow-spark-bar {
   width: 6px;
   min-height: 2px;
-  transition: height 400ms var(--ease-out);
 }
 
 .flow-spark-bar.accum {
@@ -5347,7 +5347,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   border: 1px solid var(--border-dim);
   color: var(--text-primary);
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls);
 }
 
 .sync-button:hover {
@@ -5531,7 +5531,7 @@ tr.leg-row td {
   font-size: 11px;
   letter-spacing: 0.03em;
   flex-shrink: 0;
-  animation: banner-slide-down 200ms ease-out;
+  animation: banner-reveal-in 200ms var(--ease-out);
 }
 
 .connection-banner.connected {
@@ -5553,7 +5553,7 @@ tr.leg-row td {
   font-size: 11px;
   letter-spacing: 0.03em;
   flex-shrink: 0;
-  animation: banner-slide-down 200ms ease-out;
+  animation: banner-reveal-in 200ms var(--ease-out);
 }
 
 /*
@@ -5628,18 +5628,24 @@ tr.leg-row td {
   background: var(--banner-positive);
 }
 
-@keyframes banner-slide-down {
+/*
+ * Reveal a conditionally-mounted banner. A keyframe animation (not a
+ * transition) is used deliberately: it fires reliably the moment React
+ * inserts the element, with none of the @starting-style mount-race that
+ * can leave a conditionally-rendered banner stuck at its start opacity.
+ * It animates opacity + transform only (GPU-composited, never layout),
+ * and because there is no `forwards` fill the resting state is the base
+ * rule — a fully visible banner that can never be swallowed. Dropping
+ * the old max-height keyframe also removes the 40px clip on long copy.
+ */
+@keyframes banner-reveal-in {
   from {
-    max-height: 0;
-    padding-top: 0;
-    padding-bottom: 0;
     opacity: 0;
+    transform: translateY(-4px);
   }
   to {
-    max-height: 40px;
-    padding-top: 8px;
-    padding-bottom: 8px;
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
@@ -5714,6 +5720,22 @@ tr.leg-row td {
     opacity: 1;
     transform: translateY(0);
   }
+}
+
+@keyframes toast-out {
+  from {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+.toast--exiting {
+  animation: toast-out 150ms var(--ease-out) forwards;
+  pointer-events: none;
 }
 
 /* ── Modal ── */
@@ -5951,7 +5973,7 @@ tr.leg-row td {
   border: 1px solid var(--border-dim);
   background: transparent;
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls), transform 150ms var(--ease-out);
   margin-inline-start: 4px;
 }
 
@@ -6474,7 +6496,7 @@ tr.leg-row td {
   background: transparent;
   color: var(--text-primary);
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls);
 }
 
 .btn-quick:hover:not(:disabled) {
@@ -6653,7 +6675,7 @@ tr.leg-row td {
   background: transparent;
   color: var(--text-primary);
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls), transform 150ms var(--ease-out);
 }
 
 .btn-secondary:hover:not(:disabled) {
@@ -6675,7 +6697,7 @@ tr.leg-row td {
   background: var(--text-primary);
   color: var(--bg-panel);
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls), transform 150ms var(--ease-out), opacity 150ms var(--ease-out);
 }
 
 .btn-primary:hover:not(:disabled) {
@@ -6697,7 +6719,7 @@ tr.leg-row td {
   background: var(--negative);
   color: #fff;
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls), transform 150ms var(--ease-out), opacity 150ms var(--ease-out);
 }
 
 .btn-danger:hover:not(:disabled) {
@@ -6839,7 +6861,7 @@ tr.leg-row td {
 
 /* Tabs */
 .ticker-tabs { display: flex; border-bottom: 1px solid var(--border-dim); margin-bottom: 0; }
-.ticker-tab { padding: 10px 16px; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: all 150ms ease-in-out; }
+.ticker-tab { padding: 10px 16px; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); background: transparent; border: none; border-bottom: 2px solid transparent; cursor: pointer; transition: var(--transition-controls); }
 .ticker-tab:hover { color: var(--text-primary); }
 .ticker-tab.active { color: var(--text-primary); border-bottom-color: var(--text-primary); }
 .ticker-tab-content { padding: 16px 0 0 0; }
@@ -7497,7 +7519,7 @@ tr.leg-row td {
 .order-input:focus { border-color: var(--border-focus); }
 .order-input::-webkit-inner-spin-button, .order-input::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
 .order-action-buttons { display: flex; gap: 6px; }
-.order-action-btn { flex: 1; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 0; border: 1px solid var(--border-dim); background: transparent; color: var(--text-muted); cursor: pointer; transition: all 150ms ease-in-out; }
+.order-action-btn { flex: 1; font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; padding: 8px 0; border: 1px solid var(--border-dim); background: transparent; color: var(--text-muted); cursor: pointer; transition: var(--transition-controls), transform 150ms var(--ease-out); }
 .order-action-btn:hover { color: var(--text-primary); border-color: var(--border-focus); }
 .order-action-active { color: var(--text-primary); border-color: var(--text-primary); }
 .order-action-buy.order-action-active { color: var(--positive); border-color: var(--positive); }
@@ -7575,7 +7597,7 @@ tr.leg-row td {
   background: transparent;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 150ms ease-in-out;
+  transition: var(--transition-controls);
 }
 .futures-form-action:hover { color: var(--text-primary); border-color: var(--border-focus); }
 .futures-form-action--active { color: var(--text-primary); border-color: var(--text-primary); }
@@ -8098,17 +8120,14 @@ tr.leg-row td {
 
 /* ── Micro-interactions: Press feedback ── */
 
-.sync-button:active:not(:disabled),
+/* Scoped to primary / destructive / order-entry actions only — not tabs,
+   chips, or utility controls (press-scale everywhere reads busy on a dense
+   terminal). See plans/007-press-feedback-primary-actions.md. */
 .btn-primary:active:not(:disabled),
 .btn-secondary:active:not(:disabled),
 .btn-danger:active:not(:disabled),
 .btn-order-action:active:not(:disabled),
-.btn-quick:active:not(:disabled),
-.pill-chip:active,
-.chat-send:active:not(:disabled),
-.theme-toggle:active,
-.order-action-btn:active,
-.ticker-tab:active {
+.order-action-btn:active:not(:disabled) {
   transform: scale(0.97);
 }
 
@@ -8167,7 +8186,7 @@ tr {
 .seasonality-now { font-family: var(--font-mono); font-size: 7px; font-weight: 700; color: var(--info); letter-spacing: 0.1em; padding: 1px 3px; border: 1px solid var(--info); line-height: 1; }
 
 .seasonality-cell-bar-wrap { width: 100%; height: 4px; background: var(--border-dim); border-radius: 2px; overflow: hidden; }
-.seasonality-cell-bar { height: 100%; border-radius: 2px; transition: width 300ms ease; }
+.seasonality-cell-bar { height: 100%; width: 100%; border-radius: 2px; transform-origin: left center; transition: transform 300ms var(--ease-out); }
 .seasonality-bar-positive { background: var(--positive); }
 .seasonality-bar-negative { background: var(--negative); }
 
@@ -8377,7 +8396,6 @@ tr {
      the panel past the montage. align-items: stretch then makes the tape cell
      fill that same height; the tape's own rows scroll internally. */
   align-items: stretch;
-  transition: grid-template-columns 320ms cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 .book-body-grid.tape-hidden { grid-template-columns: 1fr 0fr; }
 .book-montage { border-right: 1px solid var(--line-grid); transition: border-color 200ms ease; min-width: 0; }
@@ -9077,7 +9095,9 @@ tr {
 
 .regime-hero-bar-fill {
   height: 100%;
-  transition: width 0.3s var(--ease-out);
+  width: 100%;
+  transform-origin: left center;
+  transition: transform 0.3s var(--ease-out);
 }
 
 .regime-hero-scale {
@@ -9394,7 +9414,9 @@ tr {
 
 .regime-bar-fill {
   height: 100%;
-  transition: width 0.3s var(--ease-out);
+  width: 100%;
+  transform-origin: left center;
+  transition: transform 0.3s var(--ease-out);
 }
 
 .regime-component-score {
@@ -10924,7 +10946,7 @@ tr {
   border: none;
   color: var(--text-muted);
   cursor: pointer;
-  transition: all 100ms;
+  transition: background-color 100ms var(--ease-out), border-color 100ms var(--ease-out), color 100ms var(--ease-out);
 }
 .chain-side-toggle-btn:not(:last-child) { border-right: 1px solid var(--line-grid); }
 .chain-side-toggle-btn:hover { color: var(--text-primary); }

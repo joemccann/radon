@@ -100,7 +100,7 @@ function ComponentBar({ label, score, live }: { label: string; score: number; li
         <LiveBadge live={live} />
       </div>
       <div className="regime-bar-track">
-        <div className="regime-bar-fill" style={{ width: `${pct}%`, background: barColor }} />
+        <div className="regime-bar-fill" style={{ transform: `scaleX(${Math.max(0, Math.min(1, pct / 100))})`, transformOrigin: "left center", background: barColor }} />
       </div>
       <div className="regime-component-score">{score.toFixed(1)}/25</div>
     </div>
@@ -454,7 +454,7 @@ export default function RegimePanel({
 
           {/* Progress bar */}
           <div className="regime-hero-bar" style={{ margin: "0 0 4px" }}>
-            <div className="regime-hero-bar-fill" style={{ width: `${cri.score}%`, background: color }} />
+            <div className="regime-hero-bar-fill" style={{ transform: `scaleX(${Math.max(0, Math.min(1, cri.score / 100))})`, transformOrigin: "left center", background: color }} />
           </div>
           <div className="regime-hero-scale" style={{ marginBottom: "8px" }}>
             <span>LOW</span><span>ELEVATED</span><span>HIGH</span><span>CRITICAL</span>
@@ -566,7 +566,7 @@ export default function RegimePanel({
               {shareModal}
             </div>
             <div className="regime-hero-bar">
-              <div className="regime-hero-bar-fill" style={{ width: `${cri.score}%`, background: color }} />
+              <div className="regime-hero-bar-fill" style={{ transform: `scaleX(${Math.max(0, Math.min(1, cri.score / 100))})`, transformOrigin: "left center", background: color }} />
             </div>
             <div className="regime-hero-scale">
               <span>LOW</span><span>ELEVATED</span><span>HIGH</span><span>CRITICAL</span>

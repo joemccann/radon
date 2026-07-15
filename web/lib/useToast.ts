@@ -14,8 +14,11 @@ export type Toast = {
 
 let nextId = 0;
 
+const EXIT_MS = 150;
+
 export function useToast() {
   const [toasts, setToasts] = useState<Toast[]>([]);
+  const [exitingIds, setExitingIds] = useState<Set<string>>(new Set());
   const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const removeToast = useCallback((id: string) => {
@@ -25,6 +28,18 @@ export function useToast() {
       timersRef.current.delete(id);
     }
     setToasts((prev) => prev.filter((t) => t.id !== id));
+  }, []);
+
+  const dismissToast = useCallback((id: string) => {
+    setExitingIds((prev) => new Set(prev).add(id));
+    setTimeout(() => {
+      setToasts((prev) => prev.filter((t) => t.id !== id));
+      setExitingIds((prev) => {
+        const n = new Set(prev);
+        n.delete(id);
+        return n;
+      });
+    }, EXIT_MS);
   }, []);
 
   const addToast = useCallback(
@@ -37,15 +52,15 @@ export function useToast() {
       if (duration > 0) {
         const timer = setTimeout(() => {
           timersRef.current.delete(id);
-          setToasts((prev) => prev.filter((t) => t.id !== id));
+          dismissToast(id);
         }, duration);
         timersRef.current.set(id, timer);
       }
 
       return id;
     },
-    [],
+    [dismissToast],
   );
 
-  return { toasts, addToast, removeToast };
+  return { toasts, exitingIds, addToast, dismissToast, removeToast };
 }

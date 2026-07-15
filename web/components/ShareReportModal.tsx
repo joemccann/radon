@@ -140,7 +140,7 @@ export default function ShareReportModal({
           textTransform: "uppercase",
           color: sharing ? "var(--text-muted)" : "var(--text-primary)",
           cursor: sharing ? "not-allowed" : "pointer",
-          transition: "all 150ms",
+          transition: "background-color 150ms cubic-bezier(0.25,1,0.5,1), border-color 150ms cubic-bezier(0.25,1,0.5,1), color 150ms cubic-bezier(0.25,1,0.5,1)",
           flexShrink: 0,
         }}
         onMouseEnter={(e) => {
