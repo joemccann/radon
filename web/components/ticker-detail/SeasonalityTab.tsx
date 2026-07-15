@@ -204,7 +204,10 @@ export default function SeasonalityTab({ ticker, active }: SeasonalityTabProps) 
                   <div className="seasonality-cell-bar-wrap">
                     <div
                       className={`seasonality-cell-bar ${isPositive ? "seasonality-bar-positive" : "seasonality-bar-negative"}`}
-                      style={{ width: `${barWidth(m.avg_change)}%` }}
+                      style={{
+                        transform: `scaleX(${Math.max(0, Math.min(1, barWidth(m.avg_change) / 100))})`,
+                        transformOrigin: "left center",
+                      }}
                     />
                   </div>
                   <div className={`seasonality-cell-return ${isPositive ? "positive" : "negative"}`}>

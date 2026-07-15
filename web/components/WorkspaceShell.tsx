@@ -60,7 +60,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     && activeSection !== "watchlist"
     && activeSection !== "admin"
     && activeSection !== "workflow";
-  const { toasts, addToast, removeToast } = useToast();
+  const { toasts, exitingIds, addToast, dismissToast } = useToast();
   const marketState = useMarketHours();
   const isMarketActive = marketState !== MarketState.CLOSED;
   // CME Globex session gate for the header ES/NQ/RTY futures strip — runs ~23h,
@@ -513,7 +513,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
         <FooterTelemetryStrip />
       </main>
 
-      <ToastContainer toasts={toasts} onDismiss={removeToast} />
+      <ToastContainer toasts={toasts} exitingIds={exitingIds} onDismiss={dismissToast} />
       <ChatLauncher activeSection={activeSection} />
       <DemoWelcomeModal />
     </div>

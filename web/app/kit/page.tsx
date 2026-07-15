@@ -68,7 +68,7 @@ export default function KitPage() {
             display: "inline-flex",
             alignItems: "center",
             justifyContent: "center",
-            transition: "all 150ms ease-in-out",
+            transition: "background-color 150ms cubic-bezier(0.25,1,0.5,1), border-color 150ms cubic-bezier(0.25,1,0.5,1), color 150ms cubic-bezier(0.25,1,0.5,1)",
           }}
         >
           {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
