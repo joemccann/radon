@@ -1,0 +1,160 @@
+/**
+ * @vitest-environment jsdom
+ */
+import React from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
+import ModifyOrderModal from "@/components/ModifyOrderModal";
+
+vi.mock("@/lib/useRiskFreeRate", () => ({
+  useRiskFreeRate: () => 0,
+}));
+
+vi.mock("@/components/Modal", () => ({
+  default: ({ open, children }: { open: boolean; children: React.ReactNode }) =>
+    open ? React.createElement("div", { className: "mock-modal" }, children) : null,
+}));
+
+afterEach(() => {
+  cleanup();
+  vi.clearAllMocks();
+});
+
+function optionOrder(action: "BUY" | "SELL", quantity: number, limitPrice: number): OpenOrder {
+  return {
+    orderId: 95,
+    permId: action === "SELL" ? 653624857 : 653624858,
+    symbol: "SNDK C1570",
+    contract: {
+      conId: 987654,
+      symbol: "SNDK",
+      secType: "OPT",
+      strike: 1570,
+      right: "C",
+      expiry: "2026-07-17",
+    },
+    action,
+    orderType: "LMT",
+    totalQuantity: quantity,
+    limitPrice,
+    auxPrice: null,
+    status: "Submitted",
+    filled: 0,
+    remaining: quantity,
+    avgFillPrice: null,
+    tif: "DAY",
+  };
+}
+
+function portfolioWithLeg(direction: "LONG" | "SHORT", contracts: number, avgCost: number): PortfolioData {
+  const position: PortfolioPosition = {
+    id: 1,
+    ticker: "SNDK",
+    structure: direction === "LONG" ? "Long Call" : "Short Call",
+    structure_type: "Single",
+    risk_profile: "Defined",
+    expiry: "2026-07-17",
+    contracts,
+    direction,
+    entry_cost: contracts * avgCost,
+    max_risk: null,
+    market_value: null,
+    legs: [{
+      direction,
+      contracts,
+      type: "Call",
+      strike: 1570,
+      entry_cost: contracts * avgCost,
+      avg_cost: avgCost,
+      market_price: null,
+      market_value: null,
+    }],
+    kelly_optimal: null,
+    target: null,
+    stop: null,
+    entry_date: "2026-07-01",
+  };
+
+  return {
+    bankroll: 400_000,
+    peak_value: 400_000,
+    last_sync: "2026-07-15T17:42:03.000Z",
+    positions: [position],
+    total_deployed_pct: 0,
+    total_deployed_dollars: 0,
+    remaining_capacity_pct: 100,
+    position_count: 1,
+    defined_risk_count: 1,
+    undefined_risk_count: 0,
+    avg_kelly_optimal: null,
+    account_summary: {
+      net_liquidation: 400_000,
+      daily_pnl: 0,
+      unrealized_pnl: 0,
+      realized_pnl: 0,
+      settled_cash: 400_000,
+      maintenance_margin: 0,
+      excess_liquidity: 400_000,
+      buying_power: 800_000,
+      available_funds: 400_000,
+      dividends: 0,
+    },
+  };
+}
+
+function renderModifiedOrder(order: OpenOrder, portfolio: PortfolioData, price: string) {
+  render(
+    <ModifyOrderModal
+      order={order}
+      loading={false}
+      portfolio={portfolio}
+      onConfirm={vi.fn()}
+      onClose={() => {}}
+    />,
+  );
+  fireEvent.change(screen.getByLabelText(/New Limit Price/i), { target: { value: price } });
+  return within(document.querySelector(".order-confirm-summary") as HTMLElement);
+}
+
+describe("ModifyOrderModal close-out P&L", () => {
+  it("shows estimated realized P&L when modifying a sell-to-close long option", () => {
+    const summary = renderModifiedOrder(
+      optionOrder("SELL", 4, 100),
+      portfolioWithLeg("LONG", 4, 9_366.25),
+      "95",
+    );
+
+    expect(summary.getByText("Proceeds:")).toBeTruthy();
+    expect(summary.getByText("$38,000")).toBeTruthy();
+    expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
+    expect(summary.getByText("$535")).toBeTruthy();
+    expect(summary.queryByText("Max Gain:")).toBeNull();
+    expect(summary.queryByText("Max Loss:")).toBeNull();
+  });
+
+  it("shows estimated realized P&L when modifying a buy-to-close short option", () => {
+    const summary = renderModifiedOrder(
+      optionOrder("BUY", 2, 4.5),
+      portfolioWithLeg("SHORT", 2, 500),
+      "4",
+    );
+
+    expect(summary.getByText("Close Debit:")).toBeTruthy();
+    expect(summary.getByText("$800")).toBeTruthy();
+    expect(summary.getByText("Est. Realized P&L:")).toBeTruthy();
+    expect(summary.getByText("$200")).toBeTruthy();
+  });
+
+  it("does not classify quantity beyond the held contracts as a pure close", () => {
+    const summary = renderModifiedOrder(
+      optionOrder("SELL", 5, 100),
+      portfolioWithLeg("LONG", 4, 9_366.25),
+      "95",
+    );
+
+    expect(summary.queryByText("Est. Realized P&L:")).toBeNull();
+    expect(summary.getByText("Max Loss:")).toBeTruthy();
+    expect(summary.getByText("UNBOUNDED")).toBeTruthy();
+  });
+});

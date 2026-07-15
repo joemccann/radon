@@ -13,7 +13,37 @@ const PORTFOLIO = {
   avg_kelly_optimal: null,
   exposure: {},
   violations: [],
-  positions: [],
+  positions: [
+    {
+      id: 1,
+      ticker: "AAOI",
+      structure: "Long Put",
+      structure_type: "Single",
+      risk_profile: "Defined",
+      expiry: "2026-03-27",
+      contracts: 50,
+      direction: "LONG",
+      entry_cost: 25_000,
+      max_risk: 25_000,
+      market_value: null,
+      legs: [
+        {
+          direction: "LONG",
+          contracts: 50,
+          type: "Put",
+          strike: 90,
+          entry_cost: 25_000,
+          avg_cost: 500,
+          market_price: null,
+          market_value: null,
+        },
+      ],
+      kelly_optimal: null,
+      target: null,
+      stop: null,
+      entry_date: "2026-03-01",
+    },
+  ],
   account_summary: {
     net_liquidation: 100_000,
     daily_pnl: null,
@@ -122,7 +152,7 @@ test.describe("Order modify confirmation", () => {
   test("does not enter a fake pending state when modify is not confirmed", async ({ page }) => {
     await stubApis(page);
 
-    await page.goto("http://127.0.0.1:3000/orders");
+    await page.goto("/orders");
 
     const row = page.locator("tbody tr").filter({ hasText: "AAOI" }).first();
     await expect(row).toBeVisible({ timeout: 10_000 });
@@ -133,6 +163,8 @@ test.describe("Order modify confirmation", () => {
     const modal = page.locator(".modify-dialog");
     await expect(modal).toBeVisible();
     await modal.locator("#modify-price-input").fill("5.55");
+    await expect(modal).toContainText("Est. Realized P&L:");
+    await expect(modal).toContainText("$2,750");
     await modal.getByRole("button", { name: /modify order/i }).click();
 
     await expect(row).toContainText("$5.70");
