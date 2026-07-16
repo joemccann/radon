@@ -440,32 +440,48 @@ def _legacy_status_payload_healthy(payload: dict) -> bool:
     return bool(states) and all(state in {"up", "ok", "healthy"} for state in states)
 
 
-def _is_status_payload_healthy(payload: dict) -> bool:
-    """The Tier-2 aggregate is healthy when its top-level state is not an error.
+def _classify_status_payload(payload: dict) -> str:
+    """Classify the Tier-2 aggregate as ``healthy``, ``down``, or ``invalid``.
 
     Schema v2 publishes ``ok`` plus ``overall_state``. Exactly one validated
     predecessor is accepted during producer-first rolling deploys; unknown
-    versions and opaque bodies are not evidence that the aggregate is healthy.
+    versions, contradictory fields, and opaque bodies are invalid public
+    contracts rather than recoverable aggregate-down observations.
     """
     if not isinstance(payload, dict) or not payload:
-        return False
+        return "invalid"
     schema_version = payload.get("schema_version")
-    if schema_version is None:
-        if "ok" not in payload and "overall_state" not in payload \
-                and "state" not in payload:
-            return _legacy_status_payload_healthy(payload)
-    elif schema_version != 2:
-        return False
+    if schema_version == 2:
+        state = payload.get("overall_state")
+        if type(payload.get("ok")) is not bool or not isinstance(state, str):
+            return "invalid"
+        normalized = state.lower()
+        if normalized not in {"up", "down", "unknown", "starting"}:
+            return "invalid"
+        state_healthy = normalized == "up"
+        if payload["ok"] is not state_healthy:
+            return "invalid"
+        return "healthy" if state_healthy else "down"
+    if schema_version is not None:
+        return "invalid"
+
+    # Validated predecessor used during producer-first rollout. A legacy
+    # failure remains fail-closed/invalid because only schema v2 has an exact
+    # aggregate-down contract that the on-box recovery path may supersede.
+    if "ok" not in payload and "overall_state" not in payload and "state" not in payload:
+        return "healthy" if _legacy_status_payload_healthy(payload) else "invalid"
     state = payload.get("overall_state", payload.get("state"))
     state_healthy = (
-        isinstance(state, str) and state.lower() in {"up", "ok", "healthy"})
-    if schema_version == 2 and type(payload.get("ok")) is not bool:
-        return False
+        isinstance(state, str) and state.lower() in {"up", "ok", "healthy"}
+    )
     if isinstance(payload.get("ok"), bool):
-        if payload["ok"] is False:
-            return False
-        return state_healthy
-    return state_healthy
+        return "healthy" if payload["ok"] is True and state_healthy else "invalid"
+    return "healthy" if state_healthy else "invalid"
+
+
+def _is_status_payload_healthy(payload: dict) -> bool:
+    """Backward-compatible boolean wrapper for callers and tests."""
+    return _classify_status_payload(payload) == "healthy"
 
 
 def classify_probes(ping: dict, status: dict) -> dict:
@@ -488,8 +504,11 @@ def classify_probes(ping: dict, status: dict) -> dict:
     if not (200 <= status_code < 300):
         return {"ok": 0, "detail": "status_http_%d" % status_code}
 
-    if not _is_status_payload_healthy(status.get("payload", {})):
-        return {"ok": 0, "detail": "aggregate_unhealthy"}
+    aggregate = _classify_status_payload(status.get("payload", {}))
+    if aggregate == "down":
+        return {"ok": 0, "detail": "aggregate_down"}
+    if aggregate != "healthy":
+        return {"ok": 0, "detail": "aggregate_invalid"}
 
     return {"ok": 1, "detail": "edge_ok"}
 

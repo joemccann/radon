@@ -183,25 +183,38 @@ class TestClassifyProbes:
 
     def test_aggregate_ok_false_fails(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"ok": False}))
-        assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
+        assert result == {"ok": 0, "detail": "aggregate_invalid"}
 
     def test_unversioned_ok_without_aggregate_state_fails_closed(self):
         result = probe.classify_probes(
             _ok_probe(),
             _ok_probe(payload={"ok": True}),
         )
-        assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
+        assert result == {"ok": 0, "detail": "aggregate_invalid"}
 
     def test_contradictory_aggregate_fields_fail_closed(self):
         result = probe.classify_probes(
             _ok_probe(),
             _ok_probe(payload={"ok": True, "overall_state": "down"}),
         )
-        assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
+        assert result == {"ok": 0, "detail": "aggregate_invalid"}
 
     def test_aggregate_state_down_fails(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"state": "down"}))
-        assert result == {"ok": 0, "detail": "aggregate_unhealthy"}
+        assert result == {"ok": 0, "detail": "aggregate_invalid"}
+
+    def test_valid_schema_v2_down_is_distinct_from_invalid_payload(self):
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(
+                payload={
+                    "schema_version": 2,
+                    "ok": False,
+                    "overall_state": "down",
+                }
+            ),
+        )
+        assert result == {"ok": 0, "detail": "aggregate_down"}
 
     def test_actual_health_service_payload_drives_the_verdict(self):
         healthy = health_service_probes.build_status(
@@ -275,19 +288,19 @@ class TestClassifyProbes:
 
         assert probe.classify_probes(_ok_probe(), _ok_probe(payload=legacy)) == {
             "ok": 0,
-            "detail": "aggregate_unhealthy",
+            "detail": "aggregate_invalid",
         }
 
     def test_unknown_schema_version_fails_closed(self):
         payload = {"schema_version": 99, "ok": True, "overall_state": "up"}
         assert probe.classify_probes(_ok_probe(), _ok_probe(payload=payload)) == {
             "ok": 0,
-            "detail": "aggregate_unhealthy",
+            "detail": "aggregate_invalid",
         }
 
     def test_opaque_200_payload_fails_closed(self):
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={}))
-        assert result["ok"] == 0
+        assert result == {"ok": 0, "detail": "aggregate_invalid"}
 
 
 # ── build_probe_row ──────────────────────────────────────────────────────────

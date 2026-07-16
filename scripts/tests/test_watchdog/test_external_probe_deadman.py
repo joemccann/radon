@@ -3,7 +3,7 @@ from __future__ import annotations
 from argparse import Namespace
 from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from scripts.watchdog import __main__ as watchdog_main
 
@@ -35,6 +35,30 @@ def test_fresh_green_external_probe_is_healthy(monkeypatch) -> None:
     assert outcome.fired is False
     assert outcome.severity is None
     assert captured["source"] == "github-actions/edge"
+
+
+def test_local_aggregate_recovery_requires_healthy_schema_v2() -> None:
+    from scripts.watchdog import external_probe
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = (
+        b'{"schema_version":2,"ok":true,"overall_state":"up"}'
+    )
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        assert external_probe._local_aggregate_is_healthy() is True
+
+
+def test_local_aggregate_recovery_fails_closed_on_malformed_payload() -> None:
+    from scripts.watchdog import external_probe
+
+    response = MagicMock()
+    response.status = 200
+    response.read.return_value = b'{}'
+    with patch.object(external_probe.urllib.request, "urlopen") as urlopen:
+        urlopen.return_value.__enter__.return_value = response
+        assert external_probe._local_aggregate_is_healthy() is False
 
 
 def test_stale_external_probe_pages_the_operator(monkeypatch) -> None:
@@ -88,12 +112,78 @@ def test_fresh_red_external_probe_pages_the_operator(monkeypatch) -> None:
         "fetch_external_probe",
         lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="edge_http_503"),
     )
+    # Local health can only clear aggregate-state recovery. It must never mask
+    # a public perimeter failure that requires off-box evidence.
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
     outcome = external_probe.check_external_probe(now=NOW)
 
     assert outcome.status == "error"
     assert outcome.fired is True
     assert outcome.severity == "P1"
     assert "edge_http_503" in outcome.message
+
+
+def test_recovered_local_aggregate_clears_fresh_aggregate_failure(monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0,
+            age_minutes=32,
+            detail="aggregate_down",
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert outcome.severity is None
+    assert outcome.message == "off-box aggregate recovered locally"
+
+
+def test_still_unhealthy_local_aggregate_keeps_fresh_failure_active(monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0,
+            age_minutes=32,
+            detail="aggregate_down",
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: False)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "error"
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_legacy_aggregate_unhealthy_stays_fail_closed(monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(
+            ok=0,
+            age_minutes=32,
+            detail="aggregate_unhealthy",
+        ),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "error"
+    assert outcome.fired is True
 
 
 def test_continuous_bucket_dispatches_external_probe_deadman() -> None:
