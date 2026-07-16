@@ -14,10 +14,40 @@ from .check import CheckOutcome
 SERVICE = "external-health-probe"
 FETCH_TIMEOUT_SECONDS = 2.5
 EXPECTED_SOURCE = "github-actions/edge"
+LOCAL_STATUS_URL = "http://127.0.0.1:8330/status"
 GITHUB_RUNS_URL = (
     "https://api.github.com/repos/joemccann/radon/actions/workflows/"
     "external-health-probe.yml/runs?per_page=1"
 )
+
+
+def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
+    """Confirm recovery from a validated off-box ``aggregate_down`` sample.
+
+    The off-box row is authoritative for perimeter failures, but its irregular
+    GitHub schedule can leave a recovered aggregate red for tens of minutes.
+    The aggregate itself is produced on-box, so a fresh schema-v2 healthy
+    response is sufficient recovery evidence for this one failure class. Never
+    use this fallback for ping/status reachability failures: only an off-box
+    observer can prove that the public perimeter recovered.
+    """
+    request = urllib.request.Request(
+        LOCAL_STATUS_URL,
+        headers={"Accept": "application/json", "User-Agent": "radon-watchdog"},
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            if not 200 <= int(response.status) < 300:
+                return False
+            payload = json.loads(response.read(262_144).decode("utf-8"))
+    except Exception:  # noqa: BLE001 - recovery must fail closed
+        return False
+    return (
+        isinstance(payload, dict)
+        and payload.get("schema_version") == 2
+        and payload.get("ok") is True
+        and str(payload.get("overall_state") or "").lower() == "up"
+    )
 
 
 def _latest_github_run(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
@@ -63,6 +93,22 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
             verdict = {"verdict": reader.VERDICT_HEALTHY, "reason": "github_workflow_current"}
 
     state = verdict["verdict"]
+    if (
+        state == reader.VERDICT_DOWN
+        and verdict.get("reason") == "aggregate_down"
+        and _local_aggregate_is_healthy()
+    ):
+        return CheckOutcome(
+            service=SERVICE,
+            kind="deadman",
+            status="healthy",
+            severity=None,
+            fired=False,
+            message="off-box aggregate recovered locally",
+            consecutive_failures=0,
+            now=checked_at,
+        )
+
     if state == reader.VERDICT_HEALTHY:
         return CheckOutcome(
             service=SERVICE,
