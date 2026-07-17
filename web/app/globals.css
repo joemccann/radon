@@ -1240,24 +1240,18 @@ body {
 }
 
 .watchlist-hero,
-.watchlist-rail,
-.watchlist-detail,
+.watchlist-board,
 .watchlist-empty {
-  animation: watchlist-enter 720ms var(--watchlist-motion) both;
+  animation: watchlist-enter 480ms var(--watchlist-motion) both;
 }
 
-.watchlist-rail {
+.watchlist-board {
   animation-delay: 80ms;
-}
-
-.watchlist-detail {
-  animation-delay: 140ms;
 }
 
 @media (prefers-reduced-motion: reduce) {
   .watchlist-hero,
-  .watchlist-rail,
-  .watchlist-detail,
+  .watchlist-board,
   .watchlist-empty,
   .watchlist-row {
     animation: none;
@@ -1350,36 +1344,35 @@ body {
   letter-spacing: 0;
 }
 
-.watchlist-grid {
+/* Watchlist board — one full-width panel of flush terminal rows divided by
+   hairlines. The panel owns the outer border; rows never carry their own. */
+.watchlist-board {
   flex: 1;
   min-height: 0;
-  display: grid;
-  grid-template-columns: minmax(300px, 380px) minmax(0, 1fr);
-  gap: 14px;
-}
-
-.watchlist-rail,
-.watchlist-detail {
-  min-height: 0;
-  border: 1px solid var(--line-grid);
-  border-radius: 4px;
-  background: color-mix(in srgb, var(--bg-panel-raised) 36%, var(--bg-panel));
-  padding: 4px;
-}
-
-.watchlist-rail {
   display: flex;
   flex-direction: column;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  overflow: hidden;
 }
 
-.watchlist-rail__head,
-.watchlist-detail__head {
-  min-height: 30px;
-  display: flex;
+.watchlist-board__head,
+.watchlist-row__press {
+  display: grid;
+  grid-template-columns:
+    96px minmax(0, 1fr) 110px 96px 72px 110px 84px;
+  gap: 12px;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 0 8px;
+}
+
+.watchlist-board__head {
+  grid-template-columns:
+    96px minmax(0, 1fr) 110px 96px 72px 110px 84px 36px;
+  min-height: 32px;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid var(--line-grid);
+  background: color-mix(in srgb, var(--bg-panel-raised) 36%, var(--bg-panel));
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.14em;
@@ -1387,13 +1380,14 @@ body {
   color: var(--text-muted);
 }
 
+.watchlist-board__head-num {
+  text-align: right;
+}
+
 .watchlist-list {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1402,82 +1396,52 @@ body {
 .watchlist-row {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: stretch;
-  border: 1px solid var(--line-grid);
-  border-radius: 4px;
-  background: var(--bg-panel);
-  padding: 3px;
-  transition:
-    transform 520ms var(--watchlist-motion),
-    border-color 520ms var(--watchlist-motion),
-    background-color 520ms var(--watchlist-motion);
+  grid-template-columns: minmax(0, 1fr) 36px;
+  align-items: center;
+  transition: background-color 180ms ease-out;
 }
 
-.watchlist-row:hover,
-.watchlist-row--active {
-  border-color: color-mix(in srgb, var(--signal-core) 42%, var(--line-grid));
-  background: color-mix(in srgb, var(--signal-core) 5%, var(--bg-panel));
+.watchlist-row + .watchlist-row {
+  border-top: 1px solid var(--line-grid);
 }
 
 .watchlist-row:hover {
-  transform: translateY(-1px);
+  background: color-mix(in srgb, var(--signal-core) 5%, var(--bg-panel));
 }
 
-.watchlist-row--active::before {
+.watchlist-row:hover::before {
   content: "";
   position: absolute;
-  inset: 3px auto 3px 3px;
+  inset: 0 auto 0 0;
   width: 2px;
   background: var(--signal-core);
 }
 
 .watchlist-row__press {
   min-width: 0;
+  min-height: 44px;
   appearance: none;
   border: 0;
-  border-radius: 3px;
   background: transparent;
   color: inherit;
   cursor: pointer;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "primary quote"
-    "meta meta";
-  gap: 8px 10px;
-  align-items: center;
-  padding: 10px 9px 9px 12px;
+  padding: 10px 0 10px 16px;
   text-align: left;
 }
 
 .watchlist-row__press:focus-visible {
   outline: 1px solid var(--signal-core);
-  outline-offset: 2px;
+  outline-offset: -2px;
 }
 
 .watchlist-row > .star-toggle {
-  align-self: center;
-  margin-right: 5px;
-}
-
-.watchlist-row__primary,
-.watchlist-row__quote,
-.watchlist-row__meta {
-  min-width: 0;
-}
-
-.watchlist-row__primary {
-  grid-area: primary;
-  display: flex;
-  align-items: baseline;
-  gap: 9px;
+  justify-self: center;
+  margin-right: 6px;
 }
 
 .watchlist-row__symbol {
   color: var(--text-primary);
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 760;
   letter-spacing: 0.08em;
 }
@@ -1493,94 +1457,65 @@ body {
   white-space: nowrap;
 }
 
-.watchlist-row__quote {
-  grid-area: quote;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
-}
-
 .watchlist-row__last {
   color: var(--text-primary);
   font-size: 13px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .watchlist-row__change {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
   font-variant-numeric: tabular-nums;
+  text-align: right;
 }
 
 .watchlist-row__change.positive { color: var(--positive); }
 .watchlist-row__change.negative { color: var(--negative); }
 .watchlist-row__change.neutral { color: var(--text-muted); }
 
-.watchlist-row__meta {
-  grid-area: meta;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-}
-
-.watchlist-row__meta span {
-  border: 1px solid color-mix(in srgb, var(--line-grid) 72%, transparent);
-  border-radius: 3px;
-  padding: 2px 5px;
+.watchlist-row__status,
+.watchlist-row__orders,
+.watchlist-row__added {
   color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 8px;
+  font-size: 10px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
-  background: color-mix(in srgb, var(--bg-panel-raised) 45%, transparent);
+  white-space: nowrap;
 }
 
-.watchlist-detail {
-  display: grid;
-  grid-template-rows: 30px minmax(0, 1fr);
-}
-
-.watchlist-detail__label {
-  color: var(--text-muted);
-}
-
-.watchlist-detail__symbol {
+.watchlist-row__status--held {
   color: var(--signal-core-text);
-  font-weight: 740;
-  letter-spacing: 0.1em;
 }
 
-.watchlist-detail__frame {
-  min-height: 0;
-  border: 1px solid var(--line-grid);
-  border-radius: 4px;
-  background: var(--bg-panel);
-  overflow: hidden;
+.watchlist-row__orders--open {
+  color: var(--text-primary);
 }
 
-.watchlist-detail__frame .ticker-detail-page {
-  height: 100%;
+@media (max-width: 899px) {
+  .watchlist-board__head {
+    display: none;
+  }
+
+  .watchlist-row__press {
+    grid-template-columns: minmax(0, 1fr) 96px 76px 56px;
+    gap: 10px;
+  }
+
+  .watchlist-row__label,
+  .watchlist-row__orders,
+  .watchlist-row__added {
+    display: none;
+  }
 }
 
-.watchlist-detail__empty,
 .watchlist-empty {
   border: 1px solid var(--line-grid);
   border-radius: 4px;
   background: var(--bg-panel);
   color: var(--text-secondary);
-}
-
-.watchlist-detail__empty {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 320px;
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .watchlist-empty {
@@ -1616,27 +1551,12 @@ body[data-mobile="true"] .watchlist-stats span {
   min-width: 0;
 }
 
-body[data-mobile="true"] .watchlist-grid {
-  grid-template-columns: 1fr;
-  gap: 12px;
-  overflow: visible;
-}
-
-body[data-mobile="true"] .watchlist-rail,
-body[data-mobile="true"] .watchlist-detail {
+body[data-mobile="true"] .watchlist-board {
   min-height: auto;
 }
 
 body[data-mobile="true"] .watchlist-list {
   overflow: visible;
-}
-
-body[data-mobile="true"] .watchlist-detail__frame {
-  min-height: 620px;
-}
-
-body[data-mobile="true"] .watchlist-row {
-  transform: none;
 }
 
 /* ───────────────────────────────────────────────────────────

@@ -8,22 +8,12 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { PriceData } from "@/lib/pricesProtocol";
 
 const mocks = vi.hoisted(() => ({
-  setActiveTicker: vi.fn(),
-  setActivePositionId: vi.fn(),
-  setDepthSymbol: vi.fn(),
+  push: vi.fn(),
   toggleWatch: vi.fn(),
 }));
 
-vi.mock("@/lib/TickerDetailContext", () => ({
-  useTickerDetail: () => ({
-    getPrices: () => ({}),
-    getFundamentals: () => ({}),
-    getDepths: () => ({}),
-    getTape: () => ({}),
-    setActiveTicker: mocks.setActiveTicker,
-    setActivePositionId: mocks.setActivePositionId,
-    setDepthSymbol: mocks.setDepthSymbol,
-  }),
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: mocks.push, prefetch: vi.fn() }),
 }));
 
 vi.mock("@/lib/useWatchlist", () => ({
@@ -36,12 +26,6 @@ vi.mock("@/lib/useWatchlist", () => ({
     isWatched: () => true,
     toggleWatch: mocks.toggleWatch,
   }),
-}));
-
-vi.mock("@/components/TickerDetailContent", () => ({
-  default: (props: { ticker: string }) => (
-    <div data-testid={`ticker-detail-${props.ticker}`}>{props.ticker} detail</div>
-  ),
 }));
 
 import WatchlistContent from "@/components/watchlist/WatchlistContent";
@@ -57,38 +41,40 @@ function price(last: number, close: number): PriceData {
 }
 
 describe("WatchlistContent", () => {
-  it("selects watched symbols inline without navigation", async () => {
-    const pushState = vi.spyOn(window.history, "pushState");
-    const replaceState = vi.spyOn(window.history, "replaceState");
-
+  it("renders no inline detail pane", () => {
     render(
       <WatchlistContent
         prices={{ AAPL: price(212, 210), MSFT: price(498, 500) }}
         portfolio={null}
         orders={null}
-        theme="dark"
       />,
     );
 
-    expect(await screen.findByTestId("ticker-detail-AAPL")).toBeTruthy();
-    expect(screen.queryByTestId("ticker-detail-MSFT")).toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "Show MSFT watchlist detail" }));
-
-    expect(await screen.findByTestId("ticker-detail-MSFT")).toBeTruthy();
-    expect(screen.queryByTestId("ticker-detail-AAPL")).toBeNull();
-    expect(mocks.setActiveTicker).toHaveBeenLastCalledWith("MSFT");
-    expect(pushState).not.toHaveBeenCalled();
-    expect(replaceState).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("watchlist-detail")).toBeNull();
+    expect(screen.queryByText(/INLINE DETAIL/i)).toBeNull();
+    expect(screen.getByTestId("watchlist-row-AAPL")).toBeTruthy();
+    expect(screen.getByTestId("watchlist-row-MSFT")).toBeTruthy();
   });
 
-  it("removes a symbol through the watchlist hook", async () => {
+  it("navigates to the instrument cockpit on row click", () => {
     render(
       <WatchlistContent
         prices={{ AAPL: price(212, 210), MSFT: price(498, 500) }}
         portfolio={null}
         orders={null}
-        theme="dark"
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Open MSFT instrument cockpit" }));
+    expect(mocks.push).toHaveBeenCalledWith("/MSFT");
+  });
+
+  it("removes a symbol through the watchlist hook without navigating", async () => {
+    render(
+      <WatchlistContent
+        prices={{ AAPL: price(212, 210), MSFT: price(498, 500) }}
+        portfolio={null}
+        orders={null}
       />,
     );
 
@@ -96,5 +82,6 @@ describe("WatchlistContent", () => {
     const remove = row.querySelector(".star-toggle") as HTMLButtonElement;
     fireEvent.click(remove);
     expect(mocks.toggleWatch).toHaveBeenCalledWith("AAPL");
+    expect(mocks.push).not.toHaveBeenCalled();
   });
 });

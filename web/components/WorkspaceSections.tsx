@@ -4114,7 +4114,7 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
     case "profile":
       return <ProfileContent prices={prices} />;
     case "watchlist":
-      return <WatchlistContent prices={prices} portfolio={portfolio ?? null} orders={orders ?? null} theme={theme ?? "dark"} />;
+      return <WatchlistContent prices={prices} portfolio={portfolio ?? null} orders={orders ?? null} />;
     case "ticker-detail":
       return tickerParam ? (
         <TickerWorkspace ticker={tickerParam} theme={theme ?? "dark"} />
