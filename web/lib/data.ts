@@ -2,6 +2,7 @@ import {
   CTAGlyph,
   DashboardGlyph,
   DiscoverGlyph,
+  ExposureGlyph,
   FlowGlyph,
   JournalGlyph,
   OperatorGlyph,
@@ -36,6 +37,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true },
   { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: WatchlistGlyph },
   { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph },
+  { label: "Options", route: "options", href: "/options/net-gex?symbol=MU", icon: ExposureGlyph },
   { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph },
   { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph },
   { label: "CTA", route: "cta", href: "/cta", icon: CTAGlyph },
@@ -51,6 +53,7 @@ export const navItems: WorkspaceNavItem[] = [
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
   dashboard: ["portfolio", "scan --top 12", "compare support vs against", "review watch list", "help"],
   "flow-analysis": ["analyze brze", "compare support vs against", "what are action items", "review watch list", "scan --top 12", "evaluate brze", "portfolio"],
+  options: ["evaluate mu", "scan --top 12", "portfolio", "help"],
   portfolio: ["portfolio", "analyze brze", "journal --limit 10", "evaluate msft", "help"],
   performance: ["portfolio", "stress-test", "journal --limit 10", "help"],
   orders: ["portfolio", "journal --limit 10", "scan --top 12", "help"],
@@ -70,6 +73,7 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
 export const sectionDescription: Record<WorkspaceSection, string> = {
   dashboard: "Portfolio snapshot and command control panel.",
   "flow-analysis": "Flow and position analysis context.",
+  options: "Options exposure, Greeks, open interest, and volatility measurements.",
   portfolio: "Current portfolio-focused controls and risk summary.",
   performance: "Institutional YTD performance analytics and benchmark-relative risk metrics.",
   orders: "Open orders and executed trades from IB Gateway.",

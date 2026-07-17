@@ -17,6 +17,7 @@ const OVERFLOW_LINKS: DrawerLink[] = [
   { label: "Performance", href: "/performance", icon: BarChart3 },
   { label: "Watchlist", href: "/watchlist", icon: Star },
   { label: "Flow Analysis", href: "/flow-analysis", icon: LineChart },
+  { label: "Options", href: "/options/net-gex?symbol=MU", icon: BarChart3 },
   { label: "Journal", href: "/journal", icon: Wrench },
   { label: "Regime", href: "/regime/cri", icon: Shield },
   { label: "CTA", href: "/cta", icon: Activity },

@@ -119,6 +119,7 @@ import AdminWorkspace from "./admin/AdminWorkspace";
 import ProfileContent from "./profile/ProfileContent";
 import WatchlistContent from "./watchlist/WatchlistContent";
 import PerformancePanel from "./PerformancePanel";
+import OptionsWorkspacePanel from "./OptionsWorkspacePanel";
 import InfoTooltip from "./InfoTooltip";
 import SharePnlButton, { type SharePnlData } from "./SharePnlButton";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
@@ -4082,6 +4083,8 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
       return null;
     case "flow-analysis":
       return <FlowSections tickerParam={tickerParam} />;
+    case "options":
+      return <OptionsWorkspacePanel symbol={tickerParam ?? "MU"} />;
     case "portfolio":
       return <PortfolioSections portfolio={portfolio ?? null} prices={prices} />;
     case "performance":
