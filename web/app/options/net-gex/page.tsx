@@ -11,7 +11,7 @@ type Props = {
 export default async function NetGexPage({ searchParams }: Props) {
   const params = await searchParams;
   const rawSymbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
-  const symbol = rawSymbol && SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : "MU";
+  const symbol = rawSymbol && SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : undefined;
 
   return <WorkspaceShell section="options" tickerParam={symbol} />;
 }

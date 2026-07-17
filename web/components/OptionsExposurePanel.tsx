@@ -20,6 +20,7 @@ import {
 } from "@/lib/optionsExposure";
 import { useOptionsExposure } from "@/lib/useOptionsExposure";
 
+import SpectralLoader from "./SpectralLoader";
 import styles from "./OptionsExposurePanel.module.css";
 
 interface OptionsExposurePanelProps {
@@ -93,7 +94,7 @@ function MeasurementState({
   message,
   onRetry,
 }: {
-  kind: "loading" | "error" | "empty";
+  kind: "error" | "empty";
   message: string;
   onRetry?: () => void;
 }) {
@@ -147,7 +148,13 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
   const maxOi = Math.max(1, ...rows.flatMap((row) => [row.putOi, row.callOi]));
 
   if (loading && !data) {
-    return <MeasurementState kind="loading" message={`Sampling options exposure for ${normalizedSymbol}.`} />;
+    return (
+      <section className={styles.panel} data-testid="options-exposure-panel" data-responsive="instrument" aria-label="Options exposure">
+        <div className={styles.state}>
+          <SpectralLoader label={`Sampling options exposure for ${normalizedSymbol}.`} />
+        </div>
+      </section>
+    );
   }
   if (error && !data) {
     return <MeasurementState kind="error" message={error} onRetry={() => void refresh()} />;
@@ -188,7 +195,6 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
           </div>
         </div>
         <div className={styles.telemetry}>
-          <span>{data.source.replaceAll("_", " ").toUpperCase()}</span>
           <time dateTime={data.source_time}>{formatTimestamp(data.source_time)}</time>
           <span>SPOT {formatStrike(data.spot)}</span>
         </div>

@@ -406,3 +406,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-07-17 - MenthorQ dashboard authentication
 
 - Do not infer that distinct `.com` and `.io` domains imply irreconcilable login systems. When a user identifies a redirect-mediated identity handoff, verify the complete dashboard → identity-provider → dashboard navigation before declaring the provider client blocked; preserve the server-only token boundary while adding that proven bootstrap path.
+
+## 2026-07-17 - Options workspace entry state
+
+- Do not use a fixed example ticker as an implicit live-data query in a reusable options workspace. Require explicit valid ticker submission, keep provider identity out of the operator display, and use the established spectral measurement loader only after a request begins.

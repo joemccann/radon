@@ -27,20 +27,41 @@ describe("OptionsWorkspacePanel", () => {
     push.mockReset();
   });
 
-  it("keeps Net GEX as the first active tab and exposes planned measurements", () => {
-    render(<OptionsWorkspacePanel symbol="MU" />);
+  it("requires an explicit ticker before mounting the Net GEX measurement", () => {
+    render(<OptionsWorkspacePanel />);
 
     expect(screen.getByRole("tablist", { name: "Options measurements" })).toBeTruthy();
     expect(screen.getByRole("tab", { name: "Net GEX" }).getAttribute("aria-selected")).toBe("true");
     expect(screen.getByRole("tab", { name: /DEX/ }).getAttribute("aria-disabled")).toBe("true");
     expect(screen.getByRole("tab", { name: /Greeks/ }).getAttribute("aria-disabled")).toBe("true");
+    expect(screen.getByRole("search", { name: "Options ticker" })).toBeTruthy();
+    expect(screen.queryByTestId("net-gex-panel")).toBeNull();
+  });
+
+  it("rejects an invalid ticker without starting a measurement", () => {
+    render(<OptionsWorkspacePanel />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbol"), { target: { value: "!!!" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load exposure" }));
+
+    expect(screen.getByRole("alert").textContent).toContain("Enter a valid ticker symbol");
+    expect(push).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("net-gex-panel")).toBeNull();
+  });
+
+  it("normalizes a valid ticker and starts the canonical Net GEX measurement", () => {
+    render(<OptionsWorkspacePanel />);
+
+    fireEvent.change(screen.getByLabelText("Ticker symbol"), { target: { value: "mu" } });
+    fireEvent.click(screen.getByRole("button", { name: "Load exposure" }));
+
+    expect(push).toHaveBeenCalledWith("/options/net-gex?symbol=MU");
     expect(screen.getByTestId("net-gex-panel").textContent).toContain("MU");
   });
 
-  it("uses the canonical URL when Net GEX is selected", () => {
-    render(<OptionsWorkspacePanel symbol="MU" />);
+  it("uses a direct valid ticker deep link without injecting a default", () => {
+    render(<OptionsWorkspacePanel symbol="AAPL" />);
 
-    fireEvent.click(screen.getByRole("tab", { name: "Net GEX" }));
-    expect(push).toHaveBeenCalledWith("/options/net-gex?symbol=MU");
+    expect(screen.getByTestId("net-gex-panel").textContent).toContain("AAPL");
   });
 });

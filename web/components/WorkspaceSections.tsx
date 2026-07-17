@@ -4084,7 +4084,7 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
     case "flow-analysis":
       return <FlowSections tickerParam={tickerParam} />;
     case "options":
-      return <OptionsWorkspacePanel symbol={tickerParam ?? "MU"} />;
+      return <OptionsWorkspacePanel symbol={tickerParam} />;
     case "portfolio":
       return <PortfolioSections portfolio={portfolio ?? null} prices={prices} />;
     case "performance":

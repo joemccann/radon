@@ -126,7 +126,7 @@ describe("navItems", () => {
   it("each href contains the route", () => {
     for (const item of navItems) {
       if (item.route === "options") {
-        expect(item.href).toContain("/options/net-gex");
+        expect(item.href).toBe("/options");
         continue;
       }
       expect(item.href).toContain(item.route);
