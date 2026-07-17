@@ -40,8 +40,113 @@
   outline-offset: -2px;
 }
 
+.entry {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(280px, 0.72fr);
+  gap: clamp(24px, 4vw, 64px);
+  align-items: end;
+  padding: clamp(20px, 3vw, 36px);
+  color: var(--text-primary);
+  background: var(--bg-panel);
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+}
+
+.entryEyebrow,
+.entryForm label {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+  font-weight: 500;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.entry h2 {
+  margin: 7px 0 6px;
+  font-size: var(--text-view-title);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.entry p {
+  max-width: 56ch;
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: var(--text-body);
+  line-height: 1.55;
+}
+
+.entryForm {
+  display: grid;
+  gap: 8px;
+}
+
+.entryControls {
+  display: flex;
+  gap: 8px;
+}
+
+.entryControls input,
+.entryControls button {
+  min-height: 38px;
+  border-radius: 2px;
+  font-family: var(--font-mono);
+  font-size: var(--text-label);
+}
+
+.entryControls input {
+  min-width: 0;
+  flex: 1 1 auto;
+  padding: 7px 10px;
+  color: var(--text-primary);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-grid);
+  text-transform: uppercase;
+}
+
+.entryControls button {
+  flex: 0 0 auto;
+  padding: 7px 12px;
+  color: var(--signal-core-text);
+  background: color-mix(in srgb, var(--signal-core) 10%, var(--bg-panel));
+  border: 1px solid var(--signal-core);
+  cursor: pointer;
+}
+
+.entryControls button:disabled {
+  color: var(--text-muted);
+  background: var(--bg-panel-raised);
+  border-color: var(--line-grid);
+  cursor: not-allowed;
+}
+
+.entryControls input:focus-visible,
+.entryControls button:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--border-focus) 60%, transparent);
+  outline-offset: 2px;
+}
+
+.entryError {
+  color: var(--negative);
+  font-family: var(--font-mono);
+  font-size: var(--text-meta);
+}
+
 @media (max-width: 720px) {
   .tabBar {
     margin-bottom: 12px;
+  }
+
+  .entry {
+    grid-template-columns: 1fr;
+    gap: 22px;
+    padding: 18px;
+  }
+
+  .entryControls input,
+  .entryControls button {
+    min-height: 44px;
   }
 }

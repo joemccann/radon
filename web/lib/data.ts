@@ -37,7 +37,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true },
   { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: WatchlistGlyph },
   { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph },
-  { label: "Options", route: "options", href: "/options/net-gex?symbol=MU", icon: ExposureGlyph },
+  { label: "Options", route: "options", href: "/options", icon: ExposureGlyph },
   { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph },
   { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph },
   { label: "CTA", route: "cta", href: "/cta", icon: CTAGlyph },

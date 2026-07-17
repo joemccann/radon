@@ -11,7 +11,8 @@ type Props = {
 export default async function OptionsExposurePage({ searchParams }: Props) {
   const params = await searchParams;
   const rawSymbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
-  const symbol = rawSymbol && SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : "MU";
+  const symbol = rawSymbol && SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : null;
+  const destination = symbol ? `/options/net-gex?symbol=${encodeURIComponent(symbol)}` : "/options/net-gex";
 
-  redirect(`/options/net-gex?symbol=${encodeURIComponent(symbol)}`);
+  redirect(destination);
 }

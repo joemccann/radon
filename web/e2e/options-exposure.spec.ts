@@ -7,7 +7,7 @@ const expirations = [
   { expiration_date: "2026-07-24", dte: 8 },
 ];
 
-function exposurePayload(frequency: "eod" | "intraday") {
+function exposurePayload(frequency: "eod" | "intraday", symbol = "MU") {
   const strike_idx: number[] = [];
   const expiration_idx: number[] = [];
   const net_gex: number[] = [];
@@ -34,7 +34,7 @@ function exposurePayload(frequency: "eod" | "intraday") {
 
   return {
     schema_version: 1,
-    symbol: "MU",
+    symbol,
     source: "menthorq_dashboard",
     source_time: frequency === "eod" ? "2026-07-16T20:00:00" : "2026-07-16T19:30:00",
     fetched_at: "2026-07-17T03:00:00Z",
@@ -66,21 +66,57 @@ function exposurePayload(frequency: "eod" | "intraday") {
   };
 }
 
-async function mockWorkspace(page: Page) {
+async function mockWorkspace(page: Page, { holdExposure = false }: { holdExposure?: boolean } = {}) {
+  let exposureRequests = 0;
+  let releaseExposure = () => undefined;
+  const exposureGate = holdExposure
+    ? new Promise<void>((resolve) => { releaseExposure = resolve; })
+    : null;
+
   await page.route("**/api/**", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: "{}" }),
   );
-  await page.route("**/api/options/exposure?*", (route) => {
-    const frequency = new URL(route.request().url()).searchParams.get("frequency") === "intraday"
+  await page.route("**/api/options/exposure?*", async (route) => {
+    exposureRequests += 1;
+    const requestUrl = new URL(route.request().url());
+    const frequency = requestUrl.searchParams.get("frequency") === "intraday"
       ? "intraday"
       : "eod";
-    return route.fulfill({
+    if (exposureGate) await exposureGate;
+    await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify(exposurePayload(frequency)),
+      body: JSON.stringify(exposurePayload(frequency, requestUrl.searchParams.get("symbol") ?? "MU")),
     });
   });
+
+  return {
+    exposureRequests: () => exposureRequests,
+    releaseExposure,
+  };
 }
+
+test("Options waits for a valid ticker, then shows the spectral measurement loader", async ({ page }) => {
+  const workspace = await mockWorkspace(page, { holdExposure: true });
+  await page.goto("/options/net-gex");
+
+  await expect(page.getByRole("search", { name: "Options ticker" })).toBeVisible();
+  await expect(page.getByTestId("options-exposure-panel")).toHaveCount(0);
+  expect(workspace.exposureRequests()).toBe(0);
+
+  await page.screenshot({
+    path: resolve(process.cwd(), "../tasks/artifacts/options-exposure-entry-desktop.png"),
+    fullPage: true,
+  });
+
+  await page.getByLabel("Ticker symbol").fill("mu");
+  await page.getByRole("button", { name: "Load exposure" }).click();
+
+  await expect(page).toHaveURL(/\/options\/net-gex\?symbol=MU$/);
+  await expect(page.getByRole("status", { name: "Sampling options exposure for MU." })).toBeVisible();
+  workspace.releaseExposure();
+  await expect(page.getByRole("table", { name: "MU options exposure by strike" })).toBeVisible();
+});
 
 test("Options workspace opens its Net GEX tab with the captured controls and client-side transforms", async ({ page }) => {
   await mockWorkspace(page);
@@ -124,8 +160,15 @@ test("Options workspace opens its Net GEX tab with the captured controls and cli
 test("Options workspace canonicalizes root and legacy entry points", async ({ page }) => {
   await mockWorkspace(page);
 
+  await page.goto("/options");
+  await expect(page).toHaveURL(/\/options\/net-gex$/);
+  await expect(page.getByRole("search", { name: "Options ticker" })).toBeVisible();
+
   await page.goto("/options?symbol=MU");
   await expect(page).toHaveURL(/\/options\/net-gex\?symbol=MU$/);
+
+  await page.goto("/options/exposure");
+  await expect(page).toHaveURL(/\/options\/net-gex$/);
 
   await page.goto("/options/exposure?symbol=MU");
   await expect(page).toHaveURL(/\/options\/net-gex\?symbol=MU$/);

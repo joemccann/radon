@@ -37,6 +37,7 @@ describe("OptionsExposurePanel", () => {
     expect(screen.getByRole("button", { name: "All Expirations" }).getAttribute("aria-pressed")).toBe("true");
     expect(screen.getByRole("table", { name: "MU options exposure by strike" })).toBeTruthy();
     expect(screen.getByText("Jul 16, 20:00 UTC")).toBeTruthy();
+    expect(screen.queryByText("MENTHORQ DASHBOARD")).toBeNull();
     expect(screen.getAllByRole("columnheader").map((cell) => cell.textContent)).toEqual([
       "Strike",
       "Levels",
@@ -94,7 +95,7 @@ describe("OptionsExposurePanel", () => {
   it("renders loading, error, unavailable, and empty measurement states", () => {
     useOptionsExposureMock.mockReturnValue({ data: null, loading: true, error: null, refresh: vi.fn() });
     const { rerender } = render(<OptionsExposurePanel symbol="MU" />);
-    expect(screen.getByRole("status").textContent).toContain("Sampling options exposure");
+    expect(screen.getByRole("status", { name: "Sampling options exposure for MU." })).toBeTruthy();
 
     useOptionsExposureMock.mockReturnValue({ data: null, loading: false, error: "Feed unavailable", refresh: vi.fn() });
     rerender(<OptionsExposurePanel symbol="MU" />);

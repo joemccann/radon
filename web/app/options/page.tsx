@@ -9,7 +9,7 @@ type Props = {
 export default async function OptionsPage({ searchParams }: Props) {
   const params = await searchParams;
   const rawSymbol = Array.isArray(params.symbol) ? params.symbol[0] : params.symbol;
-  const symbol = rawSymbol && SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : "MU";
+  const symbol = rawSymbol && SYMBOL_RE.test(rawSymbol) ? rawSymbol.toUpperCase() : null;
 
-  redirect(`/options/net-gex?symbol=${encodeURIComponent(symbol)}`);
+  redirect(symbol ? `/options/net-gex?symbol=${encodeURIComponent(symbol)}` : "/options/net-gex");
 }
