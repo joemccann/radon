@@ -949,7 +949,16 @@ def run_analysis(
         cor1m_values,
         current_override=current_quotes.get("COR1M"),
     )
-    cor1m_previous_close = float(cor1m_values[-1]) if len(cor1m_values) > 0 else float("nan")
+    # IB's daily series includes today's forming bar during the session, so
+    # the last bar can be TODAY's intraday sample rather than a settled close.
+    # Anchor "previous close" to the last bar strictly before the active
+    # session date, or the UI's day change collapses to live-minus-today.
+    if len(cor1m_values) > 1 and common_dates and common_dates[-1] >= current_session_date_et():
+        cor1m_previous_close = float(cor1m_values[-2])
+    elif len(cor1m_values) > 0:
+        cor1m_previous_close = float(cor1m_values[-1])
+    else:
+        cor1m_previous_close = float("nan")
 
     # Realized vol (SPY)
     realized_vol = compute_realized_vol(spy, VOL_WINDOW)

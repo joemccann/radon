@@ -749,6 +749,28 @@ class TestRunAnalysis:
         assert "avg_sector_correlation" not in result
         assert result["crash_trigger"]["conditions"]["cor1m_gt_60"] is False
 
+    def test_previous_close_skips_todays_forming_bar(self):
+        # During RTH, IB's daily series includes today's forming bar as the
+        # last element. Previous close must anchor to the bar BEFORE the
+        # active session, not today's own intraday sample (COR1M showed
+        # -0.05 day change on a +1.73 day, 2026-07-17).
+        n = 140
+        today = current_session_date_et()
+        dates = [f"2000-01-{(i % 28) + 1:02d}" for i in range(n - 1)] + [today]
+
+        aligned = {
+            "VIX": np.linspace(18.0, 30.0, n),
+            "VVIX": np.linspace(90.0, 120.0, n),
+            "SPY": np.linspace(600.0, 560.0, n),
+            # Prior close 4.66, today's forming bar 6.43
+            "COR1M": np.concatenate([np.full(n - 2, 4.5), np.array([4.66, 6.43])]),
+        }
+
+        result = run_analysis(aligned, dates, current_quotes={"COR1M": 6.38})
+
+        assert result["cor1m"] == 6.38
+        assert result["cor1m_previous_close"] == 4.66
+
     def test_preserves_prior_cor1m_close_when_current_quote_override_exists(self):
         n = 140
         dates = [f"2026-01-{(i % 28) + 1:02d}" for i in range(n)]
