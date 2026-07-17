@@ -749,6 +749,23 @@ class TestRunAnalysis:
         assert "avg_sector_correlation" not in result
         assert result["crash_trigger"]["conditions"]["cor1m_gt_60"] is False
 
+    def test_official_cor1m_previous_close_takes_last_settled_bar_before_session(self):
+        # Official Cboe history is authoritative: IB's COR1M daily bars AND
+        # its tick-9 close both lag a session (observed 2026-07-17: IB said
+        # 4.43 while the official prior close was 4.66).
+        from cri_scan import official_cor1m_previous_close
+
+        bars = [("2026-07-14", 4.20), ("2026-07-15", 4.43), ("2026-07-16", 4.66)]
+        assert official_cor1m_previous_close(bars, "2026-07-17") == 4.66
+        # A same-session (running) row must be skipped.
+        assert official_cor1m_previous_close(
+            [*bars, ("2026-07-17", 6.29)], "2026-07-17"
+        ) == 4.66
+        # Off-hours: session date == last settled bar -> the bar before it.
+        assert official_cor1m_previous_close(bars, "2026-07-16") == 4.43
+        assert official_cor1m_previous_close([], "2026-07-17") is None
+        assert official_cor1m_previous_close(bars, "2026-07-01") is None
+
     def test_previous_close_skips_todays_forming_bar(self):
         # During RTH, IB's daily series includes today's forming bar as the
         # last element. Previous close must anchor to the bar BEFORE the
