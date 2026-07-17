@@ -2,13 +2,21 @@
  * @vitest-environment jsdom
  */
 import React from "react";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import ComboSkewPanel from "../components/ComboSkewPanel";
 import type { OrderLeg } from "../lib/optionsChainUtils";
 import type { PriceData } from "../lib/pricesProtocol";
 
-afterEach(cleanup);
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date("2026-06-24T16:00:00.000Z"));
+});
+
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function leg(right: "C" | "P", strike: number, action: "BUY" | "SELL" = "SELL"): OrderLeg {
   return {
