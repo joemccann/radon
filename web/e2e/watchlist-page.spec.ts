@@ -152,19 +152,21 @@ async function stubApis(page: Page) {
 }
 
 test.describe("Watchlist page", () => {
-  test("selects ticker detail inline without leaving /watchlist", async ({ page }) => {
+  test("lists symbols with no inline detail and navigates to the cockpit on click", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     await stubApis(page);
 
     await page.goto("/watchlist");
     await expect(page.getByTestId("watchlist-page")).toBeVisible();
     await expect(page.getByRole("heading", { name: "Watchlist" })).toBeVisible();
-    await expect(page.locator(".cockpit-head")).toContainText("AAPL", { timeout: 10000 });
+    await expect(page.getByTestId("watchlist-row-AAPL")).toBeVisible();
+    await expect(page.getByTestId("watchlist-row-MSFT")).toBeVisible();
+    await expect(page.getByTestId("watchlist-detail")).toHaveCount(0);
+    await expect(page.getByText("INLINE DETAIL")).toHaveCount(0);
 
-    await page.getByRole("button", { name: "Show MSFT watchlist detail" }).click();
+    await page.getByRole("button", { name: "Open MSFT instrument cockpit" }).click();
 
-    await expect(page).toHaveURL(/\/watchlist$/);
-    await expect(page.locator(".cockpit-head")).toContainText("MSFT");
-    await expect(page.getByTestId("watchlist-row-MSFT")).toHaveClass(/watchlist-row--active/);
+    await expect(page).toHaveURL(/\/MSFT$/);
+    await expect(page.locator(".cockpit-head")).toContainText("MSFT", { timeout: 10000 });
   });
 });

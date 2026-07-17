@@ -1,20 +1,17 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { FundamentalsData, PriceData } from "@/lib/pricesProtocol";
+import { useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
+import type { PriceData } from "@/lib/pricesProtocol";
 import type { OrdersData, PortfolioData, PortfolioPosition } from "@/lib/types";
-import { useTickerDetail } from "@/lib/TickerDetailContext";
-import { useViewport } from "@/lib/useViewport";
 import { useWatchlist, type WatchlistEntry } from "@/lib/useWatchlist";
 import { fmtPrice } from "@/lib/positionUtils";
 import StarToggle from "@/components/StarToggle";
-import TickerDetailContent from "@/components/TickerDetailContent";
 
 type WatchlistContentProps = {
   prices?: Record<string, PriceData>;
   portfolio?: PortfolioData | null;
   orders?: OrdersData | null;
-  theme: "dark" | "light";
 };
 
 type WatchQuote = {
@@ -58,52 +55,47 @@ function WatchlistRow({
   price,
   position,
   orderCount,
-  active,
-  onSelect,
+  onOpen,
   onRemove,
 }: {
   entry: WatchlistEntry;
   price?: PriceData;
   position: PortfolioPosition | null;
   orderCount: number;
-  active: boolean;
-  onSelect: (symbol: string) => void;
+  onOpen: (symbol: string) => void;
   onRemove: (symbol: string) => void | Promise<void>;
 }) {
   const quote = useMemo(() => quoteFor(price), [price]);
   const label = position?.structure ?? entry.sector ?? "UNASSIGNED";
 
   return (
-    <li className={`watchlist-row${active ? " watchlist-row--active" : ""}`} data-testid={`watchlist-row-${entry.symbol}`}>
+    <li className="watchlist-row" data-testid={`watchlist-row-${entry.symbol}`}>
       <button
         type="button"
         className="watchlist-row__press"
-        aria-pressed={active}
-        aria-label={`Show ${entry.symbol} watchlist detail`}
-        onClick={() => onSelect(entry.symbol)}
+        aria-label={`Open ${entry.symbol} instrument cockpit`}
+        onClick={() => onOpen(entry.symbol)}
       >
-        <span className="watchlist-row__primary">
-          <span className="watchlist-row__symbol mono">{entry.symbol}</span>
-          <span className="watchlist-row__label">{label}</span>
+        <span className="watchlist-row__symbol mono">{entry.symbol}</span>
+        <span className="watchlist-row__label">{label}</span>
+        <span className="watchlist-row__last mono">
+          {quote.last != null ? fmtPrice(quote.last) : "---"}
         </span>
-        <span className="watchlist-row__quote">
-          <span className="watchlist-row__last mono">
-            {quote.last != null ? fmtPrice(quote.last) : "---"}
+        {quote.pct != null ? (
+          <span className={`watchlist-row__change mono ${quote.tone}`}>
+            {quote.abs != null && quote.abs >= 0 ? "+" : ""}
+            {quote.pct.toFixed(2)}%
           </span>
-          {quote.pct != null ? (
-            <span className={`watchlist-row__change mono ${quote.tone}`}>
-              {quote.abs != null && quote.abs >= 0 ? "+" : ""}
-              {quote.pct.toFixed(2)}%
-            </span>
-          ) : (
-            <span className="watchlist-row__change mono neutral">NO MARK</span>
-          )}
+        ) : (
+          <span className="watchlist-row__change mono neutral">NO MARK</span>
+        )}
+        <span className={`watchlist-row__status mono${position ? " watchlist-row__status--held" : ""}`}>
+          {position ? "HELD" : "FLAT"}
         </span>
-        <span className="watchlist-row__meta">
-          <span>{position ? "HELD" : "FLAT"}</span>
-          <span>{orderCount > 0 ? `${orderCount} ORDER${orderCount === 1 ? "" : "S"}` : "NO ORDERS"}</span>
-          <span>{formatDateLabel(entry.added_at)}</span>
+        <span className={`watchlist-row__orders mono${orderCount > 0 ? " watchlist-row__orders--open" : ""}`}>
+          {orderCount > 0 ? `${orderCount} ORDER${orderCount === 1 ? "" : "S"}` : "NO ORDERS"}
         </span>
+        <span className="watchlist-row__added mono">{formatDateLabel(entry.added_at)}</span>
       </button>
       <StarToggle active size="sm" onToggle={() => onRemove(entry.symbol)} />
     </li>
@@ -114,56 +106,10 @@ export default function WatchlistContent({
   prices,
   portfolio,
   orders,
-  theme,
 }: WatchlistContentProps) {
-  const {
-    getPrices,
-    getFundamentals,
-    getDepths,
-    getTape,
-    setActiveTicker,
-    setActivePositionId,
-    setDepthSymbol,
-  } = useTickerDetail();
+  const router = useRouter();
   const { watchlist, isLoading, toggleWatch } = useWatchlist();
-  const { isMobile, hasMounted } = useViewport();
-  const detailRef = useRef<HTMLDivElement | null>(null);
-  const [selectedSymbol, setSelectedSymbol] = useState<string | null>(null);
-  const [activeDeck, setActiveDeck] = useState("book");
-
-  const priceMap = prices ?? getPrices();
-  const fundamentals = getFundamentals() as Record<string, FundamentalsData>;
-  const depths = getDepths();
-  const tape = getTape();
-
-  useEffect(() => {
-    if (watchlist.length === 0) {
-      setSelectedSymbol(null);
-      return;
-    }
-    setSelectedSymbol((current) => {
-      const normalized = current?.toUpperCase() ?? null;
-      if (normalized && watchlist.some((entry) => entry.symbol === normalized)) {
-        return normalized;
-      }
-      return watchlist[0].symbol;
-    });
-  }, [watchlist]);
-
-  useEffect(() => {
-    setActiveTicker(selectedSymbol);
-    setActivePositionId(null);
-    if (!selectedSymbol) setDepthSymbol(null);
-  }, [selectedSymbol, setActiveTicker, setActivePositionId, setDepthSymbol]);
-
-  useEffect(() => {
-    setActiveDeck("book");
-  }, [selectedSymbol]);
-
-  const selectedEntry = useMemo(
-    () => watchlist.find((entry) => entry.symbol === selectedSymbol) ?? null,
-    [selectedSymbol, watchlist],
-  );
+  const priceMap = prices ?? {};
 
   const stats = useMemo(() => {
     let held = 0;
@@ -171,22 +117,18 @@ export default function WatchlistContent({
     let marked = 0;
     for (const entry of watchlist) {
       if (findPosition(entry.symbol, portfolio)) held += 1;
-      const orderTotal = openOrderCount(entry.symbol, orders);
-      openOrders += orderTotal;
+      openOrders += openOrderCount(entry.symbol, orders);
       if (priceMap[entry.symbol]?.last != null) marked += 1;
     }
     return { held, openOrders, marked };
   }, [orders, portfolio, priceMap, watchlist]);
 
-  const handleSelect = useCallback((symbol: string) => {
-    setSelectedSymbol(symbol.toUpperCase());
-    if (hasMounted && isMobile) {
-      window.requestAnimationFrame(() => {
-        const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-        detailRef.current?.scrollIntoView({ block: "start", behavior: reduceMotion ? "auto" : "smooth" });
-      });
-    }
-  }, [hasMounted, isMobile]);
+  const handleOpen = useCallback(
+    (symbol: string) => {
+      router.push(`/${symbol.toUpperCase()}`);
+    },
+    [router],
+  );
 
   const handleRemove = useCallback(
     async (symbol: string) => {
@@ -230,8 +172,8 @@ export default function WatchlistContent({
           <span className="watchlist-eyebrow">TRACKED SYMBOLS</span>
           <h1>Watchlist</h1>
           <p>
-            Click a symbol to keep the route fixed and load its live book, order ticket,
-            held position, company context, and option chain in the inline cockpit.
+            Click a symbol to open its instrument cockpit: live book, order ticket,
+            held position, company context, and option chain.
           </p>
         </div>
         <div className="watchlist-stats" aria-label="Watchlist summary">
@@ -242,56 +184,30 @@ export default function WatchlistContent({
         </div>
       </header>
 
-      <div className="watchlist-grid">
-        <aside className="watchlist-rail" aria-label="Watched symbols">
-          <div className="watchlist-rail__head">
-            <span>SYMBOL</span>
-            <span>MARK</span>
-          </div>
-          <ul className="watchlist-list">
-            {watchlist.map((entry) => (
-              <WatchlistRow
-                key={entry.id}
-                entry={entry}
-                price={priceMap[entry.symbol]}
-                position={findPosition(entry.symbol, portfolio)}
-                orderCount={openOrderCount(entry.symbol, orders)}
-                active={entry.symbol === selectedSymbol}
-                onSelect={handleSelect}
-                onRemove={handleRemove}
-              />
-            ))}
-          </ul>
-        </aside>
-
-        <div className="watchlist-detail" data-testid="watchlist-detail" ref={detailRef}>
-          <div className="watchlist-detail__head">
-            <span className="watchlist-detail__label">INLINE DETAIL</span>
-            <span className="watchlist-detail__symbol mono">{selectedSymbol ?? "---"}</span>
-          </div>
-          {selectedEntry && selectedSymbol ? (
-            <div className="watchlist-detail__frame">
-              <div className="ticker-detail-page ticker-detail-page--embedded">
-                <TickerDetailContent
-                  ticker={selectedSymbol}
-                  positionId={null}
-                  activeTab={activeDeck}
-                  onTabChange={setActiveDeck}
-                  prices={priceMap}
-                  fundamentals={fundamentals}
-                  portfolio={portfolio ?? null}
-                  orders={orders ?? null}
-                  depths={depths}
-                  tape={tape}
-                  onDepthSymbolChange={setDepthSymbol}
-                  theme={theme}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="watchlist-detail__empty">Select a symbol to load instrument context.</div>
-          )}
+      <div className="watchlist-board" aria-label="Watched symbols">
+        <div className="watchlist-board__head" aria-hidden="true">
+          <span>Symbol</span>
+          <span>Structure</span>
+          <span className="watchlist-board__head-num">Mark</span>
+          <span className="watchlist-board__head-num">Change</span>
+          <span>Status</span>
+          <span>Orders</span>
+          <span>Added</span>
+          <span />
         </div>
+        <ul className="watchlist-list">
+          {watchlist.map((entry) => (
+            <WatchlistRow
+              key={entry.id}
+              entry={entry}
+              price={priceMap[entry.symbol]}
+              position={findPosition(entry.symbol, portfolio)}
+              orderCount={openOrderCount(entry.symbol, orders)}
+              onOpen={handleOpen}
+              onRemove={handleRemove}
+            />
+          ))}
+        </ul>
       </div>
     </section>
   );
