@@ -201,3 +201,8 @@ data/replica.db-info
 video/
 marketing-mockups/
 reports/
+
+# Local UI exploration and generated visual verification artifacts
+prototypes/
+tasks/mockups/
+tasks/artifacts/*.png
