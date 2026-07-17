@@ -336,6 +336,20 @@ def _fetch_cboe_cor1m_current_quote() -> Optional[float]:
     return bars[-1][1]
 
 
+def official_cor1m_previous_close(
+    bars: List[Tuple[str, float]],
+    session_date: str,
+) -> Optional[float]:
+    """Last official settled COR1M close strictly before the active session.
+
+    IB's COR1M daily bars AND its tick-9 close both lag a session for this
+    calculated index (observed 2026-07-17: IB 4.43 vs official 4.66), so the
+    Cboe dashboard history is the authoritative previous-close anchor.
+    """
+    prior = [close for date, close in bars if date < session_date]
+    return prior[-1] if prior else None
+
+
 def _parse_cboe_csv_date(raw_date: str) -> Optional[str]:
     try:
         return datetime.strptime(raw_date, "%m/%d/%Y").strftime("%Y-%m-%d")
@@ -1640,6 +1654,14 @@ Examples:
     result = run_analysis(aligned, common_dates, current_quotes=current_quotes)
     if post_close_snapshot_appended and not math.isnan(prior_cor1m_close):
         result["cor1m_previous_close"] = round(prior_cor1m_close, 2)
+
+    # Official Cboe close wins over any IB-derived anchor when available;
+    # the positional daily-bar logic above stays as the offline fallback.
+    official_prev_close = official_cor1m_previous_close(
+        _fetch_cboe_cor1m(), current_session_date_et()
+    )
+    if official_prev_close is not None:
+        result["cor1m_previous_close"] = round(official_prev_close, 2)
 
     elapsed = time.time() - t_start
 

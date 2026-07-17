@@ -614,11 +614,11 @@ export default function RegimePanel({
               timestamp={vvixLastTs ?? "---"}
             />
             <RegimeStripCell
-              testId="strip-spy"
-              label={<>SPY <LiveBadge live={effectiveHasLiveSpy} /></>}
-              value={`$${fmt(spyVal)}`}
-              change={<DayChange last={liveSpy} close={spyClose} prefix="$" />}
-              sub={<>vs 100d MA: {fmtPct(spxDistPct)}</>}
+              testId="strip-cor1m"
+              label={<>COR1M <LiveBadge live={effectiveHasLiveCor1m} /></>}
+              value={fmt(activeCorr, 2)}
+              change={<DayChange last={liveCor1m} close={cor1mPreviousClose} />}
+              sub={<>{`5d chg: ${corr5dChange != null ? `${fmtSigned(corr5dChange)} pts` : "---"}`}</>}
             />
             <RegimeStripCell
               testId="strip-rvol"
@@ -634,11 +634,11 @@ export default function RegimePanel({
               sub={<>20d annualized</>}
             />
             <RegimeStripCell
-              testId="strip-cor1m"
-              label={<>COR1M <LiveBadge live={effectiveHasLiveCor1m} /></>}
-              value={fmt(activeCorr, 2)}
-              change={<DayChange last={liveCor1m} close={cor1mPreviousClose} />}
-              sub={<>{`5d chg: ${corr5dChange != null ? `${fmtSigned(corr5dChange)} pts` : "---"}`}</>}
+              testId="strip-spy"
+              label={<>SPY <LiveBadge live={effectiveHasLiveSpy} /></>}
+              value={`$${fmt(spyVal)}`}
+              change={<DayChange last={liveSpy} close={spyClose} prefix="$" />}
+              sub={<>vs 100d MA: {fmtPct(spxDistPct)}</>}
             />
             {nqSkew != null ? (
               <RegimeStripCell
