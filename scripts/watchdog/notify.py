@@ -167,7 +167,7 @@ def build_pushover_payload(*, user: str, token: str, title: str, message: str,
         payload["retry"] = PUSHOVER_EMERGENCY_RETRY_SECS
         payload["expire"] = PUSHOVER_EMERGENCY_EXPIRE_SECS
         if tag:
-            payload["tag"] = tag
+            payload["tags"] = tag
     else:
         payload["priority"] = 0
     return payload

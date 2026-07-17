@@ -62,12 +62,12 @@ def test_emergency_payload_carries_tag():
         user="u", token="t", title="x", message="y", severity="P1", tag="cri-scan"
     )
     assert p["priority"] == 2
-    assert p["tag"] == "cri-scan"
+    assert p["tags"] == "cri-scan"
     # Non-emergency never carries the tag (nothing to cancel).
     p3 = notify.build_pushover_payload(
         user="u", token="t", title="x", message="y", severity="P3", tag="cri-scan"
     )
-    assert "tag" not in p3
+    assert "tags" not in p3
 
 
 def test_reconcile_cancels_recovered_service(db_conn):
