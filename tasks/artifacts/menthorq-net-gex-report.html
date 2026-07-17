@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>Radon — MenthorQ Net GEX Integration Report</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --canvas: #0a0f14;
+        --panel: #0f1519;
+        --raised: #151c22;
+        --grid: #1e293b;
+        --text: #f1f5f9;
+        --muted: #a7b4c4;
+        --dim: #718096;
+        --signal: #05ad98;
+        --signal-soft: #073f39;
+        --warn: #e7b85f;
+        --fault: #e16b79;
+        --fault-soft: #3d1d27;
+        --mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+        --sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+
+      * { box-sizing: border-box; }
+      html { background: var(--canvas); scroll-behavior: smooth; }
+      body {
+        margin: 0;
+        background: var(--canvas);
+        color: var(--text);
+        font-family: var(--sans);
+        font-synthesis: none;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        text-rendering: optimizeLegibility;
+      }
+      ::selection { background: var(--signal); color: #031312; }
+      a { color: #7ee8d7; text-decoration-thickness: from-font; text-underline-offset: 0.16em; }
+      a:hover { color: #b6fff5; }
+
+      .shell { width: min(100% - 32px, 1180px); margin-inline: auto; }
+      .report-header { padding-block: 48px 28px; border-bottom: 1px solid var(--grid); }
+      .eyebrow, .label, th, .toc-title {
+        color: var(--muted);
+        font-family: var(--mono);
+        font-size: 0.72rem;
+        font-weight: 600;
+        letter-spacing: 0.1em;
+        line-height: 1.3;
+        text-transform: uppercase;
+      }
+      .eyebrow { color: var(--signal); margin: 0 0 16px; }
+      h1, h2, h3 { margin: 0; color: var(--text); text-wrap: balance; }
+      h1 { max-width: 18ch; font-size: clamp(2.1rem, 6vw, 4.4rem); letter-spacing: -0.045em; line-height: 1.03; }
+      h2 { font-size: clamp(1.45rem, 3vw, 2.15rem); letter-spacing: -0.03em; line-height: 1.1; }
+      h3 { font-size: 1rem; letter-spacing: -0.01em; line-height: 1.25; }
+      p, li { font-size: 1.05rem; line-height: 1.62; }
+      p { max-width: 70ch; margin-block: 0; text-wrap: pretty; }
+      code { font-family: var(--mono); font-size: 0.9em; overflow-wrap: anywhere; }
+      .dek { margin-top: 20px; color: var(--muted); }
+      .metadata { display: flex; flex-wrap: wrap; gap: 10px 20px; margin-top: 28px; color: var(--muted); font-family: var(--mono); font-size: 0.78rem; font-variant-numeric: tabular-nums; }
+      .metadata strong { color: var(--text); font-weight: 600; }
+
+      .toc { padding-block: 24px; border-bottom: 1px solid var(--grid); }
+      .toc nav { display: flex; flex-wrap: wrap; gap: 8px 18px; margin-top: 10px; }
+      .toc a { font-size: 0.92rem; }
+
+      main { padding-block: 38px 64px; }
+      section { padding-block: 38px; border-bottom: 1px solid var(--grid); }
+      section:first-child { padding-top: 0; }
+      .section-intro { margin-top: 14px; color: var(--muted); }
+      .lede { color: var(--text); font-size: 1.18rem; line-height: 1.58; }
+      .notice {
+        max-width: 76ch;
+        margin-top: 24px;
+        padding: 18px 20px;
+        border: 1px solid #855a24;
+        border-inline-start: 4px solid var(--warn);
+        background: #261c0d;
+      }
+      .notice p { max-width: none; }
+      .notice strong { color: #ffe2a4; }
+
+      .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 16px; margin-top: 26px; }
+      .panel { grid-column: span 6; min-width: 0; border: 1px solid var(--grid); background: var(--panel); border-radius: 4px; }
+      .panel.wide { grid-column: 1 / -1; }
+      .panel-head { padding: 14px 16px; border-bottom: 1px solid var(--grid); background: var(--raised); }
+      .panel-body { padding: 16px; }
+      .panel-body p { font-size: 0.98rem; }
+      .status { display: inline-flex; align-items: center; min-height: 25px; padding: 3px 8px; border: 1px solid; border-radius: 999px; font-family: var(--mono); font-size: 0.72rem; font-weight: 600; letter-spacing: 0.03em; white-space: nowrap; }
+      .status.high { border-color: #27887b; color: #88f1df; background: var(--signal-soft); }
+      .status.unknown { border-color: #845e2e; color: #f5ce8a; background: #2b2010; }
+      .status.blocked { border-color: #864450; color: #ffacb6; background: var(--fault-soft); }
+      .facts { display: grid; gap: 16px; margin: 0; }
+      .facts div { padding-bottom: 16px; border-bottom: 1px solid var(--grid); }
+      .facts div:last-child { padding-bottom: 0; border-bottom: 0; }
+      .facts dt { color: var(--muted); font-family: var(--mono); font-size: 0.73rem; letter-spacing: 0.08em; text-transform: uppercase; }
+      .facts dd { margin: 5px 0 0; font-size: 1.03rem; line-height: 1.5; }
+
+      .flow { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; margin: 26px 0 0; padding: 0; list-style: none; }
+      .flow li { position: relative; min-height: 146px; padding: 16px; border: 1px solid var(--grid); border-radius: 4px; background: var(--panel); }
+      .flow li:not(:last-child)::after { position: absolute; top: 50%; right: -10px; z-index: 2; width: 18px; height: 1px; background: var(--signal); content: ""; }
+      .flow .step { display: block; color: var(--signal); font-family: var(--mono); font-size: 0.74rem; font-variant-numeric: tabular-nums; }
+      .flow h3 { margin-top: 14px; }
+      .flow p { margin-top: 8px; color: var(--muted); font-size: 0.88rem; line-height: 1.45; }
+
+      .table-wrap { margin-top: 24px; overflow-x: auto; border: 1px solid var(--grid); border-radius: 4px; }
+      table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+      caption { padding: 13px 16px; border-bottom: 1px solid var(--grid); color: var(--muted); text-align: start; }
+      th, td { padding: 14px 16px; border-bottom: 1px solid var(--grid); vertical-align: top; text-align: start; }
+      th { background: var(--raised); }
+      tr:last-child td { border-bottom: 0; }
+      td { color: #dce5ed; line-height: 1.5; }
+      td:first-child { font-family: var(--mono); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+
+      .endpoint { margin-top: 22px; padding: 16px; overflow-x: auto; border: 1px solid var(--grid); border-radius: 4px; background: #080c10; color: #c7d4df; font-family: var(--mono); font-size: 0.85rem; line-height: 1.65; white-space: pre; }
+      .endpoint .verb { color: #7ee8d7; font-weight: 700; }
+      .endpoint .comment { color: var(--dim); }
+      .checklist { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 24px; margin: 24px 0 0; padding: 0; list-style: none; }
+      .checklist li { position: relative; padding-inline-start: 28px; font-size: 0.96rem; }
+      .checklist li::before { position: absolute; inset-inline-start: 0; color: var(--signal); content: "✓"; font-family: var(--mono); font-weight: 700; }
+      .next-step { margin-top: 24px; padding: 22px; border: 1px solid #286d64; border-radius: 4px; background: #0b211f; }
+      .next-step p { margin-top: 8px; }
+      .footer { padding-block: 28px 50px; color: var(--dim); font-family: var(--mono); font-size: 0.76rem; line-height: 1.5; }
+
+      @media (max-width: 760px) {
+        .shell { width: min(100% - 24px, 1180px); }
+        .report-header { padding-top: 32px; }
+        p, li { font-size: 1rem; }
+        .panel { grid-column: 1 / -1; }
+        .flow { grid-template-columns: 1fr; }
+        .flow li { min-height: auto; }
+        .flow li:not(:last-child)::after { top: auto; right: auto; bottom: -9px; left: 24px; width: 1px; height: 18px; }
+        .checklist { grid-template-columns: 1fr; }
+        th, td { min-width: 165px; }
+      }
+      @media print {
+        :root { color-scheme: light; }
+        html, body { background: #fff; color: #111827; }
+        .report-header, .toc, section { border-color: #cbd5e1; }
+        .panel, .flow li, .table-wrap, .endpoint { background: #f8fafc; border-color: #cbd5e1; }
+        .panel-head, th { background: #eef2f7; }
+        .text, h1, h2, h3, td { color: #111827; }
+        .dek, .section-intro, .metadata, .facts dt, .facts dd, .flow p, caption { color: #475569; }
+        .notice { background: #fff8e7; }
+        a { color: #075f56; }
+        .toc { display: none; }
+        section { break-inside: avoid; }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="shell report-header">
+      <p class="eyebrow">Radon / provider integration assessment</p>
+      <h1>MenthorQ Net GEX integration report</h1>
+      <p class="dek">A readable implementation, API, and authentication handoff for Radon’s new options exposure workspace.</p>
+      <div class="metadata" aria-label="Report metadata">
+        <span><strong>Scope</strong> MU exposure page</span>
+        <span><strong>Prepared</strong> 2026-07-17</span>
+        <span><strong>Evidence</strong> live dashboard inspection + source review</span>
+        <span><strong>Secrets</strong> excluded</span>
+      </div>
+    </header>
+
+    <div class="shell toc">
+      <p class="toc-title">Contents</p>
+      <nav aria-label="Report contents">
+        <a href="#decision">Decision</a>
+        <a href="#delivered">Delivered</a>
+        <a href="#api">API contract</a>
+        <a href="#auth">Authentication</a>
+        <a href="#verification">Verification</a>
+      </nav>
+    </div>
+
+    <main class="shell">
+      <section id="decision">
+        <p class="eyebrow">Executive decision</p>
+        <h2>Direct retrieval and the redirect-mediated authentication bootstrap are both proven.</h2>
+        <p class="section-intro lede">Radon now has a production options exposure page and a server-only provider boundary. The active dashboard API returns the required Net GEX, DEX, open-interest, strike, expiration, spot, and gamma-level data when supplied with a valid Cognito Bearer access token.</p>
+        <aside class="notice" aria-label="Important authentication limitation">
+          <p><strong>Resolved constraint.</strong> An unauthenticated dashboard visit redirects to the MenthorQ WordPress login and returns through Cognito. Radon now uses the existing server-side WordPress credentials to establish and persist a dedicated <code>dashboard.menthorq.io</code> session owner-only. No browser-facing credential or token exposure is introduced.</p>
+        </aside>
+        <div class="grid">
+          <article class="panel">
+            <div class="panel-head"><span class="label">Conclusion</span></div>
+            <div class="panel-body">
+              <dl class="facts">
+                <div><dt>Direct API capability</dt><dd><span class="status high">High confidence</span> A dashboard access token returned the normalized numeric payload; unauthenticated requests returned <code>401</code>.</dd></div>
+                <div><dt>Legacy credentials through redirect</dt><dd><span class="status high">High confidence</span> The dashboard redirects to WordPress and returns with a valid Cognito session. Radon automates this server-side bootstrap.</dd></div>
+                <div><dt>Live Radon display today</dt><dd><span class="status high">Verified</span> A live MU EOD cube loaded with 6,321 cells across 24 expirations using the dedicated owner-only state.</dd></div>
+              </dl>
+            </div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span class="label">What the user receives</span></div>
+            <div class="panel-body">
+              <p>Radon recreates the functional exposure analysis, not MenthorQ’s proprietary styling or source code. It uses Radon’s dark instrument-panel system, zero-centered signed bars, explicit data freshness, spot and level markers, and responsive operator controls.</p>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section id="delivered">
+        <p class="eyebrow">Implemented surface</p>
+        <h2>A complete, Radon-native exposure workspace</h2>
+        <p class="section-intro">Route: <code>/options/exposure?symbol=MU</code>. The new workspace remains separate from the SPX-oriented GEX scanner, preserving correct symbol/frequency boundaries.</p>
+        <ul class="checklist" aria-label="Delivered capabilities">
+          <li>Net GEX, Abs GEX, Net DEX, Abs DEX, and Open Interest</li>
+          <li>EOD and intraday data cubes with explicit frequency state</li>
+          <li>Dynamic expiration selection with DTE and all-expiration aggregation</li>
+          <li>5, 10, 20, 50, and all-strike windows</li>
+          <li>All seven MenthorQ level overlays</li>
+          <li>Spot row highlighting and zero-centered signed exposure bars</li>
+          <li>Separate raw put/call OI rails</li>
+          <li>Responsive loading, empty, partial, and provider-unavailable states</li>
+        </ul>
+        <div class="table-wrap">
+          <table>
+            <caption>Control parity with the inspected MenthorQ exposure page</caption>
+            <thead><tr><th>Control</th><th>Values</th><th>Radon behavior</th></tr></thead>
+            <tbody>
+              <tr><td>Metric</td><td>Net GEX, Abs GEX, Net DEX, Abs DEX, Open Interest</td><td>Client-side transformation of the normalized exposure cube.</td></tr>
+              <tr><td>Strike range</td><td>5, 10, 20, 50 strikes ±, All Strikes</td><td>Centers around the nearest spot strike without a provider refetch.</td></tr>
+              <tr><td>Expiration</td><td>All plus each payload expiration and DTE</td><td>Aggregates selected expiration cells locally.</td></tr>
+              <tr><td>Level visibility</td><td>HVL, CR, PS, CR 0DTE, PS 0DTE, 1D Max, 1D Min</td><td>Independent local visibility controls.</td></tr>
+              <tr><td>Frequency</td><td>EOD, Intraday</td><td>Requests the selected server-side dataset with no browser cache reuse.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section id="api">
+        <p class="eyebrow">Provider API contract</p>
+        <h2>The page is an indexed strike-by-expiration cube</h2>
+        <p class="section-intro">The provider response contains strikes, expirations, spot, timestamp, and flattened cells that reference strike and expiration indices. Radon validates the shape, indices, finite numbers, duplicate cells, and provider identity before returning normalized data to the browser.</p>
+        <pre class="endpoint" aria-label="Observed provider endpoints"><span class="comment"># Primary exposure cube</span>
+<span class="verb">GET</span> gateway.menthorq.io/clickhouse-api/api/web/v1/options/net-gex-by-expiration/MU?frequency=eod
+<span class="verb">GET</span> gateway.menthorq.io/clickhouse-api/api/web/v1/options/net-gex-by-expiration/MU?frequency=intraday
+
+<span class="comment"># Levels and supporting page calls</span>
+<span class="verb">GET</span> gateway.menthorq.io/.../gamma-levels/MU/eod
+<span class="verb">GET</span> .../tickers/MU/last-updated
+<span class="verb">GET</span> .../options/matrix/MU?frequency=intraday
+<span class="verb">GET</span> .../prices?tickers=MU</pre>
+        <div class="grid">
+          <article class="panel">
+            <div class="panel-head"><span class="label">Normalized fields</span></div>
+            <div class="panel-body"><p><code>symbol</code>, <code>frequency</code>, <code>source_timestamp</code>, <code>spot</code>, <code>strikes</code>, <code>expirations</code>, and flattened cells containing <code>net_gex</code>, <code>abs_gex</code>, <code>net_dex</code>, <code>abs_dex</code>, <code>oi_call</code>, and <code>oi_put</code>.</p></div>
+          </article>
+          <article class="panel">
+            <div class="panel-head"><span class="label">Unit handling</span></div>
+            <div class="panel-body"><p>Provider GEX is normalized from USD billions per 1% move to USD using <code>value × 1e9</code>. DEX stays USD. Open interest remains contract counts. For the center OI exposure bar, Radon computes <code>call OI − put OI</code>.</p></div>
+          </article>
+        </div>
+      </section>
+
+      <section id="auth">
+        <p class="eyebrow">Authentication boundary</p>
+        <h2>Radon retains credentials and session material on the server</h2>
+        <p class="section-intro">The browser only requests Radon’s local API. It never receives the provider’s cookies, refresh tokens, ID tokens, or Bearer access token.</p>
+        <ol class="flow" aria-label="Server-side authentication and data flow">
+          <li><span class="step">01</span><h3>Dashboard redirect</h3><p>An unauthenticated exposure request routes to the WordPress login with a Cognito callback.</p></li>
+          <li><span class="step">02</span><h3>Server-side WordPress login</h3><p>Radon enters the existing credentials only in its server-side browser context.</p></li>
+          <li><span class="step">03</span><h3>Session retrieval</h3><p>The returned dashboard session yields a current Cognito access token.</p></li>
+          <li><span class="step">04</span><h3>Validated provider request</h3><p>The server validates and normalizes the provider cube before returning its typed payload.</p></li>
+          <li><span class="step">05</span><h3>Sanitized browser payload</h3><p>The browser receives exposure data or a bounded <code>400</code>, <code>503</code>, or <code>504</code> state.</p></li>
+        </ol>
+        <div class="next-step">
+          <p class="label">Operational next step</p>
+          <p>No manual token provisioning is required while the existing WordPress credentials remain valid. The client refreshes its dedicated <code>dashboard.menthorq.io</code> state owner-only; an explicit short-lived <code>MENTHORQ_DASHBOARD_ACCESS_TOKEN</code> remains available for operational override.</p>
+        </div>
+      </section>
+
+      <section id="verification">
+        <p class="eyebrow">Verification record</p>
+        <h2>All implementation checks passed</h2>
+        <div class="grid">
+          <article class="panel wide">
+            <div class="panel-head"><span class="label">Test and build evidence</span></div>
+            <div class="panel-body">
+              <div class="table-wrap" style="margin-top: 0; border: 0; border-radius: 0;">
+                <table>
+                  <thead><tr><th>Check</th><th>Result</th></tr></thead>
+                  <tbody>
+                    <tr><td>Focused web tests</td><td><span class="status high">55 passed</span></td></tr>
+                    <tr><td>Focused backend tests</td><td><span class="status high">21 passed</span></td></tr>
+                    <tr><td>Affected Python tests</td><td><span class="status high">90 passed</span></td></tr>
+                    <tr><td>Playwright desktop/mobile</td><td><span class="status high">2 passed</span> — controls, interaction, and 393px no-overflow coverage.</td></tr>
+                    <tr><td>Full web suite</td><td><span class="status high">4,158 passed</span> / 26 skipped</td></tr>
+                    <tr><td>Full Python suite</td><td><span class="status high">4,186 passed</span> / 13 skipped / 90 deselected</td></tr>
+                    <tr><td>Static and production checks</td><td><span class="status high">Passed</span> — TypeScript, ESLint on changed files, production build, output trace audit, and <code>git diff --check</code>.</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer class="shell footer">RADON / OPTIONS EXPOSURE / REPORT GENERATED FROM THE 2026-07-16 IMPLEMENTATION REVIEW. NO CREDENTIALS, TOKENS, COOKIES, OR PRIVATE PROVIDER PAYLOADS ARE INCLUDED.</footer>
+  </body>
+</html>

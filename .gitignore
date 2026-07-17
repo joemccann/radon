@@ -106,6 +106,7 @@ data/ticker_cache.json
 data/company_info_cache/
 data/cri_scheduled/
 data/menthorq_cache/
+data/menthorq_dashboard/
 data/seasonality_cache/
 data/darkpool_cache/
 data/price_history_cache/

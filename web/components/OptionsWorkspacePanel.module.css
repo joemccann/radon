@@ -1,0 +1,47 @@
+.workspace {
+  min-width: 0;
+}
+
+.tabBar {
+  margin-bottom: 16px;
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 40px;
+}
+
+.planned {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.planned:hover {
+  color: var(--text-muted);
+}
+
+.plannedLabel {
+  padding: 2px 5px;
+  color: var(--text-muted);
+  border: 1px solid var(--line-grid);
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 8px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.tab:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--border-focus) 60%, transparent);
+  outline-offset: -2px;
+}
+
+@media (max-width: 720px) {
+  .tabBar {
+    margin-bottom: 12px;
+  }
+}

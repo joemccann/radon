@@ -125,6 +125,10 @@ describe("navItems", () => {
 
   it("each href contains the route", () => {
     for (const item of navItems) {
+      if (item.route === "options") {
+        expect(item.href).toContain("/options/net-gex");
+        continue;
+      }
       expect(item.href).toContain(item.route);
     }
   });
@@ -184,6 +188,7 @@ describe("navItems", () => {
       "scanner",
       "watchlist",
       "flow-analysis",
+      "options",
       "journal",
       "regime",
       "cta",
@@ -202,6 +207,7 @@ describe("quickPromptsBySection", () => {
   const allSections: WorkspaceSection[] = [
     "dashboard",
     "flow-analysis",
+    "options",
     "portfolio",
     "performance",
     "orders",
@@ -256,6 +262,7 @@ describe("sectionDescription", () => {
   const allSections: WorkspaceSection[] = [
     "dashboard",
     "flow-analysis",
+    "options",
     "portfolio",
     "performance",
     "orders",

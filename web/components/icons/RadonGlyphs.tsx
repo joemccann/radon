@@ -138,6 +138,20 @@ export function FlowGlyph(p: GlyphProps) {
   );
 }
 
+/* Net GEX — opposing signed exposure bars around a measured zero axis. */
+export function ExposureGlyph(p: GlyphProps) {
+  return (
+    <Glyph {...p}>
+      <path d="M12 3 L12 21" opacity="0.55" />
+      <path d="M4 6 L12 6" />
+      <path d="M12 10 L20 10" />
+      <path d="M7 14 L12 14" />
+      <path d="M12 18 L17 18" />
+      <circle cx="12" cy="12" r="1.3" fill={p.color ?? "currentColor"} stroke="none" />
+    </Glyph>
+  );
+}
+
 /* Journal — stacked sample ledger (rows of measurement entries). */
 export function JournalGlyph(p: GlyphProps) {
   return (

@@ -59,6 +59,13 @@ from api.pool_order_manage import pool_cancel_order, pool_modify_order
 from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
+from clients.menthorq_dashboard_client import (
+    MenthorQDashboardAuthError,
+    MenthorQDashboardClient,
+    MenthorQDashboardPayloadError,
+    MenthorQDashboardTimeoutError,
+    MenthorQDashboardUpstreamError,
+)
 
 # Load .env from project root for Python scripts.
 # .env.ib-mode (managed by scripts/ib mode) overlays after .env so its
@@ -3132,6 +3139,43 @@ async def options_expirations(symbol: str):
             detail=detail,
         )
     return {"symbol": result.data.get("symbol"), "expirations": result.data.get("expirations")}
+
+
+_OPTIONS_EXPOSURE_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+_OPTIONS_EXPOSURE_FREQUENCIES = {"eod", "intraday"}
+
+
+@app.get("/options/exposure/{symbol}")
+async def options_exposure(symbol: str, frequency: str = "eod"):
+    """Return one normalized, uncached options exposure cube.
+
+    MenthorQ authentication is resolved only inside the Python provider client;
+    no dashboard token, cookie, or storage state crosses this route boundary.
+    """
+
+    if not _OPTIONS_EXPOSURE_SYMBOL_RE.fullmatch(symbol):
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    if frequency not in _OPTIONS_EXPOSURE_FREQUENCIES:
+        raise HTTPException(status_code=400, detail="Invalid frequency")
+
+    try:
+        provider = MenthorQDashboardClient()
+        return await asyncio.to_thread(provider.fetch_exposure, symbol, frequency)
+    except MenthorQDashboardAuthError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Options exposure authentication is unavailable",
+        ) from exc
+    except MenthorQDashboardTimeoutError as exc:
+        raise HTTPException(
+            status_code=504,
+            detail="Options exposure provider timed out",
+        ) from exc
+    except (MenthorQDashboardPayloadError, MenthorQDashboardUpstreamError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Options exposure data is unavailable",
+        ) from exc
 
 
 # ── Futures chain (Phase 2 — VIX et al.) ────────────────────────────

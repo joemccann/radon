@@ -54,6 +54,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const { isMobile, hasMounted } = useViewport();
   const showMobileChrome = isMobile && hasMounted;
   const activeSection: WorkspaceSection = section ?? resolveSectionFromPath(pathname, "dashboard");
+  const isOptionsWorkspace = activeSection === "options";
   const navLabel = navItems.find((item) => item.route === activeSection)?.label ?? "Dashboard";
   const activeLabel = activeSection === "ticker-detail" && tickerParam ? tickerParam : navLabel;
   const headerOwnsPageHeading = activeSection !== "ticker-detail"
@@ -366,7 +367,11 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   // connection-derived "Live data degraded" banner would always be on and read
   // as broken. Suppress it in demo; production (flag unset) is unchanged.
   const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
-  const liveDataError = isDemoMode ? null : (portfolioError ?? ordersError ?? priceError);
+  // Options measurements are backed by dedicated sources, not the IB
+  // portfolio/order relay. Their panels report source-specific faults.
+  const liveDataError = isDemoMode || isOptionsWorkspace
+    ? null
+    : (portfolioError ?? ordersError ?? priceError);
   const lastSync = isOrdersPage ? ordersLastSync : portfolioLastSync;
   const syncNow = isOrdersPage ? ordersSyncNow : portfolioSyncNow;
   const syncTarget = isOrdersPage ? "orders" : "portfolio";
@@ -462,7 +467,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           onSearchUnavailable={handleSearchUnavailable}
           lastSync={lastSync}
         >
-          <div className="sync-controls">
+          {!isOptionsWorkspace ? <div className="sync-controls">
             <span className={`sync-status ${error ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
@@ -475,7 +480,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
               <RefreshCw size={14} className={syncing ? "spin" : ""} />
               {syncing ? "Syncing..." : "Sync Now"}
             </button>
-          </div>
+          </div> : null}
         </Header>
 
         <div className="content">
@@ -494,7 +499,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
             />
           ) : null}
 
-          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
+          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && !isOptionsWorkspace ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
 
           {activeSection !== "dashboard" ? (
             <WorkspaceSections

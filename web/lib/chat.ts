@@ -327,6 +327,10 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "flow-analysis";
   }
 
+  if (pathname.startsWith("/options")) {
+    return "options";
+  }
+
   if (pathname.startsWith("/portfolio")) {
     return "portfolio";
   }

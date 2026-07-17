@@ -402,3 +402,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - A successful cache poll must clear a prior transport warning even when the snapshot identifier or `last_sync` is unchanged. Tying error recovery to new data makes one transient failure latch indefinitely during weekends, closed markets, or any quiet period.
 - When a global degraded banner combines errors from multiple hooks, audit every producer in the fallback chain. Fixing portfolio alone is insufficient if orders uses the same same-snapshot latch.
 - Separate backend recovery from frontend recovery explicitly: a green deep probe proves reads work now, but it does not prove an already-mounted client cleared warning state. Verify both state transitions before declaring the incident resolved.
+
+## 2026-07-17 - MenthorQ dashboard authentication
+
+- Do not infer that distinct `.com` and `.io` domains imply irreconcilable login systems. When a user identifies a redirect-mediated identity handoff, verify the complete dashboard → identity-provider → dashboard navigation before declaring the provider client blocked; preserve the server-only token boundary while adding that proven bootstrap path.
