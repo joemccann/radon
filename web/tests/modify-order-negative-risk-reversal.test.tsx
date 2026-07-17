@@ -29,6 +29,17 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// Window-relative expiry: a hardcoded date rots to T≈0 in CI, which zeroes the
+// Black-Scholes implied value this test asserts on (tasks/lessons.md).
+const EXPIRY = (() => {
+  const d = new Date();
+  d.setDate(d.getDate() + 180);
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${d.getFullYear()}${mm}${dd}`;
+})();
+const EXPIRY_DASHED = `${EXPIRY.slice(0, 4)}-${EXPIRY.slice(4, 6)}-${EXPIRY.slice(6)}`;
+
 function priceData(overrides: Partial<PriceData> & { symbol: string }): PriceData {
   return {
     last: null,
@@ -68,8 +79,8 @@ const riskReversalOrder: OpenOrder = {
     right: "?",
     expiry: null,
     comboLegs: [
-      { conId: 859556931, ratio: 1, action: "SELL", symbol: "MSFT", strike: 350, right: "P", expiry: "2026-07-17" },
-      { conId: 861002104, ratio: 1, action: "BUY", symbol: "MSFT", strike: 375, right: "C", expiry: "2026-07-17" },
+      { conId: 859556931, ratio: 1, action: "SELL", symbol: "MSFT", strike: 350, right: "P", expiry: EXPIRY_DASHED },
+      { conId: 861002104, ratio: 1, action: "BUY", symbol: "MSFT", strike: 375, right: "C", expiry: EXPIRY_DASHED },
     ],
   },
   action: "BUY",
@@ -91,16 +102,16 @@ const prices: Record<string, PriceData> = {
     bid: 355.5,
     ask: 355.6,
   }),
-  MSFT_20260717_350_P: priceData({
-    symbol: "MSFT_20260717_350_P",
+  [`MSFT_${EXPIRY}_350_P`]: priceData({
+    symbol: `MSFT_${EXPIRY}_350_P`,
     bid: 6.6,
     ask: 6.9,
     last: 6.75,
     impliedVol: 0.28,
     undPrice: 355.54,
   }),
-  MSFT_20260717_375_C: priceData({
-    symbol: "MSFT_20260717_375_C",
+  [`MSFT_${EXPIRY}_375_C`]: priceData({
+    symbol: `MSFT_${EXPIRY}_375_C`,
     bid: 3.05,
     ask: 3.35,
     last: 3.2,
@@ -166,8 +177,8 @@ describe("ModifyOrderModal signed risk reversal prices", () => {
         limitPrice: -3.4,
         tif: "DAY",
         legs: [
-          { action: "SELL", right: "P", strike: 350, expiry: "20260717", ratio: 1 },
-          { action: "BUY", right: "C", strike: 375, expiry: "20260717", ratio: 1 },
+          { action: "SELL", right: "P", strike: 350, expiry: EXPIRY, ratio: 1 },
+          { action: "BUY", right: "C", strike: 375, expiry: EXPIRY, ratio: 1 },
         ],
       },
     });

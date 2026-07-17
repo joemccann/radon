@@ -418,13 +418,7 @@ export default function PerformancePanel({ portfolioLastSync = null, marketState
         </div>
         <div className="section-body">
           <div className="metrics-grid">
-            {cardConfigs.slice(0, 4).map((card) => (
-              <StatCard key={card.id} {...card} onClick={() => setActiveCardId(card.id)} />
-            ))}
-          </div>
-
-          <div className="metrics-grid">
-            {cardConfigs.slice(4).map((card) => (
+            {cardConfigs.map((card) => (
               <StatCard key={card.id} {...card} onClick={() => setActiveCardId(card.id)} />
             ))}
           </div>

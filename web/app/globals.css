@@ -2454,6 +2454,21 @@ body[data-mobile="true"] .watchlist-row {
   margin-bottom: 20px;
 }
 
+/* Metric-card grids seated directly in a bordered `.section` fuse into the
+   panel frame instead of doubling it: -1px top/left margins overlay the card
+   borders onto the section border (and the header underline), while the
+   cards' own -1px right/bottom collapse margins land the far edges exactly
+   on the frame. */
+.section > :is(.metrics-grid, .metrics-grid-3, .metrics-grid-5),
+.section-body > :is(.metrics-grid, .metrics-grid-3, .metrics-grid-5) {
+  margin: -1px 0 20px -1px;
+}
+
+.section > :is(.metrics-grid, .metrics-grid-3, .metrics-grid-5):last-child,
+.section-body > :is(.metrics-grid, .metrics-grid-3, .metrics-grid-5):last-child {
+  margin-bottom: 0;
+}
+
 .metric-card {
   background: var(--bg-panel);
   border: 1px solid var(--border-dim);
@@ -3647,6 +3662,14 @@ td.last-price-cell {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
   margin-top: 14px;
+}
+
+/* Used as a `.section-body`: inset so the bordered tiles never sit flush
+   against the section frame (flush = doubled 2px border). Padding replaces
+   the base margin-top offset. */
+.section-body.performance-meta-grid {
+  margin-top: 0;
+  padding: 14px 16px 16px;
 }
 
 .performance-meta-item {
@@ -15400,6 +15423,9 @@ body[data-mobile="true"] td.right {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 12px;
+  /* Used as a `.section-body`: inset so the bordered tiles never sit flush
+     against the section frame (flush = doubled 2px border). */
+  padding: 16px;
 }
 
 .ticker-flow-metric {
