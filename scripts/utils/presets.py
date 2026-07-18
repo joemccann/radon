@@ -90,24 +90,48 @@ def list_presets() -> List[Tuple[str, str, int]]:
     return results
 
 
+import re
+
+# Preset names are bare slugs — the only thing that ever legitimately reaches
+# load_preset. Anchoring on this before the path join closes the traversal
+# primitive that four authenticated scan endpoints (leap/garch/theta/strength)
+# forward the client `preset` string into unsanitized.
+_PRESET_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$")
+
+
+def _resolve_preset_path(name: str) -> Path:
+    """Map a preset name to its file, rejecting traversal/absolute inputs.
+
+    Raises FileNotFoundError (never returns an out-of-dir path) so callers
+    surface the same "not found" contract for both a bogus slug and a
+    traversal attempt — no information leak about the filesystem layout.
+    """
+    if not _PRESET_NAME_RE.match(name):
+        raise FileNotFoundError(f"Preset '{name}' not found.")
+    candidate = (PRESETS_DIR / f"{name}.json").resolve()
+    if candidate.parent != PRESETS_DIR.resolve():
+        raise FileNotFoundError(f"Preset '{name}' not found.")
+    return candidate
+
+
 def load_preset(name: str) -> Preset:
     """
     Load a preset by name.
-    
+
     Args:
         name: Preset name (e.g., "sp500-semis"). ".json" extension optional.
-    
+
     Returns:
         Preset dataclass instance.
-    
+
     Raises:
-        FileNotFoundError: If preset doesn't exist.
+        FileNotFoundError: If preset doesn't exist or the name is not a bare slug.
         ValueError: If preset file is malformed.
     """
     # Strip .json if provided
     name = name.replace(".json", "")
-    
-    filepath = PRESETS_DIR / f"{name}.json"
+
+    filepath = _resolve_preset_path(name)
     if not filepath.exists():
         available = [f.stem for f in PRESETS_DIR.glob("*.json")]
         raise FileNotFoundError(

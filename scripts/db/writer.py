@@ -161,11 +161,18 @@ PORTFOLIO_SNAPSHOT_RETENTION = 2000
 def prune_portfolio_snapshots(retention: int = PORTFOLIO_SNAPSHOT_RETENTION) -> int:
     """Delete all but the newest ``retention`` portfolio_snapshots rows.
 
-    Returns rows deleted (0 when the driver doesn't report a rowcount). Call
-    from the daily monitor-daemon slot (flex_token_check) — NOT inline in the
-    per-sync write path: the libsql client has no timeout, so a large DELETE
-    during a Turso write-degradation window could hang save_portfolio and get
-    the sync subprocess SIGKILL'd.
+    ⚠️ NOT wired into any scheduled path. Snapshot retention is owned by the B2
+    archive pipeline (``archive_portfolio_snapshots.py`` exports to Backblaze
+    BEFORE deleting via ``delete_portfolio_snapshots_before``). This function is
+    an UNCONDITIONAL keep-newest-``retention`` DELETE with no archive
+    coordination — rewiring it into ``flex_token_check`` (as the old docstring
+    instructed, now deliberately removed there) would destroy history that has
+    not been archived. Retained only for manual/emergency use.
+
+    Returns rows deleted (0 when the driver doesn't report a rowcount). Never
+    call inline in the per-sync write path: the libsql client has no timeout, so
+    a large DELETE during a Turso write-degradation window could hang
+    save_portfolio and get the sync subprocess SIGKILL'd.
     """
     db = get_db()
     cursor = db.execute(

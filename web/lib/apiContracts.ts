@@ -88,6 +88,11 @@ const SECRET_SCRUB_PATTERNS: Array<[RegExp, string]> = [
   [/(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+/gi, "$1$2[redacted]"],
   [/eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*/g, "[redacted-jwt]"],
   [/\bU\d{6,}\b/g, "[redacted-account]"],
+  // Named provider-key prefixes: Anthropic (sk-ant-), Clerk/Stripe (sk_live_/sk_test_).
+  [/sk-ant-[A-Za-z0-9_-]{6,}/g, "[redacted-key]"],
+  [/\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b/g, "[redacted-key]"],
+  // IB Flex token + generic api-key ride in URL query strings, not headers.
+  [/([?&](?:t|token|api[_-]?key)=)[^\s&'"]+/gi, "$1[redacted]"],
 ];
 
 export function scrubSecrets(value: string): string {
