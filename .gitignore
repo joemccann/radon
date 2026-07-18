@@ -206,3 +206,7 @@ reports/
 prototypes/
 tasks/mockups/
 tasks/artifacts/*.png
+
+# Rendered security-audit reports are sensitive (enumerate attack surface + topology).
+# Keep them in the PRIVATE radon-cloud:security-archive, never this public repo.
+docs/security-audit-*.html

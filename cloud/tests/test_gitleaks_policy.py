@@ -21,6 +21,10 @@ LITERAL_TWS_BASELINE_COMMITS = {
     "af72046d0ce1d80417ccbc6ea150cbcb8c810505",
     "dfa5f948e4812376ebdd860d9b12e520c851488c",
     "65213d976eb3b4d835761c0b3f639581a533a27a",
+    # 2026-07-18 audit report re-quoted the already-public TWS_USERID literal
+    # before the report was untracked from this public repo. Immutable on
+    # protected main; value tracked for rotation, not a new exposure.
+    "9142de46a09e367483ed57e1a323f1141bd106cc",
 }
 EXAMPLE_BASELINE_COMMITS = {
     "3ee6e6e8a50c24944c1983a75f5bf6dda9048f67",
