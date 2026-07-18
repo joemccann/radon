@@ -119,6 +119,11 @@ IB_HEARTBEAT_INTERVAL_SECS = 15
 # payload; recovery itself stays on the unbounded _ib_recovery_heartbeat_loop.
 HEALTH_GATEWAY_PROBE_TIMEOUT_SECS = 2.5
 
+# /health/lite is polled by the health daemon and host-metrics sampler. It is
+# read-only and has no recovery work to justify holding a worker behind a
+# wedged gateway status probe; degrade its coarse fields after this short budget.
+HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS = 0.5
+
 
 def _bounded_env_int(name: str, default: int, *, minimum: int = 1, maximum: int = 64) -> int:
     try:
@@ -1446,7 +1451,18 @@ async def health_lite():
     """
     loop_lag_ms = await _measure_event_loop_lag_ms()
     pool_status = ib_pool.status() if ib_pool else None
-    gw = await check_ib_gateway(pool_status=pool_status, pool=None)
+    try:
+        gw = await asyncio.wait_for(
+            check_ib_gateway(pool_status=pool_status, pool=None),
+            timeout=HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
+        )
+    except Exception as exc:  # never let a passive health probe consume a worker
+        logger.warning(
+            "/health/lite gateway probe %s after %.1fs; returning degraded status",
+            "timed out" if isinstance(exc, asyncio.TimeoutError) else f"raised {type(exc).__name__}",
+            HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS,
+        )
+        gw = {}
     return {
         "status": "ok",
         "auth_state": gw.get("auth_state", "unknown"),

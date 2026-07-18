@@ -171,6 +171,31 @@ class TestStructure:
         assert cfg["Service"]["user"] == expected_user
 
 
+class TestRecoveryBoundaries:
+    """Every installed workload needs a finite recovery path.
+
+    A timer-owned oneshot that never exits blocks all future timer slots. A
+    long-running process that exits without a restart policy becomes a silent
+    outage. This fleet-wide contract pressure-tests the systemd failure mode
+    without invoking broker, provider, or production credentials.
+    """
+
+    @pytest.mark.parametrize("filename", [
+        name for name in EXPECTED_SERVICE_FILES if name.endswith(".service")
+    ])
+    def test_every_service_has_a_finite_recovery_boundary(self, unit, filename):
+        service = unit(filename)["Service"]
+        service_type = service.get("type", "simple")
+        if service_type == "oneshot":
+            assert (
+                service.get("timeoutstartsec") or service.get("runtimemaxsec")
+            ), f"{filename} needs a finite execution cap"
+        else:
+            assert service.get("restart") in {"always", "on-failure", "on-abnormal"}, (
+                f"{filename} needs a restart policy"
+            )
+
+
 # ---------------------------------------------------------------------------
 # radon-ib-gateway.service
 # ---------------------------------------------------------------------------
@@ -382,6 +407,38 @@ class TestMonitor:
 # ---------------------------------------------------------------------------
 # radon-refresh.service
 # ---------------------------------------------------------------------------
+
+
+class TestTimerOneshotExecutionBounds:
+    """Timer-owned scans need a terminal systemd boundary.
+
+    The breadth and VCG endpoints each cap their scan child at 120 seconds;
+    their wrapper has a 130-second HTTP deadline plus a direct fallback, so a
+    240-second service ceiling leaves normal-path room while releasing the
+    five-minute timer before its next slot. ``data_refresh`` runs three
+    sequential 120-second children, so 480 seconds preserves that documented
+    budget and still leaves seven minutes for the next 15-minute cadence.
+    """
+
+    EXECUTION_CAPS = {
+        "radon-breadth.service": (240, 300),
+        "radon-vcg-refresh.service": (240, 300),
+        "radon-refresh.service": (480, 900),
+    }
+
+    @pytest.mark.parametrize(("filename", "cap_seconds", "period_seconds"), [
+        (filename, cap_seconds, period_seconds)
+        for filename, (cap_seconds, period_seconds) in EXECUTION_CAPS.items()
+    ])
+    def test_timer_oneshot_has_finite_execution_cap(
+        self, unit, filename, cap_seconds, period_seconds
+    ):
+        svc = unit(filename)["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["timeoutstartsec"] == str(cap_seconds)
+        assert cap_seconds < period_seconds, (
+            f"{filename} timeout must release before its next timer slot"
+        )
 
 
 class TestRefresh:

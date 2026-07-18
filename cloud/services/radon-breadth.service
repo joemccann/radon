@@ -19,6 +19,9 @@ EnvironmentFile=/home/radon/radon-cloud/.env
 ExecStart=/usr/bin/bash /home/radon/radon/scripts/run_breadth_scan.sh
 StandardOutput=journal
 StandardError=journal
+# FastAPI caps the scan child at 120s; allow its 130s HTTP request plus
+# fallback work, but release this five-minute timer before the next slot.
+TimeoutStartSec=240
 
 [Install]
 WantedBy=multi-user.target
