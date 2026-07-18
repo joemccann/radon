@@ -142,7 +142,7 @@ radon restart
 radon status
 ```
 
-From the laptop: `ssh root@ib-gateway radon stop`. Installed by `radon-cloud/scripts/operator-radon.sh` via `setup-vps.sh:install_operator_cli()`.
+From the laptop: `ssh root@ib-gateway radon stop`. The operator CLI is installed from the monorepo [`cloud/scripts/operator-radon.sh`](../cloud/scripts/operator-radon.sh) control-plane source.
 
 ## Health monitoring (isolated daemon + edge surface)
 
@@ -189,16 +189,20 @@ Staleness windows live in `web/lib/serviceHealthWindows.ts`. Cycle-driven writer
 
 `git push origin main` triggers `.github/workflows/ci.yml`. Superseded test jobs
 may cancel independently, but the production deploy job uses a non-canceling
-`deploy-production` concurrency group. It SSHes to Hetzner as `radon` and passes
-the tested `${{ github.sha }}` to `radon-cloud/scripts/deploy.sh`:
+`deploy-production` concurrency group. It SSHes to Hetzner as `radon`, extracts
+`cloud/` from the tested `${{ github.sha }}` into an immutable support runner at
+`/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`, and invokes that runner's
+deploy script. The monorepo [`cloud/`](../cloud/) directory is the canonical
+source for deploy code, systemd units, Caddy, and the IB Gateway Compose
+project; `/home/radon/radon-cloud/.env` (`0600`) is the only legacy-path
+exception and is host secrets only.
 
-1. Acquire a nonblocking host-level `flock` in the outer supervisor; the inner process group and descendants do not inherit the lock.
-2. Require the explicit SHA to equal the freshly fetched `origin/main` tip. Divergent tracked host changes fail closed; tracked changes that byte-match the target are reset safely, and untracked runtime data is untouched.
-3. Require mode `0600` on the cloud env, enforce `TRADING_MODE`/`IB_GATEWAY_PORT` consistency, validate Compose without printing values, and write only literal `NEXT_PUBLIC_*` lines to mode-`0600` `web/.env`.
-4. Build frozen Bun workspaces and Python wheels in a detached target-SHA worktree before teardown. Fsync a transition journal, then back up the exact dependency trees, Next.js output, public web environment, and Python virtual environment.
-5. Use the five-action root helper to snapshot and quiesce every discovered non-beta Radon service and timer except Gateway-owned units. Timers stop first, oneshots are never replayed, failed core units are reset before controlled activation, and only the prior active persistent topology is restored.
-6. Gate topology, FastAPI `/health/lite`, Next.js HTTP, and relay TCP/HTTP. IB state remains advisory. The five core services must then stay active with unchanged `NRestarts` for 40 seconds.
-7. Fsync the `verified` journal phase, write the green marker, commit the topology transition, and only then delete rollback state. A fresh process resolves any surviving journal before new work.
+The deploy holds its activity lock, validates the external env and target SHA,
+then verifies the installed root control plane against its manifest **before**
+any dependency build, service stop, or transition journal mutation. It builds
+in a detached target-SHA worktree, journals and restores the active topology,
+and gates FastAPI `/health/lite`, Next.js HTTP, relay TCP/HTTP, and stable core
+service restart counts. IB state remains advisory.
 
 The deploy job is capped at 60 minutes and SSH at 55 minutes. The inner deploy
 gets 900 seconds plus a 30-second kill window. Root mutation actions get 180
@@ -208,9 +212,10 @@ consume 190 seconds once per recovery. The tested double-recovery bound is
 gate overhead.
 
 Git HEAD equality alone is not success. Confirm the durable release with
-`gh run list --workflow=ci.yml --limit 1`. The `radon-cloud` repo lives
-separately and owns systemd unit files, Caddy config, the Docker Compose project
-for IB Gateway, and `setup-vps.sh` / `wipe-vps.sh`.
+`gh run list --workflow=ci.yml --limit 1`. For the exact privileged bootstrap,
+recovery, and rollback sequence, follow [`cloud/CLAUDE.md`](../cloud/CLAUDE.md)
+and [`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md) rather
+than duplicating commands in this runbook.
 
 ## Production Build Constraint
 

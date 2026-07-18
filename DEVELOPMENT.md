@@ -34,7 +34,7 @@ Every change, agent-authored or not, goes through the same gates. The gates them
 
 - **Vitest** (web) and **pytest** (Python) — red/green TDD is mandatory, full suite before commit.
 - **chrome-cdp** (live Chrome session) — primary E2E verification for all UI work; **Playwright** (`web/playwright.config.ts`) is the fallback and the only option on the VPS.
-- **CI** (`.github/workflows/ci.yml`) — Vitest + pytest gate, then auto-deploy to Hetzner on green. The deploy script itself lives in the separate `radon-cloud` ops repo.
+- **CI** (`.github/workflows/ci.yml`) — Vitest + pytest gate, then auto-deploy to Hetzner on green from the tested monorepo SHA. Production infrastructure and deploy code live in [`cloud/`](cloud/); CI runs an immutable support bundle on the VPS. See [`cloud/CLAUDE.md`](cloud/CLAUDE.md) for the deployment contract.
 
 ## Runtime and dependencies
 

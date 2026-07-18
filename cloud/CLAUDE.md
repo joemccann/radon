@@ -85,6 +85,39 @@ do not exist yet). Remove only those seeds if verification fails. After any
 live hot-patch of an installed control-plane file, re-run bootstrap so the
 readiness manifest hashes match the next release.
 
+### Safe control-plane refresh (2026-07-18)
+
+Bootstrap validates the current `/home/radon/radon/cloud` contents, not the
+Git relationship between that checkout and the CI-tested release. Before any
+root operation, prove the VPS checkout is the intended tested commit and, if
+it is behind, fast-forward it as `radon` without resetting or checking out
+unreviewed code:
+
+```bash
+TARGET_SHA=<exact-tested-sha>
+sudo -u radon -H git -C /home/radon/radon fetch --prune origin
+TARGET_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse "${TARGET_SHA}^{commit}")"
+CURRENT_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)"
+if [ "$CURRENT_COMMIT" != "$TARGET_COMMIT" ]; then
+  sudo -u radon -H git -C /home/radon/radon merge --ff-only "$TARGET_COMMIT"
+fi
+test "$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)" = "$TARGET_COMMIT"
+
+cd /home/radon/radon
+bash cloud/scripts/bootstrap-control-plane.sh
+```
+
+Do not restart Gateway during this sequence, and do not bypass the installed
+control-plane manifest preflight. Re-run the CI deploy for the same tested SHA
+after bootstrap, wait for it to finish, then verify `/status` reports schema
+v2 with `ok=true` and `overall_state=up` and that API, Next.js, relay, monitor,
+newsfeed, and health services are active.
+
+Operational evidence: target `20c4b14b` initially appeared current while the
+VPS checkout was stale; the fast-forward precondition corrected it. Bootstrap
+then installed and verified 20 artifacts. CI rerun `29630430683` deployed
+successfully, and the stated schema and core-service checks were green.
+
 It must not start, stop, restart, or enable Radon services, Docker, IB Gateway,
 Caddy, polkit, or journald. Do not use the full `setup-vps.sh` as a live upgrade
 shortcut; setup also provisions packages, firewall, Caddy, and service state.

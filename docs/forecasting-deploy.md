@@ -1,146 +1,80 @@
 # Forecasting Deploy — Chronos-2 Nightly Runner
 
-The forecasting stack (Chronos-2 + torch) is **isolated to a dedicated host**.
-Those heavy dependencies must never land on the standard `radon-*` fleet units.
-A single nightly systemd timer runs the orchestrator
-(`scripts/nightly_forecast.py`), which chains:
+The Chronos-2 and torch forecasting stack is isolated to a dedicated forecasting
+host. Those dependencies, its virtual environment, and its nightly workload
+must never be installed on the standard `radon-*` fleet host.
 
-1. `backfill_flow_history.backfill_from_cache` — replays the dark-pool cache
+The nightly pipeline (`scripts/nightly_forecast.py`) runs, independently and in
+order:
+
+1. `backfill_flow_history.backfill_from_cache` to replay the dark-pool cache
    into `ticker_flow_history`.
-2. `flow_surprise.rank_watchlist_surprise` — ranks the watchlist by surprise
-   residual and writes the dashboard cache.
-3. `calibration_report.build_calibration_report(persist=True)` — produces and
-   persists the verdict (does Chronos beat the deterministic baseline?).
+2. `flow_surprise.rank_watchlist_surprise` to rank watchlist surprise residuals
+   and write the dashboard cache.
+3. `calibration_report.build_calibration_report(persist=True)` to persist the
+   Chronos-versus-baseline verdict.
 
-Each step is independent: a failure in one is captured (status recorded,
-traceback to stderr) and the remaining steps still run.
+A failure is recorded to stderr and does not prevent later stages from running.
 
----
+## Dedicated-host runtime
 
-## 1. Provisioning
-
-Provision the isolated venv on the forecasting host once (re-run with
-`--upgrade` to refresh deps). The script is idempotent and prints the venv
-python path on success.
+Provision the forecasting virtual environment on the dedicated host only. The
+script is idempotent and prints the resulting Python path.
 
 ```bash
-# default venv path: /home/radon/forecasting-venv
+# default: /home/radon/forecasting-venv
 bash scripts/forecasting/provision_venv.sh
 
-# refresh dependencies later
+# refresh dependencies
 bash scripts/forecasting/provision_venv.sh --upgrade
 
-# custom path
+# custom location
 RADON_FC_VENV=/opt/radon/fc-venv bash scripts/forecasting/provision_venv.sh
 ```
 
-Requires `python3.13` on PATH (or `python3.12` with its venv module installed).
-Installs the **full app deps** (`requirements.txt` — libsql, python-dotenv,
-pandas, ...) **plus** `requirements-forecasting.txt` (`torch`,
-`chronos-forecasting`). The forecasting code imports `db.writer` / `flow_history`,
-so app deps are required, not just torch. torch is pulled from the CPU wheel
-index (the host has no GPU); the default PyPI wheel drags in multi-GB CUDA libs.
+The host needs Python 3.13, or Python 3.12 with its venv module. Provisioning
+installs the app dependencies plus `requirements-forecasting.txt`; the latter
+uses CPU-only torch wheels. Do not install these dependencies on the production
+VPS fleet.
 
----
+## Ownership and installation
 
-## 2. systemd units (COPY-PASTE templates)
+The canonical unit sources are:
 
-> These unit files belong in the **radon-cloud** repo (deploy-authoritative).
-> They are documented here as templates only and are **not** auto-deployed from
-> this repository. Edit them in the radon-cloud working copy on the VPS and push
-> from there.
+- [`cloud/services/radon-forecast-nightly.service`](../cloud/services/radon-forecast-nightly.service)
+- [`cloud/services/radon-forecast-nightly.timer`](../cloud/services/radon-forecast-nightly.timer)
 
-Replace `<venv>` with the path printed by `provision_venv.sh`
-(default `/home/radon/forecasting-venv`). `WorkingDirectory` is the **app**
-checkout (`/home/radon/radon`, where `scripts/` lives), NOT the radon-cloud
-deploy repo. `EnvironmentFile` supplies the Turso credentials the pipeline needs
-to read history and persist the verdict.
+They are owned with the rest of the production infrastructure in the Radon
+monorepo `cloud/` tree. The standalone `radon-cloud` checkout owns no
+forecasting code or unit files. Its `/home/radon/radon-cloud/.env` path remains
+an external secrets-file compatibility exception only; it is not a source tree.
 
-### `/etc/systemd/system/radon-forecast-nightly.service`
+Install or update these dedicated-host units through that host's approved root
+transaction. Do not copy templates from this document, install units directly,
+or use `setup-vps.sh` as a live-update shortcut. The main VPS root bootstrap and
+manifest preflight process applies only to artifacts it manages; it does not
+claim to install the dedicated forecasting units. Use the [cloud operating
+contract](../cloud/CLAUDE.md) and [monorepo cloud lifecycle
+runbook](monorepo-cloud-migration.md) for the main VPS control-plane procedure.
 
-```ini
-[Unit]
-Description=Radon nightly Chronos-2 forecast pipeline (backfill -> surprise -> calibration)
-After=network-online.target
-Wants=network-online.target
+The dedicated-host transaction must preserve these invariants:
 
-[Service]
-Type=oneshot
-User=radon
-WorkingDirectory=/home/radon/radon
-EnvironmentFile=/home/radon/radon-cloud/.env
-# Direct-to-cloud DB only; the radon-*.service.d/common.conf drop-in also sets
-# this, repeated here so the unit is correct even if the glob ever misses.
-Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/forecasting-venv/bin/python scripts/nightly_forecast.py --metric flow_strength --top 25 --lookback 250 --backfill-days 20
-# stdout is the summary JSON; progress + tracebacks go to the journal via stderr
-StandardOutput=journal
-StandardError=journal
-TimeoutStartSec=1800
+- `WorkingDirectory=/home/radon/radon`, from the same monorepo SHA as `cloud/`.
+- `EnvironmentFile=/home/radon/radon-cloud/.env`, mode `0600`; never copy its
+  values into the checkout.
+- `RADON_DB_NO_REPLICA=1` to use the direct cloud database path.
+- `ExecStart` uses `/home/radon/forecasting-venv/bin/python` and the canonical
+  `scripts/nightly_forecast.py` invocation.
+- The timer remains nightly at 07:00 UTC, persistent, and jittered.
 
-[Install]
-WantedBy=multi-user.target
-```
+## Operator validation
 
-### `/etc/systemd/system/radon-forecast-nightly.timer`
+After an approved host update or a model/dependency change, run the pipeline
+manually on the dedicated host and inspect the persisted calibration verdict.
+Chronos is actionable only when `chronos_available=true`,
+`chronos_beats_baseline=true`, and the successful sample is meaningful.
+Otherwise treat its output as advisory and use the deterministic baseline.
 
-```ini
-[Unit]
-Description=Run the Radon nightly forecast pipeline pre-market
-
-[Timer]
-# 07:00 UTC = pre-market (~02:00/03:00 ET depending on DST), off-hours
-OnCalendar=*-*-* 07:00:00 UTC
-Persistent=true
-
-[Install]
-WantedBy=timers.target
-```
-
-Enable on the forecasting host:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now radon-forecast-nightly.timer
-systemctl list-timers radon-forecast-nightly.timer
-```
-
----
-
-## 3. Unit-file ownership
-
-The `.service` / `.timer` files above are **deploy-authoritative in the
-radon-cloud repo**, not this one. Do not add them to this repository's deploy
-path or expect `scripts/deploy.sh` to install them. Maintain them in the
-radon-cloud working copy on the VPS and push from there.
-
----
-
-## 4. Operator verification sequence
-
-Before trusting any forecast, run the steps manually and inspect the verdict.
-Do this once after provisioning and after any model/dependency change:
-
-```bash
-VENV=/home/radon/forecasting-venv
-cd /home/radon/radon                     # app checkout (scripts/ lives here)
-set -a; . /home/radon/radon-cloud/.env; set +a   # Turso creds for the manual run
-
-# 1. Provision (idempotent) and confirm the python path
-bash scripts/forecasting/provision_venv.sh
-
-# 2. Backfill flow history from the dark-pool cache
-$VENV/bin/python scripts/forecasting/backfill_flow_history.py --days 20
-
-# 3. Build + PERSIST the calibration verdict
-$VENV/bin/python scripts/forecast_calibration.py --metric flow_strength \
-    --lookback 250 --persist
-
-# 4. Inspect the verdict BEFORE trusting forecasts
-#    Look for chronos_available=true AND chronos_beats_baseline=true with a
-#    non-trivial n_ok. If chronos does NOT beat the baseline, treat forecasts
-#    as advisory only — the deterministic baseline is the safer signal.
-```
-
-Only after the verdict shows Chronos beating the baseline on a meaningful
-sample should the nightly timer's output be wired into any actionable surface.
+For pipeline behavior and test coverage, use the source and tests in the
+monorepo. For the cloud lifecycle and manifest contract, use the linked
+canonical runbooks above.

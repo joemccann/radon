@@ -1,6 +1,6 @@
-> **Monorepo (2026-07-10):** This tree lives inside [`joemccann/radon`](https://github.com/joemccann/radon) at `cloud/`.
-> The standalone `radon-cloud` GitHub repo is legacy. Prefer editing and deploying from the monorepo.
-> Migration + rollback: [`docs/monorepo-cloud-migration.md`](../docs/monorepo-cloud-migration.md).
+> **Monorepo:** `cloud/` in [`joemccann/radon`](https://github.com/joemccann/radon) is the source of truth for production infrastructure.
+> The standalone `radon-cloud` checkout is legacy compatibility only; `/home/radon/radon-cloud/.env` is its sole external-secrets exception.
+> Lifecycle, rollback, and bootstrap contract: [`cloud/CLAUDE.md`](CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](../docs/monorepo-cloud-migration.md).
 
 # Radon Cloud
 
@@ -10,10 +10,10 @@ Deployment infrastructure for the [Radon](https://github.com/joemccann/radon) tr
 
 ## What This Repo Contains
 
-This repo holds **deployment config only** — no application code. The actual Radon codebase lives in the [radon](https://github.com/joemccann/radon) repo, which is cloned onto the VPS alongside this one.
+This directory holds production configuration alongside the Radon application in one monorepo. Application code and infrastructure are tested and deployed at the same Git SHA.
 
 ```
-radon-cloud/
+cloud/
 ├── docker-compose.yml          # IB Gateway container
 ├── services/                   # systemd unit files
 │   ├── radon-ib-gateway.service
@@ -86,7 +86,7 @@ Tailscale also carries SSH.
 - Domain with DNS A record pointing to VPS IP
 - Tailscale for SSH management and laptop access to IB Gateway (4001)
 - Clerk account (free tier)
-- GitHub repo access for radon + radon-cloud
+- GitHub repo access for the Radon monorepo
 
 ---
 
@@ -99,7 +99,7 @@ The `setup-vps.sh` script automatically installs all dependencies from their off
 - **Node.js 22** from [NodeSource](https://deb.nodesource.com/)
 - **Caddy** from the [official Caddy repo](https://caddyserver.com/docs/install#debian-ubuntu-raspbian)
 
-The script must be run as root: `ssh root@<VPS_IP> 'bash -s' < scripts/setup-vps.sh`
+The one-time provisioning script must be run as root from the monorepo: `ssh root@<VPS_IP> 'bash -s' < cloud/scripts/setup-vps.sh`
 
 ---
 
@@ -109,7 +109,7 @@ The script must be run as root: `ssh root@<VPS_IP> 'bash -s' < scripts/setup-vps
 
 ```bash
 # First run — installs everything, generates SSH key, exits
-ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
+ssh root@ib-gateway 'bash -s' < cloud/scripts/setup-vps.sh
 
 # Add the printed SSH key to GitHub (Settings → SSH keys)
 
@@ -120,7 +120,7 @@ ssh root@ib-gateway 'bash -s' < scripts/setup-vps.sh
 ### 2. Complete setup (from your Mac)
 
 ```bash
-scripts/post-setup.sh
+cloud/scripts/post-setup.sh
 ```
 
 This script handles everything after bootstrap:
@@ -135,7 +135,7 @@ This script handles everything after bootstrap:
 
 ### 3. Deploy application code
 
-Pushes to the radon repo `main` branch trigger automatic deploys via GitHub Actions. The deploy script:
+Pushes to the Radon monorepo `main` branch trigger automatic deploys via GitHub Actions. The deploy script:
 
 1. Acquires the nonblocking production lock in an outer process-group supervisor with bounded TERM/KILL recovery
 2. Requires the tested SHA to equal the fetched `origin/main` tip; tracked host drift must already byte-match that target, while untracked runtime data is untouched
@@ -159,6 +159,25 @@ deadline plus 30-second kill window, and a second root recovery. Root mutation
 actions are capped at 180 seconds, verify/commit actions at 30 seconds, and one
 190-second lifecycle-lock wait is budgeted per recovery; the resulting 2,150
 seconds leaves more than ten minutes of SSH headroom for file and gate overhead.
+
+### Control-plane changes
+
+Root-owned helpers, sudoers, polkit rules, and systemd units covered by the
+control-plane manifest are installed or updated only through the root bootstrap
+transaction from the exact target monorepo checkout:
+
+```bash
+cd /home/radon/radon
+sudo bash cloud/scripts/bootstrap-control-plane.sh
+```
+
+It serializes with deploy and Gateway transitions, validates and atomically
+installs its managed artifacts, reloads systemd once, verifies the manifest, and
+publishes readiness. The next release performs the installed-control-plane
+manifest preflight before it may transition services. Do not use
+`setup-vps.sh` as a live upgrade shortcut or install managed files directly.
+See [the cloud operating contract](CLAUDE.md) and [the monorepo lifecycle
+runbook](../docs/monorepo-cloud-migration.md) for the canonical procedure.
 
 ### 4. Verify
 
@@ -209,7 +228,7 @@ radon status    # show systemd inventory plus real Gateway container state
 
 From the laptop: `ssh root@ib-gateway radon stop`. Designed for fast off-hours shutdowns from iPhone/Termius.
 
-`setup-vps.sh` installs the checked-in `scripts/operator-radon.sh` and `scripts/ib-gateway-control.sh` copies on every bootstrap or upgrade.
+Initial provisioning installs the checked-in operator and Gateway helpers. For a live update to root-owned helpers, sudoers, polkit rules, or a unit covered by the control-plane manifest, use the root bootstrap transaction below rather than copying files or running `systemctl daemon-reload` directly.
 
 ---
 
@@ -263,7 +282,7 @@ The production environment checker also requires `TRADING_MODE=live` with
 Unsupported or mismatched pairs fail before any service transition. The
 container healthcheck probes internal port `4001` for live and `4002` for paper.
 
-**Why `cloud` on the VPS?** The radon code's `docker` mode tries to manage IB Gateway from `docker/ib-gateway/`, a directory that does not exist on the VPS. On the VPS, `radon-ib-gateway.service`, the operator, boot, and watchdog all delegate lifecycle changes to radon-cloud's lease-aware control helper. The `cloud` mode tells FastAPI and the WS relay to skip local container lifecycle management and use a TCP health check.
+**Why `cloud` on the VPS?** The radon code's `docker` mode tries to manage IB Gateway from `docker/ib-gateway/`, a directory that does not exist on the VPS. On the VPS, `radon-ib-gateway.service`, the operator, boot, and watchdog all delegate lifecycle changes to the monorepo `cloud/` lease-aware control helper. The `cloud` mode tells FastAPI and the WS relay to skip local container lifecycle management and use a TCP health check.
 
 **How env vars flow on the VPS:**
 

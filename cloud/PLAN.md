@@ -1,5 +1,12 @@
 # Radon Cloud Backend — Phase 1
 
+> **Archived implementation plan.** This pre-monorepo plan is historical
+> context only. Its `radon-cloud` paths, symlink commands, standalone deploy
+> script, and service-management instructions are superseded by
+> [`cloud/CLAUDE.md`](CLAUDE.md) and
+> [`docs/monorepo-cloud-migration.md`](../docs/monorepo-cloud-migration.md).
+> Do not execute commands from this document on production.
+
 ## Context
 
 Radon's backend (FastAPI, WebSocket relay, monitor daemon, Next.js, IB Gateway) currently runs on the local Mac. The goal is to colocate **everything** on the Hetzner VPS alongside IB Gateway, exposed via HTTPS/WSS with OAuth authentication. This eliminates the Tailscale raw TCP tunnel for data clients and enables access from any browser.

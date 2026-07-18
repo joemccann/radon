@@ -63,13 +63,15 @@ radon/                          # sole product repo
    isolated health producer. It uses the legacy runner only while the root
    readiness marker is absent, then validates that `/status` publishes `ok`
    and `overall_state` without requiring the broker to be healthy.
-2. From a root session, install the exact target control-plane bundle without
-   restarting any service or IB Gateway:
+2. First verify the VPS checkout is the exact tested target SHA and
+   fast-forward it as `radon` if it is behind. Bootstrap hashes that checkout,
+   not an immutable runner. Then, from a root session, install the exact target
+   control-plane bundle without restarting any service or IB Gateway:
    ```bash
    cd /home/radon/radon
    bash cloud/scripts/bootstrap-control-plane.sh
    ```
-   The script acquires the deploy lock, refuses pending app/Gateway
+   Preserve the manifest preflight. The script acquires the deploy lock, refuses pending app/Gateway
    transitions, validates and atomically installs root-owned helpers, policies,
    and changed units, performs `systemctl daemon-reload`, verifies hashes, and
    only then publishes `/var/lib/radon/control-plane-ready`.
@@ -188,6 +190,41 @@ Documented fully in `tasks/lessons.md` (2026-07-11). Short list:
 - Deploy preflight must not require radon-readable installed sudoers; root helper owns that contract.
 - Output-trace excludes for host `data/**` are mandatory on disk-fallback API routes (VPS data >> local).
 - Host needs Bun 1.3.14 on radon PATH; prune must chmod u+w before deleting a-w runners.
+
+## Control-plane refresh evidence (2026-07-18)
+
+`bootstrap-control-plane.sh` verifies the contents of the current
+`/home/radon/radon/cloud` checkout, but cannot establish that the checkout is
+the CI-tested release. The safe refresh sequence is therefore:
+
+1. Set the tested target SHA, fetch, compare the current VPS commit, and
+   fast-forward as `radon` if it differs. Do not reset, force checkout, or run
+   bootstrap until the checkout equals the target.
+   ```bash
+   TARGET_SHA=<exact-tested-sha>
+   sudo -u radon -H git -C /home/radon/radon fetch --prune origin
+   TARGET_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse "${TARGET_SHA}^{commit}")"
+   CURRENT_COMMIT="$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)"
+   if [ "$CURRENT_COMMIT" != "$TARGET_COMMIT" ]; then
+     sudo -u radon -H git -C /home/radon/radon merge --ff-only "$TARGET_COMMIT"
+   fi
+   test "$(sudo -u radon -H git -C /home/radon/radon rev-parse HEAD)" = "$TARGET_COMMIT"
+   ```
+2. As root, run only the non-restarting bootstrap from the verified checkout:
+   ```bash
+   cd /home/radon/radon
+   bash cloud/scripts/bootstrap-control-plane.sh
+   ```
+   Preserve the installed-control-plane manifest preflight. Do not restart
+   Gateway, which can trigger IB 2FA.
+3. Re-run CI deploy for that tested SHA, wait for it to finish, and verify
+   `/status` reports schema v2 with `ok=true` and `overall_state=up`; API,
+   Next.js, relay, monitor, newsfeed, and health must be active.
+
+On 2026-07-18, target `20c4b14b` exposed a stale-checkout false-current
+condition. After the `radon` fast-forward, bootstrap installed and verified 20
+artifacts. CI rerun `29630430683` deployed successfully, and the schema-v2
+status and named core-service checks were green.
 
 ---
 
