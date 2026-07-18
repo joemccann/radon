@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
+import { dbExecute } from "@/lib/dbExecute";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import {
   RELIABILITY_WINDOW_MS,
@@ -32,24 +32,23 @@ const READ_CACHE_TTL_MS = 10_000;
 
 async function readReliabilityPayload(): Promise<ReliabilityHistoryPayload> {
   const since = new Date(Date.now() - RELIABILITY_WINDOW_MS).toISOString();
-  const db = getDb();
-  const eventsResult = await db.execute({
+  const eventsResult = await dbExecute({
     sql: `SELECT id, service, state, detail, created_at
           FROM service_health_events
           WHERE created_at >= ?
           ORDER BY created_at ASC
           LIMIT ?`,
     args: [since, MAX_EVENT_ROWS],
-  });
+  }, { label: "admin-reliability-events" });
   // SQLite/libSQL bare-column-with-MAX semantics: state comes from the row
   // holding MAX(created_at) per service — the state at window start.
-  const baselineResult = await db.execute({
+  const baselineResult = await dbExecute({
     sql: `SELECT service, state, MAX(created_at) AS created_at
           FROM service_health_events
           WHERE created_at < ?
           GROUP BY service`,
     args: [since],
-  });
+  }, { label: "admin-reliability-baseline" });
 
   const events: ServiceHealthEventRow[] = eventsResult.rows.map((row) => ({
     id: Number(row.id),

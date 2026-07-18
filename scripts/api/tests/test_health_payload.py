@@ -236,6 +236,26 @@ class TestHealthLite:
             "port_listening": False,
         }
 
+    @pytest.mark.asyncio
+    async def test_lite_hanging_gateway_probe_returns_degraded_within_budget(self, monkeypatch):
+        """A wedged read-only probe must not exhaust health-poller workers."""
+        async def _hangs(*args, **kwargs):
+            await asyncio.sleep(60)
+
+        monkeypatch.setattr(server, "check_ib_gateway", _hangs)
+        monkeypatch.setattr(server, "HEALTH_LITE_GATEWAY_PROBE_TIMEOUT_SECS", 0.05, raising=False)
+
+        result = await asyncio.wait_for(server.health_lite(), timeout=0.5)
+
+        assert isinstance(result.pop("loop_lag_ms"), float)
+        assert result == {
+            "status": "ok",
+            "auth_state": "unknown",
+            "service_state": "unknown",
+            "upstream_dead": False,
+            "port_listening": False,
+        }
+
     def test_auth_exempt_paths_exact_pin(self):
         # FULL set-equality pin, not membership checks: the perimeter is the
         # set itself. Three incidents shipped with green CI because an exempt
