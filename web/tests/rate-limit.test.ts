@@ -110,13 +110,23 @@ describe("clientIp — IP extraction from Request headers", () => {
     return new Request("https://radon.run/api/share/pnl", { headers });
   }
 
-  it("returns the first hop from x-forwarded-for", () => {
+  // Caddy runs with no trusted_proxies, so it APPENDS the real peer to the
+  // chain. The rightmost hop is the only entry a caller cannot spoof — keying
+  // on the leftmost let a spoofed X-Forwarded-For mint unlimited limiter keys
+  // (CWE-348). These tests pin the un-spoofable behaviour.
+  it("returns the LAST (proxy-appended) hop from x-forwarded-for", () => {
     const req = makeRequest({ "x-forwarded-for": "1.2.3.4, 10.0.0.1" });
-    expect(clientIp(req)).toBe("1.2.3.4");
+    expect(clientIp(req)).toBe("10.0.0.1");
   });
 
-  it("trims whitespace from the first hop", () => {
-    const req = makeRequest({ "x-forwarded-for": "  5.6.7.8  , 10.0.0.1" });
+  it("ignores a spoofed leftmost hop", () => {
+    // Attacker sets XFF; Caddy appends the true peer 203.0.113.9 last.
+    const req = makeRequest({ "x-forwarded-for": "9.9.9.9, spoof, 203.0.113.9" });
+    expect(clientIp(req)).toBe("203.0.113.9");
+  });
+
+  it("trims whitespace around the appended hop", () => {
+    const req = makeRequest({ "x-forwarded-for": "1.1.1.1 ,  5.6.7.8  " });
     expect(clientIp(req)).toBe("5.6.7.8");
   });
 

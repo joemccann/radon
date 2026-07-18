@@ -215,7 +215,11 @@ export default function ShareReportModal({
               className="cta-share-iframe"
               src={shareUrl}
               title={shareContentTitle}
-              sandbox="allow-scripts allow-same-origin"
+              // allow-scripts WITHOUT allow-same-origin: a static share-card
+              // preview needs neither the parent origin nor its
+              // cookies/storage. Granting both back cancels the sandbox's
+              // origin isolation, so the framed doc could script window.parent.
+              sandbox="allow-scripts"
             />
           </div>
         </div>

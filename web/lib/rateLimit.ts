@@ -69,16 +69,27 @@ export function rateLimit(
 
 /**
  * Read the client IP from a Request.
- * Prefers the first hop in `x-forwarded-for` (set by Caddy),
- * falls back to a sentinel so the limiter still works — including when the
+ *
+ * Uses the RIGHTMOST `x-forwarded-for` hop — the address the single trusted
+ * reverse proxy (Caddy) appends to the chain. Caddy runs with no
+ * `trusted_proxies` directive, so it APPENDS the real peer rather than
+ * replacing the header; that makes every entry left of the last one
+ * attacker-controlled. Keying the limiter on the leftmost hop (CWE-348) let a
+ * caller mint an unlimited number of distinct keys via a spoofed
+ * `X-Forwarded-For` and sail past the only abuse guard on the public
+ * unauthenticated share surface. The rightmost hop cannot be spoofed behind
+ * one appending proxy.
+ *
+ * Falls back to a sentinel so the limiter still works — including when the
  * handler is invoked without a Request (e.g. unit tests call `POST()` with no
  * args), which must degrade to the sentinel rather than throw.
  */
 export function clientIp(request?: Request): string {
   const xff = request?.headers?.get("x-forwarded-for");
   if (xff) {
-    const first = xff.split(",")[0].trim();
-    if (first) return first;
+    const hops = xff.split(",").map((h) => h.trim()).filter(Boolean);
+    const last = hops[hops.length - 1];
+    if (last) return last;
   }
   return "unknown";
 }

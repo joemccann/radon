@@ -40,8 +40,9 @@ name the files to read and the exact weaknesses to hunt.
 7. `vps-infra-deploy` — GitHub Actions, Docker, Caddy, SSH/deploy, exposed ports, SHA-pinning
 8. `dependencies` — npm/pip audit, runtime-reachability triage, lockfile integrity
 9. `websocket-relay` — ticket auth, forwarding-header trust, origin check, subscription limits, maxPayload
-10. `data-pii` — share routes, demo isolation, account figures reachable without authz
-11. `regression` — re-checks that every durable invariant below still holds (report ONLY on regression)
+10. `data-pii` — share routes (all 5 pairs), demo isolation + demo-mirror scripts, account figures reachable without authz
+11. `cloud-archive` — Backblaze B2 portfolio cold-archive: bucket/object ACL, delete-before-verify data loss, S3 credential leakage
+12. `regression` — re-checks that every durable invariant below still holds (report ONLY on regression)
 
 ## Durable regression invariants (re-checked every run)
 
@@ -91,6 +92,21 @@ line here whenever you ship a security fix.**
   identical placements (in-flight + short-TTL content hash, or an explicit
   client `idempotencyKey`) so a double-click never doubles a real-money position.
   (`web/lib/orders/orderIdempotency.ts`, `web/tests/order-place-idempotency-route.test.ts`)
+- **Share allowlist filesystem pin** — `PUBLIC_SHARE_API_ROUTES` exactly matches the
+  `*/share` + `*/share/content` route files on disk; a new share route can't ship
+  unlisted (nor a listed route go missing).
+  (`web/tests/middleware-share-allowlist.test.ts`)
+- **New read admin routes gated** — `/api/admin/{host-metrics,slo,reliability,
+  edge-health}` enforce operator authz and never leak host telemetry to a signed-in
+  demo user, same as the mutating admin routes.
+- **B2 archive delete-safety** — `scripts/archive_portfolio_snapshots.py` never
+  deletes Turso snapshot rows before the B2 partition write is verified, never sets
+  a public bucket/object ACL, and never logs `RADON_ARCHIVE_S3_*` credentials.
+  (`scripts/tests/test_archive_portfolio_snapshots.py`)
+- **Public repo hygiene** — the GitHub `radon` repo is PUBLIC. No secret may be
+  committed; git *history* must stay clean (2026-07-05 sweep found creds pending
+  rotation — verify purge status each run).
+  (`project_public_repo_leak_sweep_2026_07_05`)
 
 ## Triage & patch policy
 
@@ -114,3 +130,4 @@ line here whenever you ship a security fix.**
 |---|---|---|---|---|---|
 | 2026-06-28 | 10 + critic | 58 → 48 (8) | 12 | `radon-cloud:security-archive/docs/security-audit-2026-06-28.html` | 8 fixes shipped (WS relay bypass, share-content disclosure, ws bump, /docs gate, service-health scrub, path guards, CI hardening, HSTS). Deferred next/@clerk bumps + VPS config. `radon-cloud:security-archive/tasks/security-audit-2026-06-28.md`. |
 | 2026-06-29 | 11 + critic | 58 → 26 (**0**) | 34 | `radon-cloud:security-archive/docs/security-audit-2026-06-29.html` | Re-audit after the lower-priority block landed (CSP enforce, rate-limit, Actions SHA-pin, deps pin, media HSTS). **Zero exploitable** (24 info, 2 low). Critic confirmed all prior fixes intact. Closed the 2 lows + stale repo HSTS: gitleaks SHA256 check, admin routes fail-closed, `docker/caddy/Caddyfile` media HSTS. |
+| 2026-07-18 | 12 (+`cloud-archive`) + critic | 38 → 31 (**1**) | 8 | `docs/security-audit-2026-07-18.html` | Post-B2-archive + share-route-proliferation audit. Playbook extended: new `cloud-archive` dimension, PUBLIC-repo framing, 4 new regression invariants (share allowlist FS pin, read-admin gating, B2 delete-safety, public-repo hygiene). The **1 exploitable/high is non-code**: real portfolio figures still resolvable in PUBLIC git history (HEAD-only scrub `772c6493`, no `filter-repo`). **7 fixes shipped** (preset traversal, rate-limit rightmost-XFF, `/admin/services` operator gate, secret-scrub broaden ×2 chokepoints, share-iframe sandbox, IBKR username redact at HEAD, prune docstring footgun). **Deferred to operator** (require VPS/history/rotation): git-history purge + **credential rotation** (VNC/IB/IBKR-username — still in history & closed PR #7 blob), `wsTrust`/relay 0.0.0.0 hardening, `menthorq/cta` Next.js `spawn`, CSP `https:` wildcard, `requirements-api.txt` ceilings, lockfile dedupe. |

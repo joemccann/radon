@@ -121,6 +121,14 @@ describe("GET /api/admin/services", () => {
     const res = await GET();
     expect(res.status).toBe(502);
   });
+
+  it("returns 403 and never reaches FastAPI when the operator gate denies", async () => {
+    mockRequireDemoAdmin.mockResolvedValueOnce(null);
+    const { GET } = await import("../app/api/admin/services/route");
+    const res = await GET();
+    expect(res.status).toBe(403);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/admin/services/[unit]/[action]", () => {

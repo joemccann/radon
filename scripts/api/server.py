@@ -632,6 +632,12 @@ _SECRET_SCRUB_PATTERNS = [
     (re.compile(r"(auth[_-]?token|authorization|bearer)(\s*[=:]\s*)\S+", re.IGNORECASE), r"\1\2[redacted]"),
     (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
     (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
+    # Named provider-key prefixes: Anthropic (sk-ant-), Clerk/Stripe (sk_live_/sk_test_).
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
+    (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
+    # IB Flex Web Service token + generic api-key ride in URL query strings
+    # (t=<token>), not headers — the header patterns above never catch them.
+    (re.compile(r"([?&](?:t|token|api[_-]?key)=)[^\s&'\"]+", re.IGNORECASE), r"\1[redacted]"),
 ]
 
 
