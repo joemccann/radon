@@ -22,7 +22,7 @@ This document covers Radon's two-mode architecture introduced in Phase 0–6 of 
 
 - **Database**: Turso (libSQL) — every Radon process talks **directly** to the cloud DB for both reads and writes. Direct-to-cloud is the code default (DUR-07; replica is opt-in only via `RADON_DB_USE_REPLICA=1`), and the prefix drop-in `/etc/systemd/system/radon-.service.d/common.conf` sets the `RADON_DB_NO_REPLICA=1` kill switch on every `radon-*` unit as belt-and-suspenders. The embedded-replica architecture (`data/replica.db`) was retired 2026-05-20 after two same-day incidents: multi-writer WAL checkpoint contention (radon-cloud `741cfc6`) followed by single-writer frame conflicts between the replica owner and direct-cloud writers (radon-cloud `2c46232`). The libsql embedded-replica model only works when ONE host has exactly ONE writer; Radon's split between Node and Python writers can't satisfy that constraint. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching. See `feedback_libsql_replica_one_writer.md` for the full failure-mode catalog.
 - **Media**: Hetzner-hosted Caddy serves `https://media.radon.run`; the laptop's newsfeed scraper rsyncs new images over Tailscale.
-- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd services (cloud mode). The `docker/services/` directory in this repo is a containerized alternative we designed but did not deploy — production currently uses host-installed services at `/home/radon/radon-cloud/services/*.service`.
+- **Schedulers**: laptop launchd plists (local mode) OR Hetzner host systemd services (cloud mode). The `docker/services/` directory in this repo is a containerized alternative we designed but did not deploy — production unit sources live in `/home/radon/radon/cloud/services/` and are installed through the reviewed control-plane path.
 - **Self-contained**: themarketear.com newsfeed scraper is now a headless Playwright flow that runs on either the laptop or Hetzner. No magic-link or Chrome Debug.app dependency.
 
 ## Newsfeed (`themarketear.com`) — Self-contained headless flow
@@ -47,7 +47,7 @@ THEMARKETEAR_PASSWORD=<…>
 
 **Hetzner first-time setup:**
 
-1. `scripts/deploy.sh` already runs `npx playwright install chromium` after the npm install (idempotent).
+1. The reviewed deploy transaction installs the Playwright browser dependency before restarting the newsfeed service (idempotent).
 2. System libs (libnspr4, libnss3, libcups2, libxkbcommon0, libgbm1, …) require **one-time** sudo install:
    ```bash
    sudo apt-get update
@@ -59,12 +59,9 @@ THEMARKETEAR_PASSWORD=<…>
    ```bash
    ssh root@ib-gateway "journalctl -u radon-newsfeed -f"
    ```
-   To re-install on a fresh VPS or after `radon-newsfeed.service` was removed:
-   ```bash
-   sudo cp /home/radon/radon/docker/services/services/radon-newsfeed.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable --now radon-newsfeed.service
-   ```
+   For a missing or changed unit, use the reviewed root control-plane procedure
+   from [`cloud/CLAUDE.md`](../cloud/CLAUDE.md); do not copy a unit from an
+   obsolete containerized-services path.
 5. **`RADON_MEDIA_REMOTE` is a local fs path on Hetzner** — `/home/radon/radon-cloud/media/` (no `host:` prefix, no SSH). rsync does a local copy directly to the volume Caddy serves. The Tailscale and public-IP variants are laptop-only fallbacks (see below).
 6. **Closing the laptop after the cutover does not break `app.radon.run`** — the newsfeed now runs entirely on Hetzner. No chrome-cdp, no Chrome Debug.app, no Tailscale dependency for new posts.
 
@@ -100,21 +97,16 @@ The same SSH public key is authorized on both routes — `~/.ssh/authorized_keys
 /home/radon/
 ├─ radon/                    (git checkout — main branch, fast-forwarded by CI)
 │  ├─ web/.next              (Next.js compile-mode build, regenerated each deploy)
-│  └─ scripts/               (Python schedulers, direct-to-cloud writes via libsql client)
+│  ├─ scripts/               (Python schedulers, direct-to-cloud writes via libsql client)
+│  └─ cloud/                 (canonical deploy tooling, Caddy, Compose, and unit sources)
 └─ radon-cloud/
-   ├─ .env                   (TURSO_DB_URL, TURSO_AUTH_TOKEN, RADON_MODE=hetzner, …)
-   ├─ caddy/Caddyfile        (app.radon.run + media.radon.run)
-   ├─ media/                 (rsync target for newsfeed images)
-   ├─ scripts/deploy.sh      (health-gated CI deploy)
-   ├─ services/*.service     (radon-{nextjs,api,relay,monitor,refresh,ib-gateway};
-   │                          shared env invariants live in the prefix drop-in
-   │                          radon-.service.d/common.conf, e.g. RADON_DB_NO_REPLICA=1)
-   └─ docker-compose.yml     (ib-gateway container)
+   ├─ .env                   (external secrets only: TURSO_DB_URL, TURSO_AUTH_TOKEN, RADON_MODE=hetzner, …)
+   └─ media/                 (rsync target for newsfeed images)
 ```
 
 `data/replica.db` is intentionally absent — the embedded-replica architecture was retired 2026-05-20. If the file appears on disk (stray from a pre-migration host), it is safe to `rm` — nothing reads from it.
 
-Every `radon-*.service` uses `EnvironmentFile=/home/radon/radon-cloud/.env` so a single edit propagates to all schedulers. Restart with `sudo systemctl restart radon-{nextjs,api,relay,monitor}`.
+Every `radon-*.service` uses `EnvironmentFile=/home/radon/radon-cloud/.env` so a single edit propagates to all schedulers. The legacy directory is not a deploy source; use the canonical `cloud/` runbook for service lifecycle changes.
 
 **Whole-stack kill switch:** `/usr/local/bin/radon` wraps all units (IB Gateway included). Run on the VPS or remotely:
 
@@ -135,14 +127,12 @@ operator's request, so a green push deploys automatically). The environment
 remains for deployment history, URL metadata, environment-scoped configuration,
 and a custom branch policy that allows only `main`. Re-adding a required-reviewers
 rule in repo Settings > Environments would re-enable the gate without any YAML
-change. On green, CI runs `bash scripts/deploy.sh` (from `radon-cloud`):
-
-1. `git fetch origin main && git reset --hard origin/main` → applies repo changes.
-2. `pip install -r requirements.txt` → picks up new Python deps (e.g. `libsql-experimental`).
-3. `npm install && npm run build` → compile-mode build (no prerender, all routes dynamic).
-4. Pre-teardown: `wait_for_gateway_ready` reads the FULL `:8321/health` (while the old radon-api still serves it) so the relay is never restarted into a mid-restart / awaiting-2FA gateway. Bounded 60s, warn-and-proceed.
-5. `sudo systemctl restart radon-{nextjs,api,relay,monitor,newsfeed}` → reload services.
-6. **Layered post-deploy gate** (`deploy_gate`) → rolls back to the previous commit on failure.
+change. On green, CI extracts `cloud/` from the exact tested SHA into an
+immutable runner under `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud`.
+Before builds, teardown, or transition-journal writes, the runner verifies the
+installed root control plane against its manifest. The canonical lifecycle and
+recovery procedure is [`cloud/CLAUDE.md`](../cloud/CLAUDE.md); do not invoke a
+legacy `radon-cloud/scripts/deploy.sh` path manually.
 
 #### Post-deploy gate (DUR-05, 2026-06-12)
 
@@ -165,18 +155,14 @@ The full `/health` (IB auth state) is used only by the pre-teardown `wait_for_ga
 
 #### Manual server-only deploy (when CI is unusable)
 
-When Actions is down, the gate is wedged, or the fix must land NOW (push the commit to `origin/main` first so the VPS can fetch it):
-
-```bash
-ssh root@ib-gateway
-sudo -u radon RADON_DEPLOY_NO_GATE=1 bash /home/radon/radon-cloud/scripts/deploy.sh
-# then read the loud [gate] log lines and verify by hand:
-systemctl status 'radon-*' --no-pager
-curl -s http://localhost:8321/health/lite
-curl -s http://localhost:8330/status
-```
-
-`deploy.sh` is sourceable (`main` is guarded behind a `BASH_SOURCE` check), so the gate can be dry-exercised without deploying: `bash -c 'source /home/radon/radon-cloud/scripts/deploy.sh; deploy_gate'`.
+When Actions is down or a deploy requires privileged recovery, preserve the
+manifest boundary: compare `/home/radon/radon` to the exact tested SHA,
+fast-forward as `radon` if it is behind, run the root bootstrap from that
+checkout, then rerun CI. The command sequence and live verification contract
+are maintained in [`cloud/CLAUDE.md`](../cloud/CLAUDE.md) and
+[`docs/monorepo-cloud-migration.md`](monorepo-cloud-migration.md). Do not use
+`RADON_DEPLOY_NO_GATE` or a legacy `radon-cloud/scripts/deploy.sh` invocation
+to bypass a control-plane mismatch.
 
 Related: `scripts/db/migrate.py` (radon-api `ExecStartPre`) retries transport-class Turso failures (Hrana / dns / timeout / connection) with 2s/5s/15s backoff before failing startup — a transient DNS blip hard-failed radon-api on 2026-06-12. SQL/schema errors still fail immediately.
 
@@ -378,7 +364,7 @@ When MenthorQ's session cookie rotates, the headless Playwright run will fail. T
 ## Security
 
 - **Turso auth token** — single shared token between laptop and Hetzner. Rotate via `turso db tokens create radon-joemccann`. Update both `.env` files.
-- **Caddy admin API** — listens on localhost only. `caddy reload --config ~/radon-cloud/caddy/Caddyfile --adapter caddyfile` works without sudo via the `radon-caddy` sudoers rule (`sudo cp` + `systemctl reload caddy`).
+- **Caddy admin API** — listens on localhost only. The canonical source is `/home/radon/radon/cloud/caddy/Caddyfile`; apply changes through the reviewed control-plane path, not a legacy `~/radon-cloud/caddy` checkout.
 - **media.radon.run** — public reads, no upload endpoint. If you ever gate access, swap the `file_server` block for `auth_request` calling Clerk-issued JWTs.
 
 ## DB backup & restore (DUR-13)

@@ -108,8 +108,8 @@ Radon is glued together from a long list of third-party services. The full env-v
 | **Hetzner Cloud** | VPS that hosts FastAPI, IB Gateway (docker), the WS relay, the monitor daemon, the newsfeed, Caddy, and `media.radon.run`. Host secrets in `/home/radon/radon-cloud/.env` include Turso + **Backblaze B2** archive keys. | Resolved as `ib-gateway` via Tailscale on the laptop |
 | **Backblaze B2** | Cold storage for archived portfolio snapshot months (`portfolio_snapshots/YYYY-MM.jsonl.gz`). See required table above. | Bucket `radon-archive` |
 | **Tailscale** | Mesh VPN between laptop and VPS. Laptop reaches `ib-gateway:4001` over Tailscale; FastAPI on the VPS binds to localhost-only. | [tailscale.com](https://tailscale.com/) |
-| **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Config in the sibling `radon-cloud` repo |
-| **GitHub Actions** | `git push origin main` triggers `.github/workflows/ci.yml` which runs the Vitest + pytest gate then deploys on green: it SSHes to Hetzner and runs `bash scripts/deploy.sh`. | Confirm: `gh run list --workflow=ci.yml --limit 1` |
+| **Caddy** | TLS termination + reverse proxy on the VPS. Serves `app.radon.run` and `media.radon.run`. | Canonical config: [`cloud/caddy/`](cloud/caddy/) |
+| **GitHub Actions** | `git push origin main` triggers `.github/workflows/ci.yml`, which runs the Vitest + pytest gate then deploys the tested monorepo SHA on green. | Confirm: `gh run list --workflow=ci.yml --limit 1` |
 
 ### Optional alerting / fallback data
 
@@ -120,7 +120,7 @@ Radon is glued together from a long list of third-party services. The full env-v
 | **Cboe** | COR1M historical fallback when IB / UW are missing the series. | none | Public CSV feed |
 | **Yahoo Finance** | Last-resort price fallback when IB and UW both fail. Never the first or second source. | none | Public API |
 
-Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env`. Laptop dev uses the root `.env` for FastAPI and scripts, plus `web/.env` for Next.js (some keys are duplicated because Next.js can't read the root file from inside `web/`).
+Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env` (`0600`): this is the sole legacy-directory exception during the monorepo migration, not a source of deploy code or services. Laptop dev uses the root `.env` for FastAPI and scripts, plus `web/.env` for Next.js (some keys are duplicated because Next.js can't read the root file from inside `web/`).
 
 ## Architecture at a glance
 
@@ -168,7 +168,7 @@ Things that shipped in the last few weeks and are worth knowing about:
 - **Autonomous Hetzner timers** for `vcg-scan`, `portfolio-sync`, and `cta-sync` replaced the previous browser-driven refresh model. Data stays fresh even when no tab is open.
 - **Service-health watchdog** with four buckets (`intraday`, `continuous`, `daily`, `error`), Pushover routing (P1 only), cooldown, hysteresis, and `python -m scripts.watchdog ack <service>` to silence noise.
 - **Banner categories.** `scheduled` services flip red on stale; `on-demand` services show an amber dormant chip and are excluded from alerting.
-- **`/usr/local/bin/radon`** operator CLI auto-enumerates every loaded `radon-*` unit, so new timers don't require script edits. Installed durably by `setup-vps.sh`.
+- **`/usr/local/bin/radon`** operator CLI auto-enumerates every loaded `radon-*` unit, so new timers don't require script edits. It is installed from the canonical [`cloud/`](cloud/) control plane.
 - **Cash flow throttle backoff.** IBKR Flex codes 1001 / 1018 / 1019 trip an exponential circuit breaker (24h to 168h cap) so the script doesn't perpetuate a sliding-window throttle.
 - **CRI history zoom.** The CRI spread chart now carries ~251 trading days of history with a brush-driven zoom UI and preset range chips.
 - **Banner humanization.** `service_health.last_error` JSON is rewritten into operator-friendly copy before render.
@@ -207,6 +207,7 @@ radon/
 │  └─ watchdog/          Service-health alerting
 ├─ web/                  Next.js 16 terminal + FastAPI server scripts
 ├─ site/                 Standalone marketing site (separate Vercel project)
+├─ cloud/                Production infrastructure, services, and deploy tooling
 ├─ docs/                 Topic-scoped documentation
 ├─ data/                 Runtime artifacts (gitignored except taxonomy + presets)
 ├─ config/               launchd plists and service configuration
@@ -227,14 +228,9 @@ Never skip to Yahoo or web scrape without trying IB then Unusual Whales first. R
 
 ## Deployment
 
-`git push origin main` is the deploy. `.github/workflows/ci.yml` runs the Vitest + pytest gate then deploys on green: it SSHes to the Hetzner VPS and runs `bash scripts/deploy.sh`:
+`git push origin main` is the deploy. After the CI gates pass, GitHub Actions extracts `cloud/` from the exact tested SHA into an immutable VPS runner at `/home/radon/.radon-deploy-runners/<sha>.<run>/cloud` and runs its deploy contract. Before any dependency build, service stop, or transition write, the deploy verifies the installed root control plane against its manifest.
 
-1. `git reset --hard origin/main`
-2. `pip install -r requirements.txt`
-3. `npm install` (the VPS uses npm, not bun) then `next build --experimental-build-mode=compile`
-4. `sudo systemctl restart radon-{nextjs,api,relay,monitor,newsfeed}` with health-gated rollback
-
-Confirm with `gh run list --workflow=ci.yml --limit 1`. Full operational detail in [`docs/operations.md`](docs/operations.md). The systemd units, Caddy config, and Docker Compose project for IB Gateway live in a sibling `radon-cloud` repo.
+The monorepo [`cloud/`](cloud/) directory is the canonical source for systemd units, Caddy, the IB Gateway Compose project, and deploy tooling. `/home/radon/radon-cloud/.env` remains the only legacy-path exception for stable host secrets. Confirm releases with `gh run list --workflow=ci.yml --limit 1`. For the exact privileged recovery sequence, use [`cloud/CLAUDE.md`](cloud/CLAUDE.md) and [`docs/monorepo-cloud-migration.md`](docs/monorepo-cloud-migration.md); do not reconstruct it from this overview.
 
 ## Tests
 
