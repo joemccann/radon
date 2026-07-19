@@ -9,7 +9,10 @@ BEGIN blocks that migrate.py's end-of-line `;` splitter cannot carry.
 Idempotency key is content_hash — unchanged docs are skipped entirely (no
 last_activity_at bump, no FTS churn); changed docs are updated in place. A
 changed doc arriving without an embedding clears the stored one, since an
-embedding of superseded content is worse than none.
+embedding of superseded content is worse than none. The one exception to the
+hash-equal skip: an unchanged doc arriving WITH a vector where the stored row
+has none gets an embedding-only backfill (recovery from FTS-only degraded
+ingests), still without an activity bump or FTS churn.
 
 Callers pass the connection explicitly (sync libsql via get_db() in oneshot
 ingest scripts, a local libsql :memory: DB in tests).
@@ -23,7 +26,8 @@ from typing import Iterable
 from .schema import KnowledgeDoc
 
 _SELECT_EXISTING_SQL = (
-    "SELECT id, content_hash FROM knowledge WHERE source = ? AND doc_key = ? AND chunk_ix = ?"
+    "SELECT id, content_hash, embedding IS NOT NULL FROM knowledge "
+    "WHERE source = ? AND doc_key = ? AND chunk_ix = ?"
 )
 
 _INSERT_COLUMNS = (
@@ -50,6 +54,8 @@ _UPDATE_NO_EMBEDDING_SQL = (
     f"UPDATE knowledge SET {_UPDATE_SET_COLUMNS}, embedding = NULL WHERE id = ?"
 )
 
+_BACKFILL_EMBEDDING_SQL = "UPDATE knowledge SET embedding = vector32(?) WHERE id = ?"
+
 _FTS_DELETE_SQL = "DELETE FROM knowledge_fts WHERE rowid = ?"
 _FTS_INSERT_SQL = "INSERT INTO knowledge_fts (rowid, title, summary, content) VALUES (?, ?, ?, ?)"
 
@@ -73,7 +79,11 @@ def upsert_documents(db, docs: Iterable[KnowledgeDoc]) -> dict[str, int]:
             _SELECT_EXISTING_SQL, (doc.source, doc.doc_key, doc.chunk_ix)
         ).fetchone()
         if existing is not None and existing[1] == digest:
-            counts["skipped"] += 1
+            if doc.embedding is not None and not existing[2]:
+                _backfill_embedding(db, existing[0], doc)
+                counts["updated"] += 1
+            else:
+                counts["skipped"] += 1
         elif existing is not None:
             _update_document(db, existing[0], doc, digest)
             counts["updated"] += 1
@@ -149,6 +159,10 @@ def _update_document(db, row_id: int, doc: KnowledgeDoc, digest: str) -> None:
     else:
         db.execute(_UPDATE_NO_EMBEDDING_SQL, shared_args + (row_id,))
     _refresh_fts_row(db, row_id, doc)
+
+
+def _backfill_embedding(db, row_id: int, doc: KnowledgeDoc) -> None:
+    db.execute(_BACKFILL_EMBEDDING_SQL, (json.dumps(doc.embedding), row_id))
 
 
 def _refresh_fts_row(db, row_id: int, doc: KnowledgeDoc) -> None:

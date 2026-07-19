@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon knowledge-base ingest - hourly
+
+[Timer]
+# Fires hourly at :20 UTC, 24/7 — the connectors read Turso tables and
+# repo files, so there is no market-hours or DST concern; :20 keeps it
+# clear of the on-the-hour timers. Persistent=true replays a boot-missed
+# slot; the watchdog's 26h knowledge-ingest window means a single failed
+# hour never pages.
+OnCalendar=*-*-* *:20:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

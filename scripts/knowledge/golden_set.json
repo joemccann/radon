@@ -1,0 +1,164 @@
+{
+  "draft": true,
+  "note": "DRAFT golden set, machine-drafted from corpus recon on 2026-07-18 — the operator should curate it. Assumed doc_key conventions (verify once connectors land): journal = trade_id ('TICKER|date|structure|id' for rich rows), evals = report filename stem, docs = repo-relative markdown path, newsfeed = post id slug, incidents = service name. doc_key_pattern is a regex applied with re.search. Replace or add questions from real operator usage; Phase 2 gate is overall hit@5 >= 0.8 against the curated (non-draft) set.",
+  "questions": [
+    {
+      "question": "What was my thesis on the ALAB LEAP calls?",
+      "expected": [
+        {"source": "journal", "doc_key_pattern": "ALAB"}
+      ]
+    },
+    {
+      "question": "Why did I put on the TeraWulf WULF LEAP position?",
+      "expected": [
+        {"source": "journal", "doc_key_pattern": "WULF"},
+        {"source": "evals", "doc_key_pattern": "wulf-leap-trade"}
+      ]
+    },
+    {
+      "question": "What was the rationale for the EWY risk reversal?",
+      "expected": [
+        {"source": "journal", "doc_key_pattern": "EWY"}
+      ]
+    },
+    {
+      "question": "What did the HIMS LEAP IV mispricing evaluation conclude?",
+      "expected": [
+        {"source": "evals", "doc_key_pattern": "hims-evaluation"}
+      ]
+    },
+    {
+      "question": "What dark pool signal backed the GOOG bull call spread?",
+      "expected": [
+        {"source": "journal", "doc_key_pattern": "GOOG"},
+        {"source": "evals", "doc_key_pattern": "goog-evaluation"}
+      ]
+    },
+    {
+      "question": "How was the IWM bullish risk reversal structured and sized?",
+      "expected": [
+        {"source": "evals", "doc_key_pattern": "iwm-risk-reversal"},
+        {"source": "journal", "doc_key_pattern": "IWM"}
+      ]
+    },
+    {
+      "question": "What was the setup on the TSLA dark pool accumulation trade?",
+      "expected": [
+        {"source": "journal", "doc_key_pattern": "TSLA"},
+        {"source": "evals", "doc_key_pattern": "tsla-evaluation"}
+      ]
+    },
+    {
+      "question": "What is the max loss on a risk reversal and which structures count as defined-risk?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "options-structures"}
+      ]
+    },
+    {
+      "question": "What fixed the 2026-07-02 destroy-storm database outage?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "lessons"}
+      ],
+      "scopes": ["ops"]
+    },
+    {
+      "question": "How does IB Gateway recover from a stacked 2FA push lock?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "ib-gateway-recovery"}
+      ]
+    },
+    {
+      "question": "What happens when the WS relay stops receiving ticks?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "ib-connection-troubleshooting"},
+        {"source": "docs", "doc_key_pattern": "lessons"}
+      ]
+    },
+    {
+      "question": "Which services and schedulers run on the Hetzner VPS and how are they deployed?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "cloud-services"}
+      ]
+    },
+    {
+      "question": "What is the runbook for running IB Gateway in Docker?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "ib-gateway-docker"}
+      ]
+    },
+    {
+      "question": "What does the journal gap SLI monitor and what state is it in?",
+      "expected": [
+        {"source": "incidents", "doc_key_pattern": "journal-gap-sli"}
+      ],
+      "scopes": ["ops"]
+    },
+    {
+      "question": "Is the newsfeed scraper healthy and when did it last run?",
+      "expected": [
+        {"source": "incidents", "doc_key_pattern": "newsfeed-scraper"}
+      ],
+      "scopes": ["ops"]
+    },
+    {
+      "question": "What did the Turso read-stall RCA conclude?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "lessons"}
+      ]
+    },
+    {
+      "question": "How does the GARCH convergence strategy find IV mispricings?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "strategy-garch-convergence"},
+        {"source": "evals", "doc_key_pattern": "garch-convergence"}
+      ]
+    },
+    {
+      "question": "What is the cross-asset volatility credit gap (VCG) methodology?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "volatility_credit_gap"},
+        {"source": "evals", "doc_key_pattern": "vcg-scan"}
+      ]
+    },
+    {
+      "question": "How is the CRI crash risk indicator computed and interpreted?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "strategies"},
+        {"source": "evals", "doc_key_pattern": "cri-scan"}
+      ]
+    },
+    {
+      "question": "What has the newsfeed said about a gamma flip?",
+      "expected": [
+        {"source": "newsfeed", "doc_key_pattern": "cCVYN9efMl|ck27lPBeKX|c5lXmiZV4A"}
+      ],
+      "scopes": ["research"]
+    },
+    {
+      "question": "What is the latest newsfeed take on momentum exposure and the MoMo trendline?",
+      "expected": [
+        {"source": "newsfeed", "doc_key_pattern": "cRThqRM_Kk|czQf8ahQ0R"}
+      ],
+      "scopes": ["research"]
+    },
+    {
+      "question": "What has the newsfeed covered on buybacks and de-equitization?",
+      "expected": [
+        {"source": "newsfeed", "doc_key_pattern": "cHzM__4N8i|cT0wHmumtl"}
+      ],
+      "scopes": ["research"]
+    },
+    {
+      "question": "What are the seven milestones of the trade evaluation pipeline?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "evaluation"}
+      ]
+    },
+    {
+      "question": "What dark pool and flow data does the Unusual Whales API provide?",
+      "expected": [
+        {"source": "docs", "doc_key_pattern": "unusual_whales_api"}
+      ]
+    }
+  ]
+}

@@ -180,6 +180,29 @@ class TestUpsertDocuments:
         assert isinstance(blob, bytes)
         assert len(blob) == EMBEDDING_DIM * 4
 
+    def test_unchanged_doc_with_new_embedding_backfills_over_null(self, db):
+        """Recovery path for FTS-only rows written while the embedder was
+        unavailable: an identical doc arriving WITH a vector must store it."""
+        upsert_documents(db, [_doc()])
+        before = _knowledge_rows(db)
+
+        counts = upsert_documents(
+            db, [_doc(embedding=_unit_vector(3), last_activity_at=_days_ago(0))]
+        )
+
+        assert counts == {"inserted": 0, "updated": 1, "skipped": 0, "pruned": 0}
+        blob = db.execute("SELECT embedding FROM knowledge").fetchone()[0]
+        assert isinstance(blob, bytes)
+        assert len(blob) == EMBEDDING_DIM * 4
+        assert _knowledge_rows(db) == before  # only the vector changed; no activity bump
+
+    def test_unchanged_doc_with_stored_embedding_stays_skipped(self, db):
+        upsert_documents(db, [_doc(embedding=_unit_vector(3))])
+
+        counts = upsert_documents(db, [_doc(embedding=_unit_vector(5))])
+
+        assert counts == {"inserted": 0, "updated": 0, "skipped": 1, "pruned": 0}
+
     def test_changed_doc_without_embedding_clears_stale_embedding(self, db):
         upsert_documents(db, [_doc(embedding=_unit_vector(3))])
 

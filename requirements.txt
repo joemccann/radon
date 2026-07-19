@@ -53,3 +53,19 @@ httpx==0.28.1
 # off-box object storage (Cloudflare R2 / Backblaze B2). Lazy-imported, so it
 # is only needed on the host that runs the archive timer.
 boto3==1.43.36
+
+# Knowledge-base local embeddings
+# fastembed runs bge-small-en-v1.5 (384d, matches migration 0028's
+# F32_BLOB(384)) on CPU via onnxruntime — scripts/knowledge/embed.py,
+# consumed by the hourly radon-knowledge.timer ingest. Local so journal/eval
+# text never transits a third-party embeddings API. Lazy-imported: without
+# these, ingest degrades to FTS-only rows (get_embedder() returns None)
+# instead of failing. Pins verified to have manylinux x86_64 cp313 wheels
+# (VPS, onnxruntime needs glibc>=2.28 — fine on Hetzner Ubuntu) and to
+# install on the cp311 laptop venv.
+fastembed==0.8.0
+onnxruntime==1.27.0
+# fastembed transitive pins with compiled wheels, held explicitly so a fresh
+# VPS provision resolves the exact versions the laptop verified.
+tokenizers==0.23.1
+huggingface-hub==1.24.0

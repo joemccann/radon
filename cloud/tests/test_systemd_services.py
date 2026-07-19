@@ -64,6 +64,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-margin-debt.timer",
     "radon-oi-changes.service",
     "radon-oi-changes.timer",
+    "radon-knowledge.service",
+    "radon-knowledge.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
