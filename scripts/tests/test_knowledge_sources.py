@@ -200,17 +200,18 @@ def test_journal_skips_unparseable_payload(db, empty_trade_log):
     assert list(journal_source.fetch(db)) == []
 
 
-def test_journal_prune_authority_excludes_trade_log_keys_when_file_missing(
-    tmp_path, monkeypatch
+def test_journal_prune_authority_never_covers_trade_log_keys(
+    tmp_path, monkeypatch, empty_trade_log
 ):
-    monkeypatch.setattr(journal_source, "TRADE_LOG_PATH", tmp_path / "absent.json")
+    # trade_log.json is host-local and DIVERGES between hosts (production
+    # appends on the VPS while the laptop holds a stale copy), so even a host
+    # WITH the file must not treat another host's entries as vanished.
+    # 2026-07-19: the VPS's present-but-partial reports/ pruned 177 laptop
+    # eval docs; same hazard here.
     keys = ["manual-alab-1", "trade_log:1"]
     assert journal_source.prunable_doc_keys(keys) == ["manual-alab-1"]
-
-
-def test_journal_prune_authority_full_when_file_present(empty_trade_log):
-    keys = ["manual-alab-1", "trade_log:1"]
-    assert journal_source.prunable_doc_keys(keys) == keys
+    monkeypatch.setattr(journal_source, "TRADE_LOG_PATH", tmp_path / "absent.json")
+    assert journal_source.prunable_doc_keys(keys) == ["manual-alab-1"]
 
 
 # ---------------------------------------------------------------- evals
@@ -304,13 +305,15 @@ def test_evals_mtime_and_doc_key_stable(db, reports_dir):
     assert first[0].summary is None and first[0].embedding is None
 
 
-def test_evals_prune_authority_empty_when_reports_dir_missing(tmp_path, monkeypatch):
+def test_evals_prune_authority_always_empty(tmp_path, monkeypatch, db, reports_dir):
+    # reports/ is gitignored and host-local; each host holds a DIFFERENT
+    # subset (laptop generates most evals, the VPS a few). A directory being
+    # present is not authority over the shared corpus: on 2026-07-19 the
+    # VPS's single-report reports/ pruned 177 laptop-generated eval docs.
+    # Evals therefore never prune; stale rows are harmless.
+    assert evals_source.prunable_doc_keys(["r.html"]) == []
     monkeypatch.setattr(evals_source, "REPORTS_DIR", tmp_path / "absent")
     assert evals_source.prunable_doc_keys(["r.html"]) == []
-
-
-def test_evals_prune_authority_full_when_reports_dir_exists(db, reports_dir):
-    assert evals_source.prunable_doc_keys(["r.html"]) == ["r.html"]
 
 
 # ---------------------------------------------------------------- docs
