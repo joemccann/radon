@@ -25,12 +25,11 @@ def fetch(db) -> Iterator[KnowledgeDoc]:
 
 
 def prunable_doc_keys(doc_keys: Iterator[str] | list[str]) -> list[str]:
-    """Vanished-key authority: trade_log:* docs come from the gitignored
-    data/trade_log.json, which exists only on the host that wrote it — its
-    absence here is not deletion, so those keys are never prunable without it.
-    Turso-backed journal rows are visible from every host and always are."""
-    if TRADE_LOG_PATH.exists():
-        return list(doc_keys)
+    """Vanished-key authority: Turso-backed journal rows only. trade_log:*
+    docs come from the gitignored data/trade_log.json, which DIVERGES between
+    hosts (production appends on the VPS, the laptop holds a stale copy), so
+    even a host with the file must not treat another host's entries as
+    vanished. Same hazard class as the 2026-07-19 evals pruning incident."""
     return [key for key in doc_keys if not key.startswith(TRADE_LOG_KEY_PREFIX)]
 
 

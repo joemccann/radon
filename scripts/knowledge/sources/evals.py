@@ -31,9 +31,12 @@ def fetch(db) -> Iterator[KnowledgeDoc]:
 
 
 def prunable_doc_keys(doc_keys: Iterator[str] | list[str]) -> list[str]:
-    """Vanished-key authority: reports/ is gitignored and host-local, so a
-    host without it must not treat other hosts' reports as vanished."""
-    return list(doc_keys) if REPORTS_DIR.is_dir() else []
+    """Vanished-key authority: none. reports/ is gitignored and host-local,
+    and every host holds a DIFFERENT subset (the laptop generates most evals,
+    the VPS a few), so no host is authoritative over the shared corpus. A
+    present-but-partial reports/ on the VPS pruned 177 laptop-generated docs
+    on 2026-07-19; evals never prune, stale rows are harmless."""
+    return []
 
 
 def _report_docs(path: Path) -> Iterator[KnowledgeDoc]:
