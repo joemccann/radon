@@ -437,6 +437,38 @@ def test_newsfeed_doc_per_post_with_tags_and_timestamp(db):
     assert docs["aAAAAAA_Aa"].metadata["url"] is None
 
 
+def test_newsfeed_reads_posts_in_bounded_batches(db, monkeypatch):
+    # One unbounded SELECT of every post (full bodies + image JSON) exceeds
+    # what Turso's HTTP pipeline will forward: newsfeed ingest 502'd for 11
+    # hours on 2026-07-19 while every smaller source converged. Reads must
+    # paginate on an id cursor with a bounded LIMIT per query.
+    for i in range(5):
+        db.execute(
+            "INSERT INTO posts (id, title, content, timestamp, images, raw_images, tags) "
+            "VALUES (?, ?, ?, ?, NULL, NULL, NULL)",
+            (f"post-{i}", f"Title {i}", f"Body {i}", _days_ago(i), ),
+        )
+    db.commit()
+    monkeypatch.setattr(newsfeed_source, "_BATCH_ROWS", 2)
+
+    class CountingDb:
+        def __init__(self, inner):
+            self.inner = inner
+            self.calls = []
+
+        def execute(self, sql, *args):
+            if "FROM posts" in sql:
+                self.calls.append(sql)
+            return self.inner.execute(sql, *args)
+
+    counting = CountingDb(db)
+    docs = list(newsfeed_source.fetch(counting))
+
+    assert [d.doc_key for d in docs] == sorted(f"post-{i}" for i in range(5))
+    assert len(counting.calls) >= 3, "expected multiple bounded reads, got one big SELECT"
+    assert all("LIMIT" in sql for sql in counting.calls)
+
+
 def test_newsfeed_content_merges_title_and_body(db):
     _seed_posts(db)
     momo = next(d for d in newsfeed_source.fetch(db) if d.doc_key == "cRThqRM_Kk")

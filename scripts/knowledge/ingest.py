@@ -262,14 +262,17 @@ def main(argv: list[str] | None = None) -> int:
     from knowledge.sources import ALL_SOURCES  # noqa: PLC0415
 
     modules = _select_sources(ALL_SOURCES, args.source)
-    db = get_db()
     results: dict[str, dict] = {}
     errors: dict[str, str] = {}
     with service_cycle(SERVICE_NAME, market_hours_class="daily"):
         for name, module in modules.items():
             try:
+                # Fresh connection per source: a long or failing source can
+                # kill the shared Hrana stream and poison every source after
+                # it (incidents "stream not found" after newsfeed's 502 run,
+                # 2026-07-19).
                 results[name] = ingest_source(
-                    db,
+                    get_db(),
                     module,
                     distill_enabled=not args.no_distill,
                     embed_enabled=not args.no_embed,

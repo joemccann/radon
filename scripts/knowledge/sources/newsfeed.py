@@ -15,11 +15,30 @@ SCOPE = "research"
 
 _TICKER_TAG = re.compile(r"[A-Z]{1,5}$")
 
-_ROWS_SQL = "SELECT id, title, content, timestamp, tags, images FROM posts ORDER BY id"
+# Bounded id-cursor pagination: one unbounded SELECT of every post (full
+# bodies + image JSON) exceeds what Turso's HTTP pipeline will forward —
+# newsfeed ingest 502'd for 11 hours on 2026-07-19 while smaller sources
+# converged fine. Ordering matches the old ORDER BY id exactly.
+_BATCH_ROWS = 200
+
+_BATCH_SQL = (
+    "SELECT id, title, content, timestamp, tags, images FROM posts "
+    "WHERE id > ? ORDER BY id LIMIT ?"
+)
+
+
+def _post_rows(db) -> Iterator[tuple]:
+    cursor = ""
+    while True:
+        batch = db.execute(_BATCH_SQL, (cursor, _BATCH_ROWS)).fetchall()
+        if not batch:
+            return
+        yield from batch
+        cursor = batch[-1][0]
 
 
 def fetch(db) -> Iterator[KnowledgeDoc]:
-    for post_id, title, body, timestamp, tags_json, images_json in db.execute(_ROWS_SQL).fetchall():
+    for post_id, title, body, timestamp, tags_json, images_json in _post_rows(db):
         content = _merge_title_and_body(title, body)
         if not content:
             continue

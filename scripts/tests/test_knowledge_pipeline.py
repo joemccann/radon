@@ -581,3 +581,50 @@ class TestSelectSources:
     def test_unknown_source_exits(self):
         with pytest.raises(SystemExit):
             ingest_mod._select_sources({"a": object()}, "nope")
+
+
+class TestMainConnectionIsolation:
+    def test_each_source_gets_a_fresh_connection(self, monkeypatch, db):
+        # A single shared connection lets one source's dead Hrana stream
+        # poison every source after it (incidents 404 "stream not found"
+        # after newsfeed's long 502 run, 2026-07-19). main() must acquire
+        # a fresh connection per source.
+        import contextlib
+        from types import SimpleNamespace
+
+        import db.client as db_client
+        import db.service_cycle as service_cycle_mod
+        import knowledge.sources as sources_mod
+
+        def _make_db():
+            conn = libsql.connect(":memory:")
+            conn.execute(_BOOTSTRAP_SQL)
+            for stmt in _split_statements(_MIGRATION.read_text(encoding="utf-8")):
+                conn.execute(stmt)
+            conn.commit()
+            return conn
+
+        connections = []
+
+        def counting_get_db():
+            conn = _make_db()
+            connections.append(conn)
+            return conn
+
+        def fake_fetch(_db):
+            yield KnowledgeDoc(source="a", scope="ops", doc_key="k", content="body")
+
+        fake_sources = {
+            "a": SimpleNamespace(SOURCE="a", SCOPE="ops", fetch=fake_fetch),
+            "b": SimpleNamespace(SOURCE="b", SCOPE="ops", fetch=fake_fetch),
+        }
+
+        monkeypatch.setattr(db_client, "get_db", counting_get_db)
+        monkeypatch.setattr(
+            service_cycle_mod, "service_cycle",
+            lambda *a, **k: contextlib.nullcontext(),
+        )
+        monkeypatch.setattr(sources_mod, "ALL_SOURCES", fake_sources)
+
+        assert ingest_mod.main(["--source", "all", "--no-distill", "--no-embed"]) == 0
+        assert len(connections) == len(fake_sources)
