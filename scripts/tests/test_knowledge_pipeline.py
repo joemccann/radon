@@ -627,4 +627,69 @@ class TestMainConnectionIsolation:
         monkeypatch.setattr(sources_mod, "ALL_SOURCES", fake_sources)
 
         assert ingest_mod.main(["--source", "all", "--no-distill", "--no-embed"]) == 0
-        assert len(connections) == len(fake_sources)
+        # At least one fresh connection per source (batched writes add more:
+        # read + one per write batch + prune).
+        assert len(connections) >= len(fake_sources)
+
+
+class TestLoadExistingPagination:
+    def test_existing_rows_are_read_in_bounded_batches(self, db, monkeypatch):
+        # Same Turso HTTP-pipeline limit as the posts read: 1,200 stored
+        # newsfeed rows with full content in one SELECT still 502'd after
+        # the connector was paginated (2026-07-19). The pre-filter read
+        # must paginate too.
+        docs = [
+            KnowledgeDoc(source="s", scope="ops", doc_key=f"d{i}", content=f"body {i}")
+            for i in range(5)
+        ]
+        from knowledge.store import upsert_documents
+        upsert_documents(db, docs)
+        monkeypatch.setattr(ingest_mod, "_EXISTING_BATCH_ROWS", 2)
+
+        class CountingDb:
+            def __init__(self, inner):
+                self.inner = inner
+                self.calls = []
+
+            def execute(self, sql, *args):
+                if "FROM knowledge" in sql and "content" in sql:
+                    self.calls.append(sql)
+                return self.inner.execute(sql, *args)
+
+        counting = CountingDb(db)
+        existing = ingest_mod._load_existing(counting, "s")
+
+        assert set(existing) == {f"d{i}" for i in range(5)}
+        assert len(counting.calls) >= 3, "expected bounded batches, got one big SELECT"
+        assert all("LIMIT" in sql for sql in counting.calls)
+
+
+class TestBatchedWrites:
+    def test_changed_docs_are_processed_in_batches_on_fresh_connections(self, db, monkeypatch):
+        # 2,287 changed docs meant minutes of distillation followed by ~9k
+        # statements on one long-lived Hrana stream: Turso 502'd every run
+        # (2026-07-19) while reads were already paginated. Changed docs must
+        # be distilled/embedded/written in bounded batches, each batch
+        # upserted on a fresh connection so progress is durable.
+        from types import SimpleNamespace
+
+        def fetch(_db):
+            for i in range(5):
+                yield KnowledgeDoc(source="s", scope="ops", doc_key=f"d{i}", content=f"b{i}")
+
+        module = SimpleNamespace(SOURCE="s", SCOPE="ops", fetch=fetch)
+        monkeypatch.setattr(ingest_mod, "_INGEST_BATCH_DOCS", 2)
+
+        factory_calls = []
+
+        def db_factory():
+            factory_calls.append(1)
+            return db
+
+        result = ingest_mod.ingest_source(
+            db, module, distill_enabled=False, embed_enabled=False,
+            db_factory=db_factory,
+        )
+
+        assert result["inserted"] == 5
+        assert len(factory_calls) >= 3, "expected a fresh connection per write batch"

@@ -47,10 +47,15 @@ from knowledge.store import delete_source_docs, upsert_documents  # noqa: E402
 SERVICE_NAME = "knowledge-ingest"
 DISTILL_WORKERS = 8
 
+# Bounded id-cursor pagination, same Turso HTTP-pipeline limit as the
+# newsfeed posts read: a source's full stored content in one SELECT
+# 502s once the corpus is large (2026-07-19).
+_EXISTING_BATCH_ROWS = 200
+
 _EXISTING_SQL = (
-    "SELECT doc_key, chunk_ix, content, title, metadata, "
+    "SELECT id, doc_key, chunk_ix, content, title, metadata, "
     "summary IS NOT NULL, embedding IS NOT NULL "
-    "FROM knowledge WHERE source = ?"
+    "FROM knowledge WHERE source = ? AND id > ? ORDER BY id LIMIT ?"
 )
 
 
@@ -63,6 +68,13 @@ class _StoredChunk(NamedTuple):
 
 _EMPTY_UPSERT_COUNTS = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
 
+# Changed docs are distilled/embedded/written in bounded batches, each batch
+# upserted on a FRESH connection. One long-lived Hrana stream carrying minutes
+# of distillation idle time plus thousands of write statements 502s on Turso
+# (2026-07-19, newsfeed backfill), and batch-level writes make progress
+# durable: a mid-run failure keeps every completed batch.
+_INGEST_BATCH_DOCS = 200
+
 
 def ingest_source(
     db,
@@ -71,13 +83,16 @@ def ingest_source(
     distill_enabled: bool = True,
     embed_enabled: bool = True,
     limit: int | None = None,
+    db_factory=None,
 ) -> dict:
     """Run one connector module through the full pipeline. Returns counts.
 
     With ``limit`` set the connector fetch is truncated to the first N
     documents, and vanished-doc pruning is skipped — a partial fetch must
-    never delete documents it simply didn't reach."""
+    never delete documents it simply didn't reach. ``db_factory`` supplies a
+    fresh connection per write batch; without it the shared ``db`` is used."""
     source = module.SOURCE
+    fresh_db = db_factory if db_factory is not None else (lambda: db)
     docs = _fetch_docs(module, db, limit)
     existing = _load_existing(db, source)
     embedder = get_embedder() if embed_enabled else None
@@ -85,15 +100,22 @@ def ingest_source(
         docs, existing, require_embedding=embedder is not None
     )
 
-    distilled = distill_failed = 0
-    if distill_enabled:
-        distilled, distill_failed = _distill_docs(to_process)
-    embedded = _embed_docs(to_process, embedder) if embed_enabled else 0
+    distilled = distill_failed = embedded = 0
+    counts = dict(_EMPTY_UPSERT_COUNTS)
+    for start in range(0, len(to_process), _INGEST_BATCH_DOCS):
+        batch = to_process[start:start + _INGEST_BATCH_DOCS]
+        if distill_enabled:
+            batch_distilled, batch_failed = _distill_docs(batch)
+            distilled += batch_distilled
+            distill_failed += batch_failed
+        if embed_enabled:
+            embedded += _embed_docs(batch, embedder)
+        for key, value in upsert_documents(fresh_db(), batch).items():
+            counts[key] = counts.get(key, 0) + value
 
-    counts = upsert_documents(db, to_process) if to_process else dict(_EMPTY_UPSERT_COUNTS)
     deleted = 0
     if limit is None:
-        deleted = delete_source_docs(db, source, _vanished_keys(module, docs, existing))
+        deleted = delete_source_docs(fresh_db(), source, _vanished_keys(module, docs, existing))
 
     result = {
         "source": source,
@@ -130,13 +152,19 @@ def _fetch_docs(module, db, limit: int | None) -> list[KnowledgeDoc]:
 
 def _load_existing(db, source: str) -> dict[str, dict[int, _StoredChunk]]:
     """{doc_key: {chunk_ix: _StoredChunk}} for the source."""
-    rows = db.execute(_EXISTING_SQL, (source,)).fetchall()
     existing: dict[str, dict[int, _StoredChunk]] = {}
-    for doc_key, chunk_ix, content, title, metadata_json, has_summary, has_embedding in rows:
-        existing.setdefault(doc_key, {})[chunk_ix] = _StoredChunk(
-            content, title, metadata_json, bool(has_summary), bool(has_embedding)
-        )
-    return existing
+    cursor = 0
+    while True:
+        rows = db.execute(_EXISTING_SQL, (source, cursor, _EXISTING_BATCH_ROWS)).fetchall()
+        if not rows:
+            return existing
+        for row_id, doc_key, chunk_ix, content, title, metadata_json, has_summary, has_embedding in rows:
+            existing.setdefault(doc_key, {})[chunk_ix] = _StoredChunk(
+                content, title, metadata_json, bool(has_summary), bool(has_embedding)
+            )
+            cursor = row_id
+        if len(rows) < _EXISTING_BATCH_ROWS:
+            return existing
 
 
 def _pre_filter(
@@ -277,6 +305,7 @@ def main(argv: list[str] | None = None) -> int:
                     distill_enabled=not args.no_distill,
                     embed_enabled=not args.no_embed,
                     limit=args.limit,
+                    db_factory=get_db,
                 )
             except Exception as exc:  # noqa: BLE001 — one bad source must not stop the rest
                 errors[name] = str(exc)
