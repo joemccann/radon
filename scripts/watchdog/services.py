@@ -93,6 +93,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
     # 26h window: no weekend/holiday gap to widen for.
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # knowledge-ingest — hourly knowledge-base ingest oneshot
+    # (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7).
+    # Uniform 26h window (24h grace + timer jitter) mirrors
+    # web/lib/serviceHealthWindows.ts. Turso + Cerebras + local ONNX — no IB.
+    "knowledge-ingest": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "oi-changes":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
@@ -205,6 +210,10 @@ BUCKETS: dict[str, list[str]] = {
         # of the window expiring.
         "llm-token-index",
         "margin-debt",
+        # Hourly knowledge-base ingest — daily-bucket hourly check matches
+        # its 26h staleness window (a failed hour never pages; a missed
+        # day surfaces within 1h of the window expiring).
+        "knowledge-ingest",
         "leap-scan",
         "garch-scan",
         "oi-changes",

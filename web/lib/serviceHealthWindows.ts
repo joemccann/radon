@@ -135,6 +135,14 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // snapshot + heartbeat still write). Uniform 26h window: no weekend gap.
   "margin-debt": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
+  // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
+  // market-hours gate — connectors read Turso + repo files). Heartbeats
+  // every run including no-change short-circuits, so a uniform 26h window
+  // (24h grace + timer jitter) flags a full day of missed runs without
+  // paging on a single failed hour. Turso + Cerebras + local ONNX — no IB.
+  "knowledge-ingest": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // cri-scan + vcg-scan run on Mon-Fri-only systemd timers (see CLAUDE.md
   // autonomous timers table). Closed-hour window must cover the
   // Fri-end → Mon-open gap (~65h) or a quiet weekend flips the banner.
