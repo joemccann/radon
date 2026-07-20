@@ -140,11 +140,18 @@ def hybrid_search(
     now: datetime | None = None,
     vector_search: Callable | None = None,
     with_neighbors: bool = True,
+    rerank: Callable[[list[tuple[float, dict]]], Sequence[tuple[float, dict]]] | None = None,
 ) -> list[dict]:
     """Returns result rows best-first, each a dict of `knowledge` columns plus
     `score` and — unless `with_neighbors=False` — `neighbors` (adjacent chunks
     of the same document; one extra SELECT per winner, so callers that discard
-    neighbors opt out)."""
+    neighbors opt out).
+
+    `rerank` reorders the FULL deduped candidate pool — (score, row) pairs
+    best-first — before the per-source cap and the limit cut, so a caller can
+    promote a doc class the fused ranking buries (prior-evals: thesis docs
+    behind dozens of fill rows) without overfetching or extra statements.
+    Neighbor SELECTs still run only for the final winners."""
     now = now or datetime.now(timezone.utc)
     fts_ids = _fts_leg(db, query, CANDIDATE_POOL, scopes, sources)
     vector_ids: list = []
@@ -167,7 +174,10 @@ def hybrid_search(
         scored.append((decayed, row))
     scored.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
 
-    winners = cap_per_source(dedup_best_chunk(scored))[:limit]
+    pool = dedup_best_chunk(scored)
+    if rerank is not None:
+        pool = list(rerank(pool))
+    winners = cap_per_source(pool)[:limit]
     if not with_neighbors:
         return [_scored_result(score, row) for score, row in winners]
     return [_result_with_neighbors(db, score, row) for score, row in winners]

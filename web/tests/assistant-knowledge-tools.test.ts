@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
   radonFetch: vi.fn(),
@@ -33,6 +33,10 @@ describe("assistant knowledge tools", () => {
   beforeEach(() => {
     vi.resetModules();
     mocks.radonFetch.mockReset();
+  });
+
+  afterEach(() => {
+    vi.doUnmock("@/lib/llm/provider");
   });
 
   it("registers search_knowledge and find_prior_evals as READ tools", async () => {
@@ -188,14 +192,149 @@ describe("assistant knowledge tools", () => {
     expect(data.results[0]).not.toContain(LONG_CONTENT);
   });
 
-  it("propagates radonFetch failures as ok:false without throwing", async () => {
+  it("search_knowledge retries once on a 503 and succeeds on the second attempt", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
-    mocks.radonFetch.mockRejectedValue(new RadonApiError(503, "Knowledge retrieval unavailable"));
+    mocks.radonFetch
+      .mockRejectedValueOnce(new RadonApiError(503, "Knowledge retrieval is unavailable"))
+      .mockResolvedValueOnce({ results: [RESULT_ROW], retrieval: "hybrid" });
     const { executeTool } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("search_knowledge", { query: "EWY risk reversal" });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
+    const data = result.data as { retrieval: string; count: number; results: string[] };
+    expect(data.retrieval).toBe("hybrid");
+    expect(data.count).toBe(1);
+  });
+
+  it("find_prior_evals retries once on a network failure and succeeds", async () => {
+    mocks.radonFetch
+      .mockRejectedValueOnce(new TypeError("fetch failed"))
+      .mockResolvedValueOnce({ ticker: "EWY", results: [RESULT_ROW], retrieval: "hybrid" });
+    const { executeTool } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("find_prior_evals", { ticker: "EWY" });
+
+    expect(result.ok).toBe(true);
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("search_knowledge returns the exact degraded message when both attempts fail", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockRejectedValue(new RadonApiError(503, "Knowledge retrieval is unavailable"));
+    const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
 
     const result = await executeTool("search_knowledge", { query: "gex" });
 
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("Knowledge retrieval unavailable");
+    expect(result.error).toBe(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+    expect(KNOWLEDGE_UNAVAILABLE_MESSAGE).toContain("temporarily unavailable");
+    expect(KNOWLEDGE_UNAVAILABLE_MESSAGE).toContain("do not invent");
+    expect(KNOWLEDGE_UNAVAILABLE_MESSAGE).not.toContain("—");
+  });
+
+  it("find_prior_evals returns the exact degraded message when both attempts fail", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockRejectedValue(new RadonApiError(502, "upstream reset"));
+    const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("find_prior_evals", { ticker: "EWY" });
+
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(2);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+  });
+
+  it("does not fire a second request after a client-side timeout abort", async () => {
+    // AbortSignal.timeout in radonFetch rejects with a DOMException named
+    // "TimeoutError". The aborted server-side retrieval is uncancellable and
+    // still grinding; an immediate retry would double the orphaned work.
+    mocks.radonFetch.mockRejectedValue(
+      new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    );
+    const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("search_knowledge", { query: "gex" });
+
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+  });
+
+  it("find_prior_evals degrades without a second request on a timeout abort", async () => {
+    mocks.radonFetch.mockRejectedValue(
+      new DOMException("The operation was aborted due to timeout", "TimeoutError"),
+    );
+    const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("find_prior_evals", { ticker: "EWY" });
+
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error).toBe(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+  });
+
+  it("does not retry a 4xx validation failure and preserves its detail", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockRejectedValue(new RadonApiError(422, "query too short"));
+    const { executeTool, KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
+
+    const result = await executeTool("search_knowledge", { query: "x" });
+
+    expect(mocks.radonFetch).toHaveBeenCalledTimes(1);
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("query too short");
+    expect(result.error).not.toBe(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+  });
+
+  it("delivers the exact degraded message to the model as a tool_result without throwing", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mocks.radonFetch.mockRejectedValue(new RadonApiError(503, "Knowledge retrieval is unavailable"));
+
+    const chat = vi
+      .fn()
+      .mockResolvedValueOnce({
+        provider: "anthropic",
+        model: "mock",
+        text: "Checking prior theses.",
+        toolCalls: [{ id: "tu_kb", name: "search_knowledge", input: { query: "EWY risk reversal" } }],
+        stopReason: "tool_use",
+      })
+      .mockResolvedValueOnce({
+        provider: "anthropic",
+        model: "mock",
+        text: "Knowledge base unavailable; answering without prior context.",
+        stopReason: "end_turn",
+      });
+    vi.doMock("@/lib/llm/provider", () => ({ chat }));
+
+    const { runAssistantLoop } = await import("@/lib/assistant/loop");
+    const { KNOWLEDGE_UNAVAILABLE_MESSAGE } = await import("@/lib/assistant/tools");
+
+    const result = await runAssistantLoop(
+      [{ role: "user", content: "What was my EWY thesis?" }],
+      "system",
+    );
+
+    expect(result.content).toBe("Knowledge base unavailable; answering without prior context.");
+    expect(result.toolEvents).toEqual([
+      expect.objectContaining({ name: "search_knowledge", ok: false, error: KNOWLEDGE_UNAVAILABLE_MESSAGE }),
+    ]);
+
+    const secondCallMessages = (chat.mock.calls[1][0] as { messages: Array<{ content: unknown }> }).messages;
+    const toolResultTurn = secondCallMessages[secondCallMessages.length - 1];
+    const blocks = toolResultTurn.content as Array<{ type: string; content: string }>;
+    expect(blocks[0].type).toBe("tool_result");
+    expect(JSON.parse(blocks[0].content)).toEqual({ error: KNOWLEDGE_UNAVAILABLE_MESSAGE });
+  });
+
+  it("pins the SYSTEM_PROMPT honesty rule for knowledge failures", async () => {
+    const { SYSTEM_PROMPT } = await import("@/app/api/assistant/route");
+
+    expect(SYSTEM_PROMPT).toContain("say so plainly");
+    expect(SYSTEM_PROMPT).toContain("never fabricate prior theses, lessons, or sizing history");
+    expect(SYSTEM_PROMPT).not.toContain("—");
   });
 });

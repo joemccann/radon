@@ -361,3 +361,76 @@ class TestPerSourceCap:
         )
 
         assert len(hybrid_search(db, "cobalt", limit=2)) == 2
+
+
+class TestRerankHook:
+    """Caller-supplied rerank over the FULL deduped pool, before the
+    per-source cap and limit cut — prior-evals promotes thesis docs that a
+    bare-ticker BM25 buries at fused ranks past limit*3 (2026-07-20)."""
+
+    def _seed_fill_flood_plus_one_eval(self, db):
+        docs = [
+            _doc(
+                source="journal",
+                doc_key=f"fill-{ix}",
+                content="EWY EWY EWY fill row",
+            )
+            for ix in range(4)
+        ]
+        docs.append(
+            _doc(
+                source="evals",
+                doc_key="ewy-eval",
+                content=(
+                    "EWY risk reversal thesis with a much longer body diluting "
+                    "term frequency so bare-ticker bm25 ranks it last"
+                ),
+            )
+        )
+        upsert_documents(db, docs)
+
+    def test_rerank_promotes_doc_buried_past_the_limit_cut(self, db):
+        self._seed_fill_flood_plus_one_eval(db)
+
+        def evals_first(scored_rows):
+            evals = [p for p in scored_rows if p[1]["source"] == "evals"]
+            rest = [p for p in scored_rows if p[1]["source"] != "evals"]
+            return evals + rest
+
+        baseline = hybrid_search(db, "EWY", limit=1)
+        assert baseline[0]["source"] == "journal"  # flood wins without rerank
+
+        results = hybrid_search(db, "EWY", limit=1, rerank=evals_first)
+        assert results[0]["doc_key"] == "ewy-eval"
+
+    def test_rerank_sees_the_whole_deduped_pool(self, db):
+        self._seed_fill_flood_plus_one_eval(db)
+        seen: dict = {}
+
+        def spy(scored_rows):
+            seen["pool"] = [row["doc_key"] for _, row in scored_rows]
+            return scored_rows
+
+        hybrid_search(db, "EWY", limit=1, rerank=spy)
+
+        assert len(seen["pool"]) == 5  # all candidates, not the limit cut
+
+    def test_rerank_output_still_capped_per_source(self, db):
+        docs = [
+            _doc(source="journal", doc_key=f"fill-{ix}", content="EWY fill row")
+            for ix in range(MAX_PER_SOURCE + 2)
+        ]
+        upsert_documents(db, docs)
+
+        results = hybrid_search(db, "EWY", limit=10, rerank=lambda rows: rows)
+
+        assert len(results) == MAX_PER_SOURCE
+
+    def test_rerank_winners_get_neighbors_only_for_limit_rows(self, db):
+        self._seed_fill_flood_plus_one_eval(db)
+        recording = _RecordingDb(db)
+
+        hybrid_search(recording, "EWY", limit=1, rerank=lambda rows: rows)
+
+        neighbor_queries = [s for s in recording.statements if "chunk_ix BETWEEN" in s]
+        assert len(neighbor_queries) == 1

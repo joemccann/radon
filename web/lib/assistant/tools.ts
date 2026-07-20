@@ -9,7 +9,7 @@
  * mirroring the OrderRiskGate confirm discipline.
  */
 
-import { radonFetch } from "@/lib/radonApi";
+import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import type { LlmTool } from "@/lib/llm/provider";
 
 export type AssistantTool = LlmTool & {
@@ -33,6 +33,65 @@ const KNOWLEDGE_CONTENT_CHARS = 1200;
 const KNOWLEDGE_SUMMARY_CHARS = 300;
 const KNOWLEDGE_TITLE_CHARS = 200;
 const KNOWLEDGE_DOC_KEY_CHARS = 160;
+const KNOWLEDGE_RETRY_DELAY_MS = 250;
+
+/**
+ * The graceful tool_result the model sees when the knowledge base fails both
+ * attempts. It must instruct honesty: the observed failure mode was the model
+ * inventing sizing lessons after a transient 503.
+ */
+export const KNOWLEDGE_UNAVAILABLE_MESSAGE =
+  "Knowledge base temporarily unavailable (transient backend error or timeout). " +
+  "This answer will lack prior-context evidence: prior theses, evals, and lessons could not be retrieved. " +
+  "Tell the operator explicitly that the knowledge base was unavailable, " +
+  "and do not invent prior theses, lessons, or sizing history.";
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Retryable = transient: any 5xx from FastAPI (e.g. a Turso hrana flake
+ * surfacing as 503) or a network failure. 4xx (validation, auth) are
+ * deterministic and must NOT be retried.
+ */
+function isTransientKnowledgeFailure(error: unknown): boolean {
+  if (error instanceof RadonApiError) return error.status >= 500;
+  return true;
+}
+
+/**
+ * A client-side abort from radonFetch's AbortSignal.timeout. The server-side
+ * retrieval it abandoned is uncancellable (asyncio.to_thread) and still
+ * grinding, so an immediate retry would stack a second orphaned retrieval on
+ * top of it — degrade straight away instead.
+ */
+function isClientTimeoutAbort(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "TimeoutError";
+}
+
+/**
+ * Runs a knowledge fetch with one bounded retry on transient failure. When
+ * both attempts fail transiently — or the first attempt hits the client-side
+ * timeout, where retrying would double the orphaned server work — throws the
+ * graceful degraded message so the loop delivers it verbatim as the
+ * tool_result instead of a raw 503.
+ */
+async function fetchKnowledgeWithRetry<T>(attempt: () => Promise<T>): Promise<T> {
+  try {
+    return await attempt();
+  } catch (error) {
+    if (!isTransientKnowledgeFailure(error)) throw error;
+    if (isClientTimeoutAbort(error)) throw new Error(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+    await delay(KNOWLEDGE_RETRY_DELAY_MS);
+    try {
+      return await attempt();
+    } catch (retryError) {
+      if (!isTransientKnowledgeFailure(retryError)) throw retryError;
+      throw new Error(KNOWLEDGE_UNAVAILABLE_MESSAGE);
+    }
+  }
+}
 
 function tickerOf(input: Record<string, unknown>): string {
   const raw = typeof input.ticker === "string" ? input.ticker.trim().toUpperCase() : "";
@@ -189,13 +248,15 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       if (scopes.length) body.scopes = scopes;
       const sources = stringListOf(input, "sources");
       if (sources.length) body.sources = sources;
-      const data = await radonFetch("/knowledge/search", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        timeout: KNOWLEDGE_TIMEOUT_MS,
-        token,
-      });
+      const data = await fetchKnowledgeWithRetry(() =>
+        radonFetch("/knowledge/search", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          timeout: KNOWLEDGE_TIMEOUT_MS,
+          token,
+        }),
+      );
       return formatKnowledgePayload(data);
     },
   },
@@ -213,9 +274,11 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     },
     run: async (input, token) => {
       const ticker = tickerOf(input);
-      const data = await radonFetch(
-        `/knowledge/prior-evals?ticker=${encodeURIComponent(ticker)}&limit=${KNOWLEDGE_RESULT_LIMIT}&compact=true`,
-        { timeout: KNOWLEDGE_TIMEOUT_MS, token },
+      const data = await fetchKnowledgeWithRetry(() =>
+        radonFetch(
+          `/knowledge/prior-evals?ticker=${encodeURIComponent(ticker)}&limit=${KNOWLEDGE_RESULT_LIMIT}&compact=true`,
+          { timeout: KNOWLEDGE_TIMEOUT_MS, token },
+        ),
       );
       return formatKnowledgePayload(data);
     },
