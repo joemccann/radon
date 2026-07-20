@@ -1,3 +1,24 @@
+# Task: Radon Chat composer autofocus (2026-07-20)
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit the launcher, panel lifecycle, and existing focus behavior.
+- T2 depends_on: [T1] - Add a regression covering keyboard launch, initial composer focus, and Escape dismissal.
+- T3 depends_on: [T2] - Focus the composer when the overlay mounts without changing its dismissal behavior.
+- T4 depends_on: [T3] - Run focused, browser, static, and full-suite verification before release.
+
+## Checklist
+
+- [x] T1 Audited the modal lifecycle and composer element.
+- [x] T2 Added unit and Playwright regression coverage.
+- [x] T3 Focused the composer on modal mount.
+- [x] T4 Ran the required release verification and recorded results.
+
+## Review
+
+- The overlay focuses its composer after mounting; Escape dismissal is unchanged.
+- Verification: full web Vitest suite passed (442 files, 4,211 tests; 26 skipped), TypeScript passed, lint completed with 11 pre-existing warnings, and the focused Chromium Playwright test passed.
+
 # Task: 48-hour reliability investigation and hardening (2026-07-10)
 
 Source: operator report of repeated reliability failures during the prior 48 hours.
