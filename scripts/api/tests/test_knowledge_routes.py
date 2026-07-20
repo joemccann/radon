@@ -84,13 +84,14 @@ def stubbed_retrieval(monkeypatch):
     calls: list[dict] = []
 
     def fake_hybrid_search(db, query, *, query_embedding=None, scopes=None,
-                           sources=None, limit=10, **_kwargs):
+                           sources=None, limit=10, rerank=None, **_kwargs):
         calls.append({
             "query": query,
             "query_embedding": query_embedding,
             "scopes": scopes,
             "sources": sources,
             "limit": limit,
+            "rerank": rerank,
         })
         return [_kb_row()]
 
@@ -137,6 +138,7 @@ def test_search_happy_path_hybrid(client, stubbed_retrieval):
         "scopes": ["ops"],
         "sources": ["incidents"],
         "limit": 8,
+        "rerank": None,
     }]
 
     (row,) = body["results"]
@@ -272,6 +274,141 @@ def test_search_maps_db_failure_to_sanitized_503(client, monkeypatch):
     assert "secret" not in response.text.lower()
 
 
+# ── transient-DB resilience (incident 2026-07-20: one hrana flake → 503,
+# no server-side log, assistant fabricated lessons) ──────────────────
+
+
+@pytest.fixture
+def no_backoff(monkeypatch):
+    from scripts.api import server
+
+    monkeypatch.setattr(server, "_KNOWLEDGE_RETRY_BACKOFF_SECS", 0.0)
+
+
+def test_retry_budget_is_bounded():
+    from scripts.api import server
+
+    assert server._KNOWLEDGE_RETRIEVAL_ATTEMPTS == 2
+    assert 0 < server._KNOWLEDGE_RETRY_BACKOFF_SECS <= 0.5
+
+
+def test_search_retries_once_on_transient_db_error(client, monkeypatch, no_backoff):
+    from scripts.api import server
+
+    calls: list[str] = []
+
+    def flaky_hybrid_search(db, query, **_kwargs):
+        calls.append(query)
+        if len(calls) == 1:
+            raise server.db_http.DbHttpError("timeout: _ssl.c:980 read timed out")
+        return [_kb_row()]
+
+    monkeypatch.setattr(server, "hybrid_search", flaky_hybrid_search)
+    monkeypatch.setattr(server, "get_embedder", lambda: None)
+
+    response = client.post("/knowledge/search", json={"query": "relay farm down"})
+
+    assert response.status_code == 200
+    assert calls == ["relay farm down", "relay farm down"]
+    assert response.json()["retrieval"] == "fts-only"
+
+
+def test_prior_evals_retries_once_on_transient_db_error(client, monkeypatch, no_backoff):
+    from scripts.api import server
+
+    calls: list[str] = []
+
+    def flaky_hybrid_search(db, query, **_kwargs):
+        calls.append(query)
+        if len(calls) == 1:
+            raise server.db_http.DbHttpError("timeout: _ssl.c:980 read timed out")
+        return [_kb_row(source="journal", doc_key="trade_log:6")]
+
+    monkeypatch.setattr(server, "hybrid_search", flaky_hybrid_search)
+    monkeypatch.setattr(server, "get_embedder", lambda: None)
+
+    response = client.get("/knowledge/prior-evals?ticker=EWY")
+
+    assert response.status_code == 200
+    assert calls == ["EWY", "EWY"]
+
+
+def test_search_retry_exhausted_returns_503_and_logs_route(
+    client, monkeypatch, no_backoff, caplog
+):
+    import logging
+
+    from scripts.api import server
+
+    calls: list[str] = []
+
+    def always_down(db, query, **_kwargs):
+        calls.append(query)
+        raise server.db_http.DbHttpError("HranaError: stream reset")
+
+    monkeypatch.setattr(server, "hybrid_search", always_down)
+    monkeypatch.setattr(server, "get_embedder", lambda: None)
+
+    with caplog.at_level(logging.WARNING, logger="radon.api"):
+        response = client.post("/knowledge/search", json={"query": "relay farm down"})
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Knowledge retrieval is unavailable"}
+    assert calls == ["relay farm down", "relay farm down"]  # exactly one retry
+
+    [record] = [r for r in caplog.records if "retrieval failed" in r.getMessage()]
+    message = record.getMessage()
+    assert "/knowledge/search" in message
+    assert "after 2 attempts" in message
+    assert "HranaError: stream reset" in message
+
+
+def test_prior_evals_retry_exhausted_logs_its_own_route(
+    client, monkeypatch, no_backoff, caplog
+):
+    import logging
+
+    from scripts.api import server
+
+    def always_down(db, query, **_kwargs):
+        raise server.db_http.DbHttpError("HranaError: stream reset")
+
+    monkeypatch.setattr(server, "hybrid_search", always_down)
+    monkeypatch.setattr(server, "get_embedder", lambda: None)
+
+    with caplog.at_level(logging.WARNING, logger="radon.api"):
+        response = client.get("/knowledge/prior-evals?ticker=EWY")
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Knowledge retrieval is unavailable"}
+
+    [record] = [r for r in caplog.records if "retrieval failed" in r.getMessage()]
+    assert "/knowledge/prior-evals" in record.getMessage()
+
+
+def test_retry_exhausted_log_is_scrubbed_of_secrets(
+    client, monkeypatch, no_backoff, caplog
+):
+    """The log line carries only the DbHttpError message (already scrubbed by
+    db_http — type + message, never SQL text or tokens)."""
+    import logging
+
+    from scripts.api import server
+
+    def always_down(db, query, **_kwargs):
+        raise server.db_http.DbHttpError("HTTPError: HTTP Error 503: Service Unavailable")
+
+    monkeypatch.setattr(server, "hybrid_search", always_down)
+    monkeypatch.setattr(server, "get_embedder", lambda: None)
+
+    with caplog.at_level(logging.WARNING, logger="radon.api"):
+        response = client.post("/knowledge/search", json={"query": "relay farm down"})
+
+    assert response.status_code == 503
+    [record] = [r for r in caplog.records if "retrieval failed" in r.getMessage()]
+    assert "relay farm down" not in record.getMessage()  # no query text either
+
+
 def test_search_test_mode_returns_empty_results(client, stubbed_retrieval, monkeypatch):
     from scripts.api import server
 
@@ -288,6 +425,8 @@ def test_search_test_mode_returns_empty_results(client, stubbed_retrieval, monke
 
 
 def test_prior_evals_searches_journal_and_evals_for_ticker(client, stubbed_retrieval):
+    from scripts.api import server
+
     response = client.get("/knowledge/prior-evals?ticker=ewy")
 
     assert response.status_code == 200
@@ -301,6 +440,7 @@ def test_prior_evals_searches_journal_and_evals_for_ticker(client, stubbed_retri
         "scopes": None,
         "sources": ["journal", "evals"],
         "limit": 8,
+        "rerank": server._thesis_first,
     }]
 
 
@@ -346,6 +486,62 @@ def test_prior_evals_test_mode_returns_empty_results(client, stubbed_retrieval, 
     assert response.status_code == 200
     assert response.json() == {"ticker": "EWY", "results": [], "retrieval": "fts-only"}
     assert stubbed_retrieval == []
+
+
+# ── prior-evals thesis-first rerank (incident 2026-07-20: bare-ticker
+# BM25 let raw IB fill rows crowd every thesis doc out of the top-6) ──
+
+
+def _scored(score: float, source: str, doc_key: str) -> tuple[float, dict]:
+    return (score, {"source": source, "doc_key": doc_key, "title": doc_key})
+
+
+def test_thesis_first_orders_thesis_docs_before_fill_rows():
+    """Pool shaped like the EWY incident: fill rows outscore every thesis."""
+    from scripts.api.server import _thesis_first
+
+    fill_bag = _scored(0.02590, "journal", "0001505f.6a4fa63b.01.01")
+    fill_call = _scored(0.02538, "journal", "9885993847")
+    garch_eval = _scored(0.01639, "evals", "garch-convergence-china-etf-2026-03-24.html")
+    thesis_rr = _scored(0.01587, "journal", "trade_log:640")
+    thesis_old = _scored(0.01471, "journal", "trade_log:6")
+
+    reranked = _thesis_first([fill_bag, fill_call, garch_eval, thesis_rr, thesis_old])
+
+    assert reranked == [garch_eval, thesis_rr, thesis_old, fill_bag, fill_call]
+
+
+def test_thesis_first_preserves_score_order_within_each_band():
+    from scripts.api.server import _thesis_first
+
+    rows = [
+        _scored(0.030, "journal", "fill-a"),
+        _scored(0.020, "evals", "eval-a"),
+        _scored(0.019, "journal", "trade_log:1"),
+        _scored(0.018, "journal", "fill-b"),
+        _scored(0.010, "evals", "eval-b"),
+    ]
+
+    reranked = _thesis_first(rows)
+
+    assert [pair[1]["doc_key"] for pair in reranked] == [
+        "eval-a", "trade_log:1", "eval-b", "fill-a", "fill-b",
+    ]
+
+
+def test_thesis_first_is_identity_when_no_thesis_docs():
+    from scripts.api.server import _thesis_first
+
+    rows = [_scored(0.03, "journal", "fill-a"), _scored(0.02, "journal", "fill-b")]
+
+    assert _thesis_first(rows) == rows
+
+
+def test_search_route_does_not_rerank(client, stubbed_retrieval):
+    response = client.post("/knowledge/search", json={"query": "EWY risk reversal"})
+
+    assert response.status_code == 200
+    assert stubbed_retrieval[0]["rerank"] is None
 
 
 # ── embedder cache path (serving from FastAPI must not re-download) ──

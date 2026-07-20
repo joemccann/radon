@@ -70,6 +70,7 @@ from clients.menthorq_dashboard_client import (
 # only on first call, and only ever inside asyncio.to_thread — see /knowledge).
 from knowledge.embed import get_embedder
 from knowledge.retrieve import hybrid_search
+from knowledge.sources.journal import TRADE_LOG_KEY_PREFIX
 
 # Load .env from project root for Python scripts.
 # .env.ib-mode (managed by scripts/ib mode) overlays after .env so its
@@ -4051,6 +4052,12 @@ _KNOWLEDGE_COMPACT_CONTENT_CHARS = 1200
 _KNOWLEDGE_COMPACT_NEIGHBOR_CHARS = 400
 _KNOWLEDGE_COMPACT_MAX_NEIGHBORS = 2
 _PRIOR_EVAL_SOURCES = ["journal", "evals"]
+# One bounded retry absorbs a transient hrana flake (2026-07-20: a single
+# platform blip 503'd the assistant's only thesis lookup); a second failure
+# still surfaces the sanitized 503 within ~1 extra round-trip + backoff.
+_KNOWLEDGE_RETRIEVAL_ATTEMPTS = 2
+_KNOWLEDGE_RETRY_BACKOFF_SECS = 0.25
+_THESIS_DOC_KEY_PREFIX = TRADE_LOG_KEY_PREFIX
 _KNOWLEDGE_RESULT_FIELDS = (
     "source", "scope", "doc_key", "chunk_ix", "title", "summary",
     "content", "metadata", "score", "last_activity_at", "neighbors",
@@ -4074,15 +4081,39 @@ class _KnowledgeHranaConnection:
         return _KnowledgeRows(db_http.hrana_execute(sql, tuple(args)))
 
 
+def _is_thesis_doc(row: dict) -> bool:
+    """Thesis-bearing knowledge rows: evals reports and journal trade-log
+    entries (they carry Thesis:/Notes: lines) — as opposed to raw IB fill
+    rows, whose doc_keys are order/exec ids."""
+    if row.get("source") == "evals":
+        return True
+    return str(row.get("doc_key") or "").startswith(_THESIS_DOC_KEY_PREFIX)
+
+
+def _thesis_first(scored_rows: list[tuple[float, dict]]) -> list[tuple[float, dict]]:
+    """Deterministic prior-evals rerank: thesis-bearing docs before raw fill
+    rows, fused-score order preserved within each band. A bare-ticker query
+    lets BM25 flood the top ranks with near-duplicate fill rows (2026-07-20:
+    the EWY thesis never surfaced), so it runs over the full deduped pool."""
+    theses: list[tuple[float, dict]] = []
+    fills: list[tuple[float, dict]] = []
+    for pair in scored_rows:
+        (theses if _is_thesis_doc(pair[1]) else fills).append(pair)
+    return theses + fills
+
+
 def _knowledge_search_in_thread(
     query: str,
     scopes: Optional[List[str]],
     sources: Optional[List[str]],
     limit: int,
+    rerank: Optional[Callable] = None,
 ) -> tuple[list[dict], str]:
     """Embed the query + run hybrid search, entirely off the event loop:
     the first get_embedder() call may load the ~67 MB ONNX model, embedding
-    is sync CPU work, and each hrana statement blocks up to its timeout."""
+    is sync CPU work, and each hrana statement blocks up to its timeout.
+    A transient DbHttpError gets one in-thread retry (the query is embedded
+    once); the last failure propagates to the caller's 503 mapping."""
     query_embedding = None
     embedder = get_embedder()
     if embedder is not None:
@@ -4091,14 +4122,22 @@ def _knowledge_search_in_thread(
         except Exception as exc:
             logger.warning("knowledge: query embedding failed (%s) — FTS-only", exc)
             query_embedding = None
-    results = hybrid_search(
-        _KnowledgeHranaConnection(),
-        query,
-        query_embedding=query_embedding,
-        scopes=scopes,
-        sources=sources,
-        limit=limit,
-    )
+    for attempt in range(1, _KNOWLEDGE_RETRIEVAL_ATTEMPTS + 1):
+        try:
+            results = hybrid_search(
+                _KnowledgeHranaConnection(),
+                query,
+                query_embedding=query_embedding,
+                scopes=scopes,
+                sources=sources,
+                limit=limit,
+                rerank=rerank,
+            )
+            break
+        except db_http.DbHttpError:
+            if attempt >= _KNOWLEDGE_RETRIEVAL_ATTEMPTS:
+                raise
+            time.sleep(_KNOWLEDGE_RETRY_BACKOFF_SECS)
     retrieval = "hybrid" if query_embedding is not None else "fts-only"
     return results, retrieval
 
@@ -4109,12 +4148,22 @@ async def _run_knowledge_retrieval(
     sources: Optional[List[str]],
     limit: int,
     compact: bool,
+    *,
+    route: str,
+    rerank: Optional[Callable] = None,
 ) -> tuple[list[dict], str]:
     try:
         results, retrieval = await asyncio.to_thread(
-            _knowledge_search_in_thread, query, scopes, sources, limit
+            _knowledge_search_in_thread, query, scopes, sources, limit, rerank
         )
     except db_http.DbHttpError as exc:
+        # DbHttpError messages are already scrubbed by db_http (exception
+        # type + message, never SQL text or tokens) — safe to journal, and
+        # without this line the 503 is invisible server-side (2026-07-20).
+        logger.warning(
+            "knowledge: %s retrieval failed after %d attempts (%s)",
+            route, _KNOWLEDGE_RETRIEVAL_ATTEMPTS, exc,
+        )
         raise HTTPException(
             status_code=503, detail="Knowledge retrieval is unavailable"
         ) from exc
@@ -4199,7 +4248,7 @@ async def knowledge_search(request: Request):
         return {"results": [], "retrieval": "fts-only"}
 
     results, retrieval = await _run_knowledge_retrieval(
-        query, scopes, sources, limit, compact
+        query, scopes, sources, limit, compact, route="/knowledge/search"
     )
     return {"results": results, "retrieval": retrieval}
 
@@ -4216,7 +4265,8 @@ async def knowledge_prior_evals(ticker: str, limit: int = _KNOWLEDGE_LIMIT_DEFAU
         return {"ticker": upper, "results": [], "retrieval": "fts-only"}
 
     results, retrieval = await _run_knowledge_retrieval(
-        upper, None, _PRIOR_EVAL_SOURCES, _clamped_knowledge_limit(limit), compact
+        upper, None, _PRIOR_EVAL_SOURCES, _clamped_knowledge_limit(limit), compact,
+        route="/knowledge/prior-evals", rerank=_thesis_first,
     )
     return {"ticker": upper, "results": results, "retrieval": retrieval}
 
