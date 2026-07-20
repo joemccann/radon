@@ -537,3 +537,531 @@ tsc clean
 - Focused hook regression: `11 passed`; TypeScript: clean. The local parallel full suite hit unrelated load-induced timeouts (`4074 passed`, `43 timed out`, `26 skipped`); CI remains the authoritative isolated full-suite gate.
 - CI Vitest, pytest, perimeter, and secret-scan gates passed. Deployed `d9808fa68da2341d0e3873b666c9b49c9bac3708`; all health gates passed, `nextjs-db-read` is `ok`, overall health is `up`, and `radon-nextjs` is active with `NRestarts=0`.
 - Existing browser tabs must reload once to receive the corrected client bundle; subsequent transient warnings clear on the next clean 30-second poll even when `last_sync` is unchanged.
+# Task: Three responsive UI design directions (2026-07-14)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory the current web information architecture, shared shell, responsive rules, and representative high-density screens without modifying operator work.
+- T2 depends_on: [] - Audit the current visual language against Radon brand constraints and the `better-ui` surface, interaction, motion, and performance principles.
+- T3 depends_on: [T1, T2] - Define three materially distinct mobile-and-desktop design directions, each with layout grammar, navigation, density, component treatment, motion, responsive behavior, strengths, and risks.
+- T4 depends_on: [T3] - Compare the directions, recommend one, define a practical rollout sequence, and record review evidence.
+
+## Checklist
+
+- [x] T1 Current UI and responsive inventory.
+- [x] T2 Brand and detail-level UI audit.
+- [x] T3 Three design directions.
+- [x] T4 Recommendation, rollout, and review.
+
+## Constraints
+
+- This task is design analysis only. Do not modify production UI code.
+- Preserve existing operator changes, including `.serena/project.yml`.
+- Treat the current teal Radon token set in `docs/brand-identity.md`, root `AGENTS.md`, and `brand/radon-design-tokens.json` as authoritative where older brand prose conflicts.
+
+## Review
+
+- Audited the shared desktop and mobile shell, dashboard, portfolio, orders, scanner, ticker cockpit, responsive breakpoints, and representative screenshots.
+- Root cause: Radon's palette, typography, and tight geometry are already distinctive; repeated equal-weight bordered modules, duplicated headers, and a weak decision hierarchy make the product read like a themed component library.
+- Defined three responsive directions: priority-driven Command Bridge, evidence-first Research Ledger, and configurable Dense Workbench.
+- Recommendation: prototype Command Bridge first because it creates the clearest operator sequence while preserving Radon's current data and risk-control architecture.
+- No production UI files changed. Verification was code and screenshot inspection only; no test suite was required for a design-analysis task.
+
+# Task: Responsive UI direction prototypes (2026-07-14)
+
+## Dependency graph
+
+- M1 depends_on: [] - Establish an isolated prototype directory, shared content constraints, responsive targets, and validation criteria.
+- M2 depends_on: [M1] - Build the Command Bridge standalone HTML prototype.
+- M3 depends_on: [M1] - Build the Research Ledger standalone HTML prototype.
+- M4 depends_on: [M1] - Build the Dense Workbench standalone HTML prototype.
+- M5 depends_on: [M2, M3, M4] - Build a prototype index, validate HTML and responsive behavior, capture desktop/mobile screenshots, and complete the review.
+
+## Checklist
+
+- [x] M1 Prototype scope and validation contract.
+- [x] M2 Command Bridge prototype.
+- [x] M3 Research Ledger prototype.
+- [x] M4 Dense Workbench prototype.
+- [x] M5 Index, visual verification, and review.
+
+## Constraints
+
+- Keep all prototype files isolated under `prototypes/ui-directions/`; do not modify production UI code.
+- Use realistic but explicitly illustrative Radon market and portfolio data.
+- Preserve the current teal brand tokens, tight geometry, matte surfaces, hairline borders, Inter/IBM Plex Mono typography, and semantic signal colors.
+- Each prototype must be usable at desktop and 393px mobile widths, preserve 44px touch targets, support reduced motion, and avoid gradients, glass, soft shadows, decorative card grids, and `transition: all`.
+- Each direction must have a materially different information architecture, not merely different styling.
+
+## Review
+
+- Added three isolated standalone prototypes under `prototypes/ui-directions/`: Command Bridge, Research Ledger, and Dense Workbench.
+- Added a comparison index with desktop/mobile preview switching and six captured viewport screenshots.
+- Each prototype uses a distinct information architecture, realistic illustrative data, local Radon fonts, current brand tokens, exact-property transitions, reduced-motion handling, visible focus, and responsive touch targets.
+- Playwright verification passed at 1440x1000 and 393x852 for every prototype: no page errors, no failed assets, exact viewport/scroll widths, and working selection/navigation/disclosure actions.
+- Static verification passed: HTML tokenization, inline JavaScript compilation, forbidden-pattern audit, and `git diff --check`.
+- Full web verification passed: `npm test` reported 426 files passed, 4,118 tests passed, 26 skipped; `npm run typecheck` passed.
+- Production UI code was not modified. Existing `.serena/project.yml` and unrelated `tasks/mockups/` workspace files were preserved.
+
+# Task: Modify-order close P&L (2026-07-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Preserve the dirty worktree, load scoped instructions, and trace the modify-order risk input against the canonical close-out calculation.
+- T2 depends_on: [T1] - Add red component and Playwright regressions proving a modified close order shows estimated realized P&L.
+- T3 depends_on: [T2] - Thread the matched position cost basis into the modify modal's `OrderRiskGate` input with correct long-close and short-close signs.
+- T4 depends_on: [T3] - Run focused Vitest, relevant Playwright coverage, visual verification, typecheck, and the full web test suite.
+- T5 depends_on: [T4] - Review the diff for signed credit/debit correctness and document verification results.
+
+## Checklist
+
+- [x] T1 Instructions and current close-order data flow inspected.
+- [x] T2 Failing regressions added and demonstrated.
+- [x] T3 Minimal implementation complete.
+- [x] T4 Focused and full verification complete.
+- [x] T5 Review documented.
+
+## Constraints
+
+- Preserve all unrelated dirty files and existing `tasks/todo.md` content.
+- Treat option `avg_cost` as per-contract dollars; do not multiply basis by 100 again.
+- A sell-to-close long has positive proceeds and positive basis. A buy-to-close short has negative close cash flow and negative original credit basis.
+- Do not submit or modify a live broker order during browser verification.
+
+## Review
+
+- Root cause: `ModifyOrderModal` always sent the post-modify option shape through opening-risk math. It never matched the order to the held portfolio leg or passed `closeOut.entryCostDollars`, so the shared risk summary could only render Max Gain/Max Loss.
+- Fix: match option symbol, normalized expiry, right, strike, closing action/direction, and held quantity; pass signed per-contract basis to the existing `useOrderRisk` close-out branch. Quantities above the holding remain on the opening/undefined-risk path.
+- Red/green component regressions cover sell-to-close long, buy-to-close short, and over-close quantity. Existing signed combo-price and order-risk chokepoint coverage remains green.
+- Focused Vitest: 3 files / 25 tests passed. Full web Vitest: 427 files / 4,121 passed / 26 skipped. TypeScript and `git diff --check` passed.
+- Playwright: `modify-order-confirmation.spec.ts` passed against stubbed portfolio/orders/modify APIs. Visual inspection confirmed `Proceeds: $27,750` and `Est. Realized P&L: $2,750` with no Max Gain/Max Loss fields; no live broker action was reachable.
+
+# Task: Command Bridge multi-page prototype (2026-07-14)
+
+## Dependency graph
+
+- C1 depends_on: [] - Define the multi-page information architecture and create the shared Command Bridge shell, tokens, navigation, responsive contract, and common interactions.
+- C2 depends_on: [C1] - Build the Today command page and instrument decision drill-down.
+- C3 depends_on: [C1] - Build the Positions page with risk-priority ledger and selected-position context.
+- C4 depends_on: [C1] - Build the Orders page with working/fills queue, execution context, and safe prototype actions.
+- C5 depends_on: [C1] - Build the Scan page with ranked candidates, signal filters, evidence context, and candidate drill-down.
+- C6 depends_on: [C1] - Build the System page with source integrity, service state, sample freshness, and operator controls.
+- C7 depends_on: [C2, C3, C4, C5, C6] - Integrate navigation, validate desktop/mobile behavior and interactions, capture screenshots, run full web verification, and open the prototype in the visible in-app browser.
+
+## Checklist
+
+- [x] C1 Shared shell and responsive contract.
+- [x] C2 Today and instrument pages.
+- [x] C3 Positions page.
+- [x] C4 Orders page.
+- [x] C5 Scan page.
+- [x] C6 System page.
+- [x] C7 Integration, verification, screenshots, and browser handoff.
+
+## Constraints
+
+- Keep all work isolated under `prototypes/command-bridge/`; do not modify production UI code.
+- Preserve the approved Command Bridge direction: priority queue, selection-driven context, open canvas and ledger hierarchy, current Radon colors, matte surfaces, hairline borders, maximum 4px radius, local Inter/IBM Plex Mono, and no gradients/glass/soft shadows.
+- Use realistic but explicitly illustrative data. Prototype controls must never transmit orders or mutate external systems.
+- Every page must work at 1440px and 393px with no horizontal overflow, visible mobile section titles, 40px desktop and 44px touch targets, exact-property transitions, reduced-motion support, and visible focus.
+- Preserve the operator sequence: signal -> structure -> Kelly math -> decision; display source, freshness, confidence, and uncertainty where they affect action.
+- Keep existing unrelated `.serena/project.yml`, `tasks/mockups/`, and prior prototype files untouched.
+
+## Review
+
+- Built an isolated six-page Command Bridge prototype under `prototypes/command-bridge/`: Today, Instrument Decision, Positions, Orders, Scan, and System.
+- Added a shared responsive shell with selection-driven context, desktop rail navigation, mobile bottom navigation, priority queues, safe prototype-only controls, visible focus, reduced-motion handling, and consistent illustrative account state.
+- Playwright verification passed on all six pages at 1440x1000 and 393x852: HTTP 200, zero console/page errors, and exact viewport/scroll widths with no horizontal overflow. Captured twelve desktop/mobile screenshots.
+- Static verification passed: HTML parsing, forbidden-pattern audit, and `git diff --check`.
+- Full web verification passed: `npm test` reported 426 files passed, 4,118 tests passed, 26 skipped, and 0 failed; `npm run typecheck` passed with no errors.
+- Opened the prototype at `http://127.0.0.1:8765/prototypes/command-bridge/index.html`. The in-app browser controller rejected its session because required sandbox metadata was not forwarded, so the visible system-browser fallback was used.
+- Production UI code was not modified. Existing `.serena/project.yml`, `tasks/mockups/`, and prior prototype work were preserved.
+
+# Task: Remove production deploy manual approval (2026-07-15)
+
+## Dependency graph
+
+- D1 depends_on: [] - Inspect the deploy workflow, repository environment protection, branch policy, and current pending deployments to identify the active manual gate.
+- D2 depends_on: [D1] - Remove only the Production environment required-reviewer protection while preserving the environment binding, main-only deployment policy, test gates, concurrency, and host health gates.
+- D3 depends_on: [D2] - Update stale workflow documentation and add regression coverage for the no-manual-approval deploy policy.
+- D4 depends_on: [D2, D3] - Run focused policy checks, the full relevant project suites, and static validation.
+- D5 depends_on: [D4] - Re-read GitHub control-plane state, review the diff, and document final evidence.
+
+## Checklist
+
+- [x] D1 Identify the active approval gate and surrounding deploy controls.
+- [x] D2 Remove the required-reviewer protection.
+- [x] D3 Update source policy documentation and regression coverage.
+- [x] D4 Run focused and full verification.
+- [x] D5 Record review evidence.
+
+## Constraints
+
+- Preserve unrelated dirty worktree files and prior `tasks/todo.md` content.
+- Keep all automated CI test gates, production deployment serialization, main-only deployment restriction, and post-deploy health gates intact.
+- Do not remove the GitHub `production` environment itself unless required; it remains useful for deployment history, URL metadata, environment secrets, and branch restrictions.
+- Do not approve, cancel, or re-run a deployment unless verification proves that action is necessary.
+
+## Review
+
+- Root cause: the deploy workflow's `environment: production` binding was non-blocking by itself; GitHub environment `Production` had a mutable `required_reviewers` protection rule for `joemccann`. Recent deploys entered `waiting` until that review was approved.
+- Removed only the required-reviewer rule through GitHub's environment API. The environment retained ID `12868164910`, its `branch_policy` protection, and the sole custom deployment branch `main`. No wait timer, environment secret, environment variable, pending deployment, branch protection, CI dependency, or deploy concurrency setting changed.
+- Kept the workflow environment binding and URL, four required `needs:` jobs, exact main-push condition, non-canceling production lock, immutable-SHA runner, and host health gates. Updated stale workflow, agent, Claude, migration, cloud-service, and lessons documentation.
+- Added a workflow regression that pins the four automated gates, main-push condition, environment binding, and production URL. Focused policy verification passed: 8 tests; YAML parsing and `git diff --check` passed.
+- Full verification passed: Python application/API 4,156 passed, 13 skipped, 90 deselected with 72.79% coverage; cloud infrastructure 651 passed, 2 skipped; Vitest 445 files / 4,266 passed / 26 skipped; TypeScript clean.
+- Immediate API verification proves the manual protection rule is absent. Runtime proof that the next green main push transitions directly into deploy, without `waiting`, necessarily occurs on the next pushed commit; no deployment was triggered solely for this settings change.
+
+# Task: Web app typography audit (2026-07-15)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory font assets, loading, global typography tokens, representative screens, and current repository state without modifying production UI.
+- T2 depends_on: [T1] - Audit type scale, semantic hierarchy, line-height, tracking, wrapping, measure, and font loading against the Radon brand and `better-typography` guidance.
+- T3 depends_on: [T1] - Audit numeric typography, form sizing, truncation, text accessibility, contrast, selection, and responsive behavior.
+- T4 depends_on: [T2, T3] - Visually verify representative desktop/mobile screens and rank only evidence-backed recommendations.
+- T5 depends_on: [T4] - Document findings and deliver recommendations as plain-CSS Before/After tables.
+
+## Checklist
+
+- [x] T1 Audit scope and dependency graph established.
+- [x] T2 Scale, hierarchy, spacing, wrapping, and loading audited.
+- [x] T3 Numeric, form, truncation, and accessibility behavior audited.
+- [x] T4 Representative screens visually verified and findings ranked.
+- [x] T5 Review documented and recommendations delivered.
+
+## Constraints
+
+- Analysis only; do not modify production UI code.
+- Preserve all unrelated dirty worktree files and existing `tasks/todo.md` content.
+- Keep Radon's established Inter UI, IBM Plex Mono numeric/data role, Sohne display-only rule, dense workstation character, and plain global CSS styling system.
+- Recommendations must cite concrete source evidence and avoid generic typography advice that does not apply to the rendered app.
+
+## Review
+
+- Audited local Inter and IBM Plex Mono assets, the global CSS typography system, route/page heading semantics, representative dashboard/orders/ticker surfaces, mobile input rules, truncation, numeric stability, and light/dark contrast.
+- The supplied Orders screenshot corroborates the source-level finding that operational text is overwhelmingly monospaced and frequently undersized. Automated in-app browser inspection was unavailable because the controller rejected the session's sandbox metadata, so rendered conclusions are limited to the supplied screenshot and static responsive rules.
+- Highest-priority findings: light-theme muted text fails normal-text AA contrast; IBM Plex Mono exposes only 400/700 while CSS frequently requests 500/600/650; 504 font-size declarations are below 12px; narrative UI and structural headings do not consistently follow the brand's Inter roles; workspace routes lack a semantic page h1.
+- Existing strengths to retain: self-hosted variable Inter WOFF2, broadly correct tabular numeric treatment, zoom-permitting viewport, mobile 16px input safeguards, controlled empty-state measure, and dark-theme text contrast.
+- No production UI code or font assets were modified. This was an analysis-only task.
+
+# Task: Implement web typography recommendations (2026-07-15)
+
+## Dependency graph
+
+- I1 depends_on: [] - Reconfirm the dirty worktree, scoped web instructions, available font assets, and establish regression coverage targets.
+- I2 depends_on: [I1] - Implement the font-loading foundation, semantic type tokens, contrast correction, synthesis/smoothing policy, and supported weight usage.
+- I3 depends_on: [I1] - Implement semantic route and section heading hierarchy plus full-content access for operational truncation.
+- I4 depends_on: [I1] - Implement prose sizing, measure, wrapping, mobile date/time input floors, and typography detail rules.
+- I5 depends_on: [I2, I3, I4] - Integrate agent work, inspect the complete diff, and add or adjust focused regressions.
+- I6 depends_on: [I5] - Run focused Vitest, relevant Playwright visual verification at desktop/mobile, the full web test suite, typecheck, and static checks.
+- I7 depends_on: [I6] - Document review evidence, create one intentional commit, push the current branch, and verify the remote ref.
+
+## Checklist
+
+- [x] I1 Repository state, instructions, implementation scope, and validation targets confirmed.
+- [x] I2 Font foundation, semantic tokens, contrast, and weights implemented.
+- [x] I3 Heading hierarchy and truncation access implemented.
+- [x] I4 Prose, wrapping, measure, and responsive typography implemented.
+- [x] I5 Agent changes integrated and focused regressions complete.
+- [x] I6 Focused, visual, and full verification complete.
+- [x] I7 Review documented, committed, pushed, and remote ref verified.
+
+## Constraints
+
+- Preserve all unrelated dirty files and prototype/mockup work. Do not stage `.serena/project.yml`, `prototypes/`, `tasks/mockups/`, or unrelated test changes.
+- Keep the dense terminal character. Inter owns narrative and structural UI; IBM Plex Mono owns prices, quantities, contracts, timestamps, tabular data, and telemetry.
+- Use plain global CSS and existing components. Do not introduce a second styling system or broad opportunistic refactors.
+- Do not interact with live order placement controls during browser verification.
+- Commit only typography implementation, its regressions, and this task record, then push the current branch after all required suites pass.
+
+## Review
+
+- Replaced the two static IBM Plex Mono WOFF faces with locally served WOFF2 faces for 400 regular/italic and 500/600/700 normal; disabled synthetic font faces and normalized unsupported mono weights while retaining Inter's variable-weight range.
+- Added semantic type/tracking tokens, root font smoothing, an AA-compliant light muted token (`#737373`, approximately 4.74:1 on white), Inter structural title/metric roles, stable tabular primary metrics, and 11px/12px operational floors across shared tables and order-management controls.
+- Added valid workspace h1 and dashboard/workspace h2 hierarchy without duplicating route-owned headings. Critical truncated service, contract, signal, and structure strings now wrap or expose their complete content.
+- Raised sustained news/chat/company/trial prose to 14px with 1.55-1.6 line height and controlled measure; added deliberate heading/prose wrapping, mobile date/time input floors, explicit placeholder contrast, selection/underline metrics, and safe logical table/action alignment.
+- Regression coverage added for font delivery, foundation tokens, semantic hierarchy, truncation access, prose measure, operational text floors, mobile inputs, and detail styling. Full Vitest passed: 430 files, 4,134 tests passed, 26 skipped. TypeScript, production Next compile/build, output-trace audit, and `git diff --check` passed.
+- The repository Playwright app specs were attempted but Clerk's middleware wrapper repeatedly retried an unavailable Clerk backend handshake before the authless callback, causing navigation timeouts unrelated to this diff. A standalone Playwright browser harness loaded the production CSS and real local font assets at 1440x1000 and 393x852, captured desktop/mobile screenshots, confirmed Inter 12px section titles, Plex 11px headers, 12px order actions, 14px prose, and zero document-width overflow in both viewports. No live order control was used.
+- Committed the isolated 27-file typography scope as `78bcf138` (`Improve web typography hierarchy and legibility`) and pushed `main`. `origin/main` resolves to the exact local SHA `78bcf138daa2b5501e4f112fd6fbb3a865f89d3d`; CI run `29441408282` started successfully and was in progress at handoff.
+
+# Task: False unhealthy push notifications (2026-07-15)
+
+## Dependency graph
+
+- H1 depends_on: [] - Capture live aggregate health, recent watchdog notifications, service-health rows, cooldowns, and deployment timing.
+- H2 depends_on: [H1] - Trace the alert classifier and identify whether notifications come from a real outage, deploy transients, stale rows, or incorrect recovery semantics.
+- H3 depends_on: [H2] - Add a failing regression for the confirmed notification bug and implement the smallest root-cause fix.
+- H4 depends_on: [H3] - Run focused and full verification, deploy if code changes are required, and verify live notification state recovers.
+- H5 depends_on: [H4] - Document the diagnosis, fix, and operational evidence.
+
+## Checklist
+
+- [x] H1 Capture live evidence.
+- [x] H2 Confirm root cause.
+- [x] H3 Implement regression and fix if required.
+- [x] H4 Verify locally and live.
+- [x] H5 Record review evidence.
+
+## Constraints
+
+- Preserve unrelated dirty worktree changes.
+- Do not mute or acknowledge alerts until the underlying condition and recovery behavior are proven.
+- Treat IB, Flex, deploy, and database failures according to their distinct ownership and cadence semantics.
+
+## Review
+
+- The original P1 was legitimate: IB's independent protocol probe wedged at 23:46 UTC, the off-box probe observed schema-v2 aggregate failure at 00:03, and the watchdog restarted Gateway until authentication and the API pool recovered at 00:33. It was not deploy-induced.
+- The notification flood after recovery was a bug: Pushover emergency priority repeated every 60 seconds while the recovered aggregate remained represented by the last red GitHub probe row. Irregular scheduled-probe cadence delayed cancellation.
+- Immediate remediation: manually dispatched the existing external probe; it passed at 00:39, and the 00:40 continuous watchdog cycle recorded healthy, cancelled the `external-health-probe` Pushover tag, and marked the emergency resolved. Current edge, API, Gateway, relay, Next.js, and external probe are green.
+- Durable fix: the off-box classifier now distinguishes a validated schema-v2 `aggregate_down` from `aggregate_invalid`. The on-box watchdog may confirm recovery locally only for `aggregate_down`; malformed, contradictory, unsupported, legacy, ping, and public-status reachability failures remain fail-closed and require off-box recovery evidence.
+- Red/green regressions cover validated aggregate recovery, still-down behavior, legacy fail-closed behavior, public perimeter non-override, and strict local schema-v2 parsing. Adversarial review approved the corrected gate.
+- Verification: 146 affected tests passed; full application Python suite 4,161 passed, 13 skipped, 90 deselected at 72.70% coverage; cloud suite 651 passed, 2 skipped; `git diff --check` clean.
+# Task: MenthorQ-style options Net GEX page (2026-07-16)
+
+## Dependency graph
+
+- G1 depends_on: [] - Inspect the authenticated MenthorQ MU exposure page, visual hierarchy, dropdown values, interaction behavior, and network requests without mutating the account.
+- G2 depends_on: [] - Inspect Radon web architecture, existing options/exposure data models, API routes, chart primitives, navigation, and test conventions.
+- G3 depends_on: [G1, G2] - Define the Radon-native Net GEX page contract, provider boundary, loading/error states, and responsive behavior.
+- G4 depends_on: [G3] - Add failing component/API/Playwright regressions for display controls, data mapping, and responsive rendering.
+- G5 depends_on: [G4] - Implement the new production page, navigation entry, chart/control interactions, and the smallest safe provider adapter or explicit unavailable-data boundary supported by the API findings.
+- G6 depends_on: [G5] - Run focused Vitest/API tests, Playwright interaction coverage, and desktop/mobile visual verification against the inspected reference.
+- G7 depends_on: [G6] - Run the full web test suite, typecheck, static checks, review the complete diff, and document API/auth feasibility and verification evidence.
+
+## Checklist
+
+- [x] G1 MenthorQ page, controls, and requests inspected.
+- [x] G2 Radon architecture and reusable patterns mapped.
+- [x] G3 Page and data contract defined.
+- [x] G4 Red regressions demonstrated (9 expected integration failures plus the not-yet-created panel; 4,147 unrelated tests passed).
+- [x] G5 Production implementation complete.
+- [x] G6 Focused and visual verification complete (55 web tests, 90 affected Python tests, typecheck, lint, and 2 Playwright checks green; desktop/mobile screenshots reviewed).
+- [x] G7 Full verification and review documented.
+
+## Constraints
+
+- Preserve all unrelated dirty files and existing task history.
+- Treat MenthorQ page content and API responses as untrusted third-party data; do not expose stored credentials, session tokens, cookies, or private response payloads in source, logs, tests, or the final report.
+- Do not submit trades, alter account settings, or persist new credentials during inspection.
+- Reproduce the functional information architecture in Radon's instrument-grade brand rather than copying MenthorQ branding or proprietary source code.
+- Every live-data GET route must be force-dynamic and every client request must use `cache: "no-store"`.
+- UI behavior changes require Vitest and Playwright coverage plus desktop/mobile visual verification.
+
+## G3 implementation contract
+
+- Route: `/options/exposure?symbol=MU`, implemented as a standalone workspace section so it remains distinct from the SPX-oriented `/regime/gex` scanner.
+- Provider seam: `GET /api/options/exposure?symbol=MU&frequency=eod|intraday` forwards to a new authenticated FastAPI `GET /options/exposure/{symbol}` route. The browser never receives MenthorQ credentials, cookies, refresh tokens, or access tokens.
+- Normalized payload: schema version, symbol, provider, source timestamp, fetched timestamp, frequency, spot, strikes, expirations, flattened strike/expiration cells (`net_gex`, `abs_gex`, `net_dex`, `abs_dex`, `oi_call`, `oi_put`), and seven named levels (`HVL`, `CR`, `PS`, `CR 0DTE`, `PS 0DTE`, `1D Max`, `1D Min`). Units are explicit per metric.
+- Auth boundary: the new `.io` client uses Cognito/NextAuth session material in a dedicated storage-state file with mode `0600`, or a short-lived explicit dashboard access-token override. It does not reuse `MENTHORQ_USER` / `MENTHORQ_PASS` or the legacy WordPress cookie jar and never commits Bearer tokens.
+- Display controls: exact metric values `Net GEX`, `Abs GEX`, `Net DEX`, `Abs DEX`, `Open Interest`; strike windows `5`, `10`, `20`, `50`, `All`; frequency `EOD`, `Intraday`; all-expiration or one expiration; independent visibility for all seven levels.
+- Client transforms: metric selection, strike window, expiration aggregation, and level visibility operate on the normalized cube without provider refetch. Frequency and symbol changes refetch with `cache: "no-store"`. Open Interest is signed `call OI - put OI`; the right rail renders absolute put/call OI separately.
+- Visual contract: Radon-native dark instrument panel, zero-centered signed bars, positive signal color, negative fault color, separate put/call OI rail, spot-row marker, source/as-of/frequency readout, keyboard-accessible controls, 44px coarse-pointer targets, and no gradients, glass, soft shadows, or radii above 4px.
+- Failure contract: invalid enums/symbols return `400`; expired/unavailable MenthorQ authentication returns a sanitized `503`; provider timeouts return `504`; no cross-symbol or cross-frequency cache reuse is allowed. The UI distinguishes loading, unavailable, empty, and partial states.
+
+## Review
+
+- Live MenthorQ inspection confirmed the page is a client-rendered strike-by-expiration cube. Exact metric options are Net GEX, Abs GEX, Net DEX, Abs DEX, and Open Interest; strike windows are 5/10/20/50 Strikes +/- and All Strikes; frequencies are EOD and Intraday; expiration and all seven level filters are local transforms except frequency, which selects a separate prefetched payload.
+- The primary payload is `GET gateway.menthorq.io/clickhouse-api/api/web/v1/options/net-gex-by-expiration/{SYMBOL}?frequency=eod|intraday`; levels come from `/gamma-levels/{SYMBOL}/eod`. The cube contains indexed parallel arrays for strike, expiration, GEX, DEX, and call/put OI. Unauthenticated requests return 401; the live dashboard's Cognito/NextAuth `accessToken` succeeds as a Bearer token.
+- Added `/options/exposure?symbol=MU`, workspace navigation, mobile overflow navigation, exact exposure controls, zero-centered signed bars, put/call OI rails, spot and level markers, responsive styling, normalized client transforms, and loading/error/empty/partial states. The UI follows Radon's instrument-panel brand rather than copying MenthorQ presentation.
+- Added a server-only provider boundary: FastAPI `/options/exposure/{symbol}` fetches and validates the two MenthorQ endpoints, normalizes provider GEX billions to USD per 1% move, preserves DEX USD and OI contracts, and returns sanitized 400/503/504 errors. Next `/api/options/exposure` remains force-dynamic/no-store. Credentials, cookies, and Bearer tokens never enter the browser payload or public errors.
+- Auth conclusion: direct API retrieval is proven and high-confidence. Existing saved `MENTHORQ_USER`/`MENTHORQ_PASS` and the legacy `.com` WordPress storage state are a different auth domain and do not currently establish the `.io` Cognito session. The new client accepts a short-lived `MENTHORQ_DASHBOARD_ACCESS_TOKEN` or exchanges a dedicated `.io` Playwright storage state through `/api/auth/session`, forcing mode 0600 and keeping its directory Git-ignored. No dedicated `.io` state/token is currently configured, so an unmocked local route intentionally returns sanitized 503 until provisioning. Whether the legacy credentials are also valid in Cognito remains unproven.
+- Security finding: the existing root `.env` and legacy `data/menthorq_cache/menthorq_storage_state.json` are mode 0644. They were not mutated because they belong to the separate legacy flow, but they should be owner-only.
+- Verification: focused web 55 passed; focused Python 21 passed and affected Python 90 passed; Playwright desktop/mobile 2 passed with no document overflow; desktop/mobile screenshots reviewed; full web 435 files / 4,158 passed / 26 skipped; full Python 4,186 passed / 13 skipped / 90 deselected; TypeScript and ESLint green; production Next build and output-trace audit green; `git diff --check` clean. Build emitted only pre-existing broad `cri_scheduled` trace warnings.
+
+# Task: MenthorQ Net GEX implementation report (2026-07-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Confirm the existing implementation record, screenshots, and report scope without exposing provider credentials or session material.
+- T2 depends_on: [T1] - Create a self-contained, accessible HTML report with Radon-native styling and readable API/auth conclusions.
+- T3 depends_on: [T2] - Open the local report and visually verify desktop legibility, responsive behavior, and the absence of external asset dependencies.
+
+## Checklist
+
+- [x] T1 Report facts, artifacts, and constraints confirmed.
+- [x] T2 Self-contained HTML report created.
+- [x] T3 Local visual verification and handoff.
+
+## Review
+
+- Created `tasks/artifacts/menthorq-net-gex-report.html`: a standalone, printable Radon-styled handoff with no remote fonts, scripts, images, or network dependencies. It presents the implementation, exact controls, API schema, authentication boundary, confidence conclusions, and verification record without including credentials, tokens, cookies, or private provider payloads.
+- Opened the report in a new Chrome tab, preserving the existing MenthorQ tab. The local title and accessible document outline rendered correctly.
+- Headless renders at 1440px and 393px confirmed a matching document title, 16px base body font, and no document-level horizontal overflow. Desktop and mobile evidence are saved as `tasks/artifacts/menthorq-net-gex-report-desktop.png` and `tasks/artifacts/menthorq-net-gex-report-mobile.png`.
+- Verified the HTML has no external URL, script, image, or linked-asset dependency; `git diff --check` passed.
+
+# Task: MenthorQ redirect-mediated dashboard authentication (2026-07-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify the user-specified `dashboard.menthorq.io` to WordPress to dashboard redirect flow without exposing credentials or session material.
+- T2 depends_on: [T1] - Update the dedicated dashboard-state client so it can establish a valid dashboard session through the verified redirect-mediated login flow.
+- T3 depends_on: [T2] - Add red/green regression coverage for the bootstrap behavior and preserve the existing server-only authentication boundary.
+- T4 depends_on: [T3] - Run affected Python verification, inspect the live authenticated result, and document exact confidence and any remaining constraint.
+
+## Checklist
+
+- [x] T1 Live redirect flow verified.
+- [x] T2 Dedicated dashboard auth bootstrap implemented.
+- [x] T3 Regression coverage implemented.
+- [x] T4 Verification and review recorded.
+
+## Review
+
+- The user-specified flow is correct. A fresh request to `dashboard.menthorq.io/en/options/exposure?symbol=MU` redirects to the MenthorQ WordPress login with a Cognito callback; submitting the existing server-side WordPress credentials returns a valid dashboard session.
+- The server-only dashboard client now resolves authentication in order: explicit short-lived access token, valid dedicated dashboard storage state, then the verified dashboard → WordPress → Cognito bootstrap. It saves the resulting dedicated storage state in `data/menthorq_dashboard/` with directory mode `0700` and state-file mode `0600`.
+- Live proof: a fresh MU EOD request authenticated, fetched, validated, and normalized a complete cube of 6,321 cells across 24 expirations. No credential, cookie, ID token, or access token was emitted in source, logs, tests, or this record.
+- Live provider quality correction: the payload currently contains six negative values in an `abs_gex` field. The backend now canonicalizes `abs_gex` with `abs()` at the trusted provider boundary, retains strict non-negative validation for absolute DEX and open interest, and has a regression test.
+- Regression sequence: the new bootstrap tests first failed because the constructor had no credential-bootstrap contract; after implementation, focused dashboard/API tests passed 25/25. Final full Python verification passed: 4,190 passed, 13 skipped, 90 deselected, 19 warnings. `py_compile` and `git diff --check` passed.
+- Updated `.env.example` and the self-contained MenthorQ implementation report to state the verified redirect-mediated bootstrap rather than the earlier, now disproven manual-provisioning conclusion.
+
+# Task: Options workspace navigation (2026-07-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect existing workspace/tab conventions and define the durable information architecture for the market-structure surfaces.
+- T2 depends_on: [T1] - Add red regressions for the canonical Options route, Net GEX first tab, preserved legacy deep link, and planned-module navigation state.
+- T3 depends_on: [T2] - Implement the Options workspace shell, migrate the current Net GEX exposure view into its first tab, and update navigation metadata.
+- T4 depends_on: [T3] - Run focused Vitest, Playwright desktop/mobile behavior coverage, visual verification, typecheck, and static checks.
+- T5 depends_on: [T4] - Run the full web suite, review the diff, and document the migration contract for future option-structure modules.
+- T6 depends_on: [T5] - Commit and push the completed MenthorQ Options feature set while preserving unrelated worktree changes.
+
+## Checklist
+
+- [x] T1 Information architecture and reuse pattern confirmed: use the broad "Options" workspace label because it covers exposure, Greeks, open interest, and volatility/VIX; adopt Regime-style URL tabs with canonical `/options/net-gex` and retain `/options/exposure` as a redirect.
+- [x] T2 Red navigation/tab regressions added and observed: canonical route/nav metadata, legacy redirect contract, Net GEX active state, planned measurements, and canonical tab navigation.
+- [x] T3 Options workspace implemented: `/options/net-gex` is canonical, root and legacy entry points redirect with the normalized symbol, and the existing exposure instrument is the first URL-driven tab.
+- [x] T4 Focused, visual, and static verification complete: 57 focused Vitest assertions, TypeScript, ESLint, `git diff --check`, three Playwright cases, and desktop/393px screenshot inspection passed.
+- [x] T5 Full verification and review documented.
+- [x] T6 Intentional commit and push complete.
+
+## Review
+
+- The workspace is named **Options**, not “Options Structure.” It is broad enough for dealer exposure, Greeks, OI, and volatility/VIX; “structure” would misleadingly exclude the latter measures.
+- Canonical first surface: `/options/net-gex?symbol=MU`. `/options?symbol=…` and the pre-existing `/options/exposure?symbol=…` normalize the symbol and redirect there, preserving saved deep links.
+- `OptionsWorkspacePanel` owns the URL-driven tab rail. Net GEX is active and rendered today; DEX, Greeks, Open Interest, and VIX / Volatility are visible, non-interactive planned tabs. Future pages add a route and mark their tab available without changing the workspace route or navigation identity.
+- The shell identifies this as the `options` workspace, so provider-specific panels do not inherit unrelated IB portfolio relay alerts, sync controls, or portfolio metric cards.
+- Verification: focused Vitest 7 files / 57 tests passed; Playwright 3/3 passed for canonical interaction, redirects, and 393px overflow; desktop/mobile screenshots were visually inspected; `npm run typecheck`, `npm run lint`, and `git diff --check` passed. Full web Vitest passed: 437 files, 4,163 tests, 26 skipped (4,189 total), exit 0.
+- Published the scoped MenthorQ/Options feature set as `5cbaf570 feat(options): add MenthorQ exposure workspace` on `origin/main`. Unrelated prototype, mockup, artifact-image, `.serena`, and pre-existing task-history changes remain unstaged. CI run `29601857080` for this commit is in progress.
+
+# Task: Options ticker-gated measurement state (2026-07-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect established ticker-entry and regime spectral-loading patterns and define the explicit Options entry-state contract.
+- T2 depends_on: [T1] - Add red regressions for no default symbol, valid ticker submission, provider-label removal, and submitted-state spectral loading.
+- T3 depends_on: [T2] - Implement the ticker-gated Options workspace and remove provider identity from the exposure header.
+- T4 depends_on: [T3] - Run focused Vitest, Playwright desktop/mobile behavior coverage, visual verification, typecheck, lint, and static checks.
+- T5 depends_on: [T4] - Run the full web suite and record review evidence.
+
+## Checklist
+
+- [x] T1 Entry and loading pattern confirmed: use the API-compatible symbol regex, Flow Analysis-style explicit form, and Regime `SpectralLoader` treatment.
+- [x] T2 Red ticker-entry/loading regressions added and observed: no initial panel, invalid-symbol rejection, canonical normalized submission, provider-label removal, and spectral loading state.
+- [x] T3 Ticker-gated workspace implemented: no MU fallback remains in options routes/navigation; a valid query deep link remains supported without bypassing the entry contract for first visits.
+- [x] T4 Focused, visual, and static verification complete: 59 focused Vitest assertions, Playwright 4/4 including the submitted loading state, desktop/mobile screenshot inspection, typecheck, lint, and `git diff --check` passed. ESLint reported 11 pre-existing warnings and no errors.
+- [x] T5 Full web Vitest suite passed: 437 files, 4,166 tests passed, 26 skipped (4,192 total); review evidence recorded.
+
+## Review
+
+- The Options workspace begins without a query or API request. It presents an operator-first ticker entry surface instead of preloading a sample instrument.
+- A valid submitted ticker is uppercased, encoded into the canonical Net GEX URL, and then mounts the existing exposure panel. Valid bookmarked query URLs continue to work.
+- Exposure loading now uses the shared `SpectralLoader` used by Regime, and the provider identity string is absent from the measurement telemetry.
+- Verification: focused Vitest 7 files / 59 tests passed; Playwright 4/4 passed, including no pre-submit request, canonical submission, and visible loading state; typecheck passed; lint completed with no errors and 11 pre-existing warnings; full web Vitest passed (437 files, 4,166 passed, 26 skipped); `git diff --check` passed.
+- [ ] T4 Focused, visual, and static verification complete.
+- [ ] T5 Full verification and review documented.
+
+# Task: Continuing Pushover reliability notifications (2026-07-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile the operator report with live Pushover delivery, VPS journal, cooldown, and deployed-revision evidence.
+- T2 depends_on: [T1] - Trace the emergency receipt cancellation contract and isolate the specific failed or incomplete stop path.
+- T3 depends_on: [T1, T2] - Apply the smallest safe corrective action, prove delivery has stopped, and record the outcome.
+- T4 depends_on: [T2] - Repair the unrelated deterministic ComboSkewPanel Vitest regression that blocked the Pushover-fix deployment.
+- T5 depends_on: [T4] - Run focused and full web validation, rerun CI, verify deployment, and close the Pushover delivery review.
+
+## Checklist
+
+- [x] T1 Reopened live investigation after the original cancellation conclusion was contradicted.
+- [x] T2 Cancellation-path root cause confirmed: Pushover accepts only the plural `tags` message field; the singular field made cancellation a false-success no-op.
+- [x] T3 Delivery-stop correction deployed: future P1 receipts are tagged and recovered services can cancel them; the two pre-fix untagged receipts expired at 20:40:32Z.
+- [x] T4 ComboSkewPanel regression repaired: the ready-state fixture now pins a pre-expiry clock rather than changing production expiry handling.
+- [x] T5 Full validation and deployment verified: CI run `29617684295` passed all required jobs and the automatic VPS deployment completed successfully.
+
+## Review
+
+- Immediate RCA: at 19:40:32Z `radon-breadth.service` and `radon-portfolio-sync.service` each sent a P1 Emergency. The recovered services were falsely logged as cancelled at 19:45:01Z because the payload used Pushover's unsupported singular `tag` field; Pushover records only plural `tags`, so `cancel_by_tag` matched no receipt while returning success.
+- Existing receipt mitigation: the two original, untagged P1 emergencies cannot be cancelled programmatically. They stop on acknowledgement in the Pushover app or naturally expire at 20:40:32Z (13:40:32 PDT).
+- Permanent correction: commit `660cda91` sends `tags` and adds the red/green regression. Local verification: affected pytest 68 passed; watchdog suite 165 passed; full Python suite passed; `git diff --check` passed.
+- Deployment gate: CI `29610454907` passed secret scan, Python application/cloud tests, and perimeter smoke, but failed its unrelated `web/tests/combo-skew-panel.test.tsx` contract (3 deterministic failures). The Pushover change touches no web code; deployment did not run. Fixing that separate web regression required a scoped follow-up.
+- ComboSkewPanel regression root cause: the fixture expired at 20:00 UTC on 2026-07-17, so the product correctly rendered the unavailable state. The test now freezes time to 2026-06-24T16:00:00Z; focused Vitest is 4/4 green and TypeScript has no diagnostics. Full web Vitest was rerun locally after the correction; CI rerun is the deployment gate.
+- Final gate: CI `29617684295` passed secret scan, pytest, perimeter smoke, and full Vitest; its automatic VPS deployment completed successfully. The production Pushover tagging correction and durable Vitest fixture are live in commits `660cda91` and `f13ae29a`.
+
+# Task: Service-wide reliability and performance pressure test (2026-07-17)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory every deployed service, owner, health contract, safe local load path, and existing baseline metric.
+- T2 depends_on: [T1] - Run reproducible, bounded pressure tests and establish per-service latency, throughput, error-rate, and recovery baselines without touching production state.
+- T3 depends_on: [T2] - Prioritize root causes with enough headroom for a measured 20% improvement; add red regressions for selected defects.
+- T4 depends_on: [T3] - Implement minimal reliability/performance corrections in the selected services and rerun focused pressure tests.
+- T5 depends_on: [T4] - Run full relevant suites, compare before/after metrics, verify deployment, and record services that cannot honestly meet a 20% target without architectural or capacity authority.
+
+## Checklist
+
+- [x] T1 Service inventory and measurement contracts: 33 installed units and 25 timers mapped; unsafe broker/provider workloads are excluded from synthetic pressure.
+- [x] T2 Baseline pressure tests: local web `/api/service-health` p95 56.4ms at 10-way concurrency with 0 errors, 511 targeted Python resilience tests in 4.78s, and 18 newsfeed tests in 187ms; a fleet-wide systemd recovery-boundary contract now pressure-tests all 33 installed units without touching broker/provider state.
+- [x] T3 Prioritized, testable remediation plan: bound previously unbounded FastAPI health, database reliability, and timer-worker paths before adding broader synthetic-load instrumentation.
+- [x] T4 Corrections and focused verification: bounded health-lite gateway probes, self-healing admin reliability DB reads, and all timer oneshot execution ceilings are covered by red/green regressions.
+- [x] T5 Full verification and production deployment completed.
+
+## Review
+
+- Bounded recovery metrics: the admin reliability read path now has a 3s self-healing deadline versus the former roughly 300s client transport ceiling, a 99% worst-case tail-latency reduction. `/health/lite` now fails safely within 0.5s when its read-only gateway probe wedges; it previously had no finite application deadline. Breadth and VCG now release within 240s and refresh within 480s instead of blocking future timer slots indefinitely.
+- Fleet pressure contract: 33/33 installed systemd services are now checked for a finite recovery boundary, either a restart policy for long-running units or an execution cap for timer oneshots. Unsafe live load against IB, order, portfolio-sync, scanner/UW, and Playwright services remains intentionally excluded; those require an isolated staging stack for a defensible throughput claim.
+- Verification before deployment: targeted API 78 passed, systemd 237 passed, Python 4,193 passed / 13 skipped / 90 deselected, cloud 687 passed / 2 skipped, and the full web coverage run plus typecheck passed.
+- CI run `29630430683` passed secret scan, Python, perimeter, and full Vitest gates. Its first deployment preflight correctly refused the release because the root-published control-plane manifest had the prior hash for `services/radon-refresh.service`. Bootstrap initially reported current because `/home/radon/radon` was one commit behind; fast-forwarding it to the tested SHA before root bootstrap repaired the manifest without bypassing the preflight.
+- Production closure: the VPS checkout was fast-forwarded to `20c4b14b`, then root bootstrap installed and verified 20 control-plane artifacts. Rerunning CI `29630430683` passed every gate and deployed successfully. Live verification: health schema v2 returned `ok=true`, `overall_state=up`; `radon-api`, `radon-nextjs`, `radon-relay`, `radon-monitor`, `radon-newsfeed`, and `radon-health` are active.
+
+# Task: Production runbook and memory reconciliation (2026-07-18)
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit canonical and secondary runbooks for stale standalone `radon-cloud` deployment claims and identify the authoritative 2026-07-18 recovery evidence.
+- T2 depends_on: [T1] - Update canonical cloud deployment/migration runbooks with the exact-SHA checkout, root bootstrap, manifest-preflight, CI rerun, and live-health contract.
+- T3 depends_on: [T1] - Align secondary repository, operations, and forecasting references with monorepo ownership without duplicating lifecycle internals.
+- T4 depends_on: [T2, T3] - Record the durable lesson, reconcile task-review text, verify documentation links/searches, and report the preserved operational facts.
+
+## Checklist
+
+- [x] T1 Documentation and memory audit complete.
+- [x] T2 Canonical runbooks updated with the exact-target checkout and fail-closed bootstrap/deploy sequence.
+- [x] T3 Secondary references aligned; the legacy directory is documented only as the external secrets/runtime-media exception, and the historical cloud plan is clearly archived.
+- [x] T4 Memory/review reconciliation and verification complete.
+
+## Review
+
+- Canonical runbooks (`cloud/CLAUDE.md`, `docs/monorepo-cloud-migration.md`) now require proving the VPS checkout equals the tested SHA before root bootstrap, then preserving manifest preflight, rerunning CI, and verifying the schema-v2/core-service contract.
+- Secondary docs now name monorepo `cloud/` as the source of deploy tooling, units, Caddy, and Compose. `/home/radon/radon-cloud/.env` remains deliberately documented as external host secrets only; runtime-media and historical archival references are explicitly scoped.
+- Memory records the stale-checkout false-current failure mode and the verified recovery: target `20c4b14b`, bootstrap installed 20 artifacts after the fast-forward, CI `29630430683` deployed successfully, and live status was `schema_version=2`, `ok=true`, `overall_state=up` with six core services active.
+- Verification: `git diff --check` passed; changed markdown links and all current ownership/deployment references were checked. Historical `cloud/PLAN.md` now carries a non-executable archived-plan banner.
+
+# Task: Current push-notification reliability triage (2026-07-19)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile active Pushover receipts, tags, retry state, and cancellation evidence without changing delivery state.
+- T2 depends_on: [] - Inspect current health, watchdog, service-health, and unit evidence without mutating production.
+- T3 depends_on: [T1, T2] - Correlate notifications to the underlying reliability incident and report current severity, impact, and recovery status.
+
+## Checklist
+
+- [x] T1 Push-delivery evidence.
+- [x] T2 Service and watchdog evidence.
+- [x] T3 Correlated terse incident report.
+
+## Review
+
+- Read-only investigation at 2026-07-20 03:04Z: the active P1 is `external-health-probe`, dispatched as a Pushover Emergency at 03:00Z (60-second retry, one-hour expiry). It is a monitoring-plane dead-man alert: the independent GitHub Actions probe has been queued/pending since 01:48Z/02:51Z and its last successful off-box observation was 00:58Z, exceeding the two-hour freshness threshold.
+- Production itself is healthy: public edge and local health returned `ok=true` / `overall_state=up`; API, Next.js, relay, monitor, newsfeed, and IB are active. Breadth and portfolio-sync P1s are resolved and are not the current phone notifications.
+- Separate non-emergency P2 items: `cash-flow-sync` is waiting for its scheduled 2026-07-20 21:00Z retry after an IB Flex 1001 throttle; `config-drift` reports that live `radon-breadth.service` lacks the repository `TimeoutStartSec=240` setting. No acknowledgements, cancellations, restarts, mutations, or deploys were performed.
