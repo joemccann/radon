@@ -113,10 +113,11 @@ data/price_history_cache/
 data/service_health/
 # Nightly Turso dump pulls (DUR-13, rsync'd from the VPS — never commit)
 data/db_backups/
-# Runtime-owned by preset_rebalance handler on the VPS; tracking it trips
-# deploy.sh's tracked-drift guard (untracked 2026-07-20, same class as
-# tag_taxonomy.json 2026-07-15)
-data/presets/changelog.json
+# Runtime-owned by the preset_rebalance handler on the VPS; tracking these
+# trips deploy.sh's tracked-drift guard on every rebalance (untracked
+# 2026-07-20 after changelog.json, then r2k-*.json, blocked deploys — same
+# class as tag_taxonomy.json 2026-07-15). VPS copies are authoritative.
+data/presets/
 # Daily journald snapshots pulled from the VPS (DUR-12, laptop launchd job)
 data/journal_archive/
 # host_metrics sampler's capped local fallback when Turso writes fail (DUR-12)
