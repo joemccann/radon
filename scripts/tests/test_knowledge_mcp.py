@@ -195,6 +195,16 @@ class TestKbSearch:
     def test_blank_query_is_error(self, db):
         assert "error" in _kb_search_impl(db, None, "   ")
 
+    def test_oversized_source_list_is_error(self, db):
+        result = _kb_search_impl(db, None, "cobalt", sources=["journal"] * 50)
+        assert set(result) == {"error"}
+        assert "too many source" in result["error"]
+
+    def test_oversized_scope_list_is_error(self, db):
+        result = _kb_search_impl(db, None, "cobalt", scopes=["ops"] * 50)
+        assert set(result) == {"error"}
+        assert "too many scope" in result["error"]
+
     def test_limit_clamped_to_max(self, db):
         docs = [
             _doc(source=source, doc_key=f"{source}-{ix}", content="cobalt note")

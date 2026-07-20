@@ -41,6 +41,11 @@ CONTENT_MAX_CHARS = 1200
 SUMMARY_MAX_CHARS = 500
 TITLE_MAX_CHARS = 200
 DOC_KEY_MAX_CHARS = 160
+# Cap scope/source filter list length — parity with the FastAPI route's
+# _validated_knowledge_filter. Every accepted value becomes one bound ?
+# placeholder in retrieve.py's IN(...) clause; a value is always parameterized
+# (never an injection vector), but an unbounded list is needless work.
+FILTER_MAX_ITEMS = 10
 SEARCH_LIMIT_DEFAULT = 6
 SEARCH_LIMIT_MAX = 10
 RECENT_LIMIT_DEFAULT = 10
@@ -79,6 +84,8 @@ def _kb_search_impl(
         ("scope", scopes, KNOWN_SCOPES),
         ("source", sources, KNOWN_SOURCES),
     ):
+        if values is not None and len(values) > FILTER_MAX_ITEMS:
+            return {"error": f"too many {field}s (max {FILTER_MAX_ITEMS})"}
         error = _unknown_values_error(field, values, known)
         if error:
             return {"error": error}
