@@ -3,7 +3,9 @@
 384d to match migration 0028's F32_BLOB(384). Runs on CPU via onnxruntime so
 journal/eval text never transits a third-party embeddings API (plan §Key
 decisions). The model (~67 MB ONNX) downloads on first use into
-FASTEMBED_CACHE_PATH — set it on hosts where /tmp is ephemeral.
+FASTEMBED_CACHE_PATH, defaulted here to ~/.cache/fastembed so every process
+of the same user (FastAPI, ingest, CLI) shares one copy instead of
+fastembed's ephemeral /tmp default; an explicit env value wins.
 
 get_embedder() is a lazy singleton and degrades gracefully: it returns None
 when RADON_KB_EMBED_DISABLED=1 or fastembed is missing/broken, and ingest
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from typing import Callable, Sequence
 
 EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
@@ -24,17 +27,21 @@ Embedder = Callable[[Sequence[str]], list[list[float]]]
 
 _UNSET = object()
 _embedder: object = _UNSET  # Embedder, None (unavailable), or _UNSET
+_embedder_build_lock = threading.Lock()
 
 
 def get_embedder() -> Embedder | None:
     """Return the batch-embedding callable, or None when embeddings are
     disabled or unavailable. Build failures are cached — one loud stderr
-    line, not one per batch."""
+    line, not one per batch. Double-checked lock so concurrent cold starts
+    (asyncio.to_thread workers) build the ~67 MB model exactly once."""
     global _embedder
     if os.environ.get(DISABLE_ENV) == "1":
         return None
     if _embedder is _UNSET:
-        _embedder = _build_embedder()
+        with _embedder_build_lock:
+            if _embedder is _UNSET:
+                _embedder = _build_embedder()
     return _embedder  # type: ignore[return-value]
 
 
@@ -52,6 +59,13 @@ def _import_text_embedding():
 
 
 def _build_embedder() -> Embedder | None:
+    # fastembed's default cache lives under tempfile.gettempdir() — ephemeral
+    # on the VPS, so a process without an explicit FASTEMBED_CACHE_PATH (the
+    # FastAPI server) would re-download the model instead of finding the copy
+    # the ingest unit already has. setdefault keeps explicit unit env winning.
+    os.environ.setdefault(
+        "FASTEMBED_CACHE_PATH", os.path.expanduser("~/.cache/fastembed")
+    )
     try:
         text_embedding_class = _import_text_embedding()
         model = text_embedding_class(EMBEDDING_MODEL)

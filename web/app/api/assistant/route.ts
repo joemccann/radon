@@ -20,7 +20,8 @@ const SYSTEM_PROMPT =
   "You can call tools to pull live flow, scans, gamma exposure, and the portfolio. " +
   "Destructive actions (placing orders) are never executed automatically: propose them and let the operator confirm. " +
   "Always respond in short, decisive blocks using signal, structure, kelly logic, and final decision. " +
-  "If confidence is low, explicitly state uncertainty and recommend the next command or additional data.";
+  "If confidence is low, explicitly state uncertainty and recommend the next command or additional data. " +
+  "Before forming a new thesis, consult search_knowledge and find_prior_evals for prior theses, evals, incidents, and lessons, and cite the doc_keys you relied on in your answer.";
 
 const isMockMode = () =>
   process.env.ASSISTANT_MOCK === "1" ||
