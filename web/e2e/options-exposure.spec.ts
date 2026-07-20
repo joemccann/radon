@@ -133,6 +133,23 @@ test("Options workspace opens its Net GEX tab with the captured controls and cli
   await expect(page.getByRole("table", { name: "MU options exposure by strike" })).toBeVisible();
   await expect(page.getByTestId("exposure-row-855")).toHaveAttribute("data-spot", "true");
   await expect(page.getByTestId("live-data-degraded")).toHaveCount(0);
+  expect(await page.getByRole("columnheader").evaluateAll(
+    (headers) => headers.every((header) => getComputedStyle(header).textAlign === "center"),
+  )).toBe(true);
+
+  await page.locator(".content").evaluate((content) => content.scrollTo({ top: content.scrollHeight }));
+  const stickyHeader = await page.evaluate(() => {
+    const content = document.querySelector<HTMLElement>(".content");
+    const headers = [...document.querySelectorAll<HTMLTableCellElement>("[data-testid='options-exposure-table-wrap'] th")];
+    if (!content || headers.length === 0) return null;
+    return {
+      contentTop: content.getBoundingClientRect().top,
+      scrollTop: content.scrollTop,
+      headerTops: headers.map((header) => header.getBoundingClientRect().top),
+    };
+  });
+  expect(stickyHeader?.scrollTop).toBeGreaterThan(0);
+  expect(stickyHeader?.headerTops.every((top) => Math.abs(top - (stickyHeader?.contentTop ?? top)) <= 1)).toBe(true);
 
   await page.screenshot({
     path: resolve(process.cwd(), "../tasks/artifacts/options-exposure-desktop.png"),

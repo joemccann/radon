@@ -2,7 +2,7 @@
   container-type: inline-size;
   width: 100%;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   color: var(--text-primary);
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
@@ -198,13 +198,14 @@
 .tableWrap {
   width: 100%;
   max-width: 100%;
-  overflow-x: hidden;
+  overflow: visible;
 }
 
 .table {
   width: 100%;
   table-layout: fixed;
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0;
   font-family: var(--font-mono);
   font-size: var(--text-table);
   font-variant-numeric: tabular-nums;
@@ -227,6 +228,8 @@
 }
 
 .table thead {
+  position: relative;
+  z-index: 2;
   color: var(--text-muted);
   background: var(--bg-panel-raised);
 }
@@ -243,10 +246,15 @@
 }
 
 .table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 2;
   height: 32px;
+  background: var(--bg-panel-raised);
   font-size: var(--text-meta);
   font-weight: 500;
   letter-spacing: 0.08em;
+  text-align: center;
   text-transform: uppercase;
 }
 

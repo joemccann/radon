@@ -55,6 +55,7 @@ function formatTimestamp(value: string): string {
 
 function compactNumber(value: number): string {
   const absolute = Math.abs(value);
+  if (absolute >= 1_000_000_000_000) return `${(absolute / 1_000_000_000_000).toFixed(2)}T`;
   if (absolute >= 1_000_000_000) return `${(absolute / 1_000_000_000).toFixed(2)}B`;
   if (absolute >= 1_000_000) return `${(absolute / 1_000_000).toFixed(2)}M`;
   if (absolute >= 1_000) return `${(absolute / 1_000).toFixed(1)}K`;

@@ -423,6 +423,10 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 
 - Keep exploratory UI prototypes, mockups, and screenshot artifacts local by default. Add narrow ignore rules when they are generated so they do not appear as accidental source changes; do not ignore existing tracked report or mockup files without an explicit removal request.
 
+## 2026-07-20 - Options measurement tables
+
+- When an Options exposure table extends beyond the viewport, its measurement headers must be sticky, opaque, and layered above row content. Header centering alone does not preserve the column context while scanning a long strike ladder.
+
 ## 2026-07-17 - Reliability notification verification
 
 - Do not conclude that a Pushover emergency is stopped from an application-side cancellation log alone. Confirm the operator's device delivery has ceased and, when it has not, re-open the live receipt/cancellation investigation immediately; application cooldown state is not proof of Pushover receipt state.

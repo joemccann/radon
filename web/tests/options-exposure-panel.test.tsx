@@ -3,11 +3,15 @@
  */
 
 import React from "react";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import OptionsExposurePanel from "@/components/OptionsExposurePanel";
 import { EXPOSURE_FIXTURE } from "./options-exposure-fixture";
+
+const panelCss = readFileSync(resolve(__dirname, "../components/OptionsExposurePanel.module.css"), "utf8");
 
 const useOptionsExposureMock = vi.fn();
 
@@ -53,6 +57,38 @@ describe("OptionsExposurePanel", () => {
     expect(within(spotRow).getByText("SPOT")).toBeTruthy();
     expect(screen.getByTestId("exposure-bar-90").getAttribute("data-sign")).toBe("positive");
     expect(screen.getByTestId("exposure-bar-100").getAttribute("data-sign")).toBe("negative");
+  });
+
+  it("renders large Net GEX in a compact signed currency unit", () => {
+    useOptionsExposureMock.mockReturnValue({
+      data: {
+        ...EXPOSURE_FIXTURE,
+        cells: {
+          ...EXPOSURE_FIXTURE.cells,
+          net_gex: [-27_178_360_000_000, 2],
+        },
+      },
+      loading: false,
+      error: null,
+      refresh: vi.fn(),
+    });
+
+    render(<OptionsExposurePanel symbol="MU" />);
+
+    expect(screen.getByTestId("exposure-value-90").textContent).toBe("-$27.18T");
+  });
+
+  it("centers every exposure table header", () => {
+    expect(panelCss).toMatch(/\.table thead th\s*\{[^}]*text-align:\s*center;/s);
+  });
+
+  it("keeps the exposure headers above a long scrolling strike ladder", () => {
+    expect(panelCss).toMatch(/\.panel\s*\{[^}]*overflow:\s*visible;/s);
+    expect(panelCss).toMatch(/\.tableWrap\s*\{[^}]*overflow:\s*visible;/s);
+    expect(panelCss).toMatch(/\.table\s*\{[^}]*border-collapse:\s*separate;[^}]*border-spacing:\s*0;/s);
+    expect(panelCss).toMatch(
+      /\.table thead th\s*\{[^}]*position:\s*sticky;[^}]*top:\s*0;[^}]*z-index:\s*2;[^}]*background:\s*var\(--bg-panel-raised\);/s,
+    );
   });
 
   it("filters expiration locally without refetching", () => {
