@@ -7,6 +7,7 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
+import { PUBLIC_SHARE_API_ROUTES } from "@/lib/publicShareRoutes";
 import { handleDemoGate } from "@/lib/demo/demoGate";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 
@@ -121,25 +122,11 @@ export function isLocalDevAuthBypassEnabled(
   return isLocalHost(url);
 }
 
-// Share-card link previews — link-preview bots (Twitter, Slack, iMessage)
-// have no Clerk session and can't sign in. EXPLICIT list, not a pattern:
-// the old `/^\/api(?:\/[^/]+)*\/share(?:\/.*)?$/` regex silently published
-// any future `/api/**/share*` path the moment its route file shipped. A new
-// share route must be added here deliberately (and to the filesystem pin in
-// web/tests/middleware-share-allowlist.test.ts, which fails until it is).
-export const PUBLIC_SHARE_API_ROUTES = [
-  "/api/gex/share",
-  "/api/gex/share/content",
-  "/api/internals/share",
-  "/api/internals/share/content",
-  "/api/menthorq/cta/share",
-  "/api/menthorq/cta/share/content",
-  "/api/regime/share",
-  "/api/regime/share/content",
-  "/api/share/pnl",
-  "/api/vcg/share",
-  "/api/vcg/share/content",
-] as const;
+// Share-card link previews — definition + rationale live in
+// @/lib/publicShareRoutes (shared with app/robots.ts, which must carve these
+// out of its Disallow: / so preview bots keep unfurling shared cards).
+// Re-exported so the perimeter tests keep pinning it from the middleware.
+export { PUBLIC_SHARE_API_ROUTES };
 
 // Inbound webhooks — verified by the SENDER's signature inside the route
 // handler (svix HMAC for Clerk), not by a Clerk session. EXPLICIT list with a
@@ -169,6 +156,10 @@ export const isPublicRoute = createRouteMatcher([
   // Expired-demo landing page — the demo gate redirects signed-in expired
   // trial users here; it must bypass auth or the gate would loop on itself.
   "/trial-expired",
+  // Crawler policy (app/robots.ts) — crawlers have no Clerk session; without
+  // this exemption /robots.txt redirects to /sign-in and the disallow-all
+  // policy is never served (Google indexed exactly that redirect URL).
+  "/robots.txt",
   ...PUBLIC_SHARE_API_ROUTES,
   ...PUBLIC_WEBHOOK_API_ROUTES,
   "/api/service-health",

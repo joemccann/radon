@@ -14,6 +14,9 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 function securityHeaders() {
   const headers = [
     { key: "X-Frame-Options", value: "DENY" },
+    // Authenticated terminal — never indexed. SEO lives on radon.run (site/).
+    // Belt to app/robots.ts's suspenders: de-indexes URLs crawlers already hold.
+    { key: "X-Robots-Tag", value: "noindex, nofollow" },
     { key: "X-Content-Type-Options", value: "nosniff" },
     { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
     {
