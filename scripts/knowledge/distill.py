@@ -38,6 +38,28 @@ _SYSTEM_PROMPT = (
     "stock/ETF/index symbols the document actually discusses, [] when none."
 )
 
+# Redact secret / PII shapes from document text BEFORE it egresses to the
+# third-party Cerebras API. Eval/journal/incident content can carry the real IB
+# account id (U\d{6,}), a Turso URL, or a token; none of it helps distillation,
+# and the operator's data-handling rule is to never ship account ids/secrets to
+# third parties. The raw content still lives in the LOCAL operator-only corpus —
+# this only scrubs the copy that leaves the box. Mirrors server.py's
+# _SECRET_SCRUB_PATTERNS.
+_EGRESS_SCRUB_PATTERNS = (
+    (re.compile(r"libsql://[^\s'\"]+", re.IGNORECASE), "[redacted-db-url]"),
+    (re.compile(r"https://[a-z0-9.-]+\.turso\.io[^\s'\"]*", re.IGNORECASE), "[redacted-db-url]"),
+    (re.compile(r"eyJ[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]{6,}\.[A-Za-z0-9_-]*"), "[redacted-jwt]"),
+    (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
+    (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
+    (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
+)
+
+
+def _scrub_for_egress(text: str) -> str:
+    for pattern, repl in _EGRESS_SCRUB_PATTERNS:
+        text = pattern.sub(repl, text)
+    return text
+
 
 def distill(title: str | None, content: str, *, timeout: int = 20) -> dict | None:
     """Return {"summary": str, "tickers": list[str]} or None on any failure
@@ -77,7 +99,7 @@ def _request_payload(title: str | None, content: str) -> dict:
         "model": os.environ.get(MODEL_ENV) or DEFAULT_DISTILL_MODEL,
         "messages": [
             {"role": "system", "content": _SYSTEM_PROMPT},
-            {"role": "user", "content": document[:MAX_CONTENT_CHARS]},
+            {"role": "user", "content": _scrub_for_egress(document[:MAX_CONTENT_CHARS])},
         ],
         "temperature": 0,
     }

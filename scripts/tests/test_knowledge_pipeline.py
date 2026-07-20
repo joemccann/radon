@@ -105,6 +105,32 @@ class TestDistill:
         assert len(calls) == 1
         assert calls[0][0] == distill_mod.CEREBRAS_CHAT_COMPLETIONS_URL
 
+    def test_account_id_and_secrets_scrubbed_before_egress(self, monkeypatch):
+        # Eval/journal content carries the real IB account id + secret shapes;
+        # none of it may reach the third-party Cerebras API.
+        sent = {}
+
+        def fake_post(url, **kwargs):
+            sent["content"] = kwargs["json"]["messages"][1]["content"]
+            return _FakeResponse(200, _chat_response(_GOOD_DISTILLATION))
+
+        monkeypatch.setattr(distill_mod.requests, "post", fake_post)
+
+        # All fabricated placeholder values — never a real account/token/host.
+        distill_mod.distill(
+            "Portfolio",
+            "Account U1234567 held libsql://example-test.turso.io token "
+            "sk-ant-PLACEHOLDER00 and a NVDA call.",
+        )
+
+        body = sent["content"]
+        assert "U1234567" not in body
+        assert "[redacted-account]" in body
+        assert "turso.io" not in body
+        assert "sk-ant-PLACEHOLDER00" not in body
+        # Non-secret substance survives so distillation still works.
+        assert "NVDA call" in body
+
     def test_code_fenced_json_is_parsed(self, monkeypatch):
         fenced = f"```json\n{_GOOD_DISTILLATION}\n```"
         monkeypatch.setattr(
