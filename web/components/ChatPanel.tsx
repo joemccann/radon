@@ -67,6 +67,13 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const atBottomRef = useRef(true);
   const composingRef = useRef(false);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // ChatPanel mounts inside the ⌘J overlay; the operator expects to type
+  // immediately, so the composer takes focus on open.
+  useEffect(() => {
+    composerRef.current?.focus();
+  }, []);
   const sectionPrompts = quickPromptsBySection[activeSection];
   const isBusy = status === "submitted" || status === "streaming";
 
@@ -359,6 +366,7 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
             <form suppressHydrationWarning className="chat-input-row" onSubmit={sendMessage}>
               <textarea
                 suppressHydrationWarning
+                ref={composerRef}
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 onKeyDown={onComposerKeyDown}

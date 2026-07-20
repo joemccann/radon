@@ -434,3 +434,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-07-18 - Documentation scope
 
 - When updating ownership or deployment documentation, preserve still-current architecture, environment, authentication, service, and operator guidance. Make surgical replacements for stale authority paths and add canonical runbook links; do not replace a broad operational README with a terse pointer page unless explicitly asked.
+# 2026-07-20 — Keyboard-launched overlays
+
+- A keyboard-launched dialog must move focus to its primary text input on mount and retain a regression that verifies both focus and Escape dismissal.
