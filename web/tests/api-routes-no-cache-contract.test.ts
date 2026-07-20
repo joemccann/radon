@@ -36,6 +36,8 @@ const DYNAMIC_ROUTES = [
   "app/api/profile/route.ts",
   "app/api/bookmarks/route.ts",
   "app/api/watchlist/route.ts",
+  "app/api/knowledge/search/route.ts",
+  "app/api/knowledge/prior-evals/route.ts",
 ];
 
 // Client-side fetch sites that hit a disk-backed dynamic route. Each fetch
@@ -269,6 +271,8 @@ const NO_STORE_ROUTES = [
   "app/api/bookmarks/[post_id]/route.ts",
   "app/api/watchlist/route.ts",
   "app/api/watchlist/[symbol]/route.ts",
+  "app/api/knowledge/search/route.ts",
+  "app/api/knowledge/prior-evals/route.ts",
 ];
 
 describe("API route handlers — every response must set Cache-Control: no-store", () => {

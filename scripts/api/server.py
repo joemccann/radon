@@ -66,6 +66,10 @@ from clients.menthorq_dashboard_client import (
     MenthorQDashboardTimeoutError,
     MenthorQDashboardUpstreamError,
 )
+# Lightweight imports: get_embedder is a lazy singleton (fastembed/ONNX load
+# only on first call, and only ever inside asyncio.to_thread — see /knowledge).
+from knowledge.embed import get_embedder
+from knowledge.retrieve import hybrid_search
 
 # Load .env from project root for Python scripts.
 # .env.ib-mode (managed by scripts/ib mode) overlays after .env so its
@@ -4031,6 +4035,190 @@ def _fetch_uw_short_data(ticker: str) -> Optional[dict]:
     except UWAPIError as exc:
         logger.info("short-availability/%s: UW get_short_data error: %s", ticker, exc)
         return None
+
+
+# ---------------------------------------------------------------------------
+# Knowledge retrieval (Phase 2 — hybrid search over the `knowledge` table)
+# ---------------------------------------------------------------------------
+
+_KNOWLEDGE_QUERY_MAX_CHARS = 500
+_KNOWLEDGE_LIMIT_DEFAULT = 8
+_KNOWLEDGE_LIMIT_MAX = 20
+_KNOWLEDGE_TICKER_RE = re.compile(r"^[A-Z0-9]{1,6}$")
+_KNOWLEDGE_FILTER_MAX_ITEMS = 10
+_KNOWLEDGE_FILTER_MAX_ITEM_CHARS = 64
+_KNOWLEDGE_COMPACT_CONTENT_CHARS = 1200
+_KNOWLEDGE_COMPACT_NEIGHBOR_CHARS = 400
+_KNOWLEDGE_COMPACT_MAX_NEIGHBORS = 2
+_PRIOR_EVAL_SOURCES = ["journal", "evals"]
+_KNOWLEDGE_RESULT_FIELDS = (
+    "source", "scope", "doc_key", "chunk_ix", "title", "summary",
+    "content", "metadata", "score", "last_activity_at", "neighbors",
+)
+
+
+class _KnowledgeRows:
+    def __init__(self, rows: list[tuple]):
+        self._rows = rows
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows
+
+
+class _KnowledgeHranaConnection:
+    """Duck-typed connection for knowledge.retrieve.hybrid_search backed by
+    the bounded hrana pipeline — sync libsql is banned in this process
+    (Event-Loop Discipline, scripts/api/CLAUDE.md)."""
+
+    def execute(self, sql: str, args=()) -> _KnowledgeRows:
+        return _KnowledgeRows(db_http.hrana_execute(sql, tuple(args)))
+
+
+def _knowledge_search_in_thread(
+    query: str,
+    scopes: Optional[List[str]],
+    sources: Optional[List[str]],
+    limit: int,
+) -> tuple[list[dict], str]:
+    """Embed the query + run hybrid search, entirely off the event loop:
+    the first get_embedder() call may load the ~67 MB ONNX model, embedding
+    is sync CPU work, and each hrana statement blocks up to its timeout."""
+    query_embedding = None
+    embedder = get_embedder()
+    if embedder is not None:
+        try:
+            query_embedding = embedder([query])[0]
+        except Exception as exc:
+            logger.warning("knowledge: query embedding failed (%s) — FTS-only", exc)
+            query_embedding = None
+    results = hybrid_search(
+        _KnowledgeHranaConnection(),
+        query,
+        query_embedding=query_embedding,
+        scopes=scopes,
+        sources=sources,
+        limit=limit,
+    )
+    retrieval = "hybrid" if query_embedding is not None else "fts-only"
+    return results, retrieval
+
+
+async def _run_knowledge_retrieval(
+    query: str,
+    scopes: Optional[List[str]],
+    sources: Optional[List[str]],
+    limit: int,
+    compact: bool,
+) -> tuple[list[dict], str]:
+    try:
+        results, retrieval = await asyncio.to_thread(
+            _knowledge_search_in_thread, query, scopes, sources, limit
+        )
+    except db_http.DbHttpError as exc:
+        raise HTTPException(
+            status_code=503, detail="Knowledge retrieval is unavailable"
+        ) from exc
+    return [_knowledge_result_row(row, compact) for row in results], retrieval
+
+
+def _knowledge_result_row(row: dict, compact: bool) -> dict:
+    shaped = {field: row.get(field) for field in _KNOWLEDGE_RESULT_FIELDS}
+    neighbors = [
+        {"chunk_ix": neighbor.get("chunk_ix"), "content": neighbor.get("content") or ""}
+        for neighbor in (shaped["neighbors"] or [])
+    ]
+    if compact:
+        shaped["content"] = (shaped["content"] or "")[:_KNOWLEDGE_COMPACT_CONTENT_CHARS]
+        neighbors = [
+            {
+                "chunk_ix": neighbor["chunk_ix"],
+                "content": neighbor["content"][:_KNOWLEDGE_COMPACT_NEIGHBOR_CHARS],
+            }
+            for neighbor in neighbors[:_KNOWLEDGE_COMPACT_MAX_NEIGHBORS]
+        ]
+    shaped["neighbors"] = neighbors
+    return shaped
+
+
+def _validated_knowledge_query(body: dict) -> str:
+    query = body.get("query")
+    if isinstance(query, str):
+        query = query.strip()
+        if 1 <= len(query) <= _KNOWLEDGE_QUERY_MAX_CHARS:
+            return query
+    raise HTTPException(
+        status_code=422, detail="query must be a string of 1-500 characters"
+    )
+
+
+def _validated_knowledge_filter(value, field: str) -> Optional[List[str]]:
+    if value is None:
+        return None
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise HTTPException(status_code=422, detail=f"{field} must be a list of strings")
+    # Each value becomes a SQL placeholder in three statements — cap the list
+    # to the known scope/source vocabulary size so an authenticated caller
+    # can't ship megabyte-scale SQL to Turso.
+    if len(value) > _KNOWLEDGE_FILTER_MAX_ITEMS or any(
+        len(item) > _KNOWLEDGE_FILTER_MAX_ITEM_CHARS for item in value
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{field} accepts at most {_KNOWLEDGE_FILTER_MAX_ITEMS} values of "
+                f"{_KNOWLEDGE_FILTER_MAX_ITEM_CHARS} characters each"
+            ),
+        )
+    return value or None
+
+
+def _clamped_knowledge_limit(value) -> int:
+    try:
+        limit = int(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail="limit must be an integer") from exc
+    return max(1, min(limit, _KNOWLEDGE_LIMIT_MAX))
+
+
+@app.post("/knowledge/search")
+async def knowledge_search(request: Request):
+    """Hybrid retrieval (FTS5 BM25 + vector + recency) over the knowledge
+    base. Degrades to FTS-only when the local embedder is unavailable."""
+    body = await request.json()
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=422, detail="body must be a JSON object")
+    query = _validated_knowledge_query(body)
+    scopes = _validated_knowledge_filter(body.get("scopes"), "scopes")
+    sources = _validated_knowledge_filter(body.get("sources"), "sources")
+    limit = _clamped_knowledge_limit(body.get("limit", _KNOWLEDGE_LIMIT_DEFAULT))
+    compact = bool(body.get("compact", False))
+
+    # Demo isolation: the TEST_MODE instance gets no knowledge base — the
+    # corpus carries real journal/eval figures (plan §Key decisions).
+    if test_mode:
+        return {"results": [], "retrieval": "fts-only"}
+
+    results, retrieval = await _run_knowledge_retrieval(
+        query, scopes, sources, limit, compact
+    )
+    return {"results": results, "retrieval": retrieval}
+
+
+@app.get("/knowledge/prior-evals")
+async def knowledge_prior_evals(ticker: str, limit: int = _KNOWLEDGE_LIMIT_DEFAULT,
+                                compact: bool = False):
+    """Prior journal entries and evals for one ticker."""
+    upper = ticker.strip().upper()
+    if not _KNOWLEDGE_TICKER_RE.fullmatch(upper):
+        raise HTTPException(status_code=400, detail="Invalid ticker")
+
+    if test_mode:
+        return {"ticker": upper, "results": [], "retrieval": "fts-only"}
+
+    results, retrieval = await _run_knowledge_retrieval(
+        upper, None, _PRIOR_EVAL_SOURCES, _clamped_knowledge_limit(limit), compact
+    )
+    return {"ticker": upper, "results": results, "retrieval": retrieval}
 
 
 # ---------------------------------------------------------------------------

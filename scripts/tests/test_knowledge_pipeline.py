@@ -205,6 +205,32 @@ class TestGetEmbedder:
         assert embed_mod.get_embedder() is None
         assert len(attempts) == 1
 
+    def test_concurrent_cold_start_builds_once(self, monkeypatch, fresh_embedder_cache):
+        import threading
+        import time
+
+        build_calls = []
+        start_barrier = threading.Barrier(4)
+
+        def slow_build():
+            build_calls.append(1)
+            time.sleep(0.05)
+            return lambda texts: [[0.0] * embed_mod.EMBEDDING_DIM for _ in texts]
+
+        monkeypatch.setattr(embed_mod, "_build_embedder", slow_build)
+
+        def cold_start():
+            start_barrier.wait(timeout=2)
+            embed_mod.get_embedder()
+
+        workers = [threading.Thread(target=cold_start) for _ in range(4)]
+        for worker in workers:
+            worker.start()
+        for worker in workers:
+            worker.join(timeout=5)
+
+        assert len(build_calls) == 1
+
 
 class TestEmbeddingText:
     def test_prefers_summary_over_content(self):

@@ -27,10 +27,81 @@ export type ToolResult = {
 };
 
 const READ_TIMEOUT_MS = 130_000;
+const KNOWLEDGE_TIMEOUT_MS = 30_000;
+const KNOWLEDGE_RESULT_LIMIT = 6;
+const KNOWLEDGE_CONTENT_CHARS = 1200;
+const KNOWLEDGE_SUMMARY_CHARS = 300;
+const KNOWLEDGE_TITLE_CHARS = 200;
+const KNOWLEDGE_DOC_KEY_CHARS = 160;
 
 function tickerOf(input: Record<string, unknown>): string {
   const raw = typeof input.ticker === "string" ? input.ticker.trim().toUpperCase() : "";
   return raw;
+}
+
+function stringListOf(input: Record<string, unknown>, key: string): string[] {
+  const raw = input[key];
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((item): item is string => typeof item === "string" && item.trim().length > 0);
+}
+
+function truncateText(text: string, maxChars: number): string {
+  return text.length > maxChars ? `${text.slice(0, maxChars)}...` : text;
+}
+
+type KnowledgeRow = {
+  source?: string;
+  scope?: string;
+  doc_key?: string;
+  chunk_ix?: number;
+  title?: string | null;
+  summary?: string | null;
+  content?: string;
+  score?: number;
+  last_activity_at?: string;
+};
+
+/**
+ * Renders one retrieval row as a bounded text block: citation header
+ * (source/scope, doc_key#chunk, title, score, recency) + truncated summary +
+ * truncated content. Never a raw JSON dump — the loop stringifies tool
+ * results verbatim, so boundedness has to be enforced here.
+ */
+function formatKnowledgeRow(row: KnowledgeRow): string {
+  const source = row.source ?? "unknown";
+  const scope = row.scope ?? "unknown";
+  const docKey = truncateText(row.doc_key ?? "unknown", KNOWLEDGE_DOC_KEY_CHARS);
+  const chunk = typeof row.chunk_ix === "number" ? `#${row.chunk_ix}` : "";
+  const title =
+    typeof row.title === "string" && row.title.trim()
+      ? ` | ${truncateText(row.title.trim(), KNOWLEDGE_TITLE_CHARS)}`
+      : "";
+  const score = typeof row.score === "number" ? row.score.toFixed(3) : "?";
+  const activity = row.last_activity_at ? `, ${row.last_activity_at}` : "";
+
+  const lines = [`[${source}/${scope}] ${docKey}${chunk}${title} (score ${score}${activity})`];
+  if (typeof row.summary === "string" && row.summary.trim()) {
+    lines.push(truncateText(row.summary.trim(), KNOWLEDGE_SUMMARY_CHARS));
+  }
+  if (typeof row.content === "string" && row.content.trim()) {
+    lines.push(truncateText(row.content.trim(), KNOWLEDGE_CONTENT_CHARS));
+  }
+  return lines.join("\n");
+}
+
+function formatKnowledgePayload(data: unknown): Record<string, unknown> {
+  const payload = (data ?? {}) as {
+    retrieval?: string;
+    ticker?: string;
+    results?: KnowledgeRow[];
+  };
+  const rows = Array.isArray(payload.results) ? payload.results : [];
+  return {
+    ...(typeof payload.ticker === "string" ? { ticker: payload.ticker } : {}),
+    retrieval: payload.retrieval ?? "unknown",
+    count: rows.length,
+    results: rows.map(formatKnowledgeRow),
+  };
 }
 
 export const ASSISTANT_TOOLS: AssistantTool[] = [
@@ -85,6 +156,69 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
     },
     run: (_input, token) =>
       radonFetch("/portfolio/sync", { method: "POST", timeout: 35_000, token }),
+  },
+  {
+    name: "search_knowledge",
+    description:
+      "Search Radon's knowledge base (journal, evals, docs, newsfeed, incidents) for prior theses, evaluations, incidents, and lessons. Returns compact scored excerpts with doc_keys for citation.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "Search query, e.g. 'NVDA gamma squeeze thesis'" },
+        scopes: {
+          type: "array",
+          items: { type: "string", enum: ["trading", "research", "ops"] },
+          description: "Optional scope filter",
+        },
+        sources: {
+          type: "array",
+          items: { type: "string", enum: ["journal", "evals", "docs", "newsfeed", "incidents"] },
+          description: "Optional source filter",
+        },
+      },
+      required: ["query"],
+    },
+    run: async (input, token) => {
+      const body: Record<string, unknown> = {
+        query: typeof input.query === "string" ? input.query.trim() : "",
+        compact: true,
+        limit: KNOWLEDGE_RESULT_LIMIT,
+      };
+      const scopes = stringListOf(input, "scopes");
+      if (scopes.length) body.scopes = scopes;
+      const sources = stringListOf(input, "sources");
+      if (sources.length) body.sources = sources;
+      const data = await radonFetch("/knowledge/search", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        timeout: KNOWLEDGE_TIMEOUT_MS,
+        token,
+      });
+      return formatKnowledgePayload(data);
+    },
+  },
+  {
+    name: "find_prior_evals",
+    description:
+      "Find prior Radon evaluations and journal history for a ticker. Use before forming a new thesis so past evals and outcomes inform the current one.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        ticker: { type: "string", description: "Underlying symbol, e.g. NVDA" },
+      },
+      required: ["ticker"],
+    },
+    run: async (input, token) => {
+      const ticker = tickerOf(input);
+      const data = await radonFetch(
+        `/knowledge/prior-evals?ticker=${encodeURIComponent(ticker)}&limit=${KNOWLEDGE_RESULT_LIMIT}&compact=true`,
+        { timeout: KNOWLEDGE_TIMEOUT_MS, token },
+      );
+      return formatKnowledgePayload(data);
+    },
   },
   {
     name: "place_order",
