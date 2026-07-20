@@ -1,5 +1,13 @@
 # Lessons
 
+## 2026-07-18 - Control-plane refresh must start from the target checkout
+
+- Bootstrap hashes the current VPS checkout, not an immutable release runner. When manifest preflight rejects a newer unit hash, first prove `/home/radon/radon` is at the exact tested SHA and fast-forward it as `radon` if it is behind; then run `bash cloud/scripts/bootstrap-control-plane.sh` as root from that checkout, without restarting Gateway, and rerun CI. A stale checkout can make bootstrap report “current” while preserving an old manifest. Never bypass or relax `preflight_control_plane`.
+
+## 2026-07-17 - Broad reliability work requires parallel, metric-bound evidence
+
+- When asked to pressure-test services or improve reliability broadly, use multiple focused agents from the outset: one for inventory and service boundaries, one for web, and one for backend/daemon paths. Do not report an aggregate percentage without a reproducible per-service baseline, a defined metric, and post-change evidence.
+
 ## 2026-07-11 — portfolio LIVE DATA DEGRADED on weekend (snapshot age)
 
 - GET `/api/portfolio` must never call IB (browser amplification fix). That is correct.
@@ -410,3 +418,15 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-07-17 - Options workspace entry state
 
 - Do not use a fixed example ticker as an implicit live-data query in a reusable options workspace. Require explicit valid ticker submission, keep provider identity out of the operator display, and use the established spectral measurement loader only after a request begins.
+
+## 2026-07-17 - Local UI artifacts
+
+- Keep exploratory UI prototypes, mockups, and screenshot artifacts local by default. Add narrow ignore rules when they are generated so they do not appear as accidental source changes; do not ignore existing tracked report or mockup files without an explicit removal request.
+
+## 2026-07-17 - Reliability notification verification
+
+- Do not conclude that a Pushover emergency is stopped from an application-side cancellation log alone. Confirm the operator's device delivery has ceased and, when it has not, re-open the live receipt/cancellation investigation immediately; application cooldown state is not proof of Pushover receipt state.
+
+## 2026-07-18 - Documentation scope
+
+- When updating ownership or deployment documentation, preserve still-current architecture, environment, authentication, service, and operator guidance. Make surgical replacements for stale authority paths and add canonical runbook links; do not replace a broad operational README with a terse pointer page unless explicitly asked.

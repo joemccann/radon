@@ -1,5 +1,17 @@
 # Radon Knowledge Base — Plan
 
+> **STATUS (2026-07-20): Phases 0–3 SHIPPED.** Corpus: 4,933 docs across all
+> five sources, hourly self-converging ingest on the VPS, golden-set hit@5
+> **0.917** (gate was 0.8). Assistant answers with doc_key citations in
+> production; `radon-kb` MCP server registered in `.mcp.json` for Claude Code.
+> Commits: Phase 0 `e10061b7`, Phase 1 `f3dee350` (+ `359f8120`, `1fcd25af`,
+> `ac883c84` hardening), Phase 2 `e61d9dd2`, Phase 3 `ed908a0c`.
+> Per-phase outcome notes are inline below. Phase 4 remains evidence-gated
+> and unbuilt. Operator follow-ups: curate `scripts/knowledge/golden_set.json`
+> (still `draft: true`), decide on indexing `web/CLAUDE.md`-class files (one
+> golden miss lives there), marketing doc publish gates
+> (`tasks/artifacts/knowledge-base-marketing.md`).
+
 Source pattern: [How Cerebras Built Its Enterprise Knowledge Base](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) (read 2026-07-18).
 
 ## What Cerebras built (compressed)
@@ -98,27 +110,59 @@ Key decisions:
 
 ## Implementation plan
 
-**Phase 0 — Spike + schema (~0.5 day)**
+**Phase 0 — Spike + schema (~0.5 day)** — ✅ SHIPPED `e10061b7`
 - Verify on current Turso plan: `F32_BLOB` columns, `vector_distance_cos`, `vector_top_k`, FTS5 virtual tables via the HTTP pipeline. Abort criteria defined above.
 - Migration `00XX_knowledge.sql`: `knowledge` table + FTS5 mirror + triggers.
 - `scripts/knowledge/{schema.py,store.py,retrieve.py}`: row contract, idempotent upsert on `content_hash`, hybrid search (FTS5 BM25 ∥ vector ∥ recency → RRF → dedup → neighbor expansion).
 - Unit tests with a fixture corpus (window-relative dates).
+- *Outcome:* all Turso capabilities confirmed. Two deviations from plan: the
+  ANN index is NOT backfilled by `CREATE INDEX` over existing rows, so
+  migration `0028` creates it before any ingest (ordering is load-bearing);
+  the FTS5 mirror is code-maintained rather than trigger-based because
+  `migrate.py`'s statement splitter cannot carry multi-statement trigger
+  bodies. Local `libsql_experimental` supports FTS5 + vector fns, so tests
+  run on real `:memory:` DBs with no scorer stubs.
 
-**Phase 1 — Connectors + backlog ingest (~1–2 days)**
+**Phase 1 — Connectors + backlog ingest (~1–2 days)** — ✅ SHIPPED `f3dee350` + hardening `359f8120`/`1fcd25af`/`ac883c84`
 - Connector contract: `fetch() -> Iterable[KnowledgeDoc]` per source; plugin modules under `scripts/knowledge/sources/`.
 - Sources in value order: journal (Turso rows + trade_log rationale), eval reports (`reports/*.html` → text via stdlib parser), docs + `tasks/lessons.md`, newsfeed posts, service_health incident digests.
 - Distillation via Cerebras (`scripts/knowledge/distill.py`), local embeddings (`embed.py`).
 - One-shot backfill script, then `radon-knowledge.timer` (30–60 min) + service_health heartbeat (`knowledge-ingest`, 24h staleness window).
 - Golden-set eval harness (`scripts/knowledge/eval_golden.py`, 20–30 real questions, hit@5 report).
+- *Outcome:* hourly timer at `:20` UTC, installed on the VPS via one-time
+  root transaction (deploy.sh does not install units). The backfill surfaced
+  four production lessons now encoded as tests: (1) host-local file sources
+  (evals, trade_log) must NEVER get vanished-doc prune authority — a
+  present-but-partial `reports/` on the VPS deleted 177 laptop docs; (2/3)
+  every read of a large corpus must paginate on an id cursor — one unbounded
+  SELECT of all posts, and later of all stored rows, each 502'd Turso's HTTP
+  pipeline; (4) changed docs are distilled/embedded/written in 200-doc
+  batches on fresh connections — one long-lived Hrana stream carrying idle
+  distillation minutes plus ~9k writes 502s, and batching makes progress
+  durable. Distillation runs on the VPS too (`CEREBRAS_API_KEY` was already
+  in the fleet env).
 
-**Phase 2 — Query surfaces (~0.5 day)**
+**Phase 2 — Query surfaces (~0.5 day)** — ✅ SHIPPED `e61d9dd2` (gate passed at 0.917)
 - FastAPI `GET/POST /knowledge/search` (authenticated, NOT auth-exempt; scope + source filters).
 - Assistant tools in `web/lib/assistant/tools.ts`: `search_knowledge`, `find_prior_evals(ticker)` — both READ tools through the existing loop; Next.js proxies via `radonFetch`. System prompt nudge to consult prior context before theses.
 - Gate: ships only if golden-set hit@5 ≥ 0.8.
+- *Outcome:* retrieval runs entirely inside `asyncio.to_thread` (embedder
+  cold load included); embedder-unavailable degrades to FTS-only; demo VM
+  `test_mode` short-circuits to empty results so trial users never see the
+  operator corpus; `compact=true` bounds payloads server-side; `embed.py`
+  defaults `FASTEMBED_CACHE_PATH` so radon-api reuses the ingest unit's
+  downloaded model. Verified live end to end: the assistant answered the EWY
+  risk-reversal thesis question with doc_key citations and cross-source
+  lessons (naked-put risk, 3 DTE vs the prior IWM eval's 14–60 DTE band).
 
-**Phase 3 — MCP server (~0.5 day)**
+**Phase 3 — MCP server (~0.5 day)** — ✅ SHIPPED `ed908a0c`
 - `scripts/knowledge/mcp_server.py` (stdio, `mcp` package): `kb_search`, `kb_recent`, `kb_prior_evals`, `kb_incidents`. LLM-free, narrow structured I/O (their design).
 - Register in `.mcp.json` for laptop Claude Code sessions.
+- *Outcome:* side-effect-free imports and a SELECT-only guarantee are both
+  test-pinned; output bounds mirror Phase 2. `hybrid_search` gained
+  `with_neighbors=False` so `kb_search` skips neighbor-expansion SELECTs it
+  never returned. Live stdio smoke verified clean JSON-RPC framing with zero
+  stdout pollution against the real corpus.
 
 **Phase 4 — Optional, evidence-gated**
 - LLM rerank pass (Cerebras scores 0–10) only if golden set shows fusion ordering is the bottleneck.
