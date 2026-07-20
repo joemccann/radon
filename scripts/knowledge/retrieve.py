@@ -139,9 +139,12 @@ def hybrid_search(
     limit: int = 10,
     now: datetime | None = None,
     vector_search: Callable | None = None,
+    with_neighbors: bool = True,
 ) -> list[dict]:
     """Returns result rows best-first, each a dict of `knowledge` columns plus
-    `score` and `neighbors` (adjacent chunks of the same document)."""
+    `score` and — unless `with_neighbors=False` — `neighbors` (adjacent chunks
+    of the same document; one extra SELECT per winner, so callers that discard
+    neighbors opt out)."""
     now = now or datetime.now(timezone.utc)
     fts_ids = _fts_leg(db, query, CANDIDATE_POOL, scopes, sources)
     vector_ids: list = []
@@ -165,6 +168,8 @@ def hybrid_search(
     scored.sort(key=lambda pair: (-pair[0], pair[1]["id"]))
 
     winners = cap_per_source(dedup_best_chunk(scored))[:limit]
+    if not with_neighbors:
+        return [_scored_result(score, row) for score, row in winners]
     return [_result_with_neighbors(db, score, row) for score, row in winners]
 
 
@@ -233,6 +238,13 @@ def _fetch_candidate_rows(
     return {row[0]: dict(zip(_ROW_COLUMNS, row)) for row in rows}
 
 
+def _scored_result(score: float, row: dict) -> dict:
+    result = dict(row)
+    result["metadata"] = json.loads(row["metadata"]) if row["metadata"] else None
+    result["score"] = score
+    return result
+
+
 def _result_with_neighbors(db, score: float, row: dict) -> dict:
     neighbor_rows = db.execute(
         _NEIGHBOR_SQL,
@@ -242,9 +254,7 @@ def _result_with_neighbors(db, score: float, row: dict) -> dict:
             row["chunk_ix"],
         ),
     ).fetchall()
-    result = dict(row)
-    result["metadata"] = json.loads(row["metadata"]) if row["metadata"] else None
-    result["score"] = score
+    result = _scored_result(score, row)
     result["neighbors"] = [
         {"chunk_ix": chunk_ix, "content": content} for chunk_ix, content in neighbor_rows
     ]

@@ -85,6 +85,18 @@ def _doc(**overrides) -> KnowledgeDoc:
     return KnowledgeDoc(**base)
 
 
+class _RecordingDb:
+    """Pass-through connection that records every SQL statement executed."""
+
+    def __init__(self, inner):
+        self._inner = inner
+        self.statements: list[str] = []
+
+    def execute(self, sql, *args):
+        self.statements.append(sql)
+        return self._inner.execute(sql, *args)
+
+
 def _numpy_vector_search(db, query_embedding, pool, scopes=None, sources=None):
     """Injected vector leg: cosine over stored F32 blobs, best-first ids.
     Ignores the scope/source filters — _fetch_candidate_rows still enforces
@@ -308,6 +320,23 @@ class TestDedupAndNeighbors:
         assert winner["chunk_ix"] == 1  # best-matching chunk kept
         assert [n["chunk_ix"] for n in winner["neighbors"]] == [0, 2]
         assert winner["neighbors"][0]["content"] == "milestone one validation"
+
+    def test_with_neighbors_false_skips_neighbor_queries(self, db):
+        upsert_documents(
+            db,
+            [
+                _doc(doc_key="eval", chunk_ix=0, content="milestone one validation"),
+                _doc(doc_key="eval", chunk_ix=1, content="cobalt cobalt edge decision"),
+                _doc(doc_key="eval", chunk_ix=2, content="cobalt sizing"),
+            ],
+        )
+        recording = _RecordingDb(db)
+
+        results = hybrid_search(recording, "cobalt", with_neighbors=False)
+
+        assert len(results) == 1
+        assert "neighbors" not in results[0]
+        assert [s for s in recording.statements if "chunk_ix BETWEEN" in s] == []
 
 
 class TestPerSourceCap:

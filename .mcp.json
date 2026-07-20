@@ -3,6 +3,14 @@
     "figma": {
       "type": "http",
       "url": "https://mcp.figma.com/mcp"
+    },
+    "radon-kb": {
+      "type": "stdio",
+      "command": ".venv/bin/python",
+      "args": ["scripts/knowledge/mcp_server.py"],
+      "env": {
+        "RADON_DB_NO_REPLICA": "1"
+      }
     }
   }
 }

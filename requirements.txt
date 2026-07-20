@@ -69,3 +69,26 @@ onnxruntime==1.27.0
 # VPS provision resolves the exact versions the laptop verified.
 tokenizers==0.23.1
 huggingface-hub==1.24.0
+
+# Knowledge-base MCP server
+# mcp (FastMCP) powers scripts/knowledge/mcp_server.py — the stdio server
+# registered in .mcp.json that exposes read-only corpus retrieval to Claude
+# Code on the laptop; nothing on the VPS imports it. pip-check was run on the
+# laptop venv, which had drifted ahead of this file's pins (to fastapi
+# 0.136.1 / starlette 1.0.0 / uvicorn 0.47.0); the pins here stay
+# fastapi==0.135.2 / uvicorn==0.42.0, and mcp 1.28.1's constraints
+# (starlette>=0.27, uvicorn>=0.31.1) are satisfied by both combos. Every new
+# wheel is pure-Python except rpds-py, which ships cp313 manylinux x86_64
+# and cp311 macOS arm64 wheels — both hosts covered.
+mcp==1.28.1
+# mcp transitive pins, held explicitly so a fresh provision resolves the
+# exact versions the laptop verified for these packages.
+attrs==26.1.0
+httpx-sse==0.4.3
+jsonschema==4.26.0
+jsonschema-specifications==2025.9.1
+pydantic-settings==2.14.2
+python-multipart==0.0.32
+referencing==0.37.0
+rpds-py==2026.6.3
+sse-starlette==3.4.5
