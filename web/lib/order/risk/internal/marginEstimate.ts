@@ -90,6 +90,18 @@ export type MarginEstimateArgs =
   | {
       /** Pure close-out — consumes no margin. */
       kind: "close-out";
+    }
+  | {
+      /**
+       * Short call(s) fully covered by held LONG stock (a covered call
+       * against an existing position). Reg-T: the held shares ARE the
+       * collateral, so the short call adds NO new margin requirement. The
+       * synthetic buy-write's maxLoss (stock-to-zero) is pre-existing stock
+       * risk, NOT margin consumed by this order — rendering it as the
+       * requirement was the EWY 2026-07-21 bug ($415k req for a covered
+       * call).
+       */
+      kind: "stock-covered-call";
     };
 
 /**
@@ -99,6 +111,9 @@ export function estimateInitialMargin(args: MarginEstimateArgs): MarginEstimate 
   switch (args.kind) {
     case "close-out":
       return { requirement: 0, source: "exact-maxloss", approximate: false };
+
+    case "stock-covered-call":
+      return { requirement: 0, source: "regt-estimate", approximate: false };
 
     case "defined-risk":
       return {

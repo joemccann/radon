@@ -329,6 +329,57 @@ function estimateLinearMargin(
  *   - Multi-leg undefined/unbounded combos → no reliable client-side Reg-T;
  *     requirement null (renders "unavailable").
  */
+/**
+ * True iff the order is a single SELL CALL leg whose contracts are FULLY
+ * covered by held LONG stock consumed by the augmenter (a covered call).
+ * Partial stock cover leaves naked residue and must NOT match — the naked
+ * path (unbounded risk + Reg-T naked estimate) stays authoritative there.
+ */
+function isFullyStockCoveredCall(
+  opt: OptionOrderRiskInput,
+  coveringLegs: CoveringPortfolioLeg[],
+): boolean {
+  if (opt.chainLegs.length !== 1) return false;
+  const leg = opt.chainLegs[0];
+  if (leg.action !== "SELL" || leg.right !== "C") return false;
+  const contracts = Math.max(1, Math.trunc(leg.quantity));
+  const stockCoveredContracts = coveringLegs.reduce(
+    (sum, l) => (l.type === "Stock" ? sum + l.shares / 100 : sum),
+    0,
+  );
+  return stockCoveredContracts >= contracts;
+}
+
+function describeCoveringLeg(leg: CoveringPortfolioLeg): string {
+  return leg.type === "Option"
+    ? `LONG ${leg.contracts}× $${leg.strike} ${leg.right === "C" ? "Call" : "Put"}`
+    : `${leg.shares.toLocaleString()} held shares @ $${leg.avgCost.toFixed(2)}`;
+}
+
+/**
+ * Coverage annotation for the confirm panel. The builder header already
+ * chips coverage, but the confirm summary is where the operator reads the
+ * risk numbers — without this note a covered call's stock-to-zero max loss
+ * is indistinguishable from naked assignment stress (EWY 2026-07-21).
+ */
+function buildCoverageNote(
+  opt: OptionOrderRiskInput,
+  coveringLegs: CoveringPortfolioLeg[],
+  coveredCall: boolean,
+): string | null {
+  if (coveringLegs.length === 0) return null;
+  const held = coveringLegs.map(describeCoveringLeg).join(" + ");
+  if (coveredCall) {
+    const contracts = Math.max(1, Math.trunc(opt.chainLegs[0].quantity));
+    return (
+      `COVERED CALL: ${contracts} short call${contracts === 1 ? "" : "s"} covered by ${held}. ` +
+      `Max loss is the held stock declining to zero net of premium, not naked assignment; ` +
+      `no new margin is required.`
+    );
+  }
+  return `COVERED BY HELD ${held}`;
+}
+
 function estimateOptionMargin(opt: OptionOrderRiskInput, risk: OrderRisk): MarginEstimate {
   const isUndefined = risk.maxLossUnbounded || risk.undefinedRiskReason != null;
   const single = opt.chainLegs.length === 1 ? opt.chainLegs[0] : null;
@@ -546,7 +597,10 @@ export function useOrderRisk(
       costs,
     );
 
-    const optionMargin = estimateOptionMargin(opt, risk);
+    const coveredCall = isFullyStockCoveredCall(opt, augmented.coveringLegs);
+    const optionMargin = coveredCall
+      ? estimateInitialMargin({ kind: "stock-covered-call" })
+      : estimateOptionMargin(opt, risk);
 
     const resolved: OrderPresentationSummary = {
       ...baseSummary,
@@ -556,6 +610,7 @@ export function useOrderRisk(
       maxGainUnbounded: risk.maxGainUnbounded,
       undefinedRiskReason: risk.undefinedRiskReason,
       marginImpact: buildMarginImpact(optionMargin, portfolio, coverageStatus),
+      coverageNote: buildCoverageNote(opt, augmented.coveringLegs, coveredCall),
     };
 
     const okToSubmit =

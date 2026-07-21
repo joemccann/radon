@@ -7735,6 +7735,7 @@ tr.leg-row td {
 .order-confirm-summary { background: var(--bg-panel); border: 1px solid var(--line-grid); border-radius: 4px; padding: 10px 12px; margin-bottom: 12px; }
 .order-confirm-summary-info { background: color-mix(in srgb, var(--signal-core) 8%, transparent); border-color: var(--signal-core-text); }
 .order-confirm-description { font-family: var(--font-mono); font-size: 12px; color: var(--text-primary); margin-bottom: 6px; }
+.order-confirm-coverage { font-family: var(--font-mono); font-size: 10px; color: var(--text-secondary); padding: 4px 8px; margin-bottom: 6px; background: color-mix(in srgb, var(--ok) 8%, transparent); border: 1px solid color-mix(in srgb, var(--ok) 30%, transparent); border-radius: 4px; letter-spacing: 0.04em; }
 .order-confirm-metrics { display: flex; flex-wrap: wrap; gap: 12px; font-family: var(--font-mono); font-size: 11px; }
 .order-confirm-metric { display: flex; gap: 4px; }
 .order-confirm-metric-label { color: var(--text-muted); }
