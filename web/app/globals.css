@@ -14544,7 +14544,8 @@ body[data-mobile="true"] .chart-tooltip {
   cursor: pointer;
 }
 
-/* P6: quick-qty presets (5 / 10 / Max). Compact chips below the ± steppers. */
+/* P6: quick-qty presets (+5…+100 additive / Max). Compact chips below the
+   ± steppers; five chips wrap onto a second row at 393px. */
 .mobile-ticket__qty-presets {
   display: flex;
   flex-wrap: wrap;

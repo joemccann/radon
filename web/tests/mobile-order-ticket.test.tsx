@@ -88,6 +88,7 @@ function renderTicket(props: {
   legs: OrderLeg[];
   portfolio?: PortfolioData | null;
   prices?: Record<string, PriceData>;
+  onUpdateLeg?: (id: string, patch: Partial<OrderLeg>) => void;
 }) {
   // `null` must reach the component (coverage indeterminate), so only an
   // OMITTED portfolio falls back to the empty-but-resolved default.
@@ -102,7 +103,7 @@ function renderTicket(props: {
       portfolio={portfolio}
       onClose={() => {}}
       onRemoveLeg={() => {}}
-      onUpdateLeg={() => {}}
+      onUpdateLeg={props.onUpdateLeg ?? (() => {})}
       onClearLegs={() => {}}
     />,
   );
@@ -291,6 +292,62 @@ describe("MobileOrderTicket — close labelling", () => {
     });
     const { getByTestId } = renderTicket({ legs: [buyPutLeg], portfolio });
     expect(getByTestId("mobile-order-ticket-review").textContent).toMatch(/BUY TO CLOSE/);
+  });
+});
+
+describe("MobileOrderTicket — additive quick-qty preset chips", () => {
+  const PRESETS = [5, 10, 25, 50, 100];
+
+  it("renders +5/+10/+25/+50/+100 chips with no aria-pressed state", () => {
+    const leg = makeLeg({ quantity: 10 });
+    const { getByTestId } = renderTicket({ legs: [leg] });
+
+    for (const preset of PRESETS) {
+      const chip = getByTestId(`mobile-order-ticket-leg-${leg.id}-qty-${preset}`);
+      expect(chip.textContent).toBe(`+${preset}`);
+      // A chip is an action, not a state — no active/pressed semantics.
+      expect(chip.hasAttribute("aria-pressed")).toBe(false);
+      expect(chip.className).not.toMatch(/--active/);
+    }
+  });
+
+  it("ADDS the preset to the current quantity (10 then +25 → 35)", () => {
+    const onUpdateLeg = vi.fn();
+    const leg = makeLeg({ quantity: 10 });
+    const { getByTestId } = renderTicket({ legs: [leg], onUpdateLeg });
+
+    fireEvent.click(getByTestId(`mobile-order-ticket-leg-${leg.id}-qty-25`));
+    expect(onUpdateLeg).toHaveBeenCalledWith(leg.id, { quantity: 35 });
+  });
+
+  it("stacks presets across taps (1 +10 → 11, then 11 +25 → 36)", () => {
+    const onUpdateLeg = vi.fn();
+    const first = renderTicket({ legs: [makeLeg({ quantity: 1 })], onUpdateLeg });
+    fireEvent.click(first.getByTestId(`mobile-order-ticket-leg-${makeLeg().id}-qty-10`));
+    expect(onUpdateLeg).toHaveBeenLastCalledWith(makeLeg().id, { quantity: 11 });
+    cleanup();
+
+    const second = renderTicket({ legs: [makeLeg({ quantity: 11 })], onUpdateLeg });
+    fireEvent.click(second.getByTestId(`mobile-order-ticket-leg-${makeLeg().id}-qty-25`));
+    expect(onUpdateLeg).toHaveBeenLastCalledWith(makeLeg().id, { quantity: 36 });
+  });
+
+  it("keeps the Max chip as a SET to held contracts", () => {
+    const onUpdateLeg = vi.fn();
+    const portfolio = portfolioHolding({
+      direction: "LONG",
+      type: "Call",
+      strike: 200,
+      contracts: 65,
+      avgCost: 150,
+    });
+    const leg = makeLeg({ action: "SELL", quantity: 3 });
+    const { getByTestId } = renderTicket({ legs: [leg], portfolio, onUpdateLeg });
+
+    const max = getByTestId(`mobile-order-ticket-leg-${leg.id}-qty-max`);
+    expect(max.textContent).toBe("Max 65");
+    fireEvent.click(max);
+    expect(onUpdateLeg).toHaveBeenCalledWith(leg.id, { quantity: 65 });
   });
 });
 
