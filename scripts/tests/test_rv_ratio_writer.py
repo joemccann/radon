@@ -172,3 +172,44 @@ class TestUpsertRvRatioSnapshot:
             r[0] for r in db_with_schema.execute("SELECT symbol FROM rv_ratio_snapshots").fetchall()
         )
         assert symbols == ["SMH", "XLE"]
+
+
+class TestBatchedWriteStatements:
+    def test_large_backfills_use_multi_row_inserts(self, writer, db_with_schema, monkeypatch):
+        # Over the Hrana HTTP transport executemany is one round-trip PER ROW:
+        # the SMH cold backfill (3,017 closes) spent minutes writing and blew
+        # the 240s scan subprocess timeout in production (2026-07-21). Large
+        # upserts must go as chunked multi-row INSERT statements.
+        calls: list[str] = []
+        real_execute = db_with_schema.execute
+        real_executemany = db_with_schema.executemany
+
+        class Recorder:
+            def execute(self, sql, *args):
+                if "price_history_daily" in sql and "INSERT" in sql.upper():
+                    calls.append(sql)
+                return real_execute(sql, *args)
+
+            def executemany(self, sql, *args):
+                if "price_history_daily" in sql and "INSERT" in sql.upper():
+                    calls.append("MANY:" + sql)
+                return real_executemany(sql, *args)
+
+            def commit(self):
+                return db_with_schema.commit()
+
+        import db.writer as writer_mod
+        monkeypatch.setattr(writer_mod, "get_db", lambda: Recorder())
+
+        rows = [
+            {"date": f"20{i:02d}-01-{(i % 28) + 1:02d}", "close": 100.0 + i, "source": "yahoo"}
+            for i in range(1000)
+        ]
+        writer_mod.upsert_price_history_rows("BATCH", rows)
+
+        assert not [c for c in calls if c.startswith("MANY:")], "per-row executemany used"
+        assert 0 < len(calls) <= 3, f"expected <=3 multi-row statements, got {len(calls)}"
+        stored = db_with_schema.execute(
+            "SELECT COUNT(*) FROM price_history_daily WHERE symbol='BATCH'"
+        ).fetchone()[0]
+        assert stored == 1000

@@ -114,26 +114,36 @@ def upsert_breadth_snapshot(date_str: str, taken_at: str, payload: dict[str, Any
     db.commit()
 
 
+# Multi-row chunk size: 5 params/row keeps 400 rows at 2,000 bound params,
+# far under SQLite's variable limit. Over the Hrana HTTP transport,
+# executemany is one round-trip PER ROW — a 12y backfill (~3,000 closes)
+# spent minutes writing and blew the scan subprocess timeout (2026-07-21);
+# chunked multi-row INSERTs make it ~8 round-trips.
+_PRICE_HISTORY_INSERT_CHUNK_ROWS = 400
+
+
 def upsert_price_history_rows(symbol: str, rows: list[dict[str, Any]]) -> None:
     """Batched upsert of daily closes into price_history_daily.
 
     Each row: {"date": "YYYY-MM-DD", "close": float, "source": "ib"|"uw"|"yahoo"}.
-    fetched_at is stamped at write time.
+    fetched_at is stamped at write time. Writes go as chunked multi-row
+    INSERT statements, never per-row.
     """
     if not rows:
         return
     fetched_at = _now_iso()
     db = get_db()
-    db.executemany(
-        """
-        INSERT OR REPLACE INTO price_history_daily (symbol, date, close, source, fetched_at)
-        VALUES (?, ?, ?, ?, ?)
-        """,
-        [
-            (symbol, row["date"], float(row["close"]), row["source"], fetched_at)
-            for row in rows
-        ],
-    )
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend((symbol, row["date"], float(row["close"]), row["source"], fetched_at))
+        db.execute(
+            "INSERT OR REPLACE INTO price_history_daily "
+            f"(symbol, date, close, source, fetched_at) VALUES {placeholders}",
+            tuple(params),
+        )
     db.commit()
 
 

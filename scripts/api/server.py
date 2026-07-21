@@ -3209,7 +3209,11 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
 
 _RV_RATIO_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
 RV_RATIO_COOLDOWN_S = 600  # daily-close data cannot change intraday
-RV_RATIO_SCAN_TIMEOUT_S = 240  # covers a cold two-leg Yahoo backfill
+# Covers a cold two-leg (asset + SPY) 12y backfill: fetches plus batched
+# Turso writes. 240s was blown in production when per-row writes ate the
+# budget (2026-07-21); writes are now chunked, 360s is headroom for slow
+# Yahoo/Turso days.
+RV_RATIO_SCAN_TIMEOUT_S = 360
 _rv_ratio_last_scan: dict[str, float] = {}
 _rv_ratio_scan_locks: dict[str, asyncio.Lock] = {}
 # Reserved _rv_ratio_scan_locks key (symbols are validated uppercase, so no
