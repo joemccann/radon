@@ -38,6 +38,7 @@ const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections")
 import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { assessMargin, rankOf, type MarginLevel } from "@/lib/marginWarning";
+import { useFillToasts } from "@/lib/useFillToasts";
 import { useTheme } from "@/lib/ThemeContext";
 import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 
@@ -361,6 +362,10 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     }
     prevMarginLevelRef.current = level;
   }, [portfolio?.account_summary, addToast]);
+
+  // Persistent per-execution fill toasts, diffed from the global orders poll.
+  useFillToasts(orders, addToast);
+
   const syncing = isOrdersPage ? ordersSyncing : portfolioSyncing;
   const error = isOrdersPage ? ordersError : portfolioError;
   // Demo deployment is seed-data only (no IB gateway, no realtime relay), so the
