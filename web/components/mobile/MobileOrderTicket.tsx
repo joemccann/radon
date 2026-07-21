@@ -526,7 +526,7 @@ export default function MobileOrderTicket({
       onClose={onClose}
       title={`${ticker.toUpperCase()} · ${structure || "Order"}`}
       testId="mobile-order-ticket"
-      maxHeight="82vh"
+      maxHeight="82dvh"
       footer={footer}
     >
       {confirmStep ? (
