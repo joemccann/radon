@@ -74,7 +74,49 @@ export function detectStructure(legs: OrderLeg[]): string {
       return a.action === "BUY" ? "Long Strangle" : "Short Strangle";
     }
   }
+  if (legs.length === 3) {
+    const seagull = detectRiskReversalSpread(legs);
+    if (seagull) return seagull;
+  }
   return `${legs.length}-Leg Combo`;
+}
+
+/**
+ * Three-leg seagull: a vertical spread financed by a short option on the
+ * other side. Same expiry across all legs.
+ *
+ *   - SELL put + bull call spread (BUY lower C, SELL higher C)
+ *     → "Risk Reversal Call Spread"
+ *   - SELL call + bear put spread (BUY higher P, SELL lower P)
+ *     → "Risk Reversal Put Spread"
+ *
+ * Returns null for any other 3-leg shape (mixed expiries, long financing
+ * leg, or a debit-side vertical pointing the wrong way).
+ */
+function detectRiskReversalSpread(legs: OrderLeg[]): string | null {
+  const sameExpiry = legs.every((l) => l.expiry === legs[0].expiry);
+  if (!sameExpiry) return null;
+
+  const calls = legs.filter((l) => l.right === "C");
+  const puts = legs.filter((l) => l.right === "P");
+
+  if (calls.length === 2 && puts.length === 1) {
+    const [c1, c2] = calls;
+    if (puts[0].action !== "SELL" || c1.action === c2.action) return null;
+    const buyCall = c1.action === "BUY" ? c1 : c2;
+    const sellCall = c1.action === "SELL" ? c1 : c2;
+    return buyCall.strike < sellCall.strike ? "Risk Reversal Call Spread" : null;
+  }
+
+  if (puts.length === 2 && calls.length === 1) {
+    const [p1, p2] = puts;
+    if (calls[0].action !== "SELL" || p1.action === p2.action) return null;
+    const buyPut = p1.action === "BUY" ? p1 : p2;
+    const sellPut = p1.action === "SELL" ? p1 : p2;
+    return buyPut.strike > sellPut.strike ? "Risk Reversal Put Spread" : null;
+  }
+
+  return null;
 }
 
 /**
