@@ -5,7 +5,9 @@
  *
  * `MobileOrderTicket` is the mobile order-entry surface. It MUST:
  *  1. Require a two-step confirm before it POSTs to /api/orders/place.
- *  2. Disable the confirm action on an unbounded / undefined-risk order
+ *  2. Keep an unbounded / undefined-risk order SUBMITTABLE (Gate 4 disabled
+ *     2026-04-30; Gate 1 renders as an advisory warning) while still
+ *     disabling the confirm action when portfolio coverage is indeterminate
  *     (the OrderRiskGate chokepoint drives `okToSubmit`).
  *  3. Label a single-leg close as "SELL TO CLOSE" / "BUY TO CLOSE" when the
  *     portfolio holds a covering position.
@@ -87,6 +89,9 @@ function renderTicket(props: {
   portfolio?: PortfolioData | null;
   prices?: Record<string, PriceData>;
 }) {
+  // `null` must reach the component (coverage indeterminate), so only an
+  // OMITTED portfolio falls back to the empty-but-resolved default.
+  const portfolio = "portfolio" in props ? props.portfolio : EMPTY_PORTFOLIO;
   return render(
     <MobileOrderTicket
       open
@@ -94,7 +99,7 @@ function renderTicket(props: {
       legs={props.legs}
       prices={props.prices ?? PRICES}
       spot={210}
-      portfolio={props.portfolio ?? EMPTY_PORTFOLIO}
+      portfolio={portfolio}
       onClose={() => {}}
       onRemoveLeg={() => {}}
       onUpdateLeg={() => {}}
@@ -217,19 +222,43 @@ describe("MobileOrderTicket — two-step confirm gates placement", () => {
 });
 
 describe("MobileOrderTicket — okToSubmit gating", () => {
-  it("disables Confirm on an unbounded naked short, enables it on a bounded long", async () => {
-    // Naked short call, empty portfolio → UNBOUNDED risk → Confirm disabled.
-    const nakedShort = renderTicket({ legs: [makeLeg({ action: "SELL" })] });
-    fireEvent.click(nakedShort.getByTestId("mobile-order-ticket-review"));
-    const shortSubmit = nakedShort.getByTestId("mobile-order-ticket-submit") as HTMLButtonElement;
-    await waitFor(() => expect(shortSubmit.disabled).toBe(true));
-    cleanup();
+  it("allows submitting an unbounded naked short and still renders the Gate 1 warning", async () => {
+    // Gate 4 (no naked shorts) disabled 2026-04-30: an UNBOUNDED short is
+    // submittable — desktop parity with OrderTab — while Gate 1 stays an
+    // advisory warning in the confirm summary.
+    const { getByTestId } = renderTicket({ legs: [makeLeg({ action: "SELL" })] });
+    fireEvent.click(getByTestId("mobile-order-ticket-review"));
+    const submit = getByTestId("mobile-order-ticket-submit") as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(false));
 
-    // Bounded long call → defined risk → Confirm enabled.
+    // Gate 1 advisory must render alongside the enabled submit. The sheet
+    // portals to document.body, so assert against the document.
+    expect(document.body.textContent).toMatch(/GATE 1/i);
+    expect(document.body.textContent).toMatch(/UNBOUNDED/);
+
+    // Confirm actually places the order.
+    fireEvent.click(submit);
+    await waitFor(() => {
+      const placeCalls = (global.fetch as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([url]) => String(url) === "/api/orders/place",
+      );
+      expect(placeCalls.length).toBe(1);
+    });
+  });
+
+  it("enables Confirm on a bounded long", async () => {
     const long = renderTicket({ legs: [makeLeg({ action: "BUY" })] });
     fireEvent.click(long.getByTestId("mobile-order-ticket-review"));
     const longSubmit = long.getByTestId("mobile-order-ticket-submit") as HTMLButtonElement;
     await waitFor(() => expect(longSubmit.disabled).toBe(false));
+  });
+
+  it("keeps Confirm disabled while portfolio coverage is indeterminate", async () => {
+    // portfolio null → coverage indeterminate → hard block stays.
+    const naked = renderTicket({ legs: [makeLeg({ action: "SELL" })], portfolio: null });
+    fireEvent.click(naked.getByTestId("mobile-order-ticket-review"));
+    const submit = naked.getByTestId("mobile-order-ticket-submit") as HTMLButtonElement;
+    await waitFor(() => expect(submit.disabled).toBe(true));
   });
 });
 

@@ -53,7 +53,8 @@ describe("useOrderRisk — linear branch (futures)", () => {
     // Max gain bounded at VIX-to-zero × 1000 multiplier = $19,000
     expect(result.current!.summary.maxGain).toBe(19_000);
     expect(result.current!.summary.undefinedRiskReason).toMatch(/short/i);
-    expect(result.current!.okToSubmit).toBe(false);
+    // Unbounded but coverage-resolved → submittable (Gate 4 disabled).
+    expect(result.current!.okToSubmit).toBe(true);
   });
 
   it("LONG VIX future at $19 × 1 contract → bounded loss = $19,000, unbounded gain", () => {
@@ -140,7 +141,8 @@ describe("useOrderRisk — linear branch (stock)", () => {
     const { result } = renderHook(() => useOrderRisk(input, emptyPortfolio));
     expect(result.current!.summary.maxLossUnbounded).toBe(true);
     expect(result.current!.summary.maxGain).toBeCloseTo(22_820, 0);
-    expect(result.current!.okToSubmit).toBe(false);
+    // Unbounded but coverage-resolved → submittable (Gate 4 disabled).
+    expect(result.current!.okToSubmit).toBe(true);
   });
 
   it("LONG stock at $22.82 × 1000 shares → max loss $22,820 (stock-to-zero), unbounded gain", () => {
