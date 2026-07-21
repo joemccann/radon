@@ -103,6 +103,39 @@ test.describe("Mobile Options Chain ladder", () => {
     await expect(page.getByTestId("mobile-chain-detail-sheet")).toBeHidden();
   });
 
+  // iPhone regression (2026-07-21): the chain deck (.asset-deck) is a stacking
+  // context at z-index 40, so an inline (non-portaled) sheet was capped below
+  // the tab bar (z-index 60) — the tab bar PAINTED OVER the sheet's BUY/SELL
+  // footer. Pin the actual paint order: hit-testing the footer's own pixels
+  // must reach the sheet, not the tab bar.
+  test("detail sheet footer paints above the mobile tab bar", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    stubApis(page);
+    await page.goto("/AAPL?tab=chain");
+
+    await page.getByTestId("mobile-chain-call-200").click({ force: true });
+    const sheet = page.getByTestId("mobile-chain-detail-sheet");
+    await expect(sheet).toBeVisible();
+
+    // Let the 240ms slide-in animation settle so the footer rect is final.
+    await page.waitForFunction(() => {
+      const footer = document.querySelector(".m-sheet__footer");
+      if (!footer) return false;
+      const r = footer.getBoundingClientRect();
+      return r.bottom <= window.innerHeight && r.height > 0;
+    });
+
+    const buriedByTabBar = await page.evaluate(() => {
+      const footer = document.querySelector(".m-sheet__footer")!;
+      const r = footer.getBoundingClientRect();
+      const probe = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      if (!probe) return "no-element";
+      if (probe.closest(".mobile-sheet-root")) return "sheet-on-top";
+      return `covered-by:${probe.className}`;
+    });
+    expect(buriedByTabBar).toBe("sheet-on-top");
+  });
+
   test("desktop chain table is not rendered on mobile", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
     stubApis(page);
