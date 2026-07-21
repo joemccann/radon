@@ -308,3 +308,16 @@ describe("MobileOrderTicket — quote chips", () => {
     expect(input.value).toBe("3.40");
   });
 });
+
+describe("MobileOrderTicket — iOS viewport sizing", () => {
+  // iPhone cutoff regression (2026-07-21): an inline max-height of "82vh"
+  // resolved against the LARGE iOS viewport and pushed the sticky footer
+  // (Review / Confirm & send) below the visible area. The cap must be dvh and
+  // must flow through --sheet-max-h so .m-sheet can clamp it by the keyboard.
+  it("caps the sheet at 82dvh via --sheet-max-h", () => {
+    const { getByTestId } = renderTicket({ legs: [makeLeg()] });
+    const panel = getByTestId("mobile-order-ticket-panel");
+    expect(panel.style.getPropertyValue("--sheet-max-h")).toBe("82dvh");
+    expect(panel.style.maxHeight).toBe("");
+  });
+});

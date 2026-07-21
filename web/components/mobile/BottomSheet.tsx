@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, type ReactNode } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { X } from "lucide-react";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 
@@ -22,7 +22,9 @@ type BottomSheetProps = {
   testId?: string;
   /**
    * Optional explicit max-height. When omitted the .m-sheet class enforces
-   * 88vh; pass a value only when a caller needs a tighter ceiling.
+   * 88dvh; pass a value only when a caller needs a tighter ceiling. Use dvh
+   * units — iOS resolves vh against the large viewport (toolbar collapsed),
+   * which pushes the sticky footer below the visible area.
    */
   maxHeight?: string;
 };
@@ -43,6 +45,29 @@ export function BottomSheet({
   const dragStartRef = useRef<{ y: number; offset: number } | null>(null);
 
   const { panelRef } = useDialogChrome<HTMLDivElement>({ open, onClose });
+
+  // The iOS keyboard shrinks only the visual viewport; this fixed root keeps
+  // its layout-viewport height, so the sticky footer ends up behind the
+  // keyboard with no way to scroll it into view. Track the overlap into
+  // --keyboard-inset: the root pads its bottom by it (lifting the sheet) and
+  // .m-sheet clamps its max-height by it.
+  useEffect(() => {
+    if (!open) return;
+    const viewport = window.visualViewport;
+    const root = panelRef.current;
+    if (!viewport || !root) return;
+    const syncKeyboardInset = () => {
+      const overlap = window.innerHeight - viewport.height - viewport.offsetTop;
+      root.style.setProperty("--keyboard-inset", `${Math.max(0, Math.round(overlap))}px`);
+    };
+    syncKeyboardInset();
+    viewport.addEventListener("resize", syncKeyboardInset);
+    viewport.addEventListener("scroll", syncKeyboardInset);
+    return () => {
+      viewport.removeEventListener("resize", syncKeyboardInset);
+      viewport.removeEventListener("scroll", syncKeyboardInset);
+    };
+  }, [open, panelRef]);
 
   if (!open) return null;
 
@@ -68,7 +93,9 @@ export function BottomSheet({
     if (offset > DRAG_DISMISS_THRESHOLD) onClose();
   };
 
-  const sheetStyle: React.CSSProperties = maxHeight ? { maxHeight } : {};
+  // Routed through --sheet-max-h (not inline max-height) so the .m-sheet rule
+  // can clamp the caller's ceiling against the keyboard-adjusted viewport.
+  const sheetStyle = (maxHeight ? { "--sheet-max-h": maxHeight } : {}) as React.CSSProperties;
 
   return (
     <div className="mobile-sheet-root" ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" data-testid={testId}>

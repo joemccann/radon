@@ -14868,6 +14868,9 @@ body[data-mobile="true"] td.right {
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  /* Lifts the bottom-anchored sheet above the iOS keyboard; BottomSheet keeps
+     --keyboard-inset synced from visualViewport. */
+  padding-bottom: var(--keyboard-inset, 0px);
 }
 
 .mobile-sheet-backdrop {
@@ -16463,7 +16466,10 @@ body[data-mobile="true"] td.right {
   border-top-left-radius: 14px;
   border-top-right-radius: 14px;
   padding-bottom: var(--safe-bottom);
-  max-height: 88vh;
+  /* dvh, never vh: iOS resolves vh against the large viewport (toolbar
+     collapsed), pushing the sticky footer below the visible area. The
+     keyboard-inset clamp keeps the footer visible while the keyboard is up. */
+  max-height: min(var(--sheet-max-h, 88dvh), calc(100dvh - var(--keyboard-inset, 0px)));
   display: flex;
   flex-direction: column;
   animation: mobile-sheet-in 240ms var(--ease-out);
