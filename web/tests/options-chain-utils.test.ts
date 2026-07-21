@@ -161,6 +161,51 @@ describe("detectStructure", () => {
     ];
     expect(detectStructure(legs)).toBe("3-Leg Combo");
   });
+
+  it("detects Risk Reversal Call Spread (short put financing a bull call spread)", () => {
+    const legs = [
+      makeLeg({ strike: 120, right: "P", action: "SELL" }),
+      makeLeg({ strike: 135, right: "C", action: "BUY" }),
+      makeLeg({ strike: 155, right: "C", action: "SELL" }),
+    ];
+    expect(detectStructure(legs)).toBe("Risk Reversal Call Spread");
+  });
+
+  it("Risk Reversal Call Spread detection is leg-order independent", () => {
+    const legs = [
+      makeLeg({ strike: 155, right: "C", action: "SELL" }),
+      makeLeg({ strike: 120, right: "P", action: "SELL" }),
+      makeLeg({ strike: 135, right: "C", action: "BUY" }),
+    ];
+    expect(detectStructure(legs)).toBe("Risk Reversal Call Spread");
+  });
+
+  it("detects Risk Reversal Put Spread (short call financing a bear put spread)", () => {
+    const legs = [
+      makeLeg({ strike: 155, right: "C", action: "SELL" }),
+      makeLeg({ strike: 135, right: "P", action: "BUY" }),
+      makeLeg({ strike: 120, right: "P", action: "SELL" }),
+    ];
+    expect(detectStructure(legs)).toBe("Risk Reversal Put Spread");
+  });
+
+  it("bear call spread + short put stays 3-Leg Combo", () => {
+    const legs = [
+      makeLeg({ strike: 120, right: "P", action: "SELL" }),
+      makeLeg({ strike: 135, right: "C", action: "SELL" }),
+      makeLeg({ strike: 155, right: "C", action: "BUY" }),
+    ];
+    expect(detectStructure(legs)).toBe("3-Leg Combo");
+  });
+
+  it("mixed expiries stay 3-Leg Combo", () => {
+    const legs = [
+      makeLeg({ strike: 120, right: "P", action: "SELL", expiry: "20260515" }),
+      makeLeg({ strike: 135, right: "C", action: "BUY" }),
+      makeLeg({ strike: 155, right: "C", action: "SELL" }),
+    ];
+    expect(detectStructure(legs)).toBe("3-Leg Combo");
+  });
 });
 
 /* ─── normalizeComboOrder ─── */

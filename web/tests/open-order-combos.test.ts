@@ -246,7 +246,9 @@ describe("buildOpenOrderDisplayRows", () => {
     const row = rows[0];
     expect(row.kind).toBe("combo");
     if (row.kind !== "combo") return;
-    expect(row.structure).toBe("3-Leg Combo");
+    // Short put financing a bull call spread — named since 2026-07-21
+    // (was the generic "3-Leg Combo").
+    expect(row.structure).toBe("Risk Reversal Call Spread");
   });
 });
 
