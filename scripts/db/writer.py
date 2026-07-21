@@ -114,6 +114,59 @@ def upsert_breadth_snapshot(date_str: str, taken_at: str, payload: dict[str, Any
     db.commit()
 
 
+def upsert_price_history_rows(symbol: str, rows: list[dict[str, Any]]) -> None:
+    """Batched upsert of daily closes into price_history_daily.
+
+    Each row: {"date": "YYYY-MM-DD", "close": float, "source": "ib"|"uw"|"yahoo"}.
+    fetched_at is stamped at write time.
+    """
+    if not rows:
+        return
+    fetched_at = _now_iso()
+    db = get_db()
+    db.executemany(
+        """
+        INSERT OR REPLACE INTO price_history_daily (symbol, date, close, source, fetched_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        [
+            (symbol, row["date"], float(row["close"]), row["source"], fetched_at)
+            for row in rows
+        ],
+    )
+    db.commit()
+
+
+def delete_price_history(symbol: str) -> None:
+    """Lineage reset for one symbol (splice-mismatch re-backfill path)."""
+    db = get_db()
+    db.execute("DELETE FROM price_history_daily WHERE symbol = ?", (symbol,))
+    db.commit()
+
+
+def touch_price_history_row(symbol: str, date_str: str) -> None:
+    """Refresh one row's fetched_at (the deep-backfill re-check marker)."""
+    db = get_db()
+    db.execute(
+        "UPDATE price_history_daily SET fetched_at = ? WHERE symbol = ? AND date = ?",
+        (_now_iso(), symbol, date_str),
+    )
+    db.commit()
+
+
+def upsert_rv_ratio_snapshot(symbol: str, taken_at: str, payload: dict[str, Any]) -> None:
+    """Latest RV-ratio snapshot per symbol (single-row replace)."""
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO rv_ratio_snapshots (symbol, taken_at, payload)
+        VALUES (?, ?, ?)
+        """,
+        (symbol, taken_at, json.dumps(payload)),
+    )
+    db.commit()
+
+
 def upsert_gex_snapshot(ticker: str, scan_time: str, payload: dict[str, Any]) -> None:
     db = get_db()
     db.execute(

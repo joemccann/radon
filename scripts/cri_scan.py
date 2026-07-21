@@ -714,18 +714,10 @@ def cor1m_level_and_change(
 
 
 # ══════════════════════════════════════════════════════════════════
-# Realized Volatility
+# Realized Volatility (shared implementation, see utils/realized_vol.py)
 # ══════════════════════════════════════════════════════════════════
 
-def compute_realized_vol(prices: np.ndarray, window: int = VOL_WINDOW) -> float:
-    """Compute annualized realized volatility from the trailing window.
-
-    Returns vol in percentage points (e.g. 25.0 for 25%).
-    """
-    if len(prices) < window + 1:
-        return float("nan")
-    log_returns = np.log(prices[-window:] / prices[-window - 1:-1])
-    return float(np.std(log_returns, ddof=1) * np.sqrt(252) * 100)
+from utils.realized_vol import compute_realized_vol  # noqa: E402
 
 
 # ══════════════════════════════════════════════════════════════════

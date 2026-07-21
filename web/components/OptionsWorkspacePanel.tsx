@@ -3,9 +3,10 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import OptionsExposurePanel from "./OptionsExposurePanel";
+import RvRatioPanel from "./RvRatioPanel";
 import styles from "./OptionsWorkspacePanel.module.css";
 
-type OptionsWorkspaceTab = "net-gex" | "dex" | "greeks" | "open-interest" | "volatility";
+type OptionsWorkspaceTab = "net-gex" | "dex" | "greeks" | "open-interest" | "rv-ratio" | "volatility";
 
 type TabDefinition = {
   id: OptionsWorkspaceTab;
@@ -18,8 +19,15 @@ const TABS: readonly TabDefinition[] = [
   { id: "dex", label: "DEX", available: false },
   { id: "greeks", label: "Greeks", available: false },
   { id: "open-interest", label: "Open Interest", available: false },
+  { id: "rv-ratio", label: "Rel Vol", available: true },
+  // Reserved for a future VIX/term-structure surface — do not repurpose.
   { id: "volatility", label: "VIX / Volatility", available: false },
 ];
+
+const TAB_PATHS: Partial<Record<OptionsWorkspaceTab, string>> = {
+  "net-gex": "/options/net-gex",
+  "rv-ratio": "/options/rv-ratio",
+};
 
 const TICKER_RE = /^[A-Z][A-Z0-9.-]{0,9}$/;
 
@@ -29,7 +37,7 @@ function normalizeTicker(value: string | undefined): string | null {
 }
 
 function activeTabFromPath(pathname: string | null): OptionsWorkspaceTab {
-  return pathname?.match(/^\/options\/net-gex(?:\/|$)/) ? "net-gex" : "net-gex";
+  return pathname?.match(/^\/options\/rv-ratio(?:\/|$)/) ? "rv-ratio" : "net-gex";
 }
 
 type OptionsWorkspacePanelProps = {
@@ -66,9 +74,9 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
   }, [symbol]);
 
   const goToTab = (tab: OptionsWorkspaceTab) => {
-    if (tab === "net-gex") {
-      router.push(selectedSymbol ? `/options/net-gex?symbol=${encodeURIComponent(selectedSymbol)}` : "/options/net-gex");
-    }
+    const path = TAB_PATHS[tab];
+    if (!path) return;
+    router.push(selectedSymbol ? `${path}?symbol=${encodeURIComponent(selectedSymbol)}` : path);
   };
 
   const submitTicker = (event: FormEvent<HTMLFormElement>) => {
@@ -80,7 +88,8 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
     }
     setTickerError(null);
     setSelectedSymbol(nextSymbol);
-    router.push(`/options/net-gex?symbol=${encodeURIComponent(nextSymbol)}`);
+    const activePath = TAB_PATHS[activeTab] ?? "/options/net-gex";
+    router.push(`${activePath}?symbol=${encodeURIComponent(nextSymbol)}`);
   };
 
   return (
@@ -108,9 +117,13 @@ export default function OptionsWorkspacePanel({ symbol }: OptionsWorkspacePanelP
         })}
       </div>
 
-      <div role="tabpanel" aria-label="Net GEX">
+      <div role="tabpanel" aria-label={activeTab === "rv-ratio" ? "Rel Vol" : "Net GEX"}>
         {selectedSymbol ? (
-          <OptionsExposurePanel symbol={selectedSymbol} />
+          activeTab === "rv-ratio" ? (
+            <RvRatioPanel symbol={selectedSymbol} />
+          ) : (
+            <OptionsExposurePanel symbol={selectedSymbol} />
+          )
         ) : (
           <section className={styles.entry} data-testid="options-ticker-entry">
             <div>

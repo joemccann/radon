@@ -26,20 +26,37 @@ function fmtLocalDate(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 }
 
-export function mostRecentSessionDate(now: Date = new Date()): string {
+const OPEN_MINUTES = 9 * 60 + 30;
+const CLOSE_MINUTES = 16 * 60;
+
+function sessionDateAtBoundary(now: Date, boundaryMinutes: number): string {
   // A Date whose LOCAL fields equal the ET wall-clock.
   const et = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
   const day = et.getDay(); // 0=Sun .. 6=Sat
   const minutes = et.getHours() * 60 + et.getMinutes();
   const isWeekday = day >= 1 && day <= 5;
-  const afterOpen = minutes >= 9 * 60 + 30;
 
-  if (isWeekday && afterOpen) return fmtLocalDate(et);
+  if (isWeekday && minutes >= boundaryMinutes) return fmtLocalDate(et);
 
-  // Pre-open weekday or weekend → walk back to the previous weekday.
+  // Before the boundary, or weekend → walk back to the previous weekday.
   const d = new Date(et);
   do {
     d.setDate(d.getDate() - 1);
   } while (d.getDay() === 0 || d.getDay() === 6);
   return fmtLocalDate(d);
+}
+
+export function mostRecentSessionDate(now: Date = new Date()): string {
+  return sessionDateAtBoundary(now, OPEN_MINUTES);
+}
+
+/**
+ * Most-recent COMPLETED trading-session date (ET, YYYY-MM-DD): today counts
+ * only at/after the 16:00 ET close. Intraday, today's daily close does not
+ * exist yet, so the previous trading day is the latest session an EOD
+ * (daily-close) indicator may treat as final. Same holiday caveat as
+ * `mostRecentSessionDate`.
+ */
+export function lastCompletedSessionDate(now: Date = new Date()): string {
+  return sessionDateAtBoundary(now, CLOSE_MINUTES);
 }

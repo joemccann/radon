@@ -110,6 +110,7 @@ data/menthorq_dashboard/
 data/seasonality_cache/
 data/darkpool_cache/
 data/price_history_cache/
+data/rv_ratio/
 data/service_health/
 # Nightly Turso dump pulls (DUR-13, rsync'd from the VPS — never commit)
 data/db_backups/

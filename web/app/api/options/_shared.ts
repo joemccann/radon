@@ -4,6 +4,10 @@ import { RadonApiError } from "@/lib/radonApi";
 
 export const OPTIONS_PROXY_TIMEOUT_MS = 50_000;
 
+// Single definition lives in the domain lib so the client hook can share it
+// without pulling next/server into the browser bundle.
+export { RV_RATIO_SCAN_TIMEOUT_MS } from "@/lib/rvRatio";
+
 function isTimeoutError(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
   const name = error.name.toLowerCase();

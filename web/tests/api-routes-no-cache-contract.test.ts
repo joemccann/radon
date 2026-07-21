@@ -38,6 +38,7 @@ const DYNAMIC_ROUTES = [
   "app/api/watchlist/route.ts",
   "app/api/knowledge/search/route.ts",
   "app/api/knowledge/prior-evals/route.ts",
+  "app/api/options/rv-ratio/route.ts",
 ];
 
 // Client-side fetch sites that hit a disk-backed dynamic route. Each fetch
@@ -61,6 +62,7 @@ const NO_STORE_HOOKS = [
   "lib/useLlmTokenIndex.ts",
   "lib/useServiceHealth.ts",
   "lib/useTickerFlowReport.ts",
+  "lib/useRvRatio.ts",
 ];
 
 describe("API route handlers — must export dynamic = 'force-dynamic'", () => {
@@ -129,6 +131,7 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/garch-convergence/route.ts", dbHelperPattern: /readGarchFromDb\s*\(/ },
   { path: "app/api/flow-surprise/route.ts", dbHelperPattern: /readFlowSurpriseFromDb\s*\(/ },
   { path: "app/api/internals/route.ts", dbHelperPattern: /readLatestDbCri\s*\(/ },
+  { path: "app/api/options/rv-ratio/route.ts", dbHelperPattern: /readRvRatioFromDb\s*\(/ },
 ];
 
 // Deliberately NOT DB-first (re-confirmed 2026-07-02) — do not "fix" these:
