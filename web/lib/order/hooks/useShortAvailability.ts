@@ -42,6 +42,20 @@ export interface UseShortAvailabilityResult {
 }
 
 /**
+ * Module-level short-TTL cache. The FastAPI probe holds the IB pool data
+ * client for up to 8s, and consumers mount/unmount freely (CompanyTab
+ * remounts on every Info-deck toggle; LocateFeeChip on every confirm step).
+ * Within the TTL a remount serves the cached payload without re-firing the
+ * probe. Borrow data moves slowly; 60s staleness is immaterial.
+ */
+const CACHE_TTL_MS = 60_000;
+const responseCache = new Map<string, { data: ShortAvailabilityData; at: number }>();
+
+export function __clearShortAvailabilityCacheForTest(): void {
+  responseCache.clear();
+}
+
+/**
  * Fetches short-availability data for a single ticker from the Next.js proxy
  * route, which in turn calls FastAPI GET /short-availability/{ticker}.
  *
@@ -70,6 +84,15 @@ export function useShortAvailability(
 
     if (lastTickerRef.current === ticker && data != null) return;
 
+    const cached = responseCache.get(ticker);
+    if (cached && Date.now() - cached.at < CACHE_TTL_MS) {
+      lastTickerRef.current = ticker;
+      setData(cached.data);
+      setLoading(false);
+      setError(null);
+      return;
+    }
+
     abortRef.current?.abort();
     const ctrl = new AbortController();
     abortRef.current = ctrl;
@@ -84,6 +107,7 @@ export function useShortAvailability(
     })
       .then((r) => r.json() as Promise<ShortAvailabilityData>)
       .then((json) => {
+        responseCache.set(ticker, { data: json, at: Date.now() });
         setData(json);
         setLoading(false);
       })
