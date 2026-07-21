@@ -53,8 +53,9 @@ function priceTick(magnitude: number): number {
   return Math.abs(magnitude) < 3 ? 0.01 : 0.05;
 }
 
-/** P6: compact quick-qty presets beyond the ±1 steppers. */
-const QTY_PRESETS = [5, 10] as const;
+/** P6: additive quick-qty presets beyond the ±1 steppers — each tap ADDS its
+ *  value to the leg quantity (10 then +25 → 35). */
+const QTY_PRESETS = [5, 10, 25, 50, 100] as const;
 
 /** Held-contract match for the single-leg close-out branch. `avgCost` is the
  *  per-contract basis (already × 100 for options — NEVER re-multiply). */
@@ -622,8 +623,10 @@ export default function MobileOrderTicket({
                     <X size={16} aria-hidden />
                   </button>
                 </div>
-                {/* P6: quick-qty presets beyond ±1. "Max" appears only when this
-                    leg closes a held position, sizing to the held contracts. */}
+                {/* P6: additive quick-qty presets beyond ±1 — each chip ADDS
+                    its value to the current quantity. "Max" appears only when
+                    this leg closes a held position, SETTING to the held
+                    contracts. */}
                 <div
                   className="mobile-ticket__qty-presets"
                   data-testid={`mobile-order-ticket-leg-${leg.id}-presets`}
@@ -632,13 +635,12 @@ export default function MobileOrderTicket({
                     <button
                       key={preset}
                       type="button"
-                      className={`mobile-ticket__qty-preset tap-target${leg.quantity === preset ? " mobile-ticket__qty-preset--active" : ""}`}
-                      aria-label={`Set quantity to ${preset}`}
-                      aria-pressed={leg.quantity === preset}
-                      onClick={() => onUpdateLeg(leg.id, { quantity: preset })}
+                      className="mobile-ticket__qty-preset tap-target"
+                      aria-label={`Add ${preset} to quantity`}
+                      onClick={() => onUpdateLeg(leg.id, { quantity: leg.quantity + preset })}
                       data-testid={`mobile-order-ticket-leg-${leg.id}-qty-${preset}`}
                     >
-                      {preset}
+                      +{preset}
                     </button>
                   ))}
                   {maxClose > 0 ? (
