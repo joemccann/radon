@@ -45,16 +45,36 @@ describe("BottomSheet", () => {
 
   it("invokes onClose when the backdrop is clicked", () => {
     const onClose = vi.fn();
-    const { container } = render(
+    render(
       <BottomSheet open onClose={onClose} title="t" testId="sheet">
         <p>body</p>
       </BottomSheet>,
     );
 
-    const backdrop = container.querySelector(".mobile-sheet-backdrop");
+    const backdrop = document.querySelector(".mobile-sheet-backdrop");
     expect(backdrop).not.toBeNull();
     fireEvent.click(backdrop!);
     expect(onClose).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  // iPhone cutoff regression, part 2 (2026-07-21): the sheet rendered inline
+  // inside its caller's subtree. Inside the ticker asset-deck (a stacking
+  // context at z-index 40) the sheet's own z-index 90 was capped at level 40,
+  // so the mobile tab bar (z-index 60) painted OVER the sheet footer — the
+  // Review / BUY / SELL buttons were buried under the tab bar. The sheet MUST
+  // portal to document.body (the NewsfeedLightbox pattern) so no ancestor
+  // stacking context can ever cap it.
+  it("portals the sheet root to document.body", () => {
+    render(
+      <div style={{ zIndex: 40, position: "absolute" }}>
+        <BottomSheet open onClose={() => {}} title="t" testId="sheet">
+          <p>body</p>
+        </BottomSheet>
+      </div>,
+    );
+
+    expect(screen.getByTestId("sheet").parentElement).toBe(document.body);
     cleanup();
   });
 

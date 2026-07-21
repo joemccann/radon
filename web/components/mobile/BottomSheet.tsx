@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { X } from "lucide-react";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 
@@ -44,7 +45,7 @@ export function BottomSheet({
   const sheetRef = useRef<HTMLDivElement | null>(null);
   const dragStartRef = useRef<{ y: number; offset: number } | null>(null);
 
-  const { panelRef } = useDialogChrome<HTMLDivElement>({ open, onClose });
+  const { panelRef, portalTarget } = useDialogChrome<HTMLDivElement>({ open, onClose });
 
   // The iOS keyboard shrinks only the visual viewport; this fixed root keeps
   // its layout-viewport height, so the sticky footer ends up behind the
@@ -52,7 +53,7 @@ export function BottomSheet({
   // --keyboard-inset: the root pads its bottom by it (lifting the sheet) and
   // .m-sheet clamps its max-height by it.
   useEffect(() => {
-    if (!open) return;
+    if (!open || !portalTarget) return;
     const viewport = window.visualViewport;
     const root = panelRef.current;
     if (!viewport || !root) return;
@@ -67,9 +68,13 @@ export function BottomSheet({
       viewport.removeEventListener("resize", syncKeyboardInset);
       viewport.removeEventListener("scroll", syncKeyboardInset);
     };
-  }, [open, panelRef]);
+  }, [open, portalTarget, panelRef]);
 
-  if (!open) return null;
+  // Portal to document.body (the NewsfeedLightbox pattern): callers render
+  // this inside stacking contexts (the ticker asset-deck sits at z-index 40)
+  // that would otherwise cap the sheet's z-index 90 below the tab bar's 60,
+  // painting the tab bar over the sheet footer.
+  if (!open || !portalTarget) return null;
 
   const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!sheetRef.current) return;
@@ -97,7 +102,7 @@ export function BottomSheet({
   // can clamp the caller's ceiling against the keyboard-adjusted viewport.
   const sheetStyle = (maxHeight ? { "--sheet-max-h": maxHeight } : {}) as React.CSSProperties;
 
-  return (
+  return createPortal(
     <div className="mobile-sheet-root" ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" data-testid={testId}>
       <button
         type="button"
@@ -145,7 +150,8 @@ export function BottomSheet({
 
         {destructive ? <div className="m-sheet__destructive">{destructive}</div> : null}
       </div>
-    </div>
+    </div>,
+    portalTarget,
   );
 }
 

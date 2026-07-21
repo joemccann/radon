@@ -275,13 +275,15 @@ describe("MobileOrderTicket — IB error rendering", () => {
       }),
     });
 
-    const { getByTestId, container } = renderTicket({ legs: [makeLeg()] });
+    const { getByTestId } = renderTicket({ legs: [makeLeg()] });
     fireEvent.click(getByTestId("mobile-order-ticket-review"));
     fireEvent.click(getByTestId("mobile-order-ticket-submit"));
 
-    await waitFor(() => expect(container.querySelector(".order-error")).toBeTruthy());
+    // The sheet portals to document.body, so query the document (not the
+    // render container).
+    await waitFor(() => expect(document.querySelector(".order-error")).toBeTruthy());
 
-    const errorText = container.querySelector(".order-error")!.textContent ?? "";
+    const errorText = document.querySelector(".order-error")!.textContent ?? "";
     // formatOrderError strips the "Order rejected by IB:" prefix into the
     // summary and moves the reason into a detail row.
     expect(errorText).toMatch(/Order rejected by IB\./);
