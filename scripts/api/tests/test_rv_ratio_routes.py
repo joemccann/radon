@@ -133,11 +133,13 @@ class TestGet:
 
 class TestPostScan:
     def test_happy_path_returns_fresh_payload(self, client, run_script_ok):
+        from scripts.api import server
+
         response = client.post("/options/rv-ratio/SMH/scan")
 
         assert response.status_code == 200
         assert response.json() == _payload()
-        assert run_script_ok.calls == [("rv_ratio_scan.py", ["SMH"], 240)]
+        assert run_script_ok.calls == [("rv_ratio_scan.py", ["SMH"], server.RV_RATIO_SCAN_TIMEOUT_S)]
 
     def test_second_post_within_cooldown_returns_cooldown(self, client, run_script_ok):
         first = client.post("/options/rv-ratio/SMH/scan")
