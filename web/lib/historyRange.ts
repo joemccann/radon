@@ -8,7 +8,7 @@
  * stay consistent across the regime tabs.
  */
 
-export type RangePresetSlug = "1m" | "3m" | "6m" | "1y" | "all";
+export type RangePresetSlug = "1m" | "3m" | "6m" | "1y" | "3y" | "5y" | "all";
 
 export interface RangePreset {
   slug: RangePresetSlug;
@@ -22,6 +22,11 @@ export const RANGE_PRESETS: ReadonlyArray<RangePreset> = [
   { slug: "3m", label: "3M", sessions: 63 },
   { slug: "6m", label: "6M", sessions: 126 },
   { slug: "1y", label: "1Y", sessions: 252 },
+  // Deep-history presets for multi-year series (RV ratio). Safe for the
+  // ~251-session regime charts: HistoryRangeChips hides presets whose span
+  // exceeds `maxSessions`, so they never appear there.
+  { slug: "3y", label: "3Y", sessions: 756 },
+  { slug: "5y", label: "5Y", sessions: 1260 },
   { slug: "all", label: "All", sessions: Number.POSITIVE_INFINITY },
 ];
 

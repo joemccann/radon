@@ -119,12 +119,16 @@ never spawns; it reaches FastAPI only via `radonFetch`.
 | Panel | `web/components/RvRatioPanel.tsx` + `.module.css` | NEW |
 | Presets | `web/lib/historyRange.ts` | EDIT — additive `3y` (756) and `5y` (1260) presets; safe because `HistoryRangeChips` hides presets exceeding `maxSessions`, so existing ~251-session regime charts never show them |
 | Gitignore | `.gitignore` | EDIT — `data/rv_ratio/` |
-| Docs | `scripts/CLAUDE.md`, `web/CLAUDE.md` | EDIT — client-ID table row (62-63), component cheat-sheet row |
+| Docs | `scripts/CLAUDE.md`, `web/CLAUDE.md` | EDIT — client-ID table row (67-68), component cheat-sheet row |
 | Tests | see section 9 | NEW |
 
-Client IDs: `RV_RATIO_IB_CLIENT_IDS = (62, 63)` — scanner range 50-69, fixed-ID
+Client IDs: `RV_RATIO_IB_CLIENT_IDS = (67, 68)` — scanner range 50-69, fixed-ID
 convention per the CRI precedent (50-61 in use), disjoint from CRI. The 20-49
 never-hardcode rule does not apply to scanners.
+**Deviation from the original plan (recorded 2026-07-20):** the plan pinned
+62-63, but `breadth_scan.py` already occupies 62-66
+(`BREADTH_IB_HISTORY_CLIENT_IDS` + `BREADTH_IB_QUOTE_CLIENT_IDS`); 67-68 are
+the free scanner slots and are what the build ships.
 
 ---
 
@@ -143,8 +147,10 @@ CLOSES_TARGET = RATIO_SESSIONS_TARGET + RV_WINDOW  # 2772 aligned closes
 BACKFILL_CALENDAR_YEARS = 12                       # fetch margin over 2772 sessions
 MIN_RATIO_SESSIONS = 1                             # below -> missing:true, no writes
 BENCHMARK = "SPY"
-IB_REQUEST_TIMEOUT_S = 45
-SCAN_COOLDOWN_S = 600
+IB_HISTORY_TIMEOUT_S = 45  # built: renamed from IB_REQUEST_TIMEOUT_S so the 45s
+                           # history budget can't shadow utils.ib_preflight's 15s
+# built: SCAN_COOLDOWN_S dropped from the script — the cooldown is owned solely
+# by scripts/api/server.py:RV_RATIO_COOLDOWN_S (say it once)
 ```
 
 Pipeline, in order:
@@ -244,8 +250,9 @@ trailing `CLOSES_TARGET` sessions.
      `{SPX: Index("SPX","CBOE"), NDX: Index("NDX","NASDAQ"), RUT: Index("RUT","RUSSELL")}`;
      `reqHistoricalDataAsync(durationStr="1 Y", barSizeSetting="1 day",
      whatToShow="TRADES", useRTH=True)`, every await in
-     `asyncio.wait_for(..., IB_REQUEST_TIMEOUT_S)` — the canonical bounded-IB pattern
-     (`feedback_ib_insync_no_request_timeouts`). Client IDs 62-63.
+     `asyncio.wait_for(..., IB_HISTORY_TIMEOUT_S)` — the canonical bounded-IB pattern
+     (`feedback_ib_insync_no_request_timeouts`). Client IDs 67-68 (see the
+     deviation note in section: file inventory).
    - **P2 UW:** `UWClient().get_stock_ohlc(sym, candle_size="1d")`; skipped with a
      logged stderr reason for index symbols (UW cannot serve indices, cri precedent).
    - **P3 Yahoo:** `_fetch_yahoo_daily(sym, years=2)`.
@@ -566,3 +573,5 @@ Estimate: about one focused day; no architectural rework.
    fire-and-poll variant wanted despite the polling-loop cost?
 7. **Client IDs 62-63:** confirm nothing outside the repo (ad-hoc scripts, other
    worktrees) squats on 62-63 in the scanner range before pinning.
+   **RESOLVED 2026-07-20:** 62-66 belong to `breadth_scan.py` inside the repo;
+   the build pins 67-68 instead (see the client-ID deviation note above).

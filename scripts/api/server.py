@@ -3205,6 +3205,95 @@ async def options_exposure(symbol: str, frequency: str = "eod"):
         ) from exc
 
 
+# ── RV Ratio (realized-vol ratio vs SPY) ────────────────────────────
+
+_RV_RATIO_SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+RV_RATIO_COOLDOWN_S = 600  # daily-close data cannot change intraday
+RV_RATIO_SCAN_TIMEOUT_S = 240  # covers a cold two-leg Yahoo backfill
+_rv_ratio_last_scan: dict[str, float] = {}
+_rv_ratio_scan_locks: dict[str, asyncio.Lock] = {}
+# Reserved _rv_ratio_scan_locks key (symbols are validated uppercase, so no
+# collision): every scan subprocess also refreshes the shared SPY benchmark
+# rows, and a concurrent scan during a SPY lineage reset (DELETE + re-insert)
+# would read an empty/partial benchmark. All scans serialize on this lock.
+_RV_RATIO_BENCHMARK_LOCK_KEY = "__benchmark__"
+
+
+def _validated_rv_ratio_symbol(symbol: str) -> str:
+    if not _RV_RATIO_SYMBOL_RE.fullmatch(symbol):
+        raise HTTPException(status_code=400, detail="Invalid symbol")
+    return symbol
+
+
+def _rv_ratio_snapshot_path(symbol: str) -> Path:
+    return DATA_DIR / "rv_ratio" / f"{symbol}.json"
+
+
+def _rv_ratio_cooldown_remaining(symbol: str) -> float:
+    last = _rv_ratio_last_scan.get(symbol)
+    if last is None:
+        return 0.0
+    return RV_RATIO_COOLDOWN_S - (time.monotonic() - last)
+
+
+def _rv_ratio_cooldown_response(remaining: float) -> dict:
+    return {"status": "cooldown", "retry_in": max(1, int(round(remaining)))}
+
+
+@app.get("/options/rv-ratio/{symbol}")
+async def rv_ratio_get(symbol: str):
+    """Serve the last RV-ratio snapshot from disk (debug/parity surface).
+
+    The Turso-first read lives in the Next.js route; this mirrors the
+    subprocess's atomic disk write. An absent snapshot is a legitimate
+    pending state: 200 + missing flag, never 4xx
+    (feedback_http_status_for_real_errors).
+    """
+    symbol = _validated_rv_ratio_symbol(symbol)
+    cached = _read_cache(_rv_ratio_snapshot_path(symbol))
+    if cached is None:
+        return {"symbol": symbol, "missing": True}
+    return cached
+
+
+@app.post("/options/rv-ratio/{symbol}/scan")
+async def rv_ratio_scan(symbol: str):
+    """Run rv_ratio_scan.py synchronously and return the fresh payload.
+
+    Per-symbol 600s cooldown + single-flight lock (LEAP precedent). The
+    subprocess owns all Turso/disk writes; a failed run never advances
+    the cooldown, so the operator can retry immediately.
+    """
+    symbol = _validated_rv_ratio_symbol(symbol)
+    if test_mode:
+        return {
+            "schema_version": 1,
+            "symbol": symbol,
+            "missing": True,
+            "reason": "insufficient_history",
+            "scan_time": "",
+        }
+    remaining = _rv_ratio_cooldown_remaining(symbol)
+    if remaining > 0:
+        return _rv_ratio_cooldown_response(remaining)
+    lock = _rv_ratio_scan_locks.setdefault(symbol, asyncio.Lock())
+    async with lock:
+        remaining = _rv_ratio_cooldown_remaining(symbol)
+        if remaining > 0:
+            return _rv_ratio_cooldown_response(remaining)
+        benchmark_lock = _rv_ratio_scan_locks.setdefault(
+            _RV_RATIO_BENCHMARK_LOCK_KEY, asyncio.Lock()
+        )
+        async with benchmark_lock:
+            result = await run_script(
+                "rv_ratio_scan.py", [symbol], timeout=RV_RATIO_SCAN_TIMEOUT_S
+            )
+        if not result.ok:
+            raise HTTPException(status_code=503, detail=result.error)
+        _rv_ratio_last_scan[symbol] = time.monotonic()
+        return result.data
+
+
 # ── Futures chain (Phase 2 — VIX et al.) ────────────────────────────
 
 _FUTURES_CHAIN_TIMEOUT_S = 30.0  # patched in tests

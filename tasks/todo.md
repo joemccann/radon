@@ -1086,3 +1086,22 @@ tsc clean
 - Read-only investigation at 2026-07-20 03:04Z: the active P1 is `external-health-probe`, dispatched as a Pushover Emergency at 03:00Z (60-second retry, one-hour expiry). It is a monitoring-plane dead-man alert: the independent GitHub Actions probe has been queued/pending since 01:48Z/02:51Z and its last successful off-box observation was 00:58Z, exceeding the two-hour freshness threshold.
 - Production itself is healthy: public edge and local health returned `ok=true` / `overall_state=up`; API, Next.js, relay, monitor, newsfeed, and IB are active. Breadth and portfolio-sync P1s are resolved and are not the current phone notifications.
 - Separate non-emergency P2 items: `cash-flow-sync` is waiting for its scheduled 2026-07-20 21:00Z retry after an IB Flex 1001 throttle; `config-drift` reports that live `radon-breadth.service` lacks the repository `TimeoutStartSec=240` setting. No acknowledgements, cancellations, restarts, mutations, or deploys were performed.
+
+# Task: Gateway 2FA recovery and service-stack restart (2026-07-20)
+
+## Dependency graph
+
+- T1 depends_on: [] - Read the live 2FA lease, gateway, and service-stack state; confirm the lock-safe operator restart path.
+- T2 depends_on: [T1] - Run the approved full-stack restart through the lock-aware operator path, preserving the shared 2FA lease protocol.
+- T3 depends_on: [T2] - Verify the IB Gateway produces an authentication prompt or reaches an authenticated state, then verify core units and schema-v2 health.
+
+## Checklist
+
+- [x] T1 Preflight the live gateway and 2FA state.
+- [x] T2 Restart the full Radon service stack.
+- [x] T3 Verify gateway authentication and production health.
+
+## Review
+
+- User explicitly authorized the service restart because an expected IBKR 2FA push is absent. The initial `/usr/local/bin/radon restart` attempt fail-closed with `inherited deploy-lock proof is invalid` before mutating the gateway. The safe fallback invoked the same authoritative, lock-aware gateway controller directly, then restarted the persistent production services, `radon-health`, and 25 active timers.
+- Verification at 2026-07-21 00:25Z: a fresh 2FA lease was acquired and IBC logged `Second Factor Authentication initiated` at 00:25:06Z. The Gateway container reached `healthy`; FastAPI correctly reports `auth_state=awaiting_2fa`, `service_state=reachable`, and `port_listening=true`. API, Next.js, relay, monitor, newsfeed, health, and gateway units are active. Aggregate status remains `down` only until the IBKR 2FA approval completes. VPS evidence cannot prove delivery to the phone.

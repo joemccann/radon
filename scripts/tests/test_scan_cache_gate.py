@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 import pytest
 
 import utils.scan_cache_gate as gate
-from utils.market_calendar import most_recent_session_date
+from utils.market_calendar import last_completed_session_date, most_recent_session_date
 
 
 # ── most_recent_session_date ────────────────────────────────────────
@@ -28,6 +28,29 @@ class TestMostRecentSessionDate:
         # Fri 2026-05-29 12:00 UTC == 08:00 EDT (before open) → Thursday
         wd = datetime(2026, 5, 29, 12, 0, tzinfo=timezone.utc)
         assert most_recent_session_date(wd) == "2026-05-28"
+
+
+# ── last_completed_session_date ─────────────────────────────────────
+
+class TestLastCompletedSessionDate:
+    def test_weekday_intraday_is_prior_session(self):
+        # Fri 2026-05-29 18:00 UTC == 14:00 EDT (open, pre-close) → Thursday:
+        # today's daily close does not exist yet.
+        wd = datetime(2026, 5, 29, 18, 0, tzinfo=timezone.utc)
+        assert last_completed_session_date(wd) == "2026-05-28"
+
+    def test_weekday_after_close_is_today(self):
+        # Fri 2026-05-29 20:30 UTC == 16:30 EDT (after the close)
+        wd = datetime(2026, 5, 29, 20, 30, tzinfo=timezone.utc)
+        assert last_completed_session_date(wd) == "2026-05-29"
+
+    def test_saturday_resolves_to_friday(self):
+        sat = datetime(2026, 5, 30, 15, 0, tzinfo=timezone.utc)  # Sat
+        assert last_completed_session_date(sat) == "2026-05-29"
+
+    def test_weekday_pre_open_is_prior_session(self):
+        wd = datetime(2026, 5, 29, 12, 0, tzinfo=timezone.utc)  # 08:00 EDT
+        assert last_completed_session_date(wd) == "2026-05-28"
 
 
 # ── _session_date_from_payload ──────────────────────────────────────

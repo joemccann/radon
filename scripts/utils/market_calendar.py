@@ -275,6 +275,23 @@ def most_recent_session_date(now: datetime = None) -> str:
     `lib/marketSession.ts` and CRI's `current_session_date_et` so the off-hours
     cache gate agrees with the route/staleness layer.
     """
+    return _session_date_at_boundary(now, _OPEN_MIN)
+
+
+def last_completed_session_date(now: datetime = None) -> str:
+    """Return the most-recent COMPLETED trading-session date (ET) as YYYY-MM-DD.
+
+    Today counts only at/after the 16:00 ET close — intraday, today's daily
+    close does not exist yet, so the prior trading day is the latest session a
+    daily-close consumer (e.g. the RV-ratio close store) may treat as final.
+    Weekends and holidays resolve back to the prior trading day.
+    """
+    return _session_date_at_boundary(now, _CLOSE_MIN)
+
+
+def _session_date_at_boundary(now: datetime, boundary_minutes: int) -> str:
+    """Today once the ET wall-clock reaches ``boundary_minutes``; otherwise
+    (and on non-trading days) the prior trading day."""
     try:
         import zoneinfo
         et = zoneinfo.ZoneInfo("America/New_York")
@@ -288,13 +305,11 @@ def most_recent_session_date(now: datetime = None) -> str:
             candidate -= timedelta(days=1)
         return candidate
 
-    # Weekend or holiday → prior trading day.
     if not _is_trading_day(now_et):
         return previous_trading_day(now_et).strftime("%Y-%m-%d")
 
-    # Weekday pre-open → prior trading day (the new session has no data yet).
     minutes = now_et.hour * 60 + now_et.minute
-    if minutes < 9 * 60 + 30:
+    if minutes < boundary_minutes:
         return previous_trading_day(now_et).strftime("%Y-%m-%d")
 
     return now_et.strftime("%Y-%m-%d")
