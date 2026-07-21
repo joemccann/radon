@@ -109,6 +109,14 @@ export interface OrderPresentationSummary {
     source: "exact-maxloss" | "regt-estimate" | "ib-whatif";
     approximate: boolean;
   } | null;
+  /**
+   * Portfolio-coverage annotation, populated ONLY by `useOrderRisk` when
+   * held positions cover the order's short legs (covered call, SELL against
+   * held longs). Rendered as a coverage chip inside the confirm panel so
+   * the operator sees the covered structure at the point of confirmation,
+   * not only in the builder header. Null/absent when no coverage applies.
+   */
+  coverageNote?: string | null;
 }
 
 /**

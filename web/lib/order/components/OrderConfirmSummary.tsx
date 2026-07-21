@@ -117,6 +117,15 @@ export function OrderConfirmSummary({
       data-undefined-risk={hasUndefinedRisk ? "true" : undefined}
     >
       <div className="order-confirm-description">{summary.description}</div>
+      {summary.coverageNote != null && summary.coverageNote.length > 0 && (
+        <div
+          className="order-confirm-coverage"
+          data-testid="order-confirm-coverage"
+          role="status"
+        >
+          {summary.coverageNote}
+        </div>
+      )}
       <div className="order-confirm-metrics">
         {summary.totalCost != null && (
           <span className="order-confirm-metric">
