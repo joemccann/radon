@@ -21,8 +21,23 @@ type CacheEntry = {
   stock_state: Record<string, unknown>;
   exa_profile: Record<string, unknown>;
   exa_stats: Record<string, unknown>;
+  // Optional: legacy entries predate the field; the HIT path self-heals them.
+  short_float?: Record<string, unknown>;
+  // Last float-fetch ATTEMPT. Some tickers structurally have no float rows at
+  // UW (indexes, foreign listings) — without this stamp the HIT path would
+  // re-fire the float fetch on every request forever for them. Empty + fresh
+  // stamp = checked recently, don't retry yet.
+  short_float_checked_at?: string;
   fetched_at: string;
 };
+
+const FLOAT_RECHECK_MS = 24 * 60 * 60 * 1000;
+
+function floatRecheckDue(entry: CacheEntry): boolean {
+  if (isPopulated(entry.short_float ?? {})) return false;
+  if (!entry.short_float_checked_at) return true;
+  return Date.now() - new Date(entry.short_float_checked_at).getTime() >= FLOAT_RECHECK_MS;
+}
 
 /* ─── Cache helpers ─── */
 
@@ -117,6 +132,26 @@ async function fetchUWStockInfo(ticker: string, token: string): Promise<Record<s
     if (!res.ok) return {};
     const json = await res.json();
     return json.data ?? json ?? {};
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Public float via UW short-interest history. `data` is an array of dated
+ * rows, newest first; the float lives in `total_float` (live-probed
+ * 2026-07-21). Failure returns {} — missing float renders "---" downstream.
+ */
+async function fetchUWShortFloat(ticker: string, token: string): Promise<Record<string, unknown>> {
+  try {
+    const res = await fetch(
+      `https://api.unusualwhales.com/api/shorts/${encodeURIComponent(ticker)}/interest-float/v2`,
+      { cache: "no-store", headers: { Authorization: `Bearer ${token}` } },
+    );
+    if (!res.ok) return {};
+    const json = await res.json();
+    if (Array.isArray(json.data)) return (json.data[0] ?? {}) as Record<string, unknown>;
+    return (json.data ?? json ?? {}) as Record<string, unknown>;
   } catch {
     return {};
   }
@@ -236,14 +271,30 @@ export async function GET(request: Request): Promise<Response> {
   // (see feedback_dont_cache_empty_results).
   if (profileCached && statsCached && isPopulated(cached?.uw_info)) {
     let stockState = cached.stock_state;
+    let shortFloat = cached.short_float ?? {};
     if (token) {
-      const freshState = await fetchUWStockState(symbol, token);
+      // Legacy entries (and past float failures) lack short_float — self-heal
+      // alongside the intraday stock-state refresh, at most once per recheck
+      // window so structurally-empty tickers don't refetch on every HIT.
+      const [freshState, freshFloat] = await Promise.all([
+        fetchUWStockState(symbol, token),
+        floatRecheckDue(cached) ? fetchUWShortFloat(symbol, token) : Promise.resolve(null),
+      ]);
+      let cacheDirty = false;
       if (Object.keys(freshState).length > 0) {
         stockState = freshState;
-        // Update cache with fresh stock-state
         cached.stock_state = freshState;
-        await writeCache(cached);
+        cacheDirty = true;
       }
+      if (freshFloat != null) {
+        cached.short_float_checked_at = new Date().toISOString();
+        cacheDirty = true;
+        if (isPopulated(freshFloat)) {
+          shortFloat = freshFloat;
+          cached.short_float = freshFloat;
+        }
+      }
+      if (cacheDirty) await writeCache(cached);
     }
 
     const response = NextResponse.json({
@@ -251,6 +302,7 @@ export async function GET(request: Request): Promise<Response> {
       stock_state: stockState,
       profile: cached.exa_profile,
       stats: cached.exa_stats,
+      short_float: shortFloat,
     });
     return setCacheResponseHeaders(response, {
       maxAgeSeconds: CACHE_TTL_SECONDS,
@@ -281,10 +333,16 @@ export async function GET(request: Request): Promise<Response> {
     // empty {} from a past failure short-circuit the re-fetch behind the 24h
     // stats TTL.
     const reuseUwInfo = canReuseUwInfo(cached?.uw_info, !!statsCached);
-    const [fetchedUwInfo, stockState] = await Promise.all([
+    const [fetchedUwInfo, stockState, fetchedShortFloat] = await Promise.all([
       reuseUwInfo && cached ? Promise.resolve(cached.uw_info) : fetchUWStockInfo(symbol, token),
       fetchUWStockState(symbol, token),
+      fetchUWShortFloat(symbol, token),
     ]);
+    // Float changes slowly (biweekly settlement data) — a transient failure
+    // falls back to the last-good cached value rather than blanking it.
+    const shortFloat = isPopulated(fetchedShortFloat)
+      ? fetchedShortFloat
+      : (cached?.short_float ?? {});
     // Don't downgrade a populated cache to empty on a transient UW failure:
     // prefer the fresh fetch, fall back to the last-good cached value.
     const uwInfo = pickUwInfo(fetchedUwInfo, cached?.uw_info);
@@ -323,6 +381,8 @@ export async function GET(request: Request): Promise<Response> {
       stock_state: stockState,
       exa_profile: exaProfile,
       exa_stats: exaStats,
+      short_float: shortFloat,
+      short_float_checked_at: new Date().toISOString(),
       fetched_at: new Date().toISOString(),
     };
     if (hasAnyData) await writeCache(entry);
@@ -332,6 +392,7 @@ export async function GET(request: Request): Promise<Response> {
       stock_state: stockState,
       profile: exaProfile,
       stats: exaStats,
+      short_float: shortFloat,
     });
     return setCacheResponseHeaders(response, {
       maxAgeSeconds: CACHE_TTL_SECONDS,
