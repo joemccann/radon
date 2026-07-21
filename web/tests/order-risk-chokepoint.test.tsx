@@ -79,12 +79,14 @@ describe("useOrderRisk — branded output contract", () => {
     expect(result.current!.summary.coverageStatus).toBe("resolved");
   });
 
-  it("gates okToSubmit on a resolved, defined-risk verdict only", () => {
-    // Naked short call on empty portfolio → UNBOUNDED → okToSubmit MUST be false
+  it("keeps okToSubmit true on a resolved UNBOUNDED verdict (Gate 4 disabled; Gate 1 advisory)", () => {
+    // Naked short call on empty portfolio → UNBOUNDED, but coverage is
+    // resolved so the order stays submittable. Gate 1 renders as a warning,
+    // it does not hard-block (Gate 4 disabled 2026-04-30).
     const { result } = renderHook(() => useOrderRisk(sampleInput, emptyPortfolio));
     expect(result.current!.coverageStatus).toBe("resolved");
     expect(result.current!.summary.maxLossUnbounded).toBe(true);
-    expect(result.current!.okToSubmit).toBe(false);
+    expect(result.current!.okToSubmit).toBe(true);
   });
 
   it("close-out short-circuit emits proceeds + realized P&L, no risk fields", () => {

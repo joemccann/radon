@@ -210,9 +210,11 @@ export interface OrderRiskState {
   /** Convenience accessor — same as `summary.coverageStatus`. */
   coverageStatus: CoverageStatus;
   /**
-   * True iff coverage is fully resolved AND the underlying risk model
-   * returned a finite, defined-risk verdict (no UNBOUNDED, no undefined
-   * risk reason). Surfaces use this to gate the submit button.
+   * True iff coverage is fully resolved. Surfaces use this to gate the
+   * submit button: pending / no-portfolio coverage hard-blocks (the risk
+   * numbers are indeterminate). An UNBOUNDED / undefined-risk verdict does
+   * NOT block — Gate 4 (no naked shorts) was disabled 2026-04-30 and Gate 1
+   * is advisory, rendered as a warning by `<OrderConfirmSummary>`.
    */
   okToSubmit: boolean;
   /** Coverage entries injected, exposed for chip rendering. */
@@ -499,10 +501,9 @@ export function useOrderRisk(
         marginImpact: buildMarginImpact(linearMargin, portfolio, coverageStatus),
       };
 
-      const okToSubmit =
-        coverageStatus === "resolved" &&
-        !risk.maxLossUnbounded &&
-        !risk.hasUndefinedRisk;
+      // Unbounded / undefined risk is advisory (Gate 1 warning), not a
+      // block — only unresolved coverage disables submit.
+      const okToSubmit = coverageStatus === "resolved";
 
       return {
         summary: brand(resolved, coverageStatus, traceId),
@@ -613,10 +614,9 @@ export function useOrderRisk(
       coverageNote: buildCoverageNote(opt, augmented.coveringLegs, coveredCall),
     };
 
-    const okToSubmit =
-      coverageStatus === "resolved" &&
-      !risk.maxLossUnbounded &&
-      !risk.hasUndefinedRisk;
+    // Unbounded / undefined risk is advisory (Gate 1 warning), not a
+    // block — only unresolved coverage disables submit.
+    const okToSubmit = coverageStatus === "resolved";
 
     return {
       summary: brand(resolved, coverageStatus, traceId),

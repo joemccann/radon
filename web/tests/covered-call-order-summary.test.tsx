@@ -172,7 +172,8 @@ describe("partially covered short call stays on the naked path", () => {
     const margin = s.marginImpact;
     expect(margin).not.toBeNull();
     expect(margin!.requirement).not.toBe(0);
-    expect(result.current!.okToSubmit).toBe(false);
+    // Unbounded but coverage-resolved → submittable (Gate 4 disabled).
+    expect(result.current!.okToSubmit).toBe(true);
   });
 });
 
