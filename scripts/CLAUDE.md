@@ -18,6 +18,28 @@ Python conventions shared across the script tree. Loaded automatically when cwd 
 
 ---
 
+## Turso Hrana I/O Bounding
+
+Three production incidents in one week (knowledge ingest reads 2026-07-19,
+knowledge ingest writes 2026-07-19, rv-ratio backfill writes 2026-07-21) — same
+root cause: unbounded I/O over the direct-to-cloud HTTP pipeline. Rules:
+
+1. **Paginate large reads on an id cursor** (`WHERE id > ? ORDER BY id LIMIT 200`).
+   One SELECT of thousands of rows with text payloads 502s ("upstream forward
+   failed") and, once degraded, keeps 502ing for hours.
+2. **`executemany` is one round-trip PER ROW over Hrana.** Bulk writes must be
+   chunked multi-row `INSERT ... VALUES (...), (...)` statements (~400 rows,
+   params well under the variable limit). Exemplar:
+   `scripts/db/writer.py:upsert_price_history_rows`.
+3. **Fresh connection per long phase.** A stream that idles through minutes of
+   API work (LLM calls, fetch chains) dies server-side and poisons every
+   statement after it ("stream not found"). Acquire per batch / per source;
+   exemplar: `scripts/knowledge/ingest.py` (`db_factory`).
+4. **Bound total statements per stream.** Thousands of rapid sequential
+   statements on one connection 502 even when each is small.
+
+---
+
 ## IB Request Bounding
 
 `ib_insync` has no per-request timeout. When IB Gateway is logged in but awaiting 2FA, `qualifyContractsAsync` / `reqHistoricalDataAsync` / `reqMktData` block forever.

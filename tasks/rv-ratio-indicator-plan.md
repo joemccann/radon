@@ -1,11 +1,26 @@
 # RV Ratio Indicator — Final Architecture
 
-> **STATUS: DESIGN DOC, PENDING OPERATOR REVIEW. No code changes have been made.**
-> Synthesized 2026-07-18 from two competing proposals. Base architecture is Proposal A
-> (data-first: durable Turso close store, Yahoo-sanctioned deep backfill, session-relative
-> staleness, synchronous scan POST). Grafted from Proposal B: dedicated tab identity that
-> preserves the VIX slot, shared vol-math extraction, the tiered regime classifier and
-> badge, percentile stat, and the no-service-health-row-in-v1 posture.
+> **STATUS (2026-07-21): SHIPPED.** Built via workflow (steps 1-11) and live-verified
+> (step 12) on production. Commits: `3dda697f` (feature) + `c8b03375` (write batching).
+> Live evidence: SMH snapshot `taken_at 2026-07-21T01:47:48Z` in Turso
+> `rv_ratio_snapshots` (never the JSON fallback), 3,017 closes each for SMH/SPY plus
+> 584 for ALAB in `price_history_daily`, every series ending at the last COMPLETED
+> session; SMH rendered DECOUPLED at 2.94x / PCTL 100 (cross-validating the SpotGamma
+> reference), ALAB exercised the PARTIAL path (332 sessions, trimmed presets).
+> Two deviations recorded inline: client IDs 67-68 (62-63 collided with breadth_scan)
+> and RV_RATIO_SCAN_TIMEOUT_S 360s. One lesson only live verification caught: over the
+> Hrana HTTP transport `executemany` is one round-trip PER ROW — the first cold
+> backfill wrote 3,017 closes, blew the 240s subprocess timeout before SPY, and
+> `upsert_price_history_rows` now writes chunked 400-row multi-row INSERTs.
+> Review pass also fixed intraday close-store poisoning pre-ship: freshness anchors to
+> `utils.market_calendar.last_completed_session_date()` (16:00 ET boundary) and fetched
+> bars are clamped to completed sessions before storage.
+>
+> Original synthesis note (2026-07-18): base architecture is Proposal A (data-first:
+> durable Turso close store, Yahoo-sanctioned deep backfill, session-relative staleness,
+> synchronous scan POST); grafted from Proposal B: dedicated tab identity preserving the
+> VIX slot, shared vol-math extraction, tiered regime classifier and badge, percentile
+> stat, and the no-service-health-row-in-v1 posture.
 
 ---
 

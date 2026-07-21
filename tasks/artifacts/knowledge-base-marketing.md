@@ -139,9 +139,9 @@ Fill with real measured values at publish time. Do not publish placeholders.
 | Callout | Value | Source of truth |
 |---|---|---|
 | Sources ingested | 5 (journal, evals, docs, newsfeed, incidents) | connector registry |
-| Documents indexed | TBD at publish | `SELECT COUNT(*) FROM knowledge` |
+| Documents indexed | 4,933 at 2026-07-20; re-query at publish | `SELECT COUNT(*) FROM knowledge` |
 | Retrieval legs fused per query | 3 (lexical, vector, recency) | retrieve.py |
-| Golden-set hit rate | TBD, gate is at least 0.8 hit@5 | eval_golden.py output |
+| Golden-set hit rate | 0.917 hit@5 measured 2026-07-19 (gate was 0.8); re-run at publish | eval_golden.py output |
 | Median query latency | TBD, measure end to end | to be measured |
 | Third-party services touching position data | 0 for embedding and storage | architecture |
 
@@ -194,10 +194,11 @@ assistant says so.
 
 ## Implementation status (update before publish)
 
-| Piece | Status at draft time |
+| Piece | Status (updated 2026-07-21) |
 |---|---|
 | Store, hybrid retrieval, migrations (Phase 0) | Shipped |
-| Connectors, distillation, embeddings, timer (Phase 1) | In progress |
-| Golden-set harness | In progress |
-| Assistant tools (Phase 2) | Planned, gated on golden set |
-| MCP server (Phase 3) | Planned |
+| Connectors, distillation, embeddings, timer (Phase 1) | Shipped; hourly ingest self-converging on the VPS |
+| Golden-set harness | Shipped; 0.917 hit@5, question set still operator-uncurated |
+| Assistant tools (Phase 2) | Shipped; verified live with cited answers |
+| MCP server (Phase 3) | Shipped; registered as radon-kb for agent sessions |
+| Resilience + security hardening | Shipped (retry/logging/ranking; MCP filter caps, PII scrub) |

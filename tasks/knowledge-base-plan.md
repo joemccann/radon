@@ -10,7 +10,15 @@
 > and unbuilt. Operator follow-ups: curate `scripts/knowledge/golden_set.json`
 > (still `draft: true`), decide on indexing `web/CLAUDE.md`-class files (one
 > golden miss lives there), marketing doc publish gates
-> (`tasks/artifacts/knowledge-base-marketing.md`).
+> (`tasks/artifacts/knowledge-base-marketing.md`), and the trade_log 1-19 /
+> 635-677 duplicate-doc dedup pass.
+>
+> Post-Phase-3 hardening (2026-07-20/21): `ce8ed558` production-incident fix
+> (route retry + scrubbed 503 logging, thesis-first prior-evals rerank,
+> tool-side retry + honesty degradation; verified live twice on the EWY
+> question); `26a583ff` security pass (MCP filter caps, PII scrub before
+> third-party egress). The ingest 502 saga produced the Turso Hrana I/O
+> bounding rules now in `scripts/CLAUDE.md`.
 
 Source pattern: [How Cerebras Built Its Enterprise Knowledge Base](https://www.cerebras.ai/blog/how-we-built-our-knowledge-base) (read 2026-07-18).
 
