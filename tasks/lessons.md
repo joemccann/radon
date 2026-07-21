@@ -437,3 +437,15 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 # 2026-07-20 — Keyboard-launched overlays
 
 - A keyboard-launched dialog must move focus to its primary text input on mount and retain a regression that verifies both focus and Escape dismissal.
+
+## 2026-07-21 - Turso Hrana I/O bounding
+
+- Three incidents, one week, one root cause: unbounded I/O over the direct-to-cloud Hrana pipeline. Paginate large reads on an id cursor; write bulk rows as chunked multi-row INSERT statements (executemany is one round-trip per row over HTTP); acquire a fresh connection per long-running phase so an idle-expired stream cannot poison later statements; treat "upstream forward failed" 502s and "stream not found" errors as this signature before suspecting the platform. Rules codified in scripts/CLAUDE.md "Turso Hrana I/O Bounding".
+
+## 2026-07-19 - Host-local prune authority
+
+- Sources backed by host-local files (gitignored reports, divergent trade_log copies) must never derive delete authority for a shared datastore from local presence or absence: a present-but-partial directory on one host deleted another host's corpus. Turso-backed sources every host can see keep prune rights; file-backed ones never do.
+
+## 2026-07-21 - Live verification catches what suites cannot
+
+- The rv-ratio cold backfill passed every unit, route, and e2e suite yet died on the production 240s subprocess timeout because write latency only exists against real Turso. Timeout-bounded subprocess paths need their worst-case I/O measured live once before "done"; suite-green is not evidence for wall-clock budgets.
