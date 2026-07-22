@@ -1251,3 +1251,86 @@ describe("pinned-arithmetic: exact dollar maxLoss / maxGain", () => {
     expect(risk.maxGain).toBe(2_000);   // 2 × 10 × 100
   });
 });
+
+/* ─────────────────────────────────────────────────────────────────────────
+ * Self-contained spreads must NOT absorb held-long coverage.
+ *
+ * SPCX repro 2026-07-22: operator held 10× LONG $135C (leg of an existing
+ * risk reversal) and built BUY 10× $135C + SELL 10× $155C (a plain bull
+ * call spread, net debit $1.02). The augmenter covered the order's SELL
+ * with the HELD $135C even though the order's own BUY leg already covers
+ * it — the injected extra long made the synthetic structure net-long
+ * calls → "Max Gain: UNBOUNDED" for a defined-risk debit spread.
+ *
+ * The order's own BUY legs must cover its SELL legs first; held positions
+ * only cover the naked residue.
+ * ─────────────────────────────────────────────────────────────────────── */
+
+describe("augmentOrderLegsWithPortfolioCoverage — order-internal BUY legs cover first", () => {
+  const EXP = "20260731";
+
+  it("SPCX repro: held 10x $135C + order BUY 10x $135C / SELL 10x $155C → bounded, no coverage injected", () => {
+    const portfolio = buildPortfolio([
+      makePos({ ticker: "SPCX", expiry: "2026-07-31", right: "Call", strike: 135, direction: "LONG", contracts: 10 }),
+    ]);
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(135, "C", 10, EXP), chainSell(155, "C", 10, EXP)],
+      "SPCX",
+      portfolio,
+    );
+
+    expect(augmented.coveringLegs).toHaveLength(0);
+    expect(augmented.riskLegs).toHaveLength(2);
+
+    const risk = computeOrderRisk(augmented.riskLegs, 1.02, augmented.comboQuantity);
+    expect(risk.maxGainUnbounded).toBe(false);
+    expect(risk.maxLossUnbounded).toBe(false);
+    expect(risk.maxLoss).toBeCloseTo(1_020, 0);   // debit × 10 × 100
+    expect(risk.maxGain).toBeCloseTo(18_980, 0);  // (20 width − 1.02) × 10 × 100
+  });
+
+  it("partial self-cover: order BUY 5 / SELL 10 draws held longs only for the residue of 5", () => {
+    const portfolio = buildPortfolio([
+      makePos({ ticker: "SPCX", expiry: "2026-07-31", right: "Call", strike: 135, direction: "LONG", contracts: 10 }),
+    ]);
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(135, "C", 5, EXP), chainSell(155, "C", 10, EXP)],
+      "SPCX",
+      portfolio,
+    );
+
+    const optionCover = augmented.coveringLegs.filter((l) => l.type === "Option");
+    expect(optionCover).toHaveLength(1);
+    expect(optionCover[0]).toMatchObject({ type: "Option", strike: 135, contracts: 5 });
+  });
+
+  it("a BUY leg of a different right does not self-cover a short call", () => {
+    const portfolio = buildPortfolio([
+      makePos({ ticker: "SPCX", expiry: "2026-07-31", right: "Call", strike: 135, direction: "LONG", contracts: 10 }),
+    ]);
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(135, "P", 10, EXP), chainSell(155, "C", 10, EXP)],
+      "SPCX",
+      portfolio,
+    );
+
+    const optionCover = augmented.coveringLegs.filter((l) => l.type === "Option");
+    expect(optionCover).toHaveLength(1);
+    expect(optionCover[0]).toMatchObject({ type: "Option", strike: 135, contracts: 10 });
+  });
+
+  it("a BUY leg of a different expiry does not self-cover", () => {
+    const portfolio = buildPortfolio([
+      makePos({ ticker: "SPCX", expiry: "2026-07-31", right: "Call", strike: 135, direction: "LONG", contracts: 10 }),
+    ]);
+    const augmented = augmentOrderLegsWithPortfolioCoverage(
+      [chainBuy(135, "C", 10, "20261218"), chainSell(155, "C", 10, EXP)],
+      "SPCX",
+      portfolio,
+    );
+
+    const optionCover = augmented.coveringLegs.filter((l) => l.type === "Option");
+    expect(optionCover).toHaveLength(1);
+    expect(optionCover[0]).toMatchObject({ type: "Option", strike: 135, contracts: 10 });
+  });
+});

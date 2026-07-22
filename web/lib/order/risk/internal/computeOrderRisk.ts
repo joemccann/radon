@@ -863,6 +863,22 @@ export function augmentOrderLegsWithPortfolioCoverage(
     }
   }
 
+  // --- Pass 0: the order's own BUY legs cover its SELL legs ----------------
+  // A self-contained spread (BUY 10x 135C + SELL 10x 155C) needs NO external
+  // coverage — the multi-leg risk model already prices the pair as bounded.
+  // Injecting a held long on top of an order-internal cover double-counts
+  // and flips the structure to net-long → phantom "UNBOUNDED" max gain
+  // (SPCX repro 2026-07-22). Held positions may only cover the residue.
+  // Strikes are irrelevant for tail-boundedness: any 1:1 long-vs-short of
+  // the same right and expiry cancels the tail slope.
+  const orderBuyPool = new Map<string, number>();
+  for (let i = 0; i < chainLegs.length; i++) {
+    const leg = chainLegs[i];
+    if (leg.action !== "BUY") continue;
+    const key = `${leg.right}|${normaliseExpiry(leg.expiry)}`;
+    orderBuyPool.set(key, (orderBuyPool.get(key) ?? 0) + quantities[i]);
+  }
+
   // --- Pass 1: option coverage ---------------------------------------------
   // For each SELL chain leg, draw down covering held LONG option contracts of
   // the same expiry and right. Coverage is capped at the chain leg's contract
@@ -883,6 +899,14 @@ export function augmentOrderLegsWithPortfolioCoverage(
     if (chain.action !== "SELL") continue;
     const chainExpiry = normaliseExpiry(chain.expiry);
     let remainingShort = quantities[i];
+
+    const poolKey = `${chain.right}|${chainExpiry}`;
+    const pooled = orderBuyPool.get(poolKey) ?? 0;
+    const selfCovered = Math.min(pooled, remainingShort);
+    if (selfCovered > 0) {
+      orderBuyPool.set(poolKey, pooled - selfCovered);
+      remainingShort -= selfCovered;
+    }
 
     for (const [key, leg] of heldLongIndex.entries()) {
       if (remainingShort <= 0) break;
