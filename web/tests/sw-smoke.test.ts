@@ -142,10 +142,23 @@ describe("interception surface", () => {
     }
   });
 
-  it("calls respondWith for navigations, allowlisted API GETs, static assets", () => {
-    expect(dispatchFetch(h, { url: `${ORIGIN}/dashboard`, mode: "navigate" }).responded).toBe(true);
-    expect(dispatchFetch(h, { url: `${ORIGIN}/api/portfolio` }).responded).toBe(true);
-    expect(dispatchFetch(h, { url: `${ORIGIN}/_next/static/x.js` }).responded).toBe(true);
+  it("calls respondWith for navigations, allowlisted API GETs, static assets", async () => {
+    // Settle every dispatched handler: an unconfigured fetch mock resolves
+    // undefined and the un-awaited handler promise becomes an unhandled
+    // rejection that fails CI even with all tests green (2026-07-22).
+    h.fetchMock.mockResolvedValue(
+      new Response("{}", { status: 200, headers: { "content-type": "application/json" } }),
+    );
+    const dispatches = [
+      dispatchFetch(h, { url: `${ORIGIN}/dashboard`, mode: "navigate" }),
+      dispatchFetch(h, { url: `${ORIGIN}/api/portfolio` }),
+      dispatchFetch(h, { url: `${ORIGIN}/_next/static/x.js` }),
+    ];
+    for (const d of dispatches) {
+      expect(d.responded).toBe(true);
+      await d.response();
+      await d.settle();
+    }
   });
 });
 
