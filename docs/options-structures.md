@@ -159,7 +159,7 @@ SELL stock, qty > held    → BLOCK (oversell)
 | Box Spread (Synthetic Future) _Long Box, Risk-Free Arbitrage_ | BUY CALL (lower) + SELL CALL (higher) + SELL PUT (lower) + BUY PUT (higher) | neutral | defined | strike_width - net debit | net debit paid | **ALLOW** | Combo with both BUY and SELL legs → all hedged |
 | Reverse Conversion _Reverse Arbitrage, Synthetic Short + Long Stock_ | BUY STOCK [N/A] + SELL CALL (ATM) + BUY PUT (ATM) | neutral | defined | credit from short call - premium for put | debit for stock - credit from call + premium for put | **ALLOW** | Stock + short call (covered by stock) + long put. Combo with BUY and SELL. |
 | Conversion (Arbitrage) _Synthetic Long + Short Stock, Cash-and-Carry_ | SELL STOCK [N/A] + BUY CALL (ATM) + SELL PUT (ATM) | neutral | defined | credit from short put - cost of call | debit for short stock + cost of call - credit for put | **BLOCK** | SELL stock without sufficient long shares → naked short stock |
-| Seagull Spread _Zero-Cost Collar + extension_ | BUY CALL (highest) + SELL CALL (middle) + SELL PUT (lowest) | bullish | undefined | middle_strike - lowest_strike - net_cost | unlimited | **ALLOW ⚠** | Combo with BUY call + SELL call + SELL put. BUY and SELL present. |
+| Seagull Spread _Zero-Cost Collar + extension; UI label "Risk Reversal Call Spread" (chain builder, since 2026-07-22); put-side mirror labels "Risk Reversal Put Spread"_ | BUY CALL (highest) + SELL CALL (middle) + SELL PUT (lowest) | bullish | undefined | middle_strike - lowest_strike - net_cost | unlimited | **ALLOW ⚠** | Combo with BUY call + SELL call + SELL put. BUY and SELL present. |
 
 ---
 
