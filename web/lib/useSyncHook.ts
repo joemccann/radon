@@ -1,6 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { readOfflineMeta } from "./offline/offlineStatus";
+import {
+  reportFetchFailure,
+  reportFetchSuccess,
+  reportOfflineServed,
+} from "./offline/offlineSignals";
 
 const DEFAULT_INTERVAL_MS = 5 * 60 * 1000; // 5 minutes
 type RetryMethod = "GET" | "POST";
@@ -60,8 +66,13 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     if (!background && method === "POST") {
       setSyncing(true);
     }
+    let networkResolved = false;
     try {
       const res = await fetch(endpoint, { method, cache: "no-store" });
+      networkResolved = true;
+      const meta = readOfflineMeta(res.headers);
+      if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
+      else reportFetchSuccess();
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error((body as { error?: string }).error ?? `Sync failed (${res.status})`);
@@ -78,6 +89,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         }, retryIntervalMs);
       }
     } catch (err) {
+      if (!networkResolved) reportFetchFailure();
       // Only show error if we don't already have valid cached data —
       // unless the caller explicitly wants the stale view marked as degraded.
       setData((prev) => {
@@ -107,8 +119,13 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     initialLoadKeyRef.current = endpoint;
 
     const init = async () => {
+      let networkResolved = false;
       try {
         const res = await fetch(endpoint, { method: "GET", cache: "no-store" });
+        networkResolved = true;
+        const meta = readOfflineMeta(res.headers);
+        if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
+        else reportFetchSuccess();
         if (!res.ok) throw new Error("Failed to fetch cached data");
         const json = (await res.json()) as T;
         setData(json);
@@ -130,6 +147,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
           void triggerSync();
         }
       } catch (err) {
+        if (!networkResolved) reportFetchFailure();
         setError(err instanceof Error ? err.message : "Unknown error");
         setLoading(false);
         didInitialRead.current = true;

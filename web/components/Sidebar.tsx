@@ -5,6 +5,8 @@ import type { WorkspaceSection } from "@/lib/types";
 import { navItems } from "@/lib/data";
 import { useProfile } from "@/lib/useProfile";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
+import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
+import { resolveConnectivityLabel } from "@/lib/offline/offlineStatus";
 
 type SidebarProps = {
   activeSection: WorkspaceSection;
@@ -50,7 +52,11 @@ function monogramFor(name: string | null, email: string | null): string {
 
 export default function Sidebar({ activeSection, actionTone, lastSync }: SidebarProps) {
   const { displayStatus } = useIBStatusContext();
-  const { text, cls } = statusLabel(displayStatus);
+  // A client-side outage must read OFFLINE, not the misdiagnosed
+  // "RELAY OFFLINE" that a dead network produces via deriveDisplayStatus.
+  const { offline: browserOffline } = useOfflineStatus();
+  const { text, cls } =
+    resolveConnectivityLabel(displayStatus, browserOffline) ?? statusLabel(displayStatus);
   const dotClass =
     cls === "live"
       ? "status-dot-live"

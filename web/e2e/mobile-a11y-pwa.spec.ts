@@ -12,7 +12,9 @@
  * Plus PWA assertions:
  * - manifest.webmanifest is reachable + valid + advertises 192/512 icons,
  *   standalone display, theme_color, start_url.
- * - sw.js is reachable + bypasses /api, /_next/data, /ws.
+ * - sw.js + sw-decisions.js are reachable; the SW is network-first with
+ *   offline fallback (cache served only on network failure), and /ws,
+ *   /_next/data, non-GET + non-allowlisted /api stay untouched.
  * - layout includes apple-mobile-web-app-capable meta + manifest <link>.
  */
 
@@ -78,17 +80,28 @@ test.describe("PWA shell assertions", () => {
     expect(purposes).toContain("maskable");
   });
 
-  test("sw.js is reachable and never intercepts /api, /_next/data, /ws, non-GET", async ({ request }) => {
-    const res = await request.get("/sw.js");
-    expect(res.status()).toBe(200);
-    const body = await res.text();
+  test("sw.js is network-first with offline fallback; cache served only on network failure", async ({ request }) => {
+    const swRes = await request.get("/sw.js");
+    expect(swRes.status()).toBe(200);
+    const swBody = await swRes.text();
 
-    // Bypass list (the cache contract requires SW to leave dynamic API
-    // responses untouched so force-dynamic + no-store keep working).
-    expect(body).toContain("/api/");
-    expect(body).toContain("/_next/data/");
-    expect(body).toContain("/ws");
-    expect(body).toContain('"GET"');
+    const decisionsRes = await request.get("/sw-decisions.js");
+    expect(decisionsRes.status()).toBe(200);
+    const decisionsBody = await decisionsRes.text();
+
+    // Request-class literals (the cache contract's classification lives in
+    // sw-decisions.js now; sw.js stays a thin importScripts adapter). Online
+    // behavior is byte-identical: cache is read ONLY when fetch() rejects.
+    const combined = swBody + decisionsBody;
+    expect(combined).toContain("/api/");
+    expect(combined).toContain("/_next/data/");
+    expect(combined).toContain("/ws");
+    expect(combined).toContain('"GET"');
+
+    // Offline marking contract: served-from-cache responses carry these headers.
+    expect(decisionsBody).toContain("X-Radon-Offline");
+    expect(decisionsBody).toContain("X-Radon-Cached-At");
+    expect(swBody).toContain("importScripts");
   });
 
   test("layout exposes apple-mobile-web-app meta + manifest link", async ({ page }) => {

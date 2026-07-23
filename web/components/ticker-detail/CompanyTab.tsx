@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Building2 } from "lucide-react";
 import type { PriceData, FundamentalsData } from "@/lib/pricesProtocol";
 import SectionEmptyState from "@/components/SectionEmptyState";
 import { useShortAvailability } from "@/lib/order/hooks/useShortAvailability";
+import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 
 type CompanyData = {
   uw_info: Record<string, unknown>;
@@ -89,6 +90,21 @@ export default function CompanyTab({ ticker, active, priceData, fundamentals }: 
   useEffect(() => {
     if (active && !fetched) fetchInfo();
   }, [active, fetched, fetchInfo]);
+
+  // The one-shot fetch latches `fetched` even on failure. When connectivity
+  // returns after an offline failure, unlatch so the effect above refetches
+  // instead of stranding the tab on a stale error.
+  const { offline } = useOfflineStatus();
+  const wasOfflineRef = useRef(false);
+  useEffect(() => {
+    if (offline) {
+      wasOfflineRef.current = true;
+      return;
+    }
+    if (!wasOfflineRef.current) return;
+    wasOfflineRef.current = false;
+    if (active && error != null && data == null) setFetched(false);
+  }, [offline, active, error, data]);
 
   const info = (data?.uw_info ?? {}) as Record<string, unknown>;
   const issueType = (info.issue_type ?? "") as string;
