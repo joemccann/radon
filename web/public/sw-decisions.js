@@ -132,8 +132,10 @@ const RadonSwDecisions = (() => {
 
   // Only a clean 200 enters Cache Storage. 4xx/5xx/304/redirects pass through
   // untouched (the auth perimeter's 401/404 must never be masked by cache).
+  // Falsy input → false, never a throw (a throw here escapes the handler as
+  // an unhandled rejection).
   function shouldCacheResponse(res) {
-    if (!res.ok || res.status !== 200) return false;
+    if (!res || !res.ok || res.status !== 200) return false;
     if (res.type === "opaqueredirect" || res.type === "opaque") return false;
     return true;
   }
