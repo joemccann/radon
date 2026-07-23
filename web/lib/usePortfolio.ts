@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PortfolioData } from "./types";
+import { readOfflineMeta } from "./offline/offlineStatus";
+import {
+  reportFetchFailure,
+  reportFetchSuccess,
+  reportOfflineServed,
+} from "./offline/offlineSignals";
 
 const POLL_INTERVAL_MS = 30_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
@@ -38,11 +44,16 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
     if (readingRef.current) return;
     readingRef.current = true;
     const generation = dataGenerationRef.current;
+    let networkResolved = false;
     try {
       const res = await fetch("/api/portfolio", {
         cache: "no-store",
         signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
       });
+      networkResolved = true;
+      const meta = readOfflineMeta(res.headers);
+      if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
+      else reportFetchSuccess();
       if (!res.ok) throw new Error(`Failed to fetch portfolio (${res.status})`);
       const json = (await res.json()) as PortfolioData;
       if (!mountedRef.current || generation !== dataGenerationRef.current) return;
@@ -57,6 +68,7 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       warningSnapshotRef.current = null;
       setError(null);
     } catch (err) {
+      if (!networkResolved) reportFetchFailure();
       if (mountedRef.current && generation === dataGenerationRef.current) {
         setError(err instanceof Error ? err.message : "Unknown error");
       }

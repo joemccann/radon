@@ -39,6 +39,9 @@ import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
 import { assessMargin, rankOf, type MarginLevel } from "@/lib/marginWarning";
 import { useFillToasts } from "@/lib/useFillToasts";
+import OfflineBanner from "@/components/OfflineBanner";
+import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
+import { deriveLiveDataError } from "@/lib/offline/offlineStatus";
 import { useTheme } from "@/lib/ThemeContext";
 import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
 
@@ -374,9 +377,17 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const isDemoMode = process.env.NEXT_PUBLIC_RADON_DEMO === "1";
   // Options measurements are backed by dedicated sources, not the IB
   // portfolio/order relay. Their panels report source-specific faults.
-  const liveDataError = isDemoMode || isOptionsWorkspace
-    ? null
-    : (portfolioError ?? ordersError ?? priceError);
+  // While the browser is offline the OfflineBanner is the single
+  // explanation; the raw "Failed to fetch" degraded banner is suppressed.
+  const { offline: browserOffline } = useOfflineStatus();
+  const liveDataError = deriveLiveDataError({
+    isDemoMode,
+    isOptionsWorkspace,
+    browserOffline,
+    portfolioError,
+    ordersError,
+    priceError,
+  });
   const lastSync = isOrdersPage ? ordersLastSync : portfolioLastSync;
   const syncNow = isOrdersPage ? ordersSyncNow : portfolioSyncNow;
   const syncTarget = isOrdersPage ? "orders" : "portfolio";
@@ -489,6 +500,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
         </Header>
 
         <div className="content">
+          <OfflineBanner />
           {liveDataError ? (
             <div className="live-data-degraded" role="alert" data-testid="live-data-degraded">
               <strong>Live data degraded</strong>

@@ -9,7 +9,10 @@ export default function PwaRegister() {
     if (process.env.NODE_ENV !== "production") return;
 
     const register = () => {
-      navigator.serviceWorker.register("/sw.js", { scope: "/" }).catch((err) => {
+      // updateViaCache: "none" revalidates importScripts deps (sw-decisions.js)
+      // on every update check so a deploy never strands clients on a stale
+      // decisions script.
+      navigator.serviceWorker.register("/sw.js", { scope: "/", updateViaCache: "none" }).catch((err) => {
         console.warn("[radon] service worker registration failed:", err);
       });
     };

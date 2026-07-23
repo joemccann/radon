@@ -7,6 +7,8 @@ import { Search } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
 import { useProfile } from "@/lib/useProfile";
+import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
+import { resolveMobileConnectivityChip } from "@/lib/offline/offlineStatus";
 
 type MobileAppBarProps = {
   title: string;
@@ -90,7 +92,8 @@ function MobileAppBarView({
   avatarUrl: string | null;
 }) {
   const { displayStatus } = useIBStatusContext();
-  const chip = mobileStatusChip(displayStatus);
+  const { offline: browserOffline } = useOfflineStatus();
+  const chip = resolveMobileConnectivityChip(browserOffline) ?? mobileStatusChip(displayStatus);
   const [collapsed, setCollapsed] = useState(false);
   const pathname = usePathname() ?? "";
   const monogram = monogramFor(username, email);

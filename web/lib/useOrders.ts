@@ -2,6 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OrdersData } from "./types";
+import { readOfflineMeta } from "./offline/offlineStatus";
+import {
+  reportFetchFailure,
+  reportFetchSuccess,
+  reportOfflineServed,
+} from "./offline/offlineSignals";
 
 const POLL_INTERVAL_MS = 30_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
@@ -39,11 +45,16 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
     if (readingRef.current) return;
     readingRef.current = true;
     const generation = dataGenerationRef.current;
+    let networkResolved = false;
     try {
       const res = await fetch("/api/orders", {
         cache: "no-store",
         signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
       });
+      networkResolved = true;
+      const meta = readOfflineMeta(res.headers);
+      if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
+      else reportFetchSuccess();
       if (!res.ok) throw new Error(`Failed to fetch orders (${res.status})`);
       const json = (await res.json()) as OrdersData;
       if (!mountedRef.current || generation !== dataGenerationRef.current) return;
@@ -58,6 +69,7 @@ export function useOrders(active: boolean = true): UseOrdersReturn {
       warningSnapshotRef.current = null;
       setError(null);
     } catch (err) {
+      if (!networkResolved) reportFetchFailure();
       if (mountedRef.current && generation === dataGenerationRef.current) {
         setError(err instanceof Error ? err.message : "Unknown error");
       }

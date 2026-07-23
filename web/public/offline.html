@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Radon: offline</title>
+<!-- Static last-resort fallback served by the service worker when a
+     navigation fails offline and no cached copy of the page exists.
+     Plain HTML + inline CSS only; no scripts (avoids the per-request CSP
+     nonce entirely). Raw hex is acceptable here: this is a non-app static
+     file outside the brand-token pipeline. -->
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+    background: #0a0f14;
+    color: #c8d2dc;
+    font-family: "SF Mono", "Menlo", "Consolas", monospace;
+  }
+  .wrap {
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    box-sizing: border-box;
+  }
+  .panel {
+    max-width: 420px;
+    border: 1px solid #26313c;
+    border-radius: 4px;
+    padding: 24px;
+  }
+  h1 {
+    font-size: 14px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin: 0 0 12px;
+    color: #e8b64c;
+  }
+  p {
+    font-size: 12px;
+    line-height: 1.6;
+    margin: 0;
+    color: #8494a4;
+  }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="panel">
+      <h1>Radon is offline</h1>
+      <p>No cached copy of this page exists yet. Reconnect and open the dashboard once online to warm the offline cache.</p>
+    </div>
+  </div>
+</body>
+</html>

@@ -11,12 +11,22 @@ describe("WorkspaceShell live-data degraded banner", () => {
       "utf8",
     );
 
-    // The error falls back across the three live-data sources. The expression
-    // may be wrapped (e.g. `isDemoMode ? null : (...)`), so assert the fallback
-    // chain itself rather than the exact `const` prefix to avoid brittle breaks.
-    expect(source).toContain("portfolioError ?? ordersError ?? priceError");
+    // 2026-07-22: the fallback chain (portfolioError ?? ordersError ??
+    // priceError) moved into deriveLiveDataError in lib/offline/offlineStatus
+    // so browser-offline can suppress the raw banner. Pin that WorkspaceShell
+    // routes through the helper AND that the helper still owns the chain.
+    expect(source).toContain("deriveLiveDataError({");
+    expect(source).toContain("portfolioError,");
+    expect(source).toContain("ordersError,");
+    expect(source).toContain("priceError,");
     expect(source).toContain('data-testid="live-data-degraded"');
     expect(source).toContain("Live data degraded");
     expect(source).toContain("<span>{liveDataError}</span>");
+
+    const helperSource = readFileSync(
+      resolve(projectRoot, "lib", "offline", "offlineStatus.ts"),
+      "utf8",
+    );
+    expect(helperSource).toContain("portfolioError ?? input.ordersError ?? input.priceError");
   });
 });

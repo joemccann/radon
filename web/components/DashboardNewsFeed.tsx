@@ -5,6 +5,12 @@ import Image from "next/image";
 import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw, Radio } from "lucide-react";
 
 import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime";
+import { readOfflineMeta } from "../lib/offline/offlineStatus";
+import {
+  reportFetchFailure,
+  reportFetchSuccess,
+  reportOfflineServed,
+} from "../lib/offline/offlineSignals";
 import { useNewsfeedTagFilter } from "../lib/useNewsfeedTagFilter";
 import { useBookmarks } from "../lib/useBookmarks";
 import NewsfeedTagBar from "./NewsfeedTagBar";
@@ -119,6 +125,9 @@ export default function DashboardNewsFeed() {
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxFocus, setLightboxFocus] = useState<NewsfeedLightboxFocus | null>(null);
   const sectionRef = useRef<HTMLDivElement>(null);
+  // Mirrors `posts` for the fetch catch: a failed background refresh must
+  // hold the last-good list instead of swapping it for an error panel.
+  const postsRef = useRef<NormalisedPost[]>([]);
 
   const scrollToTop = useCallback(() => {
     const node = sectionRef.current;
@@ -141,11 +150,13 @@ export default function DashboardNewsFeed() {
       setError(null);
     }
 
+    let networkResolved = false;
     try {
       let response = await fetch(POSTS_ENDPOINT, {
         cache: "no-store",
         signal,
       });
+      networkResolved = true;
 
       if (!response.ok) {
         // Phase 1 dual-write: if the DB-backed route is unavailable
@@ -159,6 +170,11 @@ export default function DashboardNewsFeed() {
           throw new Error(`HTTP ${response.status}`);
         }
       }
+
+      const meta = readOfflineMeta(response.headers);
+      if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
+      else reportFetchSuccess();
+      const servedOffline = meta.servedOffline;
 
       const data: unknown = await response.json();
       if (!Array.isArray(data)) {
@@ -184,10 +200,15 @@ export default function DashboardNewsFeed() {
         .sort((a, b) => b.timestampMs - a.timestampMs);
 
       setPosts(normalised);
-      setLastUpdated(new Date().toISOString());
+      postsRef.current = normalised;
+      // Offline-served payloads are replays of an older fetch; stamping
+      // "now" would claim freshness the data does not have.
+      if (!servedOffline) setLastUpdated(new Date().toISOString());
       setError(null);
     } catch (err) {
       if (signal?.aborted) return;
+      if (!networkResolved) reportFetchFailure();
+      if (postsRef.current.length > 0) return;
       const message = err instanceof Error ? err.message : String(err);
       setError(`Unable to load Market Ear feed: ${message}`);
     } finally {
