@@ -65,7 +65,7 @@ describe("OptionsExposurePanel", () => {
         ...EXPOSURE_FIXTURE,
         cells: {
           ...EXPOSURE_FIXTURE.cells,
-          net_gex: [-27_178_360_000_000, 2],
+          net_gex: [-27_178_360_000, 2],
         },
       },
       loading: false,
@@ -75,7 +75,7 @@ describe("OptionsExposurePanel", () => {
 
     render(<OptionsExposurePanel symbol="MU" />);
 
-    expect(screen.getByTestId("exposure-value-90").textContent).toBe("-$27.18T");
+    expect(screen.getByTestId("exposure-value-90").textContent).toBe("-$27.18B");
   });
 
   it("centers every exposure table header", () => {

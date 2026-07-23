@@ -39,8 +39,8 @@ def _exposure_payload(*, ticker: str = "MU", frequency: str = "eod") -> dict:
         "cells": {
             "strike_idx": [0, 1],
             "expiration_idx": [0, 1],
-            "net_gex": [-0.00848, 0.002],
-            "abs_gex": [0.00848, 0.002],
+            "net_gex": [-8_480_000.0, 2_000_000.0],
+            "abs_gex": [8_480_000.0, 2_000_000.0],
             "net_dex": [-125_000.0, 35_000.0],
             "abs_dex": [125_000.0, 35_000.0],
             "oi_call": [100, 230],
@@ -115,7 +115,7 @@ def test_fetch_uses_frequency_specific_url_and_bearer_header_without_caching():
     assert all(call["headers"]["Authorization"] == f"Bearer {token}" for call in session.calls)
 
 
-def test_normalizes_gex_to_usd_and_maps_all_seven_levels():
+def test_passes_provider_usd_gex_through_unscaled_and_maps_all_seven_levels():
     session = _Session([_Response(_exposure_payload()), _Response(_levels_payload())])
     client = MenthorQDashboardClient(access_token=_jwt(), http_session=session)
 
@@ -153,7 +153,7 @@ def test_normalizes_gex_to_usd_and_maps_all_seven_levels():
 
 def test_canonicalizes_provider_abs_gex_sign_before_returning_to_consumers():
     exposure = _exposure_payload()
-    exposure["cells"]["abs_gex"][0] = -0.00848
+    exposure["cells"]["abs_gex"][0] = -8_480_000.0
     session = _Session([_Response(exposure), _Response(_levels_payload())])
     client = MenthorQDashboardClient(access_token=_jwt(), http_session=session)
 
