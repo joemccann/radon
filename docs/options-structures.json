@@ -1859,7 +1859,9 @@
   {
     "name": "Seagull Spread",
     "aliases": [
-      "Zero-Cost Collar + extension"
+      "Zero-Cost Collar + extension",
+      "Risk Reversal Call Spread",
+      "Risk Reversal Put Spread (put-side mirror)"
     ],
     "category": "complex",
     "legs": [

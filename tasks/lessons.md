@@ -449,3 +449,9 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-07-21 - Live verification catches what suites cannot
 
 - The rv-ratio cold backfill passed every unit, route, and e2e suite yet died on the production 240s subprocess timeout because write latency only exists against real Turso. Timeout-bounded subprocess paths need their worst-case I/O measured live once before "done"; suite-green is not evidence for wall-clock budgets.
+
+## 2026-07-22 - SW test harnesses and workflow supervision
+
+- Vitest fails CI on UNHANDLED REJECTIONS even with every test green, and the failure is timing-dependent (local runs can pass). Any harness that dispatches async handlers (service-worker fetch events, message handlers) must configure its mocks AND settle every dispatched promise before the test returns.
+- Coverage/augmentation passes must consider ORDER-INTERNAL structure before reaching into the portfolio: a self-contained spread needs no external cover, and injecting held legs on top of an order's own cover manufactures phantom risk (SPCX bull-call-spread UNBOUNDED repro).
+- Workflow implementer agents can stall mid-run leaving partial work in the tree. The tree state, not the agent's report, is the source of truth: run the verify phase manually, and check for the classic gap — a component written and tested but never mounted.
