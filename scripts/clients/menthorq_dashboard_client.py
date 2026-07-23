@@ -487,15 +487,15 @@ class MenthorQDashboardClient:
             "cells": {
                 "strike_idx": strike_idx,
                 "expiration_idx": expiration_idx,
-                # MenthorQ's GEX cube is denominated in USD billions per 1%
-                # underlying move. Normalize at the provider boundary so UI
-                # consumers never need provider-specific scaling knowledge.
-                "net_gex": [value * 1_000_000_000 for value in numeric["net_gex"]],
+                # MenthorQ's GEX cube arrives already denominated in plain USD
+                # (same denomination as its DEX arrays), so normalization at
+                # this provider boundary is a pass-through — no scaling.
+                "net_gex": list(numeric["net_gex"]),
                 # The live provider occasionally emits a negative value in its
                 # ``abs_gex`` array. Preserve the metric's documented absolute
                 # semantics at this trusted boundary rather than rejecting the
                 # entire otherwise-valid exposure cube.
-                "abs_gex": [abs(value) * 1_000_000_000 for value in numeric["abs_gex"]],
+                "abs_gex": [abs(value) for value in numeric["abs_gex"]],
                 "net_dex": numeric["net_dex"],
                 "abs_dex": numeric["abs_dex"],
                 "oi_call": numeric["oi_call"],
