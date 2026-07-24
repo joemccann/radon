@@ -448,6 +448,60 @@ printf 'gateway %s\n' "$*" >> "$RADON_OPERATOR_EVENTS"
     assert "radon-forecast-nightly.service" not in systemctl_actions[0]
 
 
+def test_operator_preserves_its_inherited_deploy_lock_fd_for_gateway_control(tmp_path: Path):
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    events = tmp_path / "events.log"
+    _write_executable(
+        fake_bin / "systemctl",
+        """#!/bin/sh
+if [ "${1:-}" = list-units ]; then
+  for unit in radon-ib-gateway radon-api radon-nextjs radon-relay radon-monitor radon-newsfeed radon-health; do
+    printf '%s.service loaded active running persistent\\n' "$unit"
+  done
+  exit 0
+fi
+printf 'systemctl %s\\n' "$*" >> "$RADON_OPERATOR_EVENTS"
+""",
+    )
+    gateway_control = tmp_path / "gateway-control"
+    _write_executable(
+        gateway_control,
+        """#!/bin/sh
+set -eu
+fd="${RADON_DEPLOY_LOCK_FD:?missing deploy lock fd}"
+"$RADON_OPERATOR_PYTHON" - "$fd" <<'PY'
+import os
+import sys
+
+os.fstat(int(sys.argv[1]))
+PY
+printf 'gateway %s\\n' "$*" >> "$RADON_OPERATOR_EVENTS"
+""",
+    )
+    env = {
+        **os.environ,
+        "PATH": f"{fake_bin}:{os.environ['PATH']}",
+        "RADON_IB_GATEWAY_CONTROL": str(gateway_control),
+        "RADON_OPERATOR_EVENTS": str(events),
+        "RADON_OPERATOR_TOPOLOGY_PATH": str(tmp_path / "operator-topology"),
+        "RADON_OPERATOR_ALLOW_ROOT": "1",
+        "RADON_OPERATOR_PYTHON": sys.executable,
+        "RADON_DEPLOY_LOCK_FILE": str(tmp_path / "deploy.lock"),
+    }
+
+    result = subprocess.run(
+        [str(CLOUD_ROOT / "scripts" / "operator-radon.sh"), "restart"],
+        env=env,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert result.returncode == 0, result.stderr
+    assert "gateway restart" in events.read_text().splitlines()
+
+
 def test_operator_quiesces_active_oneshot_without_restarting_it(tmp_path: Path):
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()

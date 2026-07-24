@@ -165,17 +165,22 @@ export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHear
  * row whose own payload says ``tick_age_secs: 195`` (the 2026-06-18 incident).
  *
  * The fix: the ladder owns the health row whenever it is acting. Only a fully
- * healthy cycle (action ``none``) may write the heartbeat. Off-hours and
- * latched-error suppression stay in {@link shouldWriteTickHeartbeat} (the
- * latter still matters during the post-escalation cooldown, when
- * decideStaleAction returns ``none`` but the error row is still latched).
+ * healthy cycle (action ``none``), with a connected IB socket and a fresh
+ * tick, may write the heartbeat. Off-hours and latched-error suppression stay
+ * in {@link shouldWriteTickHeartbeat} (the latter still matters during the
+ * post-escalation cooldown, when decideStaleAction returns ``none`` but the
+ * error row is still latched).
  *
  * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number}} input
  * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean}}
  */
 export function decideHealthWrite(input) {
   const action = decideStaleAction(input);
-  const heartbeat = action === "none" && shouldWriteTickHeartbeat(input);
+  const hasFreshConnectedTick = input.ibConnected
+    && input.now - input.lastTickAt <= STALE_DATA_THRESHOLD_MS;
+  const heartbeat = action === "none"
+    && hasFreshConnectedTick
+    && shouldWriteTickHeartbeat(input);
   return { action, heartbeat };
 }
 

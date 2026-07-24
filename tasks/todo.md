@@ -1,3 +1,35 @@
+# Task: Relay outage investigation and service recovery (2026-07-24)
+
+## Dependency graph
+
+- T1 depends_on: [] - Collect read-only live service, relay, and health evidence; identify the authoritative recovery path and preserve the existing worktree.
+- T2 depends_on: [T1] - Recover the wedged Gateway through its documented lock-aware controller and restore the persistent service topology without unmanaged Docker mutation.
+- T3 depends_on: [T1] - Add a red regression for the stale-disconnected relay being published as healthy, then implement the smallest truthful health-state repair.
+- T4 depends_on: [T2] - Add a regression for the operator losing its inherited deploy-lock descriptor during a privileged Gateway restart, then preserve that descriptor through the bounded subprocess wrapper.
+- T5A depends_on: [T3, T4] - Restore the declared Python 3.13 test dependency set and run the full application suite after the initial collection failure.
+- T5B depends_on: [T3, T4] - Run full web and cloud release suites plus static checks.
+- T5 depends_on: [T2, T5A, T5B] - Verify relay connectivity, core unit activity, aggregate health, and relevant logs; record the incident recovery evidence.
+- T6 depends_on: [T5] - Commit only the reliability fixes, push to main, and verify the automatic production deployment.
+
+## Checklist
+
+- [x] T1 Establish live failure cause and safe recovery path: relay is process-healthy but cannot complete the IB protocol handshake; TCP 4001 is open while IB API is wedged, relay ticks stopped at 2026-07-23T23:45Z, and the watchdog exhausted its bounded API-restart cap. The lock-aware full-stack operator is the required recovery path.
+- [x] T2 Gateway and all persistent services restarted again at 2026-07-24T14:01Z; IBKR 2FA completed and production later reported authenticated Gateway/API/relay health.
+- [x] T3 Correct stale-disconnected relay health reporting with regression coverage.
+- [x] T4 Correct the lock-aware full-stack operator regression with coverage.
+- [x] T5 Operational preflight confirms production is healthy and authenticated before release.
+- [x] T5A Used an isolated Python 3.13 environment with the declared dependencies plus pytest-asyncio; full suite passed.
+- [x] T5B Full web and cloud release suites plus static checks passed.
+- [ ] T6 Release the reliability fixes and verify production deployment.
+
+## Review
+
+- Confirmed incident root cause: the Gateway Java/GUI container remained alive while its internal API listener refused connections. The relay process remained up but retried `127.0.0.1:4001` every five seconds; the last tick was 2026-07-23T23:45:00Z. The API-aware watchdog detected the protocol wedge but had exhausted its bounded three-restart cap.
+- Recovery action: the first `/usr/local/bin/radon restart` safely refused a lost inherited deploy-lock descriptor before mutating the Gateway. The documented controller was then invoked directly, acquiring one 2FA lease and rebuilding the Gateway container; `radon-api`, `radon-nextjs`, `radon-relay`, `radon-monitor`, `radon-newsfeed`, and all 25 active timers were restarted. All five persistent units are active.
+- Recovery verification: after the replacement restart, production returned to authenticated Gateway/API/relay health. The earlier 2FA wait is resolved.
+- Reliability fixes are local and tested: disconnected/stale relays cannot publish an `ok` tick heartbeat, and the stack operator now preserves its inherited deploy-lock descriptor through its bounded subprocess runner. Focused verification passed: `cloud/tests/test_ib_gateway_control.py` 40 passed; `scripts/lib/staleDataMachine.test.js` 29 passed; `git diff --check` passed. These source changes are not deployed while the current Gateway waits for 2FA.
+- Release verification: full Python suite passed in an isolated Python 3.13 environment (`4,535 passed, 13 skipped, 90 deselected`); full web Vitest passed (`460 files, 4,430 passed, 26 skipped`); TypeScript passed; ESLint had 11 pre-existing warnings and no errors; cloud suite completed green; `git diff --check` passed. The initial system-Python run was blocked by its missing declared `mcp` package, so the isolated environment was used without changing the system toolchain.
+
 # Task: Radon Chat composer autofocus (2026-07-20)
 
 ## Dependency graph

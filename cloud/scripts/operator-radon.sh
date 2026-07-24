@@ -178,7 +178,17 @@ import subprocess
 import sys
 
 timeout, *command = sys.argv[1:]
-proc = subprocess.Popen(command, start_new_session=True)
+pass_fds = ()
+fd_text = os.environ.get("RADON_DEPLOY_LOCK_FD", "")
+if os.environ.get("RADON_DEPLOY_LOCKED") == "1" and fd_text.isdigit():
+    try:
+        deploy_lock_fd = int(fd_text)
+        os.fstat(deploy_lock_fd)
+    except OSError:
+        pass
+    else:
+        pass_fds = (deploy_lock_fd,)
+proc = subprocess.Popen(command, start_new_session=True, pass_fds=pass_fds)
 try:
     raise SystemExit(proc.wait(timeout=float(timeout)))
 except subprocess.TimeoutExpired:
