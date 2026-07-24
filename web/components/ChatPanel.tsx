@@ -1,7 +1,7 @@
 "use client";
 
 import { type FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { Bot, Send, ArrowDown, Copy, Check } from "lucide-react";
+import { Send, ArrowDown, Copy, Check } from "lucide-react";
 import type { ApiMessage, AssistantOrderProposal, Message, WorkspaceSection } from "@/lib/types";
 import { quickPromptsBySection } from "@/lib/data";
 import { createTimestamp } from "@/lib/utils";
@@ -228,16 +228,10 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
   const lastAssistantId = [...messages].reverse().find((m) => m.role === "assistant")?.id ?? null;
 
   return (
-    <div className="section chat-panel">
-      <div className="section-header">
-        <div className="section-title">
-          <Bot size={14} />
-          Radon Chat
-        </div>
-        <span className="pill defined">LIVE CONVERSATION</span>
-      </div>
-      <div className="section-body">
-        <div className="chat-shell">
+    <div className="chat-panel">
+      {/* The launcher head is the overlay's single header — ChatPanel no
+          longer renders its own, so the surface reads as one conversation. */}
+      <div className="chat-shell">
           <div className="chat-transcript-wrap">
             {messages.length === 0 ? (
               <div className="chat-empty-state">
@@ -395,7 +389,6 @@ export default function ChatPanel({ activeSection }: ChatPanelProps) {
             </form>
           </div>
         </div>
-      </div>
     </div>
   );
 }

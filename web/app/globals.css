@@ -3689,7 +3689,7 @@ td.last-price-cell {
 }
 
 .chat-shell {
-  padding: 16px;
+  padding: 0 20px 16px;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -3709,13 +3709,6 @@ td.last-price-cell {
   flex: 1;
   min-height: 0;
   margin-bottom: 0;
-}
-
-.chat-panel .section-body {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-  min-height: 0;
 }
 
 .chat-panel .chat-shell {
@@ -4562,14 +4555,14 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   flex-direction: column;
 }
 
+/* Open canvas — the transcript sits directly on the panel surface (single
+   conversational plane, no box-in-box). */
 .chat-messages {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
-  border: 1px solid var(--border-dim);
-  background: var(--bg-base);
-  padding: 12px;
+  padding: 16px 4px;
 }
 
 /* Empty / first-run state — clickable domain prompts instead of a blank box. */
@@ -4580,9 +4573,7 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   flex-direction: column;
   justify-content: center;
   gap: 12px;
-  padding: 24px 16px;
-  border: 1px solid var(--border-dim);
-  background: var(--bg-base);
+  padding: 24px 8px;
 }
 
 .chat-empty-state__title {
@@ -4757,10 +4748,20 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   .chat-typing-dot { opacity: 0.6; }
 }
 
+/* Messages separate by whitespace, not rules — conversational cadence. */
 .chat-message {
-  margin-bottom: 12px;
-  padding-bottom: 12px;
-  border-bottom: 1px dashed var(--border-dim);
+  margin-bottom: 20px;
+}
+
+/* User turns render as a right-leaning bubble (the Claude/ChatGPT read);
+   assistant turns stay full-width prose on the open canvas. */
+.chat-message.user {
+  padding: 10px 14px;
+  border-radius: 4px;
+  background: var(--bg-hover);
+  width: fit-content;
+  margin-left: auto;
+  max-width: 85%;
 }
 
 .chat-message:last-child {
@@ -5077,33 +5078,40 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   gap: 8px;
 }
 
+/* The composer is the ONLY bordered element on the chat surface — a single
+   container holding a borderless textarea and the send button, focus ring on
+   the container via :focus-within (the modern AI-composer pattern). */
 .chat-input-row {
   display: grid;
   grid-template-columns: 1fr auto;
-  gap: 8px;
+  gap: 4px;
   align-items: end;
   margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  background: var(--bg-base);
+  transition: border-color 200ms ease-in-out;
+}
+
+.chat-input-row:focus-within {
+  border-color: var(--border-focus);
 }
 
 .chat-textarea {
   width: 100%;
   field-sizing: content;
-  min-height: 44px;
+  min-height: 36px;
   max-height: 160px;
-  background: var(--bg-base);
-  border: 1px solid var(--border-dim);
+  background: transparent;
+  border: 0;
   color: var(--text-primary);
-  padding: 10px 12px;
+  padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
   line-height: 1.5;
   outline: none;
   resize: none;
-  transition: border-color 200ms ease-in-out;
-}
-
-.chat-textarea:focus {
-  border-color: var(--border-focus);
 }
 
 .chat-send {
@@ -5112,15 +5120,21 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-dim);
-  background: var(--bg-hover);
-  color: var(--text-primary);
+  border: 0;
+  border-radius: 2px;
+  background: transparent;
+  color: var(--text-muted);
   cursor: pointer;
-  transition: border-color 200ms ease-in-out, opacity 200ms ease-in-out;
+  transition: background-color 200ms ease-in-out, color 200ms ease-in-out, scale 150ms ease-in-out;
 }
 
 .chat-send:not(:disabled) {
-  border-color: var(--text-muted);
+  background: var(--accent-bg);
+  color: var(--accent-text);
+}
+
+.chat-send:not(:disabled):active {
+  scale: 0.96;
 }
 
 .chat-send:disabled {
@@ -5135,9 +5149,10 @@ body[data-mobile="true"] .dashboard-news .news-feed-refresh {
 }
 
 .pill-chip {
-  border: 1px solid var(--border-dim);
-  background: transparent;
-  color: var(--text-primary);
+  border: 0;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--bg-hover) 70%, transparent);
+  color: var(--text-secondary);
   font-size: 10px;
   text-transform: uppercase;
   letter-spacing: 0.05em;
