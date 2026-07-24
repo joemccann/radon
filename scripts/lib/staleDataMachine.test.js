@@ -226,6 +226,20 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
     expect(decideHealthWrite(hw())).toEqual({ action: "none", heartbeat: true });
   });
 
+  it("disconnected relay with an old tick → no misleading ok heartbeat", () => {
+    // Reconnect owns socket recovery, so the action remains none. It must not
+    // publish a fresh-looking tick heartbeat while the data plane is offline.
+    expect(
+      decideHealthWrite(
+        hw({
+          ibConnected: false,
+          lastTickAt: STALE_TICK_AT,
+          lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 10_000,
+        }),
+      ),
+    ).toEqual({ action: "none", heartbeat: false });
+  });
+
   it("ESCALATION cycle → NO heartbeat (the 2026-06-18 clobber bug)", () => {
     // Stale + K cycles burned + no cooldown + heartbeat interval elapsed +
     // error not yet latched (escalateStaleData latches it AFTER this decision).
