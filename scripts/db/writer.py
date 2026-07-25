@@ -129,6 +129,17 @@ def upsert_price_history_rows(symbol: str, rows: list[dict[str, Any]]) -> None:
     fetched_at is stamped at write time. Writes go as chunked multi-row
     INSERT statements, never per-row.
     """
+    upsert_price_history_symbol_rows([{**row, "symbol": symbol} for row in rows])
+
+
+def upsert_price_history_symbol_rows(rows: list[dict[str, Any]]) -> None:
+    """Cross-symbol variant for bulk member ingest (BPI scan).
+
+    Each row additionally carries "symbol". Same chunked multi-row INSERT
+    discipline — one statement per ~400 rows regardless of symbol count,
+    instead of one per-symbol statement each (2,000 members x 1 new close
+    would otherwise be 2,000 statements on one Hrana stream).
+    """
     if not rows:
         return
     fetched_at = _now_iso()
@@ -138,7 +149,9 @@ def upsert_price_history_rows(symbol: str, rows: list[dict[str, Any]]) -> None:
         placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
         params: list[Any] = []
         for row in chunk:
-            params.extend((symbol, row["date"], float(row["close"]), row["source"], fetched_at))
+            params.extend(
+                (row["symbol"], row["date"], float(row["close"]), row["source"], fetched_at)
+            )
         db.execute(
             "INSERT OR REPLACE INTO price_history_daily "
             f"(symbol, date, close, source, fetched_at) VALUES {placeholders}",
@@ -173,6 +186,45 @@ def upsert_rv_ratio_snapshot(symbol: str, taken_at: str, payload: dict[str, Any]
         VALUES (?, ?, ?)
         """,
         (symbol, taken_at, json.dumps(payload)),
+    )
+    db.commit()
+
+
+def upsert_bpi_history_rows(index_symbol: str, rows: list[dict[str, Any]]) -> None:
+    """Batched upsert of per-session BPI rows into bpi_history.
+
+    Each row: {"date": "YYYY-MM-DD", "bpi": float, "members": int,
+    "bullish": int}. Chunked multi-row INSERTs per the Hrana rules —
+    never per-row executemany (upsert_price_history_rows precedent).
+    """
+    if not rows:
+        return
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (index_symbol, row["date"], float(row["bpi"]), int(row["members"]), int(row["bullish"]))
+            )
+        db.execute(
+            "INSERT OR REPLACE INTO bpi_history "
+            f"(index_symbol, date, bpi, members, bullish) VALUES {placeholders}",
+            tuple(params),
+        )
+    db.commit()
+
+
+def upsert_bpi_snapshot(index_symbol: str, taken_at: str, payload: dict[str, Any]) -> None:
+    """Latest BPI snapshot per index (single-row replace)."""
+    db = get_db()
+    db.execute(
+        """
+        INSERT OR REPLACE INTO bpi_snapshots (index_symbol, taken_at, payload)
+        VALUES (?, ?, ?)
+        """,
+        (index_symbol, taken_at, json.dumps(payload)),
     )
     db.commit()
 

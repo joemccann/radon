@@ -3298,6 +3298,67 @@ async def rv_ratio_scan(symbol: str):
         return result.data
 
 
+# ── Bullish Percent Index (P&F buy-signal breadth) ──────────────────
+
+_BPI_INDICES = {"NDX", "SPX", "RUT"}
+BPI_SCAN_COOLDOWN_S = 600  # daily-close data cannot change intraday
+# Covers an incremental all-index run (constituents + ~2,600 member
+# staleness probes + 1mo Yahoo fetches + chunked Turso writes). Full 2y
+# backfills are operator-run on the VPS CLI, not through this endpoint.
+BPI_SCAN_TIMEOUT_S = 900
+_bpi_last_scan: dict[str, float] = {}
+# One lock for ALL BPI scans: every run writes the shared
+# price_history_daily member rows (NDX members are a subset of SPX), so
+# concurrent subprocesses would double-fetch and interleave writes.
+# Created lazily inside the handler (rv-ratio precedent) — a module-level
+# Lock binds to the import-time loop on py3.9.
+_bpi_scan_locks: dict[str, asyncio.Lock] = {}
+_BPI_GLOBAL_LOCK_KEY = "__all__"
+
+
+def _validated_bpi_index(index: str) -> str:
+    normalized = index.strip().upper()
+    if normalized != "ALL" and normalized not in _BPI_INDICES:
+        raise HTTPException(status_code=400, detail="Invalid index")
+    return normalized
+
+
+def _bpi_cooldown_remaining(index: str) -> float:
+    last = _bpi_last_scan.get(index)
+    if last is None:
+        return 0.0
+    return BPI_SCAN_COOLDOWN_S - (time.monotonic() - last)
+
+
+@app.post("/bpi/scan")
+async def bpi_scan(index: str = "all"):
+    """Run bpi_scan.py synchronously and return the fresh envelope.
+
+    Per-index 600s cooldown + single-flight lock (RV-ratio precedent).
+    The subprocess owns all Turso/disk writes; a failed run never
+    advances the cooldown, so the operator can retry immediately.
+    """
+    index = _validated_bpi_index(index)
+    if test_mode:
+        return {"generated_at": "", "indices": {}}
+    remaining = _bpi_cooldown_remaining(index)
+    if remaining > 0:
+        return _rv_ratio_cooldown_response(remaining)
+    lock = _bpi_scan_locks.setdefault(_BPI_GLOBAL_LOCK_KEY, asyncio.Lock())
+    async with lock:
+        remaining = _bpi_cooldown_remaining(index)
+        if remaining > 0:
+            return _rv_ratio_cooldown_response(remaining)
+        result = await run_script(
+            "bpi_scan.py", ["--index", index.lower() if index == "ALL" else index],
+            timeout=BPI_SCAN_TIMEOUT_S,
+        )
+        if not result.ok:
+            raise HTTPException(status_code=503, detail=result.error)
+        _bpi_last_scan[index] = time.monotonic()
+        return result.data
+
+
 # ── Futures chain (Phase 2 — VIX et al.) ────────────────────────────
 
 _FUTURES_CHAIN_TIMEOUT_S = 30.0  # patched in tests

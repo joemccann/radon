@@ -37,6 +37,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-media-backup.timer",
     "radon-db-retention.service",
     "radon-db-retention.timer",
+    "radon-bpi.service",
+    "radon-bpi.timer",
     "radon-breadth.service",
     "radon-breadth.timer",
     "radon-catalysts.service",
