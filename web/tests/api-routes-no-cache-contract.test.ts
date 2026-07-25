@@ -39,6 +39,7 @@ const DYNAMIC_ROUTES = [
   "app/api/knowledge/search/route.ts",
   "app/api/knowledge/prior-evals/route.ts",
   "app/api/options/rv-ratio/route.ts",
+  "app/api/bpi/route.ts",
 ];
 
 // Client-side fetch sites that hit a disk-backed dynamic route. Each fetch
@@ -63,6 +64,7 @@ const NO_STORE_HOOKS = [
   "lib/useServiceHealth.ts",
   "lib/useTickerFlowReport.ts",
   "lib/useRvRatio.ts",
+  "lib/useBpi.ts",
 ];
 
 describe("API route handlers — must export dynamic = 'force-dynamic'", () => {
@@ -132,6 +134,7 @@ const DB_FIRST_ROUTES: { path: string; dbHelperPattern: RegExp }[] = [
   { path: "app/api/flow-surprise/route.ts", dbHelperPattern: /readFlowSurpriseFromDb\s*\(/ },
   { path: "app/api/internals/route.ts", dbHelperPattern: /readLatestDbCri\s*\(/ },
   { path: "app/api/options/rv-ratio/route.ts", dbHelperPattern: /readRvRatioFromDb\s*\(/ },
+  { path: "app/api/bpi/route.ts", dbHelperPattern: /readBpiFromDb\b/ },
 ];
 
 // Deliberately NOT DB-first (re-confirmed 2026-07-02) — do not "fix" these:
@@ -276,6 +279,7 @@ const NO_STORE_ROUTES = [
   "app/api/watchlist/[symbol]/route.ts",
   "app/api/knowledge/search/route.ts",
   "app/api/knowledge/prior-evals/route.ts",
+  "app/api/bpi/route.ts",
 ];
 
 describe("API route handlers — every response must set Cache-Control: no-store", () => {
