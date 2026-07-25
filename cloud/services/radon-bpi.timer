@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon BPI scan - Mon-Fri 21:30 UTC, after the US close settles
+
+[Timer]
+# Fires once per US weekday well after the 20:00/21:00 UTC close so the
+# last completed session's closes are final on Yahoo. Holidays still run
+# (incremental finds nothing new) and heartbeat, so the watchdog window
+# never widens for them.
+OnCalendar=Mon..Fri *-*-* 21:30:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target

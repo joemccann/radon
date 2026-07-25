@@ -92,6 +92,8 @@ readonly SERVICE_FILES=(
   radon-oi-changes.timer
   radon-knowledge.service
   radon-knowledge.timer
+  radon-bpi.service
+  radon-bpi.timer
 )
 
 run_as_radon() {

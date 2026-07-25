@@ -222,6 +222,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Shipped 2026-07-02 without registration and inherited the 1h default,
   // flagging stale every afternoon.
   "catalysts": { open: 26 * HOUR, extended: 26 * HOUR, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // ``bpi-scan`` runs Mon-Fri 21:30 UTC (radon-bpi.timer), AFTER the close:
+  // during Monday's whole session the newest row is legitimately Friday
+  // evening's (~72h old), so the window is a uniform 4d rather than a tight
+  // open window (a 26h open window would flag stale every Monday). Holiday
+  // runs still heartbeat (incremental no-op), so the gap never widens past
+  // the weekend. Yahoo + Turso only — no IB.
+  "bpi-scan": { open: 4 * DAY, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
   // ``leap-scan`` runs once daily (radon-leap.timer) and via on-demand
   // dashboard refresh. Daily cadence so 26h covers a weekend (Fri →
   // Mon morning) without flipping stale; the on-demand button can
