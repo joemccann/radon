@@ -51,6 +51,7 @@ describe.each([
   ["gex", "app/regime/gex/page.tsx"],
   ["grg", "app/regime/grg/page.tsx"],
   ["breadth", "app/regime/breadth/page.tsx"],
+  ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
@@ -88,6 +89,9 @@ vi.mock("../components/GammaRotationPanel", () => ({
 }));
 vi.mock("../components/BreadthPanel", () => ({
   default: () => <div data-testid="breadth-panel-stub" />,
+}));
+vi.mock("../components/BpiPanel", () => ({
+  default: () => <div data-testid="bpi-panel-stub" />,
 }));
 vi.mock("../components/MarginDebtPanel", () => ({
   default: () => <div data-testid="margin-panel-stub" />,
@@ -182,6 +186,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^BREADTH$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/breadth");
+  });
+
+  it("renders the BPI panel when pathname is /regime/bpi", () => {
+    mockedPathname = "/regime/bpi";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("bpi-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("breadth-panel-stub")).toBeNull();
+  });
+
+  it("clicking BULLISH % tab pushes /regime/bpi", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^BULLISH %$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/bpi");
   });
 
   it("renders the Margin panel when pathname is /regime/margin", () => {
