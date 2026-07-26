@@ -53,6 +53,7 @@ from api.ib_gateway import (
     is_launchd_mode,
     reset_restart_backoff,
 )
+from api import ib_gateway
 from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
@@ -1529,6 +1530,16 @@ async def demo_trial_expiry(request: Request):
         raise HTTPException(status_code=400, detail=str(exc))
 
 
+def _gateway_unit_controllable() -> bool:
+    """True when THIS host owns the gateway lifecycle: systemd is present and
+    the installed control helper (single 2FA-lease owner) exists. True on the
+    Hetzner deployment, False on the laptop pointing at the remote gateway."""
+    return (
+        admin_services.is_systemd_available()
+        and Path(admin_services.GATEWAY_CONTROL_PATH).exists()
+    )
+
+
 @app.post("/ib/restart")
 async def ib_restart():
     """Restart IB Gateway via IBC service, then reconnect pool.
@@ -1536,7 +1547,38 @@ async def ib_restart():
     Honors the restart backoff (1m → 60m capped) when prior attempts haven't
     completed login. Use POST /ib/reset-backoff after approving 2FA to retry
     immediately.
+
+    Cloud mode on the gateway HOST delegates to the sanctioned systemd
+    lifecycle unit (2026-07-26 incident: the operator page's restart button
+    landed here and was refused unconditionally, while the watchdog stood
+    down at its awaiting-2fa cap — leaving no working restart path). The
+    helper owns the 2FA push lease and the latched-transition state machine;
+    pool reconnect after auth is the recovery heartbeat's job
+    (feedback_ib_pool_stuck_after_2fa).
     """
+    if ib_gateway.is_cloud_mode() and _gateway_unit_controllable():
+        action = await admin_services.control_unit(admin_services.GATEWAY_UNIT, "restart")
+        if action.ok:
+            return {
+                "restarted": True,
+                "gateway_mode": "cloud",
+                "via": admin_services.GATEWAY_UNIT,
+                "detail": action.detail,
+                "note": "Gateway cycling — approve the IBKR Mobile 2FA push to complete login.",
+            }
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "restarted": False,
+                "gateway_mode": "cloud",
+                "via": admin_services.GATEWAY_UNIT,
+                "reason": "2fa_push_in_flight"
+                if action.returncode == admin_services.PUSH_LOCK_HELD_RC
+                else "unit_restart_failed",
+                "error": action.detail,
+            },
+        )
+
     result = await restart_ib_gateway(pool=ib_pool)
     if not result.get("restarted"):
         # Surface deferred (backoff) and unauthenticated outcomes as 503 so the
