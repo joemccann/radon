@@ -15,6 +15,8 @@
  * scheduled refreshes; the API only needs to refresh during market hours.
  */
 
+import { lastCompletedSessionDate } from "./marketSession";
+
 const CACHE_TTL_MS = 60_000; // 1 minute — intraday refresh interval
 
 export interface CriDataShape {
@@ -42,16 +44,24 @@ export function isCriDataStale(
   data: CriDataShape,
   mtimeMs: number,
   todayET: string,
-  currentMarketOpen: boolean = isMarketOpenNow()
+  currentMarketOpen: boolean = isMarketOpenNow(),
+  lastCompletedSession: string = lastCompletedSessionDate()
 ): boolean {
-  // Different day → always stale
-  if (!data.date || data.date !== todayET) return true;
+  if (!data.date) return true;
+  // Session-aware date check: comparing against calendar-today alone made
+  // Friday's payload permanently "stale" all weekend, and every /api/regime
+  // poll fired a background /regime/scan in an infinite loop (2026-07-26).
+  // A payload dated the last COMPLETED session is current by date; only a
+  // payload OLDER than that session is stale by date.
+  if (data.date !== todayET && data.date < lastCompletedSession) return true;
 
   // When cached payload says closed but market is open, force refresh after TTL.
   if (data.market_open === false) {
     return currentMarketOpen ? Date.now() - mtimeMs > CACHE_TTL_MS : false;
   }
 
-  // Market open (or unknown) → stale if mtime exceeds TTL
-  return Date.now() - mtimeMs > CACHE_TTL_MS;
+  // Intraday-refresh TTL applies only while the market is CURRENTLY open —
+  // a session-close payload stamped market_open:true is final once the
+  // market shuts (otherwise the TTL branch re-arms the weekend scan loop).
+  return currentMarketOpen && Date.now() - mtimeMs > CACHE_TTL_MS;
 }
