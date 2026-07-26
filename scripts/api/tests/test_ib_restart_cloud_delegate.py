@@ -26,8 +26,10 @@ from api import services as admin_services
 def client(monkeypatch):
     monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
     monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
-    with TestClient(server.app) as c:
-        yield c
+    # No context manager: entering it runs the app lifespan (IB pool startup,
+    # recovery heartbeat), which fails on CI — sibling API tests construct
+    # the client bare for the same reason.
+    return TestClient(server.app)
 
 
 def _auth_headers():
