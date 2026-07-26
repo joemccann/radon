@@ -176,6 +176,10 @@ def build_index_payload(
         "bullish": latest["bullish"],
         "state": classify_state(latest["bpi"]),
         "cross_up_30": detect_cross_up_30(rows),
+        # Latest aggregated session lags the last completed ET session —
+        # some members' Yahoo candles haven't published yet. The catch-up
+        # timer pass (Tue-Sat 11:00 UTC) re-fetches laggards and converges.
+        "stale": latest["date"] < last_completed_session_date(),
         "thresholds": {"oversold": int(OVERSOLD), "overbought": int(OVERBOUGHT)},
         "history": [{"date": r["date"], "bpi": r["bpi"]} for r in rows],
         "sources": sources,

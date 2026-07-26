@@ -193,6 +193,26 @@ def recorded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return calls
 
 
+class TestStaleFlag:
+    """The payload must self-report when its latest aggregated session lags
+    the last completed ET session (Yahoo candle lag) so callers and the
+    catch-up timer pass can see the series has not converged to latest."""
+
+    def test_stale_true_when_latest_session_lags(self, monkeypatch):
+        sessions = _sessions(40)
+        member_series = {m: _flat_series(sessions, "buy") for m in "ABCDE"}
+        monkeypatch.setattr(bpi, "last_completed_session_date", lambda: "2099-12-31")
+        payload = _payload(member_series, 5)
+        assert payload["stale"] is True
+
+    def test_stale_false_when_current(self, monkeypatch):
+        sessions = _sessions(40)
+        member_series = {m: _flat_series(sessions, "buy") for m in "ABCDE"}
+        monkeypatch.setattr(bpi, "last_completed_session_date", lambda: sessions[-1])
+        payload = _payload(member_series, 5)
+        assert payload["stale"] is False
+
+
 class TestPersistenceGating:
     def test_missing_payload_skips_writers_but_heartbeats(self, recorded, monkeypatch):
         missing = {"missing": True, "index_symbol": "NDX", "reason": "insufficient_coverage"}
