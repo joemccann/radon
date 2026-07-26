@@ -276,14 +276,38 @@ def _fetch_yahoo_daily(symbol: str, range_str: str) -> dict[str, float]:
     except Exception as exc:
         print(f"  Yahoo: {symbol} failed: {exc}", file=sys.stderr)
         return {}
+    return parse_yahoo_chart(result)
+
+
+def _utc_date(ts: int) -> str:
+    return datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d")
+
+
+def parse_yahoo_chart(result: dict[str, Any]) -> dict[str, float]:
+    """Date->close from a v8 chart result. Yahoo intermittently serves the
+    just-closed session's candle with close:null while meta carries the
+    official close (2026-07-24 repro: every NDX mega-cap null a day after
+    the close). Recover the FINAL bar from meta.regularMarketPrice only
+    when regularMarketTime maps to that same session date; an in-progress
+    session never persists because ensure_member_history filters bars to
+    d <= last_completed_session_date().
+    """
     timestamps = result.get("timestamp") or []
     quote = (result.get("indicators", {}).get("quote") or [{}])[0]
     closes = quote.get("close") or []
-    return {
-        datetime.fromtimestamp(ts, tz=timezone.utc).strftime("%Y-%m-%d"): float(c)
+    bars = {
+        _utc_date(ts): float(c)
         for ts, c in zip(timestamps, closes)
         if c is not None
     }
+    if timestamps and closes and closes[-1] is None:
+        meta = result.get("meta") or {}
+        market_time, market_price = meta.get("regularMarketTime"), meta.get("regularMarketPrice")
+        if market_time and market_price is not None:
+            last_bar_date = _utc_date(timestamps[-1])
+            if _utc_date(market_time) == last_bar_date:
+                bars[last_bar_date] = float(market_price)
+    return bars
 
 
 def _read_stored_max_dates(members: list[str]) -> dict[str, str]:

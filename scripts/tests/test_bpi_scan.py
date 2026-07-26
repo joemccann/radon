@@ -193,6 +193,51 @@ def recorded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return calls
 
 
+class TestYahooChartParse:
+    """Yahoo intermittently serves the just-closed session's candle with
+    close:null while meta.regularMarketPrice carries the official close
+    (2026-07-24 NDX repro — all mega-caps null a day later). The parser
+    recovers the final bar from meta ONLY when regularMarketTime maps to
+    the same UTC session date; anything else stays dropped."""
+
+    def _result(self, ts_closes, meta):
+        return {
+            "timestamp": [t for t, _ in ts_closes],
+            "indicators": {"quote": [{"close": [c for _, c in ts_closes]}]},
+            "meta": meta,
+        }
+
+    def test_recovers_null_last_bar_from_meta_same_session(self):
+        day1, day2 = 1784813400, 1784899800  # 2026-07-23, 2026-07-24 13:30 UTC opens
+        close_time = 1784923200              # 2026-07-24 20:00 UTC close
+        result = self._result(
+            [(day1, 321.66), (day2, None)],
+            {"regularMarketTime": close_time, "regularMarketPrice": 333.02},
+        )
+        bars = bpi.parse_yahoo_chart(result)
+        assert bars["2026-07-23"] == 321.66
+        assert bars["2026-07-24"] == 333.02
+
+    def test_mid_series_null_stays_dropped(self):
+        day1, day2, day3 = 1784727000, 1784813400, 1784899800
+        result = self._result(
+            [(day1, 325.89), (day2, None), (day3, 330.0)],
+            {"regularMarketTime": 1784923200, "regularMarketPrice": 999.0},
+        )
+        bars = bpi.parse_yahoo_chart(result)
+        assert "2026-07-23" not in bars
+        assert bars["2026-07-24"] == 330.0
+
+    def test_no_recovery_when_meta_is_a_different_session(self):
+        day2 = 1784899800  # 2026-07-24
+        stale_meta_time = 1784813400  # 2026-07-23
+        result = self._result(
+            [(day2, None)],
+            {"regularMarketTime": stale_meta_time, "regularMarketPrice": 999.0},
+        )
+        assert "2026-07-24" not in bpi.parse_yahoo_chart(result)
+
+
 class TestStaleFlag:
     """The payload must self-report when its latest aggregated session lags
     the last completed ET session (Yahoo candle lag) so callers and the
