@@ -193,6 +193,34 @@ def recorded(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
     return calls
 
 
+class TestYahooSparkParse:
+    """Nightly incremental goes batch-first: the v8 spark endpoint serves up
+    to ~100 symbols per request anonymously (the per-symbol chart endpoint
+    was tarpitted to ~60s/request on 2026-07-27 — 415 SPX fetches took 52
+    minutes and blew the unit's start budget). Parser is pure; members whose
+    spark payload lacks the last completed session fall back to the
+    per-symbol chart path (which carries the meta-close recovery)."""
+
+    def _payload(self):
+        day_23, day_24, day_27 = 1784813400, 1784899800, 1785159000
+        return {
+            "AAPL": {"symbol": "AAPL", "timestamp": [day_23, day_27], "close": [321.66, 333.5]},
+            "MSFT": {"symbol": "MSFT", "timestamp": [day_23, day_24, day_27], "close": [381.58, 380.0, None]},
+        }
+
+    def test_parses_dates_and_skips_null_closes(self):
+        bars = bpi.parse_yahoo_spark(self._payload())
+        assert bars["AAPL"] == {"2026-07-23": 321.66, "2026-07-27": 333.5}
+        assert bars["MSFT"] == {"2026-07-23": 381.58, "2026-07-24": 380.0}
+
+    def test_chart_fallback_for_members_batch_left_stale(self):
+        bars = bpi.parse_yahoo_spark(self._payload())
+        stragglers = bpi.members_still_stale(
+            ["AAPL", "MSFT", "TSLA"], bars, last_complete="2026-07-27"
+        )
+        assert stragglers == ["MSFT", "TSLA"]
+
+
 class TestYahooChartParse:
     """Yahoo intermittently serves the just-closed session's candle with
     close:null while meta.regularMarketPrice carries the official close
