@@ -14,7 +14,11 @@ Environment=RADON_DB_NO_REPLICA=1
 ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/bpi_scan.py --index all
 StandardOutput=journal
 StandardError=journal
-TimeoutStartSec=1200
+# Weekday evenings the ENTIRE ~2,600-member universe is one session stale,
+# so the "incremental" is a full-universe refetch (~35-45 min with Yahoo
+# courtesy sleeps; NDX alone measured 13 min). 1200s killed the 2026-07-27
+# run mid-SPX (Result=timeout). Budget a full sweep plus headroom.
+TimeoutStartSec=3600
 
 [Install]
 WantedBy=multi-user.target
