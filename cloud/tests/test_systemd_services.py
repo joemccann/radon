@@ -606,3 +606,20 @@ def test_api_migration_transport_stall_is_bounded_without_masking_errors(service
     assert "/usr/bin/timeout 30" in command
     assert '"$rc" -eq 124' in command
     assert '"$rc" -eq 0' in command
+
+
+class TestBpiScanBudget:
+    """Weekday evenings the entire ~2,600-member universe is one session
+    stale, so radon-bpi's "incremental" run is a full-universe refetch
+    (~35-45 min with Yahoo courtesy sleeps). TimeoutStartSec=1200 killed
+    the 2026-07-27 run mid-SPX (Result=timeout, watchdog paged); the
+    budget must cover a full sweep with headroom."""
+
+    def test_service_start_budget_covers_full_universe_sweep(self, unit):
+        svc = unit("radon-bpi.service")["Service"]
+        assert int(svc["timeoutstartsec"]) >= 3600
+
+    def test_timer_has_evening_and_catchup_passes(self, unit, services_dir):
+        raw = (services_dir / "radon-bpi.timer").read_text()
+        assert "Mon..Fri" in raw and "21:30:00 UTC" in raw
+        assert "Tue..Sat" in raw and "11:00:00 UTC" in raw
