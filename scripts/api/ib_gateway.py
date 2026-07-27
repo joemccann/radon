@@ -16,6 +16,7 @@ import logging
 import os
 import signal
 import socket
+import struct
 import subprocess
 import sys
 import time
@@ -77,6 +78,16 @@ COMPOSE_DIR = Path(
 RESTART_WAIT_SECS = 45
 PORT_POLL_INTERVAL = 3
 PROCESS_TERM_GRACE_S = 1.0
+# ``/health/lite`` has a 0.5s total budget. Keep this raw protocol probe short
+# enough to fail closed without consuming that endpoint's worker budget.
+CLOUD_PROTOCOL_PROBE_TIMEOUT_SECS = 0.25
+
+# The version exchange is side-effect-free: it proves the IB API dispatcher is
+# alive without creating a client session, consuming a client ID, or prompting
+# for 2FA. A TCP connection alone is insufficient because Docker/socat can
+# accept the host port while the Gateway's inner Java listener is absent.
+_IB_API_SIGNATURE = b"API\x00"
+_IB_API_VERSION_RANGE = b"v100..187"
 
 # Prevent concurrent restart races
 _restart_lock = asyncio.Lock()
@@ -230,6 +241,37 @@ def _port_listening(host: str = IB_HOST, port: int = IB_PORT, timeout: float = 2
             return True
     except (ConnectionRefusedError, OSError, socket.timeout):
         return False
+
+
+def _cloud_protocol_responding(
+    host: str = IB_HOST,
+    port: int = IB_PORT,
+    timeout: float = CLOUD_PROTOCOL_PROBE_TIMEOUT_SECS,
+) -> bool:
+    """Return whether the cloud Gateway answers a bounded IB version exchange.
+
+    This deliberately performs no authentication or API request. It is a
+    protocol-level liveness check for the cloud-mode proxy topology, where a
+    host TCP listener can outlive the inner Gateway listener.
+    """
+    sock = None
+    try:
+        sock = socket.create_connection((host, port), timeout=timeout)
+        sock.settimeout(timeout)
+        sock.sendall(
+            _IB_API_SIGNATURE
+            + struct.pack(">I", len(_IB_API_VERSION_RANGE))
+            + _IB_API_VERSION_RANGE
+        )
+        return bool(sock.recv(4096))
+    except (ConnectionRefusedError, ConnectionResetError, OSError, socket.timeout):
+        return False
+    finally:
+        if sock is not None:
+            try:
+                sock.close()
+            except OSError:
+                pass
 
 
 async def _poll_port(wait_secs: int = RESTART_WAIT_SECS) -> tuple:
@@ -658,12 +700,17 @@ async def _restart_docker() -> Dict:
 
 
 async def _check_cloud() -> Dict:
-    """Check remote Gateway health via TCP port probe only."""
+    """Check remote Gateway health via TCP plus a bounded API handshake."""
     port_ok = await asyncio.to_thread(_port_listening)
+    protocol_ok = (
+        await asyncio.to_thread(_cloud_protocol_responding) if port_ok else False
+    )
     return {
         "port_listening": port_ok,
-        "upstream_dead": False,
-        "service_state": "reachable" if port_ok else "unreachable",
+        "upstream_dead": port_ok and not protocol_ok,
+        "service_state": (
+            "reachable" if protocol_ok else "unhealthy" if port_ok else "unreachable"
+        ),
         "host": IB_HOST,
         "port": IB_PORT,
         "gateway_mode": "cloud",
@@ -1094,7 +1141,7 @@ async def check_ib_gateway(
     """
     if is_cloud_mode():
         result = await _check_cloud()
-        if not result.get("port_listening"):
+        if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:
             # Pool gives us visibility into managed_accounts on the remote
