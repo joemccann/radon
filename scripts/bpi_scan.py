@@ -220,7 +220,26 @@ def ensure_member_history(
         file=sys.stderr,
     )
 
-    fetched = _fetch_members(to_fetch, BACKFILL_RANGE if backfill else INCREMENTAL_RANGE)
+    if backfill:
+        fetched = _fetch_members(to_fetch, BACKFILL_RANGE)
+    else:
+        # Batch-first: the spark endpoint serves ~100 symbols per request, so
+        # the nightly full-universe staleness sweep is ~26 requests instead of
+        # ~2,600 chart calls (which Yahoo tarpitted to ~60s each on
+        # 2026-07-27, blowing the unit's start budget). Stragglers the batch
+        # left stale fall back to per-symbol chart (meta-close recovery).
+        fetched = _fetch_members_spark(to_fetch)
+        stragglers = members_still_stale(to_fetch, fetched, last_complete)
+        if stragglers:
+            print(
+                f"  history: chart fallback for {len(stragglers)} members the "
+                "spark batch left stale",
+                file=sys.stderr,
+            )
+            for member, bars in _fetch_members(stragglers, INCREMENTAL_RANGE).items():
+                merged = dict(fetched.get(member, {}))
+                merged.update(bars)
+                fetched[member] = merged
     fetched = {
         m: {d: c for d, c in bars.items() if d <= last_complete}
         for m, bars in fetched.items()
@@ -256,6 +275,61 @@ def _fetch_members(members: list[str], range_str: str) -> dict[str, dict[str, fl
     with ThreadPoolExecutor(max_workers=FETCH_WORKERS) as pool:
         series = pool.map(lambda m: _fetch_yahoo_daily(m, range_str), members)
         return dict(zip(members, series))
+
+
+SPARK_BATCH_SIZE = 100          # symbols per spark request (endpoint cap ~200)
+SPARK_RANGE = "5d"              # covers the missing tail incl. long weekends
+
+
+def parse_yahoo_spark(payload: dict[str, Any]) -> dict[str, dict[str, float]]:
+    """{symbol: {date: close}} from a v8 spark response (top-level dict keyed
+    by symbol). Null closes are skipped — a member whose latest bar is null
+    simply stays stale and takes the chart fallback path."""
+    bars: dict[str, dict[str, float]] = {}
+    for symbol, entry in payload.items():
+        if not isinstance(entry, dict):
+            continue
+        timestamps = entry.get("timestamp") or []
+        closes = entry.get("close") or []
+        series = {
+            _utc_date(ts): float(c)
+            for ts, c in zip(timestamps, closes)
+            if c is not None
+        }
+        if series:
+            bars[symbol] = series
+    return bars
+
+
+def members_still_stale(
+    members: list[str], fetched: dict[str, dict[str, float]], last_complete: str
+) -> list[str]:
+    """Members whose fetched bars still lack the last completed session."""
+    return [m for m in members if last_complete not in fetched.get(m, {})]
+
+
+def _fetch_members_spark(members: list[str]) -> dict[str, dict[str, float]]:
+    """Batched latest-closes fetch via the multi-symbol spark endpoint."""
+    from urllib.parse import quote
+    from urllib.request import Request, urlopen
+
+    fetched: dict[str, dict[str, float]] = {}
+    for i in range(0, len(members), SPARK_BATCH_SIZE):
+        chunk = members[i : i + SPARK_BATCH_SIZE]
+        time.sleep(YAHOO_COURTESY_SLEEP_S)
+        url = (
+            "https://query1.finance.yahoo.com/v8/finance/spark"
+            f"?symbols={quote(','.join(chunk))}&range={SPARK_RANGE}&interval=1d"
+        )
+        req = Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        try:
+            with urlopen(req, timeout=30) as resp:
+                payload = json.load(resp)
+        except Exception as exc:
+            print(f"  Yahoo spark: chunk {i // SPARK_BATCH_SIZE} failed: {exc}", file=sys.stderr)
+            continue
+        fetched.update(parse_yahoo_spark(payload))
+    return fetched
 
 
 def _fetch_yahoo_daily(symbol: str, range_str: str) -> dict[str, float]:
