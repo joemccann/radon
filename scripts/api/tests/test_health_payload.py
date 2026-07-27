@@ -165,12 +165,30 @@ class TestHealthProbeBounding:
         assert "probe_timed_out" not in result["ib_gateway"]
         assert result["ib_pool"] == {"sync": {"connected": True}}
 
+    @pytest.mark.asyncio
+    async def test_trusted_health_is_observational_and_heartbeat_owns_recovery(self, monkeypatch):
+        captured = {}
+
+        async def _gw(pool_status=None, pool=None):
+            captured["pool_status"] = pool_status
+            captured["pool"] = pool
+            return {"auth_state": "authenticated", "port_listening": True}
+
+        fake_pool = SimpleNamespace(status=lambda: {"sync": {"connected": True}})
+        monkeypatch.setattr(server, "check_ib_gateway", _gw)
+        monkeypatch.setattr(server, "ib_pool", fake_pool)
+
+        await server.health(_request("127.0.0.1"))
+
+        assert captured["pool_status"] == {"sync": {"connected": True}}
+        assert captured["pool"] is None
+
 
 class TestHealthLite:
     """/health/lite is the side-effect-free, account-free coarse IB-state
     contract for high-frequency pollers (the standalone health daemon). It must
     call check_ib_gateway with pool=None so it never triggers reconnect_all/heal
-    (that recovery heartbeat stays on /health), and it must never return account
+    (the recovery heartbeat owns recovery), and it must never return account
     IDs, ports, restart backoff, or pool/topology detail.
     """
 

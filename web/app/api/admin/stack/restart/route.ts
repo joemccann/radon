@@ -10,10 +10,9 @@ import { requireDemoAdmin } from "@/lib/demo/adminAuth";
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
-// Short proxy timeout: radon restart on the VPS bounces FastAPI itself, so
-// the upstream connection drops mid-call. If the drop happens after ~3s the
-// stop sequence has already kicked in and the restart is in flight; we
-// surface that to the client as 202 Accepted rather than 502.
+// Bound the operator request. A connection loss is not proof that FastAPI
+// accepted the restart, so the route must fail closed rather than manufacture
+// an in-flight success. The UI keeps polling read-only health afterward.
 const PROXY_TIMEOUT_MS = 5_000;
 
 export async function POST(_req: NextRequest): Promise<Response> {
@@ -40,32 +39,6 @@ export async function POST(_req: NextRequest): Promise<Response> {
     const response = NextResponse.json(data);
     return setNoStoreResponseHeaders(response, requestId);
   } catch (error) {
-    // Connection dropped or timed out — this is the EXPECTED path when the
-    // restart succeeds because FastAPI cycles itself. Translate to 202 with
-    // a "poll /health to verify" body so the UI doesn't render a failure.
-    const looksLikeRestartDrop =
-      error instanceof Error &&
-      (error.name === "AbortError" ||
-        error.message.includes("aborted") ||
-        error.message.includes("ECONNRESET") ||
-        error.message.includes("fetch failed"));
-
-    if (looksLikeRestartDrop) {
-      const response = NextResponse.json(
-        {
-          unit: "radon-stack",
-          action: "restart",
-          ok: true,
-          in_flight: true,
-          detail:
-            "radon restart in progress. Backend cycled; poll /health to verify recovery.",
-          returncode: 0,
-        },
-        { status: 202 },
-      );
-      return setNoStoreResponseHeaders(response, requestId);
-    }
-
     const status = error instanceof RadonApiError ? error.status : 502;
     const detail =
       error instanceof Error ? error.message : "stack restart failed";

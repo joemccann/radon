@@ -189,15 +189,23 @@ describe("POST /api/admin/stack/restart", () => {
     expect(res.status).toBe(200);
   });
 
-  it("returns 202 'in flight' envelope when upstream drops mid-call (expected restart pattern)", async () => {
+  it("fails closed when the upstream connection drops before acceptance is proven", async () => {
     const abortErr = new Error("fetch failed: connection aborted");
     abortErr.name = "AbortError";
     mockRadonFetch.mockRejectedValueOnce(abortErr);
     const { POST } = await import("../app/api/admin/stack/restart/route");
     const res = await POST(req("http://localhost/api/admin/stack/restart") as never);
-    expect(res.status).toBe(202);
+    expect(res.status).toBe(502);
     const body = (await jsonOf(res)) as Record<string, unknown>;
-    expect(body.in_flight).toBe(true);
+    expect(body.error).toBeDefined();
+  });
+
+  it("preserves a control-plane conflict instead of masking it as an accepted restart", async () => {
+    const { RadonApiError } = await import("@/lib/radonApi");
+    mockRadonFetch.mockRejectedValueOnce(new RadonApiError(409, "2FA push already in flight"));
+    const { POST } = await import("../app/api/admin/stack/restart/route");
+    const res = await POST(req("http://localhost/api/admin/stack/restart") as never);
+    expect(res.status).toBe(409);
   });
 
   it("returns 502 envelope for non-drop FastAPI failure", async () => {
