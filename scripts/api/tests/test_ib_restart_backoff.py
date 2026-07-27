@@ -323,6 +323,31 @@ def test_cloud_mode_uses_pool_to_detect_awaiting_2fa(monkeypatch):
     assert result["auth_state"] == "awaiting_2fa"
 
 
+def test_cloud_mode_protocol_wedge_overrides_cached_authenticated_pool(monkeypatch):
+    """A socat TCP listener cannot make a missing Java API listener healthy.
+
+    The relay outage on 2026-07-27 left Docker/socat accepting :4001 while
+    the Gateway's inner listener was absent after failed 2FA. The pool still
+    held cached authenticated slots, so the TCP-only cloud check falsely
+    reported the whole data plane healthy.
+    """
+    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: True)
+    monkeypatch.setattr(ib_gateway, "_port_listening", lambda: True)
+    monkeypatch.setattr(ib_gateway, "_cloud_protocol_responding", lambda: False)
+
+    pool = {
+        "sync": {"connected": True, "managed_accounts": ["U1234567"]},
+        "orders": {"connected": True, "managed_accounts": ["U1234567"]},
+        "data": {"connected": True, "managed_accounts": ["U1234567"]},
+    }
+    result = asyncio.run(ib_gateway.check_ib_gateway(pool_status=pool))
+
+    assert result["port_listening"] is True
+    assert result["upstream_dead"] is True
+    assert result["service_state"] == "unhealthy"
+    assert result["auth_state"] == "unreachable"
+
+
 def test_compose_dir_can_be_overridden_via_env(monkeypatch, tmp_path):
     """Hetzner runs the IB Gateway container from /home/radon/radon-cloud/,
     not the default <repo>/docker/ib-gateway. IB_GATEWAY_COMPOSE_DIR is the
