@@ -13,6 +13,19 @@ import { useEffect, useRef } from "react";
 import { useAuth } from "@clerk/nextjs";
 
 export default function SignOutCachePurge() {
+  // ClerkThemeBridge intentionally omits ClerkProvider in browser tests. Keep
+  // this wrapper hook-free so the test-only boundary cannot crash the entire
+  // operator page before its reliability controls render.
+  if (
+    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
+    process.env.RADON_AUTHLESS_TEST === "1"
+  ) {
+    return null;
+  }
+  return <SignOutCachePurgeWithAuth />;
+}
+
+function SignOutCachePurgeWithAuth() {
   const { isLoaded, isSignedIn } = useAuth();
   const wasSignedInRef = useRef(false);
 

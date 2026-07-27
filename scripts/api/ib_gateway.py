@@ -1141,6 +1141,10 @@ async def check_ib_gateway(
     """
     if is_cloud_mode():
         result = await _check_cloud()
+        # The admin panel uses this state to prevent duplicate IBKR pushes.
+        # It is local control-plane state and must be present regardless of
+        # where the Gateway itself runs.
+        result["restart_backoff"] = restart_backoff_state()
         if not result.get("port_listening") or result.get("upstream_dead"):
             result["auth_state"] = "unreachable"
         elif pool_status:

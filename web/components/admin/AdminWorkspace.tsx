@@ -323,20 +323,17 @@ export default function AdminWorkspace() {
         appendLog({ at, action: "stack-restart", target: "all radon-*", ok: false, detail });
       }
     } catch (err) {
-      // Network drop is the EXPECTED path because FastAPI is one of the
-      // units being restarted. Treat as in-flight and rely on the next
-      // health poll to confirm recovery.
+      // A browser-side connection loss is not an acknowledgement from the
+      // control plane. Keep polling, but never record it as a successful
+      // restart: the lock-aware backend remains safe to retry after status
+      // confirms the previous request was not accepted.
       const detail = err instanceof Error ? err.message : "stack restart failed";
-      const looksLikeRestartDrop =
-        detail.includes("aborted") ||
-        detail.includes("Failed to fetch") ||
-        detail.includes("ECONNRESET");
       appendLog({
         at,
         action: "stack-restart",
         target: "all radon-*",
-        ok: looksLikeRestartDrop,
-        detail: looksLikeRestartDrop ? "restart in flight (connection cycled)" : detail,
+        ok: false,
+        detail,
       });
     }
     void fetchHealth();

@@ -1,6 +1,7 @@
 [Unit]
 Description=Radon monitor daemon
 After=network.target radon-ib-gateway.service radon-api.service
+PartOf=radon-ib-gateway.service
 # Ordering only. Monitor reconnects after Gateway recovery; deploy/app starts
 # must not pull Gateway while holding the shared deploy lock.
 

@@ -56,6 +56,16 @@ def _lease_held_result():
     )
 
 
+def _failed_stack_result(returncode: int = 1):
+    return admin_services.ActionResult(
+        unit="radon-stack",
+        action="restart",
+        ok=False,
+        detail="control-plane action refused",
+        returncode=returncode,
+    )
+
+
 class TestCloudDelegate:
     def test_delegates_to_gateway_unit_on_gateway_host(self, client, monkeypatch):
         monkeypatch.setattr(server.ib_gateway, "GATEWAY_MODE", "cloud")
@@ -89,3 +99,26 @@ class TestCloudDelegate:
         resp = client.post("/ib/restart", headers=_auth_headers())
         assert resp.status_code == 503
         assert "remote" in resp.json()["detail"]["error"].lower()
+
+    def test_service_action_maps_lease_conflict_to_409(self, client):
+        with patch.object(
+            admin_services, "control_unit", new=AsyncMock(return_value=_lease_held_result())
+        ):
+            resp = client.post("/admin/services/radon-ib-gateway.service/restart")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["returncode"] == admin_services.PUSH_LOCK_HELD_RC
+
+    def test_stack_restart_maps_lease_conflict_to_409(self, client):
+        with patch.object(
+            admin_services, "restart_full_stack", new=AsyncMock(return_value=_failed_stack_result(409))
+        ):
+            resp = client.post("/admin/stack/restart")
+        assert resp.status_code == 409
+        assert resp.json()["detail"]["unit"] == "radon-stack"
+
+    def test_stack_restart_maps_execution_failure_to_502(self, client):
+        with patch.object(
+            admin_services, "restart_full_stack", new=AsyncMock(return_value=_failed_stack_result(1))
+        ):
+            resp = client.post("/admin/stack/restart")
+        assert resp.status_code == 502

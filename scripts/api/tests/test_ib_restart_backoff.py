@@ -253,6 +253,25 @@ def test_cloud_mode_falls_back_to_remote_when_no_pool(monkeypatch):
     assert result["auth_state"] == "remote"
 
 
+def test_cloud_mode_exposes_restart_backoff_and_push_lock(monkeypatch):
+    async def fake_check_cloud():
+        return {
+            "port_listening": True,
+            "upstream_dead": False,
+            "service_state": "reachable",
+            "gateway_mode": "cloud",
+        }
+
+    expected = {"attempt_count": 1, "push_lock": {"remaining_secs": 42}}
+    monkeypatch.setattr(ib_gateway, "is_cloud_mode", lambda: True)
+    monkeypatch.setattr(ib_gateway, "_check_cloud", fake_check_cloud)
+    monkeypatch.setattr(ib_gateway, "restart_backoff_state", lambda: expected)
+
+    result = asyncio.run(ib_gateway.check_ib_gateway())
+
+    assert result["restart_backoff"] == expected
+
+
 def test_cloud_mode_check_returns_unreachable_when_port_down(monkeypatch):
     async def fake_check_cloud():
         return {

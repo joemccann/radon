@@ -8,8 +8,8 @@ After=docker.service tailscaled.service
 Requires=docker.service
 Wants=tailscaled.service
 
-# DUR-10 (2026-06-12): a gateway stop cascade-stops relay+monitor
-# (Requires=radon-ib-gateway in their units), and a clean container exit never
+# DUR-10 (2026-06-12): a gateway stop cascade-stops relay+monitor through
+# PartOf=radon-ib-gateway.service in their units, and a clean container exit never
 # re-fires after a clean cascade stop — they stayed down silently after a
 # manual stop -> start. Wants= makes ANY gateway start pull the cascade
 # victims back; their own After=radon-ib-gateway ordering still applies.

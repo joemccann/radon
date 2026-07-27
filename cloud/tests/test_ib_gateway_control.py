@@ -342,6 +342,11 @@ def test_operator_and_setup_route_gateway_through_control_helper():
     setup = (CLOUD_ROOT / "scripts" / "setup-vps.sh").read_text()
 
     assert "radon-ib-gateway-control" in operator
+    # The root-only stack controller deliberately preserves its inherited
+    # deploy-lock FD while demoting to radon. It must reset HOME too: Docker
+    # otherwise reads /root/.docker as radon and status falsely becomes unknown.
+    assert "runuser -u radon --preserve-environment" in operator
+    assert "env HOME=/home/radon USER=radon LOGNAME=radon" in operator
     assert "PERSISTENT_UNITS=(" in operator
     assert "require_2fa_push_lock" not in operator
     assert not re.search(r"systemctl\s+(?:start|restart)\s+radon-ib-gateway", operator)

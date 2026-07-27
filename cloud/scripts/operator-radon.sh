@@ -361,8 +361,13 @@ unique_units() {
 
 gateway_control() {
   if [[ $EUID -eq 0 ]]; then
+    # Keep the inherited deploy-lock descriptor across the privilege drop, but
+    # never keep root's identity environment. Docker reads HOME for its client
+    # config; preserving HOME=/root makes an otherwise healthy Gateway appear
+    # "unknown" to the root-only operator because radon cannot read it.
     run_bounded "$GATEWAY_ACTION_TIMEOUT_SECS" \
-      runuser -u radon --preserve-environment -- "$GATEWAY_CONTROL" "$@"
+      runuser -u radon --preserve-environment -- \
+        env HOME=/home/radon USER=radon LOGNAME=radon "$GATEWAY_CONTROL" "$@"
   else
     run_bounded "$GATEWAY_ACTION_TIMEOUT_SECS" "$GATEWAY_CONTROL" "$@"
   fi

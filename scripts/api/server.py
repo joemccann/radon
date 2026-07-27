@@ -1389,19 +1389,17 @@ async def health(request: Request):
         return {"status": "ok"}
 
     pool_status = ib_pool.status() if ib_pool else None
-    # Pass the pool itself so the auth-state transition handler can autorecover
-    # from the documented "pool stuck after 2FA" failure mode without an
-    # operator step. See feedback_ib_pool_stuck_after_2fa.md.
-    #
     # Bound the probe: check_ib_gateway can block for tens of seconds when the
     # pool is reconnecting (see HEALTH_GATEWAY_PROBE_TIMEOUT_SECS). On timeout or
     # any error we fall back to a fast "degraded" gateway dict (probe_timed_out)
     # rather than hanging the endpoint. The payload SHAPE stays identical so the
-    # web IBStatusContext / admin panel keep parsing the same keys. Recovery is
-    # NOT done here — the unbounded _ib_recovery_heartbeat_loop owns it.
+    # web IBStatusContext / admin panel keep parsing the same keys. This
+    # request is strictly observational: the unbounded
+    # _ib_recovery_heartbeat_loop exclusively owns recovery, preventing page
+    # polling from starting a reconnect cycle or a second 2FA path.
     try:
         gw = await asyncio.wait_for(
-            check_ib_gateway(pool_status=pool_status, pool=ib_pool),
+            check_ib_gateway(pool_status=pool_status, pool=None),
             timeout=HEALTH_GATEWAY_PROBE_TIMEOUT_SECS,
         )
     except Exception as exc:  # defensive: never hang or 500 /health
@@ -1637,11 +1635,14 @@ async def admin_stack_restart():
     """Run the operator CLI's ``radon restart`` to cycle every radon-* unit.
 
     The TCP response may not survive the restart (FastAPI itself is one of
-    the units cycled). The Next.js route handles this by treating a dropped
-    request after ~2s as "restart in flight, poll /health to verify".
+    the units cycled). Callers must only treat an explicit successful response
+    as acceptance; a dropped request is indeterminate and status polling is
+    required before a safe retry.
     """
     result = await admin_services.restart_full_stack()
     if not result.ok:
+        if result.returncode == admin_services.PUSH_LOCK_HELD_RC:
+            raise HTTPException(status_code=409, detail=result.to_dict())
         raise HTTPException(status_code=400 if result.returncode == -1 else 502, detail=result.to_dict())
     return result.to_dict()
 
