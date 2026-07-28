@@ -213,6 +213,11 @@ class TestYahooSparkParse:
         assert bars["AAPL"] == {"2026-07-23": 321.66, "2026-07-27": 333.5}
         assert bars["MSFT"] == {"2026-07-23": 381.58, "2026-07-24": 380.0}
 
+    def test_chunks_respect_spark_symbol_cap(self):
+        # Empirical endpoint cap: >20 symbols per request → HTTP 400 (the
+        # 2026-07-27 run 400'd every 100-symbol chunk, each tarpitted to 60s).
+        assert bpi.SPARK_BATCH_SIZE <= 20
+
     def test_chart_fallback_for_members_batch_left_stale(self):
         bars = bpi.parse_yahoo_spark(self._payload())
         stragglers = bpi.members_still_stale(

@@ -277,7 +277,8 @@ def _fetch_members(members: list[str], range_str: str) -> dict[str, dict[str, fl
         return dict(zip(members, series))
 
 
-SPARK_BATCH_SIZE = 100          # symbols per spark request (endpoint cap ~200)
+SPARK_BATCH_SIZE = 20           # symbols per spark request — >20 gets HTTP 400
+                                # (empirical cap, probed 2026-07-27)
 SPARK_RANGE = "5d"              # covers the missing tail incl. long weekends
 
 
