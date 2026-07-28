@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { runAssistantLoop, type AssistantTurn } from "@/lib/assistant/loop";
+import { runAssistantLoop, type AssistantTurn, type ToolEvent } from "@/lib/assistant/loop";
+import { recordAssistantTurn, type AssistantTurnToolCall } from "@/lib/assistant/telemetry";
 import { enforceDemoAiQuota } from "@/lib/demo/enforceAiQuota";
+import { etCalendarDateString } from "@/lib/journal/rangePnl";
 
 type ChatRole = "user" | "assistant";
 
@@ -17,12 +19,17 @@ export type AssistantPayload = {
 export const SYSTEM_PROMPT =
   "You are Grok, running as Radon's trading operations assistant. " +
   "You analyze institutional flow, portfolio risk, and trade structure with the same direct style as Grok. " +
-  "You can call tools to pull live flow, scans, gamma exposure, and the portfolio. " +
+  "You can call tools to pull live flow, scans, gamma exposure, the portfolio, and the trade journal (query_journal for raw fills, get_realized_pnl for realized P&L). " +
   "Destructive actions (placing orders) are never executed automatically: propose them and let the operator confirm. " +
   "Always respond in short, decisive blocks using signal, structure, kelly logic, and final decision. " +
   "If confidence is low, explicitly state uncertainty and recommend the next command or additional data. " +
   "Before forming a new thesis, consult search_knowledge and find_prior_evals for prior theses, evals, incidents, and lessons, and cite the doc_keys you relied on in your answer. " +
-  "If a knowledge tool fails or returns no thesis documents, say so plainly in your answer and never fabricate prior theses, lessons, or sizing history.";
+  "For questions about trade history, fills, or profit and loss, go straight to the journal tools (get_realized_pnl, query_journal); the knowledge base does not carry P&L figures and cannot enumerate fills. " +
+  "If a knowledge tool fails or returns no thesis documents, say so plainly in your answer and never fabricate prior theses, lessons, or sizing history. " +
+  "JOURNAL CONVENTIONS: The trade journal contains two row families for the same executions: Flex-rehydrate aggregate rows (family flex_agg, composite exec ids, carrying realized_pnl / cost_basis / proceeds / open_basis) and realtime per-fill rows (family fill). " +
+  "The same fill can appear in BOTH families; never sum across families without deduping, and rows marked dup:true duplicate an aggregate. " +
+  "Closes lot-match against opens by VWAP (per-unit basis = open_basis / quantity), and the matching open may lie OUTSIDE the date window you queried: a close early in a week can realize P&L against an open from a prior week. " +
+  "For realized P&L questions prefer get_realized_pnl: it dedupes and lot-matches for you, attributes P&L to the close date, and handles cross-window opens. Use query_journal only to inspect raw rows.";
 
 const isMockMode = () =>
   process.env.ASSISTANT_MOCK === "1" ||
@@ -83,6 +90,15 @@ function bearerToken(request: NextRequest): string | undefined {
   return match ? match[1] : undefined;
 }
 
+function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] {
+  return toolEvents.map((event) => ({
+    name: event.name,
+    ok: event.ok,
+    ...(event.repeated ? { repeated: true } : {}),
+    ...(event.error ? { error: event.error.slice(0, 200) } : {}),
+  }));
+}
+
 export async function POST(request: NextRequest): Promise<Response> {
   const mock = isMockMode();
 
@@ -109,13 +125,28 @@ export async function POST(request: NextRequest): Promise<Response> {
   const quota = await enforceDemoAiQuota("assistant");
   if (quota) return quota;
 
+  const t0 = Date.now();
   try {
-    const result = await runAssistantLoop(toTurns(messages), SYSTEM_PROMPT, bearerToken(request));
+    const system = `${SYSTEM_PROMPT} Today is ${etCalendarDateString(new Date())} (America/New_York).`;
+    const result = await runAssistantLoop(toTurns(messages), system, bearerToken(request));
 
     const content =
       mock && !result.proposal && isProviderMockContent(result.content)
         ? `Mock Grok response: ${fallbackReply(lastUserContent(messages))}`
         : result.content;
+
+    const outcome = result.proposal ? "proposal" : result.outcome;
+    console.log(
+      `[assistant] done rounds=${result.rounds} outcome=${outcome} toolCalls=${result.toolEvents.length} usageIn=${result.usage.inputTokens} usageOut=${result.usage.outputTokens} ms=${Date.now() - t0}`,
+    );
+    recordAssistantTurn({
+      ts: new Date().toISOString(),
+      userMsg: lastUserContent(messages),
+      rounds: result.rounds,
+      toolCalls: toTelemetryToolCalls(result.toolEvents),
+      usage: result.usage,
+      outcome,
+    });
 
     return NextResponse.json({
       content,
@@ -126,6 +157,14 @@ export async function POST(request: NextRequest): Promise<Response> {
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown assistant error.";
+    console.log(`[assistant] done rounds=0 outcome=error toolCalls=0 usageIn=0 usageOut=0 ms=${Date.now() - t0}`);
+    recordAssistantTurn({
+      ts: new Date().toISOString(),
+      userMsg: lastUserContent(messages),
+      rounds: 0,
+      toolCalls: [],
+      outcome: "error",
+    });
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }

@@ -11,6 +11,20 @@
 
 import { radonFetch, RadonApiError } from "@/lib/radonApi";
 import type { LlmTool } from "@/lib/llm/provider";
+import {
+  fetchJournalRowsInRange,
+  fetchPriorRowsForTickers,
+  WINDOW_ROW_LIMIT,
+} from "@/lib/journal/journalRangeDb";
+import {
+  classifyRowFamily,
+  computeRealizedPnl,
+  dedupJournalRows,
+  round2,
+  type RealizedJournalRow,
+} from "@/lib/journal/realizedPnl";
+import { toEtDay } from "@/lib/journal/rangePnl";
+import { compactExpiry, type JournalTradePayload } from "@/lib/blotter/fromJournal";
 
 export type AssistantTool = LlmTool & {
   destructive: boolean;
@@ -163,6 +177,145 @@ function formatKnowledgePayload(data: unknown): Record<string, unknown> {
   };
 }
 
+/* ─── Journal tools (direct Turso via dbExecute — no radonFetch) ────────── */
+
+const ISO_DAY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const JOURNAL_WINDOW_MAX_DAYS = 366;
+const QUERY_JOURNAL_DEFAULT_LIMIT = 40;
+const QUERY_JOURNAL_MAX_LIMIT = 50;
+
+/** Closing action labels (lib/journal/rangePnl's CLOSE_ACTIONS plus plain
+ * "BUY", which covers a pre-window SHORT stock position — without it that
+ * ticker never gets the widened prior fetch and its round trip is dropped). */
+const JOURNAL_CLOSING_ACTIONS = new Set(["SELL", "SELL_OPTION", "BUY", "BUY_TO_CLOSE", "CLOSED"]);
+
+type JournalWindow = { from: string; to: string; ticker?: string };
+
+/** Validation failures throw so the loop feeds the model an actionable error. */
+function journalWindowOf(input: Record<string, unknown>): JournalWindow {
+  const from = typeof input.from === "string" ? input.from.trim() : "";
+  const to = typeof input.to === "string" ? input.to.trim() : "";
+  if (!ISO_DAY_PATTERN.test(from) || !ISO_DAY_PATTERN.test(to)) {
+    throw new Error("from/to must be ET calendar days in YYYY-MM-DD format.");
+  }
+  if (from > to) throw new Error("from must be on or before to.");
+  const spanDays = (Date.parse(to) - Date.parse(from)) / 86_400_000;
+  if (spanDays > JOURNAL_WINDOW_MAX_DAYS) {
+    throw new Error(`Window too wide: at most ${JOURNAL_WINDOW_MAX_DAYS} days between from and to.`);
+  }
+  const ticker = tickerOf(input);
+  return ticker ? { from, to, ticker } : { from, to };
+}
+
+function journalRowEtDay(row: RealizedJournalRow): string | null {
+  return toEtDay((row.filled_at || row.payload.filled_at || row.payload.date || "").toString());
+}
+
+function journalRowTicker(p: JournalTradePayload): string {
+  return (p.ticker || p.symbol || "").toString().toUpperCase();
+}
+
+/** Tickers with a close inside [from, to] — those groups may lot-match opens
+ * that predate the window, so they get the widened prior fetch. */
+function closingTickersInWindow(rows: RealizedJournalRow[], window: JournalWindow): string[] {
+  const tickers = new Set<string>();
+  for (const row of rows) {
+    const action = (row.payload.action ?? "").toString().toUpperCase();
+    if (!JOURNAL_CLOSING_ACTIONS.has(action)) continue;
+    const day = journalRowEtDay(row);
+    if (!day || day < window.from || day > window.to) continue;
+    const ticker = journalRowTicker(row.payload);
+    if (!ticker) continue;
+    if (window.ticker && ticker !== window.ticker) continue;
+    tickers.add(ticker);
+  }
+  return [...tickers].sort();
+}
+
+/** Compact row for the model context: no notes/decision/exec ids, 2dp money. */
+function compactJournalRow(
+  row: RealizedJournalRow,
+  day: string,
+  dup: boolean,
+): Record<string, unknown> {
+  const p = row.payload;
+  const out: Record<string, unknown> = {
+    date: day,
+    ticker: journalRowTicker(p),
+    action: (p.action ?? "").toString(),
+    family: classifyRowFamily(p),
+  };
+  if (typeof p.structure === "string" && p.structure) out.structure = p.structure;
+  if (typeof p.contracts === "number") out.qty = p.contracts;
+  else if (typeof p.shares === "number") out.qty = p.shares;
+  if (typeof p.fill_price === "number") out.price = p.fill_price;
+  if (typeof p.total_cost === "number") out.cost = round2(p.total_cost);
+  if (typeof p.commission === "number") out.comm = round2(p.commission);
+  if (typeof p.strike === "number") out.strike = p.strike;
+  if (typeof p.right === "string" && p.right) out.right = p.right;
+  if (p.expiry) out.expiry = compactExpiry(p.expiry);
+  for (const key of ["realized_pnl", "cost_basis", "proceeds", "open_basis"] as const) {
+    const value = p[key];
+    if (typeof value === "number") out[key] = round2(value);
+  }
+  if (dup) out.dup = true;
+  return out;
+}
+
+async function runGetRealizedPnl(input: Record<string, unknown>): Promise<unknown> {
+  const window = journalWindowOf(input);
+  const windowRows = await fetchJournalRowsInRange(window.from, window.to);
+  // A silently truncated fetch would compute a WRONG total (missing fills).
+  // Refuse and ask for a narrower window instead of shipping bad dollars.
+  if (windowRows.length >= WINDOW_ROW_LIMIT) {
+    throw new Error(
+      `Window has ${WINDOW_ROW_LIMIT}+ journal rows and would be truncated. ` +
+        `Narrow the date range (or pass a ticker) and retry.`,
+    );
+  }
+  const { rows: deduped } = dedupJournalRows(windowRows);
+  const closeTickers = closingTickersInWindow(deduped, window);
+  const priorRows = closeTickers.length
+    ? await fetchPriorRowsForTickers(closeTickers, window.from)
+    : [];
+  return computeRealizedPnl([...windowRows, ...priorRows], window);
+}
+
+async function runQueryJournal(input: Record<string, unknown>): Promise<unknown> {
+  const window = journalWindowOf(input);
+  const requested =
+    typeof input.limit === "number" && Number.isFinite(input.limit)
+      ? Math.floor(input.limit)
+      : QUERY_JOURNAL_DEFAULT_LIMIT;
+  const limit = Math.max(1, Math.min(requested, QUERY_JOURNAL_MAX_LIMIT));
+
+  const fetched = await fetchJournalRowsInRange(window.from, window.to);
+
+  const inWindow: Array<{ row: RealizedJournalRow; day: string }> = [];
+  for (const row of fetched) {
+    const day = journalRowEtDay(row);
+    if (!day || day < window.from || day > window.to) continue;
+    if (window.ticker && journalRowTicker(row.payload) !== window.ticker) continue;
+    inWindow.push({ row, day });
+  }
+  inWindow.sort((a, b) => {
+    const aWhen = (a.row.filled_at || a.row.payload.filled_at || a.row.payload.date || "").toString();
+    const bWhen = (b.row.filled_at || b.row.payload.filled_at || b.row.payload.date || "").toString();
+    return aWhen < bWhen ? 1 : aWhen > bWhen ? -1 : 0;
+  });
+
+  const sliced = inWindow.slice(0, limit);
+  const dedupedSet = new Set(dedupJournalRows(fetched).rows);
+  return {
+    from: window.from,
+    to: window.to,
+    ...(window.ticker ? { ticker: window.ticker } : {}),
+    count: sliced.length,
+    truncated: inWindow.length > sliced.length,
+    rows: sliced.map(({ row, day }) => compactJournalRow(row, day, !dedupedSet.has(row))),
+  };
+}
+
 export const ASSISTANT_TOOLS: AssistantTool[] = [
   {
     name: "get_flow",
@@ -282,6 +435,39 @@ export const ASSISTANT_TOOLS: AssistantTool[] = [
       );
       return formatKnowledgePayload(data);
     },
+  },
+  {
+    name: "get_realized_pnl",
+    description:
+      "Compute realized P&L from the trade journal for a date window. Use this for ANY question about profit/loss, performance, or trading results over a period (a day, week, month, or year to date). Returns deduped, lot-matched round trips: total realized P&L net of commissions plus a per-position breakdown (ticker, open/close dates, quantity, basis, proceeds, realized). Closes are attributed to their close date; opening fills outside the window are fetched and matched automatically. Prefer this over query_journal and search_knowledge for P&L totals.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Inclusive start date, ET calendar day, YYYY-MM-DD" },
+        to: { type: "string", description: "Inclusive end date, ET calendar day, YYYY-MM-DD" },
+        ticker: { type: "string", description: "Optional underlying filter, e.g. SNDK" },
+      },
+      required: ["from", "to"],
+    },
+    run: (input) => runGetRealizedPnl(input),
+  },
+  {
+    name: "query_journal",
+    description:
+      "Fetch raw trade-journal rows (individual fills and Flex aggregate rows) for a date window. Use this to inspect specific executions: entry/exit prices, sizes, commissions, structures, timestamps. Each row carries family: 'flex_agg' (aggregate, may carry realized_pnl/cost_basis/proceeds) or 'fill' (per-execution); the SAME fill can appear in both families, and rows flagged dup:true duplicate an aggregate and must not be double-counted. For realized P&L totals use get_realized_pnl instead.",
+    destructive: false,
+    input_schema: {
+      type: "object",
+      properties: {
+        from: { type: "string", description: "Inclusive start date, ET, YYYY-MM-DD" },
+        to: { type: "string", description: "Inclusive end date, ET, YYYY-MM-DD" },
+        ticker: { type: "string", description: "Optional underlying filter" },
+        limit: { type: "number", description: "Max rows, default 40, hard cap 50" },
+      },
+      required: ["from", "to"],
+    },
+    run: (input) => runQueryJournal(input),
   },
   {
     name: "place_order",
