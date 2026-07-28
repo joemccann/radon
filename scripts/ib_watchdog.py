@@ -1211,7 +1211,12 @@ def _advance_api_hang(
             "error" if capped else "ok",
             error_message=(
                 f"api hang persists but watchdog restart {blocked}"
-                + (" — operator intervention required" if capped else "")
+                + (
+                    " — restarts exhausted: open /admin (Operator) and use "
+                    "Restart Gateway, then approve the IBKR Mobile push"
+                    if capped
+                    else ""
+                )
             ),
         )
         return state

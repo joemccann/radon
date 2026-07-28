@@ -26,6 +26,13 @@ from typing import Optional
 
 COOLDOWN_DURATION = timedelta(hours=1)
 HYSTERESIS_THRESHOLD = 2
+# A continuously-latched condition re-pages at most once per this ceiling.
+# 2026-07-28 storm: with only the 1h window, a 6h latched outage re-armed a
+# fresh unacknowledged P1 emergency every ~65 min. One page per
+# condition-TRANSITION is the contract; recovery (record_success /
+# mark_emergency_resolved) re-arms the next transition immediately past the
+# 1h flap floor, and the ceiling keeps a multi-day outage paging once daily.
+REARM_CEILING = timedelta(hours=24)
 
 
 @dataclass
@@ -110,6 +117,14 @@ def record_success(*, service: str, kind: str) -> None:
         """,
         (service, kind),
     )
+    # Recovery also re-arms this service's notification gates: flipping the
+    # severity rows off 'notified' marks the condition-transition boundary
+    # that cooldown_allows_fire keys on (one page per transition).
+    db.execute(
+        "UPDATE watchdog_cooldowns SET last_outcome='resolved' "
+        "WHERE service=? AND kind LIKE 'severity:%' AND last_outcome='notified'",
+        (service,),
+    )
     db.commit()
 
 
@@ -151,19 +166,30 @@ def mark_emergency_resolved(*, service: str) -> None:
 
 
 def cooldown_allows_fire(*, service: str, severity: str, now: Optional[datetime] = None) -> bool:
-    """True if no notification for (service, severity) has fired in
-    the last hour. Returns True on first-ever check.
+    """One page per condition-transition. True on first-ever check.
+
+    - Inside the 1h flap floor: always suppressed.
+    - Past the floor with a recovery since the last notification
+      (last_outcome != 'notified'): allowed — a new transition.
+    - Still latched (last_outcome == 'notified', no recovery observed):
+      suppressed until the 24h re-arm ceiling.
     """
     now = now or datetime.now(timezone.utc)
     db = _get_db()
     row = db.execute(
-        "SELECT last_notified_at FROM watchdog_cooldowns WHERE service=? AND kind=?",
+        "SELECT last_notified_at, last_outcome FROM watchdog_cooldowns "
+        "WHERE service=? AND kind=?",
         (service, _cooldown_key(severity)),
     ).fetchone()
     if not row or not row[0]:
         return True
     last = _parse_iso(row[0])
-    return now - last >= COOLDOWN_DURATION
+    elapsed = now - last
+    if elapsed < COOLDOWN_DURATION:
+        return False
+    if row[1] == "notified":
+        return elapsed >= REARM_CEILING
+    return True
 
 
 def mark_notified(*, service: str, severity: str, now: Optional[datetime] = None) -> None:
