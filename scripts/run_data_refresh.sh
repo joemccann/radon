@@ -47,39 +47,10 @@ _load_env() {
 _load_env "web/.env"
 _load_env ".env"
 
-resolve_python() {
-    local candidate resolved
-    for candidate in \
-        "${RADON_PYTHON_BIN:-}" \
-        /opt/homebrew/bin/python3.13 \
-        /usr/local/bin/python3.13 \
-        /usr/bin/python3.13 \
-        python3.13; do
-        [ -n "$candidate" ] || continue
-        if [[ "$candidate" == */* ]]; then
-            [ -x "$candidate" ] || continue
-            resolved="$candidate"
-        else
-            resolved=$(command -v "$candidate" 2>/dev/null) || continue
-        fi
-        "$resolved" - <<'PY' >/dev/null 2>&1
-import importlib.util
-import sys
+. scripts/lib/python_bin.sh
 
-required = ("ib_insync", "libsql_experimental")
-version_ok = sys.version_info >= (3, 13)
-dependencies_ok = all(importlib.util.find_spec(name) for name in required)
-raise SystemExit(0 if version_ok and dependencies_ok else 1)
-PY
-        if [ $? -eq 0 ]; then
-            echo "$resolved"
-            return 0
-        fi
-    done
-    return 1
-}
-
-PYTHON_BIN=$(resolve_python)
+RADON_PYTHON_MIN_VERSION="3.13"
+PYTHON_BIN=$(radon_resolve_python ib_insync libsql_experimental)
 if [ -z "$PYTHON_BIN" ]; then
     echo "$(date): No Python 3.13 interpreter with ib_insync and libsql_experimental available for data refresh"
     exit 1

@@ -10,18 +10,9 @@
 
 cd "$(dirname "$0")/.."
 
-resolve_python() {
-    local candidate
-    for candidate in "${RADON_PYTHON_BIN:-}" python3.13 python3.11 python3.9 /usr/bin/python3 python3; do
-        [ -n "$candidate" ] || continue
-        command -v "$candidate" >/dev/null 2>&1 || continue
-        echo "$candidate"
-        return 0
-    done
-    return 1
-}
+. scripts/lib/python_bin.sh
 
-PYTHON_BIN=$(resolve_python)
+PYTHON_BIN=$(radon_resolve_python dotenv)
 if [ -z "$PYTHON_BIN" ]; then
     echo "$(date): No Python interpreter available for informed-flow sweep"
     exit 1

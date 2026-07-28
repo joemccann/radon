@@ -30,6 +30,12 @@ def test_run_cta_sync_preserves_literal_env_values(tmp_path: Path) -> None:
 
     wrapper_src = Path(__file__).resolve().parents[1] / "run_cta_sync.sh"
     shutil.copy2(wrapper_src, scripts_dir / "run_cta_sync.sh")
+    # The wrapper sources interpreter resolution from scripts/lib/python_bin.sh.
+    (scripts_dir / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        Path(__file__).resolve().parents[1] / "lib" / "python_bin.sh",
+        scripts_dir / "lib" / "python_bin.sh",
+    )
     (scripts_dir / "run_cta_sync.sh").chmod((scripts_dir / "run_cta_sync.sh").stat().st_mode | stat.S_IXUSR)
 
     literal_user = "cta-user@example.com"

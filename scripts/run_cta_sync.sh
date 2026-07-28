@@ -45,24 +45,9 @@ _load_env ".env"
 
 mkdir -p data/menthorq_cache logs
 
-resolve_python() {
-    local candidate
-    for candidate in "${RADON_PYTHON_BIN:-}" python3.13 python3.9 /usr/bin/python3 python3; do
-        [ -n "$candidate" ] || continue
-        command -v "$candidate" >/dev/null 2>&1 || continue
-        "$candidate" - <<'PY' >/dev/null 2>&1
-import importlib.util
-raise SystemExit(0 if importlib.util.find_spec("playwright") else 1)
-PY
-        if [ $? -eq 0 ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
+. scripts/lib/python_bin.sh
 
-PYTHON_BIN=$(resolve_python)
+PYTHON_BIN=$(radon_resolve_python playwright)
 if [ -z "$PYTHON_BIN" ]; then
     echo "$(date): No Python interpreter with Playwright available for CTA sync"
     exit 1

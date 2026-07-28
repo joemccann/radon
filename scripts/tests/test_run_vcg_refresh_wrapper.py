@@ -52,7 +52,18 @@ def _stage_wrapper(repo_dir: Path) -> Path:
     dst = scripts_dir / "run_vcg_refresh.sh"
     shutil.copy2(src, dst)
     dst.chmod(dst.stat().st_mode | stat.S_IXUSR)
+    _stage_python_bin_lib(scripts_dir)
     return dst
+
+
+def _stage_python_bin_lib(scripts_dir: Path) -> None:
+    """Wrappers source interpreter resolution from scripts/lib/python_bin.sh."""
+    lib_dir = scripts_dir / "lib"
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(
+        Path(__file__).resolve().parents[1] / "lib" / "python_bin.sh",
+        lib_dir / "python_bin.sh",
+    )
 
 
 def _stage_python_with_market_open(bin_dir: Path) -> Path:

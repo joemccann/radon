@@ -252,6 +252,9 @@ def _refresh_project(tmp_path: Path) -> tuple[Path, Path, Path]:
     scripts = project / "scripts"
     scripts.mkdir(parents=True)
     shutil.copy2(SCRIPTS_DIR / "run_data_refresh.sh", scripts)
+    # The wrapper sources interpreter resolution from scripts/lib/python_bin.sh.
+    (scripts / "lib").mkdir(parents=True, exist_ok=True)
+    shutil.copy2(SCRIPTS_DIR / "lib" / "python_bin.sh", scripts / "lib" / "python_bin.sh")
 
     data = project / "data"
     data.mkdir()
@@ -404,12 +407,19 @@ def test_post_close_cri_repair_recovers_failed_scan(tmp_path: Path) -> None:
 
 
 def test_data_refresh_resolver_requires_python313_and_runtime_dependencies() -> None:
+    """Interpreter resolution moved to scripts/lib/python_bin.sh, but
+    run_data_refresh.sh must still declare the same two guarantees: a 3.13
+    floor and the runtime dependencies it cannot run without.
+
+    The shared candidate list does include older interpreters, so the
+    "never run this on 3.9" guarantee is now enforced by the version floor
+    rather than by omission. That enforcement is covered behaviourally in
+    scripts/tests/test_wrapper_python_resolution.py.
+    """
     text = (SCRIPTS_DIR / "run_data_refresh.sh").read_text()
 
-    assert "sys.version_info >= (3, 13)" in text
-    assert 'required = ("ib_insync", "libsql_experimental")' in text
-    assert "python3.9" not in text
-    assert "/usr/bin/python3 " not in text
+    assert 'RADON_PYTHON_MIN_VERSION="3.13"' in text
+    assert "radon_resolve_python ib_insync libsql_experimental" in text
 
 
 def test_data_refresh_setup_generator_preserves_explicit_path(tmp_path: Path) -> None:

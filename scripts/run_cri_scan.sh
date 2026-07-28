@@ -8,25 +8,9 @@
 
 cd "$(dirname "$0")/.."
 
-resolve_python() {
-    local candidate
-    for candidate in "${RADON_PYTHON_BIN:-}" python3.13 python3.9 /usr/bin/python3 python3; do
-        [ -n "$candidate" ] || continue
-        command -v "$candidate" >/dev/null 2>&1 || continue
-        "$candidate" - <<'PY' >/dev/null 2>&1
-import importlib.util
-required = ("ib_insync",)
-raise SystemExit(0 if all(importlib.util.find_spec(name) for name in required) else 1)
-PY
-        if [ $? -eq 0 ]; then
-            echo "$candidate"
-            return 0
-        fi
-    done
-    return 1
-}
+. scripts/lib/python_bin.sh
 
-PYTHON_BIN=$(resolve_python)
+PYTHON_BIN=$(radon_resolve_python ib_insync)
 if [ -z "$PYTHON_BIN" ]; then
     echo "$(date): No Python interpreter with ib_insync available for CRI scan"
     exit 1
