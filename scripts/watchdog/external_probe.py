@@ -127,9 +127,15 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
         age_text = f" for {int(float(age) // 60)}m" if age is not None else ""
         message = f"off-box observer silent{age_text} ({reason})"
         status = "stale"
+        # A silent observer is a monitoring gap, not a validated edge outage:
+        # P2 digest. Only a validated off-box DOWN verdict earns the P1
+        # emergency (2026-07-28 storm: hardcoded P1 here drove hours of
+        # retry-until-ack pages for a condition downstream of the gateway).
+        severity = "P2"
     else:
         message = f"off-box observer reports edge unhealthy ({reason})"
         status = "error"
+        severity = "P1"
 
     # The reader already tolerates measured GitHub dispatch lag (2h window), so
     # another hysteresis layer would only delay a confirmed monitoring outage.
@@ -137,7 +143,7 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
         service=SERVICE,
         kind="deadman",
         status=status,
-        severity="P1",
+        severity=severity,
         fired=True,
         message=message,
         consecutive_failures=1,

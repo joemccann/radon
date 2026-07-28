@@ -74,7 +74,9 @@ PUSHOVER_API_URL = "https://api.pushover.net/1/messages.json"
 # Pushover emergency-priority contract: retry >= 30s, expire <= 10800s.
 # https://pushover.net/api#priority — the push re-alerts every `retry`
 # seconds until acknowledged or `expire` seconds elapse.
-PUSHOVER_EMERGENCY_RETRY_SECS = 60
+# 60s made a single unacknowledged emergency ring near-continuously for its
+# whole expire window (2026-07-28 storm); 300s still cuts through DnD.
+PUSHOVER_EMERGENCY_RETRY_SECS = 300
 PUSHOVER_EMERGENCY_EXPIRE_SECS = 3600
 
 

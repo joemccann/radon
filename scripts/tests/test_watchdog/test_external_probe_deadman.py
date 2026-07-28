@@ -76,7 +76,10 @@ def test_stale_external_probe_pages_the_operator(monkeypatch) -> None:
 
     assert outcome.status == "stale"
     assert outcome.fired is True
-    assert outcome.severity == "P1"
+    # A silent off-box observer is a MONITORING gap, not a validated edge
+    # outage — P2 digest, never a P1 emergency (2026-07-28 storm: the probe's
+    # hardcoded P1 drove hours of retry-until-ack pages).
+    assert outcome.severity == "P2"
     assert "silent" in outcome.message.lower()
 
 
