@@ -5,6 +5,8 @@ import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { computeExposureDetailed, type ExposureDataWithBreakdown } from "@/lib/exposureBreakdown";
 import { computeDayMoveBreakdown } from "@/lib/dayMoveBreakdown";
+import { computeUnrealizedBreakdown } from "@/lib/unrealizedBreakdown";
+import { resolveEntryCost, resolveMarketValue } from "@/lib/positionUtils";
 import { getMarketPhaseFromDate } from "@/lib/serviceHealthWindows";
 import {
   computeLeverageRatio,
@@ -14,7 +16,7 @@ import {
 } from "@/lib/dollarDeltaLeverage";
 import ExposureBreakdownModal, { type ExposureMetric } from "./ExposureBreakdownModal";
 import FillsModal from "./FillsModal";
-import PnlBreakdownModal, { type PnlBreakdownRow } from "./PnlBreakdownModal";
+import PnlBreakdownModal from "./PnlBreakdownModal";
 import AccountMetricModal from "./AccountMetricModal";
 
 type MetricCardsProps = {
@@ -40,33 +42,6 @@ const fmtSignedExact = (n: number) =>
   `${n >= 0 ? "+" : "-"}${fmtExact(n)}`;
 
 const tone = (n: number) => (n > 0 ? "positive" as const : n < 0 ? "negative" as const : "neutral" as const);
-
-function resolveMarketValue(pos: PortfolioData["positions"][number]): number | null {
-  if (pos.market_value != null) return pos.market_value;
-  const known = pos.legs.filter((l) => l.market_value != null);
-  return known.length > 0 ? known.reduce((s, l) => s + l.market_value!, 0) : null;
-}
-
-/* ─── Unrealized P&L breakdown (IB total: entry cost vs market value) ─── */
-
-function computeUnrealizedBreakdown(portfolio: PortfolioData): PnlBreakdownRow[] {
-  return portfolio.positions.flatMap((pos) => {
-    const mv = resolveMarketValue(pos);
-    if (mv == null) return [];
-    const pnl = mv - pos.entry_cost;
-    const pnlPct = pos.entry_cost !== 0 ? (pnl / Math.abs(pos.entry_cost)) * 100 : null;
-    return [{
-      id: pos.id,
-      ticker: pos.ticker,
-      structure: pos.structure,
-      col1: `$${Math.abs(pos.entry_cost).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      col2: `$${Math.abs(mv).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
-      pnl,
-      pnlPct,
-    }];
-  });
-}
-
 
 function computeTodayUnrealizedPnl(
   portfolio: PortfolioData,
@@ -633,7 +608,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
     let total = 0;
     for (const pos of portfolio.positions) {
       const mv = resolveMarketValue(pos);
-      if (mv != null) total += mv - pos.entry_cost;
+      if (mv != null) total += mv - resolveEntryCost(pos);
     }
     return total;
   })();
@@ -766,6 +741,8 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         title="Unrealized P&L — Open Positions"
         formula={
           "Unrealized P&L = SUM( market_value − entry_cost ) per position\n" +
+          "Entry cost and market value are signed (credits and short marks negative)\n" +
+          "so each row satisfies P&L = MKT VALUE − ENTRY COST.\n" +
           "Source: IB market data synced via IB Gateway"
         }
         col1Header="ENTRY COST"

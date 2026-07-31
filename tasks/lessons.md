@@ -1,5 +1,17 @@
 # Lessons
 
+## 2026-07-31 — Unrealized P&L modal must show signed entry and MV
+
+- Never `Math.abs` entry cost or market value in a breakdown that claims `P&L = MV − entry`. Credits and short marks become unverifiable (META debit + abs(short MV) looked like a gain; AAOI credit looked like a smaller gain than the real P&L).
+- Format with explicit signs (`+$…` / `-$…`) so each row is eye-checkable. Multi-leg use signed `resolveEntryCost` / `resolveMarketValue` from `positionUtils`, not unsigned leg sums.
+
+## 2026-07-28 — Day P&L ESTIMATED (LIVE) vs IB during RTH
+
+- Screenshot showed Day P&L **-$159k ESTIMATED (LIVE)** while Turso `account_summary.daily_pnl` was **-$40.9k** and `sum(ib_daily_pnl)` matched IB. Client close-based math was ~4× off.
+- When `acct.daily_pnl` is null (reqPnL race / Phase 6 no-wait), the UI falls back to `computeDayMoveBreakdown`. That path must **prefer `pos.ib_daily_pnl` without requiring live last/close**. Gating IB daily on full quotes dropped or replaced good IB numbers with prior-close fiction.
+- Same-day opens (AAOI/META/SPCX on the bug day) must not use yesterday's option close; use IB daily first, else entry-cost baseline (`getTodayPnlDollars` / `isSameDay`).
+- When diagnosing Day P&L, compare three numbers: `account_summary.daily_pnl`, `sum(positions.ib_daily_pnl)`, and the rendered ESTIMATED total. If 1–2 agree and the UI disagrees, the bug is in the client fallback, not the market.
+
 ## 2026-07-18 - Control-plane refresh must start from the target checkout
 
 - Bootstrap hashes the current VPS checkout, not an immutable release runner. When manifest preflight rejects a newer unit hash, first prove `/home/radon/radon` is at the exact tested SHA and fast-forward it as `radon` if it is behind; then run `bash cloud/scripts/bootstrap-control-plane.sh` as root from that checkout, without restarting Gateway, and rerun CI. A stale checkout can make bootstrap report “current” while preserving an old manifest. Never bypass or relax `preflight_control_plane`.
@@ -139,6 +151,8 @@ Test-suite audit (a "improve coverage" request that turned up a live auth hole):
 - **Mutation testing found what coverage couldn't — the Kelly sizing had 0/20 mutation-kill despite being "covered."** A real mutation pass on the money math (sign flips, ×100/÷100, the 2.5% bankroll-cap constant, `min()`, denominator swaps) proved the assertions were faithless: kelly 0/20→18/20, vectorized greeks 4/11→11/11, ts P&L 18/27→22/27, order-risk 23/24→24/24. The Kelly Gate-3 bankroll cap could be flipped to 5% with NO test failing. Two recurring root causes: (1) tests asserting RELATIVE checks (`>10.0`, `>0`, direction-only) instead of the EXACT value; (2) the test re-deriving the expected value from the production function (`expected = kelly(...)` / `sum(result['leg_deltas'])`) so a formula mutation infects test and prod equally and cancels out. Pin EXACT values derived INDEPENDENTLY (hand math / a reference impl), never re-derived from the code under test. Safe pass mechanics: mutate prod → run targeted test → revert; only test files change; verify prod `git diff` empty + re-derive a sample of pins independently to avoid asserting-the-bug.
 
 ## 2026-06-11
+
+- **A listening host port is not proof that IB Gateway's API is available.** In this topology Docker/socat can keep host `:4001` open while the Java Gateway has no internal `127.0.0.1:4001` listener; health must verify the internal listener or a fresh protocol handshake before reporting the relay/API pool connected. Never declare a relay outage fixed from process state or cached pool flags alone.
 
 - NEVER run a synchronous/blocking libsql call (`db.execute`/`db.commit`) directly on the FastAPI event loop. On the single-worker uvicorn, a hung direct-cloud write freezes the WHOLE API: `/health` and `/health/lite` time out, every request stalls, while the relay/data plane stays fine. Diagnose with `py-spy dump --pid <uvicorn MainPID>` (install into the venv) — it shows the MainThread blocked in the offending call. Offload fire-and-forget DB side-effects (the dual-write mirror + service_health heartbeat) to a dedicated bounded background thread; use `asyncio.to_thread` for request-scoped blocking I/O. Commit c9e518a.
 - A wedged `/health` can block its OWN fix from deploying: `deploy.sh`'s `wait_for_gateway_ready` gate curls `/health`, so if the API is frozen the gate fails and deploy.sh rolls back. For a Python-only fix, deploy manually: on the VPS `cd /home/radon/radon && sudo -u radon git fetch && git reset --hard origin/main && systemctl restart radon-api` (no Next.js rebuild needed for server-only changes).

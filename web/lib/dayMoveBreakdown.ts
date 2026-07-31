@@ -3,9 +3,15 @@
  * so they can be unit-tested without importing a React client component.
  */
 
-import type { PortfolioData } from "@/lib/types";
+import type { PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
-import { legPriceKey, resolveRealtimePrice } from "@/lib/positionUtils";
+import {
+  getTodayPnlDollars,
+  isSameDay,
+  legPriceKey,
+  positionDirectionSign,
+  resolveRealtimePrice,
+} from "@/lib/positionUtils";
 import type { PnlBreakdownRow } from "@/components/PnlBreakdownModal";
 
 /**
@@ -41,6 +47,61 @@ function isMid(p: PriceData): boolean {
   return true;
 }
 
+/** Optional close/last labels for the breakdown modal when quotes exist. */
+function quoteLabelsForPosition(
+  pos: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): { col1: string; col2: string; pnlPct: number | null } {
+  if (pos.structure_type === "Stock") {
+    const p = prices[pos.ticker];
+    const current = p ? resolveLastOrMid(p) : null;
+    if (p?.close != null && p.close > 0 && current != null) {
+      const closeValue = p.close * Math.abs(pos.contracts);
+      const pnlPct =
+        pos.ib_daily_pnl != null && closeValue !== 0
+          ? (pos.ib_daily_pnl / Math.abs(closeValue)) * 100
+          : null;
+      return {
+        col1: `$${p.close.toFixed(2)}`,
+        col2: isMid(p) ? `$${current.toFixed(2)} (MID)` : `$${current.toFixed(2)}`,
+        pnlPct,
+      };
+    }
+    return { col1: "IB daily", col2: "reqPnLSingle", pnlPct: null };
+  }
+
+  let closeStr = "";
+  let lastStr = "";
+  for (const leg of pos.legs) {
+    const key = legPriceKey(pos.ticker, pos.expiry, leg);
+    const lp = key ? prices[key] : null;
+    const current = lp ? resolveLastOrMid(lp) : null;
+    if (!lp || current == null || lp.close == null || lp.close <= 0) continue;
+    if (!closeStr) closeStr = `$${lp.close.toFixed(2)}`;
+    if (!lastStr) {
+      lastStr = isMid(lp)
+        ? `$${current.toFixed(2)} (MID)`
+        : `$${current.toFixed(2)}`;
+    }
+  }
+  if (closeStr && lastStr) {
+    return { col1: closeStr, col2: lastStr, pnlPct: null };
+  }
+  return { col1: "IB daily", col2: "reqPnLSingle", pnlPct: null };
+}
+
+/**
+ * Per-position day move for the Account Day P&L fallback and the Day Move
+ * breakdown modal.
+ *
+ * Precedence (must match operator expectation vs TWS):
+ *   1. `pos.ib_daily_pnl` — IB reqPnLSingle, no quotes required. Handles
+ *      same-day opens and intraday adds correctly.
+ *   2. Same-day options — entry-cost baseline via getTodayPnlDollars (prior
+ *      close is meaningless when the position did not exist yesterday).
+ *   3. Stock close-based with SHORT sign awareness + last/mid.
+ *   4. Overnight options — last/mid vs prior close.
+ */
 export function computeDayMoveBreakdown(
   portfolio: PortfolioData,
   prices: Record<string, PriceData>,
@@ -49,15 +110,51 @@ export function computeDayMoveBreakdown(
   const rows: PnlBreakdownRow[] = [];
 
   for (const pos of portfolio.positions) {
+    // 1. IB per-position daily is authoritative — never gate on live quotes.
+    //    Missing bid/ask/last used to drop the row or fall through to prior-
+    //    close math and blow up ESTIMATED (LIVE) Day P&L during RTH.
+    if (pos.ib_daily_pnl != null) {
+      total += pos.ib_daily_pnl;
+      const labels = quoteLabelsForPosition(pos, prices);
+      rows.push({
+        id: pos.id,
+        ticker: pos.ticker,
+        structure: pos.structure,
+        col1: labels.col1,
+        col2: labels.col2,
+        pnl: pos.ib_daily_pnl,
+        pnlPct: labels.pnlPct,
+      });
+      continue;
+    }
+
+    // 2. Same-day options: entry baseline (shared with position-table Today P&L).
+    if (pos.structure_type !== "Stock" && isSameDay(pos)) {
+      const todayPnl = getTodayPnlDollars(pos, prices);
+      if (todayPnl == null) continue;
+      total += todayPnl;
+      rows.push({
+        id: pos.id,
+        ticker: pos.ticker,
+        structure: pos.structure,
+        col1: "entry",
+        col2: "same-day",
+        pnl: todayPnl,
+        pnlPct: null,
+      });
+      continue;
+    }
+
     if (pos.structure_type === "Stock") {
       const p = prices[pos.ticker];
       const current = p ? resolveLastOrMid(p) : null;
       if (current == null || p?.close == null || p.close <= 0) continue;
 
-      const wsPnl = (current - p.close) * pos.contracts;
-      const effectivePnl = pos.ib_daily_pnl != null ? pos.ib_daily_pnl : wsPnl;
+      // Sign-aware: contracts is a magnitude; SHORT loses when price rises.
+      const effectivePnl =
+        positionDirectionSign(pos) * (current - p.close) * Math.abs(pos.contracts);
       total += effectivePnl;
-      const closeValue = p.close * pos.contracts;
+      const closeValue = p.close * Math.abs(pos.contracts);
       const pnlPct = closeValue !== 0 ? (effectivePnl / Math.abs(closeValue)) * 100 : null;
       const currentLabel = isMid(p)
         ? `$${current.toFixed(2)} (MID)`
@@ -74,6 +171,7 @@ export function computeDayMoveBreakdown(
       continue;
     }
 
+    // 3. Overnight options: last-or-mid vs prior close.
     let legPnl = 0;
     let allLegsValid = true;
     let closeStr = "";
@@ -98,15 +196,14 @@ export function computeDayMoveBreakdown(
     }
 
     if (allLegsValid) {
-      const effectivePnl = pos.ib_daily_pnl != null ? pos.ib_daily_pnl : legPnl;
-      total += effectivePnl;
+      total += legPnl;
       rows.push({
         id: pos.id,
         ticker: pos.ticker,
         structure: pos.structure,
         col1: closeStr || "---",
         col2: lastStr || "---",
-        pnl: effectivePnl,
+        pnl: legPnl,
         pnlPct: null,
       });
     }

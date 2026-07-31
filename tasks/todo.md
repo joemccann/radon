@@ -1,3 +1,96 @@
+# Task: Day P&L ESTIMATED (LIVE) way off during RTH (2026-07-28)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce from screenshot + Turso: IB daily vs UI estimate
+- T2 depends_on: [T1] - Fix computeDayMoveBreakdown (IB first, same-day, stock short sign)
+- T3 depends_on: [T2] - Red/green tests + related suite
+
+## Checklist
+
+- [x] T1 Live Turso: daily_pnl ≈ -$40,889; sum ib_daily ≈ -$40,932; UI showed -$159,354 ESTIMATED (LIVE). Same-day AAOI +$42k IB vs poisoned close math.
+- [x] T2 `web/lib/dayMoveBreakdown.ts`: prefer `ib_daily_pnl` without quotes; same-day entry path; stock SHORT sign; keep mid fallback for overnight options.
+- [x] T3 Tests: `day-move-ib-first.test.ts` (4) + mid/ib/premarket/same-day suites green (29 focused).
+
+## Review
+
+- Root cause: RTH fallback when account `daily_pnl` is null used prior-close math and required full quotes before accepting per-position IB daily. Same-day RRs and stale option closes inflated Day Move ~4× vs TWS.
+- Fix is client-side only; when IB fields are present the estimate matches sum of `ib_daily_pnl`. Account card still labels ESTIMATED when aggregate `daily_pnl` is null.
+
+# Task: META 2026-08-21 bullish-expression analysis (2026-07-28)
+
+## Dependency graph
+
+- T1 depends_on: [] - Run the required fresh META evaluation pipeline and record its signal, data-freshness status, and active gate outcome.
+- T2 depends_on: [] - Retrieve the complete listed META 2026-08-21 chain from the authoritative options source, retaining bid/ask, IV, Greeks, open interest, and volume with timestamps.
+- T3 depends_on: [T1, T2] - Compare viable defined-risk bullish structures across liquid strikes using executable prices, expected-move context, payoff, break-even, IV/skew, and liquidity.
+- T4 depends_on: [T3] - Apply convexity, edge, fractional-Kelly, and naked-short constraints; state the conditional decision and the exact order-quality criteria.
+- T5 depends_on: [T4] - Verify calculations and source freshness, then document the review without modifying execution state.
+
+## Checklist
+
+- [x] T1 Fresh evaluation pipeline: `evaluate.py META` fetched through 2026-07-28 12:06 PT and returned NO_TRADE at EDGE (flow strength 12.8 vs >50; one sustained day; bearish news tilt). M1–M3B passed, while M5/M6 did not run.
+- [x] T2 Full expiry chain capture: blocked at both authoritative sources. IB resolves `ib-gateway:4001` to no host and local FastAPI/port 4001 are unavailable; UW rejects without `UW_TOKEN`. Yahoo fallback returned HTTP 429. Third-party web pages returned internally inconsistent snapshots and lack the required full IV/Greek set, so they were not substituted for executable data.
+- [x] T3 Strike and structure comparison: no contract-specific ranking was calculated because executable, internally consistent bid/ask + IV + Greek data is unavailable. Structurally, a traditional risk reversal and a risk-reversal call spread retain naked short-put tail exposure; a debit call vertical is the defined-risk comparator once data is restored.
+- [x] T4 Gate and sizing decision: EDGE failed before structure/Kelly. No META entry, including a risk reversal, qualifies today.
+- [x] T5 Calculation and freshness review: fresh evaluation data was available through 2026-07-28 12:06 PT; the expiry chain required to calculate payoff/skew/Kelly was unavailable or inconsistent, so no fabricated strikes, IVs, or order price is reported.
+
+## Review
+
+- Decision: NO TRADE. The live evaluation failed EDGE (12.8 strength vs >50 requirement); structure and Kelly are intentionally not advanced. No order was authorized or placed.
+- Data limitation: reconnect IB or configure `UW_TOKEN` before asking for a strike-specific replacement. Yahoo was attempted only after those two authoritative sources failed and was rate limited.
+
+# Task: Operator control-plane reliability audit and repair (2026-07-27)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory every operator-page feature, UI action, and backing API/control-plane route; classify each by read-only, service-only mutation, or 2FA/Gateway mutation.
+- T2 depends_on: [] - Reconcile service-reliability memories, incident logs, installed control-plane state, and production telemetry into explicit failure-mode invariants.
+- T3 depends_on: [T1, T2] - Execute safe production read paths and controlled local/mock action-path probes; identify every reproducible operator-page reliability defect.
+- T4 depends_on: [T3] - Design the smallest complete repair plan, including regression coverage and safe handling for service restart and single-push 2FA operations.
+- T5 depends_on: [T4] - Implement the approved-in-scope repairs with red/green tests and full affected-suite verification.
+- T6 depends_on: [T5] - Run production-safe verification, deploy through CI, and prove every operator-page action contract without issuing an unnecessary Gateway restart or 2FA push.
+
+## Checklist
+
+- [x] T1 Operator UI/API/action inventory: nine admin routes, including six read surfaces, Gateway/2FA actions, full-stack restart, per-unit control, and demo-user actions; each is classified and mapped to its UI control and existing test coverage.
+- [x] T2 Reliability evidence and invariant audit: identified root-HOME corruption in the installed full-stack CLI, cloud health omission of 2FA lock/backoff, browser-driven recovery side effects, false Gateway-stop cascade claims, and command-acceptance falsely rendered as recovery.
+- [x] T3 Read-path and controlled action-path validation: production read paths confirm a healthy broker/data plane but `radon status` falsely fails; focused Python and web proxy/UI suites cover existing mocked action paths, exposing missing status-mapping and convergence regressions without issuing a restart or 2FA push.
+- [x] T4 Durable repair specification: preserve inherited deploy-lock FDs while forcing the demoted helper HOME to `/home/radon`; expose cloud-mode lock/backoff; make `/health` passive; make Gateway stop's actual dependent state truthful; and add action-route/UI regressions that distinguish acceptance from verified recovery.
+- [x] T5 Regression fixes and test suite verification: added root-controller identity, cloud push-lock, passive-health, exact Gateway cascade, fail-closed restart-acknowledgement, FastAPI conflict mapping, and authless-browser boundary regressions; focused Python (328) and web (56) suites, Chromium operator E2E (5), typecheck, lint, shell syntax, and full suites were run.
+- [x] T6 Deployment and production contract verification: committed/pushed `2928c804`; CI run `30274059548` passed pytest, full Vitest/coverage, secret scan, perimeter smoke, and deployment after a documented non-restarting exact-SHA control-plane refresh. Production verifies the installed operator hash, passive authenticated health with restart-backoff present, schema-v2 edge health, Gateway-dependent `PartOf` links, and six core units active. All unauthenticated admin reads/mutations are blocked at the production auth perimeter.
+
+## Review
+
+- Reproducible outage cause: root's full-stack operator preserved `HOME=/root` while demoting the Gateway helper to `radon`; Docker then could not read its client config, so `radon status` reported the healthy Gateway as `unknown` and returned failure.
+- Prevention: preserve only the required deploy-lock environment while forcing the demoted identity's HOME/USER/LOGNAME; cloud health always includes the 2FA lock/backoff; browser health polling is read-only; Gateway stop now truly stops relay and monitor through systemd `PartOf`; and restart transport errors can no longer masquerade as accepted restarts.
+- Delivery: CI initially refused a stale installed control-plane manifest before mutating services. The documented exact-SHA bootstrap atomically refreshed 20 artifacts without restarting IB Gateway, and the deployment rerun completed successfully.
+
+# Task: Relay connection repair (2026-07-27)
+
+## Dependency graph
+
+- T1 depends_on: [] - Collect live relay, Gateway, API-pool, and client-session evidence; isolate the relay-only failure mode.
+- T2 depends_on: [T1] - Apply the smallest documented recovery that restores the relay without unnecessary Gateway or 2FA churn.
+- T3 depends_on: [T2] - Verify the IB relay socket, fresh ticks, service-health row, and core service state; add a regression only if a source defect is found.
+- T4 depends_on: [T3] - Make cloud-mode health fail closed when Docker/socat accepts TCP but the Gateway protocol listener is absent; preserve the `/health/lite` bounded, side-effect-free contract.
+- T5 depends_on: [T4] - Add regression coverage, run affected and full suites, deploy the narrowly scoped health fix, and verify the production contract.
+
+## Checklist
+
+- [x] T1 Diagnose the relay-only failure: the container is running but Docker marks it unhealthy; its socat proxy repeatedly receives `Connection refused` from the Gateway's missing internal API listener on 127.0.0.1:4001. The relay and cached API-pool health are false-green consequences, not independent failures.
+- [x] T2 Recover the affected service safely: issued exactly one lock-controlled `POST /ib/restart`; the IBKR Mobile approval completed and the Gateway was recreated without an unmanaged Docker or service restart.
+- [x] T3 Verify data-plane recovery and record the result: at 13:41 UTC the relay logged `IB connected (clientId 10)` with no later reconnect attempt; Gateway is Docker-healthy; `/health` reports authenticated Gateway and all API-pool clients connected; API, relay, monitor, newsfeed, and Next.js are active. Markets are closed, so fresh ticks are not expected and were not used as the success condition.
+- [x] T4 Make the cloud-mode Gateway health probe protocol-aware and fail closed: the side-effect-free version handshake is capped at 250ms, consumes no client ID, and reports `upstream_dead=true` / `unhealthy` before cached pool state can claim authentication.
+- [x] T5 Test, deploy, and verify the durable health-reporting repair: focused 70-test suite and affected 41-test suite passed; GitHub CI run 30272256009 passed every gate and deployed `eda1a2bf`; live `/health` and `/health/lite` now exercise the protocol-aware check and report an authenticated, non-dead Gateway.
+
+## Review
+
+- Root cause: the prior Gateway 2FA cycle ended in authorization failure, leaving its Java API listener absent. Docker/socat still accepted host-port connections, which made the process and cached API-pool health look up while the relay retried continuously.
+- Recovery: one sanctioned Gateway restart at 13:40 UTC and one successful IBKR approval. No client-ID collision, OOM, or code deployment was involved.
+- Final evidence: Gateway Docker health `healthy`; FastAPI reports `auth_state=authenticated`, `upstream_dead=false`, and API client IDs 3/4/5 connected; relay connected as client ID 10; all five core units are active.
+- Durable repair: commit `eda1a2bf` replaces cloud-mode TCP-only health with a bounded raw IB version handshake. On the observed Docker/socat-only failure, health now reports `upstream_dead=true`, `service_state=unhealthy`, and `auth_state=unreachable`, so aggregate monitoring fails closed without triggering an IBKR push. CI run `30272256009` and its automated production deployment passed; live production is on the matching SHA and is healthy.
+
 # Task: Relay outage investigation and service recovery (2026-07-24)
 
 ## Dependency graph
@@ -10,6 +103,7 @@
 - T5B depends_on: [T3, T4] - Run full web and cloud release suites plus static checks.
 - T5 depends_on: [T2, T5A, T5B] - Verify relay connectivity, core unit activity, aggregate health, and relevant logs; record the incident recovery evidence.
 - T6 depends_on: [T5] - Commit only the reliability fixes, push to main, and verify the automatic production deployment.
+- T7 depends_on: [T6] - Diagnose and correct the failed automated VPS deployment, then rerun the release and verify live production health.
 
 ## Checklist
 
@@ -20,7 +114,8 @@
 - [x] T5 Operational preflight confirms production is healthy and authenticated before release.
 - [x] T5A Used an isolated Python 3.13 environment with the declared dependencies plus pytest-asyncio; full suite passed.
 - [x] T5B Full web and cloud release suites plus static checks passed.
-- [ ] T6 Release the reliability fixes and verify production deployment.
+- [x] T6 Released `339c7a7f` and verified the automatic deployment path.
+- [x] T7 Refreshed the root control plane, reran the failed deploy, and verified the released SHA live.
 
 ## Review
 
@@ -29,6 +124,7 @@
 - Recovery verification: after the replacement restart, production returned to authenticated Gateway/API/relay health. The earlier 2FA wait is resolved.
 - Reliability fixes are local and tested: disconnected/stale relays cannot publish an `ok` tick heartbeat, and the stack operator now preserves its inherited deploy-lock descriptor through its bounded subprocess runner. Focused verification passed: `cloud/tests/test_ib_gateway_control.py` 40 passed; `scripts/lib/staleDataMachine.test.js` 29 passed; `git diff --check` passed. These source changes are not deployed while the current Gateway waits for 2FA.
 - Release verification: full Python suite passed in an isolated Python 3.13 environment (`4,535 passed, 13 skipped, 90 deselected`); full web Vitest passed (`460 files, 4,430 passed, 26 skipped`); TypeScript passed; ESLint had 11 pre-existing warnings and no errors; cloud suite completed green; `git diff --check` passed. The initial system-Python run was blocked by its missing declared `mcp` package, so the isolated environment was used without changing the system toolchain.
+- Release: commit `339c7a7f` passed every CI gate in run `30102688512`. Its initial deployment refusal correctly detected the stale root-owned operator. The documented exact-SHA root bootstrap fast-forwarded the VPS and installed/verified 20 control-plane artifacts without restarting services; rerunning the failed deploy then succeeded. Live verification: deployed SHA `339c7a7f`, matching installed operator hash, schema-v2 `ok=true` / `overall_state=up`, authenticated Gateway with all three API pool clients connected, relay tick age 0 seconds, and API, relay, monitor, newsfeed, Next.js, and health units active.
 
 # Task: Radon Chat composer autofocus (2026-07-20)
 

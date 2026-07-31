@@ -273,7 +273,7 @@ function parseDateOnly(rawDate: string | undefined): string | null {
 
 /** True when the position was opened today. Yesterday's close is
  *  meaningless as a baseline because the position didn't exist. */
-function isSameDay(pos: PortfolioPosition): boolean {
+export function isSameDay(pos: PortfolioPosition): boolean {
   const entryDate = parseDateOnly(pos.entry_date);
   return entryDate != null && entryDate === todayInET();
 }
