@@ -63,6 +63,17 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 
 Any gate fails → stop. Name the gate.
 
+## Testing & Verification (TDD is the default)
+
+- Write a failing test that reproduces the bug BEFORE fixing it, then make it pass.
+- After any UI change, verify live in the browser (Playwright or claude-in-chrome) and capture a screenshot as evidence — do not claim a fix works based on tests alone.
+- If tests pass/fail inconsistently, re-run the suspect test file in isolation before concluding your change caused it; test-ordering pollution and pre-existing flake are common in this repo.
+- Always confirm `pwd` before running vitest/pytest — cwd drift has repeatedly produced bogus failures.
+
+## UI Copy Rules
+
+- Never hardcode freshness/cadence copy (e.g. 'Refreshes 5m', 'Updated hourly'). Derive it from the actual job schedule or data timestamp, and grep the whole repo for existing instances of the string before shipping related changes.
+
 ## Data Source Priority
 
 1. Interactive Brokers (TWS / Gateway) — real-time
@@ -114,9 +125,19 @@ Both modes read/write the **same Turso DB** (`libsql://radon-joemccann.aws-us-we
 
 Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,py}`. Routes prefer DB, fall back to disk.
 
+## Data Persistence
+
+- All scanner/indicator/journal writes must go through Turso, not host-local disk. Reads should be Turso-first. Host-local SQLite files are ephemeral on the VPS and will silently lose data after deploys.
+- When adding a new persisted table, include a migration and verify the row lands in Turso in production before calling the task done.
+
 **Image host:** `https://media.radon.run` (Caddy on Hetzner, fed by laptop rsync over Tailscale). Posts use absolute URLs. Fallback: `RADON_MEDIA_REMOTE=<user>@<prod-host>:/path/to/media/`.
 
 **Trades canonical store:** Turso `journal` table. `/journal` and `/orders` both derive from it. `/orders` uses `web/lib/blotter/fromJournal.ts:journalRowsToBlotter()` with fallback to `data/blotter.json` for legacy rows lacking `realized_pnl`/`cost_basis`/`proceeds`. See `docs/cloud-services.md`.
+
+## Commit Hygiene
+
+- NEVER use `git add -A`, `git add .`, or whole-file/whole-directory staging. Stage only the specific files you edited (`git add path/to/file`), and run `git status` before every commit to confirm no untracked WIP (journals, scratch files, notebooks) was swept in.
+- Before pushing, wait for the previous deploy to finish. Do not push rapid-fire commits — cancelled in-flight deploys have corrupted the Next.js build and caused a production outage.
 
 ---
 
@@ -162,3 +183,10 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 - State probabilities; flag uncertainty
 - Failing gate = stop, name the gate
 - **Never rationalize a bad trade**
+
+## Environment Notes
+
+- macOS shell is zsh: quote variables and avoid bare `for f in $(...)` loops (word splitting has broken download loops). Prefer `while IFS= read -r`.
+- A background downloads-organizer daemon moves files out of ~/Downloads. After any download, search the organizer's destination folders before reporting a file as missing.
+- Only one Chrome instance should be running for browser automation; check which instance is attached before driving the UI.
+- PDF rendering: skip WeasyPrint and md-to-pdf (missing native libs / no Chromium). Go straight to headless Chrome.
