@@ -1,8 +1,8 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
-import type { PortfolioLeg, PortfolioPosition } from "@/lib/types";
+import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import {
@@ -16,6 +16,7 @@ import {
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
 import TickerLink from "@/components/TickerLink";
+import InstrumentDetailModal from "@/components/InstrumentDetailModal";
 import Card from "./Card";
 import MetricCell from "./MetricCell";
 
@@ -23,6 +24,7 @@ type MobilePositionListProps = {
   positions: PortfolioPosition[];
   prices?: Record<string, PriceData>;
   showExpiry?: boolean;
+  portfolio?: PortfolioData | null;
 };
 
 type ToneKey = "pos" | "neg" | "mut";
@@ -73,7 +75,7 @@ function getOptionRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData
   return any ? total : null;
 }
 
-function PositionCard({ pos, prices, showExpiry }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean }) {
+function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioPosition; prices?: Record<string, PriceData>; showExpiry: boolean; onLegClick: (leg: PortfolioLeg, pos: PortfolioPosition) => void }) {
   const [expanded, setExpanded] = useState(false);
 
   const isStock = pos.structure_type === "Stock";
@@ -155,7 +157,7 @@ function PositionCard({ pos, prices, showExpiry }: { pos: PortfolioPosition; pri
         {expanded ? (
           <div className="mobile-card__detail" data-testid={`mobile-position-${pos.ticker}-legs`}>
             {pos.legs.map((leg, idx) => (
-              <LegLine key={idx} leg={leg} prices={prices} ticker={pos.ticker} expiry={pos.expiry} />
+              <LegLine key={idx} leg={leg} prices={prices} ticker={pos.ticker} expiry={pos.expiry} onClick={() => onLegClick(leg, pos)} />
             ))}
           </div>
         ) : null}
@@ -164,7 +166,7 @@ function PositionCard({ pos, prices, showExpiry }: { pos: PortfolioPosition; pri
   );
 }
 
-function LegLine({ leg, prices, ticker, expiry }: { leg: PortfolioLeg; prices?: Record<string, PriceData>; ticker: string; expiry: string }) {
+function LegLine({ leg, prices, ticker, expiry, onClick }: { leg: PortfolioLeg; prices?: Record<string, PriceData>; ticker: string; expiry: string; onClick: () => void }) {
   let realtimeLeg: PriceData | null = null;
   if (leg.type !== "Stock" && leg.strike != null && expiry) {
     const k = optionKey({
@@ -193,7 +195,23 @@ function LegLine({ leg, prices, ticker, expiry }: { leg: PortfolioLeg; prices?: 
   const description = `${leg.direction} ${leg.contracts}x ${leg.type}${leg.strike ? ` $${leg.strike}` : ""}`;
 
   return (
-    <div className="mobile-card__leg-row">
+    <div
+      className="mobile-card__leg-row mobile-card__leg-row--tappable"
+      role="button"
+      tabIndex={0}
+      aria-label={`${ticker} ${description}`}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      onKeyDown={(e) => {
+        e.stopPropagation();
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+    >
       <div className="mobile-card__leg-desc">{description}</div>
       <div className="mobile-card__leg-metrics">
         <span className="mobile-card__leg-meta">{marketPrice != null ? fmtPrice(marketPrice) : "—"}</span>
@@ -205,8 +223,14 @@ function LegLine({ leg, prices, ticker, expiry }: { leg: PortfolioLeg; prices?: 
   );
 }
 
-export default function MobilePositionList({ positions, prices, showExpiry = true }: MobilePositionListProps) {
+export default function MobilePositionList({ positions, prices, showExpiry = true, portfolio = null }: MobilePositionListProps) {
   const sorted = useMemo(() => [...positions].sort((a, b) => a.ticker.localeCompare(b.ticker)), [positions]);
+
+  const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
+
+  const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
+    setActiveInstrument({ leg, ticker: pos.ticker, expiry: pos.expiry });
+  }, []);
 
   if (sorted.length === 0) {
     return (
@@ -219,8 +243,18 @@ export default function MobilePositionList({ positions, prices, showExpiry = tru
   return (
     <div className="mobile-card-list" data-testid="mobile-position-list">
       {sorted.map((pos) => (
-        <PositionCard key={pos.id} pos={pos} prices={prices} showExpiry={showExpiry} />
+        <PositionCard key={pos.id} pos={pos} prices={prices} showExpiry={showExpiry} onLegClick={handleLegClick} />
       ))}
+      {activeInstrument && prices && (
+        <InstrumentDetailModal
+          leg={activeInstrument.leg}
+          ticker={activeInstrument.ticker}
+          expiry={activeInstrument.expiry}
+          prices={prices}
+          portfolio={portfolio}
+          onClose={() => setActiveInstrument(null)}
+        />
+      )}
     </div>
   );
 }

@@ -570,7 +570,7 @@ export default function PositionTable({
   }, []);
 
   if (isMobile && hasMounted) {
-    return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} />;
+    return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} portfolio={portfolio} />;
   }
 
   return (
