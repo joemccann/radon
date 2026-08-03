@@ -59,6 +59,19 @@ async function setupMocks(
   await page.route("**/api/yield-curve", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(curvePayload) }),
   );
+  await page.route("**/api/yield-curve/live", (route) =>
+    route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        y10: 4.686,
+        y3m: 3.7,
+        spread_10y_3m: 0.986,
+        asof: "2026-08-03T19:35:00Z",
+        source: "yahoo",
+      }),
+    }),
+  );
   await page.route("**/api/portfolio", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO_EMPTY) }),
   );

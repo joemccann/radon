@@ -11,10 +11,11 @@
  */
 import React from "react";
 import { cleanup, render, screen } from "@testing-library/react";
-import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   formatDateTick,
+  formatEtTime,
   formatSessionDate,
   formatSpreadPct,
   formatYieldPct,
@@ -72,6 +73,12 @@ describe("spreadColor — inversion tones", () => {
 });
 
 describe("date formatting", () => {
+  it("formats a live as-of instant as Eastern wall-clock time", () => {
+    expect(formatEtTime("2026-08-03T19:35:00Z")).toBe("3:35 PM ET");
+    expect(formatEtTime("2026-01-15T19:35:00Z")).toBe("2:35 PM ET");
+    expect(formatEtTime(null)).toBe("---");
+  });
+
   it("formats the latest session date compactly", () => {
     expect(formatSessionDate("2026-07-31")).toBe("31 Jul 2026");
     expect(formatSessionDate(null)).toBe("---");
@@ -103,11 +110,36 @@ vi.mock("@/lib/useYieldCurve", () => ({
   useYieldCurve: (...args: unknown[]) => mockUseYieldCurve(...args),
 }));
 
+const mockUseYieldCurveLive = vi.fn();
+vi.mock("@/lib/useYieldCurveLive", () => ({
+  useYieldCurveLive: (...args: unknown[]) => mockUseYieldCurveLive(...args),
+}));
+
 import YieldCurvePanel from "../components/YieldCurvePanel";
+import type { YieldCurveLiveData } from "@/lib/yieldCurve";
+
+function liveHookState(
+  partial: Partial<{ data: YieldCurveLiveData | null }> = {},
+) {
+  return {
+    data: null as YieldCurveLiveData | null,
+    loading: false,
+    syncing: false,
+    error: null as string | null,
+    lastSync: null as string | null,
+    syncNow: vi.fn(),
+    ...partial,
+  };
+}
+
+beforeEach(() => {
+  mockUseYieldCurveLive.mockReturnValue(liveHookState());
+});
 
 afterEach(() => {
   cleanup();
   mockUseYieldCurve.mockReset();
+  mockUseYieldCurveLive.mockReset();
 });
 
 function point(overrides: Partial<YieldCurvePoint> = {}): YieldCurvePoint {
@@ -242,6 +274,44 @@ describe("YieldCurvePanel — chart + controls", () => {
         "Source: US Treasury daily par yield curve (FRBNY 3:30 PM ET quotes). SPX overlay: Yahoo Finance daily closes.",
       ),
     ).toBeTruthy();
+  });
+
+  it("renders the live 10Y-3M estimate cell with a derived as-of time", () => {
+    mockUseYieldCurveLive.mockReturnValue(
+      liveHookState({
+        data: {
+          y10: 4.686,
+          y3m: 3.7,
+          spread_10y_3m: 0.986,
+          asof: "2026-08-03T19:35:00Z",
+          source: "yahoo",
+        },
+      }),
+    );
+    renderPanel(hookState({ data: buildData() }));
+    const live = screen.getByTestId("yield-curve-live-value");
+    expect(live.textContent).toBe("+0.99%");
+    expect(live.style.color).toBe("var(--positive)");
+    expect(screen.getByText(/AS OF 3:35 PM ET/)).toBeTruthy();
+    expect(screen.getByText("10Y-3M LIVE")).toBeTruthy();
+  });
+
+  it("renders --- in the live cell when the estimate is unavailable", () => {
+    mockUseYieldCurveLive.mockReturnValue(
+      liveHookState({
+        data: {
+          missing: true,
+          y10: null,
+          y3m: null,
+          spread_10y_3m: null,
+          asof: null,
+          source: null,
+        },
+      }),
+    );
+    renderPanel(hookState({ data: buildData() }));
+    expect(screen.getByTestId("yield-curve-live-value").textContent).toBe("---");
+    expect(screen.getByText("ESTIMATE UNAVAILABLE")).toBeTruthy();
   });
 
   it("does not emit NaN path coordinates when an SPX close is 0 on the log axis", () => {

@@ -179,6 +179,40 @@ Helpers `web/lib/yieldCurve.ts` (pure, unit-tested):
 - Append both units to `cloud/scripts/setup-vps.sh` `SERVICE_FILES` and to
   `cloud/tests/test_systemd_services.py`'s canonical list.
 
+## Live intraday estimate (added 2026-08-03)
+
+The official CMT series is EOD-only, so the tab carries a clearly-labeled
+intraday ESTIMATE in the strip's fifth cell:
+
+- **Flavor is 10Y-3M, not 10Y-2Y.** Live probe findings (2026-08-03): IB has no
+  live CMT legs on this account — CME micro Treasury yield futures (2YY/10Y)
+  are DELISTED (0 contracts), and TNX/CBOE returns no data without a CBOE index
+  subscription; UW has no rates endpoints; Yahoo's `2YY=F` is dead (last trade
+  2026-07-15). Yahoo `^TNX` (10Y) and `^IRX` (13-week bill) are both live from
+  the same source with the same delay, so 10Y-3M is the only spread that needs
+  no modeling. Deriving a live 2Y from note-futures prices (DV01 math) was
+  rejected as fabricated precision. Note `^IRX` is a discount-basis bill quote,
+  not CMT bond-equivalent — a few bp of systematic convention offset is
+  acceptable for an ESTIMATED tile.
+- Route: `web/app/api/yield-curve/live/route.ts` — GET-only, force-dynamic,
+  Yahoo v8 chart meta (`regularMarketPrice`/`regularMarketTime`) with UA
+  `Mozilla/5.0`, plain-yield sanity bounds 0-20% (a Yahoo scale change must
+  read as missing, never as a 46.9% yield), 60s in-process cache that never
+  caches the missing shape, `asof` = the OLDER of the two legs, contract
+  `{missing:true, y10:null, y3m:null, spread_10y_3m:null, asof:null, source:null}`
+  at HTTP 200 on any failure.
+- Hook `useYieldCurveLive` polls every 5 min while the tab is open.
+- Cell: label `10Y-3M LIVE`, value toned by `spreadColor`, sub
+  `EST ^TNX MINUS ^IRX · AS OF {h:mm} ET` (derived timestamp, never a cadence
+  claim) or `ESTIMATE UNAVAILABLE`. Desktop only; the official EOD 10Y-2Y
+  stays the headline. Mobile grid unchanged (4 cells).
+
+## Timer cadence (updated 2026-08-03)
+
+Two OnCalendar passes: `Mon..Fri 20:45 UTC` (early pickup — within ~1h of the
+publish in summer; may land before it in winter) plus the daily `22:30 UTC`
+catch-all (also the weekend/holiday heartbeat).
+
 ## Tests (written first, red before implementation)
 
 - `scripts/tests/test_yield_curve.py` — fixture parse pins, header-name parsing across

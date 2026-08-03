@@ -1,3 +1,16 @@
+# Task: CURVE tab freshness follow-up (2026-08-03, same session)
+
+## Plan
+- [x] F1 Early timer pass Mon..Fri 20:45 UTC added to radon-yield-curve.timer (22:30 catch-all kept)
+- [x] F2 Live estimate: IB probe → 2YY/10Y micro futures DELISTED, TNX no CBOE sub; Yahoo 2YY=F dead; pivot to 10Y-3M via live ^TNX-^IRX (no modeling)
+- [x] F3 Red: 5 route + 3 panel failures → green 32/32; typecheck clean; cloud 705; e2e 3/3; live no-mock pass shows +0.99% AS OF 2:59 PM ET
+- [ ] F4 Full gate → commit → push once → CI green → VPS timer reinstall + daemon-reload → verify
+
+## Review
+(pending)
+
+---
+
 # Task: Parallel TDD swarm for new market indicators (2026-08-03)
 
 ## Plan
@@ -10,14 +23,20 @@
   - [x] S3 implementers green + committed: ingestion 3fb902bb (19 pytest + 705 cloud), api 7079435d (203 vitest), ui 5ac3e46d (57 vitest + clean tsc)
   - [x] S4 octopus merge b5b1b9a1 clean; full gate GREEN: pytest 4666, cloud 705, vitest 495 files/4694, tsc clean
   - [x] S5 DONE: migration 0032 applied; Turso verified (9151 history rows 1990→2026-07-31, snapshot 1.09MB, service_health yield-curve ok); e2e 3/3 green; live no-mock Playwright pass green; dark+light screenshots in scratchpad; e2e listener fix committed c838dca3 on ind/curve
-  - [ ] S6 ship: squash-merge ind/curve → main, push once, CI green, VPS timer install + backfill, prod browser verify
+  - [x] S6 shipped: 667fc09c + 3174bf49 pushed once; CI run 30837359632 all-green incl. Deploy to VPS; timer installed+enabled (next 22:32 UTC), VPS backfill 73s via transient unit, real service run took unchanged-day heartbeat path (9151 sessions, +0.47%); Turso health ok @17:43:53Z from VPS; anon prod API 401 (perimeter). Remaining: prod browser screenshot, worktree cleanup, review
   - [ ] S4 merge, full test suite, fix integration failures
   - [ ] S5 dev server + Playwright screenshot; chart renders, freshness copy honest
   - [ ] S6 commit, push, CI green, verify production
-- [ ] Screenshots + review
+- [x] Screenshots (dark + light, scratchpad curve-tab-{dark,light}.png) + review
 
 ## Review
-(pending)
+
+- Shipped: `667fc09c` (CURVE tab vertical slice) + `3174bf49` (skills docs), one push, CI run 30837359632 all-green incl. Deploy to VPS. Skills force-added past the `.claude/skills/` gitignore.
+- Swarm mechanics held: 3 worktree implementers off the same base, near-disjoint ownership, clean octopus merge, zero integration test failures. The only cross-worktree coupling (watchdog TS-parity tests) resolved at merge exactly as the ingestion agent predicted.
+- Integration fixes at merge level (orchestrator, not agents): e2e no-4xx listener scoped to /api/yield-curve (ambient /api/profile + /api/watchlist 401 without a Clerk session), and `upsert_yield_curve_rows` rewritten to chunked multi-row INSERTs per the Hrana I/O bounding rule before commit.
+- Production: migration 0032 applied; Turso `yield_curve_history` 9,151 rows (1990-01-02..2026-07-31); VPS backfill via transient systemd unit (73s); `radon-yield-curve.timer` enabled (22:30 UTC daily incl. weekends so the 26h health window never widens); real service run took the unchanged-day heartbeat path; `service_health` yield-curve ok written from the VPS.
+- Not done: authenticated app.radon.run browser screenshot (Chrome extension disconnected; operator MFA session required). Everything short of that is verified. scp to prod was denied by permissions; VPS regenerated its own cache instead.
+- Known gaps carried forward: the VPS JSON cache (`data/yield_curve.json`) is the daily run's merge base; if it is ever lost, rerun `--backfill` once or the snapshot regresses to current-year-only. The regime strip renders 4 cells in a 5-col grid (same as MARGIN) — house look, left alone.
 
 ---
 
