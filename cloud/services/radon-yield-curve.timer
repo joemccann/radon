@@ -1,0 +1,13 @@
+[Unit]
+Description=Radon Yield Curve Indicator - daily 22:30 UTC Treasury pull
+
+[Timer]
+# Fires daily after the ~3:30 PM ET FRBNY publish settles, so the just-ended
+# session's row is usually present. Weekend/holiday runs are no-op heartbeats
+# (no new Treasury rows), so the 26h watchdog staleness window never widens.
+OnCalendar=*-*-* 22:30:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

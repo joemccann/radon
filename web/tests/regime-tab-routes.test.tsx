@@ -53,6 +53,7 @@ describe.each([
   ["breadth", "app/regime/breadth/page.tsx"],
   ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
+  ["curve", "app/regime/curve/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -95,6 +96,9 @@ vi.mock("../components/BpiPanel", () => ({
 }));
 vi.mock("../components/MarginDebtPanel", () => ({
   default: () => <div data-testid="margin-panel-stub" />,
+}));
+vi.mock("../components/YieldCurvePanel", () => ({
+  default: () => <div data-testid="curve-panel-stub" />,
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
@@ -214,6 +218,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^MARGIN$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/margin");
+  });
+
+  it("renders the Yield Curve panel when pathname is /regime/curve", () => {
+    mockedPathname = "/regime/curve";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("curve-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
+  });
+
+  it("clicking CURVE tab pushes /regime/curve", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^CURVE$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/curve");
   });
 
   it("clicking CRI from VCG pushes /regime/cri", () => {

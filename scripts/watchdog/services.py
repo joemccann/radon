@@ -93,6 +93,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
     # 26h window: no weekend/holiday gap to widen for.
     "margin-debt":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # yield-curve — radon-yield-curve.timer, daily 22:30 UTC every calendar
+    # day (weekend/holiday runs heartbeat with no new Treasury rows). Uniform
+    # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
+    # overlay — no IB dependency.
+    "yield-curve":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # knowledge-ingest — hourly knowledge-base ingest oneshot
     # (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7).
     # Uniform 26h window (24h grace + timer jitter) mirrors
@@ -215,6 +220,9 @@ BUCKETS: dict[str, list[str]] = {
         # of the window expiring.
         "llm-token-index",
         "margin-debt",
+        # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
+        # a missed run within 1h of the 26h window expiring.
+        "yield-curve",
         # Hourly knowledge-base ingest — daily-bucket hourly check matches
         # its 26h staleness window (a failed hour never pages; a missed
         # day surfaces within 1h of the window expiring).

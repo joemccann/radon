@@ -393,6 +393,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     }
     expect(requiresIb("media-backup")).toBe(false);
   });
+
+  // ``yield-curve`` — radon-yield-curve.timer fires daily 22:30 UTC every
+  // calendar day (weekend/holiday runs heartbeat on unchanged data), so a
+  // uniform 26h window matches its margin-debt sibling. Treasury CSV +
+  // Yahoo SPX overlay only — no IB.
+  it("yield-curve is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["yield-curve"]).toBeDefined();
+    expect(getServiceCategory("yield-curve")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("yield-curve", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("yield-curve", state)).toBe(
+        getFreshnessWindowMs("margin-debt", state),
+      );
+    }
+    expect(requiresIb("yield-curve")).toBe(false);
+  });
 });
 
 describe("getServiceCategory", () => {

@@ -68,6 +68,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-oi-changes.timer",
     "radon-knowledge.service",
     "radon-knowledge.timer",
+    "radon-yield-curve.service",
+    "radon-yield-curve.timer",
 ]
 
 LONG_RUNNING_SERVICES = [

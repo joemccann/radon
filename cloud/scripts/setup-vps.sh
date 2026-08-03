@@ -94,6 +94,8 @@ readonly SERVICE_FILES=(
   radon-knowledge.timer
   radon-bpi.service
   radon-bpi.timer
+  radon-yield-curve.service
+  radon-yield-curve.timer
 )
 
 run_as_radon() {
