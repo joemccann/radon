@@ -724,6 +724,56 @@ def upsert_margin_debt_rows(rows: list[dict[str, Any]], recorded_at: Optional[st
     db.commit()
 
 
+YIELD_CURVE_UPSERT_SQL = """
+INSERT INTO yield_curve_history
+  (date, y3m, y2, y10, spread, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  y3m         = excluded.y3m,
+  y2          = excluded.y2,
+  y10         = excluded.y10,
+  spread      = excluded.spread,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_yield_curve_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Yield Curve indicator — one row per business day, idempotent on date.
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): the one-time --backfill
+    passes ~9,000 rows, which per-row would be thousands of statements on one
+    stream (the rv-ratio 2026-07-21 502 incident). Daily runs pass 0-2 rows.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    row.get("y3m"),
+                    float(row["y2"]),
+                    float(row["y10"]),
+                    float(row["spread"]),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO yield_curve_history (date, y3m, y2, y10, spread, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "y3m = excluded.y3m, y2 = excluded.y2, y10 = excluded.y10, "
+            "spread = excluded.spread, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_option_close(
     symbol: str,
     expiry: str,

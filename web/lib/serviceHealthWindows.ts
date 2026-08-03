@@ -135,6 +135,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // snapshot + heartbeat still write). Uniform 26h window: no weekend gap.
   "margin-debt": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``yield-curve`` — radon-yield-curve.timer fires daily 22:30 UTC every calendar day (weekend runs heartbeat), so a uniform 26h window fits; Treasury CSV + Yahoo only — no IB.
+  "yield-curve": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
   // market-hours gate — connectors read Turso + repo files). Heartbeats
