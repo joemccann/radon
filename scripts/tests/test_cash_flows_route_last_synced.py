@@ -23,10 +23,19 @@ from __future__ import annotations
 import re
 import sqlite3
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterator
 
 import pytest
+
+
+def _days_ago(n: int) -> str:
+    """Window-relative fixture date — hardcoded dates rot out of the
+    `?days=90` cutoff as CI's `today` advances (2026-08-03 incident:
+    rows dated 2026-05-04 silently dropped and last_synced_at went null).
+    """
+    return (datetime.now(timezone.utc) - timedelta(days=n)).strftime("%Y-%m-%d")
 
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
 _SCRIPTS_DIR = _PROJECT_ROOT / "scripts"
@@ -100,19 +109,20 @@ def _insert(conn: sqlite3.Connection, *, txn_id: str, date: str, type_: str, amo
 class TestLastSyncedAt:
     def test_returns_max_synced_at_across_returned_rows(self, app_with_inmem_db):
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="t1", date="2026-05-04", type_="Withdrawal", amount=-35_000,
-                synced_at="2026-05-05T21:02:00Z")
-        _insert(conn, txn_id="t2", date="2026-05-08", type_="Withdrawal", amount=-72_000,
-                synced_at="2026-05-09T21:02:00Z")
-        _insert(conn, txn_id="t3", date="2026-05-15", type_="Dividend", amount=245.5,
-                synced_at="2026-05-20T21:02:34Z")
+        freshest_sync = f"{_days_ago(15)}T21:02:34Z"
+        _insert(conn, txn_id="t1", date=_days_ago(30), type_="Withdrawal", amount=-35_000,
+                synced_at=f"{_days_ago(29)}T21:02:00Z")
+        _insert(conn, txn_id="t2", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(25)}T21:02:00Z")
+        _insert(conn, txn_id="t3", date=_days_ago(20), type_="Dividend", amount=245.5,
+                synced_at=freshest_sync)
 
         resp = client.get("/cash-flows?days=90")
         assert resp.status_code == 200
         body = resp.json()
         # Strict equality — the field IS the max `synced_at` over the result
         # set, used by the UI to compute "synced Xh ago".
-        assert body["last_synced_at"] == "2026-05-20T21:02:34Z"
+        assert body["last_synced_at"] == freshest_sync
 
     def test_returns_null_when_no_rows(self, app_with_inmem_db):
         client, _ = app_with_inmem_db
@@ -130,26 +140,27 @@ class TestLastSyncedAt:
         misleadingly fresh next to a recent dividend pull.
         """
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="w1", date="2026-05-04", type_="Withdrawal", amount=-35_000,
-                synced_at="2026-05-05T21:02:00Z")
-        _insert(conn, txn_id="d1", date="2026-05-15", type_="Dividend", amount=245.5,
-                synced_at="2026-05-20T21:02:34Z")
+        withdrawal_sync = f"{_days_ago(29)}T21:02:00Z"
+        _insert(conn, txn_id="w1", date=_days_ago(30), type_="Withdrawal", amount=-35_000,
+                synced_at=withdrawal_sync)
+        _insert(conn, txn_id="d1", date=_days_ago(20), type_="Dividend", amount=245.5,
+                synced_at=f"{_days_ago(15)}T21:02:34Z")
 
         resp = client.get("/cash-flows?days=90&types=Withdrawal")
         assert resp.status_code == 200
         body = resp.json()
         # Only Withdrawal row survives → its synced_at wins.
-        assert body["last_synced_at"] == "2026-05-05T21:02:00Z"
+        assert body["last_synced_at"] == withdrawal_sync
 
     def test_summary_and_count_unchanged_when_last_synced_at_added(self, app_with_inmem_db):
         """The new field is additive — pre-existing route consumers must
         keep seeing the same `count` / `summary` / `from_date` shape.
         """
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="w1", date="2026-05-04", type_="Withdrawal", amount=-35_000,
-                synced_at="2026-05-05T21:02:00Z")
-        _insert(conn, txn_id="w2", date="2026-05-08", type_="Withdrawal", amount=-72_000,
-                synced_at="2026-05-09T21:02:00Z")
+        _insert(conn, txn_id="w1", date=_days_ago(30), type_="Withdrawal", amount=-35_000,
+                synced_at=f"{_days_ago(29)}T21:02:00Z")
+        _insert(conn, txn_id="w2", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(25)}T21:02:00Z")
 
         resp = client.get("/cash-flows?days=90")
         body = resp.json()
@@ -192,8 +203,9 @@ class TestSyncStatus:
 
     def test_surfaces_throttle_state_with_next_attempt_at(self, app_with_inmem_db):
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="w1", date="2026-05-08", type_="Withdrawal", amount=-72_000,
-                synced_at="2026-05-20T21:02:34Z")
+        row_sync = f"{_days_ago(14)}T21:02:34Z"
+        _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=row_sync)
         _insert_service_health(
             conn,
             state="error",
@@ -217,12 +229,12 @@ class TestSyncStatus:
         # last_attempt_at is the daemon's last try, distinct from
         # last_synced_at (which is the freshest row's synced_at).
         assert sync_status["last_attempt_at"] == "2026-05-21T21:00:35Z"
-        assert body["last_synced_at"] == "2026-05-20T21:02:34Z"
+        assert body["last_synced_at"] == row_sync
 
     def test_ok_state_does_not_flag_throttle(self, app_with_inmem_db):
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="w1", date="2026-05-08", type_="Withdrawal", amount=-72_000,
-                synced_at="2026-05-20T21:02:34Z")
+        _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(14)}T21:02:34Z")
         _insert_service_health(
             conn,
             state="ok",
@@ -245,8 +257,8 @@ class TestSyncStatus:
         "something else broke" because the resolution paths differ.
         """
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="w1", date="2026-05-08", type_="Withdrawal", amount=-72_000,
-                synced_at="2026-05-20T21:02:34Z")
+        _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(14)}T21:02:34Z")
         _insert_service_health(
             conn,
             state="error",
@@ -267,8 +279,8 @@ class TestSyncStatus:
 
     def test_no_service_health_row_returns_unknown_state(self, app_with_inmem_db):
         client, conn = app_with_inmem_db
-        _insert(conn, txn_id="w1", date="2026-05-08", type_="Withdrawal", amount=-72_000,
-                synced_at="2026-05-20T21:02:34Z")
+        _insert(conn, txn_id="w1", date=_days_ago(26), type_="Withdrawal", amount=-72_000,
+                synced_at=f"{_days_ago(14)}T21:02:34Z")
         # No service_health insert.
 
         resp = client.get("/cash-flows?days=90")
