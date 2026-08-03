@@ -33,6 +33,16 @@ export interface YieldCurveData {
   series: YieldCurvePoint[];
 }
 
+export interface YieldCurveLiveData {
+  /** GET contract: an unavailable estimate is HTTP 200 with missing:true. */
+  missing?: boolean;
+  y10: number | null;
+  y3m: number | null;
+  spread_10y_3m: number | null;
+  asof: string | null;
+  source: string | null;
+}
+
 /* ─── Formatting ─────────────────────────────────────── */
 
 export function formatSpreadPct(v: number | null | undefined): string {
@@ -69,6 +79,19 @@ export function formatSessionDate(raw: string | null | undefined): string {
     year: "numeric",
     timeZone: "UTC",
   });
+}
+
+/** Eastern wall-clock time for a live as-of instant: "3:35 PM ET". */
+export function formatEtTime(iso: string | null | undefined): string {
+  if (!iso) return "---";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "---";
+  const time = d.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+    timeZone: "America/New_York",
+  });
+  return `${time} ET`;
 }
 
 const MONTH_LABELS = [

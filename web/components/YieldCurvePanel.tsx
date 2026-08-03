@@ -14,12 +14,14 @@ import { chartSeriesColor } from "@/lib/chartSystem";
 import { presetRange, presetSessions, type RangePresetSlug } from "@/lib/historyRange";
 import {
   formatDateTick,
+  formatEtTime,
   formatSessionDate,
   formatSpreadPct,
   formatYieldPct,
   spreadColor,
 } from "@/lib/yieldCurve";
 import { useYieldCurve } from "@/lib/useYieldCurve";
+import { useYieldCurveLive } from "@/lib/useYieldCurveLive";
 import { useViewport } from "@/lib/useViewport";
 
 const SOURCE_FOOTNOTE =
@@ -44,6 +46,7 @@ function spreadTone(v: number | null | undefined): "pos" | "neg" | "warn" | "mut
 
 export default function YieldCurvePanel() {
   const { data, loading, syncing, lastSync } = useYieldCurve();
+  const { data: live } = useYieldCurveLive();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -89,6 +92,10 @@ export default function YieldCurvePanel() {
   }
 
   const current = data.current;
+  // Intraday estimate. No live 2Y exists in the IB/UW/Yahoo ladder, so the
+  // live cell tracks the 10Y-3M spread flavor (same-source ^TNX and ^IRX);
+  // the official EOD 10Y-2Y stays the headline.
+  const liveSpread = live && !live.missing ? live.spread_10y_3m : null;
 
   const rows: CurveChartRow[] = series.map((p) => ({
     date: p.date,
@@ -174,6 +181,25 @@ export default function YieldCurvePanel() {
               label="LATEST SESSION"
               value={formatSessionDate(current.date)}
               sub={<>DAILY SERIES SINCE 1990</>}
+            />
+            <RegimeStripCell
+              testId="yield-curve-strip-live"
+              label="10Y-3M LIVE"
+              value={
+                <span
+                  data-testid="yield-curve-live-value"
+                  style={{ color: liveSpread == null ? "var(--text-muted)" : spreadColor(liveSpread) }}
+                >
+                  {formatSpreadPct(liveSpread)}
+                </span>
+              }
+              sub={
+                liveSpread == null ? (
+                  <>ESTIMATE UNAVAILABLE</>
+                ) : (
+                  <>EST ^TNX MINUS ^IRX · AS OF {formatEtTime(live?.asof)}</>
+                )
+              }
             />
           </RegimeStrip>
         )}
