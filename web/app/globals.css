@@ -13690,6 +13690,13 @@ body[data-mobile="true"] .toast-container {
   padding: 4px 0;
 }
 
+.mobile-card__leg-row--tappable {
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: opacity 100ms ease;
+}
+.mobile-card__leg-row--tappable:active { opacity: 0.7; }
+
 .mobile-card__leg-desc {
   font-family: var(--font-mono);
   font-size: 11px;

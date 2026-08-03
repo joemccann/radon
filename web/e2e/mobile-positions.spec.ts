@@ -147,6 +147,24 @@ test.describe("Mobile positions list", () => {
     await expect(page.getByTestId("mobile-position-AAPL-legs")).toContainText("Call");
   });
 
+  test("tapping an expanded leg opens the instrument detail view for that leg", async ({ page }) => {
+    await setupMocks(page);
+    await page.goto("/portfolio");
+
+    const aapl = page.getByTestId("mobile-position-AAPL");
+    await aapl.click({ force: true });
+    await expect(page.getByTestId("mobile-position-AAPL-legs")).toBeVisible();
+
+    await page.getByText("LONG 5x Call $200").click({ force: true });
+
+    const modal = page.locator(".instrument-detail-modal");
+    await expect(modal).toBeVisible();
+    await expect(modal).toContainText("AAPL");
+    await expect(modal).toContainText("$200");
+    // The tap must not have collapsed the card underneath
+    await expect(page.getByTestId("mobile-position-AAPL-legs")).toBeVisible();
+  });
+
   test("desktop table is hidden on mobile (no <table>)", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
