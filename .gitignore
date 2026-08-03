@@ -112,6 +112,8 @@ data/darkpool_cache/
 data/price_history_cache/
 data/rv_ratio/
 data/service_health/
+# Incident watchdog artifacts (scripts/incident_watchdog) — runtime-owned
+data/incidents/
 # Nightly Turso dump pulls (DUR-13, rsync'd from the VPS — never commit)
 data/db_backups/
 # Runtime-owned by the preset_rebalance handler on the VPS; tracking these
@@ -162,9 +164,11 @@ web/verify-regime-internals.mjs
 /.claude/worktrees/
 /.claude/hooks/dead-code.manifest
 
-# Local skill / agent installations (per-developer, not checked in)
+# Local skill / agent installations (per-developer, not checked in).
+# The starred form (not a bare dir) lets repo-owned skills below re-include.
 /.agents/
-/.claude/skills/
+/.claude/skills/*
+!/.claude/skills/incident-response/
 /.pi/skills/
 /skills-lock.json
 /radon-dark-full.png
