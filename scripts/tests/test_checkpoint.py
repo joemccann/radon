@@ -1,0 +1,152 @@
+"""Checkpoint contract tests: exactly-once resume across kills (scripts/lib/checkpoint.py)."""
+
+import json
+import os
+import signal
+import subprocess
+import sys
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+
+from checkpoint import CheckpointedJob, item_hash  # noqa: E402
+
+
+@pytest.fixture
+def job_dir(tmp_path):
+    return tmp_path / "job"
+
+
+def read_findings(job_dir):
+    path = job_dir / "findings.jsonl"
+    if not path.exists():
+        return []
+    return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
+
+
+def test_fresh_job_writes_all_three_files(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    job.finish()
+    assert (job_dir / "state.json").exists()
+    assert (job_dir / "findings.jsonl").exists()
+    assert (job_dir / "SUMMARY.md").exists()
+
+
+def test_is_done_after_record(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    assert not job.is_done("item-1")
+    job.record_finding("item-1", {"title": "one"})
+    assert job.is_done("item-1")
+
+
+def test_resume_skips_completed_items(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    job.finish()
+
+    resumed = CheckpointedJob(job_dir, "t")
+    assert resumed.is_done("item-1")
+    assert not resumed.is_done("item-2")
+    assert resumed.state["stats"]["resumes"] == 1
+
+
+def test_finding_logged_but_not_marked_is_recovered_on_load(job_dir):
+    """Kill between findings.jsonl append and state.json write must not duplicate."""
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    # Simulate the crash window: erase the completed mark, keep the WAL line.
+    state = json.loads((job_dir / "state.json").read_text())
+    state["completed"] = {}
+    state["stats"]["processed"] = 0
+    (job_dir / "state.json").write_text(json.dumps(state))
+
+    resumed = CheckpointedJob(job_dir, "t")
+    assert resumed.is_done("item-1")
+    assert resumed.state["stats"]["processed"] == 1
+
+
+def test_torn_final_jsonl_line_is_ignored(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.record_finding("item-1", {"title": "one"})
+    with (job_dir / "findings.jsonl").open("a") as f:
+        f.write('{"_hash": "deadbeefdeadbeef", "_key": "item-2", "tru')
+
+    resumed = CheckpointedJob(job_dir, "t")
+    assert resumed.is_done("item-1")
+    assert not resumed.is_done("item-2")
+
+
+def test_error_queue_tracks_attempts_and_clears_on_success(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.record_error("item-1", "boom")
+    job.record_error("item-1", "boom again")
+    assert job.state["errors"][0]["attempts"] == 2
+    job.record_finding("item-1", {"title": "recovered"})
+    assert job.state["errors"] == []
+
+
+def test_cursor_survives_resume(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.set_cursor({"page": 7})
+    job.checkpoint()
+    resumed = CheckpointedJob(job_dir, "t")
+    assert resumed.cursor == {"page": 7}
+
+
+def test_summary_contains_counts_cursor_and_resume_instruction(job_dir):
+    job = CheckpointedJob(job_dir, "t")
+    job.set_cursor({"page": 3})
+    job.record_finding("item-1", {"title": "alpha"})
+    job.record_error("item-2", "http 500")
+    summary = (job_dir / "SUMMARY.md").read_text()
+    assert "Processed: 1" in summary
+    assert '"page": 3' in summary
+    assert "http 500" in summary
+    assert "re-read ONLY this file" in summary
+
+
+KILL_WORKER = """
+import sys, time
+sys.path.insert(0, {libdir!r})
+from checkpoint import CheckpointedJob
+job = CheckpointedJob({jobdir!r}, "kill-test")
+for i in range(200):
+    key = f"item-{{i:03d}}"
+    if job.is_done(key):
+        continue
+    job.record_finding(key, {{"title": f"finding {{i}}"}})
+    job.set_cursor({{"i": i}})
+job.finish()
+print("DONE")
+"""
+
+
+def test_sigkill_mid_run_resumes_exactly_once(job_dir, tmp_path):
+    libdir = str(Path(__file__).resolve().parents[1] / "lib")
+    script = tmp_path / "worker.py"
+    script.write_text(KILL_WORKER.format(libdir=libdir, jobdir=str(job_dir)))
+
+    import time
+
+    for kill_after in (0.05, 0.1, 0.15):
+        proc = subprocess.Popen([sys.executable, str(script)])
+        time.sleep(kill_after)
+        if proc.poll() is None:
+            os.kill(proc.pid, signal.SIGKILL)
+            proc.wait()
+
+    final = subprocess.run(
+        [sys.executable, str(script)], capture_output=True, text=True, check=True
+    )
+    assert "DONE" in final.stdout
+
+    findings = read_findings(job_dir)
+    hashes = [f["_hash"] for f in findings]
+    assert len(hashes) == len(set(hashes)), "duplicate findings after kills"
+    assert sorted(f["_key"] for f in findings) == [f"item-{i:03d}" for i in range(200)]
+    state = json.loads((job_dir / "state.json").read_text())
+    assert state["stats"]["processed"] == 200
+    assert set(state["completed"]) == {item_hash(f"item-{i:03d}") for i in range(200)}
