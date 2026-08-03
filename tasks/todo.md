@@ -1,3 +1,76 @@
+# Task: Parallel TDD swarm for new market indicators (2026-08-03)
+
+## Plan
+- [x] Research: study breadth + margin-debt indicators end to end (3 Explore agents)
+- [x] Write `.claude/skills/new-indicator/SKILL.md` — canonical new-indicator pattern doc
+- [x] Write `.claude/skills/indicator/SKILL.md` — `/indicator <source> <name>` swarm command
+- [ ] Demo: 10Y-2Y Treasury yield-curve spread regime tab (slug `curve`, service `yield-curve`, migration 0032)
+  - [x] S1 research: Treasury per-year CSV (parse by header name, desc rows, 1990+, public domain); fixture `scripts/tests/fixtures/yield_curve_2026_sample.csv` (146 rows, 07/31 y2=4.28 y10=4.75 spread +0.47); Yahoo ^GSPC UA Mozilla/5.0 + explicit epochs (range=max degrades)
+  - [x] S2 spec `docs/indicators/curve.md` + failing tests RED: pytest ModuleNotFoundError fetch_yield_curve; vitest 2 files / 5 tests failed
+  - [x] S3 implementers green + committed: ingestion 3fb902bb (19 pytest + 705 cloud), api 7079435d (203 vitest), ui 5ac3e46d (57 vitest + clean tsc)
+  - [x] S4 octopus merge b5b1b9a1 clean; full gate GREEN: pytest 4666, cloud 705, vitest 495 files/4694, tsc clean
+  - [x] S5 DONE: migration 0032 applied; Turso verified (9151 history rows 1990→2026-07-31, snapshot 1.09MB, service_health yield-curve ok); e2e 3/3 green; live no-mock Playwright pass green; dark+light screenshots in scratchpad; e2e listener fix committed c838dca3 on ind/curve
+  - [ ] S6 ship: squash-merge ind/curve → main, push once, CI green, VPS timer install + backfill, prod browser verify
+  - [ ] S4 merge, full test suite, fix integration failures
+  - [ ] S5 dev server + Playwright screenshot; chart renders, freshness copy honest
+  - [ ] S6 commit, push, CI green, verify production
+- [ ] Screenshots + review
+
+## Review
+(pending)
+
+---
+
+# Task: Long-horizon agent durability redesign (2026-08-03)
+
+Problem: long-running agent jobs die to "Prompt is too long" / context-limit errors;
+memory-observer captured zero records across sessions. Progress lives in conversation
+instead of on disk.
+
+## Checklist
+
+- [x] T1 Audit harvesters for conversation-only state (3 parallel Explore agents)
+      - KB ingest: stateless-by-recomputation; no cursor/lock/run-ledger; loss window =
+        in-flight 200-doc batch (Cerebras spend); content_hash dedup sound. Reusables:
+        scripts/utils/atomic_io.py, ib_watchdog state file, newsfeed id-cursor pagination.
+      - Specteron harvesters: IG comment harvest = no state anywhere (Apify run id never
+        persisted; 1.8MB non-atomic all-or-nothing final write; by-post shards written but
+        never read back). Figma capture = idempotent filenames but full re-walk. DocSend =
+        prose-only skill, state IS the conversation, /tmp URL list, unchecked HTTP status.
+      - Sydecar/Ally downloader DOES NOT EXIST as code; its reports were ad-hoc session
+        output (the purest conversation-only-state case).
+      - "memory-observer" = claude-mem@thedotmack plugin (oversold only, dead 2026-07-10):
+        untruncated JSON.stringify of every tool output into a never-compacted history.
+- [x] T2 Contract shipped: scripts/lib/checkpoint.py (radon) + checkpoint.mjs (specteron).
+      findings.jsonl = fsynced WAL written first; state.json atomic-replace; completed set
+      rebuilt on load from union(state, WAL) => exactly-once across kills. 9 pytest +
+      8 vitest contract tests green.
+- [x] T3 Refactored specteron cdp-harvest.mjs: per-post CheckpointedJob loop (runHarvest),
+      atomic shard + combined writes, --job-dir. kill-drill.mjs: 3 random SIGKILLs +
+      resume => 200/200 items exactly-once, 600/600 records, <=1 wasted in-flight fetch.
+      DRILL-PASS twice. 58/58 vitest green in comment-harvest dir.
+- [x] T4 Replaced observer: ~/.claude/hooks/lh-observer-digest.sh truncates every tool
+      event to 400 chars into ~/.claude/observer/events/<sid>.jsonl (500-event cap);
+      ~/.claude/agents/memory-observer.md (haiku) reads tail -c 24000 ONLY, emits <=10
+      observations/batch, appends to observations.jsonl before replying.
+- [x] T5 Same hook injects a checkpoint reminder every 10th tool call (verified firing
+      live in this session).
+- [x] T6 .claude/skills/long-horizon-jobs/SKILL.md written; migration report delivered.
+
+## Review
+
+- Proof artifacts: kill-drill DRILL-PASS x2 (3 SIGKILLs each, zero dup / zero lost);
+  full radon pytest green excluding parallel-session WIP test_yield_curve.py
+  (pre-existing ModuleNotFoundError from the in-flight /indicator swarm, reproduced in
+  isolation, unrelated).
+- Specteron changes left uncommitted deliberately: the whole comment-harvest dir is the
+  operator's untracked WIP; landing it is their call.
+- Migration priority: 1) IG run-actor.mjs (persist Apify run id — paid duplicate runs),
+  2) DocSend skill (script it on the contract), 3) KB ingest (per-batch run ledger +
+  flock), 4) Figma capture (skip existing page-NNN.png). Details in final report.
+
+---
+
 # Task: Day P&L ESTIMATED (LIVE) way off during RTH (2026-07-28)
 
 ## Dependency graph
