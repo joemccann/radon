@@ -169,6 +169,7 @@ web/verify-regime-internals.mjs
 /.agents/
 /.claude/skills/*
 !/.claude/skills/incident-response/
+!/.claude/skills/long-horizon-jobs/
 /.pi/skills/
 /skills-lock.json
 /radon-dark-full.png
