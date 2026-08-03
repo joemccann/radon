@@ -7016,6 +7016,10 @@ tr.leg-row td {
   color: var(--text-muted);
   font-size: 9px;
   letter-spacing: 0.16em;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   padding: 0 8px;
   cursor: pointer;
   transition: color 120ms ease, background 120ms ease;
@@ -16946,9 +16950,12 @@ body[data-mobile="true"] .strength-card__head {
   font-size: 10px;
 }
 /* Touch-friendly STOCK|OPTION switcher on mobile (desktop is 18px/9px — too
-   small to tap). Taller container + wider segments; never shrinks in the row. */
+   small to tap). Taller container + wider segments; never shrinks in the row.
+   Height MUST be ≥44px: the blanket a11y rule forces min-height 44 on the
+   segment buttons, and a shorter overflow-hidden container clips their bottom
+   — the labels rendered ~6px below the visible center (2026-08-03). */
 .ckh--mobile .ckh-instr {
-  height: 32px;
+  height: 44px;
   flex-shrink: 0;
 }
 .ckh--mobile .ckh-instr-seg {

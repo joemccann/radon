@@ -2,6 +2,17 @@ import { expect, test, type Page } from "@playwright/test";
 
 const now = new Date().toISOString();
 
+// Window-relative dates — a hardcoded expiry rots into the past and the
+// expired position breaks resolution (2026-08-03: spec froze on the SSR
+// desktop shell with "No position" once expiry "2026-03-26" had lapsed).
+function daysFromToday(n: number): string {
+  const d = new Date(Date.now() + n * 86_400_000);
+  return d.toISOString().slice(0, 10);
+}
+
+const EXPIRY = daysFromToday(30);
+const EXPIRY_KEY = EXPIRY.replace(/-/g, "");
+
 const PORTFOLIO_MOCK = {
   bankroll: 100_000,
   peak_value: 100_000,
@@ -22,7 +33,7 @@ const PORTFOLIO_MOCK = {
       structure: "Risk Reversal (P$243.0/C$247.0)",
       structure_type: "Risk Reversal",
       risk_profile: "undefined",
-      expiry: "2026-03-26",
+      expiry: EXPIRY,
       contracts: 50,
       direction: "COMBO",
       entry_cost: -579.79,
@@ -57,7 +68,7 @@ const PORTFOLIO_MOCK = {
       kelly_optimal: null,
       target: null,
       stop: null,
-      entry_date: "2026-03-19",
+      entry_date: daysFromToday(-7),
     },
   ],
   account_summary: {
@@ -106,8 +117,8 @@ const PRICE_FIXTURES: Record<string, unknown> = {
     undPrice: null,
     timestamp: now,
   },
-  IWM_20260326_247_C: {
-    symbol: "IWM_20260326_247_C",
+  [`IWM_${EXPIRY_KEY}_247_C`]: {
+    symbol: `IWM_${EXPIRY_KEY}_247_C`,
     last: 3.63,
     lastIsCalculated: false,
     bid: 3.4,
@@ -130,8 +141,8 @@ const PRICE_FIXTURES: Record<string, unknown> = {
     undPrice: 244.65,
     timestamp: now,
   },
-  IWM_20260326_243_P: {
-    symbol: "IWM_20260326_243_P",
+  [`IWM_${EXPIRY_KEY}_243_P`]: {
+    symbol: `IWM_${EXPIRY_KEY}_243_P`,
     last: 3.88,
     lastIsCalculated: false,
     bid: 3.8,
@@ -216,8 +227,17 @@ async function installMockWebSocket(page: Page) {
       }
     }
 
-    // @ts-expect-error test-only replacement
-    window.WebSocket = MockWebSocket;
+    // Only the Radon relay socket is mocked; Turbopack HMR and any other
+    // sockets pass through to the real implementation — replacing them too
+    // stalls the dev runtime and the page never hydrates past the SSR shell.
+    const NativeWebSocket = window.WebSocket;
+    const RelayAwareWebSocket = function (url: string | URL, protocols?: string | string[]) {
+      return String(url).includes("localhost:8765")
+        ? (new MockWebSocket(String(url)) as unknown as WebSocket)
+        : new NativeWebSocket(url, protocols);
+    } as unknown as typeof WebSocket;
+    Object.assign(RelayAwareWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    window.WebSocket = RelayAwareWebSocket;
   }, PRICE_FIXTURES);
 }
 
@@ -272,4 +292,27 @@ test("mobile combo position shows STOCK|OPTION switcher", async ({ page }) => {
   await expect(stock).toHaveClass(/(^|\s)on(\s|$)/);
   await expect(option).not.toHaveClass(/(^|\s)on(\s|$)/);
   await expect(page.locator(".ckh--mobile")).toContainText("$244.65");
+});
+
+test("STOCK|OPTION labels are vertically centered in their segments", async ({ page }) => {
+  await installMockWebSocket(page);
+  await stubApis(page);
+
+  await page.goto("/IWM?posId=12");
+  await expect(page.getByRole("group", { name: "Instrument view" })).toBeVisible();
+
+  for (const name of ["STOCK", "OPTION"]) {
+    // Measure against the VISIBLE pill (.ckh-instr), not the button: the a11y
+    // min-height once forced the button taller than the overflow-hidden pill,
+    // so text centered in the button rendered ~6px below the pill's center.
+    const offset = await page.getByRole("button", { name }).evaluate((btn) => {
+      const pill = btn.closest(".ckh-instr")!;
+      const range = document.createRange();
+      range.selectNodeContents(btn);
+      const text = range.getBoundingClientRect();
+      const box = pill.getBoundingClientRect();
+      return Math.abs((text.top + text.height / 2) - (box.top + box.height / 2));
+    });
+    expect(offset, `${name} label off vertical center by ${offset}px`).toBeLessThanOrEqual(1.5);
+  }
 });
