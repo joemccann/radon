@@ -27,6 +27,11 @@ DEFAULT_LOCAL_DIR = Path("data/incidents_remote")
 ANALYZE_LIMIT_PER_CYCLE = 2
 ANALYZE_TIMEOUT_SECS = 2400
 LOCK_STALE_SECS = 3 * 3600
+# Self-resolving transients (mid-deploy marker mismatch, writers erroring
+# through the deploy restart window) auto-resolve within a watchdog cycle
+# or two — never spend a headless-Claude run on an incident younger than
+# two watchdog cycles + margin.
+MIN_INCIDENT_AGE_SECS = 12 * 60
 
 
 def load_state(state_path: Path) -> dict:
@@ -45,8 +50,23 @@ def mark_analyzed(state_path: Path, state: dict, incident_id: str,
     tmp.replace(state_path)
 
 
+def _is_past_transient_window(payload: dict, now: datetime) -> bool:
+    raw = payload.get("detected_at")
+    if not raw:
+        return True
+    try:
+        detected = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if detected.tzinfo is None:
+        detected = detected.replace(tzinfo=timezone.utc)
+    return (now - detected).total_seconds() >= MIN_INCIDENT_AGE_SECS
+
+
 def select_new_open_incidents(mirror_dir: Path, state: dict,
-                              limit: int = ANALYZE_LIMIT_PER_CYCLE) -> list[Path]:
+                              limit: int = ANALYZE_LIMIT_PER_CYCLE,
+                              now: datetime | None = None) -> list[Path]:
+    now = now or datetime.now(timezone.utc)
     analyzed = state.get("analyzed", {})
     selected = []
     for path in sorted(mirror_dir.glob("incident-*.json")):
@@ -57,6 +77,8 @@ def select_new_open_incidents(mirror_dir: Path, state: dict,
         if payload.get("status") != "open":
             continue
         if payload.get("incident_id") in analyzed:
+            continue
+        if not _is_past_transient_window(payload, now):
             continue
         selected.append(path)
     return selected[:limit]
@@ -103,11 +125,18 @@ def acquire_lock(lock_path: Path, now: datetime) -> bool:
 
 
 def analyze(incident_path: Path, repo_root: Path) -> str:
-    proc = subprocess.run(
-        build_analyze_command(incident_path),
-        cwd=repo_root, capture_output=True, text=True,
-        timeout=ANALYZE_TIMEOUT_SECS,
-    )
+    try:
+        proc = subprocess.run(
+            build_analyze_command(incident_path),
+            cwd=repo_root, capture_output=True, text=True,
+            timeout=ANALYZE_TIMEOUT_SECS,
+        )
+    except subprocess.TimeoutExpired:
+        return (
+            f"ANALYSIS TIMED OUT after {ANALYZE_TIMEOUT_SECS}s — "
+            "recorded so the next cycle does not re-launch the same hung run. "
+            "Re-triage manually with: /incident " + str(incident_path)
+        )
     if proc.returncode != 0:
         return f"ANALYSIS FAILED (exit {proc.returncode})\n\n{proc.stderr[-4000:]}"
     return proc.stdout
@@ -134,7 +163,7 @@ def run_cycle(repo_root: Path) -> int:
 
         state_path = mirror / ".responder-state.json"
         state = load_state(state_path)
-        incidents = select_new_open_incidents(mirror, state)
+        incidents = select_new_open_incidents(mirror, state, now=now)
         if not incidents:
             print(json.dumps({"at": now.isoformat(), "new_incidents": 0}))
             return 0

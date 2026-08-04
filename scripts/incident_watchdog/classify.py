@@ -92,7 +92,9 @@ def _classify_corrupt_build(findings: dict, now: datetime) -> dict | None:
     liveness = findings.get("nextjs_liveness", {})
     deploy = findings.get("deploy", {})
     ci = deploy.get("ci") or {}
-    deploy_settled = ci.get("status") in (None, "completed")
+    deploy_settled = (
+        ci.get("status") in (None, "completed") and not deploy.get("in_flight")
+    )
 
     if liveness.get("state") == "down" and liveness.get("http_status") == 500:
         return _incident(

@@ -116,6 +116,9 @@ data/service_health/
 data/incidents/
 # Laptop mirror of VPS incidents + responder state/diagnoses
 data/incidents_remote/
+# Red proposal tests parked by /incident analyze-only runs (never in the
+# live test tree, never in the rsync mirror — both delete them)
+data/incident_proposals/
 # Nightly Turso dump pulls (DUR-13, rsync'd from the VPS — never commit)
 data/db_backups/
 # Runtime-owned by the preset_rebalance handler on the VPS; tracking these

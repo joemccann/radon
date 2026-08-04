@@ -24,6 +24,10 @@ DEFAULT_NEXTJS_BASE = "http://127.0.0.1:3000"
 DEFAULT_API_BASE = "http://127.0.0.1:8321"
 DEFAULT_HEALTH_BASE = "http://127.0.0.1:8330"
 DEFAULT_GREEN_MARKER = "/home/radon/.radon-last-green-deploy"
+# deploy.sh's transition journal exists only while a deploy is mid-flight
+# (created at teardown, removed after the green gate) — the on-box
+# in-flight signal on hosts without gh.
+DEFAULT_TRANSITION_JOURNAL = "/home/radon/.radon-deploy-transition.json"
 
 UNKNOWN = {"state": "unknown"}
 
@@ -191,11 +195,13 @@ def _read_head(repo_dir: str) -> str | None:
     return proc.stdout.strip() or None
 
 
-def probe_deploy(repo_dir: str, green_marker_path: str) -> dict:
+def probe_deploy(repo_dir: str, green_marker_path: str,
+                 transition_journal_path: str = DEFAULT_TRANSITION_JOURNAL) -> dict:
     """Deploy status: last CI run via gh, plus green-marker vs HEAD on hosts
     where the marker exists (the VPS). HEAD == target SHA with a mismatched
     green marker is the cancelled-deploy signature — Git HEAD equality alone
-    is never success."""
+    is never success. HEAD fast-forwards before the marker lands, so the
+    transition journal marks the window where a mismatch is expected."""
     ci = _read_ci_run()
     marker_file = Path(green_marker_path)
     green_marker = None
@@ -204,7 +210,13 @@ def probe_deploy(repo_dir: str, green_marker_path: str) -> dict:
         green_marker = marker_file.read_text().strip() or None
         head = _read_head(repo_dir)
     state = "up" if (ci or green_marker) else "unknown"
-    return {"state": state, "ci": ci, "green_marker": green_marker, "head": head}
+    return {
+        "state": state,
+        "ci": ci,
+        "green_marker": green_marker,
+        "head": head,
+        "in_flight": Path(transition_journal_path).exists(),
+    }
 
 
 def gather_findings() -> dict:
@@ -214,11 +226,13 @@ def gather_findings() -> dict:
     token = os.environ.get("RADON_PROBE_FRESHNESS_TOKEN")
     repo_dir = os.environ.get("INCIDENT_WATCHDOG_REPO_DIR", str(Path.cwd()))
     marker = os.environ.get("INCIDENT_WATCHDOG_GREEN_MARKER", DEFAULT_GREEN_MARKER)
+    transition = os.environ.get(
+        "INCIDENT_WATCHDOG_TRANSITION_JOURNAL", DEFAULT_TRANSITION_JOURNAL)
     return {
         "nextjs_liveness": probe_nextjs_liveness(nextjs),
         "nextjs_db": probe_nextjs_db(nextjs),
         "api_lite": probe_api_lite(api),
         "health_status": probe_health_status(health),
         "freshness": probe_freshness(nextjs, token),
-        "deploy": probe_deploy(repo_dir, marker),
+        "deploy": probe_deploy(repo_dir, marker, transition),
     }

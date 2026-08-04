@@ -42,6 +42,7 @@ def healthy_findings():
             "ci": {"status": "completed", "conclusion": "success", "head_sha": "abc"},
             "green_marker": "abc",
             "head": "abc",
+            "in_flight": False,
         },
     }
 
@@ -107,6 +108,21 @@ class TestClassify:
             "ci": {"status": "in_progress", "conclusion": None, "head_sha": "def"},
             "green_marker": "abc",
             "head": "def",
+        }
+        assert classify(findings, NOW) == []
+
+    def test_marker_mismatch_with_transition_journal_present_is_suppressed(self):
+        """On the VPS gh is absent (ci=None) — the transition journal is the
+        on-box in-flight signal. HEAD fast-forwards before the green marker
+        lands, so every deploy window looks like a mismatch (13:05Z 2026-08-04
+        false positive)."""
+        findings = healthy_findings()
+        findings["deploy"] = {
+            "state": "up",
+            "ci": None,
+            "green_marker": "abc",
+            "head": "def",
+            "in_flight": True,
         }
         assert classify(findings, NOW) == []
 
