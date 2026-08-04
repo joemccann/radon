@@ -14,7 +14,9 @@ const css = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
 function mobileBookBlock(): string {
   const start = css.indexOf("/* Book legibility on phones");
   expect(start).toBeGreaterThan(-1);
-  return css.slice(start, start + 700);
+  // Wide enough to span the montage column-fit overrides (2026-08-04)
+  // inserted between the row rules and .book-montage-note.
+  return css.slice(start, start + 1600);
 }
 
 describe("mobile book montage legibility", () => {
