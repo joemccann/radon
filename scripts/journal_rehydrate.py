@@ -144,6 +144,7 @@ def _group_executions(executions: List[Any]) -> Dict[str, Dict[str, Any]]:
                 "right": exec_obj.right,
                 "executions": [],
                 "exec_ids": [],
+                "codes": set(),
                 "first_time": exec_obj.time,
                 "buy_qty": Decimal(0),
                 "sell_qty": Decimal(0),
@@ -155,6 +156,9 @@ def _group_executions(executions: List[Any]) -> Dict[str, Dict[str, Any]]:
 
         bucket["executions"].append(exec_obj)
         bucket["exec_ids"].append(str(exec_obj.exec_id))
+        for code in str(getattr(exec_obj, "codes", "") or "").split(";"):
+            if code.strip():
+                bucket["codes"].add(code.strip())
 
         if exec_obj.side.value == "BOT":
             bucket["buy_qty"] += exec_obj.quantity
@@ -444,6 +448,12 @@ def _bucket_to_entry(
     else:
         entry["shares"] = abs_qty
 
+    codes = bucket.get("codes")
+    if codes:
+        # IB Flex `notes`: A=assigned, Ex=exercised, Ep=expired. Lets the
+        # realized-P&L layer label assignment/exercise round trips.
+        entry["ib_codes"] = ";".join(sorted(codes))
+
     return entry
 
 
@@ -529,7 +539,18 @@ def rehydrate_from_executions(
     # too — that's the entire point.
     prior_state = _prior_state_index(trades)
 
-    grouped = _group_executions(executions)
+    # Drop already-journaled executions BEFORE grouping. Grouping known and
+    # new execs into one bucket made `_is_duplicate` skip the whole bucket
+    # on the known constituent — an assignment booked against an
+    # already-imported open (MSFT $460C 2026-08-03) silently never
+    # imported, so monthly P&L missed the close entirely.
+    new_executions = [e for e in executions if str(e.exec_id) not in exec_ids]
+    known_executions = [e for e in executions if str(e.exec_id) in exec_ids]
+    # Keep the reporting contract: already-imported executions count as
+    # skipped entries (one per contract bucket, as before the pre-filter).
+    skipped = len(_group_executions(known_executions)) if known_executions else 0
+
+    grouped = _group_executions(new_executions)
     candidate_entries: List[Dict[str, Any]] = []
     for bucket in grouped.values():
         key = _bucket_contract_key(bucket)
@@ -542,7 +563,6 @@ def rehydrate_from_executions(
     candidate_entries.sort(key=lambda e: (e["date"], e["ticker"]))
 
     imported = 0
-    skipped = 0
     for entry in candidate_entries:
         if _is_duplicate(entry, exec_ids, legacy_keys):
             skipped += 1

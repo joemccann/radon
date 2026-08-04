@@ -176,6 +176,9 @@ type MatchExec = {
   value: number;
   whenRaw: string;
   day: string;
+  /** IB Flex `notes` codes persisted by rehydrate (`ib_codes`, ";"-joined):
+   *  A=assigned, Ex=exercised, Ep=expired. */
+  codes: string;
 };
 
 type CloseEvent = {
@@ -187,7 +190,20 @@ type CloseEvent = {
   openDays: string[];
   /** True when this close is a synthetic $0 lapse (no IB fill). */
   expiredWorthless?: true;
+  /** True when the closing exec carries the IB assignment code ("A"). */
+  assigned?: true;
+  /** True when the closing exec carries the IB exercise code ("Ex"). */
+  exercised?: true;
 };
+
+function codeFlags(codes: string): { assigned?: true; exercised?: true; lapsed?: true } {
+  const tokens = codes.split(";").map((c) => c.trim());
+  return {
+    ...(tokens.includes("A") ? { assigned: true as const } : {}),
+    ...(tokens.includes("Ex") ? { exercised: true as const } : {}),
+    ...(tokens.includes("Ep") ? { lapsed: true as const } : {}),
+  };
+}
 
 type InventoryState = {
   events: CloseEvent[];
@@ -331,6 +347,7 @@ function matchInventory(execs: MatchExec[]): InventoryState {
       const closeValue = (e.value / e.qty) * closeQty;
       const realized =
         positionQty > 0 ? closeValue - basisClosed : basisClosed - closeValue;
+      const flags = codeFlags(e.codes);
       events.push({
         day: e.day,
         qty: closeQty,
@@ -338,6 +355,9 @@ function matchInventory(execs: MatchExec[]): InventoryState {
         proceeds: closeValue,
         realized,
         openDays: [...openDays],
+        ...(flags.assigned ? { assigned: true as const } : {}),
+        ...(flags.exercised ? { exercised: true as const } : {}),
+        ...(flags.lapsed ? { expiredWorthless: true as const } : {}),
       });
       const remaining = Math.abs(positionQty) - closeQty;
       positionQty = remaining > 0 ? (positionQty > 0 ? remaining : -remaining) : 0;
@@ -422,9 +442,12 @@ function closeEventsForGroup(rows: RealizedJournalRow[], asOfDay: string): Close
     if (!day) continue;
     const action = (p.action ?? "").toString().toUpperCase();
 
+    const rowCodes = (p.ib_codes ?? "").toString();
+
     if (action === "CLOSED" && typeof p.realized_pnl === "number") {
       // Net-flat rehydrate aggregate: its VWAP-collapsed price would recover
       // ~0 through the matcher, so pass the persisted round trip through.
+      const flags = codeFlags(rowCodes);
       events.push({
         day,
         qty: typeof p.realized_quantity === "number" ? p.realized_quantity : quantityOf(p),
@@ -432,6 +455,8 @@ function closeEventsForGroup(rows: RealizedJournalRow[], asOfDay: string): Close
         proceeds: typeof p.proceeds === "number" ? p.proceeds : 0,
         realized: p.realized_pnl,
         openDays: [day],
+        ...(flags.assigned ? { assigned: true as const } : {}),
+        ...(flags.exercised ? { exercised: true as const } : {}),
       });
       continue;
     }
@@ -445,6 +470,7 @@ function closeEventsForGroup(rows: RealizedJournalRow[], asOfDay: string): Close
       value: execCashValue(p, side, qty),
       whenRaw,
       day,
+      codes: rowCodes,
     });
   }
 
@@ -502,11 +528,18 @@ function mergeEventsByCloseDay(
       proceeds: round2(dayEvents.reduce((s, e) => s + e.proceeds, 0)),
       realized_pnl: round2(dayEvents.reduce((s, e) => s + e.realized, 0)),
     };
-    if (expiredWorthless) {
-      const base =
-        typeof rep.structure === "string" && rep.structure
-          ? rep.structure
-          : contractDescFromKey(key, rep);
+    const assigned = dayEvents.some((e) => e.assigned);
+    const exercised = dayEvents.some((e) => e.exercised);
+    const base =
+      typeof rep.structure === "string" && rep.structure
+        ? rep.structure
+        : contractDescFromKey(key, rep);
+    // Assignment/exercise wins over lapse when a day merges both kinds.
+    if (assigned) {
+      trip.structure = `${base} (assigned)`;
+    } else if (exercised) {
+      trip.structure = `${base} (exercised)`;
+    } else if (expiredWorthless) {
       trip.structure = `${base} (expired worthless)`;
     } else if (typeof rep.structure === "string" && rep.structure) {
       trip.structure = rep.structure;
@@ -565,6 +598,7 @@ export function computeRealizedPnl(
     round_trips: inWindow,
     note:
       "Net of commissions; deduped across flex_agg/fill row families; "
-      + "residual options expired at $0 on expiry date.",
+      + "residual options expired at $0 on expiry date; "
+      + "assignment/exercise closes labeled from IB codes.",
   };
 }

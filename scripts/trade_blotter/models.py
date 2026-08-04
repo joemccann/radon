@@ -45,6 +45,8 @@ class Execution:
     right: Optional[str] = None  # 'C' or 'P'
     expiry: Optional[str] = None  # YYYYMMDD
     multiplier: int = 100  # Options multiplier
+    # IB Flex `notes` codes, ";"-joined: A=assigned, Ex=exercised, Ep=expired
+    codes: str = ""
     
     @property
     def contract_desc(self) -> str:

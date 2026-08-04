@@ -557,3 +557,198 @@ describe("cross-family commission sign conventions (live 2026-07-24 regression)"
     expect(summary.round_trips[0].realized_pnl).toBeCloseTo(39998.0 - 23998.73, 2);
   });
 });
+
+/**
+ * Covered-call assignment / exercise (2026-08-03 MSFT incident):
+ * IB assigned 10x MSFT $460C — the option closes via a Flex BUY @ $0
+ * (notes "A") and the 1,000 held shares are delivered via a Flex stock
+ * SELL @ strike (notes "A"), both dated the assignment day. Rehydrate
+ * persists the codes as `ib_codes`. Monthly realized P&L must realize the
+ * kept premium AND the share-delivery P&L on the assignment date, label
+ * the trips, and never double-count against worthless-expiry synthesis.
+ * Every expected value is derived from the fixtures' own arithmetic.
+ */
+describe("computeRealizedPnl — covered-call assignment/exercise", () => {
+  const MSFT_CALL = {
+    ticker: "MSFT", strike: 460, right: "C", expiry: "20260803",
+    structure: "Short Call $460 2026-08-03",
+  };
+  const CALL_QTY = 10;
+  const CALL_PRICE = 5.0;
+  const CALL_COMMISSION = 6.9689;
+  const CALL_CREDIT = CALL_QTY * CALL_PRICE * 100 - CALL_COMMISSION; // 4993.0311
+  const CREDIT_PER_CONTRACT = CALL_CREDIT / CALL_QTY;
+
+  const SHARES = 1000;
+  const STOCK_BUY_PRICE = 458.5;
+  const STOCK_BUY_COMMISSION = 2.0;
+  const STOCK_BASIS = SHARES * STOCK_BUY_PRICE + STOCK_BUY_COMMISSION; // 458,502
+  const STRIKE_PROCEEDS = SHARES * 460; // 460,000 (assignments carry no commission)
+  const STOCK_DELIVERY_PNL = STRIKE_PROCEEDS - STOCK_BASIS; // +1,498
+
+  const AUG = { from: "2026-08-01", to: "2026-08-31" };
+
+  const stockOpen = row("msft-so", "2026-07-28T14:00:00Z", {
+    ticker: "MSFT", action: "BUY", shares: SHARES, fill_price: STOCK_BUY_PRICE,
+    commission: STOCK_BUY_COMMISSION, total_cost: STOCK_BASIS, ib_exec_id: "msftso1",
+  });
+  const callOpenFill = row("msft-cof", "2026-07-30T14:00:00Z", {
+    ...MSFT_CALL, action: "SELL_TO_OPEN", contracts: CALL_QTY, fill_price: CALL_PRICE,
+    commission: CALL_COMMISSION, total_cost: CALL_QTY * CALL_PRICE * 100 + CALL_COMMISSION,
+    ib_exec_id: "0002920b.6a6b7945.01.01",
+  });
+  const callOpenFlex = row("msft-cox", "2026-07-30T14:00:00Z", {
+    ...MSFT_CALL, ticker: "MSFT  260803C00460000", action: "SELL_TO_OPEN",
+    contracts: CALL_QTY, fill_price: CALL_PRICE, commission: CALL_COMMISSION,
+    total_cost: CALL_QTY * CALL_PRICE * 100 + CALL_COMMISSION,
+    proceeds: CALL_CREDIT, open_basis: CALL_CREDIT, cost_basis: 0,
+    realized_pnl: 0, ib_exec_id: "9970976570",
+  });
+  const assignmentClose = row("msft-ac", "2026-08-03T21:00:00Z", {
+    ...MSFT_CALL, action: "BUY_TO_CLOSE", contracts: CALL_QTY, fill_price: 0,
+    commission: 0, total_cost: 0, ib_exec_id: "A-MSFT-1", ib_codes: "A",
+    open_basis: 0,
+  });
+  const shareDelivery = row("msft-sd", "2026-08-03T21:00:00Z", {
+    ticker: "MSFT", action: "SELL", shares: SHARES, fill_price: 460,
+    commission: 0, proceeds: STRIKE_PROCEEDS, ib_exec_id: "A-MSFT-2", ib_codes: "A",
+  });
+
+  const FULL_ASSIGNMENT = [stockOpen, callOpenFill, callOpenFlex, assignmentClose, shareDelivery];
+
+  it("full assignment realizes kept premium + share delivery on the assignment day", () => {
+    const summary = computeRealizedPnl(FULL_ASSIGNMENT, AUG);
+    expect(summary.count).toBe(2);
+    const option = summary.round_trips.find((t) => t.desc.includes("460C"))!;
+    const stock = summary.round_trips.find((t) => t.desc.includes("STK"))!;
+
+    expect(option.closed).toBe("2026-08-03");
+    expect(option.qty).toBe(CALL_QTY);
+    expect(option.realized_pnl).toBeCloseTo(CALL_CREDIT, 2);
+    expect(option.open_outside_window).toBe(true);
+
+    expect(stock.closed).toBe("2026-08-03");
+    expect(stock.qty).toBe(SHARES);
+    expect(stock.realized_pnl).toBeCloseTo(STOCK_DELIVERY_PNL, 2);
+
+    expect(summary.total_realized_pnl).toBeCloseTo(CALL_CREDIT + STOCK_DELIVERY_PNL, 2);
+  });
+
+  it("labels assignment round trips from ib_codes", () => {
+    const summary = computeRealizedPnl(FULL_ASSIGNMENT, AUG);
+    const option = summary.round_trips.find((t) => t.desc.includes("460C"))!;
+    const stock = summary.round_trips.find((t) => t.desc.includes("STK"))!;
+    expect(option.structure ?? "").toMatch(/assigned/i);
+    expect(stock.structure ?? "").toMatch(/assigned/i);
+    expect(option.structure ?? "").not.toMatch(/expired worthless/i);
+  });
+
+  it("a real $0 assignment close never double-counts with worthless-expiry synthesis", () => {
+    // Window end is PAST expiry: if the $0 close failed to clear inventory,
+    // synthesis would add a second full-credit trip and double the total.
+    const summary = computeRealizedPnl(
+      [callOpenFill, callOpenFlex, assignmentClose],
+      { from: "2026-08-01", to: "2026-08-15" },
+    );
+    expect(summary.count).toBe(1);
+    expect(summary.total_realized_pnl).toBeCloseTo(CALL_CREDIT, 2);
+  });
+
+  it("attributes assignment P&L to the assignment month, not the open month", () => {
+    const july = computeRealizedPnl(FULL_ASSIGNMENT, { from: "2026-07-01", to: "2026-07-31" });
+    expect(july.round_trips.filter((t) => t.ticker === "MSFT")).toHaveLength(0);
+    expect(july.total_realized_pnl).toBeCloseTo(0, 2);
+  });
+
+  it("partial early assignment realizes only the assigned contracts; the rest stays open", () => {
+    const ASSIGNED = 4;
+    const partialClose = row("msft-pc", "2026-08-01T21:00:00Z", {
+      ...MSFT_CALL, action: "BUY_TO_CLOSE", contracts: ASSIGNED, fill_price: 0,
+      commission: 0, total_cost: 0, ib_exec_id: "A-MSFT-P1", ib_codes: "A",
+    });
+    // Window ends BEFORE expiry: the residual 6 must NOT lapse yet.
+    const summary = computeRealizedPnl(
+      [callOpenFill, callOpenFlex, partialClose],
+      { from: "2026-08-01", to: "2026-08-02" },
+    );
+    expect(summary.count).toBe(1);
+    const trip = summary.round_trips[0];
+    expect(trip.qty).toBe(ASSIGNED);
+    expect(trip.closed).toBe("2026-08-01");
+    expect(trip.realized_pnl).toBeCloseTo(ASSIGNED * CREDIT_PER_CONTRACT, 2);
+    expect(trip.structure ?? "").toMatch(/assigned/i);
+  });
+
+  it("after partial assignment the residual lapses at expiry once the window covers it", () => {
+    const ASSIGNED = 4;
+    const RESIDUAL = CALL_QTY - ASSIGNED;
+    const partialClose = row("msft-pc", "2026-08-01T21:00:00Z", {
+      ...MSFT_CALL, action: "BUY_TO_CLOSE", contracts: ASSIGNED, fill_price: 0,
+      commission: 0, total_cost: 0, ib_exec_id: "A-MSFT-P1", ib_codes: "A",
+    });
+    const summary = computeRealizedPnl(
+      [callOpenFill, callOpenFlex, partialClose],
+      { from: "2026-08-01", to: "2026-08-15" },
+    );
+    expect(summary.count).toBe(2);
+    const assigned = summary.round_trips.find((t) => t.closed === "2026-08-01")!;
+    const lapsed = summary.round_trips.find((t) => t.closed === "2026-08-03")!;
+    expect(assigned.realized_pnl).toBeCloseTo(ASSIGNED * CREDIT_PER_CONTRACT, 2);
+    expect(assigned.structure ?? "").toMatch(/assigned/i);
+    expect(lapsed.qty).toBe(RESIDUAL);
+    expect(lapsed.realized_pnl).toBeCloseTo(RESIDUAL * CREDIT_PER_CONTRACT, 2);
+    expect(lapsed.structure ?? "").toMatch(/expired worthless/i);
+    // Whole credit realized exactly once across the two trips.
+    expect(summary.total_realized_pnl).toBeCloseTo(CALL_CREDIT, 2);
+  });
+
+  it("partial share delivery realizes only the delivered shares", () => {
+    const DELIVERED = 400;
+    const partialDelivery = row("msft-pd", "2026-08-01T21:00:00Z", {
+      ticker: "MSFT", action: "SELL", shares: DELIVERED, fill_price: 460,
+      commission: 0, proceeds: DELIVERED * 460, ib_exec_id: "A-MSFT-PD", ib_codes: "A",
+    });
+    const summary = computeRealizedPnl([stockOpen, partialDelivery], AUG);
+    expect(summary.count).toBe(1);
+    const trip = summary.round_trips[0];
+    expect(trip.qty).toBe(DELIVERED);
+    const perShareBasis = STOCK_BASIS / SHARES;
+    expect(trip.realized_pnl).toBeCloseTo(DELIVERED * 460 - DELIVERED * perShareBasis, 2);
+    expect(trip.structure ?? "").toMatch(/assigned/i);
+  });
+
+  it("Flex lag: before assignment rows arrive, the short call falls back to expiry synthesis", () => {
+    // Numerically identical for the option leg (credit kept); corrected to a
+    // labeled assignment + share delivery on the next rehydrate.
+    const summary = computeRealizedPnl(
+      [callOpenFill, callOpenFlex],
+      { from: "2026-08-01", to: "2026-08-15" },
+    );
+    expect(summary.count).toBe(1);
+    expect(summary.round_trips[0].closed).toBe("2026-08-03");
+    expect(summary.round_trips[0].realized_pnl).toBeCloseTo(CALL_CREDIT, 2);
+    expect(summary.round_trips[0].structure ?? "").toMatch(/expired worthless/i);
+  });
+
+  it("share delivery with no journaled stock opens emits no phantom realized P&L", () => {
+    // The 1,000-share basis predates the journal corpus: without opens the
+    // matcher cannot invent a basis — pinned: no trip, zero total (the next
+    // rehydrate's persisted-basis CLOSED row is the correction path).
+    const summary = computeRealizedPnl([shareDelivery], AUG);
+    expect(summary.total_realized_pnl).toBeCloseTo(0, 2);
+    expect(summary.count).toBe(0);
+  });
+
+  it("exercise codes (Ex) label as exercised", () => {
+    const exerciseClose = row("msft-ex", "2026-08-03T21:00:00Z", {
+      ...MSFT_CALL, action: "BUY_TO_CLOSE", contracts: CALL_QTY, fill_price: 0,
+      commission: 0, total_cost: 0, ib_exec_id: "EX-MSFT-1", ib_codes: "Ex",
+    });
+    const summary = computeRealizedPnl(
+      [callOpenFill, callOpenFlex, exerciseClose],
+      { from: "2026-08-01", to: "2026-08-15" },
+    );
+    expect(summary.count).toBe(1);
+    expect(summary.round_trips[0].structure ?? "").toMatch(/exercised/i);
+  });
+});
