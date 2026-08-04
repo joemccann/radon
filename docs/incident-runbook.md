@@ -198,6 +198,16 @@ or stale scheduled). Cross-check `scripts/watchdog` cooldowns before paging —
 this class is usually one writer, not an outage. Remember: a row's state is the
 WRITER's health, never the content of the last event it dispatched.
 
+The classifier suppresses EXPECTED states (2026-08-04 false-P2): `stale` rows
+while the market is closed (RTH-only writers quiet off-hours), and `error` rows
+whose own `last_error.next_attempt_at` circuit-breaker embargo is still in the
+future (e.g. the cash-flow-sync 24h Flex embargo). Suppressed rows travel in
+the incident evidence as `suppressed_expected`. Errors without embargo metadata
+classify at any hour; an expired embargo classifies again.
+Related guard: `cash_flow_sync` caps soft-failure retries at 3 SendRequests per
+ET day (`MAX_SOFT_ATTEMPTS_PER_ET_DAY`) so a timing-out Flex service cannot
+burn the sliding-window budget all evening.
+
 `service-down`: `:8321/health/lite` connection-refused. Check
 `systemctl status radon-api` and journald; remember the cascade-stop rule — a
 cleanly stopped unit will NOT `Restart=always` back (`radon restart` respects

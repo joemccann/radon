@@ -181,7 +181,9 @@ class TestParsers:
         }
         parsed = parse_service_health_body(body)
         assert parsed["synthetic_turso_row"] is False
-        assert parsed["failing"] == [{"service": "cri-scan", "state": "stale"}]
+        assert parsed["failing"] == [
+            {"service": "cri-scan", "state": "stale", "last_error": None}
+        ]
 
     def test_parse_freshness_extracts_stale_applicable_checks(self):
         body = {
