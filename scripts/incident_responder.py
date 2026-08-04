@@ -63,8 +63,15 @@ def select_new_open_incidents(mirror_dir: Path, state: dict,
 
 
 def build_sync_command(remote: str, remote_dir: str, local_dir: Path) -> list[str]:
+    # The dedup state, lock, and diagnoses live beside the mirrored incident
+    # files. Excluding them protects them from --delete (rsync never deletes
+    # excluded paths without --delete-excluded); without this every cycle
+    # wiped the state and re-analyzed the same incident.
     return [
         "rsync", "-az", "--delete", "--timeout=30",
+        "--exclude=.responder-state.json",
+        "--exclude=.responder.lock",
+        "--exclude=*.diagnosis.md",
         f"{remote}:{remote_dir}/",
         f"{local_dir}/",
     ]
