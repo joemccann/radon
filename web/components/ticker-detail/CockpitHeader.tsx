@@ -89,7 +89,10 @@ export default function CockpitHeader({
   if (mobile) {
     // Mobile: condensed strip — ticker + last + day chg + live dot + position chip.
     // Spread is dropped to keep the single row thumb-readable; position chip links
-    // to the p-deck where the full summary lives.
+    // to the p-deck where the full summary lives. The chip stays a compact
+    // HELD/FLAT token: the full structure string is owned by the position
+    // summary directly below — repeating it here wrapped the header onto a
+    // second cluttered row (2026-08-04).
     return (
       <div className="cockpit-head ckh--mobile">
         <span className="ckh-sym mono">{ticker}</span>
@@ -134,9 +137,10 @@ export default function CockpitHeader({
         <button
           type="button"
           className={`ckh-poschip tap-target ${position ? "held" : ""}`}
+          aria-label={position ? `Position: ${position.structure}` : "No position"}
           onClick={() => onDeckChange("p")}
         >
-          {chipLabel}
+          {position ? "HELD" : "FLAT"}
         </button>
       </div>
     );

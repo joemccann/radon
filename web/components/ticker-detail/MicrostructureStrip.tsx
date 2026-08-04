@@ -58,7 +58,11 @@ export function MicrostructureStrip({
       style={{
         display: "flex",
         alignItems: "center",
-        gap: "16px",
+        // Wrap on narrow viewports: the nowrap "(±x.xx vs mid)" tail must
+        // drop to a second row, never push the document wider than the phone.
+        flexWrap: "wrap",
+        gap: "6px 16px",
+        minWidth: 0,
         padding: "8px 12px",
         marginTop: "12px",
         border: "1px solid var(--line-grid)",

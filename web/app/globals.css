@@ -7099,6 +7099,10 @@ tr.leg-row td {
    montage + tape own the full height and scroll internally. */
 .book-tab-only { display: flex; flex-direction: column; min-height: 0; padding: 0; }
 .book-tab-only > * { flex: 1; min-height: 0; }
+/* The one-line microstructure readout must NOT be flex-stretched: the montage
+   owns the leftover height. Stretching centered its single row inside a giant
+   empty border box (2026-08-04 mobile report). */
+.book-tab-only > .microstructure-strip { flex: 0 0 auto; }
 /* OrderBook panel inside the cockpit: a single clean hairline bounded by the
    region gutter. Drops its own shadow so there is no doubled, smushed seam. */
 .book-region .book-window {
@@ -7343,6 +7347,23 @@ tr.leg-row td {
 }
 .cockpit--mobile .book-row .book-mkt {
   font-size: 12px;
+}
+/* Tighter side columns on a phone: the desktop 52px-mkt / 70px-px pairs plus
+   12px pads need 382px of montage — 17px more than a 393px viewport leaves,
+   which grew an inner horizontal scrollbar and amputated the ask side. */
+.cockpit--mobile .book-side.bid .book-colhead,
+.cockpit--mobile .book-side.bid .book-row {
+  grid-template-columns: 44px minmax(0, 1fr) 58px;
+  column-gap: 6px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+.cockpit--mobile .book-side.ask .book-colhead,
+.cockpit--mobile .book-side.ask .book-row {
+  grid-template-columns: 58px minmax(0, 1fr) 44px;
+  column-gap: 6px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
 .cockpit--mobile .book-montage-note {
   font-size: 11px;
@@ -16944,10 +16965,11 @@ body[data-mobile="true"] .strength-card__head {
   height: 8px;
 }
 .ckh--mobile .ckh-poschip {
-  padding: 0 8px;
-  height: 32px;
-  min-height: 44px;
+  padding: 0 12px;
+  height: 44px;
   font-size: 10px;
+  letter-spacing: 0.12em;
+  flex-shrink: 0;
 }
 /* Touch-friendly STOCK|OPTION switcher on mobile (desktop is 18px/9px — too
    small to tap). Taller container + wider segments; never shrinks in the row.
@@ -16962,6 +16984,19 @@ body[data-mobile="true"] .strength-card__head {
   font-size: 10px;
   padding: 0 14px;
 }
+/* Mobile book head: a 393px viewport cannot hold sym + 4 stats + feed pill +
+   tape toggle on one nowrap row — the desktop clip-don't-grow rule amputated
+   SPRD and the toggle. Wrap into compact rows instead; tabular-nums keeps the
+   wrapped rows stable across ticks. The toggle keeps its switch track and
+   aria-label; its text label is dropped to save the row. */
+.cockpit--mobile .book-window-head {
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  min-height: 0;
+}
+.cockpit--mobile .book-sym { font-size: 13px; }
+.cockpit--mobile .book-toggle-text { display: none; }
 .ckp-pos-summary {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
