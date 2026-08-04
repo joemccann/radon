@@ -63,6 +63,13 @@ ET = ZoneInfo("America/New_York")
 FIRE_HOUR_ET = 17
 FIRE_WINDOW_HOURS = 1
 
+# Soft-failure retry budget per ET day. A Flex outage that keeps TIMING OUT
+# (never returning a documented throttle code) routes every failure through
+# record_soft_failure, which never escalates — unbounded, that retries every
+# ~5 min until midnight ET, and each retry burns the sliding-window request
+# budget exactly like a throttled call (module docstring; May 9 2026).
+MAX_SOFT_ATTEMPTS_PER_ET_DAY = 3
+
 
 def _now_utc() -> datetime:
     """Indirection to make `datetime.now(tz=UTC)` patchable in tests."""
@@ -116,6 +123,8 @@ class CashFlowSyncHandler(BaseHandler):
             self._backoff_state = {
                 "throttle_count": int(raw.get("throttle_count") or 0),
                 "blocked_until": raw.get("blocked_until"),
+                "soft_attempt_date": raw.get("soft_attempt_date"),
+                "soft_attempts": int(raw.get("soft_attempts") or 0),
             }
         else:
             self._backoff_state = _throttle_backoff.initial_state()
@@ -130,6 +139,9 @@ class CashFlowSyncHandler(BaseHandler):
         now_utc = _now_utc()
 
         if _throttle_backoff.is_blocked(self._backoff_state, now_utc=now_utc):
+            return False
+
+        if self._soft_budget_exhausted(now_utc):
             return False
 
         if not _is_trading_day_et(now_utc):
@@ -218,9 +230,15 @@ class CashFlowSyncHandler(BaseHandler):
                 self._backoff_state, now_utc=now_utc
             )
         else:
+            today = _et_date(now_utc)
+            prior = self._backoff_state
+            same_day = prior.get("soft_attempt_date") == today
+            attempts = int(prior.get("soft_attempts") or 0) if same_day else 0
             self._backoff_state = _throttle_backoff.record_soft_failure(
-                self._backoff_state, now_utc=now_utc
+                prior, now_utc=now_utc
             )
+            self._backoff_state["soft_attempt_date"] = today
+            self._backoff_state["soft_attempts"] = attempts + 1
 
         next_attempt_at = self._next_attempt_iso(now_utc)
         self.record_cycle_health(
@@ -228,6 +246,14 @@ class CashFlowSyncHandler(BaseHandler):
             started_at=started_at,
             error={"message": message, "next_attempt_at": next_attempt_at},
         )
+
+    def _soft_budget_exhausted(self, now_utc: datetime) -> bool:
+        """True when today's ET day already spent its soft-retry budget —
+        the next SendRequest waits for tomorrow's 17:00 ET window."""
+        state = self._backoff_state
+        if state.get("soft_attempt_date") != _et_date(now_utc):
+            return False
+        return int(state.get("soft_attempts") or 0) >= MAX_SOFT_ATTEMPTS_PER_ET_DAY
 
     def _mark_success(self) -> None:
         """Reset the circuit breaker after a successful sync."""

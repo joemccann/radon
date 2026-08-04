@@ -1,15 +1,80 @@
 """Pure classification: probe findings -> incidents mapped to runbook cases.
 
-No I/O, no clock reads — the cycle passes ``now`` so every rule is testable
-with a pinned clock. ``unknown`` findings never classify (a probe that could
-not observe is not evidence of an outage).
+No clock reads — the cycle passes ``now`` so every rule is testable with a
+pinned clock (the only I/O is a once-per-year cached holiday-config read).
+``unknown`` findings never classify (a probe that could not observe is not
+evidence of an outage), and EXPECTED states never classify: stale rows while
+the market is closed (RTH-only writers quiet off-hours are documented-normal)
+and error rows whose own ``next_attempt_at`` circuit-breaker embargo is still
+in the future (2026-08-04T08:00Z false-P2 incident).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+import json
+from datetime import datetime, timezone
+from functools import lru_cache
+from zoneinfo import ZoneInfo
 
 RUNBOOK = "docs/incident-runbook.md"
+
+ET = ZoneInfo("America/New_York")
+RTH_OPEN_MINUTES = 9 * 60 + 30
+RTH_CLOSE_MINUTES = 16 * 60
+
+
+@lru_cache(maxsize=8)
+def _holidays(year: int) -> frozenset[str]:
+    try:
+        from utils.market_calendar import load_holidays
+    except ImportError:
+        try:
+            from scripts.utils.market_calendar import load_holidays
+        except ImportError:
+            return frozenset()
+    try:
+        return frozenset(load_holidays(year))
+    except Exception:
+        return frozenset()
+
+
+def _is_market_open(now: datetime) -> bool:
+    et = now.astimezone(ET)
+    if et.weekday() >= 5:
+        return False
+    if et.strftime("%Y-%m-%d") in _holidays(et.year):
+        return False
+    minutes = et.hour * 60 + et.minute
+    return RTH_OPEN_MINUTES <= minutes < RTH_CLOSE_MINUTES
+
+
+def _embargo_in_future(last_error: str | None, now: datetime) -> bool:
+    if not last_error:
+        return False
+    try:
+        payload = json.loads(last_error)
+    except (ValueError, TypeError):
+        return False
+    raw = payload.get("next_attempt_at") if isinstance(payload, dict) else None
+    if not raw:
+        return False
+    try:
+        until = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    return until > now
+
+
+def _is_expected_quiet(row: dict, now: datetime) -> bool:
+    """True for degraded rows that are documented-normal right now."""
+    state = row.get("state")
+    if state == "stale":
+        return not _is_market_open(now)
+    if state == "error":
+        return _embargo_in_future(row.get("last_error"), now)
+    return False
 
 
 def _incident(case_id: str, severity: str, title: str, fingerprint: str,
@@ -23,7 +88,7 @@ def _incident(case_id: str, severity: str, title: str, fingerprint: str,
     }
 
 
-def _classify_corrupt_build(findings: dict) -> dict | None:
+def _classify_corrupt_build(findings: dict, now: datetime) -> dict | None:
     liveness = findings.get("nextjs_liveness", {})
     deploy = findings.get("deploy", {})
     ci = deploy.get("ci") or {}
@@ -54,7 +119,7 @@ def _classify_corrupt_build(findings: dict) -> dict | None:
     return None
 
 
-def _classify_turso_wedge(findings: dict) -> dict | None:
+def _classify_turso_wedge(findings: dict, now: datetime) -> dict | None:
     db = findings.get("nextjs_db", {})
     liveness = findings.get("nextjs_liveness", {})
     if db.get("state") == "up" and db.get("synthetic_turso_row") \
@@ -76,7 +141,7 @@ def _classify_turso_wedge(findings: dict) -> dict | None:
     return None
 
 
-def _classify_stale_freshness(findings: dict) -> dict | None:
+def _classify_stale_freshness(findings: dict, now: datetime) -> dict | None:
     fresh = findings.get("freshness", {})
     if fresh.get("state") == "up" and fresh.get("all_fresh") is False:
         stale = fresh.get("stale_checks") or []
@@ -89,21 +154,31 @@ def _classify_stale_freshness(findings: dict) -> dict | None:
     return None
 
 
-def _classify_degraded_rows(findings: dict) -> dict | None:
+def _classify_degraded_rows(findings: dict, now: datetime) -> dict | None:
     db = findings.get("nextjs_db", {})
     failing = db.get("failing") or []
-    if db.get("state") == "up" and not db.get("synthetic_turso_row") and failing:
-        names = sorted(str(row.get("service")) for row in failing)
-        return _incident(
-            "service-health-degraded", "P2",
-            f"{len(names)} service_health row(s) degraded: {', '.join(names)}",
-            "service-health-degraded:" + ",".join(names),
-            {"failing": failing},
-        )
-    return None
+    if db.get("state") != "up" or db.get("synthetic_turso_row") or not failing:
+        return None
+    actionable = [row for row in failing if not _is_expected_quiet(row, now)]
+    suppressed = [row for row in failing if _is_expected_quiet(row, now)]
+    if not actionable:
+        return None
+    names = sorted(str(row.get("service")) for row in actionable)
+    return _incident(
+        "service-health-degraded", "P2",
+        f"{len(names)} service_health row(s) degraded: {', '.join(names)}",
+        "service-health-degraded:" + ",".join(names),
+        {
+            "failing": actionable,
+            "suppressed_expected": [
+                {"service": row.get("service"), "state": row.get("state")}
+                for row in suppressed
+            ],
+        },
+    )
 
 
-def _classify_service_down(findings: dict) -> dict | None:
+def _classify_service_down(findings: dict, now: datetime) -> dict | None:
     if findings.get("api_lite", {}).get("state") == "down":
         return _incident(
             "service-down", "P1",
@@ -126,7 +201,7 @@ _RULES = (
 def classify(findings: dict, now: datetime) -> list[dict]:
     incidents = []
     for rule in _RULES:
-        incident = rule(findings)
+        incident = rule(findings, now)
         if incident:
             incident["classified_at"] = now.isoformat()
             incidents.append(incident)

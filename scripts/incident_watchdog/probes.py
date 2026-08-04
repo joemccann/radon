@@ -65,8 +65,15 @@ def parse_service_health_body(body: dict | None) -> dict:
         and services[0].get("service") == "turso-db"
         and services[0].get("state") == "error"
     )
+    # last_error travels with the row: the classifier needs it to honor a
+    # writer's own circuit-breaker embargo (next_attempt_at in the future
+    # is a breaker doing its job, not a new incident).
     failing = [
-        {"service": row.get("service"), "state": row.get("state")}
+        {
+            "service": row.get("service"),
+            "state": row.get("state"),
+            "last_error": row.get("last_error"),
+        }
         for row in (body.get("failing") or [])
     ]
     return {"synthetic_turso_row": synthetic, "failing": failing, "warning": warning}
