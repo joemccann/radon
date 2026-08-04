@@ -70,6 +70,17 @@ class TestCommands:
         assert "radon@ib-gateway:/home/radon/radon/data/incidents/" in cmd
         assert cmd[-1] == "/tmp/mirror/"
 
+    def test_sync_delete_never_wipes_responder_owned_files(self):
+        """--delete removes local files absent on the remote; the dedup state
+        and diagnoses live beside the mirror and must be protected or every
+        cycle re-analyzes the same incident (5x duplicate-analysis bug,
+        2026-08-04)."""
+        cmd = build_sync_command("r@h", "/remote", Path("/tmp/mirror"))
+        assert "--exclude=.responder-state.json" in cmd
+        assert "--exclude=.responder.lock" in cmd
+        assert "--exclude=*.diagnosis.md" in cmd
+        assert "--delete-excluded" not in cmd
+
     def test_analyze_command_is_analyze_only(self):
         cmd = build_analyze_command(Path("/tmp/mirror/incident-x.json"))
         assert cmd[0] == "claude"
