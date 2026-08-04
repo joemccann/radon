@@ -59,6 +59,9 @@ export type RealizedRoundTrip = {
   proceeds: number;
   realized_pnl: number;
   open_outside_window?: true;
+  /** True when some basis came from the portfolio snapshot's per-share
+   *  avg_cost (delivery whose stock opens predate the journal corpus). */
+  basis_from_portfolio?: true;
 };
 
 export type RealizedPnlSummary = {
@@ -194,6 +197,8 @@ type CloseEvent = {
   assigned?: true;
   /** True when the closing exec carries the IB exercise code ("Ex"). */
   exercised?: true;
+  /** True when the basis came from the portfolio-snapshot fallback. */
+  basisFromPortfolio?: true;
 };
 
 function codeFlags(codes: string): { assigned?: true; exercised?: true; lapsed?: true } {
@@ -318,11 +323,37 @@ function execCashValue(p: JournalTradePayload, side: "BUY" | "SELL", qty: number
  * consumed so cross-window opens are attributable. Residual inventory is
  * returned for worthless-expiry synthesis.
  */
-function matchInventory(execs: MatchExec[]): InventoryState {
+function matchInventory(execs: MatchExec[], fallbackPerUnit: number | null = null): InventoryState {
   const events: CloseEvent[] = [];
   let positionQty = 0;
   let avgBasis = 0;
   let openDays: string[] = [];
+
+  // A delivery (assignment/exercise-coded exec) is never an OPEN: when the
+  // journal lacks the opens it would close, settle the uncovered quantity
+  // against the portfolio snapshot's per-share basis instead of opening a
+  // phantom opposite position. Uncoded execs never qualify — a plain stock
+  // SELL with no opens is a genuine short open.
+  const closeAgainstFallback = (e: MatchExec, qty: number): boolean => {
+    if (fallbackPerUnit == null || qty <= 0) return false;
+    const flags = codeFlags(e.codes);
+    if (!flags.assigned && !flags.exercised) return false;
+    const closeValue = (e.value / e.qty) * qty;
+    const basis = fallbackPerUnit * qty;
+    const realized = e.side === "SELL" ? closeValue - basis : basis - closeValue;
+    events.push({
+      day: e.day,
+      qty,
+      basis,
+      proceeds: closeValue,
+      realized,
+      openDays: [e.day],
+      ...(flags.assigned ? { assigned: true as const } : {}),
+      ...(flags.exercised ? { exercised: true as const } : {}),
+      basisFromPortfolio: true,
+    });
+    return true;
+  };
 
   const sorted = [...execs].sort((a, b) =>
     a.whenRaw < b.whenRaw ? -1 : a.whenRaw > b.whenRaw ? 1 : 0,
@@ -334,6 +365,7 @@ function matchInventory(execs: MatchExec[]): InventoryState {
     const sameDirection = positionQty === 0 || positionQty > 0 === signed > 0;
 
     if (sameDirection) {
+      if (positionQty === 0 && closeAgainstFallback(e, e.qty)) continue;
       const currentBasis = avgBasis * Math.abs(positionQty);
       positionQty += signed;
       avgBasis = positionQty !== 0 ? (currentBasis + openValue) / Math.abs(positionQty) : 0;
@@ -369,6 +401,7 @@ function matchInventory(execs: MatchExec[]): InventoryState {
 
     const residual = e.qty - closeQty;
     if (residual > 0) {
+      if (closeAgainstFallback(e, residual)) continue;
       positionQty = isBuy ? residual : -residual;
       avgBasis = e.value / e.qty;
       openDays = [e.day];
@@ -425,7 +458,11 @@ export function synthesizeWorthlessExpiry(
   };
 }
 
-function closeEventsForGroup(rows: RealizedJournalRow[], asOfDay: string): CloseEvent[] {
+function closeEventsForGroup(
+  rows: RealizedJournalRow[],
+  asOfDay: string,
+  fallbackPerUnit: number | null = null,
+): CloseEvent[] {
   const events: CloseEvent[] = [];
   const execs: MatchExec[] = [];
   let rep: JournalTradePayload | null = null;
@@ -474,7 +511,7 @@ function closeEventsForGroup(rows: RealizedJournalRow[], asOfDay: string): Close
     });
   }
 
-  const inventory = matchInventory(execs);
+  const inventory = matchInventory(execs, fallbackPerUnit);
   events.push(...inventory.events);
 
   // Always synthesize residual OPT inventory at expiry (as-of opts.to). CLOSED
@@ -545,6 +582,7 @@ function mergeEventsByCloseDay(
       trip.structure = rep.structure;
     }
     if (opened < from) trip.open_outside_window = true;
+    if (dayEvents.some((e) => e.basisFromPortfolio)) trip.basis_from_portfolio = true;
     out.push(trip);
   }
   return out;
@@ -558,7 +596,15 @@ function mergeEventsByCloseDay(
  */
 export function computeRealizedPnl(
   allRows: RealizedJournalRow[],
-  opts: { from: string; to: string; ticker?: string },
+  opts: {
+    from: string;
+    to: string;
+    ticker?: string;
+    /** Per-share IB avg_cost by ticker (portfolio snapshot stock legs).
+     *  Used ONLY for assignment/exercise-coded stock deliveries whose
+     *  opens predate the journal corpus. */
+    stockBasisFallback?: Record<string, number>;
+  },
 ): RealizedPnlSummary {
   const { rows } = dedupJournalRows(allRows);
   const tickerFilter = opts.ticker?.trim().toUpperCase() || undefined;
@@ -579,7 +625,11 @@ export function computeRealizedPnl(
   for (const [key, group] of groups) {
     // As-of for expiry synthesis is the window end: unexpired residual after
     // `to` stays open (e.g. partial short cover with later expiry).
-    const events = closeEventsForGroup(group.rows, opts.to);
+    const fallbackPerUnit =
+      key.endsWith("|STK")
+        ? opts.stockBasisFallback?.[resolveTickerUpper(group.rep)] ?? null
+        : null;
+    const events = closeEventsForGroup(group.rows, opts.to, fallbackPerUnit);
     roundTrips.push(...mergeEventsByCloseDay(events, key, group.rep, opts.from));
   }
 
