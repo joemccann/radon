@@ -241,7 +241,7 @@ class FlexQueryFetcher:
             expiry = trade.get("expiry") or trade.get("lastTradeDateOrContractMonth", "")
         
         trade_id = trade.get("tradeID") or trade.get("execId") or f"{symbol}_{datetime_str}"
-        
+
         return Execution(
             exec_id=trade_id,
             time=exec_time,
@@ -254,6 +254,7 @@ class FlexQueryFetcher:
             strike=strike,
             right=right,
             expiry=expiry,
+            codes=trade.get("notes") or "",
         )
 
 

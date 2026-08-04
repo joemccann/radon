@@ -54,6 +54,7 @@ def _make_execution(
     right: str | None = None,
     expiry: str | None = None,
     when: datetime | None = None,
+    codes: str = "",
 ) -> Execution:
     return Execution(
         exec_id=exec_id,
@@ -67,6 +68,7 @@ def _make_execution(
         strike=Decimal(str(strike)) if strike else None,
         right=right,
         expiry=expiry,
+        codes=codes,
     )
 
 
@@ -735,6 +737,150 @@ class TestStructureLabel:
 
     def test_buy_option_is_long(self):
         assert _structure_label("BUY_OPTION", "OPT", 1000, "C", "2026-06-12") == "Long Call $1000 2026-06-12"
+
+
+class TestAssignmentImport:
+    """Covered-call assignment/exercise rows must reach the journal.
+
+    Ground truth (MSFT 2026-08-03 assignment notice, account U4698258):
+    SELL_TO_OPEN 10x $460C on 07-30 (tradeID 9970976570, already journaled
+    by the prior rehydrate), then IB books the assignment as two Flex
+    trades dated 08-03: OPT BUY 10 @ $0 (notes "A") and STK SELL 1000 @
+    $460 (notes "A"). Pre-fix, the option bucket grouped old + new execs
+    and `_is_duplicate` skipped the WHOLE bucket because the open's
+    tradeID was known — the assignment executions silently vanished and
+    monthly P&L never saw the close.
+    """
+
+    OPEN_EXEC_ID = "9970976570"
+    MSFT_CALL = dict(
+        symbol="MSFT", sec_type=SecurityType.OPTION,
+        strike=460, right="C", expiry="20260803",
+    )
+
+    def _existing_with_open(self) -> dict:
+        return {
+            "trades": [
+                {
+                    "id": 1,
+                    "date": "2026-07-30",
+                    "ticker": "MSFT",
+                    "structure": "Short Call $460 2026-08-03",
+                    "action": "SELL_TO_OPEN",
+                    "contracts": 10,
+                    "fill_price": 5.0,
+                    "total_cost": 5006.9689,
+                    "strike": 460.0,
+                    "right": "C",
+                    "expiry": "20260803",
+                    "ib_exec_id": self.OPEN_EXEC_ID,
+                }
+            ]
+        }
+
+    def _open_exec(self) -> Execution:
+        return _make_execution(
+            exec_id=self.OPEN_EXEC_ID, side=Side.SELL, quantity=10, price=5.0,
+            commission=6.9689, when=datetime(2026, 7, 30, 14, 0, 0), **self.MSFT_CALL,
+        )
+
+    def _assignment_exec(self, quantity: int = 10) -> Execution:
+        return _make_execution(
+            exec_id="A-MSFT-1", side=Side.BUY, quantity=quantity, price=0.0,
+            commission=0.0, when=datetime(2026, 8, 3, 21, 0, 0), codes="A",
+            **self.MSFT_CALL,
+        )
+
+    def _delivery_exec(self, shares: int = 1000) -> Execution:
+        return _make_execution(
+            exec_id="A-MSFT-2", symbol="MSFT", sec_type=SecurityType.STOCK,
+            side=Side.SELL, quantity=shares, price=460.0, commission=0.0,
+            when=datetime(2026, 8, 3, 21, 0, 0), codes="A",
+        )
+
+    def test_assignment_close_imports_when_open_already_journaled(self):
+        updated, imported, skipped, _ = rehydrate_from_executions(
+            [self._open_exec(), self._assignment_exec()], self._existing_with_open(),
+        )
+        assert imported == 1
+        new = updated["trades"][-1]
+        assert new["action"] == "BUY_TO_CLOSE"
+        assert new["date"] == "2026-08-03"
+        assert new["contracts"] == 10
+        assert new["fill_price"] == 0.0
+        assert new["ib_exec_id"] == "A-MSFT-1"
+
+    def test_partial_assignment_imports_partial_close(self):
+        updated, imported, _, _ = rehydrate_from_executions(
+            [self._open_exec(), self._assignment_exec(quantity=4)],
+            self._existing_with_open(),
+        )
+        assert imported == 1
+        new = updated["trades"][-1]
+        assert new["action"] == "BUY_TO_CLOSE"
+        assert new["contracts"] == 4
+        assert new["date"] == "2026-08-03"
+
+    def test_assignment_codes_persist_on_the_row(self):
+        updated, _, _, _ = rehydrate_from_executions(
+            [self._open_exec(), self._assignment_exec()], self._existing_with_open(),
+        )
+        assert updated["trades"][-1]["ib_codes"] == "A"
+
+    def test_share_delivery_imports_as_stock_sell_with_codes(self):
+        updated, imported, _, _ = rehydrate_from_executions(
+            [self._delivery_exec()], self._existing_with_open(),
+        )
+        assert imported == 1
+        new = updated["trades"][-1]
+        assert new["action"] == "SELL"
+        assert new["shares"] == 1000
+        assert new["fill_price"] == 460.0
+        assert new["date"] == "2026-08-03"
+        assert new["ib_codes"] == "A"
+
+    def test_rerun_after_assignment_import_is_idempotent(self):
+        execs = [self._open_exec(), self._assignment_exec(), self._delivery_exec()]
+        updated, imported, _, _ = rehydrate_from_executions(
+            execs, self._existing_with_open(),
+        )
+        assert imported == 2  # option close + share delivery
+        again, imported2, skipped2, _ = rehydrate_from_executions(execs, updated)
+        assert imported2 == 0
+        assert len(again["trades"]) == len(updated["trades"])
+
+    def test_rows_without_codes_do_not_carry_ib_codes(self):
+        updated, _, _, _ = rehydrate_from_executions(
+            [self._open_exec()], {"trades": []},
+        )
+        assert "ib_codes" not in updated["trades"][-1]
+
+
+class TestFlexNotesParsing:
+    """Flex `notes` codes (A=assigned, Ex=exercised, Ep=expired) must survive
+    XML parsing so the journal can label assignment trades."""
+
+    def _parse(self, notes_attr: str) -> object:
+        from trade_blotter.flex_query import FlexQueryFetcher
+
+        xml = (
+            '<FlexQueryResponse><FlexStatements count="1"><FlexStatement>'
+            '<Trades>'
+            f'<Trade symbol="MSFT" assetCategory="OPT" dateTime="20260803;210000" '
+            f'buySell="BUY" quantity="10" tradePrice="0" ibCommission="0" '
+            f'strike="460" putCall="C" expiry="20260803" tradeID="A-1" {notes_attr}/>'
+            "</Trades></FlexStatement></FlexStatements></FlexQueryResponse>"
+        )
+        fetcher = FlexQueryFetcher(token="t", query_id="q")
+        executions = fetcher._parse_xml(xml)
+        assert len(executions) == 1
+        return executions[0]
+
+    def test_assignment_notes_parsed_into_codes(self):
+        assert self._parse('notes="A"').codes == "A"
+
+    def test_missing_notes_default_to_empty(self):
+        assert self._parse("").codes == ""
 
 
 if __name__ == "__main__":

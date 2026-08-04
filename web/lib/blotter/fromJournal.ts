@@ -47,6 +47,8 @@ export interface JournalTradePayload {
   realized_quantity?: number;
   total_round_trip_quantity?: number;
   ib_exec_id?: string;
+  /** IB Flex `notes` codes, ";"-joined: A=assigned, Ex=exercised, Ep=expired. */
+  ib_codes?: string;
   strike?: number;
   right?: string;
   expiry?: string;
