@@ -752,3 +752,76 @@ describe("computeRealizedPnl — covered-call assignment/exercise", () => {
     expect(summary.round_trips[0].structure ?? "").toMatch(/exercised/i);
   });
 });
+
+/**
+ * Portfolio-basis fallback for deliveries (user 2026-08-03): the MSFT
+ * 1,000-share basis predates the journal corpus, but IB's per-share VWAP
+ * ($463.498) is on the portfolio snapshot (`leg.avg_cost`, per-share for
+ * stocks). An assignment/exercise-coded stock delivery with no (or not
+ * enough) journaled opens closes against that basis instead of silently
+ * opening a phantom short. ONLY code-carrying rows qualify — a plain
+ * stock SELL with no opens is a genuine short open (MU) and must never
+ * fabricate realized P&L.
+ */
+describe("computeRealizedPnl — portfolio-basis fallback for deliveries", () => {
+  const SHARES = 1000;
+  const IB_AVG_COST = 463.498; // per share, from the portfolio snapshot
+  const STRIKE_PROCEEDS = SHARES * 460;
+  const AUG = { from: "2026-08-01", to: "2026-08-31" };
+  const FALLBACK = { MSFT: IB_AVG_COST };
+
+  const shareDelivery = row("msft-sd", "2026-08-03T21:00:00Z", {
+    ticker: "MSFT", action: "SELL", shares: SHARES, fill_price: 460,
+    commission: 0, proceeds: STRIKE_PROCEEDS, ib_exec_id: "A-MSFT-2", ib_codes: "A",
+  });
+
+  it("assignment delivery with no journaled opens closes against the portfolio basis", () => {
+    const summary = computeRealizedPnl([shareDelivery], { ...AUG, stockBasisFallback: FALLBACK });
+    expect(summary.count).toBe(1);
+    const trip = summary.round_trips[0];
+    expect(trip.closed).toBe("2026-08-03");
+    expect(trip.qty).toBe(SHARES);
+    expect(trip.realized_pnl).toBeCloseTo(STRIKE_PROCEEDS - SHARES * IB_AVG_COST, 2); // −3,498
+    expect(trip.structure ?? "").toMatch(/assigned/i);
+    expect(trip.basis_from_portfolio).toBe(true);
+  });
+
+  it("journaled opens cover first; only the uncovered remainder uses the fallback", () => {
+    const PARTIAL_SHARES = 400;
+    const PARTIAL_PRICE = 458.5;
+    const PARTIAL_COMMISSION = 2.0;
+    const partialOpen = row("msft-po", "2026-07-28T14:00:00Z", {
+      ticker: "MSFT", action: "BUY", shares: PARTIAL_SHARES, fill_price: PARTIAL_PRICE,
+      commission: PARTIAL_COMMISSION,
+      total_cost: PARTIAL_SHARES * PARTIAL_PRICE + PARTIAL_COMMISSION,
+      ib_exec_id: "msftpo1",
+    });
+    const journalBasis = PARTIAL_SHARES * PARTIAL_PRICE + PARTIAL_COMMISSION;
+    const journalRealized = PARTIAL_SHARES * 460 - journalBasis;
+    const fallbackRealized = (SHARES - PARTIAL_SHARES) * 460 - (SHARES - PARTIAL_SHARES) * IB_AVG_COST;
+
+    const summary = computeRealizedPnl(
+      [partialOpen, shareDelivery],
+      { ...AUG, stockBasisFallback: FALLBACK },
+    );
+    expect(summary.total_realized_pnl).toBeCloseTo(journalRealized + fallbackRealized, 2);
+    const trip = summary.round_trips[0];
+    expect(trip.qty).toBe(SHARES);
+    expect(trip.basis_from_portfolio).toBe(true);
+  });
+
+  it("a plain (uncoded) stock SELL with no opens stays a short open — no fabricated P&L", () => {
+    const shortOpen = row("mu-so", "2026-08-03T14:00:00Z", {
+      ticker: "MU", action: "SELL", shares: 1000, fill_price: 1055.36,
+      commission: 5, proceeds: 1000 * 1055.36 - 5, ib_exec_id: "muso1",
+    });
+    const summary = computeRealizedPnl([shortOpen], { ...AUG, stockBasisFallback: { MU: 900 } });
+    expect(summary.count).toBe(0);
+    expect(summary.total_realized_pnl).toBeCloseTo(0, 2);
+  });
+
+  it("no fallback for the ticker keeps the pinned no-trip behavior", () => {
+    const summary = computeRealizedPnl([shareDelivery], { ...AUG, stockBasisFallback: { EWY: 164.86 } });
+    expect(summary.count).toBe(0);
+  });
+});

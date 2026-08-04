@@ -24,6 +24,7 @@ import {
   type RealizedJournalRow,
 } from "@/lib/journal/realizedPnl";
 import { toEtDay } from "@/lib/journal/rangePnl";
+import { fetchPortfolioStockBasis } from "@/lib/portfolio/stockBasisDb";
 import { compactExpiry, type JournalTradePayload } from "@/lib/blotter/fromJournal";
 
 export type AssistantTool = LlmTool & {
@@ -278,7 +279,13 @@ async function runGetRealizedPnl(input: Record<string, unknown>): Promise<unknow
   const priorRows = closeTickers.length
     ? await fetchPriorRowsForTickers(closeTickers, window.from)
     : [];
-  return computeRealizedPnl([...windowRows, ...priorRows], window);
+  // Delivery-basis fallback for called-away shares whose opens predate the
+  // journal corpus (MSFT 2026-08-03 assignment). Degrades to no fallback on
+  // a snapshot read failure — never fails the P&L call itself.
+  const stockBasisFallback = await fetchPortfolioStockBasis().catch(
+    () => ({}) as Record<string, number>,
+  );
+  return computeRealizedPnl([...windowRows, ...priorRows], { ...window, stockBasisFallback });
 }
 
 async function runQueryJournal(input: Record<string, unknown>): Promise<unknown> {

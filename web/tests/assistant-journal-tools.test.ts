@@ -13,6 +13,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({
   fetchJournalRowsInRange: vi.fn(),
   fetchPriorRowsForTickers: vi.fn(),
+  fetchPortfolioStockBasis: vi.fn(),
 }));
 
 vi.mock("@/lib/journal/journalRangeDb", () => ({
@@ -20,6 +21,10 @@ vi.mock("@/lib/journal/journalRangeDb", () => ({
   fetchPriorRowsForTickers: mocks.fetchPriorRowsForTickers,
   PRIOR_OPEN_LOOKBACK_DAYS: 180,
   WINDOW_ROW_LIMIT: 1_000,
+}));
+
+vi.mock("@/lib/portfolio/stockBasisDb", () => ({
+  fetchPortfolioStockBasis: mocks.fetchPortfolioStockBasis,
 }));
 
 import { ASSISTANT_TOOLS, isDestructiveTool, toolSchemas } from "@/lib/assistant/tools";
@@ -58,8 +63,10 @@ const AAPL_OPEN = journalRow("aapl-o", "2026-07-20T14:00:00Z", {
 beforeEach(() => {
   mocks.fetchJournalRowsInRange.mockReset();
   mocks.fetchPriorRowsForTickers.mockReset();
+  mocks.fetchPortfolioStockBasis.mockReset();
   mocks.fetchJournalRowsInRange.mockResolvedValue([]);
   mocks.fetchPriorRowsForTickers.mockResolvedValue([]);
+  mocks.fetchPortfolioStockBasis.mockResolvedValue({});
 });
 
 describe("registry", () => {
@@ -113,6 +120,39 @@ describe("get_realized_pnl", () => {
     const expected = 4 * openNetCreditPerContract - (4 * 62.8 * 100 + 6.84);
     expect(result.total_realized_pnl).toBeCloseTo(expected, 2);
     expect(result.round_trips[0].open_outside_window).toBe(true);
+  });
+
+  it("closes an assignment share delivery against the portfolio snapshot basis (MSFT 2026-08-03)", async () => {
+    // 1,000 shares called away at $460; the stock's opens predate the journal
+    // corpus, so the basis comes from the snapshot's per-share avg_cost.
+    const delivery = journalRow("msft-sd", "2026-08-03T21:00:00Z", {
+      ticker: "MSFT", action: "SELL", shares: 1000, fill_price: 460,
+      commission: 0, proceeds: 460_000, ib_exec_id: "A-MSFT-2", ib_codes: "A",
+    });
+    mocks.fetchJournalRowsInRange.mockResolvedValue([delivery]);
+    mocks.fetchPortfolioStockBasis.mockResolvedValue({ MSFT: 463.498 });
+
+    const result = (await tool("get_realized_pnl").run!({ from: "2026-08-01", to: "2026-08-31" })) as {
+      total_realized_pnl: number;
+      round_trips: Array<{ basis_from_portfolio?: true }>;
+    };
+    expect(mocks.fetchPortfolioStockBasis).toHaveBeenCalledTimes(1);
+    expect(result.total_realized_pnl).toBeCloseTo(460_000 - 1000 * 463.498, 2);
+    expect(result.round_trips[0].basis_from_portfolio).toBe(true);
+  });
+
+  it("a snapshot read failure degrades to no fallback instead of failing the tool", async () => {
+    const delivery = journalRow("msft-sd", "2026-08-03T21:00:00Z", {
+      ticker: "MSFT", action: "SELL", shares: 1000, fill_price: 460,
+      commission: 0, proceeds: 460_000, ib_exec_id: "A-MSFT-2", ib_codes: "A",
+    });
+    mocks.fetchJournalRowsInRange.mockResolvedValue([delivery]);
+    mocks.fetchPortfolioStockBasis.mockRejectedValue(new Error("turso stall"));
+
+    const result = (await tool("get_realized_pnl").run!({ from: "2026-08-01", to: "2026-08-31" })) as {
+      total_realized_pnl: number;
+    };
+    expect(result.total_realized_pnl).toBeCloseTo(0, 2);
   });
 
   it("rejects malformed dates, inverted windows, and oversized spans", async () => {
