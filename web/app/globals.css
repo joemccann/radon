@@ -7316,11 +7316,25 @@ tr.leg-row td {
   flex-direction: column;
   grid-template-columns: none;
 }
+/* Short viewports: the page column is height-locked, so when the chrome above
+   leaves less room than the book's floors need, the REGION scrolls instead of
+   the window clipping its own montage invisible. The window sizes to content
+   (grow-only) — ample space behaves exactly as before. */
+.cockpit--mobile .book-region {
+  overflow-y: auto;
+}
+.cockpit--mobile .book-region .book-window {
+  height: auto;
+  flex: 1 0 auto;
+}
 .cockpit--mobile .book-montage {
   border-right: none;
   border-bottom: 1px solid var(--line-grid);
   flex: 1 1 56%;
-  min-height: 0;
+  /* Colhead + two depth rows: under height pressure the tape (toggleable,
+     scrollable) gives way first — a montage squeezed to zero rows is a
+     broken book. */
+  min-height: 112px;
   overflow-y: auto;
 }
 .cockpit--mobile .book-tape-cell {
@@ -16994,6 +17008,11 @@ body[data-mobile="true"] .strength-card__head {
   gap: 4px 12px;
   padding: 8px 12px;
   min-height: 0;
+  /* The head is a flex child of the book column: with the 45px floor gone it
+     must never SHRINK either, or height pressure (deep book + tape) crushes
+     it under the montage colheads (2026-08-04 device report). Intrinsic
+     wrapped height, always. */
+  flex: 0 0 auto;
 }
 .cockpit--mobile .book-sym { font-size: 13px; }
 .cockpit--mobile .book-toggle-text { display: none; }

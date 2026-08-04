@@ -63,10 +63,12 @@ const IWM_DEPTH = {
   bid: [
     { price: 244.64, size: 300, marketMaker: "ARCA", exchange: "ARCA" },
     { price: 244.63, size: 200, marketMaker: "NSDQ", exchange: "NSDQ" },
+    { price: 244.62, size: 150, marketMaker: "BATS", exchange: "BATS" },
   ],
   ask: [
     { price: 244.66, size: 120, marketMaker: "ARCA", exchange: "ARCA" },
     { price: 244.67, size: 100, marketMaker: "NSDQ", exchange: "NSDQ" },
+    { price: 244.68, size: 90, marketMaker: "BATS", exchange: "BATS" },
   ],
 };
 
@@ -182,6 +184,30 @@ test("the two-sided depth montage fits its card — no inner horizontal scrollba
     return { client: sides.clientWidth, scroll: sides.scrollWidth };
   });
   expect(scroll, `montage needs ${scroll}px in a ${client}px card`).toBeLessThanOrEqual(client);
+});
+
+test("the book head keeps its intrinsic height on short viewports — never crushed by the montage", async ({ page }) => {
+  // Real-device regression (2026-08-04, second report): the flex column
+  // shrank the head under height pressure once its 45px floor was removed —
+  // the montage colheads rode over the half-clipped MID/BID/ASK row. A 660px
+  // viewport reproduces the PWA's effective height with app chrome.
+  await page.setViewportSize({ width: 393, height: 660 });
+  await openCockpit(page);
+  const head = page.locator(".book-window-head");
+  const clipped = await head.evaluate(
+    (el) => el.scrollHeight - el.clientHeight,
+  );
+  expect(clipped, `head content is ${clipped}px taller than its box`).toBeLessThanOrEqual(1);
+  await expect(page.locator(".book-head-stat", { hasText: "SPRD" })).toBeVisible();
+  // The montage must keep its two-row floor AND stay inside the card's box —
+  // a floor that escapes the window's overflow clip renders zero rows.
+  const { montageHeight, escape } = await page.evaluate(() => {
+    const win = document.querySelector(".book-region .book-window")!.getBoundingClientRect();
+    const montage = document.querySelector(".book-montage")!.getBoundingClientRect();
+    return { montageHeight: montage.height, escape: montage.bottom - win.bottom };
+  });
+  expect(montageHeight).toBeGreaterThanOrEqual(110);
+  expect(escape, `montage extends ${escape}px past the card's clip`).toBeLessThanOrEqual(1);
 });
 
 test("the structure string renders once — summary owns it, the header chip stays compact", async ({ page }) => {
