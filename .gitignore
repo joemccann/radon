@@ -114,6 +114,8 @@ data/rv_ratio/
 data/service_health/
 # Incident watchdog artifacts (scripts/incident_watchdog) — runtime-owned
 data/incidents/
+# Laptop mirror of VPS incidents + responder state/diagnoses
+data/incidents_remote/
 # Nightly Turso dump pulls (DUR-13, rsync'd from the VPS — never commit)
 data/db_backups/
 # Runtime-owned by the preset_rebalance handler on the VPS; tracking these
