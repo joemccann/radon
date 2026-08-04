@@ -246,6 +246,243 @@ describe("computeRealizedPnl", () => {
     expect(summary.note).toMatch(/net of commissions/i);
     expect(summary.note).toMatch(/dedup/i);
   });
+
+  it("notes residual options expired at $0", () => {
+    const summary = computeRealizedPnl(SNDK_ALL, WINDOW);
+    expect(summary.note).toMatch(/expir/i);
+  });
+});
+
+/**
+ * Worthless expiry synthesis (2026-08 KWEB / monthly-P&L incident):
+ * IB often writes no fill when OTM options lapse. Residual inventory after the
+ * lot-matcher must become a $0 close on the contract expiry date so monthly
+ * realized P&L includes the full debit loss (long) or credit kept (short).
+ */
+describe("computeRealizedPnl — worthless expiry synthesis", () => {
+  it("long calls that never close realize full debit loss on expiry day", () => {
+    // KWEB-style: 10 long $31C opened May, expire July 17 with no closing fill.
+    const open = row("kweb-o", "2026-05-14T14:00:00Z", {
+      ticker: "KWEB",
+      action: "BUY_OPTION",
+      structure: "Long Call $31 2026-07-17",
+      contracts: 10,
+      fill_price: 1.24,
+      commission: 5.0,
+      right: "C",
+      strike: 31,
+      expiry: "20260717",
+      total_cost: 10 * 1.24 * 100 + 5.0, // 1245
+      ib_exec_id: "kwebo1",
+    });
+    const summary = computeRealizedPnl([open], { from: "2026-07-01", to: "2026-07-31" });
+    expect(summary.count).toBe(1);
+    const trip = summary.round_trips[0];
+    expect(trip.ticker).toBe("KWEB");
+    expect(trip.opened).toBe("2026-05-14");
+    expect(trip.closed).toBe("2026-07-17");
+    expect(trip.qty).toBe(10);
+    expect(trip.proceeds).toBe(0);
+    expect(trip.basis).toBeCloseTo(1245, 2);
+    expect(trip.realized_pnl).toBeCloseTo(-1245, 2);
+    expect(trip.open_outside_window).toBe(true);
+    expect(trip.structure ?? "").toMatch(/expir/i);
+    expect(summary.total_realized_pnl).toBeCloseTo(-1245, 2);
+  });
+
+  it("short puts that never cover realize full credit on expiry day", () => {
+    const open = row("mu-o", "2026-07-01T14:00:00Z", {
+      ticker: "MU",
+      action: "SELL_TO_OPEN",
+      structure: "Short Put $850 2026-07-10",
+      contracts: 5,
+      fill_price: 12.22,
+      commission: 2.0,
+      right: "P",
+      strike: 850,
+      expiry: "20260710",
+      // net credit after commission
+      total_cost: 5 * 12.22 * 100 - 2.0, // 6108
+      ib_exec_id: "muo1",
+    });
+    // Window includes expiry; proceeds field absent so total_cost is the credit.
+    const summary = computeRealizedPnl([open], { from: "2026-07-01", to: "2026-07-31" });
+    expect(summary.count).toBe(1);
+    const trip = summary.round_trips[0];
+    expect(trip.closed).toBe("2026-07-10");
+    expect(trip.qty).toBe(5);
+    expect(trip.proceeds).toBe(0);
+    expect(trip.basis).toBeCloseTo(6108, 2);
+    // Short expire worthless: keep credit → +basis
+    expect(trip.realized_pnl).toBeCloseTo(6108, 2);
+  });
+
+  it("does not expire residual inventory when expiry is after the window as-of date", () => {
+    // SNDK residual 1-of-5 still short after partial cover; expiry is Aug 21.
+    const summary = computeRealizedPnl(SNDK_ALL, WINDOW); // to=2026-07-24
+    expect(summary.count).toBe(1);
+    expect(summary.round_trips[0].closed).toBe("2026-07-21");
+    expect(summary.round_trips.every((t) => t.closed !== "2026-08-21")).toBe(true);
+  });
+
+  it("does not synthesize expiry for stocks", () => {
+    const open = row("msft-o", "2026-07-01T14:00:00Z", {
+      ticker: "MSFT",
+      action: "BUY",
+      shares: 100,
+      fill_price: 400,
+      total_cost: 40_000,
+      ib_exec_id: "msfto1",
+    });
+    const summary = computeRealizedPnl([open], { from: "2026-07-01", to: "2026-07-31" });
+    expect(summary.count).toBe(0);
+    expect(summary.total_realized_pnl).toBe(0);
+  });
+
+  it("attributes multi-lot long expiry to the contract expiry date only once", () => {
+    const open1 = row("kweb-o1", "2026-05-07T14:00:00Z", {
+      ticker: "KWEB",
+      action: "BUY_OPTION",
+      structure: "Long Call $31 2026-07-17",
+      contracts: 1000,
+      fill_price: 1.2724,
+      right: "C",
+      strike: 31,
+      expiry: "20260717",
+      total_cost: 1000 * 1.2724 * 100,
+      ib_exec_id: "k1",
+    });
+    const open2 = row("kweb-o2", "2026-05-14T14:00:00Z", {
+      ticker: "KWEB",
+      action: "BUY_OPTION",
+      structure: "Long Call $31 2026-07-17",
+      contracts: 500,
+      fill_price: 1.24,
+      right: "C",
+      strike: 31,
+      expiry: "20260717",
+      total_cost: 500 * 1.24 * 100,
+      ib_exec_id: "k2",
+    });
+    const debit = 1000 * 1.2724 * 100 + 500 * 1.24 * 100;
+    const summary = computeRealizedPnl([open1, open2], { from: "2026-07-01", to: "2026-07-31" });
+    expect(summary.count).toBe(1);
+    expect(summary.round_trips[0].qty).toBe(1500);
+    expect(summary.round_trips[0].closed).toBe("2026-07-17");
+    expect(summary.round_trips[0].realized_pnl).toBeCloseTo(-debit, 2);
+    expect(summary.total_realized_pnl).toBeCloseTo(-debit, 2);
+  });
+
+  it("merges OCC local-symbol ticker with underlying so flex + fills share inventory", () => {
+    // Live shape: flex_agg stores "KWEB  260717C00031000"; daemon stores "KWEB".
+    const flexOpen = row("kweb-flex", "2026-05-07T14:00:00Z", {
+      ticker: "KWEB  260717C00031000",
+      action: "BUY_OPTION",
+      structure: "Long Call $31 2026-07-17",
+      contracts: 1000,
+      fill_price: 1.2724,
+      right: "C",
+      strike: 31,
+      expiry: "20260717",
+      total_cost: 1000 * 1.2724 * 100,
+      cost_basis: 1000 * 1.2724 * 100,
+      ib_exec_id: "a+b+c",
+    });
+    const fillOpen = row("kweb-fill", "2026-05-14T14:00:00Z", {
+      ticker: "KWEB",
+      action: "BUY_OPTION",
+      structure: "Long Call $31 2026-07-17",
+      contracts: 500,
+      fill_price: 1.24,
+      right: "C",
+      strike: 31,
+      expiry: "20260717",
+      total_cost: 500 * 1.24 * 100,
+      ib_exec_id: "daemon1",
+    });
+    const debit = 1000 * 1.2724 * 100 + 500 * 1.24 * 100;
+    const summary = computeRealizedPnl([flexOpen, fillOpen], { from: "2026-07-01", to: "2026-07-31" });
+    expect(summary.count).toBe(1);
+    expect(summary.round_trips[0].ticker).toBe("KWEB");
+    expect(summary.round_trips[0].qty).toBe(1500);
+    expect(summary.round_trips[0].realized_pnl).toBeCloseTo(-debit, 2);
+  });
+
+  it("does not expire residual when flex open + daemon opens double-count then fully close", () => {
+    // Live SNDK $1300C Jul-31 (2026-07-27 open / 2026-07-30 close):
+    // daemon 5+2+2+1 buys AND flex_agg buy 10 (composite ids ≠ daemon ids),
+    // then SELL 10. Without flex-over-fill preference inventory is 20 long,
+    // SELL leaves residual 10 that falsely "expires worthless" alongside the
+    // real close loss.
+    const flexOpen = row("sndk-flex-o", "2026-07-27T14:00:00Z", {
+      ticker: "SNDK  260731C01300000",
+      action: "BUY_OPTION",
+      structure: "Long Call $1300 2026-07-31",
+      contracts: 10,
+      fill_price: 77.994,
+      right: "C",
+      strike: 1300,
+      expiry: "20260731",
+      total_cost: 77_999.07,
+      cost_basis: 77_999.07,
+      open_basis: 77_999.07,
+      commission: 5.07,
+      realized_pnl: 0,
+      ib_exec_id: "9946642390+9946642407+9946642422+9946729118",
+    });
+    const fillOpens = [
+      row("sndk-fo1", "2026-07-27T14:01:00Z", {
+        ticker: "SNDK", action: "BUY_OPTION", structure: "Long Call $1300 2026-07-31",
+        contracts: 5, fill_price: 80.2, right: "C", strike: 1300, expiry: "20260731",
+        total_cost: 40_098.42, commission: -1.58, ib_exec_id: "00019285.6a677b10.01.01",
+      }),
+      row("sndk-fo2", "2026-07-27T14:02:00Z", {
+        ticker: "SNDK", action: "BUY_OPTION", structure: "Long Call $1300 2026-07-31",
+        contracts: 2, fill_price: 75.78, right: "C", strike: 1300, expiry: "20260731",
+        total_cost: 15_157.39, commission: 1.39, ib_exec_id: "0002abd7.6a674f92.01.01",
+      }),
+      row("sndk-fo3", "2026-07-27T14:03:00Z", {
+        ticker: "SNDK", action: "BUY_OPTION", structure: "Long Call $1300 2026-07-31",
+        contracts: 2, fill_price: 75.78, right: "C", strike: 1300, expiry: "20260731",
+        total_cost: 15_157.39, commission: 1.39, ib_exec_id: "0002abd7.6a674f93.01.01",
+      }),
+      row("sndk-fo4", "2026-07-27T14:04:00Z", {
+        ticker: "SNDK", action: "BUY_OPTION", structure: "Long Call $1300 2026-07-31",
+        contracts: 1, fill_price: 75.82, right: "C", strike: 1300, expiry: "20260731",
+        total_cost: 7_582.70, commission: 0.70, ib_exec_id: "0002abd7.6a674f95.01.01",
+      }),
+    ];
+    const fillClose = row("sndk-fc", "2026-07-30T15:00:00Z", {
+      ticker: "SNDK",
+      action: "SELL_OPTION",
+      structure: "Closed Call $1300 2026-07-31",
+      contracts: 10,
+      fill_price: 22.32,
+      right: "C",
+      strike: 1300,
+      expiry: "20260731",
+      total_cost: 22_327.47,
+      commission: 7.47,
+      ib_exec_id: "0002abd7.6a6b3937.01.01",
+    });
+
+    const summary = computeRealizedPnl(
+      [flexOpen, ...fillOpens, fillClose],
+      { from: "2026-07-01", to: "2026-07-31" },
+    );
+
+    // Exactly one trip: the traded close. No synthetic expiry twin.
+    expect(summary.count).toBe(1);
+    const trip = summary.round_trips[0];
+    expect(trip.closed).toBe("2026-07-30");
+    expect(trip.qty).toBe(10);
+    expect(trip.structure ?? "").not.toMatch(/expir/i);
+    // Basis from flex open (authoritative), proceeds from close.
+    expect(trip.basis).toBeCloseTo(77_999.07, 0);
+    expect(trip.proceeds).toBeCloseTo(22_327.47, 0);
+    expect(trip.realized_pnl).toBeCloseTo(22_327.47 - 77_999.07, 0);
+    expect(summary.round_trips.some((t) => t.closed === "2026-07-31")).toBe(false);
+  });
 });
 
 describe("cross-family commission sign conventions (live 2026-07-24 regression)", () => {

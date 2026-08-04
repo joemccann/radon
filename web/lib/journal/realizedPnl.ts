@@ -23,11 +23,18 @@
  * a date window can filter on close day. Do not unify them — fromJournal
  * drives a production surface (surgical-change rule wins over
  * say-it-once here).
+ *
+ * Residual option inventory after the fill walk (no opposite fill, no Flex
+ * CLOSED row) is treated as a worthless expiry at $0 on the contract's
+ * expiry date when that date is on or before the report as-of day (`opts.to`).
+ * IB rarely writes a trade for OTM lapse; without this, monthly realized P&L
+ * misses full debit losses (long) and credit kept (short) — e.g. KWEB Jul-17.
  */
 
 import {
   compactExpiry,
   contractGroupKey,
+  normalizeUnderlyingTicker,
   type JournalRow,
   type JournalTradePayload,
 } from "@/lib/blotter/fromJournal";
@@ -69,7 +76,7 @@ export function round2(n: number): number {
 }
 
 function resolveTickerUpper(p: JournalTradePayload): string {
-  return (p.ticker || p.symbol || "").toString().toUpperCase();
+  return normalizeUnderlyingTicker((p.ticker || p.symbol || "").toString()).toUpperCase();
 }
 
 function quantityOf(p: JournalTradePayload): number {
@@ -178,17 +185,93 @@ type CloseEvent = {
   proceeds: number;
   realized: number;
   openDays: string[];
+  /** True when this close is a synthetic $0 lapse (no IB fill). */
+  expiredWorthless?: true;
+};
+
+type InventoryState = {
+  events: CloseEvent[];
+  /** Signed residual contracts after the fill walk (+ long, − short). */
+  residualQty: number;
+  /** VWAP cash magnitude per residual contract. */
+  residualAvgBasis: number;
+  residualOpenDays: string[];
 };
 
 function execSide(action: string): "BUY" | "SELL" | null {
   const a = (action || "").toUpperCase();
-  if (a === "BUY" || a === "BUY_OPTION" || a === "BUY_TO_CLOSE") return "BUY";
-  if (a === "SELL" || a === "SELL_TO_OPEN" || a === "SELL_OPTION") return "SELL";
+  if (a === "BUY" || a === "BUY_OPTION" || a === "BUY_TO_OPEN" || a === "BUY_TO_CLOSE") {
+    return "BUY";
+  }
+  if (a === "SELL" || a === "SELL_TO_OPEN" || a === "SELL_TO_CLOSE" || a === "SELL_OPTION") {
+    return "SELL";
+  }
   return null;
+}
+
+/** Contract expiry as ET YYYY-MM-DD, or null if missing/unparseable. */
+export function expiryToEtDay(expiry: unknown): string | null {
+  const compact = compactExpiry(expiry as string);
+  if (!/^\d{8}$/.test(compact)) return null;
+  return `${compact.slice(0, 4)}-${compact.slice(4, 6)}-${compact.slice(6, 8)}`;
 }
 
 function effectiveWhen(row: RealizedJournalRow): string {
   return (row.filled_at || row.payload.filled_at || row.payload.date || "").toString();
+}
+
+/**
+ * When Flex rehydrate and the realtime daemon both record the same open (or
+ * same-side activity) on one ET day, composite exec ids often do NOT match
+ * daemon ids (`9946…+9946…` vs `0002abd7.…`). Constituent-based dedup then
+ * keeps both, inventory doubles, a full close leaves a phantom residual, and
+ * worthless-expiry synthesis double-counts (SNDK $1300C Jul-2026).
+ *
+ * Prefer flex_agg for any (ET day, side) that has a flex row; drop fill-family
+ * rows on that day+side. Fill-only closes (no flex twin) still flow through.
+ */
+export function preferFlexOverFillSameDaySide(rows: RealizedJournalRow[]): {
+  rows: RealizedJournalRow[];
+  droppedFillSameDay: number;
+} {
+  const flexDaySide = new Set<string>();
+  for (const row of rows) {
+    const p = row.payload;
+    if (!p || typeof p !== "object") continue;
+    if (classifyRowFamily(p) !== "flex_agg") continue;
+    const day = toEtDay(effectiveWhen(row));
+    if (!day) continue;
+    const action = (p.action ?? "").toString().toUpperCase();
+    if (action === "CLOSED") {
+      flexDaySide.add(`${day}|CLOSED`);
+      continue;
+    }
+    const side = execSide(action);
+    if (side) flexDaySide.add(`${day}|${side}`);
+  }
+
+  if (flexDaySide.size === 0) return { rows, droppedFillSameDay: 0 };
+
+  const out: RealizedJournalRow[] = [];
+  let droppedFillSameDay = 0;
+  for (const row of rows) {
+    const p = row.payload;
+    if (!p || typeof p !== "object") continue;
+    if (classifyRowFamily(p) === "flex_agg") {
+      out.push(row);
+      continue;
+    }
+    const day = toEtDay(effectiveWhen(row));
+    const action = (p.action ?? "").toString().toUpperCase();
+    const side = execSide(action);
+    const key = day && side ? `${day}|${side}` : "";
+    if (key && flexDaySide.has(key)) {
+      droppedFillSameDay += 1;
+      continue;
+    }
+    out.push(row);
+  }
+  return { rows: out, droppedFillSameDay };
 }
 
 /**
@@ -216,9 +299,10 @@ function execCashValue(p: JournalTradePayload, side: "BUY" | "SELL", qty: number
  * Running-VWAP inventory walk (long and short directions), commissions
  * folded into open/close values exactly as fromJournal's inventoryPnl does.
  * Emits one CloseEvent per closing exec, carrying the ET days of the opens
- * consumed so cross-window opens are attributable.
+ * consumed so cross-window opens are attributable. Residual inventory is
+ * returned for worthless-expiry synthesis.
  */
-function matchInventory(execs: MatchExec[]): CloseEvent[] {
+function matchInventory(execs: MatchExec[]): InventoryState {
   const events: CloseEvent[] = [];
   let positionQty = 0;
   let avgBasis = 0;
@@ -270,15 +354,69 @@ function matchInventory(execs: MatchExec[]): CloseEvent[] {
       openDays = [e.day];
     }
   }
-  return events;
+  return {
+    events,
+    residualQty: positionQty,
+    residualAvgBasis: avgBasis,
+    residualOpenDays: openDays,
+  };
 }
 
-function closeEventsForGroup(rows: RealizedJournalRow[]): CloseEvent[] {
+/**
+ * Residual option inventory with expiry on or before `asOfDay` lapses at $0.
+ * Long: realized = −basis (full debit loss). Short: realized = +basis (credit kept).
+ * Stocks and unexpired options return null.
+ */
+export function synthesizeWorthlessExpiry(
+  state: Pick<InventoryState, "residualQty" | "residualAvgBasis" | "residualOpenDays">,
+  rep: JournalTradePayload,
+  asOfDay: string,
+): CloseEvent | null {
+  if (Math.abs(state.residualQty) < 1e-9) return null;
+  // Options only — stocks have no expiry.
+  const isOption =
+    rep.contracts != null
+    || rep.right != null
+    || rep.strike != null
+    || (typeof rep.expiry === "string" && rep.expiry.length > 0);
+  if (!isOption) return null;
+  // Shares-only stock rows sometimes carry stray expiry; require option qty field.
+  if (rep.contracts == null && rep.shares != null && rep.right == null && rep.strike == null) {
+    return null;
+  }
+
+  const expDay = expiryToEtDay(rep.expiry);
+  if (!expDay) return null;
+  if (expDay > asOfDay) return null;
+
+  const qty = Math.abs(state.residualQty);
+  const basis = state.residualAvgBasis * qty;
+  const proceeds = 0;
+  // Mirror matchInventory close sign: long (pos>0) → closeValue − basis; short → basis − closeValue.
+  const realized = state.residualQty > 0 ? proceeds - basis : basis - proceeds;
+  return {
+    day: expDay,
+    qty,
+    basis,
+    proceeds,
+    realized,
+    openDays: state.residualOpenDays.length > 0 ? [...state.residualOpenDays] : [expDay],
+    expiredWorthless: true,
+  };
+}
+
+function closeEventsForGroup(rows: RealizedJournalRow[], asOfDay: string): CloseEvent[] {
   const events: CloseEvent[] = [];
   const execs: MatchExec[] = [];
+  let rep: JournalTradePayload | null = null;
 
-  for (const row of rows) {
+  // Collapse flex+daemon same-day opens before the inventory walk so residual
+  // expiry cannot double-count a fully closed book (SNDK $1300C).
+  const { rows: inventoryRows } = preferFlexOverFillSameDaySide(rows);
+
+  for (const row of inventoryRows) {
     const p = row.payload;
+    if (!rep) rep = p;
     const whenRaw = effectiveWhen(row);
     const day = toEtDay(whenRaw) ?? "";
     if (!day) continue;
@@ -310,7 +448,17 @@ function closeEventsForGroup(rows: RealizedJournalRow[]): CloseEvent[] {
     });
   }
 
-  events.push(...matchInventory(execs));
+  const inventory = matchInventory(execs);
+  events.push(...inventory.events);
+
+  // Always synthesize residual OPT inventory at expiry (as-of opts.to). CLOSED
+  // pass-throughs do not clear the fill inventory; skipping expiry when any
+  // CLOSED exists would drop true residual lapses (KWEB long after cover flip).
+  if (rep) {
+    const expired = synthesizeWorthlessExpiry(inventory, rep, asOfDay);
+    if (expired) events.push(expired);
+  }
+
   return events;
 }
 
@@ -343,6 +491,7 @@ function mergeEventsByCloseDay(
   for (const [day, dayEvents] of byDay) {
     const openDays = dayEvents.flatMap((e) => e.openDays).filter(Boolean);
     const opened = openDays.length ? openDays.reduce((a, b) => (a < b ? a : b)) : day;
+    const expiredWorthless = dayEvents.some((e) => e.expiredWorthless);
     const trip: RealizedRoundTrip = {
       ticker: resolveTickerUpper(rep),
       desc: contractDescFromKey(key, rep),
@@ -353,7 +502,15 @@ function mergeEventsByCloseDay(
       proceeds: round2(dayEvents.reduce((s, e) => s + e.proceeds, 0)),
       realized_pnl: round2(dayEvents.reduce((s, e) => s + e.realized, 0)),
     };
-    if (typeof rep.structure === "string" && rep.structure) trip.structure = rep.structure;
+    if (expiredWorthless) {
+      const base =
+        typeof rep.structure === "string" && rep.structure
+          ? rep.structure
+          : contractDescFromKey(key, rep);
+      trip.structure = `${base} (expired worthless)`;
+    } else if (typeof rep.structure === "string" && rep.structure) {
+      trip.structure = rep.structure;
+    }
     if (opened < from) trip.open_outside_window = true;
     out.push(trip);
   }
@@ -387,7 +544,9 @@ export function computeRealizedPnl(
 
   const roundTrips: RealizedRoundTrip[] = [];
   for (const [key, group] of groups) {
-    const events = closeEventsForGroup(group.rows);
+    // As-of for expiry synthesis is the window end: unexpired residual after
+    // `to` stays open (e.g. partial short cover with later expiry).
+    const events = closeEventsForGroup(group.rows, opts.to);
     roundTrips.push(...mergeEventsByCloseDay(events, key, group.rep, opts.from));
   }
 
@@ -404,6 +563,8 @@ export function computeRealizedPnl(
     total_realized_pnl: round2(inWindow.reduce((s, t) => s + t.realized_pnl, 0)),
     count: inWindow.length,
     round_trips: inWindow,
-    note: "Net of commissions; deduped across flex_agg/fill row families.",
+    note:
+      "Net of commissions; deduped across flex_agg/fill row families; "
+      + "residual options expired at $0 on expiry date.",
   };
 }
