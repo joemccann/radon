@@ -101,8 +101,19 @@ export interface BlotterPayload {
 
 const OPT_SEC_TYPES = new Set(["OPT", "BAG"]);
 
+/**
+ * Collapse IB OCC local symbols stored as ticker ("KWEB  260717C00031000")
+ * to the underlying root so flex_agg and daemon fills share one inventory.
+ */
+export function normalizeUnderlyingTicker(raw: string): string {
+  const t = raw.trim();
+  const occ = t.match(/^([A-Za-z][A-Za-z0-9.]{0,5})\s{2,}\d/);
+  if (occ) return occ[1].toUpperCase();
+  return t;
+}
+
 function resolveTicker(p: JournalTradePayload): string {
-  return (p.ticker || p.symbol || "").toString();
+  return normalizeUnderlyingTicker((p.ticker || p.symbol || "").toString());
 }
 
 function resolveSecType(p: JournalTradePayload): string {
