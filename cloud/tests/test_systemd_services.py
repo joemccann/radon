@@ -54,6 +54,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-host-metrics.timer",
     "radon-ib-watchdog.service",
     "radon-ib-watchdog.timer",
+    "radon-incident-watchdog.service",
+    "radon-incident-watchdog.timer",
     "radon-leap.service",
     "radon-leap.timer",
     "radon-llm-index.service",
@@ -625,3 +627,28 @@ class TestBpiScanBudget:
         raw = (services_dir / "radon-bpi.timer").read_text()
         assert "Mon..Fri" in raw and "21:30:00 UTC" in raw
         assert "Tue..Sat" in raw and "11:00:00 UTC" in raw
+
+
+class TestIncidentWatchdog:
+    """Endpoint/body/deploy prober writing data/incidents artifacts.
+
+    Alert/restart policy stays with scripts/watchdog and the tier-3 external
+    probe — this unit only collects evidence, so an open P1 (exit 2) must not
+    park it as failed on every 5-minute cycle."""
+
+    def test_oneshot_with_timeout_and_env(self, unit):
+        svc = unit("radon-incident-watchdog.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert int(svc["timeoutstartsec"]) <= 240
+        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert svc["workingdirectory"] == "/home/radon/radon"
+        assert "scripts.incident_watchdog --once" in svc["execstart"]
+
+    def test_open_p1_exit_code_is_success(self, unit):
+        svc = unit("radon-incident-watchdog.service")["Service"]
+        assert svc["successexitstatus"] == "2"
+
+    def test_timer_every_five_minutes(self, unit):
+        timer = unit("radon-incident-watchdog.timer")["Timer"]
+        assert timer["oncalendar"].endswith("*:00,05,10,15,20,25,30,35,40,45,50,55")
+        assert timer["persistent"] == "false"
