@@ -1,0 +1,31 @@
+[Unit]
+Description=Radon incident watchdog (endpoint/body/deploy prober -> data/incidents JSON artifacts)
+After=network.target
+
+# DUR-02: brake crash loops — after StartLimitBurst starts inside
+# StartLimitIntervalSec, systemd parks the unit as failed instead of
+# restarting forever. The unit watchdog (scripts/watchdog/units.py,
+# continuous bucket) alerts on failed/start-limit-hit.
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+# Probes are individually bounded (6s HTTP, 12s subprocess); a clean cycle is
+# a few seconds. Type=oneshot has NO default start timeout and cannot overlap,
+# so an unbounded hang would permanently stall the timer.
+TimeoutStartSec=120
+# Exit 2 = "a P1 incident is open" — that is evidence written to
+# data/incidents/, not a malfunction of this prober. Paging for the underlying
+# conditions stays with scripts/watchdog and the tier-3 external probe, so a
+# standing P1 must not park this unit as failed on every 5-minute cycle.
+SuccessExitStatus=2
+ExecStart=/home/radon/radon/.venv/bin/python -m scripts.incident_watchdog --once
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

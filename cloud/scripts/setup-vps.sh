@@ -58,6 +58,8 @@ readonly SERVICE_FILES=(
   radon-watchdog-error.timer
   radon-ib-watchdog.service
   radon-ib-watchdog.timer
+  radon-incident-watchdog.service
+  radon-incident-watchdog.timer
   radon-llm-index.service
   radon-llm-index.timer
   radon-leap.service

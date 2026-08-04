@@ -1,0 +1,11 @@
+[Unit]
+Description=Radon incident watchdog timer — every 5m, 24/7
+
+[Timer]
+# The prober is market-state aware through /api/probe/freshness (all_fresh is
+# null off-hours), so a 24/7 cadence produces no weekend false positives.
+OnCalendar=*-*-* *:00,05,10,15,20,25,30,35,40,45,50,55
+Persistent=false
+
+[Install]
+WantedBy=timers.target
