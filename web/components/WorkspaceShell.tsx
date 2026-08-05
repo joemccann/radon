@@ -205,6 +205,8 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           { symbol: "VIX", exchange: "CBOE" },
           { symbol: "VVIX", exchange: "CBOE" },
           { symbol: "COR1M", exchange: "CBOE" },
+          // STRADDLE tab's LIVE cell: intraday SPX spot vs the latest close.
+          { symbol: "SPX", exchange: "CBOE" },
         ]
       : [],
     [activeSection],

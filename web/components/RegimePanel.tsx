@@ -388,7 +388,7 @@ export default function RegimePanel({
     return (
       <div className="regime-panel">
         {tabBar}
-        <StraddlePanel />
+        <StraddlePanel prices={prices} marketOpen={marketOpen} />
       </div>
     );
   }
