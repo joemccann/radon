@@ -106,14 +106,33 @@ FASTAPI_HOST="${RADON_PORTFOLIO_REFRESH_FASTAPI_HOST:-127.0.0.1}"
 FASTAPI_PORT="${RADON_PORTFOLIO_REFRESH_FASTAPI_PORT:-8321}"
 FASTAPI_URL="http://${FASTAPI_HOST}:${FASTAPI_PORT}/portfolio/sync"
 
+# A deploy restarts radon-api, and this every-minute timer can land its
+# POST inside the seconds-wide restart gap: curl exits 7 (connection
+# refused) instantly, the oneshot fails, and the unit watchdog pages —
+# pure deploy collateral (2026-08-05 16:47:04Z and 20:45:02Z, both
+# matching radon-api restarts to the second). Retry connection-refused a
+# bounded number of times; a genuinely down FastAPI still fails after
+# the retries and alerts through radon-api.service itself.
+RETRY_LIMIT="${RADON_PORTFOLIO_REFRESH_RETRIES:-2}"
+RETRY_DELAY="${RADON_PORTFOLIO_REFRESH_RETRY_DELAY_SECS:-8}"
+
 echo "$(date): POST ${FASTAPI_URL}"
-HTTP_CODE=$(curl -fsS -X POST -m 35 -o /dev/null -w "%{http_code}" \
-    "${FASTAPI_URL}" 2>/tmp/portfolio-refresh.curl.err)
-CURL_EXIT=$?
-if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
-    echo "$(date): Portfolio refresh via FastAPI complete (OK)"
-    exit 0
-fi
+attempt=0
+while :; do
+    HTTP_CODE=$(curl -fsS -X POST -m 35 -o /dev/null -w "%{http_code}" \
+        "${FASTAPI_URL}" 2>/tmp/portfolio-refresh.curl.err)
+    CURL_EXIT=$?
+    if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
+        echo "$(date): Portfolio refresh via FastAPI complete (OK)"
+        exit 0
+    fi
+    if [ "$CURL_EXIT" -ne 7 ] || [ "$attempt" -ge "$RETRY_LIMIT" ]; then
+        break
+    fi
+    attempt=$((attempt + 1))
+    echo "$(date): FastAPI connection refused — retry ${attempt}/${RETRY_LIMIT} in ${RETRY_DELAY}s (deploy restart window?)"
+    sleep "$RETRY_DELAY"
+done
 
 EXIT_CODE="$CURL_EXIT"
 [ "$EXIT_CODE" -ne 0 ] || EXIT_CODE=22
