@@ -124,6 +124,9 @@ class ThetaCandidate:
     setup: str
     gates: Dict[str, bool]
     errors: List[str]
+    # Earnings risk surface only (v1): never gates verdict/score.
+    # null | {report_date, report_time, days_until, within_dte, source, expected_move_pct}
+    earnings: Optional[Dict[str, Any]] = None
 
 
 def _to_float(value: Any) -> Optional[float]:
@@ -594,6 +597,61 @@ def resolve_tickers(tickers: Sequence[str], preset: Optional[str]) -> Tuple[List
     return [], f"preset:{preset_name}"
 
 
+def _slim_earnings_field(payload: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Map earnings_dates.annotate payload to the Theta candidate earnings field.
+
+    Missing / unknown → None. Do not include ticker/dte/missing bookkeeping keys.
+    """
+    if not payload or payload.get("missing") or payload.get("report_date") is None:
+        return None
+    return {
+        "report_date": payload.get("report_date"),
+        "report_time": payload.get("report_time"),
+        "days_until": payload.get("days_until"),
+        "within_dte": payload.get("within_dte"),
+        "source": payload.get("source"),
+        "expected_move_pct": payload.get("expected_move_pct"),
+    }
+
+
+def annotate_candidates_with_earnings(
+    candidates: List[ThetaCandidate],
+    client: Any,
+    now: Optional[datetime] = None,
+) -> List[ThetaCandidate]:
+    """Attach earnings risk fields via batch_annotate. Never drops a candidate.
+
+    Uses structure.dte for within_dte. Failures → earnings=None (+ optional
+    error note). Does not alter score/verdict/gates.
+    """
+    if not candidates:
+        return candidates
+    try:
+        import earnings_dates as ed
+    except Exception as exc:  # pragma: no cover - import path always present in-repo
+        for candidate in candidates:
+            candidate.earnings = None
+            candidate.errors.append(f"earnings:{exc}")
+        return candidates
+
+    items = [{"ticker": c.ticker, "dte": c.structure.dte} for c in candidates]
+    try:
+        payloads = ed.batch_annotate(client, items, now=now, cache=False)
+    except Exception as exc:  # noqa: BLE001 — surface risk only; keep candidates
+        for candidate in candidates:
+            candidate.earnings = None
+            candidate.errors.append(f"earnings:{exc}")
+        return candidates
+
+    for candidate, payload in zip(candidates, payloads):
+        try:
+            candidate.earnings = _slim_earnings_field(payload if isinstance(payload, dict) else {})
+        except Exception as exc:  # noqa: BLE001
+            candidate.earnings = None
+            candidate.errors.append(f"earnings:{exc}")
+    return candidates
+
+
 def build_output(
     results: List[ThetaCandidate],
     source: str,
@@ -654,6 +712,20 @@ def scan_universe(
                 continue
             print(f"  [{idx}/{len(resolved)}] {ticker} - {row.verdict} ({row.score:.1f})", file=sys.stderr)
             results.append(row)
+
+    # Earnings annotation is a post-process batch (one UW call per ticker) so
+    # failures never drop a theta candidate and we avoid N serial calls inline.
+    if results:
+        client_kwargs = {} if retry_transient else {"max_retries": 0, "backoff_factor": 0}
+        try:
+            with UWClient(**client_kwargs) as earnings_client:
+                annotate_candidates_with_earnings(results, earnings_client)
+        except Exception as exc:  # noqa: BLE001 — surface risk only
+            print(f"  earnings annotation skipped ({exc})", file=sys.stderr)
+            for row in results:
+                if row.earnings is None and not any(e.startswith("earnings:") for e in row.errors):
+                    row.errors.append(f"earnings:{exc}")
+
     return build_output(
         results, source, len(resolved), requested_tickers=resolved,
         params={"min_dte": min_dte, "max_dte": max_dte, "min_credit": min_credit},

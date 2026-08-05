@@ -6,8 +6,8 @@ import React from "react";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import ThetaHarvesterScanner from "../components/ThetaHarvesterScanner";
-import type { ThetaHarvesterData } from "../lib/types";
+import ThetaHarvesterScanner, { formatThetaEarningsLabel } from "../components/ThetaHarvesterScanner";
+import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterResult } from "../lib/types";
 
 const pushMock = vi.fn();
 
@@ -205,6 +205,7 @@ describe("ThetaHarvesterScanner", () => {
       ["range", "Range-bound score"],
       ["dte", "Days to expiration"],
       ["credit", "Estimated entry credit"],
+      ["earnings", "Next earnings date if it falls inside"],
       ["status", "Final verdict"],
     ] as const;
 
@@ -237,5 +238,109 @@ describe("ThetaHarvesterScanner", () => {
 
     expect(screen.getByText("No theta harvest candidates")).toBeTruthy();
     expect(screen.getByText("No neutral short-premium setups are measured in the latest scan.")).toBeTruthy();
+  });
+
+  it("formats earnings labels for null, same-day, and future sessions", () => {
+    expect(formatThetaEarningsLabel(null)).toBe("---");
+    expect(formatThetaEarningsLabel(undefined)).toBe("---");
+    expect(formatThetaEarningsLabel({
+      report_date: "2026-08-05",
+      report_time: "postmarket",
+      days_until: 0,
+      within_dte: true,
+    })).toBe("TODAY AMC");
+    expect(formatThetaEarningsLabel({
+      report_date: "2026-08-05",
+      report_time: "premarket",
+      days_until: 0,
+      within_dte: true,
+    })).toBe("TODAY BMO");
+    expect(formatThetaEarningsLabel({
+      report_date: "2026-08-05",
+      report_time: "postmarket",
+      days_until: 3,
+      within_dte: true,
+    })).toBe("Aug 5 AMC");
+    expect(formatThetaEarningsLabel({
+      report_date: "2026-11-04",
+      report_time: "premarket",
+      days_until: 91,
+      within_dte: false,
+    })).toBe("Nov 4 BMO");
+    expect(formatThetaEarningsLabel({
+      report_date: "2026-09-12",
+      report_time: "unknown",
+      days_until: 10,
+      within_dte: true,
+    })).toBe("Sep 12 TBD");
+  });
+
+  it("renders earnings column with --- when missing and warn pill when within_dte", () => {
+    const withinDte: ThetaHarvesterEarnings = {
+      report_date: "2026-08-05",
+      report_time: "postmarket",
+      days_until: 0,
+      within_dte: true,
+      source: "company",
+      expected_move_pct: 8.76,
+    };
+    const outsideDte: ThetaHarvesterEarnings = {
+      report_date: "2026-11-04",
+      report_time: "premarket",
+      days_until: 91,
+      within_dte: false,
+    };
+    const multi: ThetaHarvesterData = {
+      ...data,
+      tickers_scanned: 3,
+      candidates_found: 3,
+      results: [
+        { ...data.results[0], ticker: "HONA", earnings: withinDte },
+        { ...data.results[0], ticker: "MSFT", earnings: outsideDte },
+        { ...data.results[0], ticker: "ZZZZ", earnings: null },
+      ],
+    };
+
+    render(<ThetaHarvesterScanner data={multi} />);
+
+    const cells = screen.getAllByTestId("theta-earnings-cell");
+    // Desktop table + mobile card for each of 3 rows.
+    expect(cells.length).toBe(6);
+
+    const todayAmc = cells.filter((el) => el.textContent === "TODAY AMC");
+    expect(todayAmc.length).toBe(2);
+    for (const el of todayAmc) {
+      expect(el.className).toContain("theta-pill--warn");
+      expect(el.getAttribute("data-within-dte")).toBe("true");
+    }
+
+    const novBmo = cells.filter((el) => el.textContent === "Nov 4 BMO");
+    expect(novBmo.length).toBe(2);
+    for (const el of novBmo) {
+      expect(el.className).not.toContain("theta-pill--warn");
+      expect(el.getAttribute("data-within-dte")).toBe("false");
+    }
+
+    const missing = cells.filter((el) => el.textContent === "---");
+    expect(missing.length).toBe(2);
+
+    const earningsTrigger = screen.getByTestId("theta-harvester-tooltip-earnings");
+    fireEvent.mouseEnter(earningsTrigger);
+    expect(screen.getByTestId("theta-harvester-tooltip-content-earnings").textContent).toContain(
+      "Next earnings date if it falls inside the short-strangle DTE window",
+    );
+    expect(screen.getByTestId("theta-harvester-tooltip-content-earnings").textContent).toContain("AMC=after close");
+    fireEvent.mouseLeave(earningsTrigger);
+
+    const mobileList = screen.getByTestId("theta-harvester-mobile-list");
+    expect(within(mobileList).getAllByTestId("theta-earnings-mobile").length).toBe(3);
+  });
+
+  it("omitted earnings field displays as ---", () => {
+    const row = { ...data.results[0] } as ThetaHarvesterResult;
+    delete row.earnings;
+    render(<ThetaHarvesterScanner data={{ ...data, results: [row] }} />);
+    const cells = screen.getAllByTestId("theta-earnings-cell");
+    expect(cells.every((el) => el.textContent === "---")).toBe(true);
   });
 });

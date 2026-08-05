@@ -1,3 +1,114 @@
+# Task: Standalone earnings date service + Theta Harvester (2026-08-05)
+
+## Goal
+
+Standalone earnings-date service (reusable across scanners) that answers: for ticker T and structure DTE D, is there an upcoming earnings release within the window, and if so what date/session? Wire into Theta Harvester first (HONA reports today AMC).
+
+## Dependency graph
+
+- T1 depends_on: [] — Standalone `scripts/earnings_dates.py` library + CLI: next earnings from UW `get_earnings_by_ticker`, `within_dte`, report_time, days_until. Red/green pytest.
+- T2 depends_on: [T1] — FastAPI `/earnings/{ticker}` (+ optional batch) via existing subprocess/cache pattern; thin, not scanner-owned.
+- T3 depends_on: [T1] — Annotate Theta Harvester results with earnings fields; attach during scan or post-process.
+- T4 depends_on: [T3] — Web types + Theta Harvester UI column/badge (date, session, within-DTE warning).
+- T5 depends_on: [T2, T3, T4] — Focused tests green + full relevant suites; document review.
+
+## Contract (source of truth)
+
+UW `UWClient.get_earnings_by_ticker(ticker)` returns history + upcoming; pick earliest `report_date >= ET today` (or still-pending same-day if `actual_eps` null).
+
+Per-ticker payload:
+
+```json
+{
+  "ticker": "HONA",
+  "report_date": "2026-08-05",
+  "report_time": "postmarket",
+  "days_until": 0,
+  "source": "company",
+  "expected_move_pct": 8.76,
+  "within_dte": true,
+  "dte": 16,
+  "missing": false
+}
+```
+
+`within_dte = report_date is not null and 0 <= days_until <= dte` when dte provided.
+
+Theta result fields (optional, null when unknown):
+- `earnings: { report_date, report_time, days_until, within_dte, source, expected_move_pct } | null`
+
+## Checklist
+
+- [x] T1 earnings_dates service + pytest
+- [x] T2 FastAPI route (`GET /earnings/{ticker}`, `GET /earnings?tickers=`; tests in `scripts/api/tests/test_earnings_route.py`)
+- [x] T3 Theta scanner annotation (`annotate_candidates_with_earnings` + batch post-process in `scan_universe`; earnings field on `ThetaCandidate`; tests in `test_theta_harvester_scanner.py`)
+- [x] T4 Web UI + types + vitest (`ThetaHarvesterEarnings` type; Earnings column + mobile line; `formatThetaEarningsLabel`; warn pill when `within_dte`; tests in `web/tests/theta-harvester-scanner.test.tsx`)
+- [x] T5 Verify + review
+
+## Notes
+
+- Existing `fetch_catalysts.py` is **today's calendar only** (premarket/afterhours lists). Not sufficient for forward DTE windows.
+- Data priority: UW only for this surface (no Yahoo unless UW fails and we document fallback later).
+- Do not gate/filter TRUE THETA verdict on earnings in v1 — surface risk only.
+
+## Workflow
+
+Implementation orchestrated via `.grok/workflows/earnings-date-service.rhai`.
+
+## Review (T5 — 2026-08-05)
+
+### File inventory
+
+| Surface | Path | Status |
+|---|---|---|
+| Earnings service | `/Users/joemccann/dev/apps/finance/radon/scripts/earnings_dates.py` | present |
+| Earnings pytest | `/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_earnings_dates.py` | present |
+| Theta scanner earnings field | `/Users/joemccann/dev/apps/finance/radon/scripts/theta_harvester_scanner.py` (`ThetaCandidate.earnings`, `annotate_candidates_with_earnings`, `_slim_earnings_field`) | present |
+| Theta scanner pytest | `/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_theta_harvester_scanner.py` | present |
+| Catalysts (calendar-only contrast) | `/Users/joemccann/dev/apps/finance/radon/scripts/tests/test_fetch_catalysts.py` | present |
+| FastAPI routes | `/Users/joemccann/dev/apps/finance/radon/scripts/api/server.py` (`GET /earnings/{ticker}`, `GET /earnings?tickers=`) | present |
+| FastAPI route tests | `/Users/joemccann/dev/apps/finance/radon/scripts/api/tests/test_earnings_route.py` | present |
+| Web types | `/Users/joemccann/dev/apps/finance/radon/web/lib/types.ts` (`ThetaHarvesterEarnings`) | present |
+| Web UI column | `/Users/joemccann/dev/apps/finance/radon/web/components/ThetaHarvesterScanner.tsx` (Earnings th/td + mobile EARN + warn pill) | present |
+| Web vitest | `/Users/joemccann/dev/apps/finance/radon/web/tests/theta-harvester-scanner.test.tsx`, `.../theta-harvester-route.test.ts` | present |
+
+### Test results
+
+| Suite | Command | Result |
+|---|---|---|
+| Pytest focused | `python3.13 -m pytest scripts/tests/test_earnings_dates.py scripts/tests/test_theta_harvester_scanner.py scripts/tests/test_fetch_catalysts.py -q` | **41 passed** in 0.27s |
+| FastAPI earnings (extra) | `python3.13 -m pytest scripts/api/tests/test_earnings_route.py -q` | **11 passed**, 1 deprecation warning in 0.51s |
+| Vitest theta | `cd web && npx vitest run tests/theta-harvester-scanner.test.tsx tests/theta-harvester-route.test.ts` | **2 files / 17 tests passed** in 2.24s |
+
+### Live smoke
+
+```text
+$ python3 scripts/earnings_dates.py HONA --dte 16 --json
+{
+  "ticker": "HONA",
+  "report_date": "2026-08-05",
+  "report_time": "postmarket",
+  "days_until": 0,
+  "source": "company",
+  "expected_move_pct": 8.824...,
+  "within_dte": true,
+  "dte": 16,
+  "missing": false
+}
+EXIT:0
+```
+
+Matches contract (today AMC / postmarket, `within_dte: true` for DTE 16). Network + UW auth OK.
+
+### Residual gaps
+
+- None for the T1–T5 scope: service, API, theta annotation, web column, and focused tests are green.
+- v1 intentionally does **not** gate TRUE THETA on earnings (surface risk only).
+- `fetch_catalysts` remains same-day calendar only; forward DTE window is owned by `earnings_dates`.
+- No commit/push per verification request.
+
+---
+
 # Task: CURVE tab freshness follow-up (2026-08-03, same session)
 
 ## Plan
