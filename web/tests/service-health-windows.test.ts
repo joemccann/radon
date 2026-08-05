@@ -409,6 +409,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     }
     expect(requiresIb("yield-curve")).toBe(false);
   });
+
+  // ``straddle`` — radon-straddle.timer fires daily 02:15 UTC every calendar
+  // day (Cboe appends the session row ~20:00 ET; weekend runs are 304
+  // heartbeats), so a uniform 26h window matches its margin-debt /
+  // yield-curve daily siblings. Cboe CDN CSVs only — no IB.
+  it("straddle is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["straddle"]).toBeDefined();
+    expect(getServiceCategory("straddle")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("straddle", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("straddle", state)).toBe(
+        getFreshnessWindowMs("margin-debt", state),
+      );
+    }
+    expect(requiresIb("straddle")).toBe(false);
+  });
 });
 
 describe("getServiceCategory", () => {
