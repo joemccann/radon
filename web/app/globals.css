@@ -6083,6 +6083,62 @@ tr.leg-row td {
   text-decoration: none;
 }
 
+/* Mobile: the inline label/value pairs wrap as prose on a phone. Grid the
+   three counters as stacked cells, give LAST SYNC its own quiet row, and
+   stretch the section jumps into a full-width 4-up row of 44px targets. */
+body[data-mobile="true"] .orders-command-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 8px;
+  padding: 10px 12px;
+}
+
+body[data-mobile="true"] .orders-command-strip__stat {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+body[data-mobile="true"] .orders-command-strip__value {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+body[data-mobile="true"] .orders-command-strip__stat:nth-child(4) {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  align-items: baseline;
+  gap: 6px;
+}
+
+body[data-mobile="true"] .orders-command-strip__stat:nth-child(4) .orders-command-strip__value {
+  font-size: 11px;
+  font-weight: 400;
+}
+
+body[data-mobile="true"] .orders-command-strip__jumps {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+  margin-left: 0;
+}
+
+body[data-mobile="true"] .orders-command-strip__jump {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px;
+  padding: 0 8px;
+  transition: color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+body[data-mobile="true"] .orders-command-strip__jump:active {
+  transform: scale(0.96);
+}
+
 .orders-command-strip__jump:hover,
 .orders-command-strip__jump:focus-visible {
   color: var(--signal-core-text);
@@ -16779,6 +16835,7 @@ body[data-mobile="true"] button {
 .m-sortbar::-webkit-scrollbar { display: none; }
 
 .m-chip {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -16796,12 +16853,60 @@ body[data-mobile="true"] button {
   border: 1px solid var(--line-grid);
   cursor: pointer;
   flex-shrink: 0;
-  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+/* Vertical-only tap-target extension to the 44px floor (36px visible + 4px
+   each side). Horizontal stays at the visible edge so adjacent chips in the
+   8px-gap rows never overlap hit areas. */
+.m-chip::before {
+  content: "";
+  position: absolute;
+  inset: -4px 0;
+}
+.m-chip:active {
+  transform: scale(0.96);
 }
 .m-chip--active {
   background: color-mix(in srgb, var(--signal-core) 12%, transparent);
   color: var(--signal-core-text);
   border-color: color-mix(in srgb, var(--signal-core) 32%, transparent);
+}
+
+/* ── Mobile order card: side token + status chip ── */
+
+.m-order-side {
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+.m-order-side--sell { color: var(--negative); }
+.m-order-side--buy { color: var(--positive); }
+
+.m-order-status {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--border-dim);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.m-order-status--warn {
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
+}
+.m-order-status--busy {
+  color: var(--text-muted);
+  border-style: dashed;
+}
+.m-order-status--muted {
+  color: var(--text-muted);
 }
 
 body[data-mobile="true"] .scanner-page-shell {
@@ -16935,9 +17040,11 @@ body[data-mobile="true"] .strength-card__head {
   border-radius: 4px;
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
-  transition: opacity 100ms ease, background 120ms ease;
+  transition: transform 120ms ease, background 120ms ease;
 }
-.m-card-press:active { opacity: 0.85; }
+/* Tactile press: scale, not an opacity flicker. 0.96 exactly - smaller reads
+   exaggerated. Interruptible by design (CSS transition, not keyframes). */
+.m-card-press:active { transform: scale(0.96); }
 
 .m-segment {
   display: flex;

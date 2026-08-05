@@ -180,6 +180,76 @@ describe("MobileOrderList display", () => {
     expect(card.className).toContain("mobile-card--negative");
   });
 
+  it("tones the side token on single-order cards (SELL negative, BUY positive)", () => {
+    const sell = makeOrder({ permId: 1001, action: "SELL" });
+    const buy = makeOrder({ permId: 1002, orderId: 2, action: "BUY" });
+    render(
+      <MobileOrderList
+        rows={[singleRow(sell), singleRow(buy)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={noop}
+      />,
+    );
+
+    const sides = screen.getAllByTestId("mobile-order-side");
+    expect(sides).toHaveLength(2);
+    expect(sides[0].textContent).toBe("SELL");
+    expect(sides[0].className).toContain("m-order-side--sell");
+    expect(sides[1].textContent).toBe("BUY");
+    expect(sides[1].className).toContain("m-order-side--buy");
+  });
+
+  it("combo cards keep the structure title without a side token", () => {
+    const legs = [
+      makeOrder({ permId: 10, action: "BUY" }),
+      makeOrder({ permId: 11, orderId: 2, action: "SELL" }),
+    ];
+    render(
+      <MobileOrderList
+        rows={[comboRow(legs)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={noop}
+      />,
+    );
+    const card = screen.getByTestId("mobile-order-combo-AAPL-1");
+    expect(card.textContent).toContain("Call Spread");
+    expect(screen.queryByTestId("mobile-order-side")).toBeNull();
+  });
+
+  it("renders status as a chip with a warning tone for partial fills", () => {
+    const order = makeOrder({ filled: 3, remaining: 7, totalQuantity: 10 });
+    render(
+      <MobileOrderList
+        rows={[singleRow(order)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={noop}
+      />,
+    );
+    const status = screen.getByTestId("mobile-order-status");
+    expect(status.textContent).toBe("Partial");
+    expect(status.className).toContain("m-order-status");
+    expect(status.className).toContain("m-order-status--warn");
+  });
+
+  it("renders a neutral status chip for working orders", () => {
+    const order = makeOrder({ filled: 0, remaining: 10, status: "Submitted" });
+    render(
+      <MobileOrderList
+        rows={[singleRow(order)]}
+        canModify={() => true}
+        onRequestCancel={noop}
+        onRequestModify={noop}
+      />,
+    );
+    const status = screen.getByTestId("mobile-order-status");
+    expect(status.textContent).toBe("Working");
+    expect(status.className).toContain("m-order-status");
+    expect(status.className).not.toContain("m-order-status--warn");
+  });
+
   it("action sheet shows summary content when card is clicked", () => {
     const order = makeOrder({
       filled: 3,

@@ -109,6 +109,20 @@ Matches contract (today AMC / postmarket, `within_dte: true` for DTE 16). Networ
 
 ---
 
+# Task: Mobile ORDERS view polish (/better-ui, 2026-08-05)
+
+## Plan
+- [x] M1 Red: 3 failing tests (side token classes, status chip + warn tone) in mobile-order-list-display.test.tsx
+- [x] M2 Green: MobileOrderList side token (SELL --negative / BUY --positive), StatusChip reusing mapOrderStatus tone (partial=warn, pending=busy, inactive=muted); 44/44 focused + tsc clean
+- [x] M3 CSS: m-card-press + m-chip scale(0.96) press (specific transition props), m-chip ::before vertical 44px tap extension, mobile command-strip grid (3 stacked counters, LAST SYNC row, 4-up 44px jumps)
+- [x] M4 Evidence: mobile Playwright light+dark screenshots (scratchpad mobile-orders-{light,dark}.png); mobile-orders.spec.ts regression 5/5
+- [ ] M5 Full mobile e2e project + full vitest → commit → push → CI → phone verify
+
+## Review
+(pending)
+
+---
+
 # Task: CURVE tab freshness follow-up (2026-08-03, same session)
 
 ## Plan
@@ -1436,3 +1450,22 @@ tsc clean
 
 - User explicitly authorized the service restart because an expected IBKR 2FA push is absent. The initial `/usr/local/bin/radon restart` attempt fail-closed with `inherited deploy-lock proof is invalid` before mutating the gateway. The safe fallback invoked the same authoritative, lock-aware gateway controller directly, then restarted the persistent production services, `radon-health`, and 25 active timers.
 - Verification at 2026-07-21 00:25Z: a fresh 2FA lease was acquired and IBC logged `Second Factor Authentication initiated` at 00:25:06Z. The Gateway container reached `healthy`; FastAPI correctly reports `auth_state=awaiting_2fa`, `service_state=reachable`, and `port_listening=true`. API, Next.js, relay, monitor, newsfeed, health, and gateway units are active. Aggregate status remains `down` only until the IBKR 2FA approval completes. VPS evidence cannot prove delivery to the phone.
+
+# Task: STRADDLE indicator — SPX realized vs implied 1-day straddle (2026-08-05)
+
+Per /indicator swarm (spec: docs/indicators/straddle.md). Slug/service `straddle`, tab STRADDLE, migration 0033. Source: Cboe CDN SPX_History.csv + VIX1D_History.csv (304-verified, fixtures captured). VIX1D limits backfill to 2022-05-13 — reference chart's 2016 start not reproducible.
+
+## Checklist
+
+- [x] Step 1 research: sources confirmed, fixtures saved, licensing OK (internal display only)
+- [x] Step 2 spec + red tests (pytest ModuleNotFoundError; vitest 5 failed on missing modules)
+- [x] Step 3 parallel implementers green (ingestion 17+718 pytest / api 105 vitest / ui 57 vitest)
+- [x] Step 4 merge + full gates green (4769 pytest, 718 cloud, 4788 vitest/502 files, tsc clean)
+- [x] Step 5 live verify: migration 0033 applied, 1059 rows + snapshot + ok heartbeat in Turso, e2e 3/3, live page +3.78 with no NaN paths, screenshots docs/indicators/straddle-tab{,-light}.png (merge worktree)
+- [x] Step 6 shipped: merge a24de1fa pushed, CI 31037384896 green + deployed; radon-straddle.timer installed/enabled (next 02:19 UTC), triggered once on VPS (heartbeat 19:06:27Z in Turso); anon prod API 401 = perimeter working; my 4 worktrees + ind/* branches removed
+
+## Review
+
+- Signal = signed SPX close-to-close move / prior-close implied 1-day straddle (0.798 x VIX1D x sqrt(1/252)). Series 2022-05-13+ (VIX1D inception caps backfill; reference chart's 2016 start not reproducible). Full-series stats: avg 0.063, pstdev 1.157, high +3.78, low -4.97, breakeven hit rate 36.8%.
+- Evidence chain: red (ModuleNotFoundError / 5 vitest fails) -> per-worktree green -> merge gates 4769 pytest + 718 cloud + 4788 vitest + tsc clean -> 1059 rows + snapshot + ok heartbeat in prod Turso -> Playwright e2e 3/3 -> live page screenshot docs/indicators/straddle-tab{,-light}.png -> CI green -> VPS timer run green.
+- Outstanding: authenticated app.radon.run/regime/straddle browser screenshot needs the operator (Chrome extension not connected in this remote session; Clerk MFA sign-in is operator-only).
