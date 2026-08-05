@@ -248,34 +248,34 @@ describe("ThetaHarvesterScanner", () => {
       report_time: "postmarket",
       days_until: 0,
       within_dte: true,
-    })).toBe("TODAY AMC");
+    })).toBe("TODAY · AMC");
     expect(formatThetaEarningsLabel({
       report_date: "2026-08-05",
       report_time: "premarket",
       days_until: 0,
       within_dte: true,
-    })).toBe("TODAY BMO");
+    })).toBe("TODAY · BMO");
     expect(formatThetaEarningsLabel({
       report_date: "2026-08-05",
       report_time: "postmarket",
       days_until: 3,
       within_dte: true,
-    })).toBe("Aug 5 AMC");
+    })).toBe("Aug 5 · AMC");
     expect(formatThetaEarningsLabel({
       report_date: "2026-11-04",
       report_time: "premarket",
       days_until: 91,
       within_dte: false,
-    })).toBe("Nov 4 BMO");
+    })).toBe("Nov 4 · BMO");
     expect(formatThetaEarningsLabel({
       report_date: "2026-09-12",
       report_time: "unknown",
       days_until: 10,
       within_dte: true,
-    })).toBe("Sep 12 TBD");
+    })).toBe("Sep 12 · TBD");
   });
 
-  it("renders earnings column with --- when missing and warn pill when within_dte", () => {
+  it("renders earnings chips: hot today, quiet outside DTE, empty when missing", () => {
     const withinDte: ThetaHarvesterEarnings = {
       report_date: "2026-08-05",
       report_time: "postmarket",
@@ -307,22 +307,30 @@ describe("ThetaHarvesterScanner", () => {
     // Desktop table + mobile card for each of 3 rows.
     expect(cells.length).toBe(6);
 
-    const todayAmc = cells.filter((el) => el.textContent === "TODAY AMC");
+    const todayAmc = cells.filter((el) => el.className.includes("theta-earnings--hot"));
     expect(todayAmc.length).toBe(2);
     for (const el of todayAmc) {
-      expect(el.className).toContain("theta-pill--warn");
+      expect(el.textContent ?? "").toMatch(/TODAY/);
+      expect(el.textContent ?? "").toMatch(/AMC/);
       expect(el.getAttribute("data-within-dte")).toBe("true");
+      expect(el.getAttribute("title") ?? "").toContain("after close");
+      expect(el.getAttribute("title") ?? "").toContain("8.8%");
     }
 
-    const novBmo = cells.filter((el) => el.textContent === "Nov 4 BMO");
+    const novBmo = cells.filter((el) => el.className.includes("theta-earnings--quiet"));
     expect(novBmo.length).toBe(2);
     for (const el of novBmo) {
-      expect(el.className).not.toContain("theta-pill--warn");
+      expect(el.textContent ?? "").toMatch(/Nov 4/);
+      expect(el.textContent ?? "").toMatch(/BMO/);
+      expect(el.className).not.toContain("theta-earnings--warn");
       expect(el.getAttribute("data-within-dte")).toBe("false");
     }
 
     const missing = cells.filter((el) => el.textContent === "---");
     expect(missing.length).toBe(2);
+    for (const el of missing) {
+      expect(el.className).toContain("theta-earnings--empty");
+    }
 
     const earningsTrigger = screen.getByTestId("theta-harvester-tooltip-earnings");
     fireEvent.mouseEnter(earningsTrigger);

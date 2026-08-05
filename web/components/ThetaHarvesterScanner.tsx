@@ -175,33 +175,67 @@ function formatEarningsShortDate(reportDate: string): string {
   return `${SHORT_MONTHS[month - 1]} ${day}`;
 }
 
+/** Date side of the earnings chip (no session). Exported for vitest. */
+export function formatThetaEarningsDatePart(
+  earnings: ThetaHarvesterEarnings | null | undefined,
+): string | null {
+  if (!earnings?.report_date) return null;
+  if (earnings.days_until === 0) return "TODAY";
+  return formatEarningsShortDate(earnings.report_date);
+}
+
 /** Display label for theta-harvester earnings cell. Exported for vitest. */
 export function formatThetaEarningsLabel(earnings: ThetaHarvesterEarnings | null | undefined): string {
-  if (!earnings?.report_date) return "---";
+  const datePart = formatThetaEarningsDatePart(earnings);
+  if (!datePart || !earnings) return "---";
+  return `${datePart} · ${earningsSessionLabel(earnings.report_time)}`;
+}
+
+function earningsChipTone(
+  earnings: ThetaHarvesterEarnings,
+): "hot" | "warn" | "quiet" {
+  if (!earnings.within_dte) return "quiet";
+  if (earnings.days_until === 0) return "hot";
+  return "warn";
+}
+
+function earningsTitle(earnings: ThetaHarvesterEarnings): string {
   const session = earningsSessionLabel(earnings.report_time);
-  if (earnings.days_until === 0) return `TODAY ${session}`;
-  return `${formatEarningsShortDate(earnings.report_date)} ${session}`;
+  const sessionLong =
+    session === "AMC" ? "after close" : session === "BMO" ? "before open" : "session TBD";
+  const window = earnings.within_dte
+    ? "Inside the short-strangle DTE window."
+    : "Outside the short-strangle DTE window.";
+  const move =
+    earnings.expected_move_pct != null && Number.isFinite(earnings.expected_move_pct)
+      ? ` Expected move ${earnings.expected_move_pct.toFixed(1)}%.`
+      : "";
+  return `${earnings.report_date} ${sessionLong}. ${window}${move}`;
 }
 
 function EarningsDisplay({ earnings }: { earnings: ThetaHarvesterEarnings | null | undefined }) {
-  const label = formatThetaEarningsLabel(earnings);
-  if (label === "---") {
-    return <span className="mono" data-testid="theta-earnings-cell">---</span>;
-  }
-  if (earnings?.within_dte) {
+  const datePart = formatThetaEarningsDatePart(earnings);
+  if (!datePart || !earnings) {
     return (
-      <span
-        className="theta-pill theta-pill--warn"
-        data-testid="theta-earnings-cell"
-        data-within-dte="true"
-      >
-        {label}
+      <span className="theta-earnings theta-earnings--empty" data-testid="theta-earnings-cell">
+        ---
       </span>
     );
   }
+  const session = earningsSessionLabel(earnings.report_time);
+  const tone = earningsChipTone(earnings);
   return (
-    <span className="mono" data-testid="theta-earnings-cell" data-within-dte="false">
-      {label}
+    <span
+      className={`theta-earnings theta-earnings--${tone}`}
+      data-testid="theta-earnings-cell"
+      data-within-dte={earnings.within_dte ? "true" : "false"}
+      title={earningsTitle(earnings)}
+    >
+      <span className="theta-earnings__date">{datePart}</span>
+      <span className="theta-earnings__sep" aria-hidden="true">
+        ·
+      </span>
+      <span className="theta-earnings__session">{session}</span>
     </span>
   );
 }
