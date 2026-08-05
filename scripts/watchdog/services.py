@@ -98,6 +98,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # 26h window: no weekend/holiday gap to widen for. treasury.gov + Yahoo
     # overlay — no IB dependency.
     "yield-curve":      {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # straddle — radon-straddle.timer, daily 02:15 UTC every calendar day
+    # (Cboe appends the session row ~20:00 ET; weekend/holiday runs are 304
+    # heartbeats). Uniform 26h window mirrors margin-debt/yield-curve: no
+    # weekend/holiday gap to widen for. Cboe CDN only — no IB dependency.
+    "straddle":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # knowledge-ingest — hourly knowledge-base ingest oneshot
     # (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7).
     # Uniform 26h window (24h grace + timer jitter) mirrors
@@ -223,6 +228,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 22:30 UTC Treasury yield-curve pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "yield-curve",
+        # Daily 02:15 UTC Cboe SPX/VIX1D straddle pull — hourly check
+        # surfaces a missed run within 1h of the 26h window expiring.
+        "straddle",
         # Hourly knowledge-base ingest — daily-bucket hourly check matches
         # its 26h staleness window (a failed hour never pages; a missed
         # day surfaces within 1h of the window expiring).
