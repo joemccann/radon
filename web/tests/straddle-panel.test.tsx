@@ -281,33 +281,33 @@ function withKnownLatestSession(data: StraddleData): StraddleData {
 describe("StraddlePanel — LIVE intraday cell", () => {
   it("renders the live ratio from the SPX tick against the latest close", () => {
     mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
-    render(
-      <StraddlePanel
-        prices={{ SPX: { last: 7793.5 } } as never}
-        marketOpen={true}
-      />,
-    );
+    render(<StraddlePanel prices={{ SPX: { last: 7793.5 } } as never} />);
     const live = screen.getByTestId("straddle-live-value");
     expect(live.textContent).toBe("+1.06");
     expect(live.style.color).toBe("var(--positive)");
   });
 
-  it("shows --- while the market is closed", () => {
+  it("freezes at the session close print when only close is available (market closed)", () => {
+    // After 16:00 ET IB stops ticking `last`; the frozen close keeps the final
+    // session ratio on screen instead of blanking to ---.
     mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
-    render(
-      <StraddlePanel
-        prices={{ SPX: { last: 7793.5 } } as never}
-        marketOpen={false}
-      />,
-    );
+    render(<StraddlePanel prices={{ SPX: { close: 7680 } } as never} />);
+    const live = screen.getByTestId("straddle-live-value");
+    expect(live.textContent).toBe("-1.05");
+    expect(live.style.color).toBe("var(--negative)");
+  });
+
+  it("prefers the streaming last over the close", () => {
+    mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
+    render(<StraddlePanel prices={{ SPX: { last: 7793.5, close: 7680 } } as never} />);
+    expect(screen.getByTestId("straddle-live-value").textContent).toBe("+1.06");
+  });
+
+  it("shows --- only when no SPX price exists at all", () => {
+    mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
+    render(<StraddlePanel prices={{}} />);
     const live = screen.getByTestId("straddle-live-value");
     expect(live.textContent).toBe("---");
     expect(live.style.color).toBe("var(--text-muted)");
-  });
-
-  it("shows --- when no SPX tick is streaming", () => {
-    mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
-    render(<StraddlePanel prices={{}} marketOpen={true} />);
-    expect(screen.getByTestId("straddle-live-value").textContent).toBe("---");
   });
 });
