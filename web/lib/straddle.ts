@@ -112,3 +112,30 @@ export function buildStraddleChartRows(
     spx: entry.spx_close,
   }));
 }
+
+/**
+ * Implied 1-day straddle as a % of spot from a VIX1D level — the
+ * Brenner-Subrahmanyam approximation, kept in exact parity with the Python
+ * ingestion's implied_straddle_pct (pinned at VIX1D 20 in both suites).
+ */
+export function impliedStraddlePctFromVix1d(vix1d: number): number {
+  return Math.sqrt(2 / Math.PI) * (vix1d / 100) * Math.sqrt(1 / 252) * 100;
+}
+
+/**
+ * Intraday ratio: the move from the latest completed session's close to the
+ * streaming SPX spot, divided by the implied 1-day straddle priced off that
+ * same close's VIX1D. Converges to the session's official ratio at 16:00 ET;
+ * mid-session magnitudes are biased low because the day is not done.
+ */
+export function computeLiveRatio(
+  spot: number | null | undefined,
+  priorClose: number,
+  priorVix1d: number,
+): number | null {
+  if (spot == null || !Number.isFinite(spot)) return null;
+  if (!Number.isFinite(priorClose) || priorClose <= 0) return null;
+  if (!Number.isFinite(priorVix1d) || priorVix1d <= 0) return null;
+  const movePct = (spot / priorClose - 1) * 100;
+  return movePct / impliedStraddlePctFromVix1d(priorVix1d);
+}

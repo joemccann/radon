@@ -18,6 +18,7 @@ import {
 } from "@/lib/historyRange";
 import {
   buildStraddleChartRows,
+  computeLiveRatio,
   formatHitRate,
   formatRatio,
   formatSourceDate,
@@ -27,6 +28,7 @@ import {
 } from "@/lib/straddle";
 import { useStraddle } from "@/lib/useStraddle";
 import { useViewport } from "@/lib/useViewport";
+import type { PriceData } from "@/lib/pricesProtocol";
 
 const STRADDLE_TOOLTIP =
   "Signed SPX daily move divided by the prior close's implied 1-day straddle (0.8 x VIX1D x sqrt(1/252)). Beyond +1 or -1 the move beat the straddle breakeven: buyers of 1-day vol won. Persistent readings beyond 1 mean 0DTE vol is underpriced; readings pinned inside the band mean it is rich.";
@@ -57,7 +59,14 @@ function formatDayTick(d: Date): string {
   });
 }
 
-export default function StraddlePanel() {
+export default function StraddlePanel({
+  prices,
+  marketOpen = false,
+}: {
+  /** Live L1 map from WorkspaceShell's usePrices; SPX streams on the regime section. */
+  prices?: Record<string, PriceData>;
+  marketOpen?: boolean;
+}) {
   const { data, loading, syncing, lastSync } = useStraddle();
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
@@ -97,6 +106,16 @@ export default function StraddlePanel() {
   const current = data.current;
   const stats = data.stats;
   const vix1dLastModified = data.source_last_modified?.vix1d ?? null;
+
+  // Live divisor inputs come from the LATEST series row: its close is the
+  // reference the intraday move is measured against, and its VIX1D priced
+  // today's 1-day straddle at that close. (current.implied_straddle_pct is
+  // yesterday's divisor, priced two closes back — wrong for today.)
+  const latest = series[series.length - 1];
+  const liveSpot = marketOpen ? prices?.SPX?.last ?? null : null;
+  const liveRatio = latest
+    ? computeLiveRatio(liveSpot, latest.spx_close, latest.vix1d_close)
+    : null;
 
   const rows = buildStraddleChartRows(series);
   const [start, end] = chartRange;
@@ -140,6 +159,7 @@ export default function StraddlePanel() {
 
         {compact ? (
           <div className="m-regime-grid2x2" data-testid="straddle-mobile-grid">
+            <MetricCell label="LIVE" value={formatRatio(liveRatio)} tone={ratioTone(liveRatio)} />
             <MetricCell label="LAST" value={formatRatio(current.ratio)} tone={ratioTone(current.ratio)} />
             <MetricCell label="AVG" value={formatStat(stats.avg)} />
             <MetricCell label="STDDEV" value={formatStat(stats.stddev)} />
@@ -152,6 +172,16 @@ export default function StraddlePanel() {
           </div>
         ) : (
           <RegimeStrip>
+            <RegimeStripCell
+              testId="straddle-strip-live"
+              label="LIVE"
+              value={
+                <span data-testid="straddle-live-value" style={{ color: ratioColor(liveRatio) }}>
+                  {formatRatio(liveRatio)}
+                </span>
+              }
+              sub={<>INTRADAY VS {latest?.date ?? "PRIOR"} CLOSE</>}
+            />
             <RegimeStripCell
               testId="straddle-strip-last"
               label="LAST"

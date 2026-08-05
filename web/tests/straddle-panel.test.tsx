@@ -21,6 +21,8 @@ import {
   formatRatio,
   formatSourceDate,
   formatStraddlePct,
+  impliedStraddlePctFromVix1d,
+  computeLiveRatio,
   ratioColor,
   type StraddleData,
   type StraddleEntry,
@@ -242,5 +244,70 @@ describe("StraddlePanel — chart", () => {
     for (const path of Array.from(paths)) {
       expect(path.getAttribute("d") ?? "").not.toContain("NaN");
     }
+  });
+});
+
+/* ─── LIVE intraday ratio (2026-08-05 addition) ──────── */
+
+describe("impliedStraddlePctFromVix1d / computeLiveRatio — intraday math", () => {
+  it("matches the Python implied-straddle pin at VIX1D 20", () => {
+    expect(impliedStraddlePctFromVix1d(20)).toBeCloseTo(1.005240058486846, 12);
+  });
+
+  it("divides the intraday move by the latest close's implied straddle", () => {
+    // spot 7793.5 vs prior close 7736.52 against VIX1D 13.86 (node-derived)
+    expect(computeLiveRatio(7793.5, 7736.52, 13.86)).toBeCloseTo(1.0572404501696155, 9);
+    expect(computeLiveRatio(7680, 7736.52, 13.86)).toBeCloseTo(-1.048705339480321, 9);
+  });
+
+  it("returns null on missing or degenerate inputs", () => {
+    expect(computeLiveRatio(null, 7736.52, 13.86)).toBeNull();
+    expect(computeLiveRatio(undefined, 7736.52, 13.86)).toBeNull();
+    expect(computeLiveRatio(7793.5, 0, 13.86)).toBeNull();
+    expect(computeLiveRatio(7793.5, 7736.52, 0)).toBeNull();
+    expect(computeLiveRatio(Number.NaN, 7736.52, 13.86)).toBeNull();
+  });
+});
+
+function withKnownLatestSession(data: StraddleData): StraddleData {
+  // Pin the LAST series row (the live divisor inputs) to the fixture session.
+  const series = [
+    ...data.series.slice(0, -1),
+    entry({ date: "2026-08-04", spx_close: 7736.52, vix1d_close: 13.86, ratio: 3.775801 }),
+  ];
+  return { ...data, series };
+}
+
+describe("StraddlePanel — LIVE intraday cell", () => {
+  it("renders the live ratio from the SPX tick against the latest close", () => {
+    mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
+    render(
+      <StraddlePanel
+        prices={{ SPX: { last: 7793.5 } } as never}
+        marketOpen={true}
+      />,
+    );
+    const live = screen.getByTestId("straddle-live-value");
+    expect(live.textContent).toBe("+1.06");
+    expect(live.style.color).toBe("var(--positive)");
+  });
+
+  it("shows --- while the market is closed", () => {
+    mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
+    render(
+      <StraddlePanel
+        prices={{ SPX: { last: 7793.5 } } as never}
+        marketOpen={false}
+      />,
+    );
+    const live = screen.getByTestId("straddle-live-value");
+    expect(live.textContent).toBe("---");
+    expect(live.style.color).toBe("var(--text-muted)");
+  });
+
+  it("shows --- when no SPX tick is streaming", () => {
+    mockUseStraddle.mockReturnValue(hookState({ data: withKnownLatestSession(buildData()) }));
+    render(<StraddlePanel prices={{}} marketOpen={true} />);
+    expect(screen.getByTestId("straddle-live-value").textContent).toBe("---");
   });
 });
