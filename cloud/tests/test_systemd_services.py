@@ -72,6 +72,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-knowledge.timer",
     "radon-yield-curve.service",
     "radon-yield-curve.timer",
+    "radon-straddle.service",
+    "radon-straddle.timer",
 ]
 
 LONG_RUNNING_SERVICES = [

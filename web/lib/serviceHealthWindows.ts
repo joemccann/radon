@@ -138,6 +138,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``yield-curve`` — radon-yield-curve.timer fires daily 22:30 UTC every calendar day (weekend runs heartbeat), so a uniform 26h window fits; Treasury CSV + Yahoo only — no IB.
   "yield-curve": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``straddle`` — radon-straddle.timer fires daily 02:15 UTC every calendar
+  // day (Cboe appends the session row ~20:00 ET; weekend runs are 304
+  // heartbeats), so a uniform 26h window fits like margin-debt / yield-curve.
+  // Cboe CDN CSVs only — no IB.
+  "straddle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
   // market-hours gate — connectors read Turso + repo files). Heartbeats

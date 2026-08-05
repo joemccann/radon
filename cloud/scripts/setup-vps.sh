@@ -98,6 +98,8 @@ readonly SERVICE_FILES=(
   radon-bpi.timer
   radon-yield-curve.service
   radon-yield-curve.timer
+  radon-straddle.service
+  radon-straddle.timer
 )
 
 run_as_radon() {
