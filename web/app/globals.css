@@ -12248,6 +12248,73 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   color: var(--text-muted);
 }
 
+/* Earnings risk chips: same 4px instrument geometry as status pills, but no
+   text-transform so date casing stays scannable (Aug 6 · AMC, not AUG 6 AMC). */
+.theta-earnings {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 4px;
+  max-width: 100%;
+  padding: 2px 6px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+}
+
+.theta-earnings__date {
+  min-width: 0;
+}
+
+.theta-earnings__sep {
+  flex: 0 0 auto;
+  opacity: 0.4;
+  font-weight: 500;
+}
+
+.theta-earnings__session {
+  flex: 0 0 auto;
+  letter-spacing: 0.06em;
+}
+
+.theta-earnings--empty {
+  border-color: transparent;
+  padding-left: 0;
+  padding-right: 0;
+  color: var(--text-muted);
+  font-weight: 500;
+  letter-spacing: 0.04em;
+}
+
+.theta-earnings--quiet {
+  color: var(--text-secondary);
+  background: color-mix(in srgb, var(--text-secondary) 5%, transparent);
+  border-color: color-mix(in srgb, var(--line-grid) 85%, transparent);
+}
+
+.theta-earnings--warn {
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--warning) 42%, var(--line-grid));
+  background: color-mix(in srgb, var(--warning) 9%, transparent);
+}
+
+.theta-earnings--hot {
+  color: var(--warn-text);
+  border-color: color-mix(in srgb, var(--warning) 58%, var(--line-grid));
+  background: color-mix(in srgb, var(--warning) 16%, transparent);
+}
+
+.theta-harvester table td .theta-earnings {
+  /* Optical alignment with numeric columns without forcing right-align on the chip. */
+  transform: translateY(0.5px);
+}
+
 .strength-confirmation__meta {
   display: flex;
   align-items: center;
