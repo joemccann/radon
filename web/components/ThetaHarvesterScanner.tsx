@@ -9,7 +9,7 @@ import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
 import { formatExpiry } from "@/lib/optionsChainUtils";
-import type { ThetaHarvesterData, ThetaHarvesterResult } from "@/lib/types";
+import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterResult } from "@/lib/types";
 
 type ThetaSortKey = "ticker" | "score" | "theta" | "delta" | "iv_edge" | "range" | "dte" | "credit";
 
@@ -70,8 +70,11 @@ const THETA_HEADER_HELP = {
   range: "Range-bound score. RANGE favors contained movement; TREND warns directional movement.",
   dte: "Days to expiration for the selected short put and short call expiry.",
   credit: "Estimated entry credit per share for the 1x short put plus 1x short call. Multiply by 100 per contract.",
+  earnings: "Next earnings date if it falls inside the short-strangle DTE window. AMC=after close, BMO=before open.",
   status: "Final verdict: TRUE THETA passes the active gates, DIRECTIONAL indicates disguised delta exposure, and WATCH is mixed.",
 } as const;
+
+const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
 
 type ThetaHelpKey = keyof typeof THETA_HEADER_HELP;
 
@@ -155,6 +158,52 @@ function structureLabel(row: ThetaHarvesterResult): string {
   const put = row.structure.short_put;
   const call = row.structure.short_call;
   return `${put.strike.toFixed(0)}P / ${call.strike.toFixed(0)}C`;
+}
+
+function earningsSessionLabel(reportTime: string | null | undefined): string {
+  if (reportTime === "postmarket") return "AMC";
+  if (reportTime === "premarket") return "BMO";
+  return "TBD";
+}
+
+function formatEarningsShortDate(reportDate: string): string {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(reportDate);
+  if (!match) return reportDate;
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (month < 1 || month > 12 || day < 1) return reportDate;
+  return `${SHORT_MONTHS[month - 1]} ${day}`;
+}
+
+/** Display label for theta-harvester earnings cell. Exported for vitest. */
+export function formatThetaEarningsLabel(earnings: ThetaHarvesterEarnings | null | undefined): string {
+  if (!earnings?.report_date) return "---";
+  const session = earningsSessionLabel(earnings.report_time);
+  if (earnings.days_until === 0) return `TODAY ${session}`;
+  return `${formatEarningsShortDate(earnings.report_date)} ${session}`;
+}
+
+function EarningsDisplay({ earnings }: { earnings: ThetaHarvesterEarnings | null | undefined }) {
+  const label = formatThetaEarningsLabel(earnings);
+  if (label === "---") {
+    return <span className="mono" data-testid="theta-earnings-cell">---</span>;
+  }
+  if (earnings?.within_dte) {
+    return (
+      <span
+        className="theta-pill theta-pill--warn"
+        data-testid="theta-earnings-cell"
+        data-within-dte="true"
+      >
+        {label}
+      </span>
+    );
+  }
+  return (
+    <span className="mono" data-testid="theta-earnings-cell" data-within-dte="false">
+      {label}
+    </span>
+  );
 }
 
 function legStrikeParam(strike: number): string {
@@ -364,6 +413,7 @@ export default function ThetaHarvesterScanner({
                   <SortTh<ThetaSortKey> label="Range" sortKey="range" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Range", "range")} />
                   <SortTh<ThetaSortKey> label="DTE" sortKey="dte" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("DTE", "dte")} />
                   <SortTh<ThetaSortKey> label="Credit" sortKey="credit" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Credit", "credit")} />
+                  <th><ThetaHeaderInfoLabel label="Earnings" helpKey="earnings" /></th>
                   <th><ThetaHeaderInfoLabel label="Status" helpKey="status" /></th>
                 </tr>
               </thead>
@@ -402,6 +452,7 @@ export default function ThetaHarvesterScanner({
                     <td>{rangeLabel(row)} {Math.round(row.range_score * 100)}%</td>
                     <td className="right">{row.structure.dte}</td>
                     <td className="right">{fmtMoney(row.structure.credit)}</td>
+                    <td><EarningsDisplay earnings={row.earnings} /></td>
                     <td><RowStatus row={row} /></td>
                   </tr>
                   );
@@ -428,6 +479,9 @@ export default function ThetaHarvesterScanner({
                   <span><b>{fmtTheta(row.structure.theta)}</b><em>THETA</em></span>
                   <span><b>{fmtDelta(row.structure.net_delta)}</b><em>DELTA</em></span>
                   <span><b>{signed(row.iv_rv_edge, 1)} pt</b><em>IV/RV</em></span>
+                </div>
+                <div className="theta-card__earnings" data-testid="theta-earnings-mobile">
+                  <em>EARN</em> <EarningsDisplay earnings={row.earnings} />
                 </div>
                 <GateStrip row={row} />
               </Link>

@@ -12231,6 +12231,23 @@ body[data-mobile="true"] .garch-scanner__table tbody td {
   text-transform: uppercase;
 }
 
+.theta-card__earnings {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.theta-card__earnings em {
+  font-style: normal;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
 .strength-confirmation__meta {
   display: flex;
   align-items: center;

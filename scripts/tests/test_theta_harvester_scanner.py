@@ -216,3 +216,279 @@ def test_scan_ticker_scores_true_theta_when_delta_iv_dealer_and_range_gates_pass
     assert candidate.gates["range_bound"] is True
     assert candidate.structure.net_delta == pytest.approx(-0.01)
     assert candidate.iv_rv_edge == pytest.approx(35.0)
+    # Earnings is post-process only; scan_ticker leaves it null by default.
+    assert candidate.earnings is None
+
+
+# ── Earnings annotation (surface risk only; no verdict/score gate) ─
+
+
+def _minimal_candidate(
+    ticker: str = "AAPL",
+    dte: int = 23,
+    score: float = 80.0,
+    verdict: str = "THETA_HARVEST",
+) -> theta.ThetaCandidate:
+    """Build a ThetaCandidate with a stub structure for annotation unit tests."""
+    put = theta.OptionLeg(
+        symbol=f"{ticker}260717P00095000",
+        expiry="20260717",
+        strike=95.0,
+        right="P",
+        iv=35.0,
+        delta=-0.15,
+        theta=-0.04,
+        gamma=0.002,
+        vega=0.018,
+        bid=0.9,
+        ask=1.1,
+    )
+    call = theta.OptionLeg(
+        symbol=f"{ticker}260717C00105000",
+        expiry="20260717",
+        strike=105.0,
+        right="C",
+        iv=35.0,
+        delta=0.16,
+        theta=-0.035,
+        gamma=0.0022,
+        vega=0.02,
+        bid=0.8,
+        ask=1.0,
+    )
+    structure = theta.ThetaStructure(
+        expiry="20260717",
+        dte=dte,
+        short_put=put,
+        short_call=call,
+        net_delta=-0.01,
+        theta=0.075,
+        gamma=-0.0042,
+        vega=-0.038,
+        credit=1.9,
+    )
+    return theta.ThetaCandidate(
+        ticker=ticker,
+        score=score,
+        verdict=verdict,
+        structure=structure,
+        spot=100.0,
+        iv=35.0,
+        hv20=20.0,
+        hv60=22.0,
+        iv_rv_edge=15.0,
+        iv_rv_ratio=1.75,
+        trend_20d_pct=1.0,
+        range_score=0.8,
+        dealer_support="SUPPORT",
+        net_gex=1_000_000.0,
+        gex_flip=90.0,
+        setup="TRUE_THETA" if verdict == "THETA_HARVEST" else verdict,
+        gates={
+            "delta_near_zero": True,
+            "iv_rich_vs_rv": True,
+            "dealer_support": True,
+            "theta_positive": True,
+            "gamma_controlled": True,
+            "range_bound": True,
+        },
+        errors=[],
+        earnings=None,
+    )
+
+
+class FakeEarningsClient:
+    """Mock UW client that only implements get_earnings_by_ticker."""
+
+    def __init__(self, by_ticker: dict | None = None, *, fail: bool = False):
+        self.by_ticker = by_ticker or {}
+        self.fail = fail
+        self.calls: list[str] = []
+
+    def get_earnings_by_ticker(self, ticker: str) -> dict:
+        self.calls.append(ticker.upper())
+        if self.fail:
+            raise RuntimeError("uw earnings unavailable")
+        if ticker.upper() in self.by_ticker:
+            payload = self.by_ticker[ticker.upper()]
+            if isinstance(payload, Exception):
+                raise payload
+            return payload
+        return {"data": []}
+
+
+# Midday ET so calendar-day math is unambiguous (earnings_dates uses ET today).
+_EARNINGS_NOW = datetime(2026, 6, 24, 14, 0, tzinfo=timezone.utc)  # 10:00 ET
+
+
+def test_annotate_candidates_attaches_earnings_within_dte() -> None:
+    candidate = _minimal_candidate("AAPL", dte=23)
+    client = FakeEarningsClient(
+        {
+            "AAPL": {
+                "data": [
+                    {
+                        "report_date": "2026-07-10",
+                        "report_time": "postmarket",
+                        "source": "company",
+                        "expected_move_perc": 0.05,
+                        "actual_eps": None,
+                    }
+                ]
+            }
+        }
+    )
+
+    out = theta.annotate_candidates_with_earnings([candidate], client, now=_EARNINGS_NOW)
+
+    assert out is candidate or out[0] is candidate
+    assert candidate.verdict == "THETA_HARVEST"
+    assert candidate.score == 80.0
+    assert candidate.earnings is not None
+    assert candidate.earnings["report_date"] == "2026-07-10"
+    assert candidate.earnings["report_time"] == "postmarket"
+    assert candidate.earnings["days_until"] == 16  # Jun 24 → Jul 10
+    assert candidate.earnings["within_dte"] is True  # 16 <= dte 23
+    assert candidate.earnings["source"] == "company"
+    assert candidate.earnings["expected_move_pct"] == pytest.approx(5.0)
+    # Slim field only — no bookkeeping keys.
+    assert "missing" not in candidate.earnings
+    assert "ticker" not in candidate.earnings
+    assert "dte" not in candidate.earnings
+    assert client.calls == ["AAPL"]
+
+
+def test_annotate_candidates_earnings_outside_dte_still_surfaces() -> None:
+    candidate = _minimal_candidate("AAPL", dte=14)
+    client = FakeEarningsClient(
+        {
+            "AAPL": {
+                "data": [
+                    {
+                        "report_date": "2026-07-20",
+                        "report_time": "premarket",
+                        "source": "estimation",
+                        "expected_move_perc": 4.0,
+                        "actual_eps": None,
+                    }
+                ]
+            }
+        }
+    )
+
+    theta.annotate_candidates_with_earnings([candidate], client, now=_EARNINGS_NOW)
+
+    assert candidate.earnings is not None
+    assert candidate.earnings["days_until"] == 26  # Jun 24 → Jul 20
+    assert candidate.earnings["within_dte"] is False  # 26 > dte 14
+    # v1: still surface; do not flip verdict.
+    assert candidate.verdict == "THETA_HARVEST"
+
+
+def test_annotate_candidates_missing_earnings_is_null() -> None:
+    candidate = _minimal_candidate("MSFT", dte=30)
+    client = FakeEarningsClient({"MSFT": {"data": []}})
+
+    theta.annotate_candidates_with_earnings([candidate], client, now=_EARNINGS_NOW)
+
+    assert candidate.earnings is None
+    assert candidate.verdict == "THETA_HARVEST"
+
+
+def test_annotate_candidates_fetch_failure_keeps_candidate() -> None:
+    candidate = _minimal_candidate("HONA", dte=16, score=75.0)
+    client = FakeEarningsClient(fail=True)
+
+    theta.annotate_candidates_with_earnings(
+        [candidate], client, now=datetime(2026, 8, 5, 14, 0, tzinfo=timezone.utc)
+    )
+
+    # annotate swallows per-ticker errors into missing → slim field null.
+    assert candidate.earnings is None
+    assert candidate.verdict == "THETA_HARVEST"
+    assert candidate.score == 75.0
+
+
+def test_annotate_candidates_batch_uses_structure_dte_per_ticker() -> None:
+    aapl = _minimal_candidate("AAPL", dte=10)
+    msft = _minimal_candidate("MSFT", dte=45)
+    client = FakeEarningsClient(
+        {
+            "AAPL": {
+                "data": [
+                    {
+                        "report_date": "2026-07-05",
+                        "report_time": "AMC",
+                        "source": "company",
+                        "expected_move_perc": 0.06,
+                        "actual_eps": None,
+                    }
+                ]
+            },
+            "MSFT": {
+                "data": [
+                    {
+                        "report_date": "2026-07-05",
+                        "report_time": "BMO",
+                        "source": "company",
+                        "expected_move_perc": 0.04,
+                        "actual_eps": None,
+                    }
+                ]
+            },
+        }
+    )
+
+    theta.annotate_candidates_with_earnings([aapl, msft], client, now=_EARNINGS_NOW)
+
+    assert client.calls == ["AAPL", "MSFT"]
+    assert aapl.earnings is not None
+    assert aapl.earnings["days_until"] == 11  # Jun 24 → Jul 5
+    assert aapl.earnings["within_dte"] is False  # 11 > 10
+    assert msft.earnings is not None
+    assert msft.earnings["within_dte"] is True  # 11 <= 45
+
+
+def test_build_output_includes_serializable_earnings_field() -> None:
+    candidate = _minimal_candidate("AAPL", dte=23)
+    candidate.earnings = {
+        "report_date": "2026-07-10",
+        "report_time": "postmarket",
+        "days_until": 16,
+        "within_dte": True,
+        "source": "company",
+        "expected_move_pct": 5.0,
+    }
+    payload = theta.build_output([candidate], "explicit", 1, requested_tickers=["AAPL"])
+    row = payload["results"][0]
+    assert row["earnings"]["report_date"] == "2026-07-10"
+    assert row["earnings"]["within_dte"] is True
+    # asdict must remain JSON-serializable
+    import json
+
+    json.dumps(payload)
+
+
+def test_slim_earnings_field_null_when_missing() -> None:
+    assert theta._slim_earnings_field({"missing": True, "report_date": None}) is None
+    assert theta._slim_earnings_field({}) is None
+    assert theta._slim_earnings_field(
+        {
+            "missing": False,
+            "report_date": "2026-08-05",
+            "report_time": "postmarket",
+            "days_until": 0,
+            "within_dte": True,
+            "source": "company",
+            "expected_move_pct": 8.76,
+            "ticker": "HONA",
+            "dte": 16,
+        }
+    ) == {
+        "report_date": "2026-08-05",
+        "report_time": "postmarket",
+        "days_until": 0,
+        "within_dte": True,
+        "source": "company",
+        "expected_move_pct": 8.76,
+    }

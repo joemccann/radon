@@ -552,6 +552,16 @@ export type ThetaHarvesterStructure = {
   credit?: number | null;
 };
 
+/** Next earnings release relative to the short-strangle DTE window. Null when unknown. */
+export type ThetaHarvesterEarnings = {
+  report_date: string;
+  report_time: "premarket" | "postmarket" | "unknown" | string | null;
+  days_until: number | null;
+  within_dte: boolean | null;
+  source?: string | null;
+  expected_move_pct?: number | null;
+};
+
 export type ThetaHarvesterResult = {
   ticker: string;
   score: number;
@@ -571,6 +581,8 @@ export type ThetaHarvesterResult = {
   setup: string;
   gates: Record<string, boolean>;
   errors: string[];
+  /** Next earnings if known; null/omitted when unavailable. */
+  earnings?: ThetaHarvesterEarnings | null;
 };
 
 export type ThetaHarvesterData = {

@@ -2706,6 +2706,133 @@ async def catalysts_get(limit: int = 50):
     }
 
 
+# ── Earnings dates (next report / within-DTE for scanners) ───────────
+
+_EARNINGS_DATES_DIR = DATA_DIR / "earnings_dates"
+_EARNINGS_BATCH_MAX = 50
+_EARNINGS_TIMEOUT_S = 60.0
+_EARNINGS_BATCH_TIMEOUT_S = 180.0
+
+
+def _earnings_missing_payload(ticker: str, dte: Optional[int]) -> dict:
+    """200 body when UW has no upcoming earnings (never 4xx for missing)."""
+    return {
+        "ticker": ticker.upper(),
+        "report_date": None,
+        "report_time": None,
+        "days_until": None,
+        "source": None,
+        "expected_move_pct": None,
+        "within_dte": None,
+        "dte": dte,
+        "missing": True,
+    }
+
+
+def _parse_earnings_tickers(raw: str) -> list[str]:
+    """Validate comma-separated tickers for GET /earnings batch (cap 50)."""
+    tokens = [t.strip().upper() for t in (raw or "").split(",") if t.strip()]
+    if not tokens:
+        raise HTTPException(status_code=400, detail="tickers is required")
+    seen: set[str] = set()
+    unique: list[str] = []
+    for token in tokens:
+        if not _TICKER_RE.match(token):
+            raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+        if token not in seen:
+            seen.add(token)
+            unique.append(token)
+    if len(unique) > _EARNINGS_BATCH_MAX:
+        raise HTTPException(
+            status_code=400,
+            detail=f"too many tickers (max {_EARNINGS_BATCH_MAX})",
+        )
+    return unique
+
+
+def _normalize_earnings_batch(data: Any) -> list:
+    """CLI returns a dict for one ticker and a list for many."""
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        return [data]
+    return []
+
+
+@app.get("/earnings")
+async def earnings_batch_get(
+    tickers: str = Query(..., description="Comma-separated tickers (max 50)"),
+    dte: Optional[int] = Query(None, description="Structure DTE window"),
+):
+    """Batch next-earnings annotate via ``scripts/earnings_dates.py``.
+
+    ``GET /earnings?tickers=AAPL,HONA&dte=16``. Cap 50 tickers. 200 with
+    per-row ``missing`` when UW has no upcoming date; 400 only for invalid
+    symbols / empty / oversized lists.
+    """
+    symbols = _parse_earnings_tickers(tickers)
+    args: list[str] = [*symbols]
+    if dte is not None:
+        args.extend(["--dte", str(dte)])
+    args.append("--json")
+
+    result = await run_script(
+        "earnings_dates.py", args, timeout=_EARNINGS_BATCH_TIMEOUT_S
+    )
+    if result.ok and result.data is not None and not (
+        isinstance(result.data, dict) and result.data.get("error")
+    ):
+        rows = _normalize_earnings_batch(result.data)
+        return {"results": rows, "count": len(rows), "dte": dte}
+
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    return {
+        "results": [_earnings_missing_payload(t, dte) for t in symbols],
+        "count": len(symbols),
+        "dte": dte,
+    }
+
+
+@app.get("/earnings/{ticker}")
+async def earnings_get(
+    ticker: str,
+    dte: Optional[int] = Query(None, description="Structure DTE window"),
+):
+    """Next earnings date / session / within-DTE for one ticker.
+
+    Runs ``scripts/earnings_dates.py TICKER [--dte N] --json`` via the
+    subprocess bridge (same pattern as informed-flow). 200 + ``missing``
+    when UW has no upcoming row; on-disk cache under
+    ``data/earnings_dates/{TICKER}.json`` is the fallback on live failure.
+    Never 4xx for legitimate missing earnings — only 400 for invalid ticker.
+    """
+    upper = ticker.upper().strip()
+    if not _TICKER_RE.match(upper):
+        raise HTTPException(status_code=400, detail="Invalid ticker symbol")
+
+    args: list[str] = [upper]
+    if dte is not None:
+        args.extend(["--dte", str(dte)])
+    args.append("--json")
+
+    result = await run_script(
+        "earnings_dates.py", args, timeout=_EARNINGS_TIMEOUT_S
+    )
+    if result.ok and isinstance(result.data, dict) and not result.data.get("error"):
+        return result.data
+
+    cached = _read_cache(_EARNINGS_DATES_DIR / f"{upper}.json")
+    if cached and isinstance(cached, dict):
+        return cached
+
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    if isinstance(result.data, dict):
+        return result.data
+    return _earnings_missing_payload(upper, dte)
+
+
 # ── Informed flow (F4 — congress / insider / institutional) ─────────
 
 _INFORMED_FLOW_DIR = DATA_DIR / "informed_flow"
