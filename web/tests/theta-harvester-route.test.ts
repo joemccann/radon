@@ -148,6 +148,77 @@ describe("GET /api/scanner/theta", () => {
     expect(body.results[0].ticker).toBe("NVDA");
     expect(body.universe).toBe("explicit");
   });
+
+  it("backfills earnings on pre-feature snapshots that omit the earnings key", async () => {
+    // Snapshot shape before earnings annotation shipped — no `earnings` key.
+    mocks.readFile.mockResolvedValueOnce(
+      JSON.stringify({
+        ...thetaPayload,
+        results: [
+          {
+            ticker: "HONA",
+            verdict: "THETA_HARVEST",
+            score: 98.4,
+            structure: {
+              expiry: "20260821",
+              dte: 16,
+              net_delta: -0.005,
+              theta: 0.4127,
+              short_put: { strike: 190, right: "P" },
+              short_call: { strike: 240, right: "C" },
+            },
+          },
+        ],
+      }),
+    );
+    mocks.radonFetch.mockResolvedValueOnce({
+      results: [
+        {
+          ticker: "HONA",
+          report_date: "2026-08-05",
+          report_time: "postmarket",
+          days_until: 0,
+          source: "company",
+          expected_move_pct: 8.82,
+          missing: false,
+        },
+      ],
+      count: 1,
+    });
+
+    const { GET } = await import("../app/api/scanner/theta/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.results[0].ticker).toBe("HONA");
+    expect(body.results[0].earnings).toMatchObject({
+      report_date: "2026-08-05",
+      report_time: "postmarket",
+      days_until: 0,
+      within_dte: true,
+    });
+    expect(mocks.radonFetch).toHaveBeenCalledWith(
+      "/earnings?tickers=HONA",
+      { timeout: 90_000 },
+    );
+  });
+
+  it("does not call earnings when the snapshot already has the earnings key", async () => {
+    mocks.readFile.mockResolvedValueOnce(
+      JSON.stringify({
+        ...thetaPayload,
+        results: [{ ...thetaPayload.results[0], earnings: null }],
+      }),
+    );
+    const { GET } = await import("../app/api/scanner/theta/route");
+    const res = await GET();
+    const body = await res.json();
+
+    expect(res.status).toBe(200);
+    expect(body.results[0].earnings).toBeNull();
+    expect(mocks.radonFetch).not.toHaveBeenCalled();
+  });
 });
 
 describe("POST /api/scanner/theta/scan", () => {

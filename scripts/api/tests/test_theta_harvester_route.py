@@ -185,3 +185,53 @@ def test_theta_harvester_rejects_invalid_ticker(monkeypatch):
 
     assert response.status_code == 400
     assert "ticker must be 1-6 letters" in response.text
+
+
+def test_theta_cooldown_skips_pre_earnings_snapshot(monkeypatch):
+    """Pre-feature rows omit the earnings key — cooldown must not serve them."""
+    monkeypatch.setattr(auth, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "is_trusted_local_request", lambda request: True)
+    monkeypatch.setattr(server, "_theta_last_scan", time.monotonic())  # inside cooldown
+    monkeypatch.setattr(server, "_theta_scan_lock", None)
+
+    pre_feature = {
+        "universe": "fallback:ndx100",
+        "params": {"min_dte": 7, "max_dte": 45, "min_credit": 0.0},
+        "results": [{"ticker": "HONA", "score": 98.4}],  # no earnings key
+    }
+    fresh = {
+        **pre_feature,
+        "results": [{"ticker": "HONA", "score": 98.4, "earnings": {
+            "report_date": "2026-08-05",
+            "report_time": "postmarket",
+            "days_until": 0,
+            "within_dte": True,
+            "source": "company",
+            "expected_move_pct": 8.8,
+        }}],
+    }
+    ran = {"n": 0}
+
+    async def fake_run_script(script: str, args: list[str], timeout: int | None = None):
+        ran["n"] += 1
+        return ScriptResult(ok=True, data=fresh)
+
+    monkeypatch.setattr(server, "run_script", fake_run_script)
+    monkeypatch.setattr(server, "_read_cache", lambda _path: pre_feature if ran["n"] == 0 else fresh)
+
+    client = TestClient(server.app)
+    response = client.post("/theta-harvester/scan?preset=ndx100")
+
+    assert response.status_code == 200
+    assert ran["n"] == 1
+    assert response.json()["results"][0]["earnings"]["report_date"] == "2026-08-05"
+
+
+def test_theta_results_have_earnings_field_helper():
+    assert server._theta_results_have_earnings_field({"results": []}) is True
+    assert server._theta_results_have_earnings_field({
+        "results": [{"ticker": "HONA"}],
+    }) is False
+    assert server._theta_results_have_earnings_field({
+        "results": [{"ticker": "HONA", "earnings": None}],
+    }) is True
