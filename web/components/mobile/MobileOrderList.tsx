@@ -11,6 +11,7 @@ import {
   mapOrderStatus,
   resolveOrderIntent,
   type OrderIntent,
+  type OrderStatusTone,
 } from "@/lib/orders/orderDisplay";
 import Card from "./Card";
 import BottomSheet from "./BottomSheet";
@@ -52,6 +53,24 @@ function comboFillQuantity(orders: readonly OpenOrder[], totalQuantity: number):
   return formatFillQuantity({ filled, remaining, totalQuantity });
 }
 
+function statusInfo(
+  raw: string,
+  opts: {
+    filled?: number;
+    remaining?: number;
+    isPendingCancel: boolean;
+    isPendingModify: boolean;
+  },
+): { label: string; tone: OrderStatusTone } {
+  if (opts.isPendingCancel) return { label: "Cancelling...", tone: "pending" };
+  if (opts.isPendingModify) return { label: "Modifying...", tone: "pending" };
+  const mapped = mapOrderStatus(raw, {
+    filled: opts.filled,
+    remaining: opts.remaining,
+  });
+  return { label: mapped.label, tone: mapped.tone };
+}
+
 function statusLabel(
   raw: string,
   opts: {
@@ -61,45 +80,72 @@ function statusLabel(
     isPendingModify: boolean;
   },
 ): string {
-  if (opts.isPendingCancel) return "Cancelling...";
-  if (opts.isPendingModify) return "Modifying...";
-  return mapOrderStatus(raw, {
-    filled: opts.filled,
-    remaining: opts.remaining,
-  }).label;
+  return statusInfo(raw, opts).label;
+}
+
+/** Chip modifier per status tone; calm states stay untinted. */
+const STATUS_CHIP_TONE: Record<OrderStatusTone, string | null> = {
+  working: null,
+  neutral: null,
+  done: null,
+  partial: "warn",
+  pending: "busy",
+  inactive: "muted",
+};
+
+function StatusChip({ label, tone }: { label: string; tone: OrderStatusTone }) {
+  const modifier = STATUS_CHIP_TONE[tone];
+  return (
+    <span
+      className={`m-order-status${modifier ? ` m-order-status--${modifier}` : ""}`}
+      data-testid="mobile-order-status"
+    >
+      {label}
+    </span>
+  );
 }
 
 function rowSummary(
   row: OpenOrderDisplayRow,
   pending: { cancel: boolean; modify: boolean },
-): { title: string; subtitle: string; price: string; status: string } {
+): {
+  title: string;
+  subtitle: string;
+  price: string;
+  status: string;
+  statusTone: OrderStatusTone;
+} {
   if (row.kind === "combo") {
     const qty = comboFillQuantity(row.orders, row.totalQuantity);
     const first = row.orders[0];
+    const status = statusInfo(row.status ?? "", {
+      filled: first?.filled,
+      remaining: first?.remaining,
+      isPendingCancel: pending.cancel,
+      isPendingModify: pending.modify,
+    });
     return {
       title: `${row.symbol} · ${row.structure}`,
       subtitle: `${qty}x ${row.summary}`,
       price: limitLabel(row.limitPrice, row.orderType),
-      status: statusLabel(row.status ?? "", {
-        filled: first?.filled,
-        remaining: first?.remaining,
-        isPendingCancel: pending.cancel,
-        isPendingModify: pending.modify,
-      }),
+      status: status.label,
+      statusTone: status.tone,
     };
   }
   const o = row.order;
   const qty = formatFillQuantity(o);
+  const status = statusInfo(o.status ?? "", {
+    filled: o.filled,
+    remaining: o.remaining,
+    isPendingCancel: pending.cancel,
+    isPendingModify: pending.modify,
+  });
   return {
     title: `${o.contract.symbol} · ${o.action}`,
     subtitle: `${qty}x ${o.orderType}${o.tif ? ` · ${o.tif}` : ""}`,
     price: limitLabel(o.limitPrice, o.orderType),
-    status: statusLabel(o.status ?? "", {
-      filled: o.filled,
-      remaining: o.remaining,
-      isPendingCancel: pending.cancel,
-      isPendingModify: pending.modify,
-    }),
+    status: status.label,
+    statusTone: status.tone,
   };
 }
 
@@ -365,7 +411,19 @@ export default function MobileOrderList({
               >
                 <div className="mobile-card__title-row">
                   <div className="mobile-card__title">
-                    <span>{summary.title}</span>
+                    {row.kind === "single" ? (
+                      <>
+                        <span>{row.order.contract.symbol}</span>
+                        <span
+                          className={`m-order-side m-order-side--${action === "SELL" ? "sell" : "buy"}`}
+                          data-testid="mobile-order-side"
+                        >
+                          {action}
+                        </span>
+                      </>
+                    ) : (
+                      <span>{summary.title}</span>
+                    )}
                     {(pending.cancel || pending.modify) ? <Loader2 size={12} className="cancel-spinner" /> : null}
                   </div>
                   <div className="mobile-card__pnl">
@@ -374,7 +432,7 @@ export default function MobileOrderList({
                 </div>
                 <div className="mobile-card__chevron-row">
                   <span className="mobile-card__subtitle">{summary.subtitle}</span>
-                  <span className="mobile-card__subtitle">{summary.status}</span>
+                  <StatusChip label={summary.status} tone={summary.statusTone} />
                 </div>
               </Card>
             </div>
