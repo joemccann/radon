@@ -393,3 +393,91 @@ class TestContinuousBucketWiring:
         source = Path(units.__file__).read_text()
         assert source.count("subprocess.run") == 1
         assert '["systemctl", "show", UNIT_GLOB' in source
+
+
+# ── evaluation: deploy-collateral signal kills ───────────────────────
+
+class TestDeployCollateralSignalKill:
+    """A deploy's stop-clean SIGTERMs in-flight oneshots (radon-bpi
+    2026-08-05 21:40:24Z, killed the same second as radon-deploy-root
+    stop-clean). That is Result=signal collateral, not an outage — it
+    must ride the P3 digest, not page P1. Everything else about failed
+    units is unchanged: exit-code failures, start-limit-hit, and signal
+    kills with no deploy evidence still page."""
+
+    WINDOW_NOW = datetime(2026, 8, 5, 21, 50, tzinfo=timezone.utc)
+
+    @staticmethod
+    def _ts(dt: datetime) -> str:
+        return dt.strftime("%a %Y-%m-%d %H:%M:%S UTC")
+
+    def _signal_block(self, killed_at: datetime, result: str = "signal") -> str:
+        return _show_output(
+            _block("radon-bpi.service", active="failed", sub="failed",
+                   result=result, nrestarts=0)
+            + f"\nInactiveEnterTimestamp={self._ts(killed_at)}"
+        )
+
+    def test_signal_kill_before_green_marker_downgrades_to_p3(self):
+        killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 5, 21, 41, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert len(outcomes) == 1
+        assert outcomes[0].severity == "P3"
+        assert "deploy" in outcomes[0].message.lower()
+
+    def test_signal_kill_during_inflight_deploy_downgrades_to_p3(self):
+        killed = self.WINDOW_NOW.replace(minute=48)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": None, "in_flight": True},
+        )
+        assert [o.severity for o in outcomes] == ["P3"]
+
+    def test_signal_kill_without_deploy_evidence_stays_p1(self):
+        killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": None, "in_flight": False},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_signal_kill_far_from_marker_stays_p1(self):
+        killed = datetime(2026, 8, 5, 18, 0, 0, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 5, 21, 41, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_exit_code_failure_near_deploy_stays_p1(self):
+        killed = datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)
+        marker = datetime(2026, 8, 5, 21, 41, 0, tzinfo=timezone.utc)
+        current = units.parse_show_output(self._signal_block(killed, result="exit-code"))
+        outcomes = units.evaluate(
+            current=current, previous={}, now=self.WINDOW_NOW,
+            deploy={"marker_mtime": marker, "in_flight": False},
+        )
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_evaluate_without_deploy_arg_is_unchanged(self):
+        current = units.parse_show_output(
+            _show_output(_block("radon-relay.service", active="failed",
+                                sub="failed", result="signal"))
+        )
+        outcomes = units.evaluate(current=current, previous={}, now=NOW)
+        assert [o.severity for o in outcomes] == ["P1"]
+
+    def test_parse_systemd_timestamp(self):
+        parsed = units._parse_systemd_timestamp("Wed 2026-08-05 21:40:24 UTC")
+        assert parsed == datetime(2026, 8, 5, 21, 40, 24, tzinfo=timezone.utc)
+        assert units._parse_systemd_timestamp("") is None
+        assert units._parse_systemd_timestamp("n/a") is None

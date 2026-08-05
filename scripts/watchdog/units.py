@@ -48,11 +48,19 @@ log = logging.getLogger("watchdog.units")
 
 
 UNIT_GLOB = "radon-*"
-SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts"
+SHOW_PROPERTIES = "Id,ActiveState,SubState,Result,NRestarts,InactiveEnterTimestamp"
 SYSTEMCTL_TIMEOUT_S = 10
 
 _PROJECT_DIR = Path(__file__).resolve().parent.parent.parent
 DEFAULT_STATE_PATH = _PROJECT_DIR / "data" / "watchdog_units_state.json"
+
+# Deploy evidence for the signal-kill downgrade: deploy.sh's stop-clean
+# SIGTERMs in-flight oneshots (radon-bpi 2026-08-05 21:40:24Z, killed the
+# same second as radon-deploy-root stop-clean). The transition journal
+# exists only mid-deploy; the green marker's mtime stamps deploy end.
+GREEN_MARKER_PATH = Path("/home/radon/.radon-last-green-deploy")
+TRANSITION_JOURNAL_PATH = Path("/home/radon/.radon-deploy-transition.json")
+DEPLOY_COLLATERAL_WINDOW_SECS = 20 * 60  # covers the 15-min deploy budget
 
 
 # ── systemctl seam ───────────────────────────────────────────────────
@@ -95,6 +103,57 @@ def parse_show_output(text: str) -> list[dict]:
         props["NRestarts"] = int(nrestarts) if nrestarts is not None and nrestarts.isdigit() else None
         parsed.append(props)
     return parsed
+
+
+# ── deploy-collateral evidence ───────────────────────────────────────
+
+def _parse_systemd_timestamp(value: str) -> Optional[datetime]:
+    """``systemctl show`` timestamp ("Wed 2026-08-05 21:40:24 UTC") →
+    aware datetime; None for empty / "n/a"."""
+    from datetime import timezone as _tz
+
+    if not value or value == "n/a":
+        return None
+    try:
+        parsed = datetime.strptime(value, "%a %Y-%m-%d %H:%M:%S %Z")
+    except ValueError:
+        return None
+    return parsed.replace(tzinfo=_tz.utc)
+
+
+def _read_deploy_evidence() -> dict:
+    marker_mtime = None
+    try:
+        if GREEN_MARKER_PATH.is_file():
+            from datetime import timezone as _tz
+
+            marker_mtime = datetime.fromtimestamp(
+                GREEN_MARKER_PATH.stat().st_mtime, tz=_tz.utc
+            )
+    except OSError:
+        pass
+    return {
+        "marker_mtime": marker_mtime,
+        "in_flight": TRANSITION_JOURNAL_PATH.exists(),
+    }
+
+
+def _is_deploy_collateral(unit: dict, deploy: Optional[dict], now: datetime) -> bool:
+    """True when a Result=signal failure sits inside a deploy window —
+    stop-clean killing an in-flight oneshot, not an outage."""
+    if not deploy or unit.get("Result") != "signal":
+        return False
+    failed_at = _parse_systemd_timestamp(unit.get("InactiveEnterTimestamp") or "")
+    if failed_at is None:
+        return False
+    if deploy.get("in_flight"):
+        if 0 <= (now - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS:
+            return True
+    marker = deploy.get("marker_mtime")
+    if marker is not None:
+        if 0 <= (marker - failed_at).total_seconds() <= DEPLOY_COLLATERAL_WINDOW_SECS:
+            return True
+    return False
 
 
 # ── state persistence ────────────────────────────────────────────────
@@ -140,10 +199,21 @@ def _outcome_for(*, unit_id: str, severity: str, message: str, now: datetime) ->
     )
 
 
-def _failed_alert(unit: dict, now: datetime) -> Optional[CheckOutcome]:
+def _failed_alert(
+    unit: dict, now: datetime, deploy: Optional[dict] = None
+) -> Optional[CheckOutcome]:
     if unit.get("ActiveState") != "failed":
         return None
     result = unit.get("Result") or "unknown"
+    if _is_deploy_collateral(unit, deploy, now):
+        # stop-clean SIGTERMed an in-flight oneshot mid-deploy. The unit
+        # recovers on its next timer fire; digest-tier note, never a page
+        # (feedback_deploy_stop_clean_fails_inflight_scan_oneshots).
+        message = (
+            f"signal-killed inside a deploy window (Result={result}) — "
+            "deploy stop-clean collateral, recovers on the next timer fire"
+        )
+        return _outcome_for(unit_id=unit["Id"], severity="P3", message=message, now=now)
     message = f"systemd unit failed (Result={result}, NRestarts={unit.get('NRestarts')})"
     if result == "start-limit-hit":
         message += (
@@ -205,11 +275,17 @@ def _recovery_observation(
     )
 
 
-def evaluate(*, current: list[dict], previous: dict, now: datetime) -> list[CheckOutcome]:
+def evaluate(
+    *,
+    current: list[dict],
+    previous: dict,
+    now: datetime,
+    deploy: Optional[dict] = None,
+) -> list[CheckOutcome]:
     """One alert max per unit, plus a prior-P1 recovery observation."""
     outcomes = []
     for unit in current:
-        p1_alert = _failed_alert(unit, now) or _flap_alert(unit, previous, now)
+        p1_alert = _failed_alert(unit, now, deploy) or _flap_alert(unit, previous, now)
         recovery = None if p1_alert else _recovery_observation(unit, previous, now)
         if recovery:
             outcomes.append(recovery)
@@ -248,7 +324,9 @@ def check_units(
         return []
 
     previous = _load_state(state_path)
-    outcomes = evaluate(current=current, previous=previous, now=now)
+    outcomes = evaluate(
+        current=current, previous=previous, now=now, deploy=_read_deploy_evidence()
+    )
     try:
         _save_state(state_path, current, now)
     except OSError as exc:
