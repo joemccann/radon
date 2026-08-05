@@ -61,11 +61,9 @@ function formatDayTick(d: Date): string {
 
 export default function StraddlePanel({
   prices,
-  marketOpen = false,
 }: {
   /** Live L1 map from WorkspaceShell's usePrices; SPX streams on the regime section. */
   prices?: Record<string, PriceData>;
-  marketOpen?: boolean;
 }) {
   const { data, loading, syncing, lastSync } = useStraddle();
   const { isMobile, hasMounted } = useViewport();
@@ -111,8 +109,10 @@ export default function StraddlePanel({
   // reference the intraday move is measured against, and its VIX1D priced
   // today's 1-day straddle at that close. (current.implied_straddle_pct is
   // yesterday's divisor, priced two closes back — wrong for today.)
+  // No market-hours gate: after 16:00 ET the frozen last/close keeps the
+  // session's final ratio on screen until the next Cboe row supersedes it.
   const latest = series[series.length - 1];
-  const liveSpot = marketOpen ? prices?.SPX?.last ?? null : null;
+  const liveSpot = prices?.SPX?.last ?? prices?.SPX?.close ?? null;
   const liveRatio = latest
     ? computeLiveRatio(liveSpot, latest.spx_close, latest.vix1d_close)
     : null;
