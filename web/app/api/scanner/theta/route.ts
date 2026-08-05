@@ -6,6 +6,8 @@ import { getDb } from "@/lib/db";
 import { cachedRead } from "@/lib/dbCache";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { radonFetch } from "@/lib/radonApi";
+import { backfillThetaEarningsPayload } from "@/lib/thetaEarningsBackfill";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -15,6 +17,8 @@ const STALE_THRESHOLD_SECONDS = 6 * 60 * 60;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
 const READ_CACHE_TTL_MS = 10_000;
+/** UW batch annotate budget for pre-feature snapshot backfill. */
+const EARNINGS_BACKFILL_TIMEOUT_MS = 90_000;
 
 type CacheMeta = {
   last_refresh: string | null;
@@ -84,6 +88,15 @@ async function readThetaFromDisk(): Promise<TimestampedRead<Record<string, unkno
   return { data, timestampMs: contentTimestampMs(data.scan_time) };
 }
 
+async function fetchEarningsBatch(tickers: string[]): Promise<{
+  results?: Array<Record<string, unknown>>;
+} | null> {
+  const path = `/earnings?tickers=${encodeURIComponent(tickers.join(","))}`;
+  return radonFetch<{ results?: Array<Record<string, unknown>> }>(path, {
+    timeout: EARNINGS_BACKFILL_TIMEOUT_MS,
+  });
+}
+
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
   const cache_meta = buildCacheMeta(CACHE_PATH);
@@ -97,8 +110,15 @@ export async function GET(): Promise<Response> {
     }),
   );
   if (result.ok) {
+    // Pre-feature snapshots lack the `earnings` key. Backfill from the
+    // standalone earnings service so the column is not blank until the next
+    // full NDX rescan. Fail-open: backfill errors leave the payload unchanged.
+    const data = await backfillThetaEarningsPayload(
+      result.data as Record<string, unknown>,
+      fetchEarningsBatch,
+    );
     return setNoStoreResponseHeaders(
-      NextResponse.json({ ...result.data, cache_meta }),
+      NextResponse.json({ ...data, cache_meta }),
       requestId,
     );
   }

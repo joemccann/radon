@@ -2464,6 +2464,24 @@ THETA_DEFAULT_MIN_DTE = 7
 THETA_DEFAULT_MAX_DTE = 45
 
 
+def _theta_results_have_earnings_field(cached: Any) -> bool:
+    """True when the snapshot was written after earnings annotation shipped.
+
+    Pre-feature rows omit the ``earnings`` key entirely. Those must not satisfy
+    the scan cooldown — otherwise SCAN NDX after deploy returns a blank column
+    until the cooldown window expires.
+    """
+    if not isinstance(cached, dict):
+        return False
+    results = cached.get("results") or []
+    if not results:
+        return True
+    for row in results:
+        if isinstance(row, dict) and "earnings" in row:
+            return True
+    return False
+
+
 def _theta_cache_matches(
     cached: Any, preset: str, min_dte: int, max_dte: int, min_credit: float
 ) -> bool:
@@ -2471,6 +2489,8 @@ def _theta_cache_matches(
     the search parameters match — otherwise a fresh DTE/credit search within the
     cooldown window would silently return the previous parameters' results."""
     if not isinstance(cached, dict):
+        return False
+    if not _theta_results_have_earnings_field(cached):
         return False
     universe = str(cached.get("universe") or "")
     preset_key = preset.lower()
