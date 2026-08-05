@@ -774,6 +774,56 @@ def upsert_yield_curve_rows(rows: list[dict[str, Any]], recorded_at: Optional[st
     db.commit()
 
 
+STRADDLE_UPSERT_SQL = """
+INSERT INTO straddle_history
+  (date, spx_close, vix1d_close, ratio, recorded_at)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  spx_close   = excluded.spx_close,
+  vix1d_close = excluded.vix1d_close,
+  ratio       = excluded.ratio,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_straddle_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Straddle indicator — one row per common SPX/VIX1D session, idempotent
+    on date. ratio is NULL on the series' first session (no prior close).
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a changed-source run
+    rewrites the full ~1,060-session series, which per-row would be a
+    thousand statements on one stream (the rv-ratio 2026-07-21 502
+    incident). ~3 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    float(row["spx_close"]),
+                    float(row["vix1d_close"]),
+                    row.get("ratio"),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO straddle_history (date, spx_close, vix1d_close, ratio, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "spx_close = excluded.spx_close, vix1d_close = excluded.vix1d_close, "
+            "ratio = excluded.ratio, recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 def upsert_option_close(
     symbol: str,
     expiry: str,

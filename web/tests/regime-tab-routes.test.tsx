@@ -53,6 +53,7 @@ describe.each([
   ["breadth", "app/regime/breadth/page.tsx"],
   ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
+  ["straddle", "app/regime/straddle/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
@@ -96,6 +97,9 @@ vi.mock("../components/BpiPanel", () => ({
 }));
 vi.mock("../components/MarginDebtPanel", () => ({
   default: () => <div data-testid="margin-panel-stub" />,
+}));
+vi.mock("../components/StraddlePanel", () => ({
+  default: () => <div data-testid="straddle-panel-stub" />,
 }));
 vi.mock("../components/YieldCurvePanel", () => ({
   default: () => <div data-testid="curve-panel-stub" />,
@@ -218,6 +222,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^MARGIN$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/margin");
+  });
+
+  it("renders the Straddle panel when pathname is /regime/straddle", () => {
+    mockedPathname = "/regime/straddle";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("straddle-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("margin-panel-stub")).toBeNull();
+  });
+
+  it("clicking STRADDLE tab pushes /regime/straddle", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^STRADDLE$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/straddle");
   });
 
   it("renders the Yield Curve panel when pathname is /regime/curve", () => {
