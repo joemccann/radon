@@ -20,6 +20,10 @@ export interface SkewCurrent {
   call_iv: number;
   expiry: string;
   dte: number;
+  /** Far bracket of the 30d constant-maturity interpolation; absent on
+   * rows priced from a single usable monthly. */
+  expiry_far?: string | null;
+  dte_far?: number | null;
 }
 
 export interface SkewStats {
