@@ -20,6 +20,12 @@ type UseSyncConfig<T> = {
   retryIntervalMs?: number;
   retryMethod?: RetryMethod;
   showBackgroundError?: boolean;
+  /**
+   * When false, skip the mount-time GET until `active` becomes true.
+   * Default true (legacy: inactive still hydrates cache for visible panels).
+   * Scanner mode hooks set this false so cold /scanner only fetches the active mode (T7).
+   */
+  loadWhenInactive?: boolean;
 };
 
 export type UseSyncReturn<T> = {
@@ -41,6 +47,7 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     retryIntervalMs = 0,
     retryMethod = "POST",
     showBackgroundError = false,
+    loadWhenInactive = true,
   } = config;
 
   const [data, setData] = useState<T | null>(null);
@@ -112,15 +119,24 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
     await executeRequest(method, false);
   }, [executeRequest, hasPost]);
 
-  // Initial fetch — always read the cached file once when the hook mounts.
-  // `active=false` should disable polling and background sync, not blank the page.
+  // Initial fetch — read the cached file once when the hook mounts (unless
+  // loadWhenInactive is false and the consumer is inactive). active=false
+  // still disables polling; by default it does not blank a visible panel.
   useEffect(() => {
+    if (!active && !loadWhenInactive) {
+      // Inactive + no prefetch: leave data null; badges stay empty until load.
+      if (!didInitialRead.current) {
+        setLoading(false);
+      }
+      return;
+    }
     if (initialLoadKeyRef.current === endpoint) return;
     initialLoadKeyRef.current = endpoint;
 
     const init = async () => {
       let networkResolved = false;
       try {
+        if (!didInitialRead.current) setLoading(true);
         const res = await fetch(endpoint, { method: "GET", cache: "no-store" });
         networkResolved = true;
         const meta = readOfflineMeta(res.headers);
@@ -141,10 +157,11 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
           }, retryIntervalMs);
         }
 
-        // Auto-sync on first load when the hook is active.
+        // Auto-sync on first load when the hook is active. GET-only endpoints
+        // already hydrated above — do not immediately re-GET the same cache.
         if (active && !didInitialSync.current) {
           didInitialSync.current = true;
-          void triggerSync();
+          if (hasPost) void triggerSync();
         }
       } catch (err) {
         if (!networkResolved) reportFetchFailure();
@@ -153,20 +170,22 @@ export function useSyncHook<T>(config: UseSyncConfig<T>, active: boolean): UseSy
         didInitialRead.current = true;
         if (active && !didInitialSync.current) {
           didInitialSync.current = true;
-          void triggerSync();
+          if (hasPost) void triggerSync();
         }
       }
     };
 
     void init();
-  }, [active, clearRetry, endpoint, triggerSync, extractTimestamp, retryIntervalMs, retryMethod, shouldRetry]);
+  }, [active, clearRetry, endpoint, hasPost, loadWhenInactive, triggerSync, extractTimestamp, retryIntervalMs, retryMethod, shouldRetry]);
 
-  // If the hook mounted while inactive, issue the first sync when it later becomes active.
+  // If the hook mounted while inactive (with loadWhenInactive), issue the first
+  // POST/sync when it later becomes active. When loadWhenInactive is false the
+  // initial-load effect above also re-runs on active and performs the GET.
   useEffect(() => {
     if (!active || !didInitialRead.current || didInitialSync.current) return;
     didInitialSync.current = true;
-    void triggerSync();
-  }, [active, triggerSync]);
+    if (hasPost) void triggerSync();
+  }, [active, hasPost, triggerSync]);
 
   // Auto-sync interval (only when active)
   useEffect(() => {

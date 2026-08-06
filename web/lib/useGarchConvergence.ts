@@ -15,6 +15,7 @@ const config = {
   endpoint: "/api/garch-convergence",
   hasPost: false,
   extractTimestamp: (d: GarchConvergenceData) => d.scan_time || null,
+  loadWhenInactive: false,
 };
 
 export function useGarchConvergence(active: boolean): UseSyncReturn<GarchConvergenceData> {

@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   Bell,
@@ -4077,7 +4077,7 @@ type WorkspaceSectionsProps = {
   marketState?: MarketState;
 };
 
-export default function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, prices, tickerParam, theme, marketState }: WorkspaceSectionsProps) {
+function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, prices, tickerParam, theme, marketState }: WorkspaceSectionsProps) {
   switch (section) {
     case "dashboard":
       return null;
@@ -4123,3 +4123,7 @@ export default function WorkspaceSections({ section, portfolio, portfolioLastSyn
       return <FlowSections tickerParam={tickerParam} />;
   }
 }
+
+// Memo so shell price ticks do not re-render scanner/discover (and other
+// sections that omit prices). WorkspaceShell passes prices only when needed.
+export default memo(WorkspaceSections);

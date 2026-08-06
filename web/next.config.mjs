@@ -65,6 +65,11 @@ const config = {
   outputFileTracingExcludes: Object.fromEntries(
     HOST_DATA_TRACE_ROUTES.map((route) => [route, HOST_DATA_TRACE_EXCLUDES]),
   ),
+  // Tree-shake lucide-react named imports so every shell route pays only for
+  // icons it actually uses (React BP #2 / skill-stack T10).
+  experimental: {
+    optimizePackageImports: ["lucide-react"],
+  },
   turbopack: {},
   webpack: (config) => {
     config.resolve.alias["@tools"] = resolve(__dirname, "..", "lib", "tools");

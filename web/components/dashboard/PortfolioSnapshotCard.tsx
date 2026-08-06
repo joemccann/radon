@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import type { PortfolioData } from "@/lib/types";
 import { fmtMoney, fmtMoneySigned } from "@/lib/format/money";
 import { useViewport } from "@/lib/useViewport";
@@ -20,6 +21,13 @@ function metricTone(value: number | null | undefined): "pos" | "neg" | "mut" {
   return value > 0 ? "pos" : "neg";
 }
 
+function formatSampleTime(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "—";
+  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false });
+}
+
 /**
  * PortfolioSnapshotCard — the top-of-dashboard portfolio summary. Net Liq,
  * Today P&L, Open Risk (deployed capital), and free cash. Reads from the
@@ -38,9 +46,17 @@ export function PortfolioSnapshotCard({ portfolio, realizedPnl = 0 }: Props) {
   const openRisk = portfolio?.total_deployed_dollars ?? null;
   const todayTone = pnlTone(todayPnl);
 
+  // Edge meter: open risk / bankroll (net liq). Rest when feed unavailable.
+  const edgeLevel =
+    netLiq != null && netLiq > 0 && openRisk != null && openRisk >= 0
+      ? Math.max(0, Math.min(100, (openRisk / netLiq) * 100))
+      : null;
+
+  const basis = portfolio ? "stream" : "awaiting";
+  const asOf = formatSampleTime(portfolio?.last_sync ?? null);
+
   if (mobile) {
-    // Mobile: 2x2 MetricCell grid. Drop the panel-eyebrow/title header overhead —
-    // the section toggle above already labels this block.
+    // Mobile: 2x2 MetricCell grid. Collapse row owns the short device label (T5).
     return (
       <div className="snap-mobile-grid">
         <MetricCell label="Net Liq" value={fmtMoney(netLiq)} size="primary" />
@@ -56,9 +72,14 @@ export function PortfolioSnapshotCard({ portfolio, realizedPnl = 0 }: Props) {
     );
   }
 
+  const edgeStyle =
+    edgeLevel != null
+      ? ({ ["--edge-level"]: `${edgeLevel.toFixed(1)}%` } as CSSProperties)
+      : undefined;
+
   return (
     <section className="snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
+      <span className="panel-edge-trace" style={edgeStyle} aria-hidden />
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Portfolio / 01</p>
         <h3 className="panel-title">Account</h3>
@@ -83,6 +104,20 @@ export function PortfolioSnapshotCard({ portfolio, realizedPnl = 0 }: Props) {
           <span className="snapshot-cell__value">{fmtMoney(cash)}</span>
         </div>
       </div>
+      <footer className="panel-meta-rail" aria-label="Account calibration">
+        <div className="panel-meta-rail-item">
+          <span className="k">source</span>
+          <span className="v">ib</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">basis</span>
+          <span className="v">{basis}</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">as.of</span>
+          <span className="v">{asOf}</span>
+        </div>
+      </footer>
     </section>
   );
 }

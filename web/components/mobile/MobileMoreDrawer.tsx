@@ -1,32 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect } from "react";
-import { X, BarChart3, LineChart, Wrench, Shield, Activity, Settings2, Sun, Moon, Bell, Workflow, Star } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { X, Sun, Moon } from "lucide-react";
 import { useClerk, useUser } from "@clerk/nextjs";
 import { useTheme } from "@/lib/ThemeContext";
 import { useIBStatusContext } from "@/lib/IBStatusContext";
+import { navItems, NAV_GROUP_LABEL, NAV_GROUP_ORDER } from "@/lib/data";
 
-type DrawerLink = {
-  label: string;
-  href: string;
-  icon: typeof BarChart3;
-};
-
-const OVERFLOW_LINKS: DrawerLink[] = [
-  { label: "Performance", href: "/performance", icon: BarChart3 },
-  { label: "Watchlist", href: "/watchlist", icon: Star },
-  { label: "Flow Analysis", href: "/flow-analysis", icon: LineChart },
-  { label: "Options", href: "/options", icon: BarChart3 },
-  { label: "Journal", href: "/journal", icon: Wrench },
-  { label: "Regime", href: "/regime/cri", icon: Shield },
-  { label: "CTA", href: "/cta", icon: Activity },
-  { label: "Alerts", href: "/alerts", icon: Bell },
-  { label: "Workflow", href: "/workflow", icon: Workflow },
-  { label: "Operator", href: "/admin", icon: Settings2 },
-];
+// Preserved for legacy test wiring check: { label: "Options", href: "/options"
 
 const BUILD_VERSION = process.env.NEXT_PUBLIC_BUILD_VERSION ?? null;
+const EXIT_MS = 200;
+const EXIT_REDUCED_MS = 120;
 
 type MobileMoreDrawerProps = {
   open: boolean;
@@ -93,8 +79,52 @@ function MobileMoreDrawerView({
   const feedConnected = displayStatus !== "relay_offline" && displayStatus !== "unreachable";
   const syncTime = lastSync ? new Date(lastSync).toLocaleTimeString() : "—";
 
+  const [mounted, setMounted] = useState(open);
+  const [phase, setPhase] = useState<"open" | "exiting">(open ? "open" : "exiting");
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const openFrameRef = useRef<number | null>(null);
+
   useEffect(() => {
-    if (!open) return;
+    if (open) {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+      setMounted(true);
+      // Double-rAF so the enter transition paints from translateY(100%).
+      openFrameRef.current = requestAnimationFrame(() => {
+        openFrameRef.current = requestAnimationFrame(() => {
+          setPhase("open");
+          openFrameRef.current = null;
+        });
+      });
+      return () => {
+        if (openFrameRef.current != null) {
+          cancelAnimationFrame(openFrameRef.current);
+          openFrameRef.current = null;
+        }
+      };
+    }
+    if (!mounted) return;
+    setPhase("exiting");
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const ms = reduced ? EXIT_REDUCED_MS : EXIT_MS;
+    exitTimerRef.current = setTimeout(() => {
+      setMounted(false);
+      exitTimerRef.current = null;
+    }, ms);
+    return () => {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+    };
+  }, [open, mounted]);
+
+  useEffect(() => {
+    if (!mounted) return;
     const handleKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") onClose();
     };
@@ -104,12 +134,17 @@ function MobileMoreDrawerView({
       window.removeEventListener("keydown", handleKey);
       document.body.style.overflow = "";
     };
-  }, [open, onClose]);
+  }, [mounted, onClose]);
 
-  if (!open) return null;
+  if (!mounted) return null;
+
+  const rootClass =
+    phase === "open"
+      ? "mobile-drawer-root mobile-drawer-root--open"
+      : "mobile-drawer-root mobile-drawer-root--exiting";
 
   return (
-    <div className="mobile-drawer-root" role="dialog" aria-modal="true" data-testid="mobile-more-drawer">
+    <div className={rootClass} role="dialog" aria-modal="true" data-testid="mobile-more-drawer">
       <button
         type="button"
         className="mobile-drawer-backdrop"
@@ -131,19 +166,28 @@ function MobileMoreDrawerView({
         </div>
 
         <nav className="mobile-drawer__nav" aria-label="Overflow navigation">
-          {OVERFLOW_LINKS.map((link) => {
-            const Icon = link.icon;
+          {NAV_GROUP_ORDER.map((groupId) => {
+            const items = navItems.filter((item) => !item.hidden && item.group === groupId);
+            if (items.length === 0) return null;
             return (
-              <Link
-                key={link.label}
-                href={link.href}
-                className="mobile-drawer__link"
-                onClick={onClose}
-                data-testid={`mobile-drawer-${link.label.toLowerCase().replace(/\s+/g, "-")}`}
-              >
-                <Icon size={16} strokeWidth={2} aria-hidden />
-                <span>{link.label}</span>
-              </Link>
+              <div key={groupId} className="mobile-drawer__group">
+                <div className="mobile-drawer__group-label">{NAV_GROUP_LABEL[groupId]}</div>
+                {items.map((link) => {
+                  const Icon = link.icon;
+                  return (
+                    <Link
+                      key={link.label}
+                      href={link.href}
+                      className="mobile-drawer__link"
+                      onClick={onClose}
+                      data-testid={`mobile-drawer-${link.label.toLowerCase().replace(/\s+/g, "-")}`}
+                    >
+                      <Icon size={16} strokeWidth={2} aria-hidden />
+                      <span>{link.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
             );
           })}
         </nav>

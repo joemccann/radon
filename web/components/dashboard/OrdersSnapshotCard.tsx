@@ -1,5 +1,6 @@
 "use client";
 
+import type { CSSProperties } from "react";
 import Link from "next/link";
 import type { OrdersData, OpenOrder, ExecutedOrder } from "@/lib/types";
 import { useViewport } from "@/lib/useViewport";
@@ -7,6 +8,9 @@ import { useViewport } from "@/lib/useViewport";
 type Props = {
   orders: OrdersData | null;
 };
+
+/** Soft session density cap for the working-orders edge gauge. */
+const WORKING_EDGE_CAP = 12;
 
 function fmtTime(iso?: string | null): string {
   if (!iso) return "";
@@ -56,10 +60,27 @@ export function OrdersSnapshotCard({ orders }: Props) {
   const open = (orders?.open_orders ?? []).slice(0, 3);
   const recent = (orders?.executed_orders ?? []).slice(0, 3);
   const hasAny = open.length > 0 || recent.length > 0;
+  const workingCount = orders?.open_orders.length ?? 0;
+  const filledCount = orders?.executed_orders.length ?? 0;
+
+  const edgeLevel =
+    orders != null
+      ? Math.max(0, Math.min(100, (workingCount / WORKING_EDGE_CAP) * 100))
+      : null;
+  const edgeStyle =
+    edgeLevel != null
+      ? ({ ["--edge-level"]: `${edgeLevel.toFixed(1)}%` } as CSSProperties)
+      : undefined;
+
+  const sessionEt = new Date().toLocaleTimeString("en-US", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "America/New_York",
+  });
 
   if (mobile) {
-    // Mobile: drop the panel-eyebrow/title header; section toggle already labels
-    // this block. Flatten into a single-column stacked list with a see-all link.
+    // Mobile: section toggle owns the short device label. Flatten lists.
     return (
       <div className="snap-mobile-orders">
         {!hasAny ? (
@@ -99,7 +120,7 @@ export function OrdersSnapshotCard({ orders }: Props) {
 
   return (
     <section className="snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
+      <span className="panel-edge-trace" style={edgeStyle} aria-hidden />
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Orders / 03</p>
         <h3 className="panel-title">Working &amp; Filled</h3>
@@ -113,7 +134,7 @@ export function OrdersSnapshotCard({ orders }: Props) {
           <div className="snapshot-list">
             <p className="snapshot-list__kicker">
               Working
-              <span className="snapshot-list__count">{orders?.open_orders.length ?? 0}</span>
+              <span className="snapshot-list__count">{workingCount}</span>
             </p>
             {open.length === 0 ? (
               <div className="snapshot-list__empty">No working orders.</div>
@@ -132,7 +153,7 @@ export function OrdersSnapshotCard({ orders }: Props) {
           <div className="snapshot-list">
             <p className="snapshot-list__kicker">
               Today&apos;s Fills
-              <span className="snapshot-list__count">{orders?.executed_orders.length ?? 0}</span>
+              <span className="snapshot-list__count">{filledCount}</span>
             </p>
             {recent.length === 0 ? (
               <div className="snapshot-list__empty">No fills today.</div>
@@ -149,6 +170,20 @@ export function OrdersSnapshotCard({ orders }: Props) {
           </div>
         </div>
       )}
+      <footer className="panel-meta-rail" aria-label="Orders calibration">
+        <div className="panel-meta-rail-item">
+          <span className="k">working</span>
+          <span className="v">{workingCount}</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">filled.today</span>
+          <span className="v">{filledCount}</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">session</span>
+          <span className="v">{sessionEt} ET</span>
+        </div>
+      </footer>
     </section>
   );
 }

@@ -14,6 +14,7 @@ const config = {
   endpoint: "/api/leap",
   hasPost: false,
   extractTimestamp: (d: LeapData) => d.scan_time || null,
+  loadWhenInactive: false,
 };
 
 export function useLeap(active: boolean): UseSyncReturn<LeapData> {

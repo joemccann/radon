@@ -35,21 +35,28 @@ function DashboardSection({
 }) {
   const { isMobile, hasMounted } = useViewport();
   const mobile = isMobile && hasMounted;
+  // Single mount label: when open the card owns eyebrow/title; outer is
+  // collapse-only. When collapsed (or mobile), keep a short device label so
+  // slots do not reduce to orphaned counts (T2 / T5).
+  const showDeviceLabel = !open || mobile;
+  const collapseOnly = open && !mobile;
 
   return (
     <section className={`dashboard-section dashboard-section--${id}`} data-testid={`dashboard-section-${id}`}>
       <h2 className="dashboard-section__heading" aria-label={label}>
         <button
           type="button"
-          // On mobile: give the toggle a full 44px tap target; suppress the label
-          // overhead so only the chevron + count remain as a compact collapse affordance.
-          className={`dashboard-section__toggle${mobile ? " tap-target" : ""}`}
+          className={`dashboard-section__toggle${mobile ? " tap-target" : ""}${collapseOnly ? " dashboard-section__toggle--collapse-only" : ""}`}
           aria-expanded={open}
           aria-controls={`dashboard-section-body-${id}`}
-          aria-label={mobile ? label : undefined}
+          aria-label={label}
           onClick={() => onToggle(id)}
         >
-          {!mobile && <span className="dashboard-section__title">{label}</span>}
+          {showDeviceLabel ? (
+            <span className={mobile ? "dashboard-section__label" : "dashboard-section__title"}>
+              {label}
+            </span>
+          ) : null}
           <span className="dashboard-section__meta">
             {count ? <span>{count}</span> : null}
             {open ? <ChevronDown size={16} aria-hidden /> : <ChevronRight size={16} aria-hidden />}

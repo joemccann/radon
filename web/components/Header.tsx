@@ -5,6 +5,7 @@ import { Maximize2, Minimize2, Moon, Sun } from "lucide-react";
 import TickerSearch from "./TickerSearch";
 import { useTickerNav } from "@/lib/useTickerNav";
 import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
+import { pushRecentTicker } from "./CommandPalette";
 
 type HeaderProps = {
   activeLabel: string;
@@ -24,6 +25,10 @@ type HeaderProps = {
    *  telemetry rail. Replaces the previous "Last sync" pill that lived
    *  inside the sync-controls children. */
   lastSync?: string | null;
+  onOpenPalette?: () => void;
+  isStale?: boolean;
+  staleAgeMinutes?: number | null;
+  onSyncNow?: () => void;
 };
 
 type IntegrityClass = "ok" | "warn" | "dead" | "demo";
@@ -68,6 +73,10 @@ export default function Header({
   futuresStrip,
   onSearchUnavailable,
   lastSync,
+  onOpenPalette,
+  isStale,
+  staleAgeMinutes,
+  onSyncNow,
 }: HeaderProps) {
   const searchRef = useRef<HTMLInputElement | null>(null);
   const { navigateToTicker } = useTickerNav();
@@ -79,16 +88,17 @@ export default function Header({
     const handler = (event: globalThis.KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
-        searchRef.current?.focus();
+        if (onOpenPalette) onOpenPalette();
+        else searchRef.current?.focus();
       }
     };
-
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, []);
+  }, [onOpenPalette]);
 
   const handleSelect = useCallback(
     (symbol: string) => {
+      pushRecentTicker(symbol);
       navigateToTicker(symbol);
     },
     [navigateToTicker],
@@ -96,7 +106,7 @@ export default function Header({
 
   return (
     <header className="header">
-      <div className="telemetry-rail" aria-label="Workspace telemetry">
+      <div className={`telemetry-rail${isStale ? " telemetry-rail--stale" : ""}`} aria-label="Workspace telemetry">
         {isPageHeading ? (
           <h1 className="rail-section" title={activeLabel}>{activeLabel}</h1>
         ) : (
@@ -116,6 +126,8 @@ export default function Header({
         <span
           className={`rail-integrity rail-integrity-${integrity.cls}`}
           data-integrity={integrity.cls}
+          aria-live="polite"
+          aria-atomic="true"
         >
           <span
             className={`rail-integrity-dot rail-integrity-dot-${integrity.cls}`}
@@ -123,18 +135,41 @@ export default function Header({
           />
           {integrity.text}
         </span>
+        {isStale && staleAgeMinutes != null && (
+          <>
+            <span className="rail-sep" aria-hidden>·</span>
+            <span className="stale-pill" data-testid="stale-pill">
+              stale {staleAgeMinutes}m
+              {onSyncNow && (
+                <button type="button" onClick={onSyncNow} aria-label="Sync now">Sync</button>
+              )}
+            </span>
+          </>
+        )}
       </div>
       {futuresStrip ?? null}
       <div className="header-actions" suppressHydrationWarning>
         {children}
+        <button
+          type="button"
+          className="command-palette-trigger"
+          onClick={onOpenPalette}
+          aria-label="Open command palette"
+          data-testid="command-palette-trigger"
+          title="⌘K to open palette"
+        >
+          ⌘K
+        </button>
         <TickerSearch
           ref={searchRef}
           onSelect={handleSelect}
           onSearchUnavailable={onSearchUnavailable}
-          placeholder="⌘K to search instruments…"
+          placeholder="Search ticker…"
           className="search-input-wrapper"
+          ariaLabel="Search ticker"
         />
         <button
+          type="button"
           suppressHydrationWarning
           className="fullscreen-toggle"
           onClick={onToggleFullscreen}
@@ -144,6 +179,7 @@ export default function Header({
           {isFullscreen ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
         </button>
         <button
+          type="button"
           suppressHydrationWarning
           className="theme-toggle"
           onClick={onToggleTheme}
