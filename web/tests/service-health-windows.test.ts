@@ -425,6 +425,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     }
     expect(requiresIb("straddle")).toBe(false);
   });
+
+  // ``skew`` — radon-skew.timer fires daily 21:45 UTC every calendar day
+  // (UW post-close SPX greeks final after 16:00 ET; weekend runs are
+  // no-missing-sessions heartbeats), so a uniform 26h window matches its
+  // margin-debt / yield-curve / straddle daily siblings. UW-only — no IB.
+  it("skew is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["skew"]).toBeDefined();
+    expect(getServiceCategory("skew")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("skew", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("skew", state)).toBe(
+        getFreshnessWindowMs("margin-debt", state),
+      );
+    }
+    expect(requiresIb("skew")).toBe(false);
+  });
 });
 
 describe("getServiceCategory", () => {
