@@ -1,0 +1,20 @@
+[Unit]
+Description=Radon Skew Indicator (UW SPX 1M 25-delta put/call IV ratio pull, daily)
+After=network.target
+
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=oneshot
+User=radon
+WorkingDirectory=/home/radon/radon
+EnvironmentFile=/home/radon/radon-cloud/.env
+Environment=RADON_DB_NO_REPLICA=1
+ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/fetch_skew.py
+StandardOutput=journal
+StandardError=journal
+TimeoutStartSec=300
+
+[Install]
+WantedBy=multi-user.target

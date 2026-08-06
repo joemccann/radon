@@ -144,6 +144,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Cboe CDN CSVs only — no IB.
   "straddle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``skew`` — radon-skew.timer fires daily 21:45 UTC every calendar day
+  // (UW publishes final post-close SPX greeks after 16:00 ET; 21:45 UTC
+  // clears both DST regimes; weekend runs heartbeat via fetch_skew.py's
+  // no-missing-sessions fast path), so a uniform 26h window fits like
+  // margin-debt / yield-curve / straddle. Unusual Whales only — no IB.
+  "skew": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
   // market-hours gate — connectors read Turso + repo files). Heartbeats
