@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Radon — Flex Queries Setup</title>
+<style>
+  :root{
+    --bg-canvas:#0a0f14; --bg-panel:#0f1519; --bg-raised:#151c22; --line:#1e293b;
+    --signal:#05AD98; --text:#e2e8f0; --muted:#94a3b8; --dim:#475569;
+    --warn:#F5A623; --font-sans:Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif;
+    --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg-canvas);color:var(--text);font-family:var(--font-sans);line-height:1.6;padding:32px}
+  .wrap{max-width:880px;margin:0 auto}
+  .eyebrow{font-family:var(--font-mono);font-size:10px;letter-spacing:0.16em;text-transform:uppercase;color:var(--signal);margin-bottom:8px}
+  h1{font-size:22px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px}
+  .sub{color:var(--muted);font-size:13px;margin-bottom:24px}
+  .panel{background:var(--bg-panel);border:1px solid var(--line);border-radius:4px;padding:20px;margin-bottom:16px}
+  .panel h2{font-size:13px;letter-spacing:0.08em;text-transform:uppercase;color:var(--muted);font-family:var(--font-mono);margin-bottom:10px;display:flex;align-items:center;gap:8px}
+  .panel h2 .num{width:22px;height:22px;display:inline-flex;align-items:center;justify-content:center;background:var(--signal);color:#0a0f14;font-size:11px;font-weight:700;border-radius:999px}
+  h3{font-size:13px;font-weight:600;margin:14px 0 6px}
+  p, li{font-size:13px;color:var(--text)}
+  p{margin-bottom:10px}
+  .meta{font-family:var(--font-mono);font-size:11px;color:var(--muted)}
+  ol, ul{padding-left:18px;margin-bottom:10px}
+  li{margin-bottom:4px}
+  li::marker{color:var(--dim)}
+  code{font-family:var(--font-mono);font-size:11px;background:var(--bg-raised);border:1px solid var(--line);padding:1px 5px;border-radius:3px;color:var(--text)}
+  .callout{border-left:2px solid var(--signal);background:var(--bg-raised);padding:10px 12px;border-radius:2px;margin:12px 0}
+  .callout p{margin:0;font-size:12px;color:var(--muted)}
+  .callout strong{color:var(--text)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0}
+  .kv{background:var(--bg-raised);border:1px solid var(--line);border-radius:4px;padding:10px 12px}
+  .kv .k{font-family:var(--font-mono);font-size:9px;letter-spacing:0.1em;text-transform:uppercase;color:var(--muted);margin-bottom:4px}
+  .kv .v{font-family:var(--font-mono);font-size:11px;color:var(--text);word-break:break-all}
+  .warn{border-left-color:var(--warn)}
+  a{color:var(--signal);text-decoration:none;border-bottom:1px solid transparent}
+  a:hover{border-bottom-color:var(--signal)}
+  .footer{margin-top:20px;padding-top:16px;border-top:1px solid var(--line);font-family:var(--font-mono);font-size:10px;color:var(--dim);letter-spacing:0.04em}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Radon Terminal — Performance</div>
+  <h1>Flex Queries Setup</h1>
+  <p class="sub">Two Flex queries power the new TWR Performance. <code>IB_FLEX_NAV_QUERY_ID</code> is required; <code>IB_FLEX_FLOWS_QUERY_ID</code> is optional and falls back to NAV.</p>
+
+  <div class="panel">
+    <h2><span class="num">1</span> Flex Web Service Token — <code>IB_FLEX_TOKEN</code></h2>
+    <p class="meta">One token for all Flex queries. Single-quoted if it contains <code>$</code>.</p>
+    <ol>
+      <li>IB Portal → <strong>Performance &amp; Reports → Flex Queries → Flex Web Service</strong></li>
+      <li><strong>Create</strong> → copy token → <strong>Save</strong></li>
+      <li>Set in <code>.env</code>, <code>web/.env</code>, Hetzner <code>/home/radon/radon-cloud/.env</code>, and Vercel env: <code>IB_FLEX_TOKEN='…'</code></li>
+    </ol>
+    <div class="callout"><p><strong>Already have one?</strong> Current example IDs are <code>1422766</code> (trades) and <code>1497709</code> (NAV) — reuse the same token, do not create a second.</p></div>
+  </div>
+
+  <div class="panel">
+    <h2><span class="num">2</span> NAV Query — <code>IB_FLEX_NAV_QUERY_ID</code> (required)</h2>
+    <ol>
+      <li>IB Portal → <strong>Performance &amp; Reports → Flex Queries → Activity Flex Queries → Create</strong></li>
+      <li>Period: <code>Custom Date Range</code> · Format: <code>XML</code> · Include: <code>EquitySummaryInBase — By Report Date → Total</code>, <code>CashTransactions</code> (type, amount, reportDate), <code>Transfers</code> (amount, reportDate)</li>
+      <li><strong>Save</strong> → list shows new row → copy <strong>Query ID</strong> (e.g. <code>1497709</code>)</li>
+      <li>Set <code>IB_FLEX_NAV_QUERY_ID=1497709</code> in same envs as above</li>
+    </ol>
+    <div class="grid">
+      <div class="kv"><div class="k">Example — .env</div><div class="v">IB_FLEX_NAV_QUERY_ID=1497709</div></div>
+      <div class="kv"><div class="k">Fallback</div><div class="v">If builder finds no NAV rows → <code>insufficient_data</code> empty state (no crash)</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2><span class="num">3</span> Flows Query — <code>IB_FLEX_FLOWS_QUERY_ID</code> (optional)</h2>
+    <p><code>scripts/perf_twr_builder.py</code> uses <code>flows_qid = IB_FLEX_FLOWS_QUERY_ID or IB_FLEX_NAV_QUERY_ID</code> — if your NAV query already includes <code>CashTransactions</code> + <code>Transfers</code>, skip this step.</p>
+    <ol>
+      <li>Same <strong>Create</strong> flow → only <code>CashTransactions</code> + <code>Transfers</code> (add <code>EquitySummaryInBase</code> if you want it standalone)</li>
+      <li>Save → copy ID → set <code>IB_FLEX_FLOWS_QUERY_ID=…</code> (leave unset to reuse NAV)</li>
+    </ol>
+    <div class="callout warn"><p><strong>Do not</strong> reuse <code>IB_FLEX_QUERY_ID=1422766</code> (trades) for NAV/flows — that query lacks the sections and will return <code>insufficient_data</code>.</p></div>
+  </div>
+
+  <div class="panel">
+    <h2><span class="num">4</span> FRED — <code>FRED_API_KEY</code> (risk-free)</h2>
+    <p>Sharpe/Sortino use daily 3-mo T-bill (DGS3MO), not 0.</p>
+    <ol>
+      <li>Visit <a href="https://fred.stlouisfed.org/docs/api/api_key.html" target="_blank" rel="noreferrer">fred.stlouisfed.org/docs/api/api_key.html</a> → Request API Key</li>
+      <li>Set <code>FRED_API_KEY='…'</code> in same envs (cached to <code>data/risk_free_rate.json</code>; fallback <code>0</code> with warning if unset)</li>
+    </ol>
+  </div>
+
+  <div class="panel">
+    <h2>Apply &amp; verify</h2>
+    <ol>
+      <li>Restart <code>ib_realtime_server</code> / <code>uvicorn</code> or redeploy Vercel.</li>
+      <li><code>python3 scripts/perf_twr_builder.py --json | head</code> — should emit <code>curve_type: twr_modified_dietz_daily</code> (not <code>insufficient_data</code>).</li>
+      <li>Open <strong>Performance</strong> in the sidebar (now visible on desktop + mobile) — curve starts at first NAV date, metrics gated: Annualized ≥20 sessions, Beta/Alpha ≥40, VaR ≥60.</li>
+    </ol>
+  </div>
+
+  <div class="footer">Radon — docs: <code>tasks/performance-rework-plan.md §4</code> · builder: <code>scripts/perf_twr_builder.py</code> · migration: <code>scripts/db/migrations/0035_perf_twr.sql</code></div>
+</div>
+</body>
+</html>

@@ -1,11 +1,12 @@
 import { NextResponse } from "next/server";
-import { readFile, stat } from "fs/promises";
+import { readFile } from "fs/promises";
 import { join } from "path";
-import { isPerformanceBehindPortfolioSync, isPortfolioBehindCurrentEtSession } from "@/lib/performanceFreshness";
+import { isPerformanceBehindPortfolioSync } from "@/lib/performanceFreshness";
 import { radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { dbExecute } from "@/lib/dbExecute";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
+import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
 // Disable Next.js static caching: this handler reads live disk state
 // (data/*.json, cache files). Without this, the framework freezes the
 // first response and serves stale data until the dev server restarts.
@@ -14,15 +15,16 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const PERFORMANCE_PATH = join(process.cwd(), "..", "data", "performance.json");
-const CACHE_TTL_MS = 15 * 60_000;
 
-async function isPerformanceStale(): Promise<boolean> {
-  try {
-    const fileStat = await stat(PERFORMANCE_PATH);
-    return Date.now() - fileStat.mtimeMs > CACHE_TTL_MS;
-  } catch {
-    return true;
-  }
+// §4.4 — TTL is market-state aware: 5 min when OPEN, 60 min otherwise.
+// CLOSED covers extended + overnight + weekends (getMarketStateFromDate
+// returns "closed" | "extended" | "open").
+const CACHE_TTL_OPEN_MS = 5 * 60_000;
+const CACHE_TTL_CLOSED_MS = 60 * 60_000;
+
+function getCacheTtlMs(now: Date = new Date()): number {
+  const state = getMarketStateFromDate(now);
+  return state === "open" ? CACHE_TTL_OPEN_MS : CACHE_TTL_CLOSED_MS;
 }
 
 async function readJsonFile(path: string): Promise<Record<string, unknown> | null> {
@@ -58,6 +60,7 @@ function isCacheBehindPortfolio(
 /**
  * Fire-and-forget background rebuild trigger.
  * 5s timeout, swallow all errors — caller already returned cached data.
+ * §4.4: keep SWR — serve stale immediately, rebuild in background.
  */
 function triggerBackgroundRebuild(): void {
   radonFetch("/performance/background", { method: "POST", timeout: 5_000 }).catch(() => {});
@@ -100,52 +103,53 @@ async function readPerformanceFromDisk(): Promise<TimestampedRead<Record<string,
 
 export async function GET(): Promise<Response> {
   const requestId = getRequestId();
-  const [stale, perfRead, initialPortfolioSnapshot] = await Promise.all([
-    isPerformanceStale(),
+  const cacheTtlMs = getCacheTtlMs();
+  const [perfRead, portfolioSnapshot] = await Promise.all([
     // Fresher of DB row and disk JSON — a frozen writer on either side
     // never wins. The downstream freshness logic uses whichever was served.
+    // TTL is market-state aware (§4.4): 5 min OPEN, 60 min CLOSED.
     dbFirstRead({
       fromDb: readPerformanceFromDb,
       fromDisk: readPerformanceFromDisk,
-      maxAgeMs: CACHE_TTL_MS,
+      maxAgeMs: cacheTtlMs,
       label: "performance",
     }),
     readPortfolioFromDb(),
   ]);
   const cachedPerformance = perfRead.ok ? perfRead.data : null;
 
-  let portfolioSnapshot = initialPortfolioSnapshot;
-  const portfolioLastSync = extractTimestampValue(portfolioSnapshot, "last_sync");
+  // §4.4: removed 35s POST /portfolio/sync block — portfolio sync is
+  // independent (WorkspaceShell handles it). No blocking sync here.
 
-  if (isPortfolioBehindCurrentEtSession(portfolioLastSync)) {
-    try {
-      const refreshed = await radonFetch<Record<string, unknown>>("/portfolio/sync", {
-        method: "POST",
-        timeout: 35_000,
-      });
-      portfolioSnapshot = refreshed;
-    } catch {
-      // Portfolio sync failed — if we have fresh-enough perf cache, return it
-      if (cachedPerformance && !isCacheBehindPortfolio(cachedPerformance, portfolioSnapshot)) {
-        return setNoStoreResponseHeaders(NextResponse.json(cachedPerformance), requestId);
-      }
-      // Otherwise fall through to rebuild evaluation
-    }
-  }
+  // Honest methodology (§4.4) is owned by the TWR builder
+  // (curve_type: twr_modified_dietz_daily, return_basis: time_weighted,
+  //  risk_free_rate: FRED DGS3MO, library_strategy: fred_dgs3mo).
+  // The route passes payload through unchanged — no rewriting.
+  // insufficient_data payloads are returned 200 with warnings so the
+  // UI can render the measurement description empty state.
 
-  const shouldRebuild = !cachedPerformance || stale || isCacheBehindPortfolio(cachedPerformance, portfolioSnapshot);
+  const stale = perfRead.ok ? !perfRead.fresh : true;
+  const behindPortfolio = isCacheBehindPortfolio(cachedPerformance, portfolioSnapshot);
+
+  // §4.4 shouldRebuild: TTL-gated staleness OR portfolio freshness lag.
+  // Covers both "served snapshot is past its market-state window" and
+  // "performance last_sync/as_of lags portfolio last_sync" (twr_subperiods
+  // vs nav_snapshots check is inside the builder; the route gates on
+  // isPerformanceBehindPortfolioSync).
+  const shouldRebuild = !cachedPerformance || stale || behindPortfolio;
 
   if (!shouldRebuild && cachedPerformance) {
     return setNoStoreResponseHeaders(NextResponse.json(cachedPerformance), requestId);
   }
 
-  // SWR: if we have stale cache, return it immediately + trigger background rebuild
+  // insufficient_data is still a valid 200 — surface warnings, SWR in
+  // background so a Flex backfill can fill the gap without blocking.
   if (cachedPerformance) {
     triggerBackgroundRebuild();
     return setNoStoreResponseHeaders(NextResponse.json(cachedPerformance), requestId);
   }
 
-  // Cold start: no cache at all — must block on full rebuild
+  // Cold start: no cache at all — must block on full TWR builder
   try {
     const data = await radonFetch("/performance", { method: "POST", timeout: 180_000 });
     return setNoStoreResponseHeaders(NextResponse.json(data), requestId);

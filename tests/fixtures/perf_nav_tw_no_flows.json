@@ -1,0 +1,9 @@
+{
+  "nav_snapshots": {
+    "2026-01-02": 100000.0,
+    "2026-01-03": 112345.6
+  },
+  "external_flows": {},
+  "expected_total_return": 0.123456,
+  "description": "Two-day no-flow golden: r = 112345.6/100000 -1 = 0.123456 exactly"
+}
