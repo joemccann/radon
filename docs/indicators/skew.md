@@ -13,34 +13,34 @@ call implied vol. Reference: operator-supplied chart ("Change in SPX 1-Month
 
 ## Signal definition
 
-Per session `t`, from the SPX option chain of the selected monthly expiry:
+Per session `t`, at **constant 30-day maturity** interpolated between the two
+bracketing monthly expiries (near = longest monthly at or under 30 DTE, far =
+shortest beyond 30; a single rolling monthly is WRONG here — the ratio jumps
+structurally on roll day because near-dated skew runs steeper, which doubles
+the change-series stddev with non-market artifacts):
 
 ```
-put_iv_25d  = IV linearly interpolated in delta to put_delta  = -0.25
-call_iv_25d = IV linearly interpolated in delta to call_delta = +0.25
-ratio_t     = put_iv_25d / call_iv_25d
-change_t    = ratio_t - ratio_{t-1}          (None on the first stored session)
+per expiry E:  put_iv_25d(E), call_iv_25d(E)  = IV linearly interpolated in
+                                                delta to -0.25 / +0.25
+per leg:       iv_30d = constant_maturity_leg(iv_near, dte_near, iv_far, dte_far)
+               (linear in DTE to 30, clamped to the bracket edges)
+ratio_t        = put_iv_30d / call_iv_30d
+change_t       = ratio_t - ratio_{t-1}        (None on the first stored session)
 ```
 
-- Interpolation: per wing, collect (delta, iv) points with both fields present
-  and iv > 0, coerce strings to float, sort by delta, take the bracketing pair
-  around the target and interpolate linearly; exact-hit short-circuits.
-  Fixture-derived pins (2026-08-05, expiry 2026-09-18, 571 strikes):
-  `call25 = 0.12340843535214445`, `put25 = 0.15956701505157658`,
-  `ratio = 1.2929992556526146`.
-- Expiry selection (`nearest_monthly_expiry(as_of)`): candidates are the third
-  Fridays of the as-of month and the next two months; pick min `|dte - 30|`,
-  **tie breaks to the LATER expiry** (2026-08-05: Aug 21 = 16 DTE vs Sep 18 =
-  44 DTE, both |14| from 30 → Sep 18, matching the fixture). If the chain for
-  a candidate comes back empty (holiday-shifted expiry), retry the prior
-  calendar day, then the next-nearest candidate. Tenor drifts ~16-44 DTE by
-  construction — this is the standard "1M constant-maturity-ish" monthly walk;
-  document, don't hide.
+- Delta interpolation: per wing, collect (delta, iv) points with both fields
+  present and iv > 0, coerce strings to float, sort by delta, interpolate the
+  bracketing pair; exact-hit short-circuits.
+- `bracketing_monthly_expiries(as_of)`: third Fridays of the as-of month and
+  the next two; near = max dte <= 30 (else shortest listed), far = min dte >
+  30 (else near). 2026-08-05 -> (2026-08-21 @ 16 DTE, 2026-09-18 @ 44 DTE).
+- Holiday-shifted expiry fallback per bracket: listed date, then the prior
+  calendar day. A single usable bracket prices the row alone (clamped);
+  neither usable -> skip the session (self-heals on a later run).
 - Stats over all non-null changes: `high`, `low`, `avg`, `stddev` (population,
   `statistics.pstdev`). The UI derives z = change / stddev.
-- Tone rule (UI): a change strictly beyond ±2 x stddev renders
-  `var(--warning)` (a tail event in either direction); otherwise / null
-  `var(--text-muted)`. Boundary exactly 2 sigma stays muted (strict).
+- Tone rule (UI): strictly beyond +/-2 x stddev renders `var(--warning)`;
+  otherwise / null `var(--text-muted)`; boundary stays muted (strict).
 
 ## Source facts (research 2026-08-05, live-probed with repo token)
 
@@ -72,7 +72,8 @@ Bearer + honest UA. Pure functions:
 - `parse_greek_rows(payload) -> list[dict]` — `payload["data"]`, floats coerced.
 - `interpolate_iv_at_delta(rows, side, target) -> float | None` — per spec;
   `side` in `{"call", "put"}` selects `{side}_delta` / `{side}_volatility`.
-- `nearest_monthly_expiry(as_of: date) -> date` + `third_friday(year, month)`.
+- `bracketing_monthly_expiries(as_of) -> (near, far)` + `third_friday(year, month)`
+  + `constant_maturity_leg(iv_near, dte_near, iv_far, dte_far, target=30)`.
 - `compute_change_series(rows) -> list[dict]` — ascending by date; attaches
   `change` (None first row).
 - `compute_stats(series) -> {high, low, avg, stddev} | None` over non-null changes.
@@ -101,9 +102,10 @@ Bearer + honest UA. Pure functions:
   "source": "unusual_whales",
   "count": 730,
   "current": {
-    "date": "2026-08-05", "ratio": 1.292999, "change": -0.12,
-    "put_iv": 0.159567, "call_iv": 0.123408,
-    "expiry": "2026-09-18", "dte": 44
+    "date": "2026-08-05", "ratio": 1.242056, "change": -0.12,
+    "put_iv": 0.147926, "call_iv": 0.119098,
+    "expiry": "2026-08-21", "dte": 16,
+    "expiry_far": "2026-09-18", "dte_far": 44
   },
   "stats": { "high": 0.13, "low": -0.16, "avg": 0.0004, "stddev": 0.04 },
   "series": [ { "date": "2023-09-06", "ratio": 1.31, "change": null }, ... ]
@@ -200,9 +202,15 @@ confirm it exists on the VPS env; it does for GEX/leap timers),
 
 ## Test evidence pins (fixture-derived 2026-08-05)
 
-- Fixture chain: 571 rows, `date=2026-08-05`, `expiry=2026-09-18`.
-- `interpolate_iv_at_delta(rows, "call", 0.25) = 0.12340843535214445`
-- `interpolate_iv_at_delta(rows, "put", -0.25) = 0.15956701505157658`
-- ratio `= 1.2929992556526146`
-- `nearest_monthly_expiry(2026-08-05)` = `2026-09-18` (tie 16 vs 44 DTE → later)
-- `third_friday(2026, 8)` = `2026-08-21`; `third_friday(2026, 9)` = `2026-09-18`
+- Far fixture (`skew_uw_sample.json`): 571 rows, expiry 2026-09-18 (44 DTE):
+  call25 `0.12340843535214445`, put25 `0.15956701505157658`, ratio `1.2929992556526146`.
+- Near fixture (`skew_uw_sample_near.json`): 582 rows, expiry 2026-08-21 (16 DTE):
+  call25 `0.11478760890347106`, put25 `0.13628591095888667`.
+- Constant-maturity 30d (w_far = (30-16)/(44-16) = 0.5):
+  cm_call `0.11909802212780776`, cm_put `0.14792646300523163`, cm_ratio `1.242056420101479`.
+- `bracketing_monthly_expiries(2026-08-05)` = (2026-08-21, 2026-09-18);
+  `(2026-08-24)` = (2026-09-18, 2026-10-16).
+- `third_friday(2026, 8)` = 2026-08-21; `third_friday(2026, 9)` = 2026-09-18.
+- DB row semantics: `expiry`/`dte` = the NEAR anchor of the CM interpolation;
+  `put_iv`/`call_iv`/`ratio` are the CM-30d values; payload rows additionally
+  carry `expiry_far`/`dte_far`.

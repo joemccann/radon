@@ -30,10 +30,10 @@ import { useSkew } from "@/lib/useSkew";
 import { useViewport } from "@/lib/useViewport";
 
 const SKEW_TOOLTIP =
-  "Ratio of SPX 25-delta put IV to 25-delta call IV on the monthly expiry nearest 30 days, interpolated in delta from the Unusual Whales chain. The chart plots the day-over-day change: sharp drops mean put skew collapsing or call demand spiking; sharp rises mean downside fear getting bid. Beyond 2 sigma is a tail repricing event.";
+  "Ratio of SPX 25-delta put IV to 25-delta call IV at a constant 30-day maturity: each wing is interpolated in delta from the Unusual Whales chain, then in time between the two bracketing monthly expiries. The chart plots the day-over-day change: sharp drops mean put skew collapsing or call demand spiking; sharp rises mean downside fear getting bid. Beyond 2 sigma is a tail repricing event.";
 
 const SOURCE_FOOTNOTE =
-  "Unusual Whales SPX greeks chain, monthly expiry nearest 30 days (tenor drifts 16-44 DTE by construction). Stats span all sessions with a computable change, not the visible range.";
+  "Unusual Whales SPX greeks chains, constant-maturity 30d interpolated between the bracketing monthlies. Stats span all sessions with a computable change, not the visible range.";
 
 const VIEWS: ReadonlyArray<{ slug: SkewChartView; label: string }> = [
   { slug: "change", label: "CHANGE" },
@@ -159,7 +159,7 @@ export default function SkewPanel() {
             <MetricCell label="LOW" value={formatSkewChange(stats.low)} />
             <MetricCell label="STDDEV" value={formatSkewRatio(stats.stddev)} />
             <MetricCell label="LATEST DATE" value={current.date} />
-            <MetricCell label="TENOR" value={`${current.expiry} (${current.dte} DTE)`} />
+            <MetricCell label="TENOR" value="30D CM" />
           </div>
         ) : (
           <RegimeStrip>
@@ -224,8 +224,13 @@ export default function SkewPanel() {
             <RegimeStripCell
               testId="skew-strip-tenor"
               label="TENOR"
-              value={current.expiry}
-              sub={<>{current.dte} DTE</>}
+              value="30D CM"
+              sub={
+                <>
+                  {current.expiry} ({current.dte}D) X {current.expiry_far ?? current.expiry} (
+                  {current.dte_far ?? current.dte}D)
+                </>
+              }
             />
           </RegimeStrip>
         )}

@@ -59,7 +59,7 @@ _MAX_GAP_SESSIONS = 10
 _BACKFILL_START = "2023-09-06"  # UW greeks history floor for this token
 _BACKFILL_THROTTLE_S = 0.3
 _BACKFILL_CHECKPOINT_EVERY = 50
-_BASE_ROW_KEYS = ("date", "expiry", "dte", "put_iv", "call_iv", "ratio")
+_BASE_ROW_KEYS = ("date", "expiry", "dte", "expiry_far", "dte_far", "put_iv", "call_iv", "ratio")
 
 
 # ── chain parsing + delta interpolation ───────────────────────────
@@ -140,28 +140,31 @@ def _monthly_candidates(as_of: date) -> list[date]:
     return candidates
 
 
-def _rank_by_target_dte(candidates: list[date], as_of: date) -> list[date]:
-    """Nearest |dte - 30| first; equal distance breaks to the LATER expiry."""
-    return sorted(
-        candidates,
-        key=lambda e: (abs((e - as_of).days - _TARGET_DTE), -(e - as_of).days),
-    )
+def bracketing_monthly_expiries(as_of: date) -> tuple[date, date]:
+    """The monthly pair straddling the 30d target: near = longest-dated
+    monthly at or under 30 DTE (or the shortest listed when none are),
+    far = shortest-dated monthly beyond 30 DTE (or near when none are).
+    Interpolating between the pair gives a constant-maturity 30d surface —
+    a single rolling monthly jumps structurally on roll day (near-dated
+    skew ratios run much steeper), which contaminates the change series."""
+    candidates = _monthly_candidates(as_of)
+    under = [e for e in candidates if (e - as_of).days <= _TARGET_DTE]
+    over = [e for e in candidates if (e - as_of).days > _TARGET_DTE]
+    near = max(under) if under else min(candidates)
+    far = min(over) if over else near
+    return near, far
 
 
-def nearest_monthly_expiry(as_of: date) -> date:
-    return _rank_by_target_dte(_monthly_candidates(as_of), as_of)[0]
-
-
-def _expiry_candidates(as_of: date) -> list[date]:
-    """Fetch order for one session: the nearest monthly, then the prior
-    calendar day (holiday-shifted expiries trade a day early), then the
-    next-nearest monthly candidate."""
-    ranked = _rank_by_target_dte(_monthly_candidates(as_of), as_of)
-    primary = ranked[0]
-    candidates = [primary, primary - timedelta(days=1)]
-    if len(ranked) > 1:
-        candidates.append(ranked[1])
-    return candidates
+def constant_maturity_leg(
+    iv_near: float, dte_near: int, iv_far: float, dte_far: int, target: int = _TARGET_DTE
+) -> float:
+    """IV interpolated linearly in DTE to the target tenor, clamped to the
+    bracket edges (never extrapolate beyond the listed monthlies)."""
+    if dte_far == dte_near:
+        return iv_near
+    weight = (target - dte_near) / (dte_far - dte_near)
+    weight = min(1.0, max(0.0, weight))
+    return iv_near + weight * (iv_far - iv_near)
 
 
 # ── change series + stats ─────────────────────────────────────────
@@ -247,32 +250,52 @@ def _read_json_cache() -> Optional[dict[str, Any]]:
 
 # ── session fetching ──────────────────────────────────────────────
 
-def _fetch_session_row(client: Any, session: str) -> Optional[dict[str, Any]]:
-    """One session's base row, or None (stderr note) when the chain is
-    empty for every expiry candidate or a wing cannot be interpolated."""
-    as_of = date.fromisoformat(session)
-    for expiry in _expiry_candidates(as_of):
-        rows = parse_greek_rows(client.fetch_greeks(expiry.isoformat(), session))
+def _fetch_expiry_wings(
+    client: Any, expiry: date, session: str
+) -> Optional[tuple[date, float, float]]:
+    """(actual_expiry, put_iv_25d, call_iv_25d) for one monthly, trying the
+    listed date then the prior calendar day (holiday-shifted expiries trade
+    a day early); None when neither chain prices both wings."""
+    for candidate in (expiry, expiry - timedelta(days=1)):
+        rows = parse_greek_rows(client.fetch_greeks(candidate.isoformat(), session))
         if not rows:
             continue
         put_iv = interpolate_iv_at_delta(rows, "put", _PUT_TARGET_DELTA)
         call_iv = interpolate_iv_at_delta(rows, "call", _CALL_TARGET_DELTA)
-        if put_iv is None or call_iv is None:
-            print(
-                f"[skew] {session} expiry {expiry}: 25d wing not bracketed; skipping",
-                file=sys.stderr,
-            )
-            return None
-        return {
-            "date": session,
-            "expiry": expiry.isoformat(),
-            "dte": (expiry - as_of).days,
-            "put_iv": put_iv,
-            "call_iv": call_iv,
-            "ratio": put_iv / call_iv,
-        }
-    print(f"[skew] {session}: empty chain for every expiry candidate; skipping", file=sys.stderr)
+        if put_iv is not None and call_iv is not None:
+            return candidate, put_iv, call_iv
     return None
+
+
+def _fetch_session_row(client: Any, session: str) -> Optional[dict[str, Any]]:
+    """One session's constant-maturity 30d base row from the bracketing
+    monthly pair; a single usable bracket prices the row alone (clamped);
+    None (stderr note) when neither bracket is usable."""
+    as_of = date.fromisoformat(session)
+    near_expiry, far_expiry = bracketing_monthly_expiries(as_of)
+    near = _fetch_expiry_wings(client, near_expiry, session)
+    far = near if far_expiry == near_expiry else _fetch_expiry_wings(client, far_expiry, session)
+
+    if near is None and far is None:
+        print(f"[skew] {session}: no usable chain in the bracketing pair; skipping", file=sys.stderr)
+        return None
+    near = near or far
+    far = far or near
+
+    near_dte = (near[0] - as_of).days
+    far_dte = (far[0] - as_of).days
+    put_iv = constant_maturity_leg(near[1], near_dte, far[1], far_dte)
+    call_iv = constant_maturity_leg(near[2], near_dte, far[2], far_dte)
+    return {
+        "date": session,
+        "expiry": near[0].isoformat(),
+        "dte": near_dte,
+        "expiry_far": far[0].isoformat(),
+        "dte_far": far_dte,
+        "put_iv": put_iv,
+        "call_iv": call_iv,
+        "ratio": put_iv / call_iv,
+    }
 
 
 def _missing_sessions(last_stored: str, now: datetime) -> list[str]:
@@ -287,7 +310,8 @@ def _missing_sessions(last_stored: str, now: datetime) -> list[str]:
 
 
 def _base_rows(series: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    return [{key: row[key] for key in _BASE_ROW_KEYS} for row in series]
+    # .get: rows cached before the constant-maturity rework lack the far keys.
+    return [{key: row.get(key) for key in _BASE_ROW_KEYS} for row in series]
 
 
 def _scan_time_iso(now: datetime) -> str:
@@ -406,6 +430,15 @@ def run_backfill(
         series = compute_change_series(base)
         scan_time = _scan_time_iso(datetime.now(timezone.utc))
         payload = _build_payload(scan_time, series)
+        # Fresh connection per checkpoint: the singleton's Hrana stream dies
+        # server-side while the loop spends minutes on UW fetches, and every
+        # later statement on it 404s ("stream not found") — Hrana rule 3.
+        try:
+            from db.client import reset_connection
+
+            reset_connection()
+        except ImportError:
+            pass
         _write_db_cache(payload, scan_time, rows_changed=True)
         _write_json_cache(payload)
         return payload

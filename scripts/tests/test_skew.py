@@ -13,21 +13,31 @@ from pathlib import Path
 import pytest
 
 from fetch_skew import (
+    bracketing_monthly_expiries,
     compute_change_series,
     compute_stats,
+    constant_maturity_leg,
     interpolate_iv_at_delta,
-    nearest_monthly_expiry,
     parse_greek_rows,
     third_friday,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures"
 UW_PAYLOAD = json.loads((FIXTURES / "skew_uw_sample.json").read_text())
+UW_NEAR_PAYLOAD = json.loads((FIXTURES / "skew_uw_sample_near.json").read_text())
 MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0034_skew.sql"
 
+# Far monthly (2026-09-18, 44 DTE as of 2026-08-05)
 CALL_25D = 0.12340843535214445
 PUT_25D = 0.15956701505157658
 RATIO = 1.2929992556526146
+# Near monthly (2026-08-21, 16 DTE as of 2026-08-05)
+NEAR_CALL_25D = 0.11478760890347106
+NEAR_PUT_25D = 0.13628591095888667
+# Constant-maturity 30d: w_far = (30-16)/(44-16) = 0.5
+CM_CALL_25D = 0.11909802212780776
+CM_PUT_25D = 0.14792646300523163
+CM_RATIO = 1.242056420101479
 
 
 # ── Chain parsing + delta interpolation ───────────────────────────
@@ -93,13 +103,38 @@ class TestExpirySelection:
         assert third_friday(2026, 8) == date(2026, 8, 21)
         assert third_friday(2026, 9) == date(2026, 9, 18)
 
-    def test_tie_between_candidates_breaks_to_later_expiry(self):
-        # 2026-08-05: Aug 21 = 16 DTE, Sep 18 = 44 DTE — both |14| from 30.
-        assert nearest_monthly_expiry(date(2026, 8, 5)) == date(2026, 9, 18)
+    def test_bracketing_pair_straddles_the_30d_target(self):
+        # 2026-08-05: Aug 21 = 16 DTE (below 30), Sep 18 = 44 DTE (above).
+        assert bracketing_monthly_expiries(date(2026, 8, 5)) == (
+            date(2026, 8, 21), date(2026, 9, 18),
+        )
 
-    def test_clear_nearest_wins(self):
-        # 2026-08-24: Sep 18 = 25 DTE beats Oct 16 = 53 and (expired) Aug 21.
-        assert nearest_monthly_expiry(date(2026, 8, 24)) == date(2026, 9, 18)
+    def test_after_the_near_roll_the_next_pair_brackets(self):
+        # 2026-08-24: Sep 18 = 25 DTE (below 30), Oct 16 = 53 DTE (above).
+        assert bracketing_monthly_expiries(date(2026, 8, 24)) == (
+            date(2026, 9, 18), date(2026, 10, 16),
+        )
+
+
+class TestConstantMaturity:
+    def test_interpolates_linearly_in_dte(self):
+        assert constant_maturity_leg(0.10, 16, 0.20, 44) == pytest.approx(0.15)
+
+    def test_fixture_cm_legs_and_ratio(self):
+        cm_call = constant_maturity_leg(NEAR_CALL_25D, 16, CALL_25D, 44)
+        cm_put = constant_maturity_leg(NEAR_PUT_25D, 16, PUT_25D, 44)
+        assert cm_call == pytest.approx(CM_CALL_25D, abs=1e-12)
+        assert cm_put == pytest.approx(CM_PUT_25D, abs=1e-12)
+        assert cm_put / cm_call == pytest.approx(CM_RATIO, abs=1e-12)
+
+    def test_target_outside_the_bracket_clamps_to_the_edge(self):
+        # Both expiries beyond 30d: clamp to the near leg, never extrapolate.
+        assert constant_maturity_leg(0.10, 35, 0.20, 63) == pytest.approx(0.10)
+        # Both under 30d: clamp to the far leg.
+        assert constant_maturity_leg(0.10, 5, 0.20, 20) == pytest.approx(0.20)
+
+    def test_degenerate_equal_dtes_returns_the_near_leg(self):
+        assert constant_maturity_leg(0.12, 30, 0.99, 30) == pytest.approx(0.12)
 
 
 # ── Change series + stats ─────────────────────────────────────────
@@ -185,18 +220,41 @@ class TestRunIncremental:
         assert payload["scan_time"] != "old"
         assert self.db_writes == [False]
 
-    def test_missing_session_is_fetched_computed_and_upserted(self):
+    def test_missing_session_fetches_both_brackets_and_upserts_the_cm_row(self):
+        series = compute_change_series([_row("2026-08-03", 1.31), _row("2026-08-04", 1.30)])
+        self._cached(series)
+        client = _StubClient({
+            ("2026-08-21", "2026-08-05"): UW_NEAR_PAYLOAD,
+            ("2026-09-18", "2026-08-05"): UW_PAYLOAD,
+        })
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 23, 0, tzinfo=timezone.utc)
+        )
+        assert ("2026-08-21", "2026-08-05") in client.calls
+        assert ("2026-09-18", "2026-08-05") in client.calls
+        current = payload["current"]
+        assert current["date"] == "2026-08-05"
+        assert current["ratio"] == pytest.approx(CM_RATIO, abs=1e-9)
+        assert current["put_iv"] == pytest.approx(CM_PUT_25D, abs=1e-9)
+        assert current["call_iv"] == pytest.approx(CM_CALL_25D, abs=1e-9)
+        assert current["change"] == pytest.approx(CM_RATIO - 1.30, abs=1e-9)
+        assert current["expiry"] == "2026-08-21"
+        assert current["dte"] == 16
+        assert current["expiry_far"] == "2026-09-18"
+        assert current["dte_far"] == 44
+        assert self.db_writes == [True]
+
+    def test_single_usable_bracket_falls_back_to_that_leg_alone(self):
+        # Near chain empty (holiday-shifted fallbacks also empty): the far
+        # monthly alone prices the row rather than dropping the session.
         series = compute_change_series([_row("2026-08-03", 1.31), _row("2026-08-04", 1.30)])
         self._cached(series)
         client = _StubClient({("2026-09-18", "2026-08-05"): UW_PAYLOAD})
         payload = self.mod.run(
             client=client, now=datetime(2026, 8, 5, 23, 0, tzinfo=timezone.utc)
         )
-        assert ("2026-09-18", "2026-08-05") in client.calls
         current = payload["current"]
-        assert current["date"] == "2026-08-05"
         assert current["ratio"] == pytest.approx(RATIO, abs=1e-9)
-        assert current["change"] == pytest.approx(RATIO - 1.30, abs=1e-9)
         assert current["expiry"] == "2026-09-18"
         assert current["dte"] == 44
         assert self.db_writes == [True]

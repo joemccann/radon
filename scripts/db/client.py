@@ -187,3 +187,12 @@ def reset_for_tests() -> None:
     global _cached
     with _lock:
         _cached = None
+
+
+def reset_connection() -> None:
+    """Drop the cached singleton so the next get_db() opens fresh.
+
+    Long-running jobs must call this between phases that idle the
+    connection for minutes (Hrana bounding rule 3: an idle stream dies
+    server-side and every later statement on it 404s "stream not found")."""
+    reset_for_tests()
