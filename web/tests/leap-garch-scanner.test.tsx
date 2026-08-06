@@ -84,13 +84,14 @@ describe("LeapScanner", () => {
     render(<LeapScanner data={leapData} onScan={onScan} lastSync={leapData.scan_time} />);
 
     const section = screen.getByTestId("leap-scanner-section");
+    expect(within(section).getByText("LEAP / 05")).toBeTruthy();
     expect(within(section).getByText("LEAP IV Mispricing")).toBeTruthy();
     expect(within(section).getByText("NVDA")).toBeTruthy();
     expect(within(section).getByText("+13.7")).toBeTruthy();
     expect(within(section).getByText("MISPRICED")).toBeTruthy();
     expect(within(section).getByText("1 MISPRICED")).toBeTruthy();
 
-    fireEvent.click(within(section).getByRole("button", { name: /run scan/i }));
+    fireEvent.click(within(section).getByRole("button", { name: /^scan$/i }));
     expect(onScan).toHaveBeenCalledTimes(1);
   });
 
@@ -150,6 +151,7 @@ describe("GarchConvergenceScanner", () => {
     render(<GarchConvergenceScanner data={garchData} onScan={onScan} lastSync={garchData.scan_time} />);
 
     const section = screen.getByTestId("garch-scanner-section");
+    expect(within(section).getByText("GARCH / 06")).toBeTruthy();
     expect(within(section).getByText("GARCH Convergence")).toBeTruthy();
     // Pair cell: leader → lagger hierarchy
     expect(within(section).getByTestId("garch-row-NVDA-AMD")).toBeTruthy();
@@ -161,7 +163,7 @@ describe("GarchConvergenceScanner", () => {
     // Filter bar present
     expect(within(section).getByTestId("garch-filter-actionable")).toBeTruthy();
 
-    fireEvent.click(within(section).getByRole("button", { name: /run scan/i }));
+    fireEvent.click(within(section).getByRole("button", { name: /^scan$/i }));
     expect(onScan).toHaveBeenCalledTimes(1);
   });
 

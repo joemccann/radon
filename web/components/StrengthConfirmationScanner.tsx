@@ -3,6 +3,7 @@
 import { useState, type FormEvent } from "react";
 import { CheckCircle2, Loader2, Search, ShieldCheck, XCircle } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
+import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import TickerLink from "./TickerLink";
@@ -204,18 +205,18 @@ export default function StrengthConfirmationScanner({
   };
 
   return (
-    <section className="section strength-confirmation" data-testid="strength-confirmation-section">
-      <div className="section-header">
-        <h2 className="section-title">
-          <ShieldCheck size={14} />
-          7-Step Strength
-          <InfoTooltip
-            text={STRENGTH_SECTION_HELP}
-            ariaLabel="7-Step Strength scanner details"
-            triggerTestId="strength-title-tooltip"
-            contentTestId="strength-title-tooltip-content"
-          />
-        </h2>
+    <ScannerInstrumentShell
+      moduleId="STRENGTH / 04"
+      title="7-Step Strength"
+      titleAccessory={
+        <InfoTooltip
+          text={STRENGTH_SECTION_HELP}
+          ariaLabel="7-Step Strength scanner details"
+          triggerTestId="strength-title-tooltip"
+          contentTestId="strength-title-tooltip-content"
+        />
+      }
+      controls={
         <div className="strength-confirmation__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{data?.confirmed_strength_count ?? 0} CONFIRMED</span>
@@ -267,8 +268,16 @@ export default function StrengthConfirmationScanner({
             </button>
           )}
         </div>
-      </div>
-
+      }
+      rail={[
+        { k: "source", v: data?.source ?? "Unusual Whales" },
+        { k: "universe", v: data?.universe ?? "—" },
+        { k: "last.sample", v: lastSync ? new Date(lastSync).toLocaleTimeString() : "—" },
+        { k: "confirmed", v: String(data?.confirmed_strength_count ?? 0) },
+      ]}
+      className="strength-confirmation"
+      testId="strength-confirmation-section"
+    >
       {loading ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Measuring seven strength factors...</div>
@@ -343,6 +352,6 @@ export default function StrengthConfirmationScanner({
           </div>
         </>
       )}
-    </section>
+    </ScannerInstrumentShell>
   );
 }

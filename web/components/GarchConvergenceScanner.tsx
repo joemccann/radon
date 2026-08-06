@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import { GitCompareArrows, Loader2 } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
+import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
@@ -109,18 +110,18 @@ export default function GarchConvergenceScanner({
   );
 
   return (
-    <section className="section garch-scanner" data-testid="garch-scanner-section">
-      <div className="section-header garch-scanner__header">
-        <h2 className="section-title">
-          <GitCompareArrows size={14} />
-          GARCH Convergence
-          <InfoTooltip
-            text={GARCH_SECTION_HELP}
-            ariaLabel="GARCH scanner details"
-            triggerTestId="garch-scanner-title-tooltip"
-            contentTestId="garch-scanner-title-tooltip-content"
-          />
-        </h2>
+    <ScannerInstrumentShell
+      moduleId="GARCH / 06"
+      title="GARCH Convergence"
+      titleAccessory={
+        <InfoTooltip
+          text={GARCH_SECTION_HELP}
+          ariaLabel="GARCH scanner details"
+          triggerTestId="garch-scanner-title-tooltip"
+          contentTestId="garch-scanner-title-tooltip-content"
+        />
+      }
+      controls={
         <div className="theta-harvester__meta garch-scanner__meta">
           {lastSync && (
             <span className="report-meta" title={lastSync}>
@@ -147,17 +148,28 @@ export default function GarchConvergenceScanner({
           {onScan && (
             <button
               type="button"
-              className="theta-search__button"
+              className="theta-scan-button"
               onClick={onScan}
               disabled={scanning}
             >
               {scanning ? <Loader2 size={12} className="spin" /> : null}
-              {scanning ? "Scanning..." : "Run scan"}
+              {scanning ? "SCANNING" : "SCAN"}
             </button>
           )}
         </div>
-      </div>
-
+      }
+      rail={[
+        { k: "engine", v: "garch.convergence" },
+        { k: "universe", v: data?.universe ?? "—" },
+        {
+          k: "last.sample",
+          v: lastSync ? `${formatScanTime(lastSync)} ET` : "—",
+        },
+        { k: "actionable", v: String(actionableCount) },
+      ]}
+      className="garch-scanner"
+      testId="garch-scanner-section"
+    >
       {rows.length > 0 && (
         <div className="garch-scanner__filterbar" role="toolbar" aria-label="Filter pairs by gate status">
           {(
@@ -303,6 +315,6 @@ export default function GarchConvergenceScanner({
           </div>
         )}
       </div>
-    </section>
+    </ScannerInstrumentShell>
   );
 }

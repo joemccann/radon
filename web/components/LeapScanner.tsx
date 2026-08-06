@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { Loader2, Telescope } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
+import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import ScannerTickerSearch from "./ScannerTickerSearch";
 import SectionEmptyState from "./SectionEmptyState";
 import { SigMeter } from "./SigMeter";
@@ -62,18 +63,18 @@ export default function LeapScanner({
   const mispricedCount = rows.filter((r) => r.is_mispriced).length;
 
   return (
-    <section className="section leap-scanner" data-testid="leap-scanner-section">
-      <div className="section-header">
-        <h2 className="section-title">
-          <Telescope size={14} />
-          LEAP IV Mispricing
-          <InfoTooltip
-            text={LEAP_SECTION_HELP}
-            ariaLabel="LEAP scanner details"
-            triggerTestId="leap-scanner-title-tooltip"
-            contentTestId="leap-scanner-title-tooltip-content"
-          />
-        </h2>
+    <ScannerInstrumentShell
+      moduleId="LEAP / 05"
+      title="LEAP IV Mispricing"
+      titleAccessory={
+        <InfoTooltip
+          text={LEAP_SECTION_HELP}
+          ariaLabel="LEAP scanner details"
+          triggerTestId="leap-scanner-title-tooltip"
+          contentTestId="leap-scanner-title-tooltip-content"
+        />
+      }
+      controls={
         <div className="theta-harvester__meta">
           {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
           <span className="pill defined">{mispricedCount} MISPRICED</span>
@@ -87,16 +88,25 @@ export default function LeapScanner({
           {onScan && (
             <button
               type="button"
-              className="theta-search__button"
+              className="theta-scan-button"
               onClick={onScan}
               disabled={scanning}
             >
               {scanning ? <Loader2 size={12} className="spin" /> : null}
-              {scanning ? "Scanning…" : "Run scan"}
+              {scanning ? "SCANNING" : "SCAN"}
             </button>
           )}
         </div>
-      </div>
+      }
+      rail={[
+        { k: "engine", v: "leap.iv.mispricing" },
+        { k: "universe", v: data?.universe ?? "—" },
+        { k: "last.sample", v: lastSync ? new Date(lastSync).toLocaleTimeString() : "—" },
+        { k: "mispriced", v: String(mispricedCount) },
+      ]}
+      className="leap-scanner"
+      testId="leap-scanner-section"
+    >
       <div className="section-body">
         {error ? (
           <div className="alert-item bearish">{error}</div>
@@ -162,6 +172,6 @@ export default function LeapScanner({
           </div>
         )}
       </div>
-    </section>
+    </ScannerInstrumentShell>
   );
 }
