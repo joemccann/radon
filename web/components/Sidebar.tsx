@@ -1,45 +1,18 @@
 "use client";
 
 import Link from "next/link";
-import type { WorkspaceSection } from "@/lib/types";
-import { navItems } from "@/lib/data";
+import { useState, useCallback } from "react";
+import type { WorkspaceSection, NavGroupId } from "@/lib/types";
+import { navItems, NAV_GROUP_LABEL, NAV_GROUP_ORDER } from "@/lib/data";
 import { useProfile } from "@/lib/useProfile";
-import { useIBStatusContext, type IBDisplayStatus } from "@/lib/IBStatusContext";
-import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
-import { resolveConnectivityLabel } from "@/lib/offline/offlineStatus";
 
 type SidebarProps = {
   activeSection: WorkspaceSection;
   actionTone: string;
-  /** @deprecated kept for callers that haven't migrated. The authoritative
-   *  status now comes from useIBStatusContext().displayStatus inside this
-   *  component — see the IB Gateway 2FA contradictions fix. */
+  /** @deprecated kept for callers that haven't migrated. */
   ibConnected?: boolean;
   lastSync?: string | null;
 };
-
-/** Footer label per derived display status. Keep tight — overflowing the
- *  sidebar reflows the status row. */
-function statusLabel(
-  status: IBDisplayStatus,
-): { text: string; cls: "live" | "warn" | "dead" | "demo" } {
-  switch (status) {
-    case "connected":
-      return { text: "NOMINAL", cls: "live" };
-    case "awaiting_2fa":
-      return { text: "AWAITING 2FA", cls: "warn" };
-    case "unhealthy":
-      return { text: "DEGRADED", cls: "warn" };
-    case "unreachable":
-      return { text: "UNREACHABLE", cls: "dead" };
-    case "ib_offline":
-      return { text: "OFFLINE", cls: "dead" };
-    case "relay_offline":
-      return { text: "RELAY OFFLINE", cls: "dead" };
-    case "demo":
-      return { text: "DEMO", cls: "demo" };
-  }
-}
 
 function monogramFor(name: string | null, email: string | null): string {
   const source = (name ?? email ?? "").trim();
@@ -50,22 +23,16 @@ function monogramFor(name: string | null, email: string | null): string {
   return (parts[0][0] + parts[1][0]).toUpperCase();
 }
 
-export default function Sidebar({ activeSection, actionTone, lastSync }: SidebarProps) {
-  const { displayStatus } = useIBStatusContext();
-  // A client-side outage must read OFFLINE, not the misdiagnosed
-  // "RELAY OFFLINE" that a dead network produces via deriveDisplayStatus.
-  const { offline: browserOffline } = useOfflineStatus();
-  const { text, cls } =
-    resolveConnectivityLabel(displayStatus, browserOffline) ?? statusLabel(displayStatus);
-  const dotClass =
-    cls === "live"
-      ? "status-dot-live"
-      : cls === "warn"
-        ? "status-dot-warn"
-        : cls === "demo"
-          ? "status-dot-demo"
-          : "status-dot-dead";
-  const syncTime = lastSync ? new Date(lastSync).toLocaleTimeString() : "—";
+export default function Sidebar({ activeSection, actionTone }: SidebarProps) {
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<NavGroupId>>(() => new Set<NavGroupId>(["operations"]));
+  const toggleGroup = useCallback((group: NavGroupId) => {
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  }, []);
 
   // Sidebar identity comes from our own profile store (fetch-based, no Clerk
   // context needed here). The account email + Clerk avatar fallback live on
@@ -93,20 +60,49 @@ export default function Sidebar({ activeSection, actionTone, lastSync }: Sidebar
         </span>
       </div>
 
-      <nav className="sidebar-nav">
-        {navItems.filter((item) => !item.hidden).map((item) => {
-          const Icon = item.icon;
+      <nav className="sidebar-nav" aria-label="Primary navigation">
+        {NAV_GROUP_ORDER.map((groupId) => {
+          const items = navItems.filter((item) => !item.hidden && item.group === groupId);
+          if (items.length === 0) return null;
+          const collapsed = collapsedGroups.has(groupId);
+          const isActiveGroup = items.some((it) => it.route === activeSection);
           return (
-            <Link
-              key={item.label}
-              href={item.href}
-              className={item.route === activeSection ? "nav-item active" : "nav-item"}
-            >
-              <span className="nav-icon">
-                <Icon size={14} color={actionTone} strokeWidth={2} />
-              </span>
-              {item.label}
-            </Link>
+            <div key={groupId} className={`nav-group${collapsed ? " nav-group--collapsed" : ""}${isActiveGroup ? " nav-group--active" : ""}`}>
+              <button
+                type="button"
+                className="nav-group-label"
+                onClick={() => toggleGroup(groupId)}
+                aria-expanded={!collapsed}
+                aria-label={`${NAV_GROUP_LABEL[groupId]} group`}
+              >
+                <span className="nav-group-label-text">{NAV_GROUP_LABEL[groupId]}</span>
+                <span className={`nav-group-chevron${collapsed ? "" : " nav-group-chevron--open"}`} aria-hidden>
+                  <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+                    <path d="M1.5 2.5L4 5L6.5 2.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="square" strokeLinejoin="miter" />
+                  </svg>
+                </span>
+              </button>
+              {!collapsed && (
+                <div className="nav-group-items">
+                  {items.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.label}
+                        href={item.href}
+                        className={item.route === activeSection ? "nav-item active" : "nav-item"}
+                        aria-current={item.route === activeSection ? "page" : undefined}
+                      >
+                        <span className="nav-icon">
+                          <Icon size={14} color={actionTone} strokeWidth={2} />
+                        </span>
+                        {item.label}
+                      </Link>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           );
         })}
       </nav>
@@ -129,24 +125,6 @@ export default function Sidebar({ activeSection, actionTone, lastSync }: Sidebar
           <span className="sidebar-user-card__email">View profile</span>
         </span>
       </Link>
-
-      <div className="sidebar-footer">
-        <div className="status-row">
-          <span>Uplink</span>
-          <span className="status-dot-wrap">
-            <span className={`status-dot ${dotClass}`} />
-            {text}
-          </span>
-        </div>
-        <div className="status-row">
-          <span>Last Sample</span>
-          <span>{syncTime}</span>
-        </div>
-        <div className="status-row">
-          <span>Source</span>
-          <span>IB · UW</span>
-        </div>
-      </div>
     </aside>
   );
 }

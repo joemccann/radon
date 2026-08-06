@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import Link from "next/link";
 import { useScanner } from "@/lib/useScanner";
 import { useDiscover } from "@/lib/useDiscover";
@@ -157,9 +157,51 @@ export function OpportunitiesCard() {
     }
   };
 
+  const candidateCount =
+    tab === "scanner"
+      ? scanner.data?.signals_found ?? scannerRows.length
+      : tab === "discover"
+        ? discover.data?.candidates_found ?? discoverRows.length
+        : tab === "theta"
+          ? theta.data?.theta_harvest_count ?? thetaRows.length
+          : tab === "leap"
+            ? leapRows.filter((r) => r.is_mispriced).length
+            : garchRows.filter((p) => p.gates_passed).length;
+  const edgeLevel =
+    !loading && !error
+      ? Math.max(0, Math.min(100, (candidateCount / 10) * 100))
+      : null;
+  const edgeStyle =
+    edgeLevel != null
+      ? ({ ["--edge-level"]: `${edgeLevel.toFixed(1)}%` } as CSSProperties)
+      : undefined;
+  const lastSampleLabel = lastSync
+    ? new Date(lastSync).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+    : "—";
+  const engineLabel =
+    tab === "scanner"
+      ? "flow"
+      : tab === "discover"
+        ? "discover"
+        : tab === "theta"
+          ? "theta"
+          : tab === "leap"
+            ? "leap"
+            : "garch";
+  const universeLabel =
+    tab === "scanner"
+      ? String(scanner.data?.tickers_scanned ?? "—")
+      : tab === "discover"
+        ? String(discover.data?.alerts_analyzed ?? "—")
+        : tab === "theta"
+          ? "ndx100"
+          : tab === "leap"
+            ? "mag7"
+            : "mega-tech";
+
   return (
     <section className="snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
+      <span className="panel-edge-trace" style={edgeStyle} aria-hidden />
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Opportunities / 04</p>
         <h3 className="panel-title">Trading Candidates</h3>
@@ -433,6 +475,20 @@ export function OpportunitiesCard() {
           })}
         </ul>
       )}
+      <footer className="panel-meta-rail" aria-label="Opportunities calibration">
+        <div className="panel-meta-rail-item">
+          <span className="k">engine</span>
+          <span className="v">{engineLabel}</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">last.sample</span>
+          <span className="v">{lastSampleLabel}</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">universe</span>
+          <span className="v">{universeLabel}</span>
+        </div>
+      </footer>
     </section>
   );
 }

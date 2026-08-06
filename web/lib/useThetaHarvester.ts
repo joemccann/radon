@@ -8,6 +8,7 @@ const config = {
   endpoint: "/api/scanner/theta",
   hasPost: false,
   extractTimestamp: (d: ThetaHarvesterData) => d.scan_time || null,
+  loadWhenInactive: false,
 };
 
 export function useThetaHarvester(active: boolean): UseSyncReturn<ThetaHarvesterData> {

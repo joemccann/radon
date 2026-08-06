@@ -118,6 +118,11 @@ describe("useSyncHook offline signals", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { result } = renderHook(() => useSyncHook<typeof scannerBody>(config, true));
     await waitFor(() => expect(result.current.data).not.toBeNull());
+    // GET-only hooks no longer re-GET immediately after mount; drive a second
+    // read via syncNow so the rejection path still exercises offline signals.
+    act(() => {
+      result.current.syncNow();
+    });
     await waitFor(() => expect(signalTypes()).toContain("fetch-failure"));
     expect(result.current.data).not.toBeNull();
   });
