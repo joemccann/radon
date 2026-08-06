@@ -28,6 +28,8 @@ type TickerSearchProps = {
   onSelect: (symbol: string) => void;
   placeholder?: string;
   className?: string;
+  /** Accessible name for the combobox (placeholders are not names). */
+  ariaLabel?: string;
   /** Fired when the user attempts a search while IB Gateway is unreachable. */
   onSearchUnavailable?: () => void;
 };
@@ -38,7 +40,7 @@ const ALLOWED_SEC_TYPES = new Set(["STK", "IND", "FUT"]);
 
 const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
   function TickerSearch(
-    { onSelect, placeholder = "Search ticker...", className, onSearchUnavailable },
+    { onSelect, placeholder = "Search ticker...", className, ariaLabel = "Search ticker", onSearchUnavailable },
     ref,
   ) {
     const inputRef = useRef<HTMLInputElement>(null);
@@ -364,11 +366,13 @@ const TickerSearch = forwardRef<HTMLInputElement, TickerSearchProps>(
             (e.target as HTMLInputElement).style.borderColor =
               "var(--border-dim)";
           }}
+          aria-label={ariaLabel}
           aria-expanded={showDropdown}
           aria-haspopup="listbox"
           aria-autocomplete="list"
           aria-controls="ticker-search-listbox"
           role="combobox"
+          name="ticker-search"
         />
 
         {/* Dropdown */}

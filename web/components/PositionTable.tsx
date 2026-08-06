@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, ChevronUp } from "lucide-react";
 import type { PortfolioData, PortfolioLeg, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
@@ -32,6 +32,33 @@ import { useColumnVisibility } from "@/lib/useColumnVisibility";
 import { useViewport } from "@/lib/useViewport";
 import { ColumnsToggle, type ColumnsToggleEntry } from "./ColumnsToggle";
 import MobilePositionList from "./mobile/MobilePositionList";
+
+const DENSITY_STORAGE_PREFIX = "radon:density:";
+
+type DensityMode = "comfortable" | "compact";
+
+function useDensity(tableId: string): [DensityMode, () => void] {
+  const storageKey = `${DENSITY_STORAGE_PREFIX}${tableId}`;
+  const [mode, setMode] = useState<DensityMode>(() => {
+    if (typeof window === "undefined") return "comfortable";
+    try {
+      const saved = window.localStorage.getItem(storageKey);
+      if (saved === "compact" || saved === "comfortable") return saved;
+    } catch {
+      // ignore
+    }
+    return "comfortable";
+  });
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(storageKey, mode);
+    } catch {
+      // ignore
+    }
+  }, [storageKey, mode]);
+  const toggle = useCallback(() => setMode((m) => (m === "comfortable" ? "compact" : "comfortable")), []);
+  return [mode, toggle];
+}
 
 /* ─── Helpers ──────────────────────────────────────────── */
 
@@ -562,6 +589,8 @@ export default function PositionTable({
     [showImplied],
   );
 
+  const [density, toggleDensity] = useDensity(tableId);
+
   // Instrument detail modal state
   const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
 
@@ -577,6 +606,16 @@ export default function PositionTable({
     <>
       {!isControlled && (
         <div className="position-table-toolbar">
+          <button
+            type="button"
+            className={`density-toggle${density === "compact" ? " density-toggle--active" : ""}`}
+            onClick={toggleDensity}
+            aria-label={`Switch to ${density === "compact" ? "comfortable" : "compact"} density`}
+            data-testid="density-toggle"
+            title={density === "compact" ? "Compact density — click for comfortable" : "Comfortable density — click for compact"}
+          >
+            {density === "compact" ? "Comfortable" : "Compact"}
+          </button>
           <ColumnsToggle<ToggleableColumnKey>
             columns={visibleColumnEntries}
             visible={columns}
@@ -585,8 +624,8 @@ export default function PositionTable({
           />
         </div>
       )}
-      <div className="table-wrap">
-      <table>
+      <div className={`table-wrap${density === "compact" ? " table-wrap--density-compact" : ""}`}>
+      <table className="position-table-sticky">
         <thead>
           <tr>
             <SortTh<PositionSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
