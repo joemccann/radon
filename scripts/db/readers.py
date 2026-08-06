@@ -234,3 +234,131 @@ def read_watchlist_items(db: Optional[Any] = None) -> list[dict[str, Any]]:
             item["source"] = source
         items.append(item)
     return items
+
+
+# ── Performance TWR (plan §4.2) ──────────────────────────────────────────────
+
+
+def _is_missing_table_error(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "no such table" in msg and any(
+        token in msg for token in ("nav_snapshots", "external_flows", "twr_subperiods")
+    )
+
+
+def read_nav_snapshots(
+    db: Optional[Any] = None,
+    *,
+    account_id: Optional[str] = None,
+    limit: Optional[int] = None,
+) -> list[dict[str, Any]]:
+    """Read NAV snapshots ordered by report_date ASC.
+
+    Filters by account_id when given; otherwise returns all accounts.
+    Returns [] if the table hasn't been migrated yet (first-build before 0035).
+    """
+    try:
+        if account_id is not None:
+            sql = "SELECT account_id, report_date, total_net_liq, cash, stock, options, accrued_fees FROM nav_snapshots WHERE account_id = ? ORDER BY report_date ASC"
+            args: tuple[Any, ...] = (account_id,)
+            if limit is not None:
+                sql += " LIMIT ?"
+                args = (account_id, int(limit))
+            rows = _db(db).execute(sql, args).fetchall()
+        elif limit is not None:
+            rows = _db(db).execute(
+                "SELECT account_id, report_date, total_net_liq, cash, stock, options, accrued_fees FROM nav_snapshots ORDER BY report_date ASC LIMIT ?",
+                (int(limit),),
+            ).fetchall()
+        else:
+            rows = _db(db).execute(
+                "SELECT account_id, report_date, total_net_liq, cash, stock, options, accrued_fees FROM nav_snapshots ORDER BY report_date ASC"
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001 — table may not exist before migration 0035
+        if _is_missing_table_error(exc):
+            return []
+        raise
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        result.append(
+            {
+                "account_id": _cell(row, 0, "account_id"),
+                "report_date": _cell(row, 1, "report_date"),
+                "total_net_liq": _cell(row, 2, "total_net_liq"),
+                "cash": _cell(row, 3, "cash"),
+                "stock": _cell(row, 4, "stock"),
+                "options": _cell(row, 5, "options"),
+                "accrued_fees": _cell(row, 6, "accrued_fees"),
+            }
+        )
+    return result
+
+
+def read_external_flows(
+    db: Optional[Any] = None,
+    *,
+    account_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Read external flows ordered by report_date ASC. Returns [] if table missing."""
+    try:
+        if account_id is not None:
+            rows = _db(db).execute(
+                "SELECT account_id, report_date, amount, flow_type, note FROM external_flows WHERE account_id = ? ORDER BY report_date ASC, flow_type ASC",
+                (account_id,),
+            ).fetchall()
+        else:
+            rows = _db(db).execute(
+                "SELECT account_id, report_date, amount, flow_type, note FROM external_flows ORDER BY report_date ASC, account_id ASC, flow_type ASC"
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001
+        if _is_missing_table_error(exc):
+            return []
+        raise
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        result.append(
+            {
+                "account_id": _cell(row, 0, "account_id"),
+                "report_date": _cell(row, 1, "report_date"),
+                "amount": _cell(row, 2, "amount"),
+                "flow_type": _cell(row, 3, "flow_type"),
+                "note": _cell(row, 4, "note"),
+            }
+        )
+    return result
+
+
+def read_twr_subperiods(
+    db: Optional[Any] = None,
+    *,
+    account_id: Optional[str] = None,
+) -> list[dict[str, Any]]:
+    """Read TWR subperiods ordered by report_date ASC. Returns [] if table missing."""
+    try:
+        if account_id is not None:
+            rows = _db(db).execute(
+                "SELECT account_id, report_date, b, e, c, r, cum_r FROM twr_subperiods WHERE account_id = ? ORDER BY report_date ASC",
+                (account_id,),
+            ).fetchall()
+        else:
+            rows = _db(db).execute(
+                "SELECT account_id, report_date, b, e, c, r, cum_r FROM twr_subperiods ORDER BY report_date ASC, account_id ASC"
+            ).fetchall()
+    except Exception as exc:  # noqa: BLE001
+        if _is_missing_table_error(exc):
+            return []
+        raise
+    result: list[dict[str, Any]] = []
+    for row in rows:
+        result.append(
+            {
+                "account_id": _cell(row, 0, "account_id"),
+                "report_date": _cell(row, 1, "report_date"),
+                "b": _cell(row, 2, "b"),
+                "e": _cell(row, 3, "e"),
+                "c": _cell(row, 4, "c"),
+                "r": _cell(row, 5, "r"),
+                "cum_r": _cell(row, 6, "cum_r"),
+            }
+        )
+    return result
