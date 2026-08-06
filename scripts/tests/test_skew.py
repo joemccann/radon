@@ -260,6 +260,39 @@ class TestRunIncremental:
         assert self.db_writes == [True]
 
 
+class TestCalendarAndSanity:
+    def test_backfill_calendar_excludes_2023_and_2024_holidays(self):
+        # load_holidays returned an EMPTY set for unconfigured years, so the
+        # first backfill fetched Christmas/New Year/Good Friday and UW served
+        # garbage chains (25d call IV 60%) that poisoned the change series.
+        import fetch_skew as mod
+
+        days = set(mod._trading_days_between("2023-12-20", "2024-04-05"))
+        assert "2023-12-25" not in days
+        assert "2024-01-01" not in days
+        assert "2024-03-29" not in days  # Good Friday 2024
+        assert "2023-12-26" in days
+        assert "2024-01-02" in days
+        assert "2024-03-28" in days
+
+    def test_implausible_ratio_row_is_rejected(self):
+        # SPX 25d put/call is structurally put-over-call (~1.0-1.9); a chain
+        # pricing it at 0.4 is upstream garbage, not a market event.
+        import fetch_skew as mod
+
+        garbage = {"data": [
+            {"strike": 6000, "call_delta": 0.20, "call_volatility": 0.55,
+             "put_delta": -0.20, "put_volatility": 0.22},
+            {"strike": 6100, "call_delta": 0.30, "call_volatility": 0.65,
+             "put_delta": -0.30, "put_volatility": 0.26},
+        ]}
+        client = _StubClient({
+            ("2026-08-21", "2026-08-05"): garbage,
+            ("2026-09-18", "2026-08-05"): garbage,
+        })
+        assert mod._fetch_session_row(client, "2026-08-05") is None
+
+
 # ── Migration + upsert (sqlite3 stand-in for libsql) ──────────────
 
 

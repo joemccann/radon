@@ -55,6 +55,9 @@ _TICKER = "SPX"
 _TARGET_DTE = 30
 _PUT_TARGET_DELTA = -0.25
 _CALL_TARGET_DELTA = 0.25
+# Plausibility bounds for the 25d put/call ratio; outside = upstream garbage.
+_RATIO_SANE_MIN = 0.8
+_RATIO_SANE_MAX = 3.0
 _MAX_GAP_SESSIONS = 10
 _BACKFILL_START = "2023-09-06"  # UW greeks history floor for this token
 _BACKFILL_THROTTLE_S = 0.3
@@ -286,6 +289,17 @@ def _fetch_session_row(client: Any, session: str) -> Optional[dict[str, Any]]:
     far_dte = (far[0] - as_of).days
     put_iv = constant_maturity_leg(near[1], near_dte, far[1], far_dte)
     call_iv = constant_maturity_leg(near[2], near_dte, far[2], far_dte)
+    ratio = put_iv / call_iv
+    if not (_RATIO_SANE_MIN <= ratio <= _RATIO_SANE_MAX):
+        # SPX 25d put/call is structurally put-over-call (~1.0-1.9). Outside
+        # these bounds the upstream chain is garbage (seen on unfiltered
+        # holidays: 25d call IV 60% on Christmas), never a market event.
+        print(
+            f"[skew] {session}: implausible ratio {ratio:.3f} "
+            f"(put {put_iv:.4f} / call {call_iv:.4f}); rejecting chain",
+            file=sys.stderr,
+        )
+        return None
     return {
         "date": session,
         "expiry": near[0].isoformat(),
@@ -294,7 +308,7 @@ def _fetch_session_row(client: Any, session: str) -> Optional[dict[str, Any]]:
         "dte_far": far_dte,
         "put_iv": put_iv,
         "call_iv": call_iv,
-        "ratio": put_iv / call_iv,
+        "ratio": ratio,
     }
 
 
