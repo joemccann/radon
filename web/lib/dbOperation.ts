@@ -4,6 +4,10 @@ import { AsyncLocalStorage } from "node:async_hooks";
 export type DbOperationIdentity = {
   readonly id: number;
   poolGeneration: number | null;
+  /** dbExecute's human label, stamped for teardown-path attribution —
+   * a pool destroy with no trigger label is undiagnosable from journald
+   * (2026-08-06 incident). */
+  label?: string;
 };
 
 const operationStorage = new AsyncLocalStorage<DbOperationIdentity>();

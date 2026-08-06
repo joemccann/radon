@@ -113,14 +113,36 @@ function getPoolAgent(): Agent {
  *      destroys — an isolated failure is Turso tail latency, not a wedge.
  *   2. Cooldown: destroying again within the window is the storm.
  * `force` is the test seam. */
-function destroyPoolAgent(force = false): void {
+function describeTrigger(trigger?: DbOperationIdentity): string {
+  if (!trigger) return "trigger=bare";
+  return (
+    `trigger=${trigger.label ?? "unlabelled"} op=${trigger.id} ` +
+    `opGen=${trigger.poolGeneration ?? "null"} activeGen=${activePoolGeneration ?? "null"}`
+  );
+}
+
+function destroyPoolAgent(force = false, trigger?: DbOperationIdentity): void {
   const now = Date.now();
   if (!force) {
     const clustered = now - lastResetAttemptAtMs <= DB_POOL_FAILURE_CLUSTER_WINDOW_MS;
     lastResetAttemptAtMs = now;
-    if (!clustered) return;
-    if (now - lastAgentDestroyAtMs < DB_POOL_DESTROY_COOLDOWN_MS) return;
+    if (!clustered) {
+      // The arming half of the cluster gate was previously invisible: the
+      // 2026-08-06 journald showed only UND_ERR_DESTROYED collateral with
+      // no attributable trigger. One line per armed reset is cheap — real
+      // failures are already log-adjacent — and makes the pair diagnosable.
+      console.warn(`[db] pool reset armed (${describeTrigger(trigger)})`);
+      return;
+    }
+    if (now - lastAgentDestroyAtMs < DB_POOL_DESTROY_COOLDOWN_MS) {
+      console.warn(`[db] pool destroy suppressed by cooldown (${describeTrigger(trigger)})`);
+      return;
+    }
   }
+  console.warn(
+    `[db] pool destroy (${describeTrigger(trigger)} ` +
+    `sinceLastDestroyMs=${now - lastAgentDestroyAtMs} force=${force})`,
+  );
   lastAgentDestroyAtMs = now;
   const agent = cachedAgent;
   cachedAgent = null;
@@ -273,14 +295,14 @@ function isCurrentFailure(identity: DbOperationIdentity): boolean {
 export function resetDb(identity?: DbOperationIdentity): void {
   if (identity && !isCurrentFailure(identity)) return;
   cached = null;
-  destroyPoolAgent();
+  destroyPoolAgent(false, identity);
 }
 
 /** Drop the cached demo client so the next getDemoDb() opens a fresh pool. */
 export function resetDemoDb(identity?: DbOperationIdentity): void {
   if (identity && !isCurrentFailure(identity)) return;
   cachedDemo = null;
-  destroyPoolAgent();
+  destroyPoolAgent(false, identity);
 }
 
 /** Wrap a client so any failed or stalled `execute`/`batch` invokes `onHeal`,
@@ -297,7 +319,15 @@ function selfHealing(
     settled: Promise<unknown>,
     identity: DbOperationIdentity,
   ): void => {
-    const timer = setTimeout(() => onHeal(identity), STALL_CEILING_MS);
+    const timer = setTimeout(() => {
+      // Previously 100% silent — a stalled call healing the pool was
+      // indistinguishable from nothing happening (2026-08-06 incident).
+      console.warn(
+        `[db] stall ceiling fired after ${STALL_CEILING_MS}ms ` +
+        `(op=${identity.id} label=${identity.label ?? "unlabelled"})`,
+      );
+      onHeal(identity);
+    }, STALL_CEILING_MS);
     timer.unref?.();
     settled.then(
       () => clearTimeout(timer),
