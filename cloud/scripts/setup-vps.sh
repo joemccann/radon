@@ -100,6 +100,8 @@ readonly SERVICE_FILES=(
   radon-yield-curve.timer
   radon-straddle.service
   radon-straddle.timer
+  radon-skew.service
+  radon-skew.timer
 )
 
 run_as_radon() {

@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon Skew Indicator - daily UW SPX 25d greeks pull
+
+[Timer]
+# Session greeks final after the 16:00 ET close; 21:45 UTC = 17:45 EDT /
+# 16:45 EST clears both DST regimes. Runs daily including weekends:
+# weekend/holiday runs heartbeat via the no-missing-sessions fast path,
+# keeping service_health fresh inside the 48h API staleness window.
+OnCalendar=*-*-* 21:45:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
