@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
-import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw, Radio } from "lucide-react";
+import { ChevronLeft, ChevronRight, Link as LinkIcon, RefreshCw } from "lucide-react";
 
 import { formatAbsolute, formatRelative, formatTime } from "../lib/newsfeedTime";
 import { readOfflineMeta } from "../lib/offline/offlineStatus";
@@ -124,7 +124,7 @@ export default function DashboardNewsFeed() {
   const [lastUpdated, setLastUpdated] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [lightboxFocus, setLightboxFocus] = useState<NewsfeedLightboxFocus | null>(null);
-  const sectionRef = useRef<HTMLDivElement>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   // Mirrors `posts` for the fetch catch: a failed background refresh must
   // hold the last-good list instead of swapping it for an error panel.
   const postsRef = useRef<NormalisedPost[]>([]);
@@ -342,7 +342,10 @@ export default function DashboardNewsFeed() {
     scrollToTop();
   }, [safePage, totalPages, scrollToTop]);
 
-  const freshnessLabel = lastUpdated ? `Updated ${formatAbsolute(lastUpdated)}` : "Awaiting first capture";
+  const lastSample = lastUpdated
+    ? new Date(lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false })
+    : "—";
+  const captureBasis = error ? "fault" : loading ? "awaiting" : "scraper";
 
   const paginationBar = showPagination ? (
     <PaginationBar
@@ -357,26 +360,27 @@ export default function DashboardNewsFeed() {
   ) : null;
 
   return (
-    <div className="section dashboard-news" ref={sectionRef}>
-      <div className="section-header">
-        <div className="section-title">
-          <Radio size={14} />
-          Live Market Analysis
+    <section className="dashboard-news snapshot-card" ref={sectionRef}>
+      <span className="panel-edge-trace" aria-hidden />
+      <header className="dashboard-news__header">
+        <div className="dashboard-news__heading">
+          <p className="panel-eyebrow">Feed / 02</p>
+          <h3 className="panel-title">Live market analysis</h3>
         </div>
         <div className="news-feed-actions">
-          <span className="news-feed-updated">{freshnessLabel}</span>
           <button
             type="button"
-            className="news-feed-refresh"
+            className="news-feed-refresh news-feed-refresh--rail"
             onClick={handleRefresh}
             disabled={refreshing}
+            aria-label={refreshing ? "Refreshing feed" : "Refresh feed"}
           >
-            <RefreshCw size={12} className={refreshing ? "spin" : ""} />
+            <RefreshCw size={12} className={refreshing ? "spin" : ""} aria-hidden />
             {refreshing ? "Refreshing" : "Refresh"}
           </button>
         </div>
-      </div>
-      <div className="section-body">
+      </header>
+      <div className="dashboard-news__body section-body">
         <NewsfeedTagBar
           selectedTags={selectedTags}
           onRemove={toggleTag}
@@ -480,6 +484,20 @@ export default function DashboardNewsFeed() {
           </>
         )}
       </div>
+      <footer className="panel-meta-rail" aria-label="Feed calibration">
+        <div className="panel-meta-rail-item">
+          <span className="k">source</span>
+          <span className="v">Market Ear</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">capture.basis</span>
+          <span className="v">{captureBasis}</span>
+        </div>
+        <div className="panel-meta-rail-item">
+          <span className="k">last.sample</span>
+          <span className="v">{lastSample}</span>
+        </div>
+      </footer>
       <NewsfeedLightbox
         focus={lightboxFocus}
         onDismiss={() => setLightboxFocus(null)}
@@ -487,6 +505,6 @@ export default function DashboardNewsFeed() {
         canNavigatePrev={canNavigatePrev}
         canNavigateNext={canNavigateNext}
       />
-    </div>
+    </section>
   );
 }

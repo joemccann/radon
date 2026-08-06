@@ -32,8 +32,10 @@ import DemoWelcomeModal from "@/components/DemoWelcomeModal";
 import MobileShell from "@/components/mobile/MobileShell";
 import { useViewport } from "@/lib/useViewport";
 
+import InstrumentSkeleton from "@/components/ui/InstrumentSkeleton";
+
 const WorkspaceSections = dynamic(() => import("@/components/WorkspaceSections"), {
-  loading: () => null,
+  loading: () => <InstrumentSkeleton testId="workspace-sections-skeleton" />,
 });
 import FooterTelemetryStrip from "@/components/FooterTelemetryStrip";
 import { useTickerDetail } from "@/lib/TickerDetailContext";
@@ -44,6 +46,7 @@ import { useOfflineStatus } from "@/lib/offline/OfflineStatusContext";
 import { deriveLiveDataError } from "@/lib/offline/offlineStatus";
 import { useTheme } from "@/lib/ThemeContext";
 import { useRealtimeAuth } from "@/lib/RealtimeAuthContext";
+import CommandPalette from "@/components/CommandPalette";
 
 type WorkspaceShellProps = {
   section?: WorkspaceSection;
@@ -54,6 +57,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
   const { theme: resolvedTheme, toggleTheme } = useTheme();
   const getRealtimeToken = useRealtimeAuth();
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const pathname = usePathname();
   const { isMobile, hasMounted } = useViewport();
   const showMobileChrome = isMobile && hasMounted;
@@ -466,14 +470,39 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       ? "Sync failed. Reconstruction incomplete."
       : "Awaiting first sample";
 
+  const isStale = useMemo(() => {
+    if (!lastSync) return false;
+    if (marketState !== MarketState.OPEN) return false;
+    const ageMs = Date.now() - new Date(lastSync).getTime();
+    return ageMs > 60_000;
+  }, [lastSync, marketState]);
+  const staleAgeMinutes = useMemo(() => {
+    if (!lastSync) return null;
+    const ageMs = Date.now() - new Date(lastSync).getTime();
+    return Math.max(1, Math.floor(ageMs / 60_000));
+  }, [lastSync]);
+
+  // Sections that render live marks from the prices map. Scanner/discover (and
+  // other non-price modules) must not receive a new `prices` identity on every
+  // tick — memoized WorkspaceSections then skips re-render (skill-stack T11).
+  const sectionNeedsPrices =
+    activeSection === "portfolio"
+    || activeSection === "orders"
+    || activeSection === "regime"
+    || activeSection === "profile"
+    || activeSection === "watchlist"
+    || activeSection === "ticker-detail";
+  const pricesForSections = sectionNeedsPrices ? prices : undefined;
+
   return (
     <div className="app-shell" suppressHydrationWarning>
+      <a href="#main-content" className="skip-link">Skip to content</a>
       {showMobileChrome ? (
         <MobileShell title={activeLabel} ibConnected={ibConnected} lastSync={lastSync} />
       ) : null}
       <Sidebar activeSection={activeSection} actionTone={actionTone} ibConnected={ibConnected} lastSync={lastSync} />
 
-      <main className="main">
+      <main id="main-content" className="main" tabIndex={-1}>
         <Header
           activeLabel={activeLabel}
           isPageHeading={headerOwnsPageHeading}
@@ -484,19 +513,24 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} delayed={futuresDelayed} /> : null}
           onSearchUnavailable={handleSearchUnavailable}
           lastSync={lastSync}
+          onOpenPalette={() => setPaletteOpen(true)}
+          isStale={isStale}
+          staleAgeMinutes={staleAgeMinutes}
+          onSyncNow={syncNow}
         >
           {!isOptionsWorkspace ? <div className="sync-controls">
             <span className={`sync-status ${error ? "sync-error" : syncing ? "sync-active" : ""}`}>
               {syncLabel}
             </span>
             <button
+              type="button"
               className="sync-button"
               onClick={syncNow}
               disabled={syncing}
               title={`Sync ${syncTarget} from IB Gateway`}
             >
               <RefreshCw size={14} className={syncing ? "spin" : ""} />
-              {syncing ? "Syncing..." : "Sync Now"}
+              {syncing ? "Syncing…" : "Sync Now"}
             </button>
           </div> : null}
         </Header>
@@ -518,7 +552,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
             />
           ) : null}
 
-          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && !isOptionsWorkspace ? <MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /> : null}
+          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
 
           {activeSection !== "dashboard" ? (
             <WorkspaceSections
@@ -526,7 +560,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
               portfolio={portfolio}
               portfolioLastSync={portfolioLastSync}
               orders={orders}
-              prices={prices}
+              prices={pricesForSections}
               tickerParam={tickerParam}
               theme={resolvedTheme}
               marketState={marketState}
@@ -540,6 +574,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       <ToastContainer toasts={toasts} exitingIds={exitingIds} onDismiss={dismissToast} />
       <ChatLauncher activeSection={activeSection} />
       <DemoWelcomeModal />
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>
   );
 }

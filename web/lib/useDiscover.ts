@@ -7,6 +7,7 @@ import type { DiscoverData } from "./types";
 const config = {
   endpoint: "/api/discover",
   extractTimestamp: (d: DiscoverData) => d.discovery_time || null,
+  loadWhenInactive: false,
 };
 
 export function useDiscover(active: boolean): UseSyncReturn<DiscoverData> {

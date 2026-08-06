@@ -84,20 +84,29 @@ afterEach(() => {
 });
 
 describe("dashboard mobile newsfeed layout", () => {
-  it("labels Live Market Feed as the second dashboard section", () => {
+  it("assigns dashboard section counts and keeps collapse affordances", () => {
     const { getByTestId } = render(
       <DashboardSurface portfolio={null} orders={null} realizedPnl={0} />,
     );
 
+    // Open desktop: outer chrome is collapse-only (count + chevron); the
+    // snapshot card owns the mount label (skill-stack T2).
     expect(
       within(getByTestId("dashboard-section-portfolio")).getByRole("button").textContent,
-    ).toMatch(/Portfolio\s*01/);
+    ).toMatch(/01/);
     expect(
       within(getByTestId("dashboard-section-news")).getByRole("button").textContent,
-    ).toMatch(/Live Market Feed\s*02/);
+    ).toMatch(/02/);
     expect(
       within(getByTestId("dashboard-section-orders")).getByRole("button").textContent,
-    ).toMatch(/Working & Filled\s*03/);
+    ).toMatch(/03/);
+
+    expect(
+      within(getByTestId("dashboard-section-portfolio")).getByRole("button").getAttribute("aria-label"),
+    ).toBe("Portfolio");
+    expect(
+      within(getByTestId("dashboard-section-news")).getByRole("button").getAttribute("aria-label"),
+    ).toBe("Live Market Feed");
   });
 
   it("fails open when persisted state hides every dashboard section", async () => {
@@ -155,9 +164,10 @@ describe("dashboard mobile newsfeed layout", () => {
   it("stacks the mobile news header actions so Refresh stays inside the panel border", () => {
     expect(ruleBlock(css, ".news-feed-updated")).toMatch(/border-bottom:\s*0/);
 
+    // Instrument header (T3) — mobile stacks the device label + rail control.
     const mobileNewsHeader = ruleBlock(
       css,
-      'body[data-mobile="true"] .dashboard-news .section-header',
+      'body[data-mobile="true"] .dashboard-news__header',
     );
     expect(mobileNewsHeader).toMatch(/flex-direction:\s*column/);
     expect(mobileNewsHeader).toMatch(/align-items:\s*stretch/);
