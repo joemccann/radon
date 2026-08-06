@@ -79,6 +79,47 @@ const LONG_PUT: PortfolioLeg = {
   market_value: 2_135,
 };
 
+const COVERED_CALL_STOCK: PortfolioLeg = {
+  direction: "LONG",
+  contracts: 2_500,
+  type: "Stock",
+  strike: 0,
+  entry_cost: 424_650,
+  avg_cost: 169.86,
+  market_price: 170.65,
+  market_value: 426_625,
+};
+
+const COVERED_CALL_SHORT_CALL: PortfolioLeg = {
+  direction: "SHORT",
+  contracts: 25,
+  type: "Call",
+  strike: 165,
+  entry_cost: -12_518,
+  avg_cost: -500.72,
+  market_price: 9.05,
+  market_value: -22_625,
+};
+
+const COVERED_CALL: PortfolioPosition = {
+  id: 84,
+  ticker: "EWY",
+  structure: "Covered Call $165.0",
+  structure_type: "Covered Call",
+  risk_profile: "defined",
+  direction: "COMBO",
+  contracts: 25,
+  expiry: "2026-08-07",
+  entry_date: "2026-07-31",
+  entry_cost: 412_132,
+  market_value: 404_000,
+  max_risk: null,
+  kelly_optimal: null,
+  target: null,
+  stop: null,
+  legs: [COVERED_CALL_STOCK, COVERED_CALL_SHORT_CALL],
+};
+
 const POSITION: PortfolioPosition = {
   id: 42,
   ticker: "MU",
@@ -105,16 +146,21 @@ const PORTFOLIO: PortfolioData = {
   total_deployed_pct: 0,
   total_deployed_dollars: 0,
   remaining_capacity_pct: 100,
-  position_count: 1,
-  defined_risk_count: 0,
+  position_count: 2,
+  defined_risk_count: 1,
   undefined_risk_count: 1,
   avg_kelly_optimal: null,
-  positions: [POSITION],
+  positions: [POSITION, COVERED_CALL],
+  account_summary: {
+    available_funds: 536_775,
+    buying_power: 1_073_550,
+  },
 } as unknown as PortfolioData;
 
 const PRICES: Record<string, PriceData> = {
   MU_20260626_1250_C: price("MU_20260626_1250_C", 0.01, 0.09),
   MU_20260626_1125_P: price("MU_20260626_1125_P", 4.15, 4.39),
+  EWY: price("EWY", 170.6, 170.7),
 };
 
 function enterLimitAndReview(limit: string) {
@@ -127,7 +173,61 @@ function summaryText(): string {
 }
 
 describe("InstrumentDetailModal buy-to-cover", () => {
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.unstubAllGlobals();
+  });
+
+  it("builds a stock-only sell when closing the equity leg of a covered call", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ status: "submitted" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    render(
+      <InstrumentDetailModal
+        leg={COVERED_CALL_STOCK}
+        ticker="EWY"
+        expiry="2026-08-07"
+        prices={PRICES}
+        portfolio={PORTFOLIO}
+        onClose={() => {}}
+      />,
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "EWY Stock" });
+    expect(dialog.textContent).not.toContain("$0 STOCK");
+    expect(dialog.textContent).not.toContain("2026-08-07");
+    expect((screen.getByPlaceholderText("Shares") as HTMLInputElement).value).toBe("2500");
+    expect(dialog.textContent).toContain("BID 170.60");
+
+    fireEvent.change(screen.getByPlaceholderText("0.00"), { target: { value: "170" } });
+    fireEvent.click(screen.getByRole("button", { name: /place order/i }));
+
+    const text = summaryText();
+    expect(text).toContain("SELL 2500 EWY Stock @ $170.00");
+    expect(text).toContain("Proceeds:");
+    expect(text).toContain("$425,000");
+    expect(text).toContain("Est. Realized P&L:");
+    expect(text).toContain("$350");
+    expect(text).toContain("25 retained short calls uncovered");
+    expect(text).toContain("UNAVAILABLE");
+    expect(text).not.toContain("EWY $0 P");
+    expect(text).not.toContain("$42,500,000");
+
+    fireEvent.click(screen.getByRole("button", { name: /confirm order/i }));
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toEqual({
+      type: "stock",
+      symbol: "EWY",
+      action: "SELL",
+      quantity: 2_500,
+      limitPrice: 170,
+      tif: "DAY",
+    });
+  });
 
   it("uses negative close-out basis for a short call buy-to-cover", () => {
     render(
