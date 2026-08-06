@@ -116,10 +116,13 @@ Matches contract (today AMC / postmarket, `within_dte: true` for DTE 16). Networ
 - [x] M2 Green: MobileOrderList side token (SELL --negative / BUY --positive), StatusChip reusing mapOrderStatus tone (partial=warn, pending=busy, inactive=muted); 44/44 focused + tsc clean
 - [x] M3 CSS: m-card-press + m-chip scale(0.96) press (specific transition props), m-chip ::before vertical 44px tap extension, mobile command-strip grid (3 stacked counters, LAST SYNC row, 4-up 44px jumps)
 - [x] M4 Evidence: mobile Playwright light+dark screenshots (scratchpad mobile-orders-{light,dark}.png); mobile-orders.spec.ts regression 5/5
-- [ ] M5 Full mobile e2e project + full vitest → commit → push → CI → phone verify
+- [x] M5 Full mobile e2e 63/63 + full vitest 4767 green; committed 71b1a66f, pushed once; CI 31042361873 success incl. Deploy to VPS
 
 ## Review
-(pending)
+- Shipped 71b1a66f: side token toning (SELL/BUY), StatusChip reusing mapOrderStatus tones, scale(0.96) press physics on cards + chips (property-specific transitions), 44px tap floors via vertical-only ::before extension (no overlapping hit areas, no layout growth), mobile command-strip grid (3 stacked counters + LAST SYNC row + 4-up jumps).
+- Deliberately NOT applied from better-ui: shadows-over-borders and larger radii (Instrument Rack brand = flat --border-dim borders, 4px cap); card/press radii already concentric at equal 4px with zero padding.
+- Amber CASH jump chip is pre-existing cash-section signal styling, left alone.
+- Evidence: red 3 → green 44/44 focused; 63 mobile Playwright; full vitest 4767 + coverage ratchet; tsc clean; light+dark 393x852 screenshots (scratchpad mobile-orders-{light,dark}.png).
 
 ---
 
@@ -1469,3 +1472,45 @@ Per /indicator swarm (spec: docs/indicators/straddle.md). Slug/service `straddle
 - Signal = signed SPX close-to-close move / prior-close implied 1-day straddle (0.798 x VIX1D x sqrt(1/252)). Series 2022-05-13+ (VIX1D inception caps backfill; reference chart's 2016 start not reproducible). Full-series stats: avg 0.063, pstdev 1.157, high +3.78, low -4.97, breakeven hit rate 36.8%.
 - Evidence chain: red (ModuleNotFoundError / 5 vitest fails) -> per-worktree green -> merge gates 4769 pytest + 718 cloud + 4788 vitest + tsc clean -> 1059 rows + snapshot + ok heartbeat in prod Turso -> Playwright e2e 3/3 -> live page screenshot docs/indicators/straddle-tab{,-light}.png -> CI green -> VPS timer run green.
 - Outstanding: authenticated app.radon.run/regime/straddle browser screenshot needs the operator (Chrome extension not connected in this remote session; Clerk MFA sign-in is operator-only).
+
+# Task: Reduce Codex skill context-budget pressure (2026-08-05)
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit the current Codex plugin, skill, and configuration state and confirm the supported disable mechanism from the current Codex manual.
+- T2 depends_on: [T1] - Classify capabilities as required for Radon, generally useful, or safely unused; preserve repository-required and actively configured integrations.
+- T3 depends_on: [T2] - Disable only safely unused skills or plugins with the smallest reversible configuration change.
+- T4 depends_on: [T3] - Restart or reload the relevant Codex surface if supported, verify the loaded skill inventory/context warning, and document the exact result.
+
+## Checklist
+
+- [x] T1 Codex configuration and supported disable mechanism audited.
+- [x] T2 Required and unused capabilities classified.
+- [x] T3 Safely unused capabilities disabled.
+- [x] T4 Runtime verification and review documented.
+
+## Review
+
+- Root cause: 127 active skills were competing for Codex's fixed 2% skill-metadata budget. The largest source was 67 globally loaded `~/.agents/skills` entries, including 11 exact duplicate-name/identical-frontmatter pairs also present under `~/.codex/skills`.
+- Applied 78 reversible path-level `[[skills.config]]` overrides in `~/.codex/config.toml`. The rules remove duplicate copies, unrelated marketing/CRO/native stacks, redundant visual variants, narrow Cloudflare specialties, and unused artifact/mail prompts while preserving system skills, Radon's brand-aligned repo-local UI suite, GitHub, browser/computer-use, Figma, Exa, Radon KB, trading/Doob, orchestration, core Cloudflare/Wrangler, GooseWorks research, and web performance.
+- Plugins remain installed and enabled; only unused plugin skill prompts were filtered where needed. The original user config is recoverable at `~/.codex/config.toml.backup.skill-budget-2026-08-05`.
+- Verification: Codex CLI configuration and all four MCP servers load cleanly; active local skill entries fell from 124 to 47; the rendered skill block fell from 22,253 to 18,892 characters; zero rendered descriptions are shorter than their source frontmatter. The Codex app's bundled runtime also loads the config and renders the retained skills with full descriptions. A new thread/session is required because existing thread prompts are immutable.
+
+# Task: SKEW indicator — change in SPX 1M 25d put/call IV ratio (2026-08-05)
+
+Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab SKEW, migration 0034. Source: UW /api/stock/SPX/greeks (per-strike delta+IV, history floor 2023-09-06 for this token, monthlies only). 25d legs interpolated in delta; ratio stored, daily change charted. Cboe SKEW index rejected (different quantity); IB rejected (no historical IV-by-delta).
+
+## Checklist
+
+- [x] Step 1 research: UW greeks confirmed both ends of 2y window; fixture skew_uw_sample.json captured
+- [x] Step 2 spec + red tests (pytest ModuleNotFoundError; vitest 5 failed)
+- [x] Step 3 parallel implementers green (ingestion 19 pytest+723 cloud / api 106 vitest / ui 63 vitest)
+- [x] Step 3.5 methodology fix in merge worktree: constant-maturity 30d between bracketing monthlies (single rolling monthly = ±0.85 roll artifacts); fresh Hrana conn per backfill checkpoint (first run silently lost 588/737 rows); 2023/2024 NYSE holidays added to market_holidays.json (load_holidays silently returned empty; UW served garbage on Christmas: 25d call IV 60%); implausible-ratio guard [0.8, 3.0]
+- [x] Step 4 merge + full gates green (4808 pytest, 723 cloud, 4826 vitest, tsc clean)
+- [x] Step 5 backfill 731 clean sessions in Turso (2023-09-06..2026-08-05); stats now match reference chart (pstdev 0.034 vs 0.04, last change -0.119 vs -0.12); e2e 3/3; live page verified; screenshots docs/indicators/skew-tab{,-light}.png
+- [x] Step 6 shipped: merged 5e5fe2e6 + fixes 3fd4205e; CI 31064542073 + 31064985429 green + deployed; radon-skew.timer enabled (21:45 UTC daily); VPS first-run exposed JSON-only read clobbering the snapshot (10 rows) -> run() now unions Turso history (Turso-first); re-trigger restored 731-session snapshot (health ok 02:19Z); anon prod API 401 = perimeter; worktrees + ind/* branches removed
+
+## Review (SKEW)
+
+- Methodology: CM-30d put/call 25d IV ratio interpolated in delta per monthly then in DTE between bracketing monthlies; daily change charted. Three verification-caught defects fixed pre-ship: monthly-roll artifact (stddev 0.081 -> 0.034), 2023/2024 holidays missing from market_holidays.json (UW garbage chains on closures; plausibility guard [0.8, 3.0] added), Hrana stream death dropping 588/737 checkpoint rows (reset_connection per batch). Post-ship VPS first run caught the JSON-only base read; Turso-first union fixed and verified in prod.
+- Outstanding: authenticated app.radon.run/regime/skew operator screenshot (same Chrome-extension limitation as straddle).

@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-01 — Worthless option expiry must synthesize $0 closes
+
+- IB often writes no journal fill when OTM options lapse. `computeRealizedPnl` only saw CLOSED rows or opposite-side fills, so residual inventory (e.g. KWEB 1500× $31C Jul-17) never became realized P&L and monthly totals understated large debit losses.
+- After the lot-matcher walk, residual OPT inventory with `expiry <= report as-of (opts.to)` must emit a synthetic close: proceeds $0, long realized = −basis, short realized = +basis, close date = expiry ET day. Do not expire residual past `opts.to` (partial covers with later expiry stay open).
+- **Phantom residual trap (SNDK $1300C):** Flex open (composite exec ids) plus daemon fills for the same open are often *not* linked by constituent ids. Constituent dedup alone leaves 2× open qty; a full SELL close leaves residual that falsely “expires worthless” alongside the real close. Fix: `preferFlexOverFillSameDaySide` — when flex_agg exists for (ET day, side), drop fill-family rows on that day+side before the inventory walk. A fully closed book must never also expire.
+
 ## 2026-07-31 — Unrealized P&L modal must show signed entry and MV
 
 - Never `Math.abs` entry cost or market value in a breakdown that claims `P&L = MV − entry`. Credits and short marks become unverifiable (META debit + abs(short MV) looked like a gain; AAOI credit looked like a smaller gain than the real P&L).
@@ -337,6 +343,7 @@ Test-suite audit (a "improve coverage" request that turned up a live auth hole):
 - When a generated output directory appears in the worktree and should not be versioned, add an explicit root `.gitignore` entry immediately instead of leaving it as recurring untracked noise.
 - When collaborating on parallel changes in this repo, treat any file the user says they already changed as reserved unless a direct integration change is unavoidable; design around the declared contract first to avoid stomping concurrent work.
 - When fixing Codex skill manifests, validate the YAML frontmatter types directly; bracketed placeholder text after `description:` becomes a YAML sequence and the loader expects a plain string.
+- When a user reports Codex's skill-description context-budget warning, diagnose the installed/enabled skill and plugin inventory first; do not treat it as an MCP server failure merely because MCP-backed plugins may contribute capabilities.
 
 ## 2026-03-18
 
