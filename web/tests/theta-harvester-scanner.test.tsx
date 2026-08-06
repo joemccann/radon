@@ -136,23 +136,32 @@ describe("ThetaHarvesterScanner", () => {
     expect(within(section).getByText("THETA / 03")).toBeTruthy();
     expect(within(section).getByText("Theta Harvester")).toBeTruthy();
     expect(within(section).getAllByText("AAPL").length).toBeGreaterThan(0);
-    expect(within(section).getAllByText("TRUE THETA").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("SHORT 95P / 105C").length).toBeGreaterThan(0);
+    // Mobile card keeps the /day label; the desktop grid uses the compact /d.
     expect(within(section).getAllByText("+7.50/day").length).toBeGreaterThan(0);
+    expect(within(section).getAllByText("+7.50/d").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("-1.0 sh").length).toBeGreaterThan(0);
-    expect(within(section).getByText("+23.0 pt / 2.92x")).toBeTruthy();
+    expect(within(section).getAllByText("2.92×").length).toBeGreaterThan(0);
+    expect(within(section).getAllByText("+23.0 pt").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("IV RICH").length).toBeGreaterThan(0);
 
-    const rowLink = within(section.querySelector("tbody")!).getByRole("link", {
+    // The ticker link goes straight to the order builder (e2e contract).
+    const grid = screen.getByTestId("theta-grid");
+    const tickerLink = within(grid).getByRole("link", {
       name: /open AAPL theta order builder/i,
     });
-    fireEvent.click(rowLink);
+    expectThetaHref(tickerLink.getAttribute("href"));
+
+    // Row click expands the reconstructed position; Send to orders navigates.
+    fireEvent.click(within(grid).getByRole("button", { name: "AAPL details" }));
+    const detail = screen.getByTestId("theta-grid-detail-AAPL");
+    expect(within(detail).getByText("SELL 95 PUT")).toBeTruthy();
+    expect(within(detail).getByText("SELL 105 CALL")).toBeTruthy();
+    expect(within(detail).getByText("2.92× · +23.0 pt")).toBeTruthy();
+    expect(within(detail).getAllByText("TRUE THETA").length).toBeGreaterThan(0);
+    fireEvent.click(within(detail).getByRole("button", { name: "Send to orders" }));
     expect(pushMock).toHaveBeenCalledWith(expect.stringContaining("/AAPL?"));
     expectThetaHref(pushMock.mock.calls[0][0]);
-
-    fireEvent.keyDown(rowLink, { key: "Enter" });
-    expect(pushMock).toHaveBeenCalledTimes(2);
-    expectThetaHref(pushMock.mock.calls[1][0]);
 
     const mobileList = screen.getByTestId("theta-harvester-mobile-list");
     expectThetaHref(within(mobileList).getByRole("link").getAttribute("href"));
@@ -197,26 +206,35 @@ describe("ThetaHarvesterScanner", () => {
     expect(screen.getByTestId("theta-harvester-title-tooltip-content").textContent).toContain("Neutral short-premium scan");
     fireEvent.mouseLeave(titleTrigger);
 
-    const expectations = [
+    // Live column headers carry their help bubbles unexpanded…
+    const headerExpectations = [
       ["score", "Composite theta harvest score"],
       ["theta", "Estimated daily theta"],
-      ["net-delta", "Near zero"],
       ["iv-rv", "Implied-volatility edge"],
+      ["credit", "Estimated entry credit"],
+      ["dte", "Days to expiration"],
+    ] as const;
+    // …the demoted columns keep theirs inside the expanded detail.
+    const demotedExpectations = [
+      ["net-delta", "Near zero"],
       ["dealer", "Dealer support gate"],
       ["range", "Range-bound score"],
-      ["dte", "Days to expiration"],
-      ["credit", "Estimated entry credit"],
       ["earnings", "Next earnings date if it falls inside"],
       ["status", "Final verdict"],
     ] as const;
 
-    for (const [key, expectedText] of expectations) {
+    const probe = (key: string, expectedText: string) => {
       const trigger = screen.getByTestId(`theta-harvester-tooltip-${key}`);
       expect(trigger).toBeTruthy();
       fireEvent.mouseEnter(trigger);
       expect(screen.getByTestId(`theta-harvester-tooltip-content-${key}`).textContent).toContain(expectedText);
       fireEvent.mouseLeave(trigger);
-    }
+    };
+
+    for (const [key, expectedText] of headerExpectations) probe(key, expectedText);
+
+    fireEvent.click(screen.getByRole("button", { name: "AAPL details" }));
+    for (const [key, expectedText] of demotedExpectations) probe(key, expectedText);
   });
 
   it("rejects malformed ticker search text", () => {
@@ -304,12 +322,13 @@ describe("ThetaHarvesterScanner", () => {
 
     render(<ThetaHarvesterScanner data={multi} />);
 
+    // Collapsed: earnings cells live on the mobile cards only; the desktop
+    // grid surfaces within-DTE risk as an ER badge on the row.
     const cells = screen.getAllByTestId("theta-earnings-cell");
-    // Desktop table + mobile card for each of 3 rows.
-    expect(cells.length).toBe(6);
+    expect(cells.length).toBe(3);
 
     const todayAmc = cells.filter((el) => el.className.includes("theta-earnings--hot"));
-    expect(todayAmc.length).toBe(2);
+    expect(todayAmc.length).toBe(1);
     for (const el of todayAmc) {
       expect(el.textContent ?? "").toMatch(/TODAY/);
       expect(el.textContent ?? "").toMatch(/AMC/);
@@ -319,7 +338,7 @@ describe("ThetaHarvesterScanner", () => {
     }
 
     const novBmo = cells.filter((el) => el.className.includes("theta-earnings--quiet"));
-    expect(novBmo.length).toBe(2);
+    expect(novBmo.length).toBe(1);
     for (const el of novBmo) {
       expect(el.textContent ?? "").toMatch(/Nov 4/);
       expect(el.textContent ?? "").toMatch(/BMO/);
@@ -328,10 +347,21 @@ describe("ThetaHarvesterScanner", () => {
     }
 
     const missing = cells.filter((el) => el.textContent === "---");
-    expect(missing.length).toBe(2);
+    expect(missing.length).toBe(1);
     for (const el of missing) {
       expect(el.className).toContain("theta-earnings--empty");
     }
+
+    // Only the within-DTE row wears the ER badge.
+    const grid = screen.getByTestId("theta-grid");
+    expect(within(grid).getByText(/^ER TODAY AMC$/)).toBeTruthy();
+    expect(within(screen.getByTestId("theta-grid-row-MSFT")).queryByText(/^ER /)).toBeNull();
+
+    // The expanded detail carries the full earnings cell + its help bubble.
+    fireEvent.click(within(grid).getByRole("button", { name: "HONA details" }));
+    const detail = screen.getByTestId("theta-grid-detail-HONA");
+    const detailCell = within(detail).getByTestId("theta-earnings-cell");
+    expect(detailCell.className).toContain("theta-earnings--hot");
 
     const earningsTrigger = screen.getByTestId("theta-harvester-tooltip-earnings");
     fireEvent.mouseEnter(earningsTrigger);
@@ -343,6 +373,93 @@ describe("ThetaHarvesterScanner", () => {
 
     const mobileList = screen.getByTestId("theta-harvester-mobile-list");
     expect(within(mobileList).getAllByTestId("theta-earnings-mobile").length).toBe(3);
+  });
+
+  it("filter chips narrow the cohort and report the active filter", () => {
+    const multi: ThetaHarvesterData = {
+      ...data,
+      results: [
+        { ...data.results[0], ticker: "AAPL" },
+        {
+          ...data.results[0],
+          ticker: "SLOW",
+          score: 62,
+          iv_rv_ratio: 1.2,
+          structure: { ...data.results[0].structure, dte: 60 },
+        },
+      ],
+    };
+    render(<ThetaHarvesterScanner data={multi} />);
+    const grid = screen.getByTestId("theta-grid");
+
+    expect(screen.getByTestId("theta-filter-summary").textContent).toBe("NO FILTER");
+    expect(within(grid).getAllByTestId(/theta-grid-row-/).length).toBe(2);
+
+    fireEvent.click(within(grid).getByRole("button", { name: "DTE ≤ 30" }));
+    expect(within(grid).getAllByTestId(/theta-grid-row-/).length).toBe(1);
+    expect(within(grid).queryByTestId("theta-grid-row-SLOW")).toBeNull();
+    expect(screen.getByTestId("theta-filter-summary").textContent).toBe("DTE ≤ 30 ACTIVE");
+
+    fireEvent.click(within(grid).getByRole("button", { name: "All 2" }));
+    expect(within(grid).getAllByTestId(/theta-grid-row-/).length).toBe(2);
+  });
+
+  it("renders criteria pips with pass/fail state from the gates", () => {
+    const mixed: ThetaHarvesterData = {
+      ...data,
+      results: [
+        {
+          ...data.results[0],
+          gates: { ...data.results[0].gates, iv_rich_vs_rv: false },
+        },
+      ],
+    };
+    render(<ThetaHarvesterScanner data={mixed} />);
+    const row = screen.getByTestId("theta-grid-row-AAPL");
+    expect(within(row).getByTitle("PASS · Delta neutrality within band").textContent).toBe("Δ");
+    expect(within(row).getByTitle("NOT MET · IV rich vs realized").textContent).toBe("V");
+    expect(within(row).getByTitle("PASS · Dealer positioning supportive").textContent).toBe("D");
+    expect(within(row).getByTitle("PASS · Theta decay dominant").textContent).toBe("Θ");
+  });
+
+  it("multi-select shows the selection bar; Send to orders routes the first pick", () => {
+    render(<ThetaHarvesterScanner data={data} />);
+    expect(screen.queryByTestId("theta-selection-bar")).toBeNull();
+
+    fireEvent.click(screen.getByRole("checkbox", { name: "Select AAPL" }));
+    const bar = screen.getByTestId("theta-selection-bar");
+    expect(bar.textContent).toContain("1 structure selected · AAPL");
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Send to orders" }));
+    expectThetaHref(pushMock.mock.calls[0][0]);
+
+    fireEvent.click(within(bar).getByRole("button", { name: "Clear" }));
+    expect(screen.queryByTestId("theta-selection-bar")).toBeNull();
+  });
+
+  it("J/K move the cursor, Enter expands, Space selects — but never while typing", () => {
+    const multi: ThetaHarvesterData = {
+      ...data,
+      results: [
+        { ...data.results[0], ticker: "AAPL" },
+        { ...data.results[0], ticker: "MSFT", score: 80 },
+      ],
+    };
+    render(<ThetaHarvesterScanner data={multi} onTickerScan={vi.fn()} />);
+
+    fireEvent.keyDown(document, { key: "j" });
+    fireEvent.keyDown(document, { key: "Enter" });
+    expect(screen.getByTestId("theta-grid-detail-MSFT")).toBeTruthy();
+
+    fireEvent.keyDown(document, { key: "k" });
+    fireEvent.keyDown(document, { key: " " });
+    expect(screen.getByTestId("theta-selection-bar").textContent).toContain("AAPL");
+
+    // Typing in the ticker search must not drive the table.
+    const input = screen.getByLabelText("Ticker symbol");
+    fireEvent.keyDown(input, { key: "j" });
+    fireEvent.keyDown(input, { key: " " });
+    expect(screen.getByTestId("theta-selection-bar").textContent).not.toContain("MSFT");
   });
 
   it("omitted earnings field displays as ---", () => {
