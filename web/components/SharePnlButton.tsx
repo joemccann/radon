@@ -1,9 +1,12 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Share2 } from "lucide-react";
 import { useDismissablePopover } from "@/lib/useDismissablePopover";
 import { formatHoldDuration } from "@/lib/holdTime";
+
+const POPOVER_EXIT_MS = 120;
+const POPOVER_EXIT_REDUCED_MS = 80;
 
 export type SharePnlData = {
   description: string;
@@ -64,14 +67,48 @@ export function buildTweetText(
 
 export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps) {
   const [open, setOpen] = useState(false);
+  const [mounted, setMounted] = useState(false);
+  const [exiting, setExiting] = useState(false);
   const [showDollar, setShowDollar] = useState(false);
   const [showPct, setShowPct] = useState(true);
   const [copying, setCopying] = useState(false);
   const [copied, setCopied] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const close = useCallback(() => setOpen(false), []);
   useDismissablePopover(popoverRef, close, open);
+
+  // Keep the popover mounted through a short exit transition so open/close
+  // retargets via CSS (not keyframe restart).
+  useEffect(() => {
+    if (open) {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+      setMounted(true);
+      setExiting(false);
+      return;
+    }
+    if (!mounted) return;
+    setExiting(true);
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const ms = reduced ? POPOVER_EXIT_REDUCED_MS : POPOVER_EXIT_MS;
+    exitTimerRef.current = setTimeout(() => {
+      setMounted(false);
+      setExiting(false);
+      exitTimerRef.current = null;
+    }, ms);
+    return () => {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+    };
+  }, [open, mounted]);
 
   const generateImage = useCallback(async () => {
     const params = new URLSearchParams();
@@ -144,15 +181,22 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
   return (
     <div style={{ position: "relative", display: "inline-flex" }} ref={popoverRef}>
       <button
+        type="button"
         className="share-pnl-button"
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen((prev) => !prev)}
         title="Share P&L"
+        aria-expanded={open}
+        aria-haspopup="dialog"
       >
         <Share2 size={size} />
       </button>
 
-      {open && (
-        <div className="share-pnl-popover">
+      {mounted ? (
+        <div
+          className={`share-pnl-popover${exiting ? " share-pnl-popover--exiting" : ""}`}
+          role="dialog"
+          aria-label="Share options"
+        >
           <div className="share-pnl-popover-title">Share Options</div>
           <label className="share-pnl-checkbox">
             <input
@@ -172,6 +216,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
           </label>
           <div className="share-pnl-popover-actions">
             <button
+              type="button"
               className="btn-primary share-pnl-action"
               onClick={handleCopyAndTweet}
               disabled={copying || (!showDollar && !showPct)}
@@ -179,6 +224,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
               {copying ? "Generating..." : "Copy & Tweet"}
             </button>
             <button
+              type="button"
               className="btn-secondary share-pnl-action"
               onClick={handleCopy}
               disabled={copying || (!showDollar && !showPct)}
@@ -187,7 +233,7 @@ export default function SharePnlButton({ data, size = 13 }: SharePnlButtonProps)
             </button>
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

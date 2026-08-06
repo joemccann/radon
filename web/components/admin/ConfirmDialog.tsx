@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { useDialogChrome } from "@/lib/useDialogChrome";
 
@@ -20,6 +20,9 @@ type ConfirmDialogProps = {
    *  name) and moves initial focus to the input instead of Confirm. */
   requireTyped?: string;
 };
+
+const EXIT_MS = 120;
+const EXIT_REDUCED_MS = 80;
 
 /**
  * Minimal confirmation dialog tailored for operator actions. Adopts the shared
@@ -46,11 +49,45 @@ export default function ConfirmDialog({
   const [typed, setTyped] = useState("");
   const [copied, setCopied] = useState(false);
   const copyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mounted, setMounted] = useState(open);
+  const [exiting, setExiting] = useState(false);
+  const exitTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { portalTarget, panelRef } = useDialogChrome<HTMLDivElement>({
     open,
     onClose: onCancel,
   });
+
+  // Enter/exit paint: keep the portal mounted ~120ms after open becomes false
+  // so opacity + translateY can settle (shared Modal recipe).
+  useEffect(() => {
+    if (open) {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+      setMounted(true);
+      setExiting(false);
+      return;
+    }
+    if (!mounted) return;
+    setExiting(true);
+    const reduced =
+      typeof window !== "undefined" &&
+      window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const ms = reduced ? EXIT_REDUCED_MS : EXIT_MS;
+    exitTimerRef.current = setTimeout(() => {
+      setMounted(false);
+      setExiting(false);
+      exitTimerRef.current = null;
+    }, ms);
+    return () => {
+      if (exitTimerRef.current) {
+        clearTimeout(exitTimerRef.current);
+        exitTimerRef.current = null;
+      }
+    };
+  }, [open, mounted]);
 
   // Reset the typed-confirm field each time the dialog opens.
   useEffect(() => {
@@ -82,18 +119,27 @@ export default function ConfirmDialog({
     else confirmBtnRef.current?.focus();
   }, [open, requireTyped, destructive]);
 
-  if (!open || !portalTarget) return null;
+  const handleBackdropClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (exiting || pending) return;
+      if (e.target === e.currentTarget) onCancel();
+    },
+    [exiting, pending, onCancel],
+  );
+
+  if (!mounted || !portalTarget) return null;
 
   const typedOk = !requireTyped || typed.trim() === requireTyped;
-  const confirmDisabled = pending || !typedOk;
+  const confirmDisabled = pending || !typedOk || exiting;
 
   return createPortal(
     <div
-      className="admin-confirm-backdrop"
+      className={`admin-confirm-backdrop${exiting ? " admin-confirm-backdrop--exiting" : ""}`}
       role="dialog"
       aria-modal="true"
       aria-label={title}
       data-testid="admin-confirm"
+      onClick={handleBackdropClick}
     >
       <div className="admin-confirm-panel" ref={panelRef} tabIndex={-1}>
         <h2 className="admin-confirm-title">{title}</h2>
@@ -147,7 +193,7 @@ export default function ConfirmDialog({
             type="button"
             className="admin-btn admin-btn-ghost"
             onClick={onCancel}
-            disabled={pending}
+            disabled={pending || exiting}
           >
             {cancelLabel}
           </button>
