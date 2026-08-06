@@ -61,7 +61,7 @@ describe("/api/performance route", () => {
   it("GET returns cached performance data when cache is fresh and aligned with portfolio", async () => {
     mockDbSnapshots({
       portfolio: {
-        last_sync: "2026-03-13T12:00:00Z",
+        last_sync: "2026-03-13T16:08:00Z",
         account_summary: { net_liquidation: 1_313_112.03 },
       },
     });
@@ -70,7 +70,8 @@ describe("/api/performance route", () => {
       if (path.includes("performance.json")) {
         return JSON.stringify({
           as_of: "2026-03-13",
-          last_sync: "2026-03-13T12:00:00Z",
+          // Inside the 5-min market-open TTL of the fake clock (16:10Z).
+          last_sync: "2026-03-13T16:08:00Z",
           summary: { sharpe_ratio: 1.2 },
           series: [],
         });
@@ -84,8 +85,8 @@ describe("/api/performance route", () => {
 
     expect(res.status).toBe(200);
     expect(body.as_of).toBe("2026-03-13");
-        expect(body.summary.sharpe_ratio).toBe(1.2);
-        expect(mockRadonFetch).not.toHaveBeenCalled();
+    expect(body.summary.sharpe_ratio).toBe(1.2);
+    expect(mockRadonFetch).not.toHaveBeenCalled();
   });
 
   it("GET returns stale cache + triggers background rebuild when cached performance lags the current portfolio snapshot (SWR)", async () => {
@@ -107,11 +108,7 @@ describe("/api/performance route", () => {
       }
       throw new Error(`unexpected read: ${path}`);
     });
-    mockRadonFetch
-      .mockResolvedValueOnce({
-        last_sync: "2026-03-11T13:37:14Z",
-      })
-      .mockResolvedValueOnce({ status: "accepted" });
+    mockRadonFetch.mockResolvedValueOnce({ status: "accepted" });
 
     const { GET } = await import("../app/api/performance/route");
     const res = await GET();
@@ -121,15 +118,9 @@ describe("/api/performance route", () => {
     expect(res.status).toBe(200);
     expect(body.as_of).toBe("2026-03-10");
     expect(body.summary.ending_equity).toBe(1_063_031.86);
-    // Should have called portfolio/sync + background trigger
-    expect(mockRadonFetch).toHaveBeenCalledTimes(2);
-    expect(mockRadonFetch).toHaveBeenNthCalledWith(
-      1,
-      "/portfolio/sync",
-      expect.objectContaining({ method: "POST" }),
-    );
-    expect(mockRadonFetch).toHaveBeenNthCalledWith(
-      2,
+    // §4.4: no blocking /portfolio/sync — one fire-and-forget rebuild only.
+    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
       "/performance/background",
       expect.objectContaining({ method: "POST", timeout: 5_000 }),
     );
@@ -154,11 +145,7 @@ describe("/api/performance route", () => {
       }
       throw new Error(`unexpected read: ${path}`);
     });
-    mockRadonFetch
-      .mockResolvedValueOnce({
-        last_sync: "2026-03-13T20:02:06Z",
-      })
-      .mockResolvedValueOnce({ status: "accepted" });
+    mockRadonFetch.mockResolvedValueOnce({ status: "accepted" });
 
     const { GET } = await import("../app/api/performance/route");
     const res = await GET();
@@ -168,20 +155,15 @@ describe("/api/performance route", () => {
     expect(res.status).toBe(200);
     expect(body.as_of).toBe("2026-03-12");
     expect(body.summary.ending_equity).toBe(1_218_410.03);
-    // Portfolio sync + background trigger
-    expect(mockRadonFetch).toHaveBeenNthCalledWith(
-      1,
-      "/portfolio/sync",
-      expect.objectContaining({ method: "POST" }),
-    );
-    expect(mockRadonFetch).toHaveBeenNthCalledWith(
-      2,
+    // §4.4: no blocking /portfolio/sync — one fire-and-forget rebuild only.
+    expect(mockRadonFetch).toHaveBeenCalledTimes(1);
+    expect(mockRadonFetch).toHaveBeenCalledWith(
       "/performance/background",
       expect.objectContaining({ method: "POST", timeout: 5_000 }),
     );
   });
 
-  it("GET returns cached performance when portfolio refresh fails and cache is current", async () => {
+  it("GET serves cached performance even when the background rebuild trigger fails", async () => {
     mockDbSnapshots({
       portfolio: {
         last_sync: "2026-03-12T13:23:21Z",
@@ -209,7 +191,10 @@ describe("/api/performance route", () => {
     expect(res.status).toBe(200);
     expect(body.as_of).toBe("2026-03-12");
     expect(mockRadonFetch).toHaveBeenCalledTimes(1);
-    expect(mockRadonFetch).toHaveBeenCalledWith("/portfolio/sync", expect.objectContaining({ method: "POST" }));
+    expect(mockRadonFetch).toHaveBeenCalledWith(
+      "/performance/background",
+      expect.objectContaining({ method: "POST", timeout: 5_000 }),
+    );
   });
 
   it("POST runs the API sync and returns generated performance JSON", async () => {
