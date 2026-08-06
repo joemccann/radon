@@ -2797,6 +2797,78 @@ body[data-mobile="true"] .watchlist-list {
 }
 
 /* ───────────────────────────────────────────────────────────
+   Instrument section (scanner family) — rack-mount module shell.
+   Signature of Radon Flow: calibrated edge + device eyebrow + control
+   rail. Composes existing panel-* tokens; does not invent new color.
+   ─────────────────────────────────────────────────────────── */
+.instrument-section {
+  /* Gutter for the edge gauge so body content never collides with ticks. */
+  padding-left: 0;
+  overflow: visible;
+}
+
+.instrument-section > .panel-edge-trace {
+  /* Keep gauge inside the section border. */
+  border-radius: 4px 0 0 4px;
+}
+
+.instrument-section__header {
+  align-items: flex-start;
+  gap: 12px 16px;
+  flex-wrap: wrap;
+  /* Align title block past the gauge channel. */
+  padding-left: 28px;
+}
+
+.instrument-section__heading {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  flex: 1 1 180px;
+}
+
+.instrument-section__heading .panel-eyebrow {
+  margin-bottom: 0;
+}
+
+.instrument-section__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-size: var(--text-panel-title);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1.2;
+  text-wrap: balance;
+}
+
+.instrument-section__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px 10px;
+  min-width: 0;
+  flex: 1 1 280px;
+}
+
+.instrument-section > .section-body,
+.instrument-section > .table-wrap,
+.instrument-section > .theta-harvester__table-wrap,
+.instrument-section > .theta-harvester__cards {
+  /* Body content clears the edge gauge. */
+  padding-left: 14px;
+}
+
+.instrument-section__rail {
+  margin-top: 0;
+  padding-left: 28px;
+}
+
+/* ───────────────────────────────────────────────────────────
    InstrumentPanel — the production primitive for hero cards.
    Composes .panel-eyebrow / .panel-title / .panel-edge-trace +
    a big metric block + a meta-rail. See

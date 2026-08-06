@@ -133,6 +133,7 @@ describe("ThetaHarvesterScanner", () => {
     );
 
     const section = screen.getByTestId("theta-harvester-section");
+    expect(within(section).getByText("THETA / 03")).toBeTruthy();
     expect(within(section).getByText("Theta Harvester")).toBeTruthy();
     expect(within(section).getAllByText("AAPL").length).toBeGreaterThan(0);
     expect(within(section).getAllByText("TRUE THETA").length).toBeGreaterThan(0);

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, Sparkles } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
+import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
 import SortTh from "./SortTh";
 import { useSort } from "@/lib/useSort";
@@ -328,93 +329,111 @@ export default function ThetaHarvesterScanner({
     openThetaOrder(href);
   };
 
-  return (
-    <section className="section theta-harvester" data-testid="theta-harvester-section">
-      <div className="section-header">
-        <h2 className="section-title">
-          <Sparkles size={14} />
-          Theta Harvester
-          <InfoTooltip
-            text={THETA_SECTION_HELP}
-            ariaLabel="Theta Harvester scanner details"
-            triggerTestId="theta-harvester-title-tooltip"
-            contentTestId="theta-harvester-title-tooltip-content"
+  const controls = (
+    <div className="theta-harvester__meta">
+      {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
+      <span className="pill defined">{data?.theta_harvest_count ?? 0} TRUE THETA</span>
+      {onTickerScan && (
+        <form className="theta-search" onSubmit={submitTickerScan}>
+          <Search size={13} aria-hidden="true" />
+          <input
+            id="theta-ticker-search"
+            className="theta-search__input"
+            value={tickerQuery}
+            onChange={(event) => {
+              setTickerQuery(event.target.value.toUpperCase());
+              setTickerError(null);
+            }}
+            placeholder="Ticker"
+            autoCapitalize="characters"
+            autoComplete="off"
+            spellCheck={false}
+            aria-label="Ticker symbol"
+            aria-invalid={tickerError ? "true" : "false"}
+            aria-describedby={tickerError ? "theta-ticker-search-error" : undefined}
           />
-        </h2>
-        <div className="theta-harvester__meta">
-          {lastSync && <span className="report-meta">{new Date(lastSync).toLocaleTimeString()}</span>}
-          <span className="pill defined">{data?.theta_harvest_count ?? 0} TRUE THETA</span>
-          {onTickerScan && (
-            <form className="theta-search" onSubmit={submitTickerScan}>
-              <Search size={13} aria-hidden="true" />
-              <input
-                id="theta-ticker-search"
-                className="theta-search__input"
-                value={tickerQuery}
-                onChange={(event) => {
-                  setTickerQuery(event.target.value.toUpperCase());
-                  setTickerError(null);
-                }}
-                placeholder="Ticker"
-                autoCapitalize="characters"
-                autoComplete="off"
-                spellCheck={false}
-                aria-label="Ticker symbol"
-                aria-invalid={tickerError ? "true" : "false"}
-                aria-describedby={tickerError ? "theta-ticker-search-error" : undefined}
-              />
-              <button
-                type="submit"
-                className="theta-search__button"
-                disabled={scanning || normalizedTicker.length === 0}
-              >
-                {scanning ? <Loader2 size={12} className="spin" /> : null}
-                Scan
-              </button>
-              {tickerError && (
-                <span id="theta-ticker-search-error" className="theta-search__error" role="alert">
-                  {tickerError}
-                </span>
-              )}
-            </form>
+          <button
+            type="submit"
+            className="theta-search__button"
+            disabled={scanning || normalizedTicker.length === 0}
+          >
+            {scanning ? <Loader2 size={12} className="spin" /> : null}
+            Scan
+          </button>
+          {tickerError && (
+            <span id="theta-ticker-search-error" className="theta-search__error" role="alert">
+              {tickerError}
+            </span>
           )}
-          {onScan && (
-            <div className="theta-params" role="group" aria-label="Theta search parameters" style={THETA_PARAMS_ROW}>
-              <span style={THETA_PARAMS_LABEL}>DTE</span>
-              <input
-                type="number" min={0} max={400} step={1} value={minDteInput}
-                onChange={(e) => setMinDteInput(e.target.value)}
-                aria-label="Minimum days to expiration" style={THETA_PARAMS_INPUT}
-                data-testid="theta-min-dte"
-              />
-              <span style={THETA_PARAMS_LABEL}>–</span>
-              <input
-                type="number" min={0} max={400} step={1} value={maxDteInput}
-                onChange={(e) => setMaxDteInput(e.target.value)}
-                aria-label="Maximum days to expiration" style={THETA_PARAMS_INPUT}
-                data-testid="theta-max-dte"
-              />
-              <span style={{ ...THETA_PARAMS_LABEL, marginLeft: 6 }}>MIN CR</span>
-              <input
-                type="number" min={0} max={1000} step={0.05} value={minCreditInput}
-                onChange={(e) => setMinCreditInput(e.target.value)}
-                aria-label="Minimum credit per share" style={THETA_PARAMS_INPUT}
-                data-testid="theta-min-credit"
-              />
-              <button
-                type="button"
-                className="theta-scan-button"
-                onClick={runPresetScan}
-                disabled={scanning}
-              >
-                <Loader2 size={12} className={scanning ? "spin" : ""} />
-                {scanning ? "SCANNING" : "SCAN NDX"}
-              </button>
-            </div>
-          )}
+        </form>
+      )}
+      {onScan && (
+        <div className="theta-params" role="group" aria-label="Theta search parameters" style={THETA_PARAMS_ROW}>
+          <span style={THETA_PARAMS_LABEL}>DTE</span>
+          <input
+            type="number" min={0} max={400} step={1} value={minDteInput}
+            onChange={(e) => setMinDteInput(e.target.value)}
+            aria-label="Minimum days to expiration" style={THETA_PARAMS_INPUT}
+            data-testid="theta-min-dte"
+          />
+          <span style={THETA_PARAMS_LABEL}>–</span>
+          <input
+            type="number" min={0} max={400} step={1} value={maxDteInput}
+            onChange={(e) => setMaxDteInput(e.target.value)}
+            aria-label="Maximum days to expiration" style={THETA_PARAMS_INPUT}
+            data-testid="theta-max-dte"
+          />
+          <span style={{ ...THETA_PARAMS_LABEL, marginLeft: 6 }}>MIN CR</span>
+          <input
+            type="number" min={0} max={1000} step={0.05} value={minCreditInput}
+            onChange={(e) => setMinCreditInput(e.target.value)}
+            aria-label="Minimum credit per share" style={THETA_PARAMS_INPUT}
+            data-testid="theta-min-credit"
+          />
+          <button
+            type="button"
+            className="theta-scan-button"
+            onClick={runPresetScan}
+            disabled={scanning}
+          >
+            <Loader2 size={12} className={scanning ? "spin" : ""} />
+            {scanning ? "SCANNING" : "SCAN NDX"}
+          </button>
         </div>
-      </div>
+      )}
+    </div>
+  );
 
+  const rail = [
+    { k: "source", v: data?.source ?? "Unusual Whales" },
+    { k: "universe", v: data?.universe ?? "—" },
+    {
+      k: "last.sample",
+      v: lastSync ? new Date(lastSync).toLocaleTimeString() : "—",
+    },
+    {
+      k: "true.theta",
+      v: String(data?.theta_harvest_count ?? 0),
+    },
+  ];
+
+  return (
+    <ScannerInstrumentShell
+      moduleId="THETA / 03"
+      title="Theta Harvester"
+      titleAccessory={
+        <InfoTooltip
+          text={THETA_SECTION_HELP}
+          ariaLabel="Theta Harvester scanner details"
+          triggerTestId="theta-harvester-title-tooltip"
+          contentTestId="theta-harvester-title-tooltip-content"
+        />
+      }
+      controls={controls}
+      rail={rail}
+      className="theta-harvester"
+      testId="theta-harvester-section"
+    >
       {loading ? (
         <div className="section-body">
           <div className="snapshot-card__empty">Sampling theta surface...</div>
@@ -523,6 +542,6 @@ export default function ThetaHarvesterScanner({
           </div>
         </>
       )}
-    </section>
+    </ScannerInstrumentShell>
   );
 }
