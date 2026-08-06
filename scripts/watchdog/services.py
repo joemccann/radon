@@ -103,6 +103,12 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # heartbeats). Uniform 26h window mirrors margin-debt/yield-curve: no
     # weekend/holiday gap to widen for. Cboe CDN only — no IB dependency.
     "straddle":         {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # skew — radon-skew.timer, daily 21:45 UTC every calendar day (UW session
+    # greeks final after the 16:00 ET close; weekend/holiday runs heartbeat
+    # via the no-missing-sessions fast path). Uniform 26h window mirrors
+    # straddle/margin-debt: no weekend/holiday gap to widen for. UW-only —
+    # no IB dependency.
+    "skew":             {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # knowledge-ingest — hourly knowledge-base ingest oneshot
     # (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7).
     # Uniform 26h window (24h grace + timer jitter) mirrors
@@ -231,6 +237,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:15 UTC Cboe SPX/VIX1D straddle pull — hourly check
         # surfaces a missed run within 1h of the 26h window expiring.
         "straddle",
+        # Daily 21:45 UTC UW SPX 25d skew pull — hourly check surfaces a
+        # missed run within 1h of the 26h window expiring.
+        "skew",
         # Hourly knowledge-base ingest — daily-bucket hourly check matches
         # its 26h staleness window (a failed hour never pages; a missed
         # day surfaces within 1h of the window expiring).
