@@ -43,6 +43,7 @@ export async function dbExecute(
 ): Promise<ResultSet> {
   const { timeoutMs = DEFAULT_DB_READ_TIMEOUT_MS, label = "db" } = opts;
   const identity = currentDbOperationIdentity() ?? createDbOperationIdentity();
+  identity.label ??= label;
   try {
     return await runWithDbOperation(identity, () =>
       withTimeout(
