@@ -1,18 +1,18 @@
 "use client";
 
-import { useState, type CSSProperties, type FormEvent, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, Search, Sparkles } from "lucide-react";
 import InfoTooltip from "./InfoTooltip";
 import ScannerInstrumentShell from "./ScannerInstrumentShell";
 import SectionEmptyState from "./SectionEmptyState";
-import SortTh from "./SortTh";
-import { useSort } from "@/lib/useSort";
+import { useWatchlist } from "@/lib/useWatchlist";
 import { formatExpiry } from "@/lib/optionsChainUtils";
-import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterResult } from "@/lib/types";
+import type { ThetaHarvesterData, ThetaHarvesterEarnings, ThetaHarvesterLeg, ThetaHarvesterResult } from "@/lib/types";
 
-type ThetaSortKey = "ticker" | "score" | "theta" | "delta" | "iv_edge" | "range" | "dte" | "credit";
+/** Sortable columns of the overhauled grid (Scanner Table Overhaul.dc.html). */
+type ThetaSortKey = "score" | "theta" | "iv" | "credit" | "dte";
 
 export type ThetaScanParams = { minDte: number; maxDte: number; minCredit: number };
 
@@ -79,41 +79,67 @@ const SHORT_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "S
 
 type ThetaHelpKey = keyof typeof THETA_HEADER_HELP;
 
-function thetaHelpProps(label: string, helpKey: ThetaHelpKey) {
-  return {
-    helpText: THETA_HEADER_HELP[helpKey],
-    helpAriaLabel: `${label} theta harvester details`,
-    helpTriggerTestId: `theta-harvester-tooltip-${helpKey}`,
-    helpContentTestId: `theta-harvester-tooltip-content-${helpKey}`,
-  };
-}
-
-function ThetaHeaderInfoLabel({ label, helpKey }: { label: string; helpKey: ThetaHelpKey }) {
+function ThetaInfo({ label, helpKey }: { label: string; helpKey: ThetaHelpKey }) {
   return (
-    <span className="scanner-header-label">
-      <span>{label}</span>
-      <InfoTooltip
-        text={THETA_HEADER_HELP[helpKey]}
-        ariaLabel={`${label} theta harvester details`}
-        triggerTestId={`theta-harvester-tooltip-${helpKey}`}
-        contentTestId={`theta-harvester-tooltip-content-${helpKey}`}
-      />
-    </span>
+    <InfoTooltip
+      text={THETA_HEADER_HELP[helpKey]}
+      ariaLabel={`${label} theta harvester details`}
+      triggerTestId={`theta-harvester-tooltip-${helpKey}`}
+      contentTestId={`theta-harvester-tooltip-content-${helpKey}`}
+    />
   );
 }
 
-function extract(row: ThetaHarvesterResult, key: ThetaSortKey): string | number | null {
-  switch (key) {
-    case "ticker": return row.ticker;
-    case "score": return row.score;
-    case "theta": return row.structure.theta;
-    case "delta": return Math.abs(row.structure.net_delta);
-    case "iv_edge": return row.iv_rv_edge;
-    case "range": return row.range_score;
-    case "dte": return row.structure.dte;
-    case "credit": return row.structure.credit ?? null;
-    default: return null;
-  }
+/* ── Overhaul: filter chips + criteria pips (exported for vitest) ───────── */
+
+export type ThetaFilterChipId = "all" | "dte30" | "noearn" | "rich" | "s97";
+
+export const THETA_FILTER_CHIPS: readonly {
+  id: ThetaFilterChipId;
+  label: (total: number) => string;
+  test: (row: ThetaHarvesterResult) => boolean;
+}[] = [
+  { id: "all", label: (n) => `All ${n}`, test: () => true },
+  { id: "dte30", label: () => "DTE ≤ 30", test: (r) => r.structure.dte <= 30 },
+  { id: "noearn", label: () => "No earnings risk", test: (r) => !(r.earnings?.within_dte ?? false) },
+  { id: "rich", label: () => "IV ≥ 1.80×", test: (r) => r.iv_rv_ratio >= 1.8 },
+  { id: "s97", label: () => "Score ≥ 97", test: (r) => r.score >= 97 },
+];
+
+export const THETA_CRITERIA: readonly { k: string; gate: string; label: string }[] = [
+  { k: "Δ", gate: "delta_near_zero", label: "Delta neutrality within band" },
+  { k: "V", gate: "iv_rich_vs_rv", label: "IV rich vs realized" },
+  { k: "D", gate: "dealer_support", label: "Dealer positioning supportive" },
+  { k: "Θ", gate: "theta_positive", label: "Theta decay dominant" },
+];
+
+const SORT_VALUE: Record<ThetaSortKey, (row: ThetaHarvesterResult) => number> = {
+  score: (r) => r.score,
+  theta: (r) => r.structure.theta,
+  iv: (r) => r.iv_rv_ratio,
+  credit: (r) => r.structure.credit ?? Number.NEGATIVE_INFINITY,
+  dte: (r) => r.structure.dte,
+};
+
+/** Score bar fill, relative to the visible cohort so comparison stays honest. */
+function scorePct(score: number, lo: number, hi: number): number {
+  if (!Number.isFinite(score)) return 0;
+  if (hi <= lo) return 100;
+  return Math.round(Math.max(0, Math.min(1, (score - lo) / (hi - lo))) * 100);
+}
+
+function legMidCredit(leg: ThetaHarvesterLeg): string {
+  const { bid, ask } = leg;
+  if (bid != null && ask != null && bid > 0 && ask > 0) return `${((bid + ask) / 2).toFixed(2)} CR`;
+  return "— CR";
+}
+
+function legLine(leg: ThetaHarvesterLeg): { name: string; val: string } {
+  const kind = leg.right === "P" ? "PUT" : "CALL";
+  return {
+    name: `SELL ${leg.strike.toFixed(0)} ${kind}`,
+    val: `${legMidCredit(leg)} · Δ ${signed(leg.delta, 2)}`,
+  };
 }
 
 function signed(value: number, digits = 1): string {
@@ -291,13 +317,83 @@ export default function ThetaHarvesterScanner({
   onTickerScan,
 }: ThetaHarvesterScannerProps) {
   const router = useRouter();
+  const { isWatched, toggleWatch } = useWatchlist();
   const [tickerQuery, setTickerQuery] = useState("");
   const [tickerError, setTickerError] = useState<string | null>(null);
   const [minDteInput, setMinDteInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.minDte));
   const [maxDteInput, setMaxDteInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.maxDte));
   const [minCreditInput, setMinCreditInput] = useState(String(THETA_DEFAULT_SCAN_PARAMS.minCredit));
   const rows = data?.results ?? [];
-  const { sorted, sort, toggle } = useSort(rows, extract);
+
+  // Overhaul state: local sort (desc-first per column), chip filter, one
+  // expanded row, multi-select, and a keyboard cursor (J/K/Enter/Space).
+  const [sortKey, setSortKey] = useState<ThetaSortKey>("score");
+  const [sortDir, setSortDir] = useState<-1 | 1>(-1);
+  const [filter, setFilter] = useState<ThetaFilterChipId>("all");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [cursor, setCursor] = useState(0);
+
+  const setSort = (key: ThetaSortKey) => {
+    setSortDir((dir) => (sortKey === key ? ((-dir) as -1 | 1) : -1));
+    setSortKey(key);
+  };
+
+  const activeChip = THETA_FILTER_CHIPS.find((c) => c.id === filter) ?? THETA_FILTER_CHIPS[0];
+  const sorted = useMemo(() => {
+    const value = SORT_VALUE[sortKey];
+    return rows
+      .filter(activeChip.test)
+      .slice()
+      .sort((a, b) => (value(a) - value(b)) * sortDir);
+  }, [rows, activeChip, sortKey, sortDir]);
+
+  const scoreBounds = useMemo(() => {
+    const scores = sorted.map((r) => r.score).filter((s) => Number.isFinite(s));
+    return { lo: Math.min(...scores), hi: Math.max(...scores) };
+  }, [sorted]);
+
+  const toggleExpand = (ticker: string) =>
+    setExpanded((current) => (current === ticker ? null : ticker));
+  const toggleSelect = (ticker: string) =>
+    setSelected((current) =>
+      current.includes(ticker) ? current.filter((t) => t !== ticker) : [...current, ticker],
+    );
+
+  // J/K move the cursor, Enter expands, Space selects — ignored while typing.
+  const keyContext = useRef({ sorted, cursor });
+  keyContext.current = { sorted, cursor };
+  useEffect(() => {
+    const onKey = (event: globalThis.KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (
+        event.metaKey || event.ctrlKey || event.altKey ||
+        (target && (/^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName) || target.isContentEditable))
+      ) {
+        return;
+      }
+      const { sorted: list, cursor: at } = keyContext.current;
+      if (list.length === 0) return;
+      const key = event.key.toLowerCase();
+      if (key === "j" || key === "k") {
+        event.preventDefault();
+        setCursor(Math.max(0, Math.min(list.length - 1, at + (key === "j" ? 1 : -1))));
+      } else if (key === "enter" || key === " ") {
+        const row = list[at];
+        if (!row) return;
+        event.preventDefault();
+        if (key === "enter") toggleExpand(row.ticker);
+        else toggleSelect(row.ticker);
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, []);
+
+  const selectedRows = selected
+    .map((ticker) => rows.find((r) => r.ticker === ticker))
+    .filter((r): r is ThetaHarvesterResult => Boolean(r));
+
   const normalizedTicker = tickerQuery.trim().toUpperCase();
 
   const runPresetScan = () => {
@@ -321,12 +417,6 @@ export default function ThetaHarvesterScanner({
 
   const openThetaOrder = (href: string) => {
     router.push(href);
-  };
-
-  const onThetaOrderKeyDown = (event: KeyboardEvent<HTMLTableRowElement>, href: string) => {
-    if (event.key !== "Enter" && event.key !== " ") return;
-    event.preventDefault();
-    openThetaOrder(href);
   };
 
   const controls = (
@@ -452,66 +542,267 @@ export default function ThetaHarvesterScanner({
         </div>
       ) : (
         <>
-          <div className="section-body table-wrap theta-harvester__table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <SortTh<ThetaSortKey> label="Ticker" sortKey="ticker" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
-                  <th>Structure</th>
-                  <SortTh<ThetaSortKey> label="Score" sortKey="score" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Score", "score")} />
-                  <SortTh<ThetaSortKey> label="Theta" sortKey="theta" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Theta", "theta")} />
-                  <SortTh<ThetaSortKey> label="Net Delta" sortKey="delta" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Net Delta", "net-delta")} />
-                  <SortTh<ThetaSortKey> label="IV/RV" sortKey="iv_edge" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("IV/RV", "iv-rv")} />
-                  <th><ThetaHeaderInfoLabel label="Dealer" helpKey="dealer" /></th>
-                  <SortTh<ThetaSortKey> label="Range" sortKey="range" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Range", "range")} />
-                  <SortTh<ThetaSortKey> label="DTE" sortKey="dte" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("DTE", "dte")} />
-                  <SortTh<ThetaSortKey> label="Credit" sortKey="credit" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} {...thetaHelpProps("Credit", "credit")} />
-                  <th><ThetaHeaderInfoLabel label="Earnings" helpKey="earnings" /></th>
-                  <th><ThetaHeaderInfoLabel label="Status" helpKey="status" /></th>
-                </tr>
-              </thead>
-              <tbody>
-                {sorted.map((row) => {
-                  const href = thetaOrderHref(row);
-                  return (
-                  <tr
-                    key={`theta-${row.ticker}`}
-                    className="theta-row theta-row--actionable"
-                    role="link"
+          <div className="section-body theta-harvester__table-wrap theta-grid" data-testid="theta-grid">
+            {/* filter rail */}
+            <div className="theta-grid__filters">
+              <span className="theta-grid__filters-label">FILTER</span>
+              {THETA_FILTER_CHIPS.map((chip) => (
+                <button
+                  key={chip.id}
+                  type="button"
+                  className={`theta-chip${filter === chip.id ? " theta-chip--on" : ""}`}
+                  aria-pressed={filter === chip.id}
+                  onClick={() => {
+                    setFilter(chip.id);
+                    setCursor(0);
+                  }}
+                >
+                  {chip.label(rows.length)}
+                </button>
+              ))}
+              <span className="theta-grid__filters-spacer" />
+              <span className="theta-grid__filters-summary" data-testid="theta-filter-summary">
+                {filter === "all" ? "NO FILTER" : `${activeChip.label(rows.length).toUpperCase()} ACTIVE`}
+              </span>
+            </div>
+
+            {/* column header */}
+            <div className="theta-grid__head" role="row">
+              <span className="theta-grid__h">#</span>
+              <button type="button" className="theta-grid__h theta-grid__h--sort" onClick={() => setSort("score")}>
+                SCORE {sortKey === "score" ? (sortDir === -1 ? "▾" : "▴") : ""}
+                <ThetaInfo label="Score" helpKey="score" />
+              </button>
+              <span className="theta-grid__h">TICKER · STRUCT.</span>
+              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("theta")}>
+                THETA/DAY {sortKey === "theta" ? (sortDir === -1 ? "▾" : "▴") : ""}
+                <ThetaInfo label="Theta" helpKey="theta" />
+              </button>
+              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("iv")}>
+                IV / RV {sortKey === "iv" ? (sortDir === -1 ? "▾" : "▴") : ""}
+                <ThetaInfo label="IV/RV" helpKey="iv-rv" />
+              </button>
+              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("credit")}>
+                CREDIT {sortKey === "credit" ? (sortDir === -1 ? "▾" : "▴") : ""}
+                <ThetaInfo label="Credit" helpKey="credit" />
+              </button>
+              <button type="button" className="theta-grid__h theta-grid__h--sort right" onClick={() => setSort("dte")}>
+                DTE {sortKey === "dte" ? (sortDir === -1 ? "▾" : "▴") : ""}
+                <ThetaInfo label="DTE" helpKey="dte" />
+              </button>
+              <span className="theta-grid__h right">CRITERIA</span>
+              <span className="theta-grid__h" aria-hidden />
+            </div>
+
+            {/* rows */}
+            {sorted.map((row, index) => {
+              const href = thetaOrderHref(row);
+              const isExpanded = expanded === row.ticker;
+              const isSelected = selected.includes(row.ticker);
+              const put = row.structure.short_put;
+              const call = row.structure.short_call;
+              const legs = [
+                legLine(put),
+                legLine(call),
+                { name: "WIDTH", val: `${(call.strike - put.strike).toFixed(1)} pt · ${row.structure.dte} DTE` },
+              ];
+              return (
+                <div
+                  key={`theta-${row.ticker}`}
+                  className={`theta-grid__rowwrap${isSelected ? " is-selected" : ""}`}
+                  data-testid={`theta-grid-row-${row.ticker}`}
+                >
+                  {isSelected && <span className="theta-grid__selrule" aria-hidden />}
+                  <div
+                    className={`theta-grid__row${index === cursor ? " is-cursor" : ""}`}
+                    role="button"
                     tabIndex={0}
-                    aria-label={`Open ${row.ticker} theta order builder`}
-                    title={`Open ${row.ticker} chain order builder`}
-                    onClick={() => openThetaOrder(href)}
-                    onKeyDown={(event) => onThetaOrderKeyDown(event, href)}
+                    aria-expanded={isExpanded}
+                    aria-label={`${row.ticker} details`}
+                    onClick={() => toggleExpand(row.ticker)}
+                    onKeyDown={(event) => {
+                      if (event.key !== "Enter" && event.key !== " ") return;
+                      event.preventDefault();
+                      toggleExpand(row.ticker);
+                    }}
                   >
-                    <td>
+                    <div className="theta-grid__rank">
+                      <span
+                        className={`theta-grid__selbox${isSelected ? " is-on" : ""}`}
+                        role="checkbox"
+                        aria-checked={isSelected}
+                        aria-label={`Select ${row.ticker}`}
+                        tabIndex={0}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleSelect(row.ticker);
+                        }}
+                        onKeyDown={(event) => {
+                          if (event.key !== "Enter" && event.key !== " ") return;
+                          event.preventDefault();
+                          event.stopPropagation();
+                          toggleSelect(row.ticker);
+                        }}
+                      >
+                        {isSelected && <span className="theta-grid__selbox-fill" />}
+                      </span>
+                      <span className="theta-grid__ranknum">{String(index + 1).padStart(2, "0")}</span>
+                    </div>
+                    <div className="theta-grid__score">
+                      <span className="theta-grid__score-num">{row.score.toFixed(1)}</span>
+                      <span className="theta-grid__score-track">
+                        <span
+                          className="theta-grid__score-fill"
+                          style={{ width: `${scorePct(row.score, scoreBounds.lo, scoreBounds.hi)}%` }}
+                        />
+                      </span>
+                    </div>
+                    <div className="theta-grid__ident">
                       <Link
                         href={href}
-                        className="theta-row__ticker-link"
+                        className="theta-row__ticker-link theta-grid__ticker"
+                        aria-label={`Open ${row.ticker} theta order builder`}
+                        title={`Open ${row.ticker} chain order builder`}
                         onClick={(event) => event.stopPropagation()}
                       >
                         {row.ticker}
                       </Link>
-                    </td>
-                    <td>
-                      <span className="mono">SHORT {structureLabel(row)}</span>
-                      <GateStrip row={row} />
-                    </td>
-                    <td className="right">{row.score.toFixed(1)}</td>
-                    <td className="right">{fmtTheta(row.structure.theta)}</td>
-                    <td className="right">{fmtDelta(row.structure.net_delta)}</td>
-                    <td className="right">{signed(row.iv_rv_edge, 1)} pt / {row.iv_rv_ratio.toFixed(2)}x</td>
-                    <td>{dealerLabel(row)}</td>
-                    <td>{rangeLabel(row)} {Math.round(row.range_score * 100)}%</td>
-                    <td className="right">{row.structure.dte}</td>
-                    <td className="right">{fmtMoney(row.structure.credit)}</td>
-                    <td><EarningsDisplay earnings={row.earnings} /></td>
-                    <td><RowStatus row={row} /></td>
-                  </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                      <span className="theta-grid__struct">SHORT {structureLabel(row)}</span>
+                      {(row.earnings?.within_dte ?? false) && (
+                        <span className="theta-grid__earnbadge" title={earningsTitle(row.earnings!)}>
+                          ER {formatThetaEarningsLabel(row.earnings).replace(" · ", " ")}
+                        </span>
+                      )}
+                      <span className="theta-grid__peek">
+                        · {legs[0].name} / {legs[1].name}
+                      </span>
+                    </div>
+                    <span className="theta-grid__num theta-grid__num--theta">
+                      {signed(row.structure.theta * 100, 2)}/d
+                    </span>
+                    <span className="theta-grid__ivcell">
+                      <span className="theta-grid__num">{row.iv_rv_ratio.toFixed(2)}×</span>
+                      <span className="theta-grid__num theta-grid__num--dim">{signed(row.iv_rv_edge, 1)} pt</span>
+                    </span>
+                    <span className="theta-grid__num">{fmtMoney(row.structure.credit)}</span>
+                    <span className="theta-grid__num theta-grid__num--dim">{row.structure.dte}</span>
+                    <span className="theta-grid__pips">
+                      {THETA_CRITERIA.map((crit) => {
+                        const pass = row.gates[crit.gate] === true;
+                        return (
+                          <span
+                            key={crit.gate}
+                            className={`theta-grid__pip${pass ? " is-pass" : ""}`}
+                            title={`${pass ? "PASS" : "NOT MET"} · ${crit.label}`}
+                          >
+                            {crit.k}
+                          </span>
+                        );
+                      })}
+                    </span>
+                    <span className="theta-grid__caret" aria-hidden>{isExpanded ? "▾" : "▸"}</span>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="theta-grid__detail" data-testid={`theta-grid-detail-${row.ticker}`}>
+                      <div className="theta-grid__detail-col">
+                        <div className="theta-grid__detail-label">RECONSTRUCTED POSITION</div>
+                        <div className="theta-grid__legs">
+                          {legs.map((leg) => (
+                            <div key={leg.name} className="theta-grid__leg">
+                              <span>{leg.name}</span>
+                              <span className="theta-grid__leg-val">{leg.val}</span>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="theta-grid__actions">
+                          <button type="button" className="theta-scan-button" onClick={() => openThetaOrder(href)}>
+                            Send to orders
+                          </button>
+                          <button
+                            type="button"
+                            className="theta-grid__btn"
+                            onClick={() => router.push(`/${encodeURIComponent(row.ticker)}`)}
+                          >
+                            Open surface
+                          </button>
+                          <button
+                            type="button"
+                            className="theta-grid__btn theta-grid__btn--ghost"
+                            onClick={() => void toggleWatch(row.ticker)}
+                          >
+                            {isWatched(row.ticker) ? "Watching ✓" : "Watchlist"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="theta-grid__detail-col">
+                        <div className="theta-grid__detail-label">DEMOTED COLUMNS</div>
+                        <div className="theta-grid__facts">
+                          <div className="theta-grid__fact">
+                            <span className="theta-grid__fact-k">NET DELTA<ThetaInfo label="Net Delta" helpKey="net-delta" /></span>
+                            <span className="theta-grid__fact-v">{fmtDelta(row.structure.net_delta)}</span>
+                          </div>
+                          <div className="theta-grid__fact">
+                            <span className="theta-grid__fact-k">DEALER<ThetaInfo label="Dealer" helpKey="dealer" /></span>
+                            <span className="theta-grid__fact-v">{dealerLabel(row)}</span>
+                          </div>
+                          <div className="theta-grid__fact">
+                            <span className="theta-grid__fact-k">RANGE CONTAINMENT<ThetaInfo label="Range" helpKey="range" /></span>
+                            <span className="theta-grid__fact-v">{rangeLabel(row)} {Math.round(row.range_score * 100)}%</span>
+                          </div>
+                          <div className="theta-grid__fact">
+                            <span className="theta-grid__fact-k">STATUS<ThetaInfo label="Status" helpKey="status" /></span>
+                            <span className="theta-grid__fact-v"><RowStatus row={row} /></span>
+                          </div>
+                          <div className="theta-grid__fact">
+                            <span className="theta-grid__fact-k">EARNINGS<ThetaInfo label="Earnings" helpKey="earnings" /></span>
+                            <span className="theta-grid__fact-v"><EarningsDisplay earnings={row.earnings} /></span>
+                          </div>
+                          <div className="theta-grid__fact">
+                            <span className="theta-grid__fact-k">IV / RV</span>
+                            <span className="theta-grid__fact-v">
+                              {row.iv_rv_ratio.toFixed(2)}× · {signed(row.iv_rv_edge, 1)} pt
+                            </span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {selectedRows.length > 0 && (
+              <div className="theta-grid__selectionbar" data-testid="theta-selection-bar">
+                <span className="theta-grid__selection-label">
+                  {selectedRows.length} structure{selectedRows.length === 1 ? "" : "s"} selected ·{" "}
+                  {selectedRows.map((r) => r.ticker).join(" · ")}
+                </span>
+                <div className="theta-grid__actions">
+                  <button
+                    type="button"
+                    className="theta-grid__btn theta-grid__btn--ghost"
+                    onClick={() => setSelected([])}
+                  >
+                    Clear
+                  </button>
+                  <button
+                    type="button"
+                    className="theta-scan-button"
+                    onClick={() => openThetaOrder(thetaOrderHref(selectedRows[0]))}
+                  >
+                    Send to orders
+                  </button>
+                </div>
+              </div>
+            )}
+
+            <div className="theta-grid__foot">
+              <span>
+                ENGINE {(data?.source ?? "—").toUpperCase()} · WINDOW DTE {minDteInput}–{maxDteInput}
+              </span>
+              <span>J / K TO MOVE · ENTER TO EXPAND · SPACE TO SELECT</span>
+            </div>
           </div>
 
           <div className="theta-harvester__cards" data-testid="theta-harvester-mobile-list">
