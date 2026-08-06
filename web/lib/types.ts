@@ -68,12 +68,15 @@ export type WorkspaceSection = "dashboard" | "flow-analysis" | "options" | "port
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
 
+export type NavGroupId = "overview" | "positions" | "research" | "risk" | "operations";
+
 export type WorkspaceNavItem = {
   label: string;
   route: WorkspaceSection;
   href: string;
   icon: NavIcon;
   hidden?: boolean;
+  group: NavGroupId;
 };
 
 export type PortfolioLeg = {
