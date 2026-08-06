@@ -24,7 +24,8 @@ describe("Sidebar navigation", () => {
 
     expect(screen.getByRole("link", { name: /dashboard/i })).toBeTruthy();
     expect(screen.getByRole("link", { name: /portfolio/i })).toBeTruthy();
-    expect(screen.queryByRole("link", { name: /performance/i })).toBeNull();
+    // Performance un-shelved with the GIPS TWR panel (lib/data.ts hidden: false).
+    expect(screen.getByRole("link", { name: /performance/i })).toBeTruthy();
     expect(screen.queryByRole("link", { name: /discover/i })).toBeNull();
   });
 });
