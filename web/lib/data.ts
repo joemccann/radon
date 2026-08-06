@@ -28,26 +28,36 @@ export const PI_COMMAND_ALIASES: Record<string, string> = {
   "watchlist": "/scan --top 12",
 };
 
+export const NAV_GROUP_LABEL: Record<import("./types").NavGroupId, string> = {
+  overview: "Overview",
+  positions: "Positions",
+  research: "Research",
+  risk: "Risk",
+  operations: "Operations",
+};
+
+export const NAV_GROUP_ORDER: import("./types").NavGroupId[] = ["overview", "positions", "research", "risk", "operations"];
+
 export const navItems: WorkspaceNavItem[] = [
-  { label: "Dashboard", route: "dashboard", href: "/dashboard", icon: DashboardGlyph },
-  { label: "Portfolio", route: "portfolio", href: "/portfolio", icon: PortfolioGlyph },
-  { label: "Performance", route: "performance", href: "/performance", icon: PerformanceGlyph, hidden: true },
-  { label: "Orders", route: "orders", href: "/orders", icon: OrdersGlyph },
-  { label: "Scanner", route: "scanner", href: "/scanner", icon: ScannerGlyph },
-  { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true },
-  { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: WatchlistGlyph },
-  { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph },
-  { label: "Options", route: "options", href: "/options", icon: ExposureGlyph },
-  { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph },
-  { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph },
-  { label: "CTA", route: "cta", href: "/cta", icon: CTAGlyph },
-  { label: "Alerts", route: "alerts", href: "/alerts", icon: ScannerGlyph },
-  { label: "Workflow", route: "workflow", href: "/workflow", icon: OperatorGlyph },
-  { label: "Operator", route: "admin", href: "/admin", icon: OperatorGlyph },
+  { label: "Dashboard", route: "dashboard", href: "/dashboard", icon: DashboardGlyph, group: "overview" },
+  { label: "Portfolio", route: "portfolio", href: "/portfolio", icon: PortfolioGlyph, group: "positions" },
+  { label: "Performance", route: "performance", href: "/performance", icon: PerformanceGlyph, hidden: false, group: "positions" },
+  { label: "Orders", route: "orders", href: "/orders", icon: OrdersGlyph, group: "positions" },
+  { label: "Scanner", route: "scanner", href: "/scanner", icon: ScannerGlyph, group: "research" },
+  { label: "Watchlist", route: "watchlist", href: "/watchlist", icon: WatchlistGlyph, group: "positions" },
+  { label: "Flow Analysis", route: "flow-analysis", href: "/flow-analysis", icon: FlowGlyph, group: "research" },
+  { label: "Options", route: "options", href: "/options", icon: ExposureGlyph, group: "research" },
+  { label: "Discover", route: "discover", href: "/discover", icon: DiscoverGlyph, hidden: true, group: "research" },
+  { label: "Journal", route: "journal", href: "/journal", icon: JournalGlyph, group: "operations" },
+  { label: "Regime", route: "regime", href: "/regime/cri", icon: RegimeGlyph, group: "risk" },
+  { label: "CTA", route: "cta", href: "/cta", icon: CTAGlyph, group: "risk" },
+  { label: "Alerts", route: "alerts", href: "/alerts", icon: ScannerGlyph, group: "operations" },
+  { label: "Workflow", route: "workflow", href: "/workflow", icon: OperatorGlyph, group: "operations" },
+  { label: "Operator", route: "admin", href: "/admin", icon: OperatorGlyph, group: "operations" },
   // Profile is reached via the dedicated user card above the sidebar footer,
   // not the main nav list — hidden keeps it out of the primary loop while
   // still exposing the route/label/icon to consumers that resolve by route.
-  { label: "Profile", route: "profile", href: "/profile", icon: ProfileGlyph, hidden: true },
+  { label: "Profile", route: "profile", href: "/profile", icon: ProfileGlyph, hidden: true, group: "operations" },
 ];
 
 export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {

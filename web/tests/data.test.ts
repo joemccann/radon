@@ -184,6 +184,7 @@ describe("navItems", () => {
     expect(navItems.filter((n) => !n.hidden).map((n) => n.route)).toEqual([
       "dashboard",
       "portfolio",
+      "performance",
       "orders",
       "scanner",
       "watchlist",
