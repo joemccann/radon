@@ -61,6 +61,25 @@ DATE_KEYED_UPSERTS = {"upsert_breadth_snapshot"}
 SERVICE_KEYED_UPSERTS = {"upsert_scan_snapshot"}
 
 
+def ensure_perf_twr_tables_best_effort() -> None:
+    """Best-effort DDL for nav_snapshots / external_flows / twr_subperiods.
+
+    Idempotent (CREATE TABLE IF NOT EXISTS). Call before any TWR write so
+    a host that hasn't run migration 0035 yet still creates the tables on
+    first performance build (plan §4.2). Swallows all errors — DDL is
+    best-effort from the mirror path.
+    """
+    try:
+        from db import writer
+    except ImportError:  # pragma: no cover
+        return
+    try:
+        writer.ensure_no_replica_for_writers()
+        writer.ensure_perf_twr_tables()
+    except Exception as exc:  # noqa: BLE001 — DDL is best-effort
+        print(f"[perf-twr] ensure tables non-fatal: {exc}", file=sys.stderr)
+
+
 def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = None) -> None:
     """Best-effort: upsert the scan's Turso snapshot + heartbeat service_health.
 
@@ -78,6 +97,13 @@ def mirror_scan_snapshot(service: str, payload: dict, taken_at: Optional[str] = 
         return
     try:
         writer.ensure_no_replica_for_writers()
+        # Performance snapshots need the TWR tables to exist for downstream
+        # /performance readers (plan §4.2: tables via dbExecute on first build).
+        if service == "performance":
+            try:
+                writer.ensure_perf_twr_tables()
+            except Exception as exc:  # noqa: BLE001 — DDL is best-effort
+                print(f"[performance] ensure TWR tables non-fatal: {exc}", file=sys.stderr)
         upsert_name = SNAPSHOT_UPSERTS[service]
         if upsert_name in DATE_KEYED_UPSERTS:
             getattr(writer, upsert_name)(

@@ -1386,5 +1386,328 @@ def get_latest_backtest_run(strategy: str) -> Optional[dict[str, Any]]:
     return json.loads(row[0])
 
 
+# ── Performance TWR (plan §4.2) ─────────────────────────────────────────────
+# Daily NAV snapshots from Flex EquitySummaryInBase, external flows from
+# CashTransactions+Transfers, and chained TWR subperiods derived from (B,E,C).
+# Tables are created via migration 0035_perf_twr.sql; ensure helper below
+# keeps first-run idempotent when the migration hasn't applied yet (plan §4.2:
+# "Ensure tables are created via dbExecute on first performance build").
+
+_PERF_TWR_DDL = """
+CREATE TABLE IF NOT EXISTS nav_snapshots (
+  account_id    TEXT NOT NULL,
+  report_date   TEXT NOT NULL,
+  total_net_liq REAL NOT NULL,
+  cash          REAL,
+  stock         REAL,
+  options       REAL,
+  accrued_fees  REAL,
+  PRIMARY KEY (account_id, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_nav_snapshots_date ON nav_snapshots (report_date DESC);
+CREATE TABLE IF NOT EXISTS external_flows (
+  account_id  TEXT NOT NULL,
+  report_date TEXT NOT NULL,
+  amount      REAL NOT NULL,
+  flow_type   TEXT NOT NULL,
+  note        TEXT,
+  PRIMARY KEY (account_id, report_date, flow_type)
+);
+CREATE INDEX IF NOT EXISTS idx_external_flows_date ON external_flows (report_date DESC);
+CREATE TABLE IF NOT EXISTS twr_subperiods (
+  account_id  TEXT NOT NULL,
+  report_date TEXT NOT NULL,
+  b           REAL NOT NULL,
+  e           REAL NOT NULL,
+  c           REAL NOT NULL,
+  r           REAL NOT NULL,
+  cum_r       REAL NOT NULL,
+  PRIMARY KEY (account_id, report_date)
+);
+CREATE INDEX IF NOT EXISTS idx_twr_subperiods_date ON twr_subperiods (report_date DESC);
+"""
+
+
+_perf_twr_tables_ensured = False
+
+
+def ensure_perf_twr_tables() -> None:
+    """Idempotent: CREATE TABLE IF NOT EXISTS for the three TWR tables.
+
+    Called by the performance builder on first build and by the migration
+    script. Uses the synchronous libsql path (the builder is a short-lived
+    subprocess with TimeoutStartSec, so no bounded-HTTP needed; the tables
+    are tiny DDL). Once-per-process memo keeps batch upserts from issuing
+    DDL on every row (plan §4.2: ensure via dbExecute on first build)."""
+    global _perf_twr_tables_ensured
+    if _perf_twr_tables_ensured:
+        return
+    db = get_db()
+    for stmt in [s.strip() for s in _PERF_TWR_DDL.strip().split(";") if s.strip()]:
+        db.execute(stmt)
+    db.commit()
+    _perf_twr_tables_ensured = True
+
+
+def _ensure_perf_twr_tables_if_missing(exc: BaseException) -> bool:
+    msg = str(exc).lower()
+    return "no such table" in msg and ("nav_snapshots" in msg or "external_flows" in msg or "twr_subperiods" in msg)
+
+
+NAV_SNAPSHOT_UPSERT_SQL = """
+INSERT INTO nav_snapshots (account_id, report_date, total_net_liq, cash, stock, options, accrued_fees)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(account_id, report_date) DO UPDATE SET
+  total_net_liq = excluded.total_net_liq,
+  cash          = excluded.cash,
+  stock         = excluded.stock,
+  options       = excluded.options,
+  accrued_fees  = excluded.accrued_fees
+"""
+
+EXTERNAL_FLOW_UPSERT_SQL = """
+INSERT INTO external_flows (account_id, report_date, amount, flow_type, note)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(account_id, report_date, flow_type) DO UPDATE SET
+  amount = excluded.amount,
+  note   = excluded.note
+"""
+
+TWR_SUBPERIOD_UPSERT_SQL = """
+INSERT INTO twr_subperiods (account_id, report_date, b, e, c, r, cum_r)
+VALUES (?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(account_id, report_date) DO UPDATE SET
+  b     = excluded.b,
+  e     = excluded.e,
+  c     = excluded.c,
+  r     = excluded.r,
+  cum_r = excluded.cum_r
+"""
+
+
+def upsert_nav_snapshot(
+    account_id: str,
+    report_date: str,
+    total_net_liq: float,
+    *,
+    cash: Optional[float] = None,
+    stock: Optional[float] = None,
+    options: Optional[float] = None,
+    accrued_fees: Optional[float] = None,
+) -> None:
+    """Upsert one daily NAV snapshot (Flex EquitySummaryInBase)."""
+    db = get_db()
+    try:
+        db.execute(
+            NAV_SNAPSHOT_UPSERT_SQL,
+            (account_id, report_date, float(total_net_liq), cash, stock, options, accrued_fees),
+        )
+    except Exception as exc:  # noqa: BLE001 — first-build ensure (plan §4.2)
+        if _ensure_perf_twr_tables_if_missing(exc):
+            ensure_perf_twr_tables()
+            db.execute(
+                NAV_SNAPSHOT_UPSERT_SQL,
+                (account_id, report_date, float(total_net_liq), cash, stock, options, accrued_fees),
+            )
+        else:
+            raise
+    db.commit()
+
+
+def upsert_nav_snapshot_rows(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert of NAV snapshots (chunked multi-row INSERTs per Hrana I/O bounding).
+
+    Each row: {account_id, report_date, total_net_liq, cash?, stock?, options?, accrued_fees?}
+    """
+    if not rows:
+        return
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start : start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["account_id"],
+                    row["report_date"],
+                    float(row["total_net_liq"]),
+                    row.get("cash"),
+                    row.get("stock"),
+                    row.get("options"),
+                    row.get("accrued_fees"),
+                )
+            )
+        try:
+            db.execute(
+                "INSERT INTO nav_snapshots (account_id, report_date, total_net_liq, cash, stock, options, accrued_fees) "
+                f"VALUES {placeholders} "
+                "ON CONFLICT(account_id, report_date) DO UPDATE SET "
+                "total_net_liq = excluded.total_net_liq, cash = excluded.cash, "
+                "stock = excluded.stock, options = excluded.options, accrued_fees = excluded.accrued_fees",
+                tuple(params),
+            )
+        except Exception as exc:  # noqa: BLE001 — first-build ensure
+            if _ensure_perf_twr_tables_if_missing(exc):
+                ensure_perf_twr_tables()
+                db.execute(
+                    "INSERT INTO nav_snapshots (account_id, report_date, total_net_liq, cash, stock, options, accrued_fees) "
+                    f"VALUES {placeholders} "
+                    "ON CONFLICT(account_id, report_date) DO UPDATE SET "
+                    "total_net_liq = excluded.total_net_liq, cash = excluded.cash, "
+                    "stock = excluded.stock, options = excluded.options, accrued_fees = excluded.accrued_fees",
+                    tuple(params),
+                )
+            else:
+                raise
+    db.commit()
+
+
+def upsert_external_flow(
+    account_id: str,
+    report_date: str,
+    amount: float,
+    flow_type: str,
+    note: Optional[str] = None,
+) -> None:
+    """Upsert one external flow (deposit|withdrawal|acats|internal) per account/day/type."""
+    db = get_db()
+    try:
+        db.execute(
+            EXTERNAL_FLOW_UPSERT_SQL,
+            (account_id, report_date, float(amount), flow_type, note),
+        )
+    except Exception as exc:  # noqa: BLE001 — first-build ensure
+        if _ensure_perf_twr_tables_if_missing(exc):
+            ensure_perf_twr_tables()
+            db.execute(
+                EXTERNAL_FLOW_UPSERT_SQL,
+                (account_id, report_date, float(amount), flow_type, note),
+            )
+        else:
+            raise
+    db.commit()
+
+
+def upsert_external_flow_rows(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert of external flows (chunked multi-row INSERTs).
+
+    Each row: {account_id, report_date, amount, flow_type, note?}
+    """
+    if not rows:
+        return
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start : start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["account_id"],
+                    row["report_date"],
+                    float(row["amount"]),
+                    row["flow_type"],
+                    row.get("note"),
+                )
+            )
+        try:
+            db.execute(
+                "INSERT INTO external_flows (account_id, report_date, amount, flow_type, note) "
+                f"VALUES {placeholders} "
+                "ON CONFLICT(account_id, report_date, flow_type) DO UPDATE SET "
+                "amount = excluded.amount, note = excluded.note",
+                tuple(params),
+            )
+        except Exception as exc:  # noqa: BLE001 — first-build ensure
+            if _ensure_perf_twr_tables_if_missing(exc):
+                ensure_perf_twr_tables()
+                db.execute(
+                    "INSERT INTO external_flows (account_id, report_date, amount, flow_type, note) "
+                    f"VALUES {placeholders} "
+                    "ON CONFLICT(account_id, report_date, flow_type) DO UPDATE SET "
+                    "amount = excluded.amount, note = excluded.note",
+                    tuple(params),
+                )
+            else:
+                raise
+    db.commit()
+
+
+def upsert_twr_subperiod(
+    account_id: str,
+    report_date: str,
+    b: float,
+    e: float,
+    c: float,
+    r: float,
+    cum_r: float,
+) -> None:
+    """Upsert one TWR subperiod derived from nav_snapshots + external_flows."""
+    db = get_db()
+    try:
+        db.execute(
+            TWR_SUBPERIOD_UPSERT_SQL,
+            (account_id, report_date, float(b), float(e), float(c), float(r), float(cum_r)),
+        )
+    except Exception as exc:  # noqa: BLE001 — first-build ensure
+        if _ensure_perf_twr_tables_if_missing(exc):
+            ensure_perf_twr_tables()
+            db.execute(
+                TWR_SUBPERIOD_UPSERT_SQL,
+                (account_id, report_date, float(b), float(e), float(c), float(r), float(cum_r)),
+            )
+        else:
+            raise
+    db.commit()
+
+
+def upsert_twr_subperiod_rows(rows: list[dict[str, Any]]) -> None:
+    """Batch upsert of TWR subperiods (chunked multi-row INSERTs).
+
+    Each row: {account_id, report_date, b, e, c, r, cum_r}
+    """
+    if not rows:
+        return
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start : start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["account_id"],
+                    row["report_date"],
+                    float(row["b"]),
+                    float(row["e"]),
+                    float(row["c"]),
+                    float(row["r"]),
+                    float(row["cum_r"]),
+                )
+            )
+        try:
+            db.execute(
+                "INSERT INTO twr_subperiods (account_id, report_date, b, e, c, r, cum_r) "
+                f"VALUES {placeholders} "
+                "ON CONFLICT(account_id, report_date) DO UPDATE SET "
+                "b = excluded.b, e = excluded.e, c = excluded.c, r = excluded.r, cum_r = excluded.cum_r",
+                tuple(params),
+            )
+        except Exception as exc:  # noqa: BLE001 — first-build ensure
+            if _ensure_perf_twr_tables_if_missing(exc):
+                ensure_perf_twr_tables()
+                db.execute(
+                    "INSERT INTO twr_subperiods (account_id, report_date, b, e, c, r, cum_r) "
+                    f"VALUES {placeholders} "
+                    "ON CONFLICT(account_id, report_date) DO UPDATE SET "
+                    "b = excluded.b, e = excluded.e, c = excluded.c, r = excluded.r, cum_r = excluded.cum_r",
+                    tuple(params),
+                )
+            else:
+                raise
+    db.commit()
+
+
 def _as_float(value: Any) -> Optional[float]:
     return float(value) if value is not None else None
