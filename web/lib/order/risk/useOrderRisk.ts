@@ -317,6 +317,59 @@ function estimateLinearMargin(
 }
 
 /**
+ * A stock sale can be a pure linear close while still increasing portfolio
+ * risk by removing collateral from retained short calls. Long calls of the
+ * same expiry absorb short-call tail risk first; remaining shorts consume
+ * 100 long shares each. The order stays stock-only, but its confirmation must
+ * surface any newly uncovered calls instead of reporting a $0 margin impact.
+ */
+function retainedShortCallRiskAfterStockClose(
+  input: LinearOrderRiskInput,
+  portfolio: PortfolioData | null,
+): string | null {
+  if (
+    portfolio == null ||
+    input.instrument !== "stock" ||
+    input.action !== "SELL" ||
+    input.quantity <= 0
+  ) {
+    return null;
+  }
+
+  let heldLongShares = 0;
+  const callsByExpiry = new Map<string, { long: number; short: number }>();
+
+  for (const position of portfolio.positions) {
+    if (position.ticker.toUpperCase() !== input.ticker.toUpperCase()) continue;
+    for (const leg of position.legs) {
+      if (leg.type === "Stock" && leg.direction === "LONG") {
+        heldLongShares += leg.contracts;
+        continue;
+      }
+      if (leg.type !== "Call") continue;
+      const bucket = callsByExpiry.get(position.expiry) ?? { long: 0, short: 0 };
+      bucket[leg.direction === "LONG" ? "long" : "short"] += leg.contracts;
+      callsByExpiry.set(position.expiry, bucket);
+    }
+  }
+
+  const shortCallsNeedingStock = [...callsByExpiry.values()].reduce(
+    (total, calls) => total + Math.max(0, calls.short - calls.long),
+    0,
+  );
+  if (shortCallsNeedingStock === 0) return null;
+
+  const coveredBefore = Math.min(shortCallsNeedingStock, Math.floor(heldLongShares / 100));
+  const sharesAfter = Math.max(0, heldLongShares - input.quantity);
+  const coveredAfter = Math.min(shortCallsNeedingStock, Math.floor(sharesAfter / 100));
+  const uncoveredBefore = shortCallsNeedingStock - coveredBefore;
+  const uncoveredAfter = shortCallsNeedingStock - coveredAfter;
+  if (uncoveredAfter <= uncoveredBefore) return null;
+
+  return `${uncoveredAfter} retained short call${uncoveredAfter === 1 ? "" : "s"} uncovered after selling stock collateral`;
+}
+
+/**
  * Margin estimate for a freshly-opened option order (no close-out).
  *
  * Classification:
@@ -452,6 +505,9 @@ export function useOrderRisk(
       // for BUY-to-close (mirror).
       if (input.closeOut != null) {
         const grossCash = Math.abs(input.limitPrice * input.quantity * input.multiplier);
+        const postCloseUndefinedRiskReason = retainedShortCallRiskAfterStockClose(input, portfolio);
+        const hasPostCloseUndefinedRisk =
+          postCloseUndefinedRiskReason != null && postCloseUndefinedRiskReason.length > 0;
         const pnl =
           input.action === "SELL"
             ? grossCash - input.closeOut.entryCostDollars
@@ -465,9 +521,15 @@ export function useOrderRisk(
               : "Cost to Cover:",
           estimatedPnl: pnl,
           estimatedPnlLabel: input.closeOut.estimatedPnlLabel ?? "Est. Realized P&L:",
-          // A pure close consumes no margin.
+          maxLossUnbounded: hasPostCloseUndefinedRisk ? true : undefined,
+          undefinedRiskReason: postCloseUndefinedRiskReason,
+          // A pure close consumes no margin unless removing the linear leg
+          // uncovers retained option exposure. In that case, fail closed on
+          // the client estimate and require broker what-if confirmation.
           marginImpact: buildMarginImpact(
-            estimateInitialMargin({ kind: "close-out" }),
+            hasPostCloseUndefinedRisk
+              ? { requirement: null, source: "regt-estimate", approximate: true }
+              : estimateInitialMargin({ kind: "close-out" }),
             portfolio,
             coverageStatus,
           ),

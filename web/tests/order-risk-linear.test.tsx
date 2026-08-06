@@ -185,6 +185,47 @@ describe("useOrderRisk — linear branch (stock)", () => {
     expect(result.current!.okToSubmit).toBe(true);
   });
 
+  it("warns when a stock close leaves retained short calls uncovered", () => {
+    const portfolioWithMargin = {
+      ...emptyPortfolio,
+      positions: [
+        {
+          ticker: "EWY",
+          expiry: "2026-08-07",
+          legs: [
+            { type: "Stock", direction: "LONG", contracts: 2_500 },
+            { type: "Call", direction: "SHORT", contracts: 25 },
+          ],
+        },
+      ],
+      account_summary: { available_funds: 500_000 },
+    } as unknown as PortfolioData;
+    const input = {
+      type: "linear" as const,
+      ticker: "EWY",
+      instrument: "stock" as const,
+      action: "SELL" as const,
+      quantity: 2_500,
+      limitPrice: 170,
+      multiplier: 1,
+      heldQuantity: 2_500,
+      description: "SELL 2500 EWY Stock @ $170.00",
+      closeOut: {
+        entryCostDollars: 424_650,
+      },
+    };
+    const { result } = renderHook(() => useOrderRisk(input, portfolioWithMargin));
+    const summary = result.current!.summary;
+
+    expect(summary.totalLabel).toBe("Proceeds:");
+    expect(summary.totalCost).toBe(425_000);
+    expect(summary.estimatedPnl).toBe(350);
+    expect(summary.maxLossUnbounded).toBe(true);
+    expect(summary.undefinedRiskReason).toContain("25 retained short calls uncovered");
+    expect(summary.marginImpact?.requirement).toBeNull();
+    expect(result.current!.okToSubmit).toBe(true);
+  });
+
   it("SELL N stock with held LONG < N → partial-naked, UNBOUNDED on excess", () => {
     // Held 100 long, sell 150 → 100 close + 50 naked SHORT
     const input = {

@@ -40,15 +40,20 @@ export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onC
 
   if (!leg) return null;
 
+  const isStock = leg.type === "Stock";
   const priceKey = legPriceKey(ticker, expiry, leg);
-  const priceData = priceKey ? prices[priceKey] ?? null : null;
+  const priceData = isStock
+    ? prices[ticker.toUpperCase()] ?? prices[ticker] ?? null
+    : priceKey
+      ? prices[priceKey] ?? null
+      : null;
 
   // Derive header label: "AAOI $105 Call 2026-03-20"
-  const strikeStr = leg.strike != null ? `$${leg.strike} ` : "";
-  const title = `${ticker} ${strikeStr}${leg.type} ${expiry}`;
+  const strikeStr = !isStock && leg.strike != null ? `$${leg.strike} ` : "";
+  const title = isStock ? `${ticker} Stock` : `${ticker} ${strikeStr}${leg.type} ${expiry}`;
 
   // Position summary
-  const mult = leg.type === "Stock" ? 1 : 100;
+  const mult = isStock ? 1 : 100;
   const rtLast = priceData?.last != null && priceData.last > 0 ? priceData.last : null;
   const legMv = rtLast != null ? rtLast * leg.contracts * mult : leg.market_value != null ? Math.abs(leg.market_value) : null;
   const legEc = Math.abs(leg.entry_cost);
@@ -58,7 +63,7 @@ export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onC
 
   // Price bar label
   const right = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : "";
-  const priceLabel = `${ticker} ${expiry} ${strikeStr}${right}`;
+  const priceLabel = isStock ? `${ticker} STOCK` : `${ticker} ${expiry} ${strikeStr}${right}`;
 
   return (
     <Modal open={true} onClose={onClose} title={title} className="instrument-detail-modal">
@@ -104,7 +109,7 @@ export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onC
   );
 }
 
-/* ─── Single-leg option order form ─── */
+/* ─── Single-instrument order form ─── */
 
 function LegOrderForm({
   ticker,
@@ -127,6 +132,7 @@ function LegOrderForm({
   const bid = priceData?.bid ?? null;
   const ask = priceData?.ask ?? null;
   const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
+  const isStock = leg.type === "Stock";
 
   const defaultAction: SingleLegOrderAction = leg.direction === "LONG" ? "SELL" : "BUY";
   const [action, setAction] = useState<SingleLegOrderAction>(defaultAction);
@@ -136,8 +142,8 @@ function LegOrderForm({
   const parsedPrice = parseFloat(limitPrice);
   const isValid = !isNaN(parsedQty) && parsedQty > 0 && !isNaN(parsedPrice) && parsedPrice > 0;
 
-  const strikeStr = leg.strike != null ? `$${leg.strike} ` : "";
-  const right = leg.type === "Call" ? "C" : "P";
+  const strikeStr = !isStock && leg.strike != null ? `$${leg.strike} ` : "";
+  const right: "C" | "P" | null = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
   const expiryClean = expiry.replace(/-/g, "");
 
   // Build the chokepoint input. Risk math + close-out detection + portfolio
@@ -151,18 +157,36 @@ function LegOrderForm({
   // "Coverage indeterminate" skeleton instead of silently wrong risk.
   const riskInput: OrderRiskInput | null = useMemo(() => {
     if (!isValid) return null;
-    const totalCost = parsedQty * parsedPrice * 100;
-    const description = `${action} ${parsedQty}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(parsedPrice)}`;
-    const optionRight: "C" | "P" | null = right === "C" ? "C" : right === "P" ? "P" : null;
-    if (optionRight == null || leg.strike == null) {
+    const multiplier = isStock ? 1 : 100;
+    const totalCost = parsedQty * parsedPrice * multiplier;
+    const description = isStock
+      ? `${action} ${parsedQty} ${ticker} Stock @ ${fmtPrice(parsedPrice)}`
+      : `${action} ${parsedQty}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(parsedPrice)}`;
+
+    if (isStock) {
+      const closingLong = leg.direction === "LONG" && action === "SELL" && parsedQty <= leg.contracts;
+      const closingShort = leg.direction === "SHORT" && action === "BUY" && parsedQty <= leg.contracts;
       return {
+        type: "linear",
         ticker,
-        chainLegs: [],
-        netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
+        instrument: "stock",
+        action,
+        quantity: parsedQty,
+        limitPrice: parsedPrice,
+        multiplier: 1,
+        heldQuantity: leg.direction === "LONG" ? leg.contracts : 0,
+        heldShortQuantity: leg.direction === "SHORT" ? leg.contracts : 0,
         description,
-        totalCost: action === "SELL" ? -totalCost : totalCost,
+        closeOut:
+          closingLong || closingShort
+            ? {
+                entryCostDollars: parsedQty * Math.abs(leg.avg_cost),
+              }
+            : undefined,
       };
     }
+
+    if (right == null || leg.strike == null) return null;
     // Close-out path: SELL of a held LONG (or BUY of a held SHORT) up to
     // the held-contract count is a pure close. Above the count → the
     // excess opens fresh exposure and goes through the augmentation
@@ -187,7 +211,7 @@ function LegOrderForm({
     return {
       ticker,
       chainLegs: [
-        { action, right: optionRight, strike: leg.strike, expiry, quantity: parsedQty },
+        { action, right, strike: leg.strike, expiry, quantity: parsedQty },
       ],
       netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
       description,
@@ -195,15 +219,15 @@ function LegOrderForm({
       // FU7: thread the single-leg live quote for net-of-cost risk.
       quote: { bid, ask },
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, strikeStr, right, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);
+  }, [isValid, parsedQty, parsedPrice, action, ticker, strikeStr, right, isStock, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);
 
   return (
     <SingleLegOrderTicket
       defaultAction={defaultAction}
-      defaultTif="GTC"
+      defaultTif={isStock ? "DAY" : "GTC"}
       quantity={quantity}
       onQuantityChange={onQuantityChange}
-      quantityPlaceholder="Contracts"
+      quantityPlaceholder={isStock ? "Shares" : "Contracts"}
       bid={bid}
       mid={mid}
       ask={ask}
@@ -220,19 +244,32 @@ function LegOrderForm({
           variant="info"
         />
       }
-      buildPayload={({ action, quantity, limitPrice, tif }) => ({
-        type: "option",
-        symbol: ticker,
-        action,
-        quantity,
-        limitPrice,
-        tif,
-        expiry: expiryClean,
-        strike: leg.strike,
-        right,
-      })}
+      buildPayload={({ action, quantity, limitPrice, tif }) =>
+        isStock
+          ? {
+              type: "stock",
+              symbol: ticker,
+              action,
+              quantity,
+              limitPrice,
+              tif,
+            }
+          : {
+              type: "option",
+              symbol: ticker,
+              action,
+              quantity,
+              limitPrice,
+              tif,
+              expiry: expiryClean,
+              strike: leg.strike,
+              right,
+            }
+      }
       buildSuccessMessage={({ action, quantity, limitPrice }) =>
-        `Order placed: ${action} ${quantity}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(limitPrice)}`
+        isStock
+          ? `Order placed: ${action} ${quantity} ${ticker} Stock @ ${fmtPrice(limitPrice)}`
+          : `Order placed: ${action} ${quantity}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(limitPrice)}`
       }
       onSuccessToast={(message) => orderActions?.pushNotification({ type: "success", message })}
       suppressInlineSuccess

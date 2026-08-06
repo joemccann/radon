@@ -244,8 +244,8 @@ export function OrderConfirmSummary({
           <span className="order-confirm-undefined-risk-label">GATE 1: Undefined risk</span>
           <span className="order-confirm-undefined-risk-detail">
             {summary.maxLossUnbounded === true
-              ? `${summary.undefinedRiskReason ?? "Uncovered short option"} — loss is theoretically unbounded.`
-              : `${summary.undefinedRiskReason ?? "Naked short exposure"} — max loss reflects assignment-at-zero stress, not a defined-risk cap.`}
+              ? `${summary.undefinedRiskReason ?? "Uncovered short option"}; loss is theoretically unbounded.`
+              : `${summary.undefinedRiskReason ?? "Naked short exposure"}; max loss reflects assignment-at-zero stress, not a defined-risk cap.`}
           </span>
         </div>
       )}

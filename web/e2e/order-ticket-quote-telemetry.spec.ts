@@ -1,5 +1,7 @@
 import { expect, test } from "@playwright/test";
 
+test.use({ serviceWorkers: "block" });
+
 function parsePrice(text: string | null): number {
   return Number((text ?? "").replace(/[$,]/g, ""));
 }
@@ -18,10 +20,14 @@ const PORTFOLIO_WITH_VERTICAL = {
   total_deployed_pct: 9.84,
   total_deployed_dollars: 9842,
   remaining_capacity_pct: 90.16,
-  position_count: 1,
-  defined_risk_count: 1,
+  position_count: 2,
+  defined_risk_count: 2,
   undefined_risk_count: 0,
   avg_kelly_optimal: null,
+  account_summary: {
+    available_funds: 536_775,
+    buying_power: 1_073_550,
+  },
   exposure: {},
   violations: [],
   positions: [
@@ -67,10 +73,73 @@ const PORTFOLIO_WITH_VERTICAL = {
         },
       ],
     },
+    {
+      id: 84,
+      ticker: "EWY",
+      structure: "Covered Call $165.0",
+      structure_type: "Covered Call",
+      direction: "COMBO",
+      contracts: 25,
+      expiry: "2026-08-07",
+      entry_date: "2026-07-31",
+      entry_cost: 412_132,
+      market_value: 404_000,
+      risk_profile: "defined",
+      max_risk: null,
+      target: null,
+      stop: null,
+      kelly_optimal: null,
+      legs: [
+        {
+          direction: "LONG",
+          contracts: 2_500,
+          type: "Stock",
+          strike: 0,
+          avg_cost: 169.86,
+          entry_cost: 424_650,
+          market_price: 170.65,
+          market_value: 426_625,
+        },
+        {
+          direction: "SHORT",
+          contracts: 25,
+          type: "Call",
+          strike: 165,
+          avg_cost: -500.72,
+          entry_cost: -12_518,
+          market_price: 9.05,
+          market_value: -22_625,
+        },
+      ],
+    },
   ],
 };
 
 const PRICES = {
+  EWY: {
+    symbol: "EWY",
+    last: 170.65,
+    lastIsCalculated: false,
+    bid: 170.6,
+    ask: 170.7,
+    bidSize: 100,
+    askSize: 90,
+    volume: 2_500_000,
+    high: 171,
+    low: 168,
+    open: 169,
+    close: 169.4,
+    week52High: null,
+    week52Low: null,
+    avgVolume: null,
+    delta: null,
+    gamma: null,
+    theta: null,
+    vega: null,
+    impliedVol: null,
+    undPrice: null,
+    timestamp: new Date().toISOString(),
+  },
   AAOI: {
     symbol: "AAOI",
     last: 17.41,
@@ -145,92 +214,159 @@ const PRICES = {
   },
 };
 
-function stubApis(page: import("@playwright/test").Page) {
-  page.route("**/api/portfolio", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify(PORTFOLIO_WITH_VERTICAL),
-    }),
-  );
+async function installMockWebSocket(page: import("@playwright/test").Page) {
+  await page.addInitScript((priceFixtures) => {
+    const NativeWebSocket = window.WebSocket;
 
-  page.route("**/api/orders", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
+    class MockWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+
+      url: string;
+      readyState = MockWebSocket.CONNECTING;
+      onopen: ((event?: unknown) => void) | null = null;
+      onmessage: ((event: { data: string }) => void) | null = null;
+      onclose: ((event?: unknown) => void) | null = null;
+      onerror: ((event?: unknown) => void) | null = null;
+      listeners = new Map<string, Set<(event: unknown) => void>>();
+
+      constructor(url: string) {
+        this.url = url;
+        setTimeout(() => {
+          this.readyState = MockWebSocket.OPEN;
+          this.onopen?.({});
+          this.dispatch("open", {});
+          this.emit({
+            type: "status",
+            ib_connected: true,
+            ib_issue: null,
+            ib_status_message: null,
+            subscriptions: [],
+          });
+        }, 0);
+      }
+
+      send(raw: string) {
+        let message: {
+          action?: string;
+          symbols?: string[];
+          contracts?: Array<{ symbol: string; expiry: string; strike: number; right: "C" | "P" }>;
+        };
+        try {
+          message = JSON.parse(raw);
+        } catch {
+          return;
+        }
+        if (message.action !== "subscribe") return;
+
+        const updates: Record<string, unknown> = {};
+        for (const symbol of message.symbols ?? []) {
+          if (priceFixtures[symbol]) updates[symbol] = priceFixtures[symbol];
+        }
+        for (const contract of message.contracts ?? []) {
+          const expiry = String(contract.expiry).replace(/-/g, "");
+          const key = `${String(contract.symbol).toUpperCase()}_${expiry}_${Number(contract.strike)}_${contract.right}`;
+          if (priceFixtures[key]) updates[key] = priceFixtures[key];
+        }
+        if (Object.keys(updates).length > 0) this.emit({ type: "batch", updates });
+      }
+
+      close() {
+        this.readyState = MockWebSocket.CLOSED;
+        this.onclose?.({});
+        this.dispatch("close", {});
+      }
+
+      emit(payload: unknown) {
+        const event = { data: JSON.stringify(payload) };
+        this.onmessage?.(event);
+        this.dispatch("message", event);
+      }
+
+      addEventListener(type: string, listener: (event: unknown) => void) {
+        const listeners = this.listeners.get(type) ?? new Set<(event: unknown) => void>();
+        listeners.add(listener);
+        this.listeners.set(type, listeners);
+      }
+
+      removeEventListener(type: string, listener: (event: unknown) => void) {
+        this.listeners.get(type)?.delete(listener);
+      }
+
+      dispatch(type: string, event: unknown) {
+        for (const listener of this.listeners.get(type) ?? []) listener(event);
+      }
+    }
+
+    const RoutedWebSocket = function (
+      url: string | URL,
+      protocols?: string | string[],
+    ): WebSocket {
+      if (String(url).includes("/_next/webpack-hmr")) {
+        return protocols == null
+          ? new NativeWebSocket(url)
+          : new NativeWebSocket(url, protocols);
+      }
+      return new MockWebSocket(String(url)) as unknown as WebSocket;
+    } as unknown as typeof WebSocket;
+    Object.defineProperties(RoutedWebSocket, {
+      CONNECTING: { value: 0 },
+      OPEN: { value: 1 },
+      CLOSING: { value: 2 },
+      CLOSED: { value: 3 },
+    });
+    window.WebSocket = RoutedWebSocket;
+  }, PRICES);
+}
+
+async function stubApis(page: import("@playwright/test").Page) {
+  await page.route("**/api/**", async (route) => {
+    const path = new URL(route.request().url()).pathname;
+    const json = (body: unknown) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+
+    if (path === "/api/portfolio") return json(PORTFOLIO_WITH_VERTICAL);
+    if (path === "/api/orders") {
+      return json({
         last_sync: new Date().toISOString(),
         open_orders: [],
         executed_orders: [],
         open_count: 0,
         executed_count: 0,
-      }),
-    }),
-  );
-
-  page.route("**/api/regime", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ score: 15, cri: { score: 15 } }),
-    }),
-  );
-
-  page.route("**/api/ib-status", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({ connected: false }),
-    }),
-  );
-
-  page.route("**/api/blotter", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({
+      });
+    }
+    if (path === "/api/regime") return json({ score: 15, cri: { score: 15 } });
+    if (path === "/api/ib-status") return json({ connected: false });
+    if (path === "/api/ib/ws-ticket") return json({ ticket: "test" });
+    if (path === "/api/blotter") {
+      return json({
         as_of: new Date().toISOString(),
         summary: { realized_pnl: 0 },
         closed_trades: [],
         open_trades: [],
-      }),
-    }),
-  );
-
-  page.route("**/api/ticker/**", (route) =>
-    route.fulfill({
-      status: 200,
-      contentType: "application/json",
-      body: JSON.stringify({}),
-    }),
-  );
-
-  page.route("**/api/prices", (route) => route.abort());
+      });
+    }
+    if (path === "/api/service-health") return json({ services: [] });
+    if (path === "/api/profile") return json({ username: "Operator" });
+    if (path === "/api/watchlist") return json({ symbols: [] });
+    if (path === "/api/flex-token") return json({ remaining: 240 });
+    return json({});
+  });
 }
 
 test.describe("Portfolio order ticket quote telemetry", () => {
   test("shows BID, MID, ASK ordering and raw spread percent in the instrument ticket", async ({ page }) => {
     await page.unrouteAll({ behavior: "ignoreErrors" });
-    stubApis(page);
+    await installMockWebSocket(page);
+    await stubApis(page);
 
     await page.goto("/portfolio");
 
-    await page.evaluate((prices) => {
-      for (const [, priceData] of Object.entries(prices)) {
-        window.dispatchEvent(
-          new CustomEvent("ws-price", {
-            detail: {
-              type: "price",
-              symbol: (priceData as { symbol: string }).symbol,
-              data: priceData,
-            },
-          }),
-        );
-      }
-    }, PRICES);
-
     const expandLegs = page.locator('button[aria-label="Expand legs for AAOI"]').first();
     await expandLegs.waitFor({ timeout: 10_000 });
+
     await expandLegs.click();
 
     const legTrigger = page.locator(".leg-clickable", { hasText: "LONG 25x Call $105" }).first();
@@ -265,5 +401,62 @@ test.describe("Portfolio order ticket quote telemetry", () => {
     const expectedSpread = `${formatUsd(spread)} / ${((spread / mid) * 100).toFixed(2)}%`;
 
     await expect(spreadValue).toHaveText(expectedSpread);
+  });
+
+  test("covered-call equity leg submits a stock-only close and retains the short call", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 1200 });
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await installMockWebSocket(page);
+    await stubApis(page);
+
+    let submittedPayload: Record<string, unknown> | null = null;
+    await page.route("**/api/orders/place", async (route) => {
+      submittedPayload = await route.request().postDataJSON();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ status: "ok", orderId: 99, permId: 199 }),
+      });
+    });
+
+    await page.goto("/portfolio");
+    await page.getByLabel("Expand legs for EWY").waitFor({ timeout: 10_000 });
+
+    await page.getByLabel("Expand legs for EWY").click();
+    await page.locator(".leg-clickable", { hasText: "LONG 2500x Stock" }).click();
+
+    const dialog = page.getByRole("dialog", { name: "EWY Stock" });
+    await expect(dialog).toBeVisible();
+    await expect(dialog).not.toContainText("$0 Stock");
+    await expect(dialog).not.toContainText("2026-08-07");
+    await expect(dialog.getByPlaceholder("Shares")).toHaveValue("2500");
+    await expect(dialog).toContainText("BID 170.60");
+
+    await dialog.locator(".modify-price-input").fill("170");
+    await dialog.getByRole("button", { name: /place order/i }).click();
+
+    const summary = dialog.locator(".order-confirm-summary");
+    await expect(summary).toContainText("SELL 2500 EWY Stock @ $170.00");
+    await expect(summary).toContainText("Proceeds:");
+    await expect(summary).toContainText("$425,000");
+    await expect(summary).toContainText("Est. Realized P&L:");
+    await expect(summary).toContainText("$350");
+    await expect(summary).toContainText("25 retained short calls uncovered");
+    await expect(summary).toContainText("UNAVAILABLE");
+    await expect(summary).not.toContainText("EWY $0 P");
+    await expect(summary).not.toContainText("$42,500,000");
+    await dialog.screenshot({ path: "/tmp/radon-covered-call-stock-close.png" });
+
+    await dialog.getByRole("button", { name: /confirm order/i }).click();
+    await expect.poll(() => submittedPayload).not.toBeNull();
+    expect(submittedPayload).toEqual({
+      type: "stock",
+      symbol: "EWY",
+      action: "SELL",
+      quantity: 2_500,
+      limitPrice: 170,
+      tif: "DAY",
+    });
+
   });
 });
