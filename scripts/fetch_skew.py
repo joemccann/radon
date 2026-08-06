@@ -244,6 +244,23 @@ def _write_json_cache(payload: dict[str, Any]) -> None:
     SKEW_JSON.write_text(json.dumps(payload, indent=2))
 
 
+def _read_history_rows() -> list[dict[str, Any]]:
+    """Turso skew_history -> base rows (Turso-first read; the JSON file is a
+    fallback mirror only — a fresh host has no data/skew.json while Turso
+    holds the full backfilled series)."""
+    try:
+        from db.client import get_db
+
+        rows = get_db().execute(
+            "SELECT date, expiry, dte, put_iv, call_iv, ratio FROM skew_history ORDER BY date"
+        ).fetchall()
+        keys = ("date", "expiry", "dte", "put_iv", "call_iv", "ratio")
+        return [dict(zip(keys, row)) for row in rows]
+    except Exception as exc:  # noqa: BLE001 — the JSON fallback still works
+        print(f"[skew] turso rehydrate non-fatal: {exc}", file=sys.stderr)
+        return []
+
+
 def _read_json_cache() -> Optional[dict[str, Any]]:
     try:
         return json.loads(SKEW_JSON.read_text())
@@ -357,18 +374,21 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     if client is None:
         client = _DefaultClient()
 
-    cached = _read_json_cache()
-    cached_series = (cached or {}).get("series") or []
-    last_stored = cached_series[-1]["date"] if cached_series else ""
+    # Base series is the union of Turso history and the JSON mirror, keyed by
+    # date (reads are Turso-first; the JSON file is only a fallback). Trusting
+    # the JSON alone restarted the series at the 10-session gap bound on a
+    # fresh host and clobbered the full snapshot (VPS first run, 2026-08-06).
+    by_date = {row["date"]: row for row in _base_rows(_read_history_rows())}
+    for row in _base_rows((_read_json_cache() or {}).get("series") or []):
+        by_date[row["date"]] = row
+    base = [by_date[day] for day in sorted(by_date)]
+
+    last_stored = base[-1]["date"] if base else ""
     missing = _missing_sessions(last_stored, now)
     scan_time = _scan_time_iso(now)
 
-    if cached and not missing:
+    if not missing:
         print("[skew] no missing sessions; refreshing snapshot only", file=sys.stderr)
-        payload = {**cached, "scan_time": scan_time}
-        _write_db_cache(payload, scan_time, rows_changed=False)
-        _write_json_cache(payload)
-        return payload
 
     new_rows: list[dict[str, Any]] = []
     for session in missing:
@@ -377,7 +397,7 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
         if row:
             new_rows.append(row)
 
-    series = compute_change_series(_base_rows(cached_series) + new_rows)
+    series = compute_change_series(base + new_rows)
     if not series:
         raise ValueError("skew series computed to zero rows")
 

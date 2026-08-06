@@ -193,6 +193,8 @@ class TestRunIncremental:
         import fetch_skew as mod
 
         monkeypatch.setattr(mod, "SKEW_JSON", tmp_path / "skew.json")
+        monkeypatch.setattr(mod, "_read_history_rows", lambda: [], raising=False)
+        self.monkeypatch = monkeypatch
         self.db_writes = []
         monkeypatch.setattr(
             mod, "_write_db_cache",
@@ -243,6 +245,48 @@ class TestRunIncremental:
         assert current["expiry_far"] == "2026-09-18"
         assert current["dte_far"] == 44
         assert self.db_writes == [True]
+
+    def test_missing_json_cache_rehydrates_base_series_from_turso(self):
+        # VPS first run: data/skew.json does not exist but Turso holds the
+        # full backfilled history. run() must rebuild on top of the Turso
+        # rows, NOT restart the series at the 10-session gap bound and
+        # clobber the 731-row snapshot with a 10-row payload (2026-08-06).
+        self.monkeypatch.setattr(
+            self.mod, "_read_history_rows",
+            lambda: [_row("2026-08-01", 1.28), _row("2026-08-04", 1.30)],
+        )
+        client = _StubClient({
+            ("2026-08-21", "2026-08-05"): UW_NEAR_PAYLOAD,
+            ("2026-09-18", "2026-08-05"): UW_PAYLOAD,
+        })
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 23, 0, tzinfo=timezone.utc)
+        )
+        assert payload["count"] == 3
+        assert [r["date"] for r in payload["series"]] == [
+            "2026-08-01", "2026-08-04", "2026-08-05",
+        ]
+        assert payload["current"]["ratio"] == pytest.approx(CM_RATIO, abs=1e-9)
+        assert self.db_writes == [True]
+
+    def test_stale_short_json_cache_is_unioned_with_turso_history(self):
+        # A clobbered/short JSON mirror must not shrink the series when
+        # Turso has more history; the union keyed by date wins.
+        series = compute_change_series([_row("2026-08-04", 1.30), _row("2026-08-05", 1.29)])
+        self._cached(series)
+        self.monkeypatch.setattr(
+            self.mod, "_read_history_rows",
+            lambda: [_row("2026-08-01", 1.28), _row("2026-08-04", 1.30)],
+        )
+        client = _StubClient({})
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 23, 0, tzinfo=timezone.utc)
+        )
+        assert client.calls == []
+        assert [r["date"] for r in payload["series"]] == [
+            "2026-08-01", "2026-08-04", "2026-08-05",
+        ]
+        assert self.db_writes == [False]
 
     def test_single_usable_bracket_falls_back_to_that_leg_alone(self):
         # Near chain empty (holiday-shifted fallbacks also empty): the far
