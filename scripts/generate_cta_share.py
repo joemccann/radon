@@ -112,6 +112,86 @@ def pctile_label(p: int) -> str:
     return f"{p}th"
 
 
+def normalize_pctile(p) -> int:
+    """Percentile as 0-100. The main table ships 0-100 ints; the index and
+    commodity tables ship 0-1 fractions. Both reach this module.
+
+    Disambiguate by TYPE, not by range: an int 1 is the 1st percentile (max
+    short) while a float 1.0 is the 100th (max long). A range test alone reads
+    them identically and silently inverts the entire narrative.
+    """
+    if isinstance(p, bool) or not isinstance(p, (int, float)):
+        return 50
+    if isinstance(p, int):
+        return max(0, min(100, p))
+    return int(round(p * 100)) if 0.0 <= p <= 1.0 else int(round(p))
+
+
+def assess_positioning(r: dict) -> dict:
+    """Direction-aware read of one CTA positioning row.
+
+    SINGLE source of narrative truth: card1 and build_tweet both consume this,
+    so the card can never assert a story the tweet contradicts. Every field is
+    derived from the payload; nothing here is a literal about "today".
+
+    The 2026-08-07 bug shipped a frozen max-SHORT story over max-LONG data,
+    because the card hardcoded its copy and the tweet only branched on z <= -1.5.
+    A positive extreme is just as tradeable and must read as a LONG.
+    """
+    today = r.get("position_today") or 0.0
+    ago = r.get("position_1m_ago") or 0.0
+    z = r.get("z_score_3m") or 0.0
+    pctile = normalize_pctile(r.get("percentile_3m", 50))
+
+    side = "long" if today > 0.05 else "short" if today < -0.05 else "neutral"
+
+    # Extreme = far from the 3M mean OR pinned to an end of the 3M range.
+    is_extreme = abs(z) >= 1.5 or pctile >= 90 or pctile <= 10
+    if abs(z) >= 2.5 or pctile >= 98 or pctile <= 2:
+        severity = "HIGH"
+    elif is_extreme:
+        severity = "ELEVATED"
+    else:
+        severity = "NORMAL"
+
+    # Where the mechanical risk points. A max LONG deleverages INTO weakness
+    # (forced selling, downside); a max SHORT covers INTO strength (upside
+    # squeeze). Getting this backwards inverts the entire trade implication.
+    if is_extreme and side == "long":
+        risk_direction = "downside"
+    elif is_extreme and side == "short":
+        risk_direction = "upside"
+    else:
+        risk_direction = "none"
+
+    return {
+        "today": today,
+        "ago": ago,
+        "z": z,
+        "pctile": pctile,
+        "side": side,
+        "is_extreme": is_extreme,
+        "severity": severity,
+        "risk_direction": risk_direction,
+        # Sign change over the month, not merely a change in size.
+        "flipped": (ago > 0 > today) or (ago < 0 < today),
+        "extended": abs(today) > abs(ago) and not ((ago > 0 > today) or (ago < 0 < today)),
+        # Marker position on a MAX SHORT (left) .. MAX LONG (right) track.
+        "meter_pct": max(2, min(98, pctile)),
+    }
+
+
+def est_selling_bn(data: dict):
+    """Estimated forced-flow figure, or None when the model did not supply one.
+    Never invent it: the old code defaulted to a literal 90.6 and published
+    "$90.6B forced selling pipeline" on days when `cta_model` was null."""
+    model = data.get("cta_model")
+    if not isinstance(model, dict):
+        return None
+    v = model.get("est_selling_bn")
+    return v if isinstance(v, (int, float)) else None
+
+
 # ── Card HTML generators ──────────────────────────────────────────────────────
 
 FONTS = '<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">'
@@ -167,19 +247,26 @@ def card1_squeeze(data: dict, ds: str) -> str:
             return ""
         today = r["position_today"]
         ago   = r["position_1m_ago"]
-        # scale: ±4 maps to 0–100% of half-track (50% each side)
+        # Scale: ±4 maps to the full half-track (50% each side of centre).
+        # TODAY's bar grows RIGHT of centre when long and LEFT when short. The
+        # old code drew the long portion from `ago` and anchored both segments
+        # right:50%, so a long position rendered leftward as if it were short.
         max_scale = 4.0
-        short_pct = min(abs(min(today, 0)) / max_scale * 50, 50)
-        long_pct  = min(abs(max(ago,   0)) / max_scale * 50, 50)
-        val_color = "#E85D6C" if today < 0 else "#05AD98"
+        span = lambda v: min(abs(v) / max_scale * 50, 50)
+        today_pct, ago_pct = span(today), span(ago)
+        today_side = "left:50%" if today >= 0 else f"right:50%"
+        # 1M-ago tick, so the change is visible without a second bar.
+        ago_offset = 50 + (ago_pct if ago >= 0 else -ago_pct)
+        val_color = "#F5A623" if today > 0 else "#E85D6C" if today < 0 else "#94a3b8"
+        fill = "rgba(245,166,35,0.45)" if today > 0 else "rgba(232,93,108,0.6)"
         ago_sign  = "+" if ago > 0 else ""
         return f"""
         <div style="display:flex;align-items:center;gap:0;margin-bottom:10px">
           <div style="font-family:'IBM Plex Mono',monospace;font-size:11px;color:#94a3b8;width:100px;flex-shrink:0">{label}</div>
           <div style="flex:1;height:28px;background:#0f1519;border:1px solid #1e293b;border-radius:2px;position:relative">
             <div style="position:absolute;left:50%;top:0;bottom:0;width:1px;background:#334155"></div>
-            <div style="position:absolute;right:50%;height:100%;width:{long_pct}%;background:rgba(5,173,152,0.35);border-radius:1px"></div>
-            <div style="position:absolute;right:50%;height:100%;width:{short_pct}%;background:rgba(232,93,108,0.6);border-radius:1px"></div>
+            <div style="position:absolute;{today_side};height:100%;width:{today_pct}%;background:{fill};border-radius:1px"></div>
+            <div style="position:absolute;left:{ago_offset}%;top:4px;bottom:4px;width:1px;background:#64748b" title="1M ago"></div>
           </div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:700;color:{val_color};margin-left:8px;flex-shrink:0">{today:+.2f}</div>
           <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;color:#475569;margin-left:6px">{ago_sign}{ago:.2f} 1M ago</div>
@@ -187,54 +274,93 @@ def card1_squeeze(data: dict, ds: str) -> str:
 
     flip_rows = "".join(bar_row(lbl, r) for lbl, r in rows)
 
-    spx_pctile = spx["percentile_3m"] if spx else "—"
-    spx_z      = f"{spx['z_score_3m']:.2f}" if spx else "—"
-    selling_bn = data.get("cta_model", {}).get("est_selling_bn", 90.6) if isinstance(data.get("cta_model"), dict) else 90.6
+    a = assess_positioning(spx or {})
+    pct_txt = pctile_label(a["pctile"])
+    z_txt = f"{a['z']:.2f}"
+
+    # Every string below is derived. A max LONG must never render as a squeeze.
+    if a["is_extreme"] and a["side"] == "long":
+        alert = "CTA LONG EXTREME"
+        accent = "#F5A623"
+        headline = "Max Long Exposure"
+        move_txt = (
+            f"CTAs {'flipped from' if a['flipped'] else 'extended from'} "
+            f"<span style=\"color:#94a3b8\">{a['ago']:+.2f} → {a['today']:+.2f} long</span> in 30 days."
+        )
+        implication = "Deleveraging risk if realized vol expands."
+        risk_label = "Selling Risk"
+    elif a["is_extreme"] and a["side"] == "short":
+        alert = "CTA SQUEEZE ALERT"
+        accent = "#E85D6C"
+        headline = "The Coil Is Set"
+        move_txt = (
+            f"CTAs {'flipped from' if a['flipped'] else 'extended from'} "
+            f"<span style=\"color:#94a3b8\">{a['ago']:+.2f} → {a['today']:+.2f} short</span> in 30 days."
+        )
+        implication = "Maximum mean-reversion fuel."
+        risk_label = "Squeeze Risk"
+    else:
+        alert = "CTA POSITIONING"
+        accent = "#94a3b8"
+        headline = "Positioning In Range"
+        move_txt = (
+            f"CTAs at <span style=\"color:#94a3b8\">{a['today']:+.2f}</span> "
+            f"versus {a['ago']:+.2f} a month ago."
+        )
+        implication = "No mechanical extreme in play."
+        risk_label = "Flow Risk"
+
+    selling = est_selling_bn(data)
+    selling_txt = f" · ${selling:g}B est. forced flow" if selling is not None else ""
+    selling_tile = f"${selling:g}B" if selling is not None else "N/A"
+    severity_color = "#F5A623" if a["severity"] != "NORMAL" else "#94a3b8"
 
     body = f"""
-    <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:#E85D6C;margin-bottom:10px;display:flex;align-items:center;gap:8px">
-      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#E85D6C"></span>
-      CTA SQUEEZE ALERT · {ds}
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;font-weight:600;letter-spacing:.15em;text-transform:uppercase;color:{accent};margin-bottom:10px;display:flex;align-items:center;gap:8px">
+      <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:{accent}"></span>
+      {alert} · {ds}
     </div>
-    <div style="font-size:32px;font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:6px">The Coil Is Set</div>
+    <div style="font-size:32px;font-weight:800;letter-spacing:-.03em;line-height:1.1;margin-bottom:6px">{headline}</div>
     <div style="font-size:13px;color:#64748b;margin-bottom:24px;line-height:1.4">
-      CTAs flipped from <span style="color:#94a3b8">+{spx['position_1m_ago']:.2f} long → {spx['position_today']:+.2f} short</span> in 30 days.
-      SPX positioning at <span style="color:#94a3b8">{pctile_label(int(spx_pctile))} percentile</span> of its 3-month range. Maximum mean-reversion fuel.
+      {move_txt}
+      SPX positioning at <span style="color:#94a3b8">{pct_txt} percentile</span> of its 3-month range. {implication}
     </div>
 
-    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#475569;margin-bottom:12px">Position Flip (1M ago → Today)</div>
+    <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#475569;margin-bottom:12px">Position Change (1M ago to today)</div>
     {flip_rows}
 
     <div style="margin-bottom:24px">
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#475569;margin-bottom:8px">CTA Equity Exposure — Squeeze Meter</div>
-      <div style="position:relative;height:14px;border-radius:2px;background:linear-gradient(to right,#05AD98,#334155 50%,#E85D6C);margin-bottom:4px">
-        <div style="position:absolute;left:3%;top:-3px;width:3px;height:20px;background:#fff;border-radius:1px;box-shadow:0 0 5px rgba(255,255,255,0.4)"></div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;font-weight:600;letter-spacing:.12em;text-transform:uppercase;color:#475569;margin-bottom:8px">CTA Equity Exposure · Positioning Meter</div>
+      <div style="position:relative;height:14px;border-radius:2px;background:linear-gradient(to right,#E85D6C,#334155 50%,#F5A623);margin-bottom:4px">
+        <div style="position:absolute;left:{a['meter_pct']}%;top:-3px;width:3px;height:20px;background:#fff;border-radius:1px;box-shadow:0 0 5px rgba(255,255,255,0.4)"></div>
       </div>
       <div style="display:flex;justify-content:space-between;font-family:'IBM Plex Mono',monospace;font-size:9px;color:#475569;margin-bottom:6px">
-        <span style="color:#E85D6C">◀ MAX SHORT (NOW)</span><span>NEUTRAL</span><span>MAX LONG ▶</span>
+        <span style="color:{'#E85D6C' if a['side'] == 'short' and a['is_extreme'] else '#475569'}">◀ MAX SHORT{' (NOW)' if a['side'] == 'short' and a['is_extreme'] else ''}</span>
+        <span>NEUTRAL</span>
+        <span style="color:{'#F5A623' if a['side'] == 'long' and a['is_extreme'] else '#475569'}">MAX LONG{' (NOW)' if a['side'] == 'long' and a['is_extreme'] else ''} ▶</span>
       </div>
-      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:#E85D6C;font-weight:600">{pctile_label(int(spx_pctile))} percentile (3M) · z-score {spx_z} · $90.6B forced selling pipeline</div>
+      <div style="font-family:'IBM Plex Mono',monospace;font-size:10px;color:{accent};font-weight:600">{pct_txt} percentile (3M) · z-score {z_txt}{selling_txt}</div>
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1px;background:#1e293b;border:1px solid #1e293b;border-radius:3px;margin-bottom:20px">
       <div style="background:#0f1519;padding:12px 10px;text-align:center">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:5px">SPX 3M Pctile</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:#E85D6C">{pctile_label(int(spx_pctile))}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:{accent}">{pct_txt}</div>
       </div>
       <div style="background:#0f1519;padding:12px 10px;text-align:center">
         <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:5px">Z-Score</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:#E85D6C">{spx_z}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:{accent}">{z_txt}</div>
       </div>
       <div style="background:#0f1519;padding:12px 10px;text-align:center">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:5px">Est. Selling</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:#F5A623">$90B</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:5px">Est. Forced Flow</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:#F5A623">{selling_tile}</div>
       </div>
       <div style="background:#0f1519;padding:12px 10px;text-align:center">
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:5px">Squeeze Risk</div>
-        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:#F5A623">HIGH</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#475569;margin-bottom:5px">{risk_label}</div>
+        <div style="font-family:'IBM Plex Mono',monospace;font-size:20px;font-weight:700;color:{severity_color}">{a['severity']}</div>
       </div>
     </div>"""
-    return card_html("CTA Squeeze Meter", body, 1, 4, ds)
+    return card_html("CTA Positioning Meter", body, 1, 4, ds)
 
 
 def card2_equity(data: dict, ds: str) -> str:
@@ -540,43 +666,63 @@ def build_tweet(data: dict, ds: str) -> str:
     bonds_10y = get_row(main, "10-year") or get_row(main, "10y")
     gold = get_row(main, "gold") or get_row(commodity_table, "gold")
 
-    spx_pos = spx['position_today']
-    spx_1m = spx.get('position_1m_ago', 0)
-    spx_z = spx.get('z_score_3m', 0)
-    spx_pctile = spx.get('percentile_3m', 0)
-    flipped = spx_1m > 0 and spx_pos < 0
+    a = assess_positioning(spx or {})
+    spx_pos = a["today"]
+    spx_1m = a["ago"]
+    spx_z = a["z"]
+    spx_pctile = a["pctile"]
+    flipped = a["flipped"]
 
     # Count extreme positions across indexes
     extreme_short_indexes = []
     for r in (index_table or []):
-        p = r.get("percentile_3m", 50)
-        if isinstance(p, (int, float)) and p <= 0.05:
+        if normalize_pctile(r.get("percentile_3m", 50)) <= 5:
             name = r.get("underlying", "").replace("E-Mini ", "").replace("CME ", "").replace(" Index", "").replace("ICE MSCI ", "")
             extreme_short_indexes.append(name)
+
+    # Extreme index LONGS — the mirror case the old code could not see.
+    extreme_long_indexes = []
+    for r in (index_table or []):
+        if normalize_pctile(r.get("percentile_3m", 50)) >= 95:
+            name = r.get("underlying", "").replace("E-Mini ", "").replace("CME ", "").replace(" Index", "").replace("ICE MSCI ", "")
+            extreme_long_indexes.append(name)
 
     # Find extreme commodity longs (crowded trades)
     extreme_long_commodities = []
     for r in (commodity_table or []):
-        p = r.get("percentile_3m", 50)
-        if isinstance(p, (int, float)) and p >= 0.85:
-            name = r.get("underlying", "")
-            extreme_long_commodities.append((name, round(p * 100) if p <= 1 else p))
+        p = normalize_pctile(r.get("percentile_3m", 50))
+        if p >= 85:
+            extreme_long_commodities.append((r.get("underlying", ""), p))
 
     # ── Build narrative based on the data ──
 
-    if spx_z <= -2.0:
+    # Branch on the ASSESSMENT, not on a one-sided z threshold. The old code
+    # only tested z <= -1.5, so a +3.68 z at the 100th percentile fell through
+    # to "No extreme positioning" while the card screamed squeeze alert.
+    if spx_z >= 2.0:
         hook = (
-            f"🚨 CTAs just hit a {abs(spx_z):.1f} standard deviation short on SPX futures — "
-            f"the most extreme positioning in {'a year' if spx_pctile <= 0.01 else '3 months'}."
+            f"🚨 CTAs just hit a {abs(spx_z):.1f} standard deviation LONG on SPX futures, "
+            f"the most stretched positioning in {'a year' if spx_pctile >= 99 else '3 months'}."
+        )
+    elif spx_z <= -2.0:
+        hook = (
+            f"🚨 CTAs just hit a {abs(spx_z):.1f} standard deviation short on SPX futures, "
+            f"the most extreme positioning in {'a year' if spx_pctile <= 1 else '3 months'}."
+        )
+    elif spx_z >= 1.5:
+        hook = (
+            f"⚠️ CTA equity positioning is at max long: SPX futures at "
+            f"{spx_pos:+.2f} (z-score {spx_z:.2f}). The pipeline is one-sided."
         )
     elif spx_z <= -1.5:
         hook = (
-            f"⚠️ CTA equity positioning is at max short — SPX futures at "
+            f"⚠️ CTA equity positioning is at max short: SPX futures at "
             f"{spx_pos:+.2f} (z-score {spx_z:.2f}). The coil is building."
         )
     elif flipped:
+        direction = "short" if spx_pos < 0 else "long"
         hook = (
-            f"📉 CTAs flipped from +{spx_1m:.2f} long to {spx_pos:+.2f} short on SPX "
+            f"📉 CTAs flipped from {spx_1m:+.2f} to {spx_pos:+.2f} {direction} on SPX "
             f"in 30 days. That's a {abs(spx_1m - spx_pos):.2f}-point swing in systematic exposure."
         )
     else:
@@ -586,29 +732,51 @@ def build_tweet(data: dict, ds: str) -> str:
         )
 
     # Thesis: what the positioning means
+    nq_pos = nq['position_today'] if nq else None
+    nq_note = f" NQ at {nq_pos:+.2f}." if nq_pos is not None else ""
+
     if extreme_short_indexes and len(extreme_short_indexes) >= 4:
         index_list = ", ".join(extreme_short_indexes[:6])
         thesis = (
-            f"This isn't just SPX — {len(extreme_short_indexes)} global equity indexes "
+            f"This isn't just SPX: {len(extreme_short_indexes)} global equity indexes "
             f"are simultaneously at the bottom of their 3-month range ({index_list}). "
             f"When systematic funds are this short across every index, the next move is "
             f"binary: either the macro deteriorates further, or we get a violent short-covering "
             f"rally across everything."
         )
+    elif extreme_long_indexes and len(extreme_long_indexes) >= 4:
+        index_list = ", ".join(extreme_long_indexes[:6])
+        thesis = (
+            f"This isn't just SPX: {len(extreme_long_indexes)} global equity indexes "
+            f"are simultaneously at the top of their 3-month range ({index_list}). "
+            f"Systematic length that crowded is the fuel for a mechanical unwind, not a thesis. "
+            f"The trigger is a vol expansion, not a headline."
+        )
+    elif a["is_extreme"] and a["side"] == "long":
+        thesis = (
+            f"SPX CTA position: {spx_pos:+.2f}, the {pctile_label(spx_pctile)} percentile of its "
+            f"3-month range (was {spx_1m:+.2f} a month ago).{nq_note} "
+            f"Vol-targeting models are carrying maximum length here. That exposure is mechanical: "
+            f"if realized vol expands, the same models must sell into it regardless of the narrative."
+        )
+    elif a["is_extreme"] and a["side"] == "short":
+        thesis = (
+            f"SPX CTA position: {spx_pos:+.2f}, the {pctile_label(spx_pctile)} percentile of its "
+            f"3-month range (was {spx_1m:+.2f} a month ago).{nq_note} "
+            f"This selling is not discretionary. It is algorithmic, and it doesn't stop until "
+            f"realized vol compresses below the lookback window."
+        )
     elif flipped:
         thesis = (
-            f"One month ago CTAs were long at +{spx_1m:.2f}. The vol-targeting models "
-            f"detected the regime change and mechanically reversed. This selling is "
-            f"not discretionary — it's algorithmic, and it doesn't stop until realized "
-            f"vol compresses below the lookback window."
+            f"One month ago CTAs sat at {spx_1m:+.2f}. The vol-targeting models "
+            f"detected the regime change and mechanically reversed to {spx_pos:+.2f}. "
+            f"This flow is not discretionary, it is algorithmic."
         )
     else:
-        nq_pos = nq['position_today'] if nq else None
-        nq_note = f" NQ at {nq_pos:+.2f}." if nq_pos is not None else ""
         thesis = (
             f"SPX CTA position: {spx_pos:+.2f} (was {spx_1m:+.2f} one month ago).{nq_note} "
-            f"Vol-targeting models are adjusting exposure based on realized volatility — "
-            f"the positioning reflects the vol regime, not a directional view."
+            f"Vol-targeting models are adjusting exposure based on realized volatility. "
+            f"The positioning reflects the vol regime, not a directional view."
         )
 
     # Cross-asset context
@@ -638,15 +806,20 @@ def build_tweet(data: dict, ds: str) -> str:
     cross_asset = "\n".join(cross_asset_lines) if cross_asset_lines else ""
 
     # Conclusion
-    if spx_z <= -1.5:
+    if a["is_extreme"] and a["side"] == "short":
         conclusion = (
-            "The mean-reversion coil is set. Any bullish catalyst — Fed signal, "
-            "macro beat, tariff relief — triggers mechanical short-covering. "
+            "The mean-reversion coil is set. Any bullish catalyst (Fed signal, "
+            "macro beat, tariff relief) triggers mechanical short-covering. "
             "This is structural, not speculative."
+        )
+    elif a["is_extreme"] and a["side"] == "long":
+        conclusion = (
+            "Crowded length is not a sell signal on its own, it is a fragility reading. "
+            "Watch realized vol: an expansion forces the same models to deleverage into weakness."
         )
     elif flipped:
         conclusion = (
-            "The flip is mechanical but the magnitude matters. Watch realized vol — "
+            "The flip is mechanical but the magnitude matters. Watch realized vol: "
             "if it compresses, CTAs reverse just as aggressively to the upside."
         )
     else:
