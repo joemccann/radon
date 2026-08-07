@@ -13,7 +13,7 @@ Sources (UWClient methods):
 
 Every event becomes a catalyst row:
 
-    {ticker, type, title, date, source, days_until}
+    {ticker, type, title, date, source, days_until, event_time?}
 
 ``date`` is an ISO ``YYYY-MM-DD`` calendar day (ET). ``days_until`` is the
 whole-day distance from "now" (negative = past; past events are dropped by
@@ -33,7 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
 
@@ -57,6 +57,11 @@ TYPE_EARNINGS = "earnings"
 TYPE_FDA = "fda"
 TYPE_ECONOMIC = "economic"
 
+EARNINGS_LOOKAHEAD_SESSIONS = 5
+EARNINGS_PAGE_LIMIT = 100
+EARNINGS_MAX_PAGES = 3
+FDA_LOOKAHEAD_DAYS = 365
+
 _CATALYSTS_TABLE_DDL = """
 CREATE TABLE IF NOT EXISTS catalysts (
   scan_time TEXT NOT NULL,
@@ -77,7 +82,7 @@ def _et_today(now: datetime) -> date:
 
 
 def _parse_day(value: Any) -> Optional[date]:
-    """Parse an ISO date or datetime string to a calendar date (UTC day)."""
+    """Parse an ISO date or datetime string to an ET calendar date."""
     if not value:
         return None
     text = str(value).strip()
@@ -86,7 +91,14 @@ def _parse_day(value: Any) -> Optional[date]:
     try:
         if "T" in text:
             cleaned = text.replace("Z", "+00:00")
-            return datetime.fromisoformat(cleaned).astimezone(timezone.utc).date()
+            parsed = datetime.fromisoformat(cleaned)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            try:
+                import zoneinfo
+                return parsed.astimezone(zoneinfo.ZoneInfo("America/New_York")).date()
+            except Exception:
+                return parsed.astimezone(timezone.utc).date()
         return date.fromisoformat(text[:10])
     except (ValueError, TypeError):
         return None
@@ -104,6 +116,72 @@ def _rows_from_payload(payload: Any) -> list[dict[str, Any]]:
     if isinstance(payload, list):
         return [r for r in payload if isinstance(r, dict)]
     return []
+
+
+def _canonical_utc_time(value: Any) -> Optional[str]:
+    """Return a provider timestamp as canonical UTC, or None when invalid."""
+    if not value or "T" not in str(value):
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).isoformat().replace("+00:00", "Z")
+    except (ValueError, TypeError):
+        return None
+
+
+def _next_trading_sessions(today: date, count: int) -> list[date]:
+    """Return today/next US trading sessions using the shared calendar SoT."""
+    from utils.market_calendar import _is_trading_day
+
+    sessions: list[date] = []
+    candidate = today
+    while len(sessions) < count:
+        if _is_trading_day(datetime.combine(candidate, time.min)):
+            sessions.append(candidate)
+        candidate += timedelta(days=1)
+    return sessions
+
+
+def _fetch_earnings_pages(
+    client: Any,
+    method_name: str,
+    sessions: list[date],
+) -> list[dict[str, Any]]:
+    """Fetch a bounded page set for each requested earnings session."""
+    method = getattr(client, method_name)
+    rows: list[dict[str, Any]] = []
+    for session in sessions:
+        for page in range(EARNINGS_MAX_PAGES):
+            payload = _safe_call(
+                lambda session=session, page=page: method(
+                    date=session.isoformat(),
+                    limit=EARNINGS_PAGE_LIMIT,
+                    page=page,
+                )
+            )
+            page_rows = _rows_from_payload(payload)
+            rows.extend(page_rows)
+            if len(page_rows) < EARNINGS_PAGE_LIMIT:
+                break
+    return rows
+
+
+def _dedupe_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Remove duplicate provider rows returned across adjacent date queries."""
+    unique: dict[tuple[Any, ...], dict[str, Any]] = {}
+    for row in rows:
+        key = (
+            row.get("type"),
+            row.get("ticker"),
+            row.get("date"),
+            row.get("source"),
+            row.get("title"),
+            row.get("event_time"),
+        )
+        unique.setdefault(key, row)
+    return list(unique.values())
 
 
 def _normalize_earnings(payload: Any, source: str, today: date) -> list[dict[str, Any]]:
@@ -131,7 +209,11 @@ def _normalize_fda(payload: Any, today: date) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for raw in _rows_from_payload(payload):
         ticker = (raw.get("ticker") or "").upper() or None
-        event_day = _parse_day(raw.get("start_date") or raw.get("end_date"))
+        # UW's scheduled decision day is target_date. start/end describe the
+        # trial window and can be months old.
+        event_day = _parse_day(
+            raw.get("target_date") or raw.get("end_date") or raw.get("start_date")
+        )
         if not event_day:
             continue
         catalyst = raw.get("catalyst") or "FDA Event"
@@ -163,6 +245,7 @@ def _normalize_economic(payload: Any, today: date) -> list[dict[str, Any]]:
                 "type": TYPE_ECONOMIC,
                 "title": raw.get("event") or "Economic Event",
                 "date": event_day.isoformat(),
+                "event_time": _canonical_utc_time(raw.get("time")),
                 "source": TYPE_ECONOMIC,
                 "days_until": _days_until(event_day, today),
                 "forecast": raw.get("forecast"),
@@ -195,16 +278,33 @@ def fetch_catalysts(
     """
     now = now or datetime.now(timezone.utc)
     today = _et_today(now)
+    sessions = _next_trading_sessions(today, EARNINGS_LOOKAHEAD_SESSIONS)
+    fda_end = today + timedelta(days=FDA_LOOKAHEAD_DAYS)
 
     rows: list[dict[str, Any]] = []
     rows += _normalize_earnings(
-        _safe_call(client.get_earnings_premarket), "earnings_premarket", today
+        {"data": _fetch_earnings_pages(client, "get_earnings_premarket", sessions)},
+        "earnings_premarket",
+        today,
     )
     rows += _normalize_earnings(
-        _safe_call(client.get_earnings_afterhours), "earnings_afterhours", today
+        {"data": _fetch_earnings_pages(client, "get_earnings_afterhours", sessions)},
+        "earnings_afterhours",
+        today,
     )
-    rows += _normalize_fda(_safe_call(client.get_fda_calendar), today)
+    rows += _normalize_fda(
+        _safe_call(
+            lambda: client.get_fda_calendar(
+                target_date_min=today.isoformat(),
+                target_date_max=fda_end.isoformat(),
+                limit=200,
+            )
+        ),
+        today,
+    )
     rows += _normalize_economic(_safe_call(client.get_economic_calendar), today)
+
+    rows = _dedupe_rows(rows)
 
     if not include_past:
         rows = [r for r in rows if r["days_until"] >= 0]

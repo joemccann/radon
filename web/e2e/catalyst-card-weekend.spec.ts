@@ -191,3 +191,24 @@ test("Sunday: all-past fossil snapshot renders the empty state", async ({ page }
   await expect(card.getByText(/no upcoming catalysts/i)).toBeVisible();
   await expect(card.getByText("Today", { exact: true })).toHaveCount(0);
 });
+
+test("trading day: elapsed exact-time events disappear while later events remain", async ({ page }, testInfo) => {
+  await page.clock.install({ time: new Date("2026-08-07T21:59:00Z") });
+  await installMockWebSocket(page);
+  await stubApis(page, [
+    catalystRow("2026-08-07", "U.S. employment report", {
+      event_time: "2026-08-07T12:30:00Z",
+    }),
+    catalystRow("2026-08-07", "Evening Fed speaker", {
+      event_time: "2026-08-07T22:30:00Z",
+    }),
+  ]);
+
+  await page.goto("/");
+
+  const card = catalystCard(page);
+  await expect(card.getByText("Evening Fed speaker")).toBeVisible();
+  await expect(card.getByText("U.S. employment report")).toHaveCount(0);
+  await expect(card.getByText("Today", { exact: true })).toBeVisible();
+  await card.screenshot({ path: testInfo.outputPath("catalyst-exact-time.png") });
+});

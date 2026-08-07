@@ -43,7 +43,8 @@ def _make_client() -> MagicMock:
     client.get_fda_calendar.return_value = {
         "data": [
             {"ticker": "IOVA", "drug": "Lifileucel", "catalyst": "PDUFA Date",
-             "start_date": "2026-06-21", "end_date": "2026-06-21",
+             "start_date": "2025-06-21", "end_date": None,
+             "target_date": "2026-06-21",
              "indication": "Advanced Melanoma"},
         ]
     }
@@ -106,6 +107,7 @@ def test_economic_row_has_no_ticker_and_date_from_time():
     econ = next(r for r in rows if r["type"] == "economic")
     assert econ["ticker"] is None
     assert econ["date"] == "2026-06-26"
+    assert econ["event_time"] == "2026-06-26T13:30:00Z"
     assert econ["days_until"] == 5
     assert econ["title"] == "PCE index"
 
@@ -115,6 +117,68 @@ def test_rows_sorted_by_days_until_ascending():
     rows = fc.fetch_catalysts(client=client, now=FIXED_NOW)
     days = [r["days_until"] for r in rows]
     assert days == sorted(days)
+
+
+def test_earnings_queries_next_five_trading_sessions():
+    client = _make_client()
+    client.get_earnings_premarket.return_value = {"data": []}
+    client.get_earnings_afterhours.return_value = {"data": []}
+
+    fc.fetch_catalysts(
+        client=client,
+        now=datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+    )
+
+    expected = [
+        "2026-08-07",
+        "2026-08-10",
+        "2026-08-11",
+        "2026-08-12",
+        "2026-08-13",
+    ]
+    for method in (client.get_earnings_premarket, client.get_earnings_afterhours):
+        assert [call.kwargs["date"] for call in method.call_args_list] == expected
+        assert all(call.kwargs["limit"] == 100 for call in method.call_args_list)
+        assert all(call.kwargs["page"] == 0 for call in method.call_args_list)
+
+
+def test_earnings_pagination_stops_after_short_page():
+    client = _make_client()
+    client.get_earnings_afterhours.return_value = {"data": []}
+
+    def paged_premarket(*, date, limit, page):
+        if date != "2026-08-07":
+            return {"data": []}
+        if page == 0:
+            return {
+                "data": [
+                    {"symbol": f"T{i:03}", "full_name": f"Ticker {i}",
+                     "report_date": date, "expected_move_perc": "0.01"}
+                    for i in range(100)
+                ]
+            }
+        if page == 1:
+            return {
+                "data": [
+                    {"symbol": "LAST", "full_name": "Last ticker",
+                     "report_date": date, "expected_move_perc": "0.01"}
+                ]
+            }
+        raise AssertionError("pagination must stop after a short page")
+
+    client.get_earnings_premarket.side_effect = paged_premarket
+    rows = fc.fetch_catalysts(
+        client=client,
+        now=datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+    )
+
+    assert any(row["ticker"] == "LAST" for row in rows)
+    aug7_pages = [
+        call.kwargs["page"]
+        for call in client.get_earnings_premarket.call_args_list
+        if call.kwargs["date"] == "2026-08-07"
+    ]
+    assert aug7_pages == [0, 1]
 
 
 def test_past_events_excluded_by_default():

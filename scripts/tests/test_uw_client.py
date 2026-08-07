@@ -862,9 +862,18 @@ class TestMarketEndpoints:
 
     def test_get_fda_calendar(self, client, mock_session):
         mock_session.get.return_value = _make_response(200, {"data": []})
-        client.get_fda_calendar()
+        client.get_fda_calendar(
+            target_date_min="2026-08-07",
+            target_date_max="2027-08-07",
+            limit=200,
+        )
         call_url = mock_session.get.call_args[0][0]
         assert "market/fda-calendar" in call_url
+        assert mock_session.get.call_args[1]["params"] == {
+            "target_date_min": "2026-08-07",
+            "target_date_max": "2027-08-07",
+            "limit": 200,
+        }
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -875,15 +884,21 @@ class TestMarketEndpoints:
 class TestEarningsEndpoints:
     def test_get_earnings_premarket(self, client, mock_session):
         mock_session.get.return_value = _make_response(200, {"data": []})
-        client.get_earnings_premarket()
+        client.get_earnings_premarket(date="2026-08-10", limit=100, page=0)
         call_url = mock_session.get.call_args[0][0]
         assert "earnings/premarket" in call_url
+        assert mock_session.get.call_args[1]["params"] == {
+            "date": "2026-08-10", "limit": 100, "page": 0,
+        }
 
     def test_get_earnings_afterhours(self, client, mock_session):
         mock_session.get.return_value = _make_response(200, {"data": []})
-        client.get_earnings_afterhours()
+        client.get_earnings_afterhours(date="2026-08-10", limit=100, page=1)
         call_url = mock_session.get.call_args[0][0]
         assert "earnings/afterhours" in call_url
+        assert mock_session.get.call_args[1]["params"] == {
+            "date": "2026-08-10", "limit": 100, "page": 1,
+        }
 
     def test_get_earnings_by_ticker(self, client, mock_session):
         mock_session.get.return_value = _make_response(200, {"data": []})

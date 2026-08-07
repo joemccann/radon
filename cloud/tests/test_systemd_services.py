@@ -169,6 +169,11 @@ class TestStructure:
         for section in ("Unit", "Timer", "Install"):
             assert section in cfg, f"radon-refresh.timer missing [{section}]"
 
+    def test_catalysts_refreshes_three_times_per_trading_day(self, services_dir):
+        text = (services_dir / "radon-catalysts.timer").read_text()
+        for wall_time in ("06:30:00", "10:00:00", "16:00:00"):
+            assert f"OnCalendar=Mon..Fri *-*-* {wall_time} America/New_York" in text
+
     @pytest.mark.parametrize("filename", EXPECTED_SERVICE_FILES)
     def test_every_unit_has_description(self, unit, filename):
         cfg = unit(filename)

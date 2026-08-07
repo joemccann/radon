@@ -10,6 +10,7 @@
  *
  * Semantics (operator-specified):
  *  - "Upcoming" means now-or-future only. Past events never survive.
+ *  - Rows with an exact `event_time` expire immediately after that instant.
  *  - A same-day event ages out once the extended session has ended (20:00 ET)
  *    — no market event can still occur today after that.
  *  - Events do not occur on closed market days. A row dated a weekend/holiday
@@ -30,6 +31,7 @@ const NEXT_SESSION_SEARCH_LIMIT_DAYS = 14;
 interface DatedCatalyst {
   date: string;
   days_until: number;
+  event_time?: string | null;
 }
 
 function etWallClock(now: Date): Date {
@@ -78,6 +80,10 @@ export function upcomingCatalysts<T extends DatedCatalyst>(rows: T[], now: Date 
   for (const row of rows) {
     const recomputed = daysUntilEt(row.date, now);
     if (!Number.isFinite(recomputed) || recomputed < 0) continue;
+    if (row.event_time) {
+      const eventMs = Date.parse(row.event_time);
+      if (Number.isFinite(eventMs) && eventMs < now.getTime()) continue;
+    }
     if (recomputed === 0) {
       if (todayIsTradingDay && extendedSessionOver) continue;
       if (!todayIsTradingDay) {

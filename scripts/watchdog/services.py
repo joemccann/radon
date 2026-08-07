@@ -86,9 +86,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     #  * oi-changes      — radon-oi-changes.timer 3x/RTH day (14/17/20 UTC
     #    Mon-Fri); market-wide fetch_oi_changes.py --market heartbeats via
     #    mirror_scan_snapshot; holiday skips heartbeat ok. UW-only.
-    #  * catalysts      — radon-catalysts.timer, Mon-Fri 10:30 UTC; heartbeats
-    #    ok on holiday skips (run_catalysts.sh), so the longest legit gap is
-    #    the Fri→Mon weekend. UW-only, no IB.
+    #  * catalysts      — radon-catalysts.timer at 06:30, 10:00, and 16:00 ET;
+    #    heartbeats ok on holiday skips (run_catalysts.sh). Seven hours spans
+    #    the active-day schedule; four days bridges a long weekend. UW-only.
     "llm-token-index":  {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # margin-debt — daily wrapper every calendar day (FINRA monthly source,
     # conditional-GET no-op on unchanged days, heartbeats each run). Uniform
@@ -114,7 +114,7 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "leap-scan":        {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "garch-scan":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     "oi-changes":       {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
-    "catalysts":        {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    "catalysts":        {"open": 7 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     # bpi-scan — radon-bpi.timer, Mon-Fri 21:30 UTC AFTER the close: during
     # Monday's whole session the newest row is legitimately Friday-evening's
     # (~72h old), so the window is uniform 4d rather than a tight open window.

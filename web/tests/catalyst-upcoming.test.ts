@@ -24,8 +24,8 @@ const MONDAY_REGULAR = new Date("2026-07-06T16:00:00Z"); // Mon 12:00 ET (tradin
 const MONDAY_LABOR_DAY = new Date("2026-09-07T16:00:00Z"); // Mon 12:00 ET (holiday)
 const FRIDAY_LATE_EVENING = new Date("2026-07-11T01:00:00Z"); // Fri 2026-07-10 21:00 ET (Sat in UTC)
 
-function row(date: string, storedDaysUntil: number, title = date) {
-  return { ticker: null, type: "economic", title, date, source: "economic", days_until: storedDaysUntil };
+function row(date: string, storedDaysUntil: number, title = date, eventTime?: string) {
+  return { ticker: null, type: "economic", title, date, source: "economic", days_until: storedDaysUntil, event_time: eventTime };
 }
 
 describe("daysUntilEt", () => {
@@ -90,6 +90,19 @@ describe("upcomingCatalysts", () => {
 
   it("ages out a same-day event once the extended session has ended (Friday 21:00 ET)", () => {
     expect(upcomingCatalysts([row("2026-07-10", 0)], FRIDAY_LATE_EVENING)).toEqual([]);
+  });
+
+  it("drops elapsed same-day events at their exact time while retaining later events", () => {
+    const friday1759Et = new Date("2026-08-07T21:59:00Z");
+    const kept = upcomingCatalysts(
+      [
+        row("2026-08-07", 0, "Employment report", "2026-08-07T12:30:00Z"),
+        row("2026-08-07", 0, "Evening speaker", "2026-08-07T22:30:00Z"),
+      ],
+      friday1759Et,
+    );
+
+    expect(kept.map((item) => item.title)).toEqual(["Evening speaker"]);
   });
 
   it("keeps future events late Friday evening with ET-correct distance (west-of-UTC)", () => {

@@ -671,21 +671,46 @@ class UWClient:
         """GET /api/market/economic-calendar - Economic events."""
         return self._get("market/economic-calendar")
 
-    def get_fda_calendar(self) -> dict:
+    def get_fda_calendar(
+        self,
+        *,
+        target_date_min: str | None = None,
+        target_date_max: str | None = None,
+        limit: int | None = None,
+    ) -> dict:
         """GET /api/market/fda-calendar - FDA calendar events."""
-        return self._get("market/fda-calendar")
+        params = self._build_params(
+            target_date_min=target_date_min,
+            target_date_max=target_date_max,
+            limit=limit,
+        )
+        return self._get("market/fda-calendar", params=params)
 
     # ══════════════════════════════════════════════════════════════════
     # EARNINGS ENDPOINTS
     # ══════════════════════════════════════════════════════════════════
 
-    def get_earnings_premarket(self) -> dict:
+    def get_earnings_premarket(
+        self,
+        *,
+        date: str | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+    ) -> dict:
         """GET /api/earnings/premarket - Premarket earnings."""
-        return self._get("earnings/premarket")
+        params = self._build_params(date=date, limit=limit, page=page)
+        return self._get("earnings/premarket", params=params)
 
-    def get_earnings_afterhours(self) -> dict:
+    def get_earnings_afterhours(
+        self,
+        *,
+        date: str | None = None,
+        limit: int | None = None,
+        page: int | None = None,
+    ) -> dict:
         """GET /api/earnings/afterhours - Afterhours earnings."""
-        return self._get("earnings/afterhours")
+        params = self._build_params(date=date, limit=limit, page=page)
+        return self._get("earnings/afterhours", params=params)
 
     def get_earnings_by_ticker(self, ticker: str) -> dict:
         """GET /api/earnings/{ticker} - Historical earnings for ticker."""

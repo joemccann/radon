@@ -141,6 +141,22 @@ describe("CatalystCard", () => {
     expect(screen.getByText("2d")).toBeTruthy();
   });
 
+  it("does not render economic releases that already occurred today", async () => {
+    freezeClock("2026-08-07T21:59:00Z");
+    stubCatalystsFetch({
+      scan_time: "2026-08-07T20:00:00Z",
+      count: 2,
+      catalysts: [
+        catRow("2026-08-07", 0, { title: "Employment report", event_time: "2026-08-07T12:30:00Z" }),
+        catRow("2026-08-07", 0, { title: "Evening speaker", event_time: "2026-08-07T22:30:00Z" }),
+      ],
+    });
+
+    render(<CatalystCard />);
+    await waitFor(() => expect(screen.getByText("Evening speaker")).toBeTruthy());
+    expect(screen.queryByText("Employment report")).toBeNull();
+  });
+
   it("renders the empty state when no catalysts are present", async () => {
     stubCatalystsFetch({ missing: true, count: 0, catalysts: [] });
     render(<CatalystCard />);
