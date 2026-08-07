@@ -6,7 +6,7 @@ import type { QuoteFallback } from "@/lib/quoteTelemetry";
 import { useViewport } from "@/lib/useViewport";
 import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailContext";
 import { MetricCell } from "@/components/mobile/MetricCell";
-import { resolveMarketValue, resolveEntryCost, fmtPrice } from "@/lib/positionUtils";
+import { resolveMarketValue, resolveEntryCost, getAvgEntry, fmtPrice } from "@/lib/positionUtils";
 import { fmtMoneySigned } from "@/lib/format/money";
 import BookTab from "./BookTab";
 import OrderTab from "./OrderTab";
@@ -56,9 +56,13 @@ function MobilePositionSummary({ position }: { position: PortfolioPosition }) {
   const ec = resolveEntryCost(position);
   const pnl = mv != null ? mv - ec : null;
   const pnlTone = pnl == null ? "mut" : pnl > 0 ? "pos" : pnl < 0 ? "neg" : "mut";
-  const avgEntry = position.contracts > 0
-    ? fmtPrice(Math.abs(ec) / (position.contracts * (position.structure_type === "Stock" ? 1 : 100)))
-    : "---";
+  // Signed per the credit/debit convention: a credit combo's avg entry reads
+  // NEGATIVE (the operator was paid to open). `getAvgEntry` owns the leg-count
+  // and instrument scoping — never re-derive it with Math.abs here.
+  const avgEntryRaw = position.contracts > 0 ? getAvgEntry(position) : null;
+  const avgEntry = avgEntryRaw == null
+    ? "---"
+    : `${avgEntryRaw < 0 ? "-" : ""}${fmtPrice(Math.abs(avgEntryRaw))}`;
 
   return (
     <div className="ckp-pos-summary">

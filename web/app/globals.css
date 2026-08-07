@@ -14940,6 +14940,31 @@ body[data-mobile="true"] .toast-container {
   color: var(--text-muted);
 }
 
+/* Underlying spot on an option position card: where the stock trades relative
+   to the strikes, without leaving the card (2026-08-07 request). */
+.mobile-card__underlying {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line-grid);
+}
+.mobile-card__underlying-k {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.mobile-card__underlying-v {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+}
+
 .mobile-card__leg-row {
   display: flex;
   align-items: center;
