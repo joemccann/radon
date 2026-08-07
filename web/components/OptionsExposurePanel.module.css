@@ -564,3 +564,37 @@
     width: 106px;
   }
 }
+
+/* PNG export control: sits in the telemetry rail so it reads as instrument
+   chrome rather than a primary action. */
+.exportButton {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 4px 10px;
+  min-height: 24px;
+  border-radius: 4px;
+  border: 1px solid var(--line-grid);
+  background: transparent;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: border-color var(--dur-fast, 150ms), color var(--dur-fast, 150ms);
+}
+
+.exportButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--signal-core) 45%, var(--line-grid));
+  color: var(--text-primary);
+}
+
+.exportButton:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.exportError {
+  margin: 0 var(--panel-padding, 16px) 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--fault);
+}
