@@ -171,6 +171,8 @@ class TestAnalyzeOptionsFlow:
         result = analyze_options_flow([])
         assert result["bias"] == "NO_DATA"
         assert result["total_alerts"] == 0
+        assert result["put_call_ratio"] is None
+        assert "call_put_ratio" not in result
 
     def test_all_calls_bias(self):
         alerts = [
@@ -179,57 +181,66 @@ class TestAnalyzeOptionsFlow:
         ]
         result = analyze_options_flow(alerts)
         assert result["bias"] == "ALL_CALLS"
-        assert result["call_put_ratio"] is None
+        assert result["put_call_ratio"] == 0.0
+
+    def test_all_puts_keeps_ratio_json_safe(self):
+        alerts = [
+            {"premium": "100000", "is_call": False},
+            {"premium": "200000", "is_call": False},
+        ]
+        result = analyze_options_flow(alerts)
+        assert result["bias"] == "STRONGLY_BEARISH"
+        assert result["put_call_ratio"] is None
 
     def test_strongly_bullish(self):
-        # Call premium >> Put premium  (ratio >= 2.0)
+        # Call premium >> Put premium (put/call ratio <= 0.5)
         alerts = [
             {"premium": "300000", "is_call": True},
             {"premium": "100000", "is_call": False},
         ]
         result = analyze_options_flow(alerts)
         assert result["bias"] == "STRONGLY_BULLISH"
-        assert result["call_put_ratio"] == 3.0
+        assert result["put_call_ratio"] == 0.33
 
     def test_strongly_bearish(self):
-        # Put premium >> Call premium  (ratio <= 0.5)
+        # Put premium >> Call premium (put/call ratio >= 2.0)
         alerts = [
             {"premium": "100000", "is_call": True},
             {"premium": "400000", "is_call": False},
         ]
         result = analyze_options_flow(alerts)
         assert result["bias"] == "STRONGLY_BEARISH"
-        assert result["call_put_ratio"] == 0.25
+        assert result["put_call_ratio"] == 4.0
 
     def test_bullish(self):
-        # Call/put ratio between 1.2 and 2.0
+        # Put/call ratio between 0.5 and 0.83
         alerts = [
             {"premium": "150000", "is_call": True},
             {"premium": "100000", "is_call": False},
         ]
         result = analyze_options_flow(alerts)
         assert result["bias"] == "BULLISH"
-        assert result["call_put_ratio"] == 1.5
+        assert result["put_call_ratio"] == 0.67
 
     def test_bearish(self):
-        # Call/put ratio between 0.5 and 0.8
+        # Put/call ratio between 1.25 and 2.0
         alerts = [
             {"premium": "70000", "is_call": True},
             {"premium": "100000", "is_call": False},
         ]
         result = analyze_options_flow(alerts)
         assert result["bias"] == "BEARISH"
-        assert result["call_put_ratio"] == 0.7
+        assert result["put_call_ratio"] == 1.43
 
     def test_neutral(self):
-        # Call/put ratio between 0.8 and 1.2
+        # Put/call ratio between 0.83 and 1.25
         alerts = [
             {"premium": "100000", "is_call": True},
             {"premium": "100000", "is_call": False},
         ]
         result = analyze_options_flow(alerts)
         assert result["bias"] == "NEUTRAL"
-        assert result["call_put_ratio"] == 1.0
+        assert result["put_call_ratio"] == 1.0
 
     def test_real_uw_field_names(self):
         # UW /option-trades/flow-alerts returns total_premium (not premium)
@@ -244,7 +255,8 @@ class TestAnalyzeOptionsFlow:
         assert result["call_premium"] == 300000.0
         assert result["put_premium"] == 100000.0
         assert result["bias"] == "STRONGLY_BULLISH"
-        assert result["call_put_ratio"] == 3.0
+        assert result["put_call_ratio"] == 0.33
+        assert "call_put_ratio" not in result
 
 
 # ── fetch_flow combined signal ──────────────────────────────────────

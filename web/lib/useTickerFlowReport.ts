@@ -57,6 +57,8 @@ export type FlowReportData = {
   };
   options_flow?: {
     bias?: string;
+    put_call_ratio?: number | null;
+    /** @deprecated Compatibility for flow reports cached before the P/C migration. */
     call_put_ratio?: number | null;
     call_premium?: number;
     put_premium?: number;
