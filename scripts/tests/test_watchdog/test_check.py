@@ -272,3 +272,80 @@ class TestSeverityMapping:
             market_state="closed",
         )
         assert outcome.severity == "P2"
+
+
+class TestCircuitBreakerEmbargo:
+    """A writer whose own circuit breaker scheduled the next attempt is not
+    a fresh incident every cycle.
+
+    2026-08-06 digest: `cash-flow-sync ×21 — Flex throttle (code 1001)`. One
+    Flex throttle engages a 24h embargo BY DESIGN; the hourly daily bucket
+    then enqueued one digest entry per cycle for the whole embargo. The
+    cooldown gate gates Pushover but `_enqueue_digest` runs per fired
+    outcome, so the transition rule never reached the digest.
+
+    Contract: fire through hysteresis (the operator learns about the
+    throttle), then stay quiet while that embargo holds; fire again once
+    the deadline passes and the row is STILL error (the retry failed).
+    """
+
+    EMBARGO_ERR = {
+        "message": (
+            "ERR: cash flow fetch failed: Flex throttle (code 1001): "
+            "Statement could not be generated at this time."
+        ),
+        "next_attempt_at": "2026-08-07T21:08:47Z",
+    }
+    NOW = datetime(2026, 8, 6, 22, 0, tzinfo=timezone.utc)
+
+    def _run(self, db_conn, now, error):
+        from watchdog import check
+
+        _seed_service_health(db_conn, "cash-flow-sync", "error", now, error=error)
+        return check.check_service(
+            service="cash-flow-sync", kind="error", now=now, market_state="closed"
+        )
+
+    def test_fires_through_hysteresis_then_suppresses_within_embargo(self, db_conn):
+        first = self._run(db_conn, self.NOW, self.EMBARGO_ERR)
+        assert first.fired is False  # hysteresis
+        second = self._run(db_conn, self.NOW + timedelta(hours=1), self.EMBARGO_ERR)
+        assert second.fired is True  # operator learns about the throttle
+
+        # Every later cycle inside the embargo is the SAME condition.
+        for hour in range(2, 8):
+            later = self._run(db_conn, self.NOW + timedelta(hours=hour), self.EMBARGO_ERR)
+            assert later.fired is False, f"re-fired {hour}h into a live embargo"
+            assert "embargo" in later.message.lower()
+
+    def test_fires_again_once_the_embargo_deadline_passes(self, db_conn):
+        self._run(db_conn, self.NOW, self.EMBARGO_ERR)
+        self._run(db_conn, self.NOW + timedelta(hours=1), self.EMBARGO_ERR)
+        self._run(db_conn, self.NOW + timedelta(hours=2), self.EMBARGO_ERR)
+        after = self._run(db_conn, datetime(2026, 8, 7, 22, 0, tzinfo=timezone.utc),
+                          self.EMBARGO_ERR)
+        assert after.fired is True
+
+    def test_error_without_embargo_metadata_is_unchanged(self, db_conn):
+        plain = {"message": "boom"}
+        self._run(db_conn, self.NOW, plain)
+        second = self._run(db_conn, self.NOW + timedelta(hours=1), plain)
+        assert second.fired is True
+        third = self._run(db_conn, self.NOW + timedelta(hours=2), plain)
+        assert third.fired is True
+
+    def test_past_next_attempt_at_does_not_suppress(self, db_conn):
+        stale_embargo = {"message": "boom", "next_attempt_at": "2026-08-05T00:00:00Z"}
+        self._run(db_conn, self.NOW, stale_embargo)
+        second = self._run(db_conn, self.NOW + timedelta(hours=1), stale_embargo)
+        assert second.fired is True
+        third = self._run(db_conn, self.NOW + timedelta(hours=2), stale_embargo)
+        assert third.fired is True
+
+    def test_malformed_next_attempt_at_does_not_suppress(self, db_conn):
+        bad = {"message": "boom", "next_attempt_at": "not-a-timestamp"}
+        self._run(db_conn, self.NOW, bad)
+        second = self._run(db_conn, self.NOW + timedelta(hours=1), bad)
+        assert second.fired is True
+        third = self._run(db_conn, self.NOW + timedelta(hours=2), bad)
+        assert third.fired is True

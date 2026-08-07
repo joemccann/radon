@@ -212,6 +212,24 @@ def check_service(*, service: str, kind: str, now: datetime, market_state: str) 
     return _check_stale(service=service, health=health, now=now, market_state=market_state)
 
 
+def _embargo_deadline(err: Any) -> Optional[datetime]:
+    """The writer's own next-attempt deadline from its error payload, or None.
+
+    Written by the throttle-aware handlers (``next_attempt_at``); absent or
+    malformed values never suppress — an unparseable embargo is no embargo.
+    """
+    if not isinstance(err, dict):
+        return None
+    raw = err.get("next_attempt_at")
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+
+
 def _check_error(*, service: str, health: Optional[dict], now: datetime, market_state: str) -> CheckOutcome:
     """`error` bucket — fire iff the row's state is 'error'."""
     if not health or health.get("state") != "error":
@@ -236,12 +254,33 @@ def _check_error(*, service: str, health: Optional[dict], now: datetime, market_
     decision = cooldown_mod.record_failure_and_decide(service=service, kind="error", now=now)
     severity = _resolve_severity(service=service, kind="error", market_state=market_state)
     msg = f"in error state: {err_msg or 'unknown'}"
+
+    # One alert per condition-transition, not per cycle. A writer that
+    # scheduled its own next attempt (Flex throttle -> 24h circuit breaker)
+    # holds an `error` row for the whole embargo BY DESIGN; the digest
+    # enqueues every fired outcome, so an untreated embargo became
+    # "cash-flow-sync ×21" (2026-08-06). Fire through hysteresis so the
+    # operator learns about it, then stay quiet until the deadline passes —
+    # if the retry then fails, the row keeps firing normally.
+    embargo_until = _embargo_deadline(err)
+    fired = decision.should_fire
+    if (
+        fired
+        and embargo_until is not None
+        and embargo_until > now
+        and decision.consecutive_failures > cooldown_mod.HYSTERESIS_THRESHOLD
+    ):
+        fired = False
+        msg = (
+            f"{msg} (embargoed by its own circuit breaker until "
+            f"{embargo_until.isoformat().replace('+00:00', 'Z')}; alert already sent)"
+        )
     return CheckOutcome(
         service=service,
         kind="error",
         status="error",
         severity=severity,
-        fired=decision.should_fire,
+        fired=fired,
         message=msg,
         consecutive_failures=decision.consecutive_failures,
         now=now,
