@@ -51,7 +51,17 @@ _AUTH_COOKIE_PREFIXES = ("cognito", "__Secure-authjs.session-token")
 SESSION_URL = "https://dashboard.menthorq.io/api/auth/session"
 BOOTSTRAP_URL = "https://dashboard.menthorq.io/en/options/exposure?symbol=MU"
 API_ROOT = "https://gateway.menthorq.io/clickhouse-api/api/web/v1"
+# A real Chrome UA: the WAF in front of menthorq.com serves a bot
+# challenge to Playwright's default "HeadlessChrome" agent, which is
+# why the automated re-login silently failed (2026-08-07).
+_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
+    "(KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36"
+)
 DEFAULT_TIMEOUT_SECONDS = 20.0
+# The full WordPress -> Cognito -> dashboard chain needs more than a
+# single API call's budget; measured ~15s on the VPS.
+DEFAULT_LOGIN_TIMEOUT_SECONDS = 60.0
 
 _FREQUENCIES = {"eod", "intraday"}
 _SYMBOL_RE = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
@@ -194,12 +204,19 @@ class MenthorQDashboardClient:
     ) -> None:
         env_token = os.environ.get("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "").strip()
         self._access_token = (access_token or env_token).strip() or None
+        # An EXPLICIT access_token= is a caller assertion ("use this one"),
+        # so an expired one fails loudly. The ENV override is ambient
+        # operational config and degrades to the jar instead.
+        self._token_is_explicit = bool((access_token or "").strip())
         configured_path = os.environ.get("MENTHORQ_DASHBOARD_STORAGE_STATE", "").strip()
         self._storage_state_path = Path(
             storage_state_path or configured_path or DEFAULT_STORAGE_STATE_PATH
         )
         self._http = http_session or requests.Session()
         self._timeout_seconds = max(1.0, float(timeout_seconds))
+        self._login_timeout_seconds = max(
+            self._timeout_seconds, DEFAULT_LOGIN_TIMEOUT_SECONDS
+        )
         self._username = (username or os.environ.get("MENTHORQ_USER", "")).strip() or None
         self._password = (password or os.environ.get("MENTHORQ_PASS", "")).strip() or None
 
@@ -222,6 +239,14 @@ class MenthorQDashboardClient:
 
     def _resolve_access_token(self) -> str:
         token = self._access_token
+        # An operational override is a SHORTCUT, never a dead end: once it
+        # lapses, fall through to the self-refreshing jar instead of failing
+        # with a perfectly good session on disk (2026-08-07 — the 12h stopgap
+        # token would otherwise have re-broken /options/net-gex on expiry).
+        if token is not None and not self._token_is_explicit:
+            expiry = _jwt_expiry(token)
+            if expiry is not None and expiry <= time.time():
+                token = None
         if token is None:
             if self._storage_state_path.is_file():
                 self._ensure_private_storage_state()
@@ -263,8 +288,19 @@ class MenthorQDashboardClient:
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
-                context = browser.new_context(storage_state=str(self._storage_state_path))
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
+                # Same WAF constraint as the bootstrap: without a real UA the
+                # challenge returns HTML and response.json() raises. This is
+                # the DURABLE path — it runs on every call — so a jar that
+                # cannot be spent here is as broken as no jar at all.
+                context = browser.new_context(
+                    storage_state=str(self._storage_state_path),
+                    user_agent=_BROWSER_USER_AGENT,
+                    viewport={"width": 1440, "height": 900},
+                )
                 response = context.request.get(
                     SESSION_URL,
                     timeout=int(self._timeout_seconds * 1000),
@@ -322,13 +358,23 @@ class MenthorQDashboardClient:
             from playwright.sync_api import sync_playwright
 
             with sync_playwright() as playwright:
-                browser = playwright.chromium.launch(headless=True)
-                context = browser.new_context()
+                browser = playwright.chromium.launch(
+                    headless=True,
+                    args=["--disable-blink-features=AutomationControlled"],
+                )
+                # MenthorQ sits behind AWS WAF (the jar carries an
+                # aws-waf-token). Playwright's default UA announces
+                # "HeadlessChrome" and the login silently never completes —
+                # the 2026-08-07 outage. A real UA completes it headlessly.
+                context = browser.new_context(
+                    user_agent=_BROWSER_USER_AGENT,
+                    viewport={"width": 1440, "height": 900},
+                )
                 page = context.new_page()
                 page.goto(
                     BOOTSTRAP_URL,
                     wait_until="domcontentloaded",
-                    timeout=int(self._timeout_seconds * 1000),
+                    timeout=int(self._login_timeout_seconds * 1000),
                 )
                 username = page.locator('input[name="log"]')
                 password = page.locator('input[name="pwd"]')
@@ -344,6 +390,19 @@ class MenthorQDashboardClient:
                 username.fill(self._username or "")
                 password.fill(self._password or "")
                 submit.click()
+
+                # WordPress -> Cognito -> dashboard. /api/auth/session returns
+                # null until that chain LANDS, so waiting for the destination
+                # is what makes the poll below meaningful rather than a race.
+                try:
+                    page.wait_for_url(
+                        "**dashboard.menthorq.io**",
+                        timeout=int(self._login_timeout_seconds * 1000),
+                    )
+                except Exception as exc:
+                    raise MenthorQDashboardAuthError(
+                        "dashboard authentication is unavailable"
+                    ) from exc
 
                 deadline = time.monotonic() + self._timeout_seconds
                 while time.monotonic() < deadline:
