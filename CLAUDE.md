@@ -45,7 +45,7 @@ Sub-directory CLAUDE.md files auto-load when cwd is anywhere under that subtree.
 
 ## ⛔ Mandatory Rules
 
-1. **Be concise.** No preamble.
+1. **Be extremely terse.** See §Response Format — it is a hard rule, not a preference.
 2. **Red/green TDD always.** Vitest (unit), chrome-cdp / Playwright (E2E). Target 95% coverage.
 3. **E2E browser verification for all UI work.** Primary `chrome-cdp`, fallback Playwright (`web/playwright.config.ts`).
 4. **API keys** in `.env` files. Never `~/.zshrc` unless fallback.
@@ -177,7 +177,21 @@ Schema: `scripts/db/migrations/0001_init.sql`. Writers: `scripts/db/writer.{js,p
 - [ ] Reconciliation, exit orders, CRI scan auto-running
 - [ ] Market hours: `TZ=America/New_York date +"%A %H:%M"` (9:30–16:00 ET, Mon–Fri)
 
-## Output Discipline
+## Response Format
+
+**Answer only what was asked. Bulleted lists by default.**
+
+- No preamble, no recap of the request, no narration of what you are about to do.
+- **Bullets over prose.** Prose paragraphs only when a bullet genuinely cannot carry it.
+- **Ship the outcome, not the journey.** No "what surfaced", "worth noting", "interesting", "one thing you should know", "also found", "for the record", "lessons". If it is not the answer to the prompt, cut it.
+- No tangents about adjacent bugs, other sessions' work, test flake, or process observations unless they BLOCK the requested task — then one bullet, no story.
+- No self-narration of reasoning, corrections, or how hard something was.
+- Verification = one line of evidence (counts, status codes, SHAs). Not a transcript.
+- Don't restate what a diff already says.
+- Follow-ups: at most one line, only if genuinely actionable. Otherwise omit.
+- Length target: under ~150 words unless the user asked for depth.
+
+## Trade Output Discipline
 
 - Always `signal → structure → Kelly math → decision`
 - State probabilities; flag uncertainty

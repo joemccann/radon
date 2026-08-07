@@ -17,9 +17,23 @@ This root file is intentionally small. Scoped `AGENTS.md` files live beside subs
 
 When a scoped `AGENTS.md` and this root file conflict, prefer the more specific scoped file. When `AGENTS.md` and `CLAUDE.md` conflict, prefer the newer, more specific rule and update the Codex file during the work.
 
+## Response Format
+
+**Answer only what was asked. Bulleted lists by default.**
+
+- No preamble, no recap of the request, no narration of what you are about to do.
+- **Bullets over prose.** Prose only when a bullet genuinely cannot carry it.
+- **Ship the outcome, not the journey.** No "what surfaced", "worth noting", "interesting", "one thing you should know", "also found", "for the record", "lessons". If it is not the answer to the prompt, cut it.
+- No tangents about adjacent bugs, other sessions' work, test flake, or process observations unless they BLOCK the requested task — then one bullet, no story.
+- No self-narration of reasoning, corrections, or how hard something was.
+- Verification = one line of evidence (counts, status codes, SHAs). Not a transcript.
+- Don't restate what a diff already says.
+- Follow-ups: at most one line, only if genuinely actionable. Otherwise omit.
+- Length target: under ~150 words unless the user asked for depth.
+
 ## Workflow
 
-- Be concise. No preamble.
+- Be extremely terse. See §Response Format — a hard rule, not a preference.
 - Think before coding. State assumptions, surface tradeoffs, and ask only when ambiguity blocks safe progress.
 - Keep changes surgical. Touch only what the task requires; do not refactor adjacent code opportunistically.
 - Simplicity first. Do not add speculative features or abstractions without a concrete need.
