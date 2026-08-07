@@ -336,9 +336,21 @@ class TestExpiredJarFailsFast:
         import time as _time
         from clients import menthorq_dashboard_client as mod
 
+        # `username=""` is FALSY, so the constructor falls back to
+        # MENTHORQ_USER/PASS from .env — which made this test perform a REAL
+        # login. Blank the env so the credential path is genuinely absent.
+        monkeypatch.setenv("MENTHORQ_USER", "")
+        monkeypatch.setenv("MENTHORQ_PASS", "")
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "")
         jar = self._jar(tmp_path, _time.time() - 86_400)
         client = mod.MenthorQDashboardClient(
             storage_state_path=jar, username="", password="",
+        )
+        monkeypatch.setattr(
+            client, "_bootstrap_dashboard_session",
+            lambda: (_ for _ in ()).throw(
+                AssertionError("must not attempt a live login in a unit test")
+            ),
         )
         called = {"storage": 0}
 
@@ -352,6 +364,9 @@ class TestExpiredJarFailsFast:
         assert called["storage"] == 0
 
     def test_live_jar_still_reads_through_the_browser(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MENTHORQ_USER", "")
+        monkeypatch.setenv("MENTHORQ_PASS", "")
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "")
         import time as _time
         from clients import menthorq_dashboard_client as mod
 
@@ -363,6 +378,9 @@ class TestExpiredJarFailsFast:
         assert client._resolve_access_token() == "token-abc"
 
     def test_jar_without_expiry_metadata_is_not_treated_as_expired(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("MENTHORQ_USER", "")
+        monkeypatch.setenv("MENTHORQ_PASS", "")
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", "")
         """Session cookies (expires = -1) carry no deadline — absence of
         metadata must never be read as expiry."""
         import json
@@ -379,3 +397,58 @@ class TestExpiredJarFailsFast:
         )
         monkeypatch.setattr(client, "_token_from_storage_state", lambda: "token-xyz")
         assert client._resolve_access_token() == "token-xyz"
+
+
+class TestExpiredOverrideTokenFallsBack:
+    """An EXPIRED operational override must not be a dead end.
+
+    `_resolve_access_token` returns the env token untouched, then rejects it
+    on expiry — WITHOUT trying the jar. So the 12h stopgap token installed
+    on 2026-08-07 would have broken /options/net-gex again the moment it
+    lapsed, even with a perfectly good self-refreshing jar on disk.
+    """
+
+    def test_expired_env_token_falls_back_to_the_jar(self, tmp_path, monkeypatch):
+        import base64, json as _json, time as _time
+        from clients import menthorq_dashboard_client as mod
+
+        def _jwt(exp: float) -> str:
+            body = base64.urlsafe_b64encode(_json.dumps({"exp": exp}).encode()).decode().rstrip("=")
+            return f"header.{body}.sig"
+
+        jar = tmp_path / "jar.json"
+        jar.write_text(_json.dumps({"cookies": [{
+            "name": "cognito", "value": "x", "domain": ".menthorq.io",
+            "path": "/", "expires": _time.time() + 7 * 86_400,
+        }], "origins": []}))
+        jar.chmod(0o600)
+
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", _jwt(_time.time() - 60))
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="u", password="p",
+        )
+        monkeypatch.setattr(client, "_token_from_storage_state", lambda: _jwt(_time.time() + 3600))
+        monkeypatch.setattr(
+            client, "_bootstrap_dashboard_session",
+            lambda: (_ for _ in ()).throw(AssertionError("jar was usable; must not re-login")),
+        )
+        assert client._resolve_access_token().startswith("header.")
+
+    def test_live_env_token_is_still_preferred(self, tmp_path, monkeypatch):
+        import base64, json as _json, time as _time
+        from clients import menthorq_dashboard_client as mod
+
+        body = base64.urlsafe_b64encode(
+            _json.dumps({"exp": _time.time() + 3600}).encode()
+        ).decode().rstrip("=")
+        live = f"header.{body}.sig"
+        monkeypatch.setenv("MENTHORQ_DASHBOARD_ACCESS_TOKEN", live)
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=tmp_path / "absent.json",
+            username="u", password="p",
+        )
+        monkeypatch.setattr(
+            client, "_bootstrap_dashboard_session",
+            lambda: (_ for _ in ()).throw(AssertionError("must not log in with a live token")),
+        )
+        assert client._resolve_access_token() == live
