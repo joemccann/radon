@@ -148,6 +148,40 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
   const maxExposure = Math.max(1, ...rows.map((row) => Math.abs(row.value)));
   const maxOi = Math.max(1, ...rows.flatMap((row) => [row.putOi, row.callOi]));
 
+  // PNG export of exactly what is on screen: the model is built from the same
+  // `rows` the table renders plus the live control state, so the image can
+  // never disagree with the panel.
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
+  const handleExportPng = async () => {
+    if (!data) return;
+    setExporting(true);
+    setExportError(null);
+    try {
+      const { buildExposureChartModel, downloadExposureChart } = await import("@/lib/options/exposureChart");
+      const selected = expirationDates ? [...expirationDates] : null;
+      const expirationLabel = selected == null
+        ? "All Expirations"
+        : selected.map((d) => formatExpiration(d)).join(", ") || "All Expirations";
+      await downloadExposureChart(buildExposureChartModel({
+        symbol: data.symbol,
+        spot: data.spot,
+        sourceTime: data.source_time,
+        metric,
+        strikeWindow,
+        frequency,
+        visibleLevels: [...visibleLevels],
+        expirationLabel,
+        rows,
+        complete: data.complete,
+      }));
+    } catch (err) {
+      setExportError(err instanceof Error ? err.message : "PNG export failed.");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (loading && !data) {
     return (
       <section className={styles.panel} data-testid="options-exposure-panel" data-responsive="instrument" aria-label="Options exposure">
@@ -198,8 +232,21 @@ export default function OptionsExposurePanel({ symbol }: OptionsExposurePanelPro
         <div className={styles.telemetry}>
           <time dateTime={data.source_time}>{formatTimestamp(data.source_time)}</time>
           <span>SPOT {formatStrike(data.spot)}</span>
+          <button
+            type="button"
+            className={styles.exportButton}
+            onClick={handleExportPng}
+            disabled={exporting || rows.length === 0}
+            aria-label="Export chart as PNG"
+            data-testid="options-exposure-export"
+          >
+            {exporting ? "Exporting…" : "Export PNG"}
+          </button>
         </div>
       </header>
+      {exportError ? (
+        <div className={styles.exportError} role="alert">{exportError}</div>
+      ) : null}
 
       <div className={styles.controls} data-testid="options-exposure-controls">
         <label className={styles.field}>
