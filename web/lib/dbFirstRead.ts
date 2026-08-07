@@ -123,6 +123,9 @@ async function readSource<T>(
 ): Promise<TimestampedRead<T> | null> {
   const identity: DbOperationIdentity | undefined =
     sourceName === "DB" ? createDbOperationIdentity() : undefined;
+  // Stamp the caller's label so a teardown triggered here is attributable
+  // in journald (2026-08-06: `trigger=unlabelled` was undiagnosable).
+  if (identity) identity.label = label ? `dbFirstRead:${label}` : "dbFirstRead";
   try {
     const pending = identity ? runWithDbOperation(identity, read) : read();
     return (await withTimeout(

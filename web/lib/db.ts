@@ -386,11 +386,7 @@ export function getDb(): Client {
     );
   }
 
-  const useReplica = (
-    process.env.NODE_ENV !== "test" &&
-    process.env.RADON_DB_USE_REPLICA === "1" &&
-    process.env.RADON_DB_NO_REPLICA !== "1"
-  );
+  const useReplica = isReplicaEnabled();
 
   const raw = createClient(
     useReplica
@@ -445,11 +441,32 @@ export function getDemoDb(): Client {
 }
 
 // Legacy convenience for explicit replica opt-in callers.
+/** True only when an embedded replica is actually in use. The replica was
+ * retired 2026-05-20 (direct-to-cloud, DUR-07); it needs an explicit opt-in
+ * and the legacy kill switch always wins. */
+function isReplicaEnabled(): boolean {
+  return (
+    process.env.NODE_ENV !== "test" &&
+    process.env.RADON_DB_USE_REPLICA === "1" &&
+    process.env.RADON_DB_NO_REPLICA !== "1"
+  );
+}
+
+/** Pull cloud state into the embedded replica — a no-op without one.
+ *
+ * Gated on the replica actually being ENABLED, never on the presence of a
+ * `sync` method: @libsql/client's HTTP client DEFINES sync() and throws
+ * `SYNC_NOT_SUPPORTED`, so the old `"sync" in db` feature-check passed and
+ * threw on every call. readOrdersFromDb's catch then armed a pool teardown
+ * on EVERY /orders read; two arms inside the cluster window escalated to a
+ * real Agent.destroy() that aborted unrelated in-flight requests
+ * (UND_ERR_DESTROYED → 503s on watchlist/profile/portfolio, 2026-08-06). */
 export async function syncDb(): Promise<void> {
+  if (!isReplicaEnabled()) return;
   const db = getDb();
-  if ("sync" in db && typeof (db as { sync?: () => Promise<unknown> }).sync === "function") {
-    await (db as { sync: () => Promise<unknown> }).sync();
-  }
+  const sync = (db as { sync?: () => Promise<unknown> }).sync;
+  if (typeof sync !== "function") return;
+  await sync.call(db);
 }
 
 // Test seam — drop the cached clients + pool between vitest tests.
