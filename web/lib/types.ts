@@ -91,6 +91,17 @@ export type PortfolioLeg = {
   market_price_is_calculated?: boolean;
 };
 
+export type PositionReturnCapitalPayload = {
+  amount: number | null;
+  kind: "opening-margin";
+  source: string | null;
+  as_of: string | null;
+  quality: "exact" | "fill-linked" | "estimated";
+  fill_linked: boolean;
+};
+
+export type LegacyEntryMarginMetadata = Omit<PositionReturnCapitalPayload, "amount">;
+
 export type PortfolioPosition = {
   id: number;
   ticker: string;
@@ -102,6 +113,14 @@ export type PortfolioPosition = {
   direction: string;
   entry_cost: number;
   max_risk: number | null;
+  /**
+   * Legacy projected margin field. It is not a valid return denominator unless
+   * `init_margin_at_entry_metadata` proves the value is fill-linked.
+   */
+  init_margin_at_entry?: number | null;
+  init_margin_at_entry_metadata?: LegacyEntryMarginMetadata | null;
+  /** Future-facing, fill-linked capital basis from the position ledger. */
+  return_capital?: PositionReturnCapitalPayload | null;
   market_value: number | null;
   legs: PortfolioLeg[];
   market_price_is_calculated?: boolean;

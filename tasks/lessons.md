@@ -1,5 +1,11 @@
 # Lessons
 
+## 2026-08-07 — Credit-position return must use risk capital, not net premium
+
+- `P&L / abs(net entry premium)` is only a premium-return statistic. For credit and undefined-risk structures it can report extreme percentages while ignoring the buying power used to carry short-option risk.
+- Keep signed entry cost for dollar P&L (`MV - entry`), but use verified position capital for the percentage denominator: max risk for defined-risk structures, full-loss debit for long stock/all-long options, and a fill-linked opening-margin basis for undefined-risk structures. If that denominator is unavailable, show `N/A` rather than falling back to the opening credit.
+- Persist any broker margin basis as an immutable, fill-linked lifecycle event with source/time provenance. A projected what-if is not filled-position capital, a later close-order preview measures current marginal relief, and portfolio-margin offsets make position margins non-additive.
+
 ## 2026-08-01 — Worthless option expiry must synthesize $0 closes
 
 - IB often writes no journal fill when OTM options lapse. `computeRealizedPnl` only saw CLOSED rows or opposite-side fills, so residual inventory (e.g. KWEB 1500× $31C Jul-17) never became realized P&L and monthly totals understated large debit losses.

@@ -164,6 +164,7 @@ describe("computeUnrealizedBreakdown — signed entry and market value", () => {
     expect(row.pnl).toBeCloseTo(41_002.57, 2);
     expect(row.col1).toBe("-$9,002.57");
     expect(row.col2).toBe("+$32,000.00");
+    expect(row.pnlPct).toBeNull();
 
     const parseSigned = (s: string) => Number(s.replace(/[$,+]/g, ""));
     expect(parseSigned(row.col2) - parseSigned(row.col1)).toBeCloseTo(row.pnl, 2);
@@ -204,6 +205,7 @@ describe("computeUnrealizedBreakdown — signed entry and market value", () => {
     expect(rows[0].col1).toBe("+$468,505.27");
     expect(rows[0].col2).toBe("+$448,930.00");
     expect(rows[0].pnl).toBeCloseTo(448_930 - 468_505.27, 2);
+    expect(rows[0].pnlPct).toBeCloseTo((448_930 - 468_505.27) / 468_505.27 * 100, 6);
   });
 
   test("sumUnrealizedBreakdown matches row P&L total", () => {
@@ -272,5 +274,6 @@ describe("computeUnrealizedBreakdown — signed entry and market value", () => {
     const rowSum = rows.reduce((s, r) => s + r.pnl, 0);
     expect(sumUnrealizedBreakdown(portfolio)).toBeCloseTo(rowSum, 2);
     expect(rowSum).toBeCloseTo((3_150 - 44_383.38) + (40_040 - 40_076.51), 2);
+    expect(rows[0].pnlPct).toBeCloseTo((3_150 - 44_383.38) / 44_383.38 * 100, 6);
   });
 });

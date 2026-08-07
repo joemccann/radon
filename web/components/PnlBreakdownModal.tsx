@@ -22,6 +22,7 @@ type Props = {
   formula: string;
   col1Header: string;
   col2Header: string;
+  pctHeader?: string;
   rows: PnlBreakdownRow[];
   total: number;
   totalLabel?: string;
@@ -30,7 +31,7 @@ type Props = {
 };
 
 export default function PnlBreakdownModal({
-  open, title, formula, col1Header, col2Header, rows, total, totalLabel = "TOTAL", onClose, className = "",
+  open, title, formula, col1Header, col2Header, pctHeader = "%", rows, total, totalLabel = "TOTAL", onClose, className = "",
 }: Props) {
   const columns: MetricBreakdownColumn[] = [
     { header: "TICKER" },
@@ -38,7 +39,7 @@ export default function PnlBreakdownModal({
     { header: col1Header, className: "text-right" },
     { header: col2Header, className: "text-right" },
     { header: "P&L", className: "text-right" },
-    { header: "%", className: "text-right" },
+    { header: pctHeader, className: "text-right" },
   ];
 
   const breakdownRows: MetricBreakdownRow[] = rows.map((row) => ({
