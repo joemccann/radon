@@ -38,6 +38,8 @@ type FlowReportLike = {
   } | null;
   options_flow?: {
     bias?: string | null;
+    put_call_ratio?: number | null;
+    /** @deprecated Compatibility for flow reports cached before the P/C migration. */
     call_put_ratio?: number | null;
   } | null;
   combined_signal?: string | null;

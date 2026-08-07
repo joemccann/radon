@@ -70,7 +70,7 @@ function bullishReport(ticker: string, fetchedAt: string) {
     },
     options_flow: {
       bias: "BULLISH",
-      call_put_ratio: 1.85,
+      put_call_ratio: 0.54,
       call_premium: 1_500_000,
       put_premium: 810_000,
       total_alerts: 24,
@@ -150,7 +150,27 @@ test.describe("Flow Analysis per-ticker route", () => {
     // Report sections render
     await expect(page.locator(".ticker-flow-report")).toContainText(/Dark Pool Aggregate/i);
     await expect(page.locator(".ticker-flow-report")).toContainText(/Options Flow Bias/i);
+    await expect(page.locator(".ticker-flow-report")).toContainText("Put/Call Ratio");
+    await expect(page.locator(".ticker-flow-report")).toContainText("0.54");
+    await expect(page.locator(".ticker-flow-report")).not.toContainText("Call/Put Ratio");
     await expect(page.locator(".ticker-flow-report")).toContainText(/Daily Dark Pool History/i);
+  });
+
+  test("mobile options tab renders the put/call convention", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await setupBaseMocks(page);
+    const fresh = bullishReport("AAPL", new Date().toISOString());
+    await page.route("**/api/flow-analysis/AAPL**", (r) =>
+      r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(fresh) }),
+    );
+
+    await page.goto("/flow-analysis/AAPL");
+    await page.getByRole("tab", { name: "Options" }).click();
+
+    const report = page.getByTestId("ticker-flow-report");
+    await expect(report).toContainText("P/C Ratio");
+    await expect(report).toContainText("0.54");
+    await expect(report).not.toContainText("C/P Ratio");
   });
 
   test("missing cache triggers a scan and shows the analyzing state", async ({ page }) => {

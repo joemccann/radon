@@ -4,6 +4,7 @@ import { ArrowDownRight, ArrowUpRight, Minus, RefreshCw } from "lucide-react";
 import { useMemo, useState } from "react";
 import { useTickerFlowReport, type FlowReportData } from "@/lib/useTickerFlowReport";
 import { classifyFlowSignal, type FlowDirection } from "@/lib/flowSignal";
+import { resolvePutCallRatio } from "@/lib/flowRatio";
 import SignalCard from "@/components/mobile/SignalCard";
 import { useViewport } from "@/lib/useViewport";
 
@@ -90,6 +91,7 @@ function MobileTickerFlowReport({
 
   const dpAgg = data?.dark_pool?.aggregate ?? {};
   const optionsFlow = data?.options_flow ?? {};
+  const putCallRatio = resolvePutCallRatio(optionsFlow);
   const daily = (data?.dark_pool?.daily ?? [])
     .slice()
     .sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
@@ -306,9 +308,9 @@ function MobileTickerFlowReport({
               </span>
             </div>
             <div className="m-metric">
-              <span className="m-metric__label">C/P Ratio</span>
+              <span className="m-metric__label">P/C Ratio</span>
               <span className="m-metric__value m-metric__value--primary">
-                {optionsFlow.call_put_ratio != null ? optionsFlow.call_put_ratio.toFixed(2) : "---"}
+                {putCallRatio != null ? putCallRatio.toFixed(2) : "---"}
               </span>
             </div>
             <div className="m-metric">
@@ -550,6 +552,7 @@ function ReportSections({
   const buyPct = typeof buyRatio === "number" ? Math.round(buyRatio * 100) : null;
   const sellPct = typeof buyRatio === "number" ? 100 - Math.round(buyRatio * 100) : null;
   const optionsFlow = data.options_flow ?? {};
+  const putCallRatio = resolvePutCallRatio(optionsFlow);
   const dailyAll = data.dark_pool?.daily ?? [];
   const daily = dailyAll.slice().sort((a, b) => (b.date ?? "").localeCompare(a.date ?? ""));
 
@@ -602,8 +605,8 @@ function ReportSections({
             tone={optionsBiasTone(optionsFlow.bias)}
           />
           <Metric
-            label="Call/Put Ratio"
-            value={optionsFlow.call_put_ratio == null ? "--" : optionsFlow.call_put_ratio.toFixed(2)}
+            label="Put/Call Ratio"
+            value={putCallRatio == null ? "--" : putCallRatio.toFixed(2)}
           />
           <Metric
             label="Call Premium"
