@@ -8,6 +8,17 @@ Usage:
   python3 scripts/generate_cta_share.py
   python3 scripts/generate_cta_share.py --json    # print output path as JSON
   python3 scripts/generate_cta_share.py --date 2026-03-19
+
+Copy is written from the payload by a deterministic template. An LLM can write
+it instead, OFF by default and opt-in per run:
+
+  RADON_CTA_LLM_COPY=1 python3 scripts/generate_cta_share.py
+
+That path needs `pip install anthropic` and ANTHROPIC_API_KEY (web/.env);
+RADON_CTA_LLM_MODEL overrides the model (default claude-opus-5). Every figure
+in the generated copy is checked back against the payload facts, and anything
+that fails to verify falls back to the template. Missing key, missing SDK,
+timeout, or API error all fall back too: the share is never blocked.
 """
 
 from __future__ import annotations
@@ -33,6 +44,7 @@ from utils.cta_history import (  # noqa: E402
     load_prior_payloads,
     payload_is_valid,
 )
+from utils.cta_llm import generate_share_copy  # noqa: E402
 from utils.cta_sync import latest_closed_trading_day  # noqa: E402
 
 CACHE_DIR = PROJECT_ROOT / "data" / "menthorq_cache"
@@ -885,6 +897,80 @@ def build_tweet(data: dict, ds: str, priors: Optional[list] = None) -> str:
     return "\n".join(parts)
 
 
+def build_llm_facts(data: dict, ds: str, priors: Optional[list] = None) -> dict:
+    """The complete figure set the copy is allowed to reference.
+
+    Anything absent from here is a figure the post may not contain, so an
+    unsupplied model output (est_selling_bn) stays None rather than acquiring
+    a default. This doubles as the whitelist the generated copy is checked
+    against.
+    """
+    main = data["tables"]["main"]
+    commodity_table = data["tables"].get("commodity", [])
+    a = assess_positioning(spx_row(data) or {})
+    nq = get_row(main, "nasdaq") or get_row(main, "nq")
+    bonds_10y = get_row(main, "10-year") or get_row(main, "10y")
+    gold = get_row(main, "gold") or get_row(commodity_table, "gold")
+
+    def leg(row: Optional[dict]) -> Optional[dict]:
+        if not row:
+            return None
+        r = assess_positioning(row)
+        return {
+            "name": clean_underlying_name(row.get("underlying", "")),
+            "position_today": r["today"],
+            "z_score_3m": r["z"],
+            "percentile_3m": r["pctile"],
+        }
+
+    return {
+        "as_of_date": ds,
+        "spx": {
+            "position_today": a["today"],
+            "position_1m_ago": a["ago"],
+            "z_score_3m": a["z"],
+            "percentile_3m": a["pctile"],
+            "side": a["side"],
+            "is_extreme": a["is_extreme"],
+            "severity": a["severity"],
+            "risk_direction": a["risk_direction"],
+            "flipped": a["flipped"],
+        },
+        "nasdaq": leg(nq),
+        "bonds_10y": leg(bonds_10y),
+        "gold": leg(gold),
+        "crowded_commodity_longs": [
+            {
+                "name": clean_underlying_name(r.get("underlying", "")),
+                "percentile_3m": normalize_pctile(r.get("percentile_3m", 50)),
+            }
+            for r in (commodity_table or [])
+            if normalize_pctile(r.get("percentile_3m", 50)) >= 85
+        ],
+        "est_forced_selling_bn": est_selling_bn(data),
+        "change_since_prior_session": derive_change_context(
+            data, priors or [], assess=assess_positioning, find_spx=spx_row
+        ),
+        "lookback_window_months": 3,
+        "lookback_window_days": 30,
+    }
+
+
+def compose_share_copy(
+    data: dict,
+    ds: str,
+    priors: Optional[list] = None,
+    *,
+    env: Optional[dict] = None,
+    caller=None,
+) -> str:
+    """The copy that ships: LLM-written when opted in AND verified, else the template."""
+    template = build_tweet(data, ds, priors=priors)
+    return generate_share_copy(
+        build_llm_facts(data, ds, priors), template, env=env, caller=caller
+    )
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def main():
@@ -949,7 +1035,7 @@ def main():
             cards_b64.append("")
 
     # Build tweet text
-    tweet_text = build_tweet(data, ds, priors=load_prior_payloads(ds))
+    tweet_text = compose_share_copy(data, ds, load_prior_payloads(ds))
 
     # Build preview HTML
     preview_html = build_preview(
