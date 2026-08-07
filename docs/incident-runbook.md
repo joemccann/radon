@@ -208,6 +208,15 @@ Related guard: `cash_flow_sync` caps soft-failure retries at 3 SendRequests per
 ET day (`MAX_SOFT_ATTEMPTS_PER_ET_DAY`) so a timing-out Flex service cannot
 burn the sliding-window budget all evening.
 
+The PAGING watchdog (`scripts/watchdog/check.py:_check_error`) applies the same
+embargo rule independently of the incident classifier: an `error` row whose
+`last_error.next_attempt_at` is in the future fires through hysteresis (so the
+operator learns about it once) and then stays quiet until the deadline passes.
+Without this, a 24h Flex breaker produced one digest entry per hourly cycle —
+`cash-flow-sync ×21` on 2026-08-06 — because `notify._enqueue_digest` batches
+every fired outcome while `cooldown_allows_fire` only gates Pushover. A `×N`
+count on a latched daily handler is cycles-since-latch, never N incidents.
+
 `service-down`: `:8321/health/lite` connection-refused. Check
 `systemctl status radon-api` and journald; remember the cascade-stop rule — a
 cleanly stopped unit will NOT `Restart=always` back (`radon restart` respects
