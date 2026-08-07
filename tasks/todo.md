@@ -1,3 +1,347 @@
+# Task: Correct per-position return implementation (2026-08-07)
+
+## Goal
+
+Remove margin capture from the live order critical path, eliminate misleading premium-return fallbacks for credit/undefined-risk structures, centralize denominator semantics and provenance across portfolio surfaces, and replace unsafe persistence/lifecycle behavior with a safe unavailable state until a fill-linked broker basis exists.
+
+## Dependency graph
+
+- T1 depends_on: [] - Freeze the reviewed scope, establish red regression coverage for live placement isolation and return-basis policy, and preserve unrelated dirty work.
+- T2 depends_on: [T1] - Remove automatic what-if and synchronous margin persistence from live order placement; restore bounded placement timeouts.
+- T3 depends_on: [T1] - Implement a discriminated return-capital resolver with defined-risk, debit-paid, broker-margin, and unavailable semantics.
+- T4 depends_on: [T2] - Remove unsafe structure-key persistence, snapshot hydration, and linear Portfolio Margin scaling from the backend.
+- T5 depends_on: [T3] - Adopt the shared return resolver in desktop, mobile, ticker detail, and unrealized breakdown surfaces with accurate labels/provenance.
+- T6 depends_on: [T2, T3, T4, T5] - Run focused Python, Vitest, TypeScript, Playwright/browser verification, then full project suites and document results.
+
+## Checklist
+
+- [x] T1 Regression baseline and scope
+- [x] T2 Live order-path isolation
+- [x] T3 Return-capital resolver
+- [x] T4 Unsafe persistence removal
+- [x] T5 Cross-surface UI parity
+- [x] T6 Verification and review
+
+## Review
+
+- Removed the automatic live-order what-if and all post-acceptance margin persistence. Explicit `/orders/whatif` remains isolated; `/orders/place` is back to its 25-second subprocess budget and contains no native DB dependency.
+- Removed the uncommitted structure-key migration/helper, DB reader/writer, portfolio hydration, and linear scaling behavior. No projected or heuristic margin is attached to positions.
+- Added a provenance-bearing `return_capital` contract and one shared resolver. Priority is exact positive max risk, verified fill-linked opening margin, then full-loss debit (including long stock/all-long options); opening credits and bare/projected what-if values return unavailable.
+- Desktop table/sort, mobile cards, ticker detail, and unrealized breakdown now use the same dollar-P&L and Return % helpers. Labels/tooltips disclose max-risk, debit-paid, fill-linked margin, or unavailable basis.
+- Regression coverage includes live-place/preview isolation, SMART error 360, API DB/timeout safety, the 58-structure catalog, SPCX unavailable behavior, defined-risk priority, long/short stock, complex fill-linked margin, cross-surface parity, and desktop/mobile Playwright rendering.
+- Focused verification: 37 Python tests passed; 281 Vitest tests passed; TypeScript passed; Playwright desktop 1/1 and mobile 5/5 passed; rendered screenshot inspected successfully.
+- Full-suite verification: cloud Python 723 passed/2 skipped. Application Python reached 4,794 passed/13 skipped with 72.71% coverage after excluding an environment-missing `mcp` collection test; one unrelated stale `data/performance.json` fixture failed. Full Vitest reached 5,114 passed/26 skipped with one unrelated Theta Harvester timeout; later retries showed additional unrelated timeout flakiness under coverage load. Changed-surface tests remained green.
+- No broker calls, migrations, commits, or deployments were performed. Unrelated dirty files were preserved.
+
+---
+
+# Task: Review current per-position return implementation (2026-08-07)
+
+## Goal
+
+Review the newly present per-position margin/return implementation against its git history, IBKR semantics, Radon position identity, and cross-surface behavior; report only prioritized corrective changes without modifying application code.
+
+## Dependency graph
+
+- T1 depends_on: [] - Identify the relevant commit or working-tree diff and establish the exact review scope.
+- T2 depends_on: [T1] - Review backend capture, persistence, identity, and IBKR API correctness.
+- T3 depends_on: [T1] - Review frontend formulas, source labeling, cross-surface parity, and sorting.
+- T4 depends_on: [T2, T3] - Run focused static/test verification and rank findings by severity.
+- T5 depends_on: [T4] - Record a terse review and recommended modifications.
+
+## Checklist
+
+- [x] T1 Scope and history
+- [x] T2 Backend review
+- [x] T3 Frontend review
+- [x] T4 Verification
+- [x] T5 Review
+
+## Review
+
+- No ROE/margin implementation commit has landed: `HEAD` and `origin/main` remain `172a39bf`; the reviewed implementation is an uncommitted working-tree diff.
+- P0: automatic what-if runs on the live placement path. SMART BAG what-if is unsupported (IB error 360), shares the live order error buffer, consumes the same timeout budget, and can make an accepted real order appear failed.
+- P0: live placement then performs synchronous native DB persistence. A stalled write after IB acceptance creates the same ambiguous-order/duplicate-retry hazard.
+- P0: missing margin deliberately falls back to `abs(entry_cost)`, so the motivating SPCX credit structure still displays approximately 1,874% rather than unavailable.
+- P1: margin is a projected pre-trade account delta persisted at submission, not filled-position capital. The structure-only key cannot distinguish accounts, fills, lifecycles, conIds, calendars, or reopened positions; add/reduce handling linearly scales a non-linear PM value.
+- P1: defined-risk positions incorrectly prefer projected IB margin over exact maximum loss, and ticker detail/unrealized breakdown still use the old premium denominator.
+- Recommended redesign: remove automatic what-if and DB writes from live transmit; preview explicitly with pacing/idempotency; persist immutable estimates/fill events under a durable `position_id`/`orderRef`; use `max_risk` for defined risk, positive broker-derived opening basis for undefined risk, otherwise `N/A`; return denominator provenance and use one resolver across all surfaces.
+- Verification: focused Python suite passed 92 tests; focused Vitest suite passed 253 tests across five files; `npx tsc --noEmit` passed. Existing tests do not cover SMART error 360, post-transmit timeout ambiguity, cancellations/reopens, account separation, or lifecycle resizing.
+
+---
+
+# Task: Per-position IBKR margin function design (2026-08-07)
+
+## Goal
+
+Define an implementable, broker-grounded function that calculates per-position return on margin from the data IBKR actually exposes, including exact combo reconstruction, persistence, lifecycle semantics, fallbacks, and validation, without placing orders or changing application behavior.
+
+## Dependency graph
+
+- T1 depends_on: [] - Verify current IBKR API margin capabilities and limitations from official documentation.
+- T2 depends_on: [] - Trace Radon's position grouping, contract identifiers, BAG/what-if request construction, and current API response contract.
+- T3 depends_on: [] - Trace journal/order/portfolio persistence and identify the durable strategy identity and margin fields required.
+- T4 depends_on: [T1, T2, T3] - Specify opening-margin capture and current close-release algorithms, function signatures, formulas, labels, and failure behavior.
+- T5 depends_on: [T4] - Define migration/backfill strategy, regression matrix, and implementation sequence; review for Portfolio Margin and lifecycle correctness.
+
+## Checklist
+
+- [x] T1 IBKR capability verification
+- [x] T2 Radon execution-path trace
+- [x] T3 Persistence and lifecycle trace
+- [x] T4 Function and data-contract design
+- [x] T5 Review
+
+## Review
+
+- IBKR position, portfolio-update, and per-contract P&L callbacks expose contract identity, quantity, basis, value, and P&L but no position margin. `InitMarginReq` and `MaintMarginReq` are explicitly whole-portfolio account values.
+- A closing-order what-if can measure a supported position's signed current marginal contribution as `-InitMarginChange`, but this is portfolio-dependent, non-additive, and not historical opening margin. Preserve zero/negative contributions; return percentage is unavailable unless the denominator is positive.
+- Critical limitation: official TWS error 360 says SMART combo orders have no what-if support, so equity-option SMART risk reversals and ratio structures such as SPCX cannot receive broker-derived combo margin through Radon's current path. Separate-leg previews are not equivalent and must not be summed.
+- The implementable design is a tiered `resolve_position_capital_basis`: defined-risk positions use payoff-derived max loss; supported single/direct-routed orders may use persisted opening IB margin impact or current signed close-release; Reg-T accounts may use an explicitly labeled IB-formula standalone estimate; Portfolio Margin SMART combos return unavailable unless an entry-time observed basis or validated external risk result exists.
+- Opening basis must be captured prospectively. Generate a durable `position_id`, send it in IB `orderRef`, persist before/change/after margin fields with route, exact leg `conId`s/ratios/quantities/price/account/timestamp, and associate later fills by `permId`/`execId`. For unsupported SMART combos, bracket the actual fill with account-margin observations only when no concurrent account/position event occurred, and mark the result `observed-account-delta` rather than exact allocation.
+- Current portfolio rows are not margin-ready: grouping is only `(ticker, expiry)`, row IDs are regenerated ordinals, raw `conId` is dropped, and the position trade builder hardcodes 1:1 ratios and omits stock legs. A server-side position function requires stable lifecycle identity plus exact per-leg contract metadata and must never trust browser-reconstructed contracts.
+- Do not run per-row what-if on refresh. IB recommends no more than one what-if request per minute, about ten submitted orders per what-if, and cancellation after review. Use the persistent orders connection, an account-wide limiter, durable cache, as-of timestamps, and explicit unsupported/error-360 states.
+- No application or broker state was changed. This task produced the design and identified that the current uncommitted browser Reg-T estimator cannot serve as durable or broker-exact position margin.
+
+---
+
+# Task: Position P&L percentage versus margin-based ROE (2026-08-07)
+
+## Goal
+
+Trace the portfolio position P&L and P&L-percent calculations, reproduce the SPCX credit-position result, determine whether position-level margin is available, and recommend an accurate return-on-equity metric for undefined-risk structures without changing live broker or UI state.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace the desktop/mobile position-row P&L dollar and percentage calculation from rendered cells through shared helpers and payload fields.
+- T2 depends_on: [] - Trace IBKR/account margin fields and determine whether Radon stores position- or order-level margin for existing positions.
+- T3 depends_on: [T1, T2] - Reproduce the SPCX ratio-risk-reversal math and identify why a credit entry produces the displayed 1,873.9%.
+- T4 depends_on: [T3] - Define a financially coherent ROE denominator, fallbacks, labels, and regression cases for debit, credit, defined-risk, and undefined-risk structures.
+- T5 depends_on: [T4] - Record evidence, constraints, and an implementation recommendation; no production calculation change in this diagnostic task.
+
+## Checklist
+
+- [x] T1 Frontend calculation trace
+- [x] T2 Margin-data trace
+- [x] T3 SPCX reproduction and root cause
+- [x] T4 ROE design and regression matrix
+- [x] T5 Review
+
+## Review
+
+- Reproduced the displayed SPCX result exactly: signed opening value `-$1,513.60`, current market value `+$26,850.00`, and economic P&L `+$28,363.60`; the legacy percentage is `28,363.60 / abs(-1,513.60) = 1,873.9%`. Dollar P&L is internally consistent, but the percentage measures return versus a small opening credit rather than capital committed.
+- IB position, portfolio-update, and per-contract P&L callbacks do not provide position margin. Radon persists exact account-level initial/maintenance margin and has an existing order what-if path for incremental margin, but what-if results are transient and are not attached to existing portfolio positions.
+- Recommended metric: defined-risk positions use `P&L / max_risk`; undefined-risk positions use `P&L / opening incremental IB initial margin`, labeled `Return on Margin`, with a separate optional current marginal-release metric. Show `N/A` when a broker-derived denominator is unavailable; do not substitute net credit, allocate aggregate account margin, or sum independent leg estimates.
+- Regression coverage should span debit positions, defined-risk credit spreads, naked shorts, ratio structures, missing/zero margin, adds/partial closes, and consistent desktop/mobile/detail/sort behavior through one shared helper.
+- An independently modified, uncommitted local Reg-T estimator appeared during the audit. It is not safe to ship as-is: call/put OTM formulas are reversed, defined-credit `max_risk` fallback is absent, strike-aware cover relationships are not modeled, current spot is substituted for opening margin, and TypeScript reports `underlyingPrice` used before declaration. No application code or broker state was changed by this diagnostic.
+- Verification: the pre-estimator focused position suites passed 16/16 tests. The current uncommitted estimator fails `npx tsc --noEmit` with TS2448/TS2454 at `PositionTable.tsx:374`.
+
+---
+
+# Task: Terse gold and silver trade-idea report (2026-08-07)
+
+## Goal
+
+Create a compact, self-contained HTML report of the completed GLD/SLV evaluation that makes the Edge-gate failures, zero sizing, supporting evidence, and rerun triggers immediately legible.
+
+## Dependency graph
+
+- T1 depends_on: [] - Reconcile the exact GLD and SLV evaluation facts, freshness, and gate outcomes from the completed analysis.
+- T2 depends_on: [T1] - Define the terse information hierarchy using Radon's required `signal -> structure -> Kelly math -> decision` order.
+- T3 depends_on: [T2] - Build the self-contained Radon-branded HTML report without inventing post-gate option structures.
+- T4 depends_on: [T3] - Validate content, responsive rendering, accessibility basics, and visual output.
+
+## Checklist
+
+- [x] T1 Fact reconciliation
+- [x] T2 Report hierarchy
+- [x] T3 HTML report
+- [x] T4 Verification
+
+## Review
+
+- Reconciled the completed 2026-08-07 GLD/SLV evaluations without importing hypothetical structures from the newsfeed.
+- Preserved the required `signal -> structure -> Kelly math -> decision` sequence. Both assets show `NO_TRADE: EDGE`, 0% Kelly, and $0 no-position payoff fields.
+- Added the exact supporting evidence, preferred future vehicles, rejected vehicle tradeoffs, rerun triggers, freshness timestamps, and no-execution state.
+- Deliverables:
+  - `reports/gold-silver-trade-ideas-2026-08-07.html`
+  - `reports/gold-silver-trade-ideas-2026-08-07.png`
+- Browser validation passed at 1440×1000 and 390×844: one H1, two evaluation modules, both decisions present, no horizontal overflow, and zero page errors.
+- Visual inspection passed. No app source, broker state, or live order was changed.
+
+---
+
+# Task: Bullish gold and silver X post pack (2026-08-07)
+
+## Goal
+
+Create a natural, evidence-backed X post that showcases the strongest bullish gold and silver newsfeed posts, packages four original source charts for easy copy/paste, and opens the finished local pack in the browser.
+
+## Dependency graph
+
+- T1 depends_on: [] - Audit the prior 30-day corpus and verify candidate source images are readable.
+- T2 depends_on: [T1] - Select a balanced four-image set covering technical and positioning evidence for both gold and silver.
+- T3 depends_on: [T1] - Draft and character-count natural X copy that avoids hype and unsupported certainty.
+- T4 depends_on: [T2, T3] - Build a self-contained Radon-branded HTML post pack with original images and copy controls.
+- T5 depends_on: [T4] - Validate content, image rendering, copy behavior, and visual layout; open the pack visibly in the browser.
+
+## Checklist
+
+- [x] T1 Source and asset audit
+- [x] T2 Four-image selection
+- [x] T3 X copy
+- [x] T4 Self-contained post pack
+- [x] T5 Verification and browser handoff
+
+## Review
+
+- Selected four verified original feed assets: `Gold and the 50 day MA` (`cyBVjIumlV`), `CTAs in gold` (`c9Nd-W1pLC`), `Surging silver` (`cqWFZflyc6`), and `Specs missed it` (`c5R-fq9KVz`). This gives technical and positioning evidence for both metals.
+- Wrote a 271-character post in natural first-person language. It states a bullish lean while retaining the resistance-confirmation caveat.
+- Deliverables:
+  - `reports/gold-silver-x-post-pack-2026-08-07.html` (self-contained, four base64-embedded source charts, copy control, download controls, source IDs/links)
+  - `reports/gold-silver-x-assets-2026-08-07/` (four original full-resolution PNG files)
+  - `reports/gold-silver-x-post-pack-2026-08-07.png` (full-page visual verification capture)
+- Automated browser validation: four PNGs decoded at native resolution; all were embedded as data URIs; exact post length 271; no template placeholders; copy control reported success; zero page errors.
+- Visual inspection passed at 1440px. The finished pack was opened in a visible Chrome tab and left selected for copy/paste handoff.
+- No app source code or live external account was changed; nothing was posted to X.
+
+---
+
+# Task: Gold and silver newsfeed sentiment timeline (2026-08-07)
+
+## Goal
+
+Analyze every live-newsfeed post explicitly related to gold or silver over the trailing 30 days, preserve the full classified corpus in Markdown, identify any bullish/bearish sentiment shift, and deliver a verified infographic opened in the in-app browser.
+
+## Dependency graph
+
+- T1 depends_on: [] - Query the live Turso newsfeed for the exact trailing-30-day window and build a complete relevance-screened corpus.
+- T2 depends_on: [T1] - Independently classify gold-related posts with evidence, sentiment, intensity, and catalysts.
+- T3 depends_on: [T1] - Independently classify silver-related and cross-metal posts with evidence, sentiment, intensity, and catalysts.
+- T4 depends_on: [T2, T3] - Reconcile classifications, calculate daily/weekly sentiment, and identify statistically honest shifts and inflection dates.
+- T5 depends_on: [T4] - Create the Markdown corpus report and deterministic Radon-branded HTML/SVG infographic.
+- T6 depends_on: [T5] - Validate counts/content/rendering, capture a screenshot, and open the infographic visibly for handoff.
+
+## Checklist
+
+- [x] T1 Live 30-day corpus
+- [x] T2 Gold classification
+- [x] T3 Silver/cross-metal classification
+- [x] T4 Timeline and shift analysis
+- [x] T5 Markdown and infographic
+- [x] T6 Browser verification and open handoff
+
+## Review
+
+- Exact window: 2026-07-08 00:00 PT through 2026-08-07 08:25 PT. Final recheck at 08:32 PT found no newer feed rows.
+- Screened 1,283 live Turso posts. Retained 76 unique posts: 54 gold, 23 silver, one overlap. Excluded GOLDEN-CROSS-only, idiomatic, product-name, and historical-analogy false positives.
+- Detailed classification: 54 bullish, 8 bearish, 14 neutral/mixed, signed score +76. Independent ternary audit: 56/6/14; same inflection dates.
+- Shift: first contrarian bullish pivot July 21; decisive breakout confirmation August 5-6; August 7 is continuation/chasing with overbought and false-break caveats.
+- Deliverables:
+  - `reports/gold-silver-news-sentiment-2026-08-07.md` (complete 76-post classified corpus)
+  - `reports/gold-silver-sentiment-infographic-2026-08-07.html` (deterministic, self-contained infographic)
+  - `reports/gold-silver-sentiment-infographic-2026-08-07.png` (1440×1232 full-page capture)
+- Verification: `git diff --check` clean; headless Chrome reported zero page errors and 101 SVG children; visual inspection passed after fixing the initial `window.top` identifier collision. Final HTML was reloaded and left open in the visible Chrome tab.
+
+---
+
+# Task: Bullish gold and silver options expressions (2026-08-07)
+
+## Goal
+
+Use fresh IBKR/UW market, options-chain, flow, OI, and portfolio data to select concise defined-risk bullish expressions for gold and silver across ETFs, leveraged ETFs, and futures/options.
+
+## Dependency graph
+
+- T1 depends_on: [] - Run the required fresh Radon evaluations for the primary liquid gold and silver ETF proxies.
+- T2 depends_on: [] - Pull comparable live option chains/quotes for ETF, leveraged ETF, and COMEX candidates; screen liquidity and expiries.
+- T3 depends_on: [T1, T2] - Price candidate defined-risk structures and calculate breakeven, max loss, max payout, and reward/risk.
+- T4 depends_on: [T3] - Apply sequential convexity, edge, Kelly, and naked-short gates; rank the surviving gold and silver trades.
+- T5 depends_on: [T4] - Record freshness, assumptions, uncertainties, and a terse recommendation table.
+
+## Checklist
+
+- [x] T1 Required GLD/SLV evaluations
+- [x] T2 Cross-vehicle chain/liquidity comparison
+- [x] T3 Structure payoff calculations (not reached: Edge gate stopped both evaluations)
+- [x] T4 Trading gates and sizing
+- [x] T5 Review
+
+## Review
+
+Data freshness: Radon evaluations 2026-08-07 08:19 PT; IB vehicle snapshots 2026-08-07 15:19:52-15:20:35 UTC.
+
+| Asset | Signal | Structure | Max loss | Max payout | R/R | Kelly | Decision |
+|---|---|---|---:|---:|---:|---:|---|
+| Gold / GLD | 62.1% DP buys but strength 24.1 (<50); priced in | None | $0 | $0 | N/A | 0% | NO_TRADE: EDGE |
+| Silver / SLV | 55.0% DP buys, neutral; options conflict | None | $0 | $0 | N/A | 0% | NO_TRADE: EDGE |
+
+- GLD showed bullish aggregate options/OI evidence ($117.36M bullish vs $45.70M bearish), but recent options flow leaned bearish and the signal was already priced in.
+- SLV had eight significant OI changes totaling $19.95M, with no large or massive changes.
+- GLD/SLV remain the preferred vehicles if a future evaluation passes: tight underlying spreads and 26-27 expiries. UGL/AGQ were rejected for daily-leverage path decay and thinner chains; GDX adds miner/equity beta; full-size GC/SI options are oversized and operationally complex.
+- Per the sequential gate rule, no chain structure, payoff, or Kelly sizing was manufactured after Edge failed. Re-run when GLD aggregate strength exceeds 50 and is not priced-in, or when SLV develops a specific non-conflicting flow/OI edge.
+- Commands: `python3.13 scripts/evaluate.py GLD`; `python3.13 scripts/evaluate.py SLV`. No orders were placed or changed.
+
+---
+
+# Task: Near-real-time IBKR order lifecycle updates (2026-08-06)
+
+## Goal
+
+Determine why placed, modified, canceled, and filled IBKR orders take minutes to appear in Radon, identify IBKR's supported push/streaming interfaces, and produce a concrete low-risk architecture for browser updates without changing live order state.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace Radon's current IB order, execution, snapshot, persistence, and browser refresh paths.
+- T2 depends_on: [] - Verify current IBKR TWS API and Client Portal API streaming/event capabilities from official documentation.
+- T3 depends_on: [T1, T2] - Compare integration options against Radon's deployed Gateway, FastAPI, relay WebSocket, Turso, and auth topology; identify the root latency boundaries.
+- T4 depends_on: [T3] - Recommend an incremental implementation, delivery guarantees, reconciliation fallback, observability, and test plan.
+- T5 depends_on: [T4] - Record findings and evidence in the review section; no live broker mutations.
+
+## Checklist
+
+- [x] T1 Current-path trace
+- [x] T2 Official IBKR API capability review
+- [x] T3 Architecture/options analysis
+- [x] T4 Recommendation and validation plan
+- [x] T5 Review
+
+## Review
+
+### Root cause
+
+- Orders are snapshot-driven. FastAPI runs `ib_orders.py --sync` every 5 minutes during market hours, then `useOrders` rereads Turso every 30 seconds. External order changes can therefore take about 5 minutes 30 seconds to render; outside the gated window there is no autonomous order writer.
+- Portfolio state is written by a 60-second systemd timer and reread by the browser every 30 seconds, yielding about 90 seconds of expected propagation before sync duration.
+- Journal execution reconciliation runs every 5 minutes. The 60-second fill monitor cannot reliably capture a final fill that appears and disappears between polls.
+- Place/cancel/modify routes request an immediate orders refresh, but the shared sync coordinator can return a successful snapshot cached before the mutation for 30 seconds. Placement components also discard the refreshed `orders` payload returned by the route.
+- Radon's existing authenticated `/ws` relay maintains a persistent IB socket, but only wires market-price, depth, tape, search, and status events. The installed `@stoqey/ib` client exposes order, execution, commission, and position callbacks that are currently unused.
+
+### IBKR capability
+
+- TWS/IB Gateway is already an asynchronous persistent TCP socket. `openOrder`, `orderStatus`, `execDetails`, `commissionAndFeesReport`, and the `reqPositions()` subscription provide push updates. `reqAllOpenOrders()` is only a baseline snapshot.
+- Client Portal Web API also offers WebSocket topics `sor` (orders) and `str` (trades), but it adds a separate brokerage-session/authentication lifecycle, can conflict with an active Gateway session for the same username, and does not provide an equivalent complete position stream.
+- Order-status callbacks may be duplicated or omitted for immediately filled orders. Treat `execDetails` as authoritative for fills, dedupe executions by `ExecId`, and retain snapshot reconciliation after reconnects.
+- Cross-client visibility requires a correctly configured Master Client ID. Client ID 0/manual-order binding has potential exchange queue-priority side effects, so mobile/TWS-originated visibility must be validated in paper before enabling `reqAutoOpenOrders(true)` in a read-only listener.
+
+### Recommendation
+
+1. Add one persistent, dedicated IB order-event consumer rather than coupling durable broker state to the price relay. Listen for order status, executions, commissions, and positions; enqueue callbacks so IB's reader thread never performs database or network work.
+2. On a lifecycle event, coalesce bursts, force the canonical orders sync (bypassing the 30-second stale-result window), trigger portfolio/journal reconciliation as appropriate, and publish only after Turso commits.
+3. Reuse the authenticated browser WebSocket for a small revision/invalidation message such as `broker-state-changed`; browser hooks immediately refetch snapshot-only GET endpoints. Do not expose the IB socket or make browser activity call IB directly.
+4. On reconnect, rebuild from `reqAllOpenOrders()`, `reqExecutions()`, and a renewed `reqPositions()` subscription before publishing a new revision. Keep the existing 5-minute/1-minute schedules as repair loops.
+5. Idempotency: executions by `ExecId`; orders by `permId` with `(clientId, orderId)` fallback; suppress duplicate status tuples. Track callback-to-commit, commit-to-render, reconnect count, last event age, and reconciliation mismatches.
+
+### Rollout and acceptance
+
+- Phase 0: bypass the sync-age cache for mutation-triggered refreshes and consume returned order snapshots, eliminating avoidable 30-second/5-minute waits for Radon-originated actions.
+- Phase 1: deploy the event consumer and post-commit browser invalidations behind a feature flag; validate Master Client ID/mobile-order visibility in paper.
+- Phase 2: enable production with periodic reconciliation retained and alerting on stream age or snapshot divergence.
+- Target: p95 IB callback to committed snapshot under 3 seconds, committed snapshot to browser under 1 second, and zero missed `ExecId` values after reconnect reconciliation.
+
+Analysis was read-only apart from this task record. No IB orders, broker settings, services, or production state were changed.
+
+---
+
 # Task: Standalone earnings date service + Theta Harvester (2026-08-05)
 
 ## Goal

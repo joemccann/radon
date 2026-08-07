@@ -9,8 +9,11 @@ import {
   fmtUsd,
   fmtPrice,
   resolveMarketValue,
-  resolveEntryCost,
   getInitialValue,
+  getPnlDollars,
+  getPnlPct,
+  resolveReturnCapital,
+  describeReturnCapital,
   positionDirectionSign,
   getOptionDailyChg,
   getTodayPnlDollars,
@@ -106,10 +109,10 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
   // `ec` drives the P&L math (signed, unchanged); `displayEc` is the signed
   // credit/debit the operator reads, via the same helper as the desktop
   // Initial Value column.
-  const ec = resolveEntryCost(pos);
   const displayEc = getInitialValue(pos);
-  const pnl = mv != null ? mv - ec : null;
-  const pnlPct = mv != null && ec !== 0 ? (pnl! / Math.abs(ec)) * 100 : null;
+  const pnl = getPnlDollars(pos, mv);
+  const pnlPct = getPnlPct(pos, mv);
+  const returnTitle = describeReturnCapital(resolveReturnCapital(pos));
   const todayPnl = getTodayPnlDollars(pos, prices);
   const dailyChg = isStock ? null : getOptionDailyChg(pos, prices);
 
@@ -151,7 +154,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
               <div style={{ fontFamily: "var(--font-mono)", fontVariantNumeric: "tabular-nums", fontWeight: 600, fontSize: 14, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
                 {fmtPnl(pnl)}
               </div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
+              <div title={returnTitle} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
                 {fmtPct(pnlPct)}
               </div>
             </div>
@@ -171,9 +174,10 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
             tone={toneFor(todayPnl)}
           />
           <MetricCell
-            label="P&L %"
+            label="Return %"
             value={fmtPct(pnlPct)}
             tone={pnlTone}
+            title={returnTitle}
           />
         </div>
 

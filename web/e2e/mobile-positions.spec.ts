@@ -136,6 +136,9 @@ test.describe("Mobile positions list", () => {
     await expect(aapl).toContainText("Long Call");
     await expect(aapl).toContainText("MV");
     await expect(aapl).toContainText("EC");
+    await expect(aapl).toContainText("Return %");
+    await expect(aapl).toContainText("+16.67%");
+    await expect(msft).toContainText("+2.50%");
 
     // Legs should not be visible initially
     await expect(page.getByTestId("mobile-position-AAPL-legs")).toHaveCount(0);

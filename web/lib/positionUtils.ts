@@ -1,4 +1,8 @@
-import type { PortfolioPosition } from "@/lib/types";
+import type {
+  LegacyEntryMarginMetadata,
+  PortfolioPosition,
+  PositionReturnCapitalPayload,
+} from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 
@@ -147,6 +151,161 @@ export function getInitialValue(pos: PortfolioPosition): number {
   if (isStock) return magnitude;
   const isShort = (onlyLeg?.direction ?? pos.direction) === "SHORT";
   return isShort ? -magnitude : magnitude;
+}
+
+export type ReturnCapitalBasis =
+  | {
+      amount: number;
+      kind: "max-risk";
+      source: "position.max_risk";
+      asOf: null;
+      quality: "exact";
+    }
+  | {
+      amount: number;
+      kind: "opening-margin";
+      source: string;
+      asOf: string;
+      quality: "exact" | "fill-linked";
+    }
+  | {
+      amount: number;
+      kind: "debit-paid";
+      source: "position.entry_cost";
+      asOf: string | null;
+      quality: "exact";
+    };
+
+function normalizedRiskProfile(pos: PortfolioPosition): string {
+  return String(pos.risk_profile ?? "").trim().toLowerCase();
+}
+
+function isVerifiedOpeningMargin(
+  payload: PositionReturnCapitalPayload | null | undefined,
+): payload is PositionReturnCapitalPayload & {
+  amount: number;
+  source: string;
+  as_of: string;
+  quality: "exact" | "fill-linked";
+  fill_linked: true;
+} {
+  const source = typeof payload?.source === "string" ? payload.source.trim() : "";
+  const asOf = typeof payload?.as_of === "string" ? payload.as_of.trim() : "";
+  return payload?.kind === "opening-margin"
+    && payload.fill_linked === true
+    && (payload.quality === "exact" || payload.quality === "fill-linked")
+    && source.length > 0
+    && !/what[-_ ]?if/i.test(source)
+    && asOf.length > 0
+    && Number.isFinite(Date.parse(asOf))
+    && payload.amount != null
+    && Number.isFinite(payload.amount)
+    && payload.amount > 0;
+}
+
+function legacyOpeningMarginPayload(pos: PortfolioPosition): PositionReturnCapitalPayload | null {
+  const meta: LegacyEntryMarginMetadata | null | undefined = pos.init_margin_at_entry_metadata;
+  if (!meta) return null;
+  return { ...meta, amount: pos.init_margin_at_entry ?? null };
+}
+
+function isFullLossDebit(pos: PortfolioPosition, entryCost: number): boolean {
+  if (!Number.isFinite(entryCost) || entryCost <= 0) return false;
+  if (normalizedRiskProfile(pos) === "defined") return true;
+  if (pos.legs.length === 1) {
+    const onlyLeg = pos.legs[0];
+    if (onlyLeg?.type === "Stock" && onlyLeg.direction === "LONG") return true;
+  }
+  return pos.legs.length > 0
+    && pos.legs.every((leg) => leg.type !== "Stock" && leg.direction === "LONG");
+}
+
+/**
+ * Resolve the economically valid denominator for an open-position return.
+ *
+ * Defined-risk max loss wins. Any position without exact max loss may use a
+ * positive, fill-linked opening-margin record with complete provenance. A
+ * projected what-if number alone is never accepted. Debit paid is used only
+ * where it is demonstrably the full loss.
+ */
+export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
+  if (normalizedRiskProfile(pos) === "defined") {
+    const maxRisk = pos.max_risk;
+    if (maxRisk != null && Number.isFinite(maxRisk) && maxRisk > 0) {
+      return {
+        amount: maxRisk,
+        kind: "max-risk",
+        source: "position.max_risk",
+        asOf: null,
+        quality: "exact",
+      };
+    }
+  }
+
+  const payload = isVerifiedOpeningMargin(pos.return_capital)
+    ? pos.return_capital
+    : legacyOpeningMarginPayload(pos);
+  if (isVerifiedOpeningMargin(payload)) {
+    return {
+      amount: payload.amount,
+      kind: "opening-margin",
+      source: payload.source.trim(),
+      asOf: payload.as_of.trim(),
+      quality: payload.quality,
+    };
+  }
+
+  const entryCost = resolveEntryCost(pos);
+  if (isFullLossDebit(pos, entryCost)) {
+    const entryDate = String(pos.entry_date ?? "").trim();
+    return {
+      amount: entryCost,
+      kind: "debit-paid",
+      source: "position.entry_cost",
+      asOf: entryDate && entryDate !== "unknown" ? entryDate : null,
+      quality: "exact",
+    };
+  }
+
+  return null;
+}
+
+/** Compatibility scalar for callers that only need the denominator amount. */
+export function getPnlCapital(pos: PortfolioPosition): number | null {
+  return resolveReturnCapital(pos)?.amount ?? null;
+}
+
+export function describeReturnCapital(basis: ReturnCapitalBasis | null): string {
+  if (!basis) return "Return unavailable: no verified capital basis";
+  const amount = fmtUsd(basis.amount);
+  if (basis.kind === "max-risk") return `Return on max risk · ${amount} · exact`;
+  if (basis.kind === "debit-paid") {
+    return `Return on debit paid · ${amount} · exact${basis.asOf ? ` · as of ${basis.asOf}` : ""}`;
+  }
+  return `Return on fill-linked opening margin · ${amount} · ${basis.source} · as of ${basis.asOf}`;
+}
+
+/** Unrealized P&L $ = market value − signed entry cost. */
+export function getPnlDollars(
+  pos: PortfolioPosition,
+  marketValue?: number | null,
+): number | null {
+  const mv = marketValue !== undefined ? marketValue : resolveMarketValue(pos);
+  if (mv == null) return null;
+  return mv - resolveEntryCost(pos);
+}
+
+/**
+ * Open-position return = P&L $ / verified risk capital × 100.
+ */
+export function getPnlPct(
+  pos: PortfolioPosition,
+  marketValue?: number | null,
+): number | null {
+  const pnl = getPnlDollars(pos, marketValue);
+  const basis = resolveReturnCapital(pos);
+  if (pnl == null || basis == null) return null;
+  return (pnl / basis.amount) * 100;
 }
 
 export function getLastPrice(pos: PortfolioPosition): number | null {

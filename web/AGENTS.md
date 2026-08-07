@@ -67,7 +67,7 @@ Applies under `web/`. Mirrors `web/CLAUDE.md`; prefer the Claude file if it is n
 - `PortfolioLeg.avg_cost` is per-contract for options and per-share for stocks. Do not multiply option `avg_cost` by 100 again.
 - Journal lot-matched basis overrides IB's drifting VWAP; raw IB value is diagnostic.
 - Per-leg P&L = `sign * (|MV| - |EC|)`. Position P&L is the sum.
-- Total P&L percent = `(MV - EC) / |EC| * 100`.
+- Open-position Return % = `(MV - EC) / verified risk capital * 100`: exact positive `max_risk` for defined risk; positive fill-linked opening margin with source/time provenance when exact max loss is unavailable; debit paid only when it is demonstrably the full max loss, including long stock. Otherwise render unavailable. Never divide an opening credit by its absolute premium.
 - Price resolution: stock `prices[ticker].last`; single option `prices[optionKey].last`; spreads from signed leg prices; BAG via `resolveOrderLastPrice()` / `resolveOrderPriceData()`. Show `---` if unavailable.
 - Exposure delta sign: normalize provider option delta to canonical option delta first, then apply position direction. LONG Call +, SHORT Call -, LONG Put -, SHORT Put +. Positive provider put deltas may be call-equivalent; convert with `delta - 1` before applying LONG/SHORT.
 - Margin warning thresholds live in `web/lib/marginWarning.ts`; toasts are persistent and fire only on transition to worse rank.

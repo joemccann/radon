@@ -39,6 +39,15 @@ def _make_client(state: MagicMock) -> MagicMock:
     return client
 
 
+def _make_submitted_trade() -> MagicMock:
+    trade = MagicMock()
+    trade.order.orderId = 42
+    trade.order.permId = 420042
+    trade.orderStatus.status = "Submitted"
+    trade.log = []
+    return trade
+
+
 _STOCK_PARAMS = {
     "type": "stock",
     "symbol": "TSLA",
@@ -134,3 +143,54 @@ def test_what_if_timeout_returns_error_not_place():
     result = _invoke(_STOCK_PARAMS, client, what_if=True)
     assert result["status"] == "error"
     client.place_order.assert_not_called()
+
+
+def test_live_place_routes_without_requesting_whatif():
+    client = _make_client(_make_state())
+    client.place_order.return_value = _make_submitted_trade()
+
+    result = _invoke(_STOCK_PARAMS, client, what_if=False)
+
+    assert result["status"] == "ok"
+    client.place_order.assert_called_once()
+    client.what_if_order.assert_not_called()
+
+
+def test_smart_error_360_preview_cannot_poison_later_live_place():
+    client = _make_client(_make_state())
+    client.what_if_order.side_effect = RuntimeError(
+        "IB error 360: No what-if check support for smart combo order"
+    )
+    client.place_order.return_value = _make_submitted_trade()
+
+    preview = _invoke(_STOCK_PARAMS, client, what_if=True)
+    assert preview["status"] == "error"
+    assert "360" in preview["message"]
+    client.place_order.assert_not_called()
+
+    client.what_if_order.reset_mock()
+    live = _invoke(_STOCK_PARAMS, client, what_if=False)
+
+    assert live["status"] == "ok"
+    client.place_order.assert_called_once()
+    client.what_if_order.assert_not_called()
+
+
+def test_live_place_never_runs_whatif_or_returns_projected_margin():
+    client = _make_client(_make_state(initMarginChange="3300.0"))
+    trade = MagicMock()
+    trade.order.orderId = 101
+    trade.order.permId = 202
+    trade.orderStatus.status = "Submitted"
+    trade.orderStatus.whyHeld = ""
+    trade.log = []
+    client.place_order.return_value = trade
+
+    result = _invoke(_STOCK_PARAMS, client, what_if=False)
+
+    assert result["status"] == "ok"
+    assert "initMargin" not in result
+    assert "maintMargin" not in result
+    assert "marginSource" not in result
+    client.what_if_order.assert_not_called()
+    client.place_order.assert_called_once()
