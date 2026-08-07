@@ -210,6 +210,18 @@ test("the book head keeps its intrinsic height on short viewports — never crus
   expect(escape, `montage extends ${escape}px past the card's clip`).toBeLessThanOrEqual(1);
 });
 
+test("a credit combo's AVG ENTRY reads negative, not positive (2026-08-07)", async ({ page }) => {
+  // The IWM fixture opened for a NET CREDIT (entry_cost −579.79 over 50x100),
+  // so avg entry is −0.12. The card used Math.abs and showed +0.12, reading as
+  // a debit paid.
+  await openCockpit(page);
+  const summary = page.locator(".ckp-pos-summary");
+  await expect(summary).toBeVisible();
+  const avgEntry = await summary.locator(".m-metric", { hasText: "Avg Entry" }).textContent();
+  expect(avgEntry ?? "").toMatch(/-\$?0\.12/);
+  expect(avgEntry ?? "").not.toMatch(/(?<![-])\$0\.12/);
+});
+
 test("the structure string renders once — summary owns it, the header chip stays compact", async ({ page }) => {
   await openCockpit(page);
   await expect(page.locator(".ckp-pos-summary")).toContainText(STRUCTURE);
