@@ -43,6 +43,7 @@ export async function readOrdersFromDb(): Promise<OrdersSnapshot | null> {
   // drift on every order state transition (PreSubmitted → Submitted at
   // market open, Submitted → Filled, etc.).
   const syncIdentity = createDbOperationIdentity();
+  syncIdentity.label = "orders replica sync";
   try {
     await withTimeout(
       runWithDbOperation(syncIdentity, syncDb),

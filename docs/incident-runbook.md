@@ -46,6 +46,18 @@ Peak incident: 2026-07-02 21:32–23:37 UTC, P1, every DB-backed Next.js route d
   minute. Canary succeeds ⇒ Node-local wedge, `radon unit restart radon-nextjs`
   helps. Both fail ⇒ upstream Turso — do NOT restart-flap; stand down and probe
   from a second network (`feedback_turso_http_pipeline_incident_signature`).
+- **2026-08-06 recurrence — feature-detection vs the retired replica.**
+  `syncDb()` guarded with `"sync" in db`, but @libsql/client's HTTP client
+  DEFINES `sync()` and throws `SYNC_NOT_SUPPORTED`. The guard passed, the call
+  threw, and `readOrdersFromDb`'s catch armed a pool teardown on EVERY
+  `/orders` read; two arms inside the 10 s cluster window escalated to a real
+  `Agent.destroy()` that aborted unrelated in-flight requests — 503s on
+  watchlist/profile/portfolio while Turso itself was healthy (Python canary
+  76 ms). Fixed by gating `syncDb` on the replica being ENABLED, never on
+  method presence. Lesson: after retiring a subsystem, audit its
+  feature-detection guards — a method that exists and throws is not absence.
+  Diagnosis required instrumentation: the teardown path logged nothing, so
+  journald showed only collateral. Every teardown now logs its trigger label.
 - **Standing defenses:** 8-conn bounded Agent, 5 s destroy cooldown,
   10 s failure-cluster gate, transport timeout 2750 ms < 3 s caller deadline,
   routes 503 `DB_UNAVAILABLE` (never 500), `radon-nextjs-db-watchdog.timer`
