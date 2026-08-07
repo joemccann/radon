@@ -27,6 +27,12 @@ PROJECT_ROOT = Path(__file__).parent.parent.resolve()
 sys.path.insert(0, str(PROJECT_ROOT / "scripts"))
 
 from utils.card_screenshot import screenshot_card  # noqa: E402
+from utils.cta_history import (  # noqa: E402
+    clean_underlying_name,
+    derive_change_context,
+    load_prior_payloads,
+    payload_is_valid,
+)
 from utils.cta_sync import latest_closed_trading_day  # noqa: E402
 
 CACHE_DIR = PROJECT_ROOT / "data" / "menthorq_cache"
@@ -35,16 +41,6 @@ REPORTS_DIR.mkdir(exist_ok=True)
 
 
 # ── Data loading ─────────────────────────────────────────────────────────────
-
-def _payload_is_valid(data: object) -> bool:
-    if not isinstance(data, dict):
-        return False
-    tables = data.get("tables")
-    if not isinstance(tables, dict):
-        return False
-    main = tables.get("main")
-    return isinstance(main, list) and len(main) > 0
-
 
 def _load_cta_from_db() -> Optional[dict]:
     """Latest menthorq_cta row from Turso — the same source the CTA page reads."""
@@ -60,7 +56,7 @@ def _load_cta_from_db() -> Optional[dict]:
     except Exception as exc:  # noqa: BLE001 — any DB failure falls back to disk
         print(f"[cta-share] db read unavailable, using disk cache: {exc}", file=sys.stderr)
         return None
-    return data if _payload_is_valid(data) else None
+    return data if payload_is_valid(data) else None
 
 
 def _load_cta_from_disk() -> Optional[dict]:
@@ -69,7 +65,7 @@ def _load_cta_from_disk() -> Optional[dict]:
         return None
     with open(files[-1]) as f:
         data = json.load(f)
-    return data if _payload_is_valid(data) else None
+    return data if payload_is_valid(data) else None
 
 
 def load_cta(target_date: Optional[str] = None) -> dict:
@@ -103,6 +99,12 @@ def get_row(rows: list, *keywords: str) -> Optional[dict]:
         if all(k in name for k in kw_lower):
             return r
     return None
+
+
+def spx_row(payload: dict) -> Optional[dict]:
+    """The SPX row every narrative anchors on, from a whole payload."""
+    main = ((payload or {}).get("tables") or {}).get("main") or []
+    return get_row(main, "s&p") or get_row(main, "e-mini")
 
 
 def pctile_label(p: int) -> str:
@@ -232,7 +234,7 @@ def card_html(title: str, body: str, card_n: int, total: int, ds: str) -> str:
 
 def card1_squeeze(data: dict, ds: str) -> str:
     main = data["tables"]["main"]
-    spx = get_row(main, "s&p") or get_row(main, "e-mini")
+    spx = spx_row(data)
     nq  = get_row(main, "nasdaq")
     r1k = get_row(main, "russell")
 
@@ -650,9 +652,49 @@ function copyImg(id,btn){{
 
 # ── Tweet text ────────────────────────────────────────────────────────────────
 
-def build_tweet(data: dict, ds: str) -> str:
+def change_sentences(context: dict) -> list:
+    """One line per fact that separates THIS session from the last one.
+
+    Each sentence is gated on the underlying measurement existing. With no
+    prior payload the list is empty and the post reads exactly as it did
+    before history was available: an unmeasured delta is never narrated.
+    """
+    lines = []
+    prior_date = context.get("prior_date")
+    delta = context.get("spx_delta")
+
+    if prior_date and delta:
+        lines.append(
+            f"> Since the {prior_date} read: SPX {delta['prior_position']:+.2f} to "
+            f"{delta['position']:+.2f}, z {delta['prior_z']:.2f} to {delta['z']:.2f}, "
+            f"{pctile_label(delta['prior_pctile'])} to {pctile_label(delta['pctile'])} percentile"
+        )
+
+    if prior_date and context.get("entered_extreme"):
+        names = ", ".join(context["entered_extreme"][:6])
+        lines.append(f"> Crossed INTO an extreme since {prior_date}: {names}")
+
+    if prior_date and context.get("exited_extreme"):
+        names = ", ".join(context["exited_extreme"][:6])
+        lines.append(f"> Dropped OUT of an extreme since {prior_date}: {names}")
+
+    sessions = context.get("regime_sessions")
+    label = context.get("regime_label")
+    if sessions and sessions > 1 and label and label != "unknown":
+        if context.get("regime_bounded"):
+            lines.append(f"> Session {sessions} of unbroken {label} positioning")
+        else:
+            lines.append(
+                f"> {label.capitalize()} positioning has held for at least "
+                f"{sessions} straight sessions"
+            )
+
+    return lines
+
+
+def build_tweet(data: dict, ds: str, priors: Optional[list] = None) -> str:
     main = data["tables"]["main"]
-    spx = get_row(main, "s&p") or get_row(main, "e-mini")
+    spx = spx_row(data)
     d = datetime.strptime(ds, "%Y-%m-%d")
     month_day = d.strftime("%b %-d")
 
@@ -674,18 +716,18 @@ def build_tweet(data: dict, ds: str) -> str:
     flipped = a["flipped"]
 
     # Count extreme positions across indexes
-    extreme_short_indexes = []
-    for r in (index_table or []):
-        if normalize_pctile(r.get("percentile_3m", 50)) <= 5:
-            name = r.get("underlying", "").replace("E-Mini ", "").replace("CME ", "").replace(" Index", "").replace("ICE MSCI ", "")
-            extreme_short_indexes.append(name)
+    extreme_short_indexes = [
+        clean_underlying_name(r.get("underlying", ""))
+        for r in (index_table or [])
+        if normalize_pctile(r.get("percentile_3m", 50)) <= 5
+    ]
 
     # Extreme index LONGS — the mirror case the old code could not see.
-    extreme_long_indexes = []
-    for r in (index_table or []):
-        if normalize_pctile(r.get("percentile_3m", 50)) >= 95:
-            name = r.get("underlying", "").replace("E-Mini ", "").replace("CME ", "").replace(" Index", "").replace("ICE MSCI ", "")
-            extreme_long_indexes.append(name)
+    extreme_long_indexes = [
+        clean_underlying_name(r.get("underlying", ""))
+        for r in (index_table or [])
+        if normalize_pctile(r.get("percentile_3m", 50)) >= 95
+    ]
 
     # Find extreme commodity longs (crowded trades)
     extreme_long_commodities = []
@@ -805,6 +847,12 @@ def build_tweet(data: dict, ds: str) -> str:
 
     cross_asset = "\n".join(cross_asset_lines) if cross_asset_lines else ""
 
+    # What separates this post from the last one in the same regime.
+    change_context = derive_change_context(
+        data, priors or [], assess=assess_positioning, find_spx=spx_row
+    )
+    changes = "\n".join(change_sentences(change_context))
+
     # Conclusion
     if a["is_extreme"] and a["side"] == "short":
         conclusion = (
@@ -830,6 +878,8 @@ def build_tweet(data: dict, ds: str) -> str:
     parts = [hook, "", thesis]
     if cross_asset:
         parts.extend(["", cross_asset])
+    if changes:
+        parts.extend(["", changes])
     parts.extend(["", conclusion, "", "Analyzed by Radon · radon.run"])
 
     return "\n".join(parts)
@@ -899,7 +949,7 @@ def main():
             cards_b64.append("")
 
     # Build tweet text
-    tweet_text = build_tweet(data, ds)
+    tweet_text = build_tweet(data, ds, priors=load_prior_payloads(ds))
 
     # Build preview HTML
     preview_html = build_preview(
