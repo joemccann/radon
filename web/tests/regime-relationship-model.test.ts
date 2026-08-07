@@ -56,4 +56,31 @@ describe("buildRegimeRelationshipModel", () => {
     expect(summary?.latestSpread).toBeCloseTo(8, 6);
     expect(summary?.latestQuadrant).toBe("Fragile Calm");
   });
+
+  it("classifies quadrants against the full-sample means, not the 20-session z-window", () => {
+    // Production repro 2026-08-07: after weeks of collapsed implied
+    // correlation, COR1M 7.38 sat ABOVE its own depressed 20-session mean
+    // and the headline read SYSTEMIC PANIC with VIX under 15 — while the
+    // scatter crosshair (full-sample means) correctly placed the dot in
+    // Stock Picker's. The quadrant is a structural label; only the z-score
+    // overlay is 20-session scoped.
+    const history: CriHistoryEntry[] = [
+      ...Array.from({ length: 10 }, (_, i) =>
+        point(`2026-06-${String(i + 1).padStart(2, "0")}`, 12, 25),
+      ),
+      ...Array.from({ length: 19 }, (_, i) =>
+        point(`2026-07-${String(i + 1).padStart(2, "0")}`, 13, 6.5),
+      ),
+      point("2026-08-06", 14.35, 7.38),
+    ];
+
+    const entries = buildRegimeRelationshipEntries(history);
+    const summary = summarizeRegimeRelationship(entries);
+
+    // Full-sample means: RVOL ~12.7 (14.35 is high), COR1M ~12.7 (7.38 is
+    // LOW correlation) -> high vol + low correlation = Stock Picker's.
+    expect(summary?.latestQuadrant).toBe("Stock Picker's Market");
+    // The high-correlation era still classifies as correlation-high.
+    expect(entries[0]?.quadrant).toBe("Fragile Calm");
+  });
 });

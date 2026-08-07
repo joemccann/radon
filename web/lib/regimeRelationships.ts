@@ -144,6 +144,15 @@ export function buildRegimeRelationshipEntries(
   const realizedVolStdDev = sampleStdDev(realizedVolSeries, realizedVolMean);
   const cor1mStdDev = sampleStdDev(cor1mSeries, cor1mMean);
 
+  // Quadrants are STRUCTURAL labels classified against the full-sample
+  // means — the same baseline the scatter crosshair draws. Classifying
+  // against the 20-session z-window means made COR1M 7.38 read as "high
+  // correlation" after weeks of collapsed correlation and headlined
+  // SYSTEMIC PANIC with VIX under 15 (2026-08-07). Only the z-score
+  // overlay is 20-session scoped.
+  const quadrantRvolMean = mean(comparable.map((entry) => entry.realized_vol));
+  const quadrantCor1mMean = mean(comparable.map((entry) => entry.cor1m));
+
   return comparable.map((entry) => {
     const realizedVolZ = zScore(entry.realized_vol, realizedVolMean, realizedVolStdDev);
     const cor1mZ = zScore(entry.cor1m, cor1mMean, cor1mStdDev);
@@ -159,8 +168,8 @@ export function buildRegimeRelationshipEntries(
       quadrant: classifyRegimeQuadrant(
         entry.realized_vol,
         entry.cor1m,
-        realizedVolMean,
-        cor1mMean,
+        quadrantRvolMean,
+        quadrantCor1mMean,
       ),
     };
   });
