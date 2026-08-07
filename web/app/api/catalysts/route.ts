@@ -18,7 +18,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 const CATALYSTS_CACHE_PATH = join(process.cwd(), "..", "data", "catalysts.json");
-// Producer is a daily 06:30 timer; a day + slack is the freshness budget.
+// Snapshot availability budget; service health separately enforces the
+// producer's 06:30 / 10:00 / 16:00 ET active-day cadence.
 const CATALYSTS_MAX_AGE_MS = 26 * 60 * 60 * 1000;
 // Coalesces polling tabs into one source read per window
 // (contract: tests/db-read-cache-contract.test.ts).
