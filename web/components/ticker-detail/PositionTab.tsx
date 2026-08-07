@@ -14,6 +14,10 @@ import {
   legPriceKey,
   resolveRealtimePrice,
   resolveSpreadPriceData,
+  getPnlDollars,
+  getPnlPct,
+  resolveReturnCapital,
+  describeReturnCapital,
 } from "@/lib/positionUtils";
 import { fmtSignedPrice, fmtUsd, toneClass } from "@/lib/format";
 import PositionTradeTicket from "./PositionTradeTicket";
@@ -221,8 +225,9 @@ function PositionView({
   const avgEntry = getAvgEntry(position);
   const mv = rtData?.mv ?? resolveMarketValue(position);
   const lastPrice = rtData?.lastPrice ?? (mv != null ? mv / (position.contracts * getMultiplier(position)) : null);
-  const pnl = mv != null ? mv - entryCost : null;
-  const pnlPct = pnl != null && entryCost !== 0 ? (pnl / Math.abs(entryCost)) * 100 : null;
+  const pnl = getPnlDollars(position, mv);
+  const pnlPct = getPnlPct(position, mv);
+  const returnTitle = describeReturnCapital(resolveReturnCapital(position));
   const lastPriceLabel = !isStock && position.legs.length > 1 ? "Mark Price" : "Last Price";
 
   return (
@@ -263,9 +268,14 @@ function PositionView({
           <span className="pos-stat-value">{mv != null ? fmtUsd(mv) : "---"}</span>
         </div>
         <div className="pos-stat">
-          <span className="pos-stat-label">Unrealized P&L</span>
-          <span className={`pos-stat-value ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}>
-            {pnl != null ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))} (${pnlPct!.toFixed(1)}%)` : "---"}
+          <span className="pos-stat-label">Unrealized P&L / Return</span>
+          <span
+            className={`pos-stat-value ${pnl != null ? (pnl >= 0 ? "positive" : "negative") : ""}`}
+            title={returnTitle}
+          >
+            {pnl != null
+              ? `${pnl >= 0 ? "+" : "-"}${fmtUsd(Math.abs(pnl))}${pnlPct != null ? ` (${pnlPct.toFixed(1)}%)` : " (Return N/A)"}`
+              : "---"}
           </span>
         </div>
         {position.expiry !== "N/A" && (

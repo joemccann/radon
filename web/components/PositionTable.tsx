@@ -18,6 +18,10 @@ import {
   positionDirectionSign,
   getAvgEntry,
   getInitialValue,
+  getPnlDollars,
+  getPnlPct,
+  resolveReturnCapital,
+  describeReturnCapital,
   getMultiplier,
   getLastPrice,
   getLastPriceIsCalculated,
@@ -129,7 +133,7 @@ export const POSITION_COLUMNS: readonly ColumnsToggleEntry<PositionToggleableCol
   { key: "entry_cost", label: "Entry Cost" },
   { key: "initial_value", label: "Initial Value" },
   { key: "pnl", label: "P&L" },
-  { key: "pnl_pct", label: "P&L %" },
+  { key: "pnl_pct", label: "Return %" },
   { key: "expiry", label: "Expiry" },
 ];
 
@@ -199,12 +203,8 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
       case "initial_value": return getInitialValue(pos);
       case "entry_cost": return resolveEntryCost(pos);
       case "market_value": return mv;
-      case "pnl": return mv != null ? mv - resolveEntryCost(pos) : null;
-      case "pnl_pct": {
-        const ec = resolveEntryCost(pos);
-        const p = mv != null ? mv - ec : null;
-        return p != null && ec !== 0 ? (p / Math.abs(ec)) * 100 : null;
-      }
+      case "pnl": return getPnlDollars(pos, mv);
+      case "pnl_pct": return getPnlPct(pos, mv);
       case "expiry": return pos.expiry === "N/A" ? null : pos.expiry;
       default: return null;
     }
@@ -365,8 +365,10 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   // resolveMarketValue fallback paths are already signed.
   const mv = rtLast != null ? positionDirectionSign(pos) * rtLast * Math.abs(pos.contracts) : optionsRt?.mv ?? resolveMarketValue(pos);
   const entryCost = resolveEntryCost(pos);
-  const pnl = mv != null ? mv - entryCost : null;
-  const pnlPct = pnl != null && entryCost !== 0 ? (pnl / Math.abs(entryCost)) * 100 : null;
+  const pnl = getPnlDollars(pos, mv);
+  const pnlPct = getPnlPct(pos, mv);
+  const returnBasis = resolveReturnCapital(pos);
+  const returnTitle = describeReturnCapital(returnBasis);
   const avgEntry = getAvgEntry(pos);
   const lastPrice = rtLast ?? (optionsRt ? mv! / (pos.contracts * getMultiplier(pos)) : getLastPrice(pos));
   const lastPriceIsCalculated = rtLast != null ? false : optionsRt ? optionsRt.priceIsCalculated : getLastPriceIsCalculated(pos);
@@ -497,7 +499,10 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
           </td>
         )}
         {columns.pnl_pct && (
-          <td className={`right ${pnlPct != null ? (pnlPct >= 0 ? "positive" : "negative") : ""}`}>
+          <td
+            className={`right ${pnlPct != null ? (pnlPct >= 0 ? "positive" : "negative") : ""}`}
+            title={returnTitle}
+          >
             {pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%` : "—"}
           </td>
         )}
@@ -643,7 +648,18 @@ export default function PositionTable({
             {columns.entry_cost && <SortTh<PositionSortKey> label="Entry Cost" sortKey="entry_cost" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.initial_value && <SortTh<PositionSortKey> label="Initial Value" sortKey="initial_value" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
             {columns.pnl && <SortTh<PositionSortKey> label="P&L" sortKey="pnl" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
-            {columns.pnl_pct && <SortTh<PositionSortKey> label="P&L %" sortKey="pnl_pct" className="right" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
+            {columns.pnl_pct && (
+              <SortTh<PositionSortKey>
+                label="Return %"
+                sortKey="pnl_pct"
+                className="right"
+                activeKey={sort.key}
+                direction={sort.direction}
+                onToggle={toggle}
+                helpText="Return uses exact max risk, verified fill-linked opening margin when exact risk is unavailable, or debit paid when it is the full loss."
+                helpAriaLabel="Explain position return basis"
+              />
+            )}
             {showExpiry && columns.expiry && <SortTh<PositionSortKey> label="Expiry" sortKey="expiry" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />}
           </tr>
         </thead>

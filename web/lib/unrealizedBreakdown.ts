@@ -4,7 +4,12 @@
  */
 
 import type { PortfolioData } from "@/lib/types";
-import { resolveEntryCost, resolveMarketValue } from "@/lib/positionUtils";
+import {
+  getPnlDollars,
+  getPnlPct,
+  resolveEntryCost,
+  resolveMarketValue,
+} from "@/lib/positionUtils";
 import { fmtSigned } from "@/lib/format/money";
 import type { PnlBreakdownRow } from "@/components/PnlBreakdownModal";
 
@@ -23,8 +28,9 @@ export function computeUnrealizedBreakdown(
     const mv = resolveMarketValue(pos);
     if (mv == null) return [];
     const entry = resolveEntryCost(pos);
-    const pnl = mv - entry;
-    const pnlPct = entry !== 0 ? (pnl / Math.abs(entry)) * 100 : null;
+    const pnl = getPnlDollars(pos, mv);
+    if (pnl == null) return [];
+    const pnlPct = getPnlPct(pos, mv);
     return [{
       id: pos.id,
       ticker: pos.ticker,
