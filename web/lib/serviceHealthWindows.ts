@@ -120,6 +120,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   "exit-orders": { open: 5 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
+  // MenthorQ dashboard session powering /options/net-gex. Daily check;
+  // its jar died silently for 11 days before this row existed (2026-08-07).
+  "menthorq-session": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``llm-token-index`` fires once per UTC day at 06:30 via
   // radon-llm-index.timer (Hetzner). The timer is scheduled daily but
@@ -144,12 +147,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Cboe CDN CSVs only — no IB.
   "straddle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
-  // ``skew`` — radon-skew.timer fires daily 21:45 UTC every calendar day
-  // (UW publishes final post-close SPX greeks after 16:00 ET; 21:45 UTC
-  // clears both DST regimes; weekend runs heartbeat via fetch_skew.py's
-  // no-missing-sessions fast path), so a uniform 26h window fits like
-  // margin-debt / yield-curve / straddle. Unusual Whales only — no IB.
-  "skew": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+  // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
+  // UTC. Five minutes tolerates transient UW failures while surfacing a dead
+  // live writer; the daily heartbeat preserves the off-hours window.
+  "skew": { open: 5 * MIN, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no

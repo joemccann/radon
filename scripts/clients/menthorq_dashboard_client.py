@@ -45,6 +45,9 @@ DEFAULT_STORAGE_STATE_PATH = (
     / "menthorq_dashboard"
     / "menthorq_dashboard_storage_state.json"
 )
+# Cookies that actually gate authentication; mirrors
+# monitor_daemon/handlers/menthorq_session_check.py.
+_AUTH_COOKIE_PREFIXES = ("cognito", "__Secure-authjs.session-token")
 SESSION_URL = "https://dashboard.menthorq.io/api/auth/session"
 BOOTSTRAP_URL = "https://dashboard.menthorq.io/en/options/exposure?symbol=MU"
 API_ROOT = "https://gateway.menthorq.io/clickhouse-api/api/web/v1"
@@ -127,6 +130,36 @@ def _jwt_expiry(token: str) -> float | None:
         return None
 
 
+def _storage_state_expired(path: Path) -> bool:
+    """True when the jar's auth cookies have provably lapsed.
+
+    Only auth cookies count — a jar is full of analytics cookies that
+    expire constantly and mean nothing. Cookies without an expiry
+    (``expires <= 0``, i.e. session cookies) carry no deadline, so a jar
+    made only of those is NEVER reported expired: absence of metadata is
+    not evidence of expiry. Any read/parse problem also returns False so
+    the browser path stays authoritative — this is a fast NEGATIVE check,
+    never a new way to fail.
+    """
+    try:
+        payload = json.loads(path.read_text())
+        cookies = payload.get("cookies") if isinstance(payload, dict) else None
+        if not isinstance(cookies, list):
+            return False
+        deadlines = [
+            cookie["expires"]
+            for cookie in cookies
+            if isinstance(cookie, dict)
+            and isinstance(cookie.get("name"), str)
+            and cookie["name"].startswith(_AUTH_COOKIE_PREFIXES)
+            and isinstance(cookie.get("expires"), (int, float))
+            and cookie["expires"] > 0
+        ]
+        return bool(deadlines) and min(deadlines) <= time.time()
+    except Exception:  # noqa: BLE001 — never let the fast path add failures
+        return False
+
+
 def _session_expired(value: Any) -> bool:
     if value is None:
         return False
@@ -192,10 +225,17 @@ class MenthorQDashboardClient:
         if token is None:
             if self._storage_state_path.is_file():
                 self._ensure_private_storage_state()
-                try:
-                    token = self._token_from_storage_state()
-                except MenthorQDashboardAuthError:
+                # A provably expired jar cannot mint a token, and launching
+                # chromium to learn that costs ~14s (2026-08-07: two such
+                # launches made every failing request take ~28s). The jar's
+                # own cookie expiries answer it for free.
+                if _storage_state_expired(self._storage_state_path):
                     token = None
+                else:
+                    try:
+                        token = self._token_from_storage_state()
+                    except MenthorQDashboardAuthError:
+                        token = None
             if token is None:
                 if not self._username or not self._password:
                     raise MenthorQDashboardAuthError("dashboard authentication is unavailable")

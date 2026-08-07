@@ -158,6 +158,42 @@ Incident: 2026-07-08, P1.
 
 ---
 
+## menthorq-dashboard-session-expiry
+
+**A third-party session died and nothing noticed for 11 days.** 2026-08-07, P2.
+
+- **Mechanism:** `/options/net-gex` → `/api/options/exposure` → FastAPI
+  `/options/exposure/{symbol}` → `MenthorQDashboardClient`. Its dedicated
+  Playwright cookie jar
+  (`data/menthorq_dashboard/menthorq_dashboard_storage_state.json`) had a
+  `cognito` cookie that expired 2026-07-27 while the `authjs.session-token`
+  cookies stayed valid to 08-26 — so the jar *looked* healthy. Every request
+  then launched chromium twice (stale-jar read, then re-login) before 503ing
+  after ~28 s. Symbol-independent: SPY failed identically.
+- **Detection:** UI sits on "SAMPLING OPTIONS EXPOSURE" (that is the pending
+  state, not a hang — it flips to MEASUREMENT FAULT after the proxy timeout);
+  FastAPI logs `503 "Options exposure authentication is unavailable"`.
+- **Why no test caught it:** every exposure test mocks the provider — by
+  construction they cannot see an expired live credential. `cta-sync` kept
+  working throughout (separate jar, separate login), proving creds/host/WAF
+  were fine and isolating it to the dashboard jar.
+- **Upstream blocker:** the automated re-login cannot complete — MenthorQ's
+  WordPress→Cognito redirect issues `client_id=aws_cognito_client_id`, a
+  literal placeholder. Not fixable from this side; the jar needs re-minting
+  out of band, and a code workaround is a stand-down (upstream defect).
+- **Standing defense:** `menthorq-session` daily writer
+  (`scripts/monitor_daemon/handlers/menthorq_session_check.py`) reads the
+  jar's own auth-cookie expiries — no browser, no network — and publishes a
+  `service_health` row so the daily watchdog bucket pages. Warns at ≤3 days.
+  Registered in all four places (TS windows, Python SCHEDULED_SERVICES, daily
+  bucket, daemon). `_storage_state_expired()` also short-circuits the client
+  so a provably dead jar fails in milliseconds instead of ~28 s.
+- **Lesson:** on-demand third-party integrations need a credential-liveness
+  monitor exactly like `flex-token-check`. Mocked unit tests prove code
+  behavior; only a live monitor proves the credential still works.
+
+---
+
 ## cri-query-plan-read-stall
 
 **A query-plan regression that impersonated a network outage.** 2026-07-12.

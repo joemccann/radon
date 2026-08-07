@@ -313,3 +313,69 @@ def test_upstream_error_never_echoes_response_body_or_token():
 
     assert token not in str(exc_info.value)
     assert "Authorization" not in str(exc_info.value)
+
+
+class TestExpiredJarFailsFast:
+    """2026-08-07: an expired cookie jar cost ~28s per request — Playwright
+    launched chromium to discover the jar was stale, then launched it AGAIN
+    to attempt a re-login. The jar's own expiry metadata answers the first
+    question for free, so a dead jar must skip straight to bootstrap (and,
+    with no usable credentials, fail immediately)."""
+
+    def _jar(self, tmp_path, expires_at):
+        import json
+        path = tmp_path / "jar.json"
+        path.write_text(json.dumps({"cookies": [{
+            "name": "cognito", "value": "x", "domain": ".menthorq.io",
+            "path": "/", "expires": expires_at,
+        }], "origins": []}))
+        path.chmod(0o600)
+        return path
+
+    def test_expired_jar_never_launches_a_browser_to_read_it(self, tmp_path, monkeypatch):
+        import time as _time
+        from clients import menthorq_dashboard_client as mod
+
+        jar = self._jar(tmp_path, _time.time() - 86_400)
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="", password="",
+        )
+        called = {"storage": 0}
+
+        def _boom():
+            called["storage"] += 1
+            raise AssertionError("launched a browser for a provably expired jar")
+
+        monkeypatch.setattr(client, "_token_from_storage_state", _boom)
+        with pytest.raises(mod.MenthorQDashboardAuthError):
+            client._resolve_access_token()
+        assert called["storage"] == 0
+
+    def test_live_jar_still_reads_through_the_browser(self, tmp_path, monkeypatch):
+        import time as _time
+        from clients import menthorq_dashboard_client as mod
+
+        jar = self._jar(tmp_path, _time.time() + 7 * 86_400)
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="", password="",
+        )
+        monkeypatch.setattr(client, "_token_from_storage_state", lambda: "token-abc")
+        assert client._resolve_access_token() == "token-abc"
+
+    def test_jar_without_expiry_metadata_is_not_treated_as_expired(self, tmp_path, monkeypatch):
+        """Session cookies (expires = -1) carry no deadline — absence of
+        metadata must never be read as expiry."""
+        import json
+        from clients import menthorq_dashboard_client as mod
+
+        jar = tmp_path / "jar.json"
+        jar.write_text(json.dumps({"cookies": [{
+            "name": "cognito", "value": "x", "domain": ".menthorq.io",
+            "path": "/", "expires": -1,
+        }], "origins": []}))
+        jar.chmod(0o600)
+        client = mod.MenthorQDashboardClient(
+            storage_state_path=jar, username="", password="",
+        )
+        monkeypatch.setattr(client, "_token_from_storage_state", lambda: "token-xyz")
+        assert client._resolve_access_token() == "token-xyz"
