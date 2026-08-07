@@ -433,7 +433,7 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
             "total_premium": 0,
             "call_premium": 0,
             "put_premium": 0,
-            "call_put_ratio": None,
+            "put_call_ratio": None,
             "bias": "NO_DATA",
         }
 
@@ -449,17 +449,22 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
             put_premium += prem
 
     total = call_premium + put_premium
-    cp_ratio = round(call_premium / put_premium, 2) if put_premium > 0 else None
+    put_call_ratio = round(put_premium / call_premium, 2) if call_premium > 0 else None
 
-    if cp_ratio is None:
-        bias = "ALL_CALLS" if call_premium > 0 else "NO_DATA"
-    elif cp_ratio >= 2.0:
+    # Preserve the established directional bands while expressing them in the
+    # market-standard put/call convention. Compare premiums directly so
+    # rounding the displayed ratio cannot move a signal across a boundary.
+    if call_premium <= 0:
+        bias = "STRONGLY_BEARISH" if put_premium > 0 else "NO_DATA"
+    elif put_premium <= 0:
+        bias = "ALL_CALLS"
+    elif call_premium >= put_premium * 2.0:
         bias = "STRONGLY_BULLISH"
-    elif cp_ratio >= 1.2:
+    elif call_premium >= put_premium * 1.2:
         bias = "BULLISH"
-    elif cp_ratio <= 0.5:
+    elif put_premium >= call_premium * 2.0:
         bias = "STRONGLY_BEARISH"
-    elif cp_ratio <= 0.8:
+    elif put_premium >= call_premium * 1.25:
         bias = "BEARISH"
     else:
         bias = "NEUTRAL"
@@ -469,7 +474,7 @@ def analyze_options_flow(alerts: List[Dict]) -> Dict:
         "total_premium": round(total, 2),
         "call_premium": round(call_premium, 2),
         "put_premium": round(put_premium, 2),
-        "call_put_ratio": cp_ratio,
+        "put_call_ratio": put_call_ratio,
         "bias": bias,
     }
 

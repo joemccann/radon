@@ -172,7 +172,7 @@ python3.13 scripts/fetch_options.py [TICKER]
 **Data Sources**: IBClient (spot price) → UWClient (chain + flow) → Yahoo (absolute last resort only)
 
 **Acceptance Criteria**:
-- Call/put premium ratio calculated
+- Put/call premium ratio calculated
 - Chain bias determined (BULLISH/LEAN_BULLISH/NEUTRAL/LEAN_BEARISH/BEARISH)
 - Flow alerts analyzed (if available)
 - Flow bias and strength quantified (0-100)

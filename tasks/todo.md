@@ -1,3 +1,36 @@
+# Task: Normalize options-flow ratio to put/call (2026-08-07)
+
+## Goal
+
+Standardize the Options Flow Bias stat card and its supporting calculation on the market-standard put/call convention: put premium divided by call premium, labeled `PUT/CALL RATIO`.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace the flow ratio from data source through report calculation, API contract, UI, and tests.
+- T2 depends_on: [T1] - Add a failing regression that requires put premium divided by call premium and the `PUT/CALL RATIO` label.
+- T3 depends_on: [T2] - Apply the smallest end-to-end semantic and presentation change without disturbing unrelated work.
+- T4 depends_on: [T3] - Run focused tests, full suites, type checking, Playwright coverage, and visual verification.
+- T5 depends_on: [T4] - Record results and add a durable lesson preventing ratio-convention drift.
+
+## Checklist
+
+- [x] T1 Trace current ratio
+- [x] T2 Red regression coverage
+- [x] T3 Put/call implementation
+- [x] T4 Verification
+- [x] T5 Review and lesson
+
+## Review
+
+- Root cause: `analyze_options_flow` emitted call premium divided by put premium as `call_put_ratio`; desktop and mobile cards rendered that value directly. For the reported MSFT values, this produced `6.38` instead of the standard P/C value `0.16`.
+- The producer now emits `put_call_ratio = put premium / call premium`. Existing directional bands are preserved through direct premium comparisons, so the convention change does not retune flow signals. All-call flow returns `0.00`; a zero call denominator stays JSON-safe as unavailable.
+- Desktop now labels the metric `Put/Call Ratio`; mobile uses `P/C Ratio`. A shared resolver derives P/C from premium totals and falls back to the canonical field or the reciprocal legacy field, so previously cached reports remain correct during migration.
+- Red/green proof: the focused Python suite failed seven canonical-field assertions before implementation, then passed 36/36. Flow ratio/route Vitest passed 12/12; TypeScript and focused ESLint passed; Playwright passed 4/4 across desktop and mobile; the rendered metric card was inspected at `0.54` for $810K puts / $1.50M calls.
+- Full verification: web Vitest passed 4,981 with 26 skipped; production build and output-trace audit passed; cloud Python passed 724 with 2 skipped. Application Python excluding the environment-missing optional `mcp` test reached 4,282 passed / 13 skipped with one unrelated stale `data/performance.json` `period_label` failure.
+- No broker calls, cache rewrites, commits, or deployments were performed. Unrelated dirty files were preserved.
+
+---
+
 # Task: Correct per-position return implementation (2026-08-07)
 
 ## Goal
