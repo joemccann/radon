@@ -1,3 +1,54 @@
+# Task: Keep Upcoming Catalysts current (2026-08-07)
+
+## Goal
+
+Ensure the dashboard Upcoming Catalysts module reflects the latest catalyst dataset and refreshes within its documented freshness window instead of remaining on an overnight snapshot throughout the trading day.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace catalyst ingestion, scheduler, persistence, API caching, dashboard fetch/polling, and live production freshness.
+- T2 depends_on: [T1] - Add a failing regression that reproduces the confirmed stale-data path.
+- T3 depends_on: [T2] - Implement the smallest end-to-end freshness fix without disturbing unrelated dashboard or SKEW work.
+- T4 depends_on: [T3] - Run focused tests, full suites, production build, Playwright coverage, and visual browser verification.
+- T5 depends_on: [T4] - Record the root cause, delivered behavior, operational contract, and verification results.
+
+## Checklist
+
+- [x] T1 Trace and reproduce stale catalyst data
+- [x] T2 Red regression coverage
+- [x] T3 Freshness implementation
+- [x] T4 Verification
+- [x] T5 Review
+
+## Review
+
+- Root cause: production refreshed catalysts only once at 06:30 ET, while the
+  browser merely re-read that frozen snapshot every ten minutes. The producer
+  also discarded exact economic-event timestamps, queried only UW's default
+  earnings day, and treated FDA trial start dates as scheduled decision dates.
+- The producer now preserves canonical UTC event times, removes duplicates,
+  fetches paged earnings for the next five US trading sessions, and queries a
+  one-year FDA window by `target_date`. The shared market calendar remains the
+  trading-session source of truth.
+- The production timer now runs at 06:30, 10:00, and 16:00 ET on weekdays.
+  Service-health windows match that active-day cadence, and the dashboard also
+  revalidates immediately when a backgrounded tab becomes visible.
+- Read-time filtering removes an exact-time event immediately after it occurs;
+  date-only provider rows retain the existing same-day/20:00 ET fallback.
+- Red/green proof: focused Python passed 131, focused Vitest passed 36, systemd
+  tests passed 274, and catalyst Playwright passed 3. The rendered card was
+  inspected with the elapsed 12:30Z release absent and the future 22:30Z event
+  present.
+- Broad verification: TypeScript, focused ESLint, production build, and the
+  144-manifest output-trace audit passed. Full Vitest passed 5,005 with 26
+  skipped. Application Python passed 4,927 with 13 skipped and one unrelated
+  stale performance-cache fixture failure. Cloud passed 723 with 2 skipped and
+  two unrelated timing failures; both passed immediately in isolation.
+- No broker calls, cache rewrites, or deployments were made. Unrelated dirty
+  files were preserved.
+
+---
+
 # Task: Normalize options-flow ratio to put/call (2026-08-07)
 
 ## Goal

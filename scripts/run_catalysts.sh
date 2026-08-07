@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# FU4 — Catalyst feed wrapper for launchd (F3 fetch_catalysts.py).
+# FU4 — Scheduled catalyst feed wrapper (F3 fetch_catalysts.py).
 #
-# Daily pre-market refresh of the earnings / FDA / economic catalyst stream.
+# Trading-day refresh of the earnings / FDA / economic catalyst stream.
 # Holiday-aware: skips on non-trading days. Writes data/catalysts.json (the
 # fetcher itself owns the write); this wrapper just gates + logs.
 #

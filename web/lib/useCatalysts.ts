@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-const SYNC_INTERVAL_MS = 10 * 60 * 1000; // 10 minutes — catalyst dates move slowly
+const SYNC_INTERVAL_MS = 10 * 60 * 1000; // producer refreshes intraday; refetch while mounted
 
 export type CatalystType = "earnings" | "fda" | "economic";
 
@@ -13,6 +13,7 @@ export interface CatalystRow {
   date: string;
   source: string;
   days_until: number;
+  event_time?: string | null;
 }
 
 export interface CatalystData {
@@ -57,8 +58,13 @@ export function useCatalysts(active: boolean = true): UseCatalystsReturn {
     if (!active) return;
     void load();
     intervalRef.current = setInterval(() => void load(), SYNC_INTERVAL_MS);
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
   }, [active, load]);
 
