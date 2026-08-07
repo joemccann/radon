@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from monitor_daemon.daemon import MonitorDaemon
 from monitor_daemon.handlers import FillMonitorHandler, ExitOrdersHandler, PresetRebalanceHandler, JournalSyncHandler
 from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
+from monitor_daemon.handlers.menthorq_session_check import MenthorQSessionCheck
 from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
 from monitor_daemon.handlers.journal_reconcile import JournalReconcileHandler
 from monitor_daemon.handlers.journal_gap_sli import JournalGapSliHandler
@@ -91,6 +92,7 @@ def create_daemon() -> MonitorDaemon:
     daemon.register(PresetRebalanceHandler())
 
     daemon.register(FlexTokenCheck())
+    daemon.register(MenthorQSessionCheck())
 
     daemon.register(JournalSyncHandler(
         ib_port=4001
