@@ -202,6 +202,10 @@ class TestFillMonitorJournalPersistence:
     def _make_partial_fill_trade(self):
         mock_trade = MagicMock()
         mock_trade.order.orderId = 5
+        # Realistic identity fields: permId 0 = not yet assigned by IB (the
+        # key then falls back to orderId); bare MagicMocks coerce via
+        # __int__ to 1 and shadow the orderId in the T-013 trade_id.
+        mock_trade.order.permId = 0
         mock_trade.order.action = "BUY"
         mock_trade.order.totalQuantity = 25
         mock_trade.order.lmtPrice = 1.00
@@ -211,6 +215,7 @@ class TestFillMonitorJournalPersistence:
         mock_trade.orderStatus.avgFillPrice = 0.98
         mock_trade.contract.symbol = "AAOI"
         mock_trade.contract.localSymbol = "AAOI  260306P00090000"
+        mock_trade.contract.conId = 265598
         return mock_trade
 
     def test_partial_fill_writes_to_journal(self):

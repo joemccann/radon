@@ -24,6 +24,8 @@
 
 | T-022 | DONE | (T-022 commit) | RED: `1 failed, 8 passed` — journal net +10 vs IB position -10 passed `abs()==abs()` and applied a LONG lot's basis to a SHORT. GREEN: signed equality `journal_net == position_size` (None keeps legacy pass); zero-net-vs-open-position pin added; basis/carry/entry-date neighbors 29/29; full pytest layer 4948 passed/14 skipped. |
 
+| T-023 | DONE | (T-023 commit) | RED (true, after an import fix in the test itself): "got 2026-06-26" / "got 2026-11-02" — UTC-aware evening fills stamped the NEXT day (incl. the DST-week case). GREEN: shared `et_session_date()` in handlers/base.py (aware→ET, naive assumed ET, no-arg=now ET); wired into journal_sync `_fill_to_entry` and fill_monitor's `fill_date`. Collateral fixed en route: the T-013 key made legacy `test_partial_fill_writes_to_journal` mock-address-dependent (`int(MagicMock())==1` shadowing orderId; '5'-in-id passed only when a mock repr contained 5) — fixture now carries realistic conId/permId(0), assertion untouched; `_identity_int` guards non-int identity junk. Stability: monitor_daemon 3x 270/270; full pytest layer 4951 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.

@@ -29,7 +29,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from .base import BaseHandler
+from .base import BaseHandler, et_session_date
 from clients.ib_client import IBClient, DEFAULT_HOST
 from clients.journal_basis import normalize_expiry_compact, prior_net_qty_for_contract
 from utils.atomic_io import atomic_save, verified_load
@@ -653,7 +653,10 @@ class JournalSyncHandler(BaseHandler):
         total_cost = float(shares) * price * multiplier + commission
 
         ib_time = getattr(execution, "time", None)
-        date_str = ib_time.strftime("%Y-%m-%d") if isinstance(ib_time, datetime) else datetime.now().strftime("%Y-%m-%d")
+        # ET session date, never a bare strftime on the (UTC-aware) exec
+        # time — a fill after ~20:00 ET otherwise lands on the next
+        # calendar day and shifts the basis cutoff + same-day P&L (T-023).
+        date_str = et_session_date(ib_time if isinstance(ib_time, datetime) else None)
 
         strike = getattr(contract, "strike", None) if sec_type in ("OPT", "BAG") else None
         right = getattr(contract, "right", None) if sec_type in ("OPT", "BAG") else None

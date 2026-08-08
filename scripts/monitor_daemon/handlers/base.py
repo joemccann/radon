@@ -39,9 +39,28 @@ for every handler — not just cash_flow_sync. See
 from abc import ABC, abstractmethod
 from datetime import datetime, timedelta
 from typing import Dict, Any, Optional
+from zoneinfo import ZoneInfo
 import logging
 
 logger = logging.getLogger(__name__)
+
+ET_ZONE = ZoneInfo("America/New_York")
+
+
+def et_session_date(moment: Optional[datetime] = None) -> str:
+    """Calendar date (YYYY-MM-DD) of the ET trading session for a timestamp.
+
+    ib_insync hands back timezone-AWARE UTC execution times, so any fill
+    after ~20:00 ET stamped via a bare strftime lands on the NEXT calendar
+    day — shifting journal basis cutoffs and same-day P&L (T-023). Aware
+    timestamps convert to ET; naive ones are assumed to already be ET
+    (legacy fixtures / pre-normalized values); no argument = now in ET.
+    Never a hardcoded UTC offset — see feedback_hardcoded_timezone_offsets.
+    """
+    m = moment if moment is not None else datetime.now(ET_ZONE)
+    if m.tzinfo is not None:
+        m = m.astimezone(ET_ZONE)
+    return m.strftime("%Y-%m-%d")
 
 
 class HandlerSoftFailure(RuntimeError):
