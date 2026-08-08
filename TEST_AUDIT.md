@@ -1363,3 +1363,7 @@ Deferred (out of backlog, documented in audit as follow-ups): relay backpressure
 ## NEW_FINDINGS (post-freeze)
 
 _Discoveries made during PART B land here; they do not expand the frozen backlog._
+
+- **Retry classifier bypassed by isinstance (found landing T-043):** `_hrana_with_retry`'s gate retries ANY `HranaHttpError` once — since `hrana_execute`/`hrana_query` wrap every failure (including genuine SQL errors) as `HranaHttpError`, `_is_delete_transport_error` is effectively dead code at the real DELETE call sites. Today's callers are idempotent DELETEs so the blast radius is nil, but wiring this helper onto any INSERT path would silently gain re-execution semantics. Pinned loudly in `scripts/tests/test_db_writer_transport_classifier.py`; fix deliberately out of scope.
+- **Production journal_sync bricked on an empty journal table (fixed under T-015's umbrella):** beyond "untested", the prod wiring raised the recovery-path "journal table is empty" error on every cycle of a fresh host — first fill could never import. Fixed via `allow_empty=True` on the prod path only.
+- **Legacy fill-monitor persistence test was latently address-dependent (fixed under T-023):** `"5" in trade_id` only held while mock reprs leaked into the key; realistic fixture identities restore determinism without weakening the assertion.
