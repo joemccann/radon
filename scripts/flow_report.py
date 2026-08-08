@@ -22,6 +22,10 @@ from scanner import analyze_signal
 _BULLISH_OPTION_BIAS = {"BULLISH", "STRONGLY_BULLISH"}
 _BEARISH_OPTION_BIAS = {"BEARISH", "STRONGLY_BEARISH"}
 
+# Daily Dark Pool History window for the per-ticker flow report UI.
+# Scanner / batch paths keep their own shorter defaults for rate budget.
+DEFAULT_LOOKBACK_DAYS = 20
+
 
 def _classify_direction(flow: Dict[str, Any], analysis: Dict[str, Any]) -> Dict[str, Any]:
     """Pick BULLISH / NEUTRAL / BEARISH and a confidence score.
@@ -74,7 +78,7 @@ def _classify_direction(flow: Dict[str, Any], analysis: Dict[str, Any]) -> Dict[
     }
 
 
-def build_report(ticker: str, lookback_days: int = 5) -> Dict[str, Any]:
+def build_report(ticker: str, lookback_days: int = DEFAULT_LOOKBACK_DAYS) -> Dict[str, Any]:
     """Run the flow fetch + analysis pipeline for a single ticker."""
     ticker = ticker.upper()
     flow = fetch_flow(ticker, lookback_days=lookback_days)
@@ -99,7 +103,12 @@ def build_report(ticker: str, lookback_days: int = 5) -> Dict[str, Any]:
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run flow report for a single ticker")
     parser.add_argument("ticker", help="Stock ticker symbol")
-    parser.add_argument("--days", type=int, default=5, help="Lookback trading days (default 5)")
+    parser.add_argument(
+        "--days",
+        type=int,
+        default=DEFAULT_LOOKBACK_DAYS,
+        help=f"Lookback trading days (default {DEFAULT_LOOKBACK_DAYS})",
+    )
     args = parser.parse_args()
 
     try:

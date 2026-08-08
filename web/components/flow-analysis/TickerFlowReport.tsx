@@ -7,6 +7,7 @@ import { classifyFlowSignal, type FlowDirection } from "@/lib/flowSignal";
 import { resolvePutCallRatio } from "@/lib/flowRatio";
 import SignalCard from "@/components/mobile/SignalCard";
 import { useViewport } from "@/lib/useViewport";
+import DailyDarkPoolHistory from "@/components/flow-analysis/DailyDarkPoolHistory";
 
 type Props = {
   ticker: string;
@@ -329,71 +330,13 @@ function MobileTickerFlowReport({
         )}
 
         {section === "history" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {daily.length === 0 ? (
-              <div className="alert-item" style={{ textAlign: "center", padding: "24px 0" }}>
-                No history available
-              </div>
-            ) : (
-              daily.map((d) => {
-                const pct = typeof d.dp_buy_ratio === "number" ? Math.round(d.dp_buy_ratio * 100) : null;
-                const dirTone =
-                  d.flow_direction === "ACCUMULATION" ? "pos" as const
-                    : d.flow_direction === "DISTRIBUTION" ? "neg" as const
-                      : "mut" as const;
-                return (
-                  <div
-                    key={d.date}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "80px 1fr auto auto",
-                      gap: 8,
-                      alignItems: "center",
-                      padding: "8px 0",
-                      borderBottom: "1px solid var(--line-grid)",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        fontVariantNumeric: "tabular-nums",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {d.date}
-                    </span>
-                    <span
-                      className={`m-pill m-pill--${dirTone}`}
-                      style={{ minHeight: 24, fontSize: 10, padding: "2px 8px" }}
-                    >
-                      {(d.flow_direction ?? "NEUTRAL").replace("_", " ")}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        fontVariantNumeric: "tabular-nums",
-                        color: "var(--text-muted)",
-                      }}
-                    >
-                      {d.flow_strength ?? "--"}
-                    </span>
-                    <span
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 11,
-                        fontVariantNumeric: "tabular-nums",
-                        color: "var(--text-primary)",
-                      }}
-                    >
-                      {pct != null ? `${pct}%` : "--"}
-                    </span>
-                  </div>
-                );
-              })
-            )}
-          </div>
+          daily.length === 0 ? (
+            <div className="alert-item" style={{ textAlign: "center", padding: "24px 0" }}>
+              No history available
+            </div>
+          ) : (
+            <DailyDarkPoolHistory daily={daily} compact />
+          )
         )}
       </div>
 
@@ -619,56 +562,12 @@ function ReportSections({
         </div>
       </section>
 
-      {daily.length > 0 && (
-        <section className="section">
-          <div className="section-header">
-            <div className="section-title">Daily Dark Pool History</div>
-            <span className="pill neutral">{daily.length} SESSIONS</span>
-          </div>
-          <div className="section-body">
-            <table className="ticker-flow-daily">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Direction</th>
-                  <th>Strength</th>
-                  <th>Buy %</th>
-                  <th>Prints</th>
-                </tr>
-              </thead>
-              <tbody>
-                {daily.map((d) => {
-                  const pct = typeof d.dp_buy_ratio === "number" ? Math.round(d.dp_buy_ratio * 100) : null;
-                  const dirClass =
-                    d.flow_direction === "ACCUMULATION"
-                      ? "accum"
-                      : d.flow_direction === "DISTRIBUTION"
-                        ? "distrib"
-                        : "neutral";
-                  return (
-                    <tr key={d.date}>
-                      <td className="mono">{d.date}</td>
-                      <td>
-                        <span className={`pill ${dirClass}`}>
-                          {(d.flow_direction ?? "NEUTRAL").replace("_", " ")}
-                        </span>
-                      </td>
-                      <td className="mono">{d.flow_strength ?? "--"}</td>
-                      <td className="mono">{pct == null ? "--" : `${pct}%`}</td>
-                      <td className="mono">{d.num_prints ?? "--"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </section>
-      )}
+      {daily.length > 0 && <DailyDarkPoolHistory daily={daily} />}
 
       <section className="section">
         <div className="report-meta">
           {data.fetched_at
-            ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? 5} Trading Days`
+            ? `Report Generated: ${new Date(data.fetched_at).toLocaleString()} - Source: UW API - Dark Pool Lookback: ${data.lookback_days ?? 20} Trading Days`
             : "No report timestamp available"}
           {isAnalyzing ? " - Refreshing in background..." : ""}
         </div>
