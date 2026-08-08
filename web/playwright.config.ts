@@ -20,7 +20,19 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"] },
+      use: {
+        ...devices["Desktop Chrome"],
+        launchOptions: {
+          // chromium's in-container async DNS resolver returns
+          // ERR_NAME_NOT_RESOLVED for "localhost" (CI run 31263267789,
+          // container mcr.microsoft.com/playwright) even though loopback
+          // itself works there. Map the name straight to the loopback IP so
+          // baseURL can stay "localhost" — keeping every localhost-keyed app
+          // path and page.route mock identical to local runs. No-op locally,
+          // where localhost already resolves to 127.0.0.1.
+          args: ["--host-resolver-rules=MAP localhost 127.0.0.1"],
+        },
+      },
     },
     {
       name: "mobile",
