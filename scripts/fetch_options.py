@@ -229,23 +229,19 @@ def fetch_uw_chain(ticker: str, _client: UWClient = None) -> Optional[Dict]:
 
 
 def fetch_uw_flow(ticker: str, days: int = 7, _client: UWClient = None) -> Optional[Dict]:
-    """Fetch options flow alerts from Unusual Whales."""
+    """Fetch options flow alerts from Unusual Whales (full multi-page walk)."""
     if not UW_TOKEN:
         return None
 
     try:
-        def _fetch(client):
-            # Use same params as fetch_flow.py for cache hits
-            return client.get_flow_alerts(ticker=ticker, min_premium=50000, limit=100)
+        from fetch_flow import fetch_flow_alerts
 
-        if _client is not None:
-            raw = _fetch(_client)
-        else:
-            with UWClient() as client:
-                raw = _fetch(client)
+        data = fetch_flow_alerts(
+            ticker=ticker,
+            min_premium=50000,
+            _client=_client,
+        )
 
-        data = raw.get("data", [])
-        
         if not data:
             return {"total_alerts": 0, "bias": "NO_DATA"}
         
