@@ -136,7 +136,11 @@ test.describe("Share PnL", () => {
 
     const historical = page.getByTestId("historical-trades-section");
     await expect(historical).toBeVisible({ timeout: 15_000 });
-    await expect(historical.getByRole("row", { name: /AAOI/ })).toBeVisible({ timeout: 15_000 });
+    // The blotter fixture has an open AND a closed AAOI row; under a production
+    // `next start` both render, so gate on "at least one AAOI row present"
+    // (.first) — strict-mode over 2 matches otherwise fails. The closed-trade
+    // share button is still pinned to exactly one below.
+    await expect(historical.getByRole("row", { name: /AAOI/ }).first()).toBeVisible({ timeout: 15_000 });
     await expect(historical.locator(".share-pnl-button")).toHaveCount(1);
     await expect(historical.locator(".share-pnl-button")).toBeVisible();
   });
