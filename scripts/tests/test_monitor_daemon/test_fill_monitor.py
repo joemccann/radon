@@ -299,5 +299,65 @@ class TestFillMonitorState:
         assert 5 in handler.known_orders or "5" in handler.known_orders
 
 
+class TestFillMonitorTradeIdUniqueness:
+    """T-013: the synthetic journal trade_id collided across DIFFERENT
+    orders (IB orderIds restart per session/clientId) — and JOURNAL_UPSERT_SQL
+    is ON CONFLICT(trade_id) DO UPDATE, so the second fill destructively
+    overwrote the first order's journal row."""
+
+    @staticmethod
+    def _trade(symbol, con_id, perm_id, strike=90.0):
+        t = MagicMock()
+        t.order.orderId = 5          # same orderId on purpose — new session
+        t.order.permId = perm_id
+        t.order.action = "BUY"
+        t.order.totalQuantity = 25
+        t.order.lmtPrice = 1.00
+        t.orderStatus.status = "Submitted"
+        t.orderStatus.filled = 10
+        t.orderStatus.remaining = 15
+        t.orderStatus.avgFillPrice = 0.98
+        t.contract.symbol = symbol
+        t.contract.localSymbol = f"{symbol}  260306P000{int(strike)}000"
+        t.contract.conId = con_id
+        t.contract.secType = "OPT"
+        t.contract.strike = strike
+        t.contract.right = "P"
+        t.contract.lastTradeDateOrContractMonth = "20260306"
+        return t
+
+    def _run_cycle(self, trade, captured_trade_ids):
+        with patch("monitor_daemon.handlers.fill_monitor.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.fill_monitor.upsert_journal_entry") as mock_upsert:
+            mock_cls.return_value = make_mock_client(trades=[trade])
+            handler = FillMonitorHandler(send_notifications=False)
+            handler.known_orders = {5: {"filled": 0}}
+            handler.execute()
+            for call in mock_upsert.call_args_list:
+                tid = call.args[0] if call.args else call.kwargs.get("trade_id")
+                captured_trade_ids.append(str(tid))
+
+    def test_same_order_id_on_different_contracts_gets_distinct_trade_ids(self):
+        trade_ids: list = []
+        self._run_cycle(self._trade("AAOI", con_id=111, perm_id=9001), trade_ids)
+        self._run_cycle(self._trade("MU", con_id=222, perm_id=9002, strike=105.0), trade_ids)
+
+        assert len(trade_ids) == 2
+        assert trade_ids[0] != trade_ids[1], (
+            "two different orders sharing orderId 5 produced the SAME journal "
+            f"trade_id ({trade_ids[0]}) — the second upsert overwrites the first row"
+        )
+
+    def test_same_fill_state_re_detection_stays_idempotent(self):
+        trade_ids: list = []
+        self._run_cycle(self._trade("AAOI", con_id=111, perm_id=9001), trade_ids)
+        self._run_cycle(self._trade("AAOI", con_id=111, perm_id=9001), trade_ids)
+
+        assert len(trade_ids) == 2
+        assert trade_ids[0] == trade_ids[1], (
+            "re-detecting the SAME fill state must upsert the same row, not append"
+        )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
