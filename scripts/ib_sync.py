@@ -771,9 +771,13 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
         )
         if journal_key and journal_key in journal_basis_lookup and position_size != 0:
             journal_net = journal_net_qty_lookup.get(journal_key)
+            # SIGNED equality: |+10| == |-10| let a sign-flipped journal
+            # apply a long lot's basis to a short position (T-022). A
+            # journal that disagrees on DIRECTION is as incomplete as one
+            # that disagrees on size. None = legacy lookup without net-qty.
             basis_is_complete = (
                 journal_net is None
-                or abs(journal_net) == abs(position_size)
+                or journal_net == position_size
             )
             if basis_is_complete:
                 entry_cost = abs(float(journal_basis_lookup[journal_key]))

@@ -22,6 +22,8 @@
 
 | T-015 | DONE | (T-015 commit) | RED: `2 failed, 2 passed` — production wiring (trade_log_path=None) bricked on an EMPTY journal table ("journal read failed: … empty; cannot recover") which also blocked the next-cycle upsert retry. GREEN: `_load_existing_from_journal(db, allow_empty=True)` on the prod path (recovery path still raises on empty); 4 prod-config tests now pin journal-table dedupe, reconciled==0, read-failure abort-without-upserts, and within-session upsert retry. File 35/35; full pytest layer 4946 passed/14 skipped. |
 
+| T-022 | DONE | (T-022 commit) | RED: `1 failed, 8 passed` — journal net +10 vs IB position -10 passed `abs()==abs()` and applied a LONG lot's basis to a SHORT. GREEN: signed equality `journal_net == position_size` (None keeps legacy pass); zero-net-vs-open-position pin added; basis/carry/entry-date neighbors 29/29; full pytest layer 4948 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
