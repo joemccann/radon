@@ -15,6 +15,23 @@ export function normalizeNumber(value) {
   return value;
 }
 
+/**
+ * Price fields only. IB signals "no quote" with 0 as well as -1: a dead option
+ * book after hours ticks bid=0/ask=0, and a one-sided book ticks bid=0 against
+ * a real ask. Zero is not a tradeable price for anything this relay carries
+ * (stocks, options, cash indexes, index futures), so it must not survive into
+ * PriceData — updateDerivedLast would average 0 and 0 into a midpoint and
+ * publish last=0 with lastIsCalculated=true, i.e. a fabricated $0.00 mark on a
+ * live position.
+ *
+ * Counts keep normalizeNumber: 0 bid size (nothing resting) and 0 volume
+ * (nothing traded today) are both legitimate values, not sentinels.
+ */
+export function normalizePrice(value) {
+  const price = normalizeNumber(value);
+  return price === 0 ? null : price;
+}
+
 export function createPriceData(symbol) {
   return {
     symbol,
@@ -78,28 +95,28 @@ export function updatePriceFromTickPrice(data, tickType, value) {
   switch (tickType) {
     // ── Live tick types ───────────────────────────────────────────────────
     case TICK_TYPE.BID:
-      data.bid = normalizeNumber(value);
+      data.bid = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.ASK:
-      data.ask = normalizeNumber(value);
+      data.ask = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.LAST:
-      data.last = normalizeNumber(value);
+      data.last = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.HIGH:
-      data.high = normalizeNumber(value);
+      data.high = normalizePrice(value);
       break;
     case TICK_TYPE.LOW:
-      data.low = normalizeNumber(value);
+      data.low = normalizePrice(value);
       break;
     case TICK_TYPE.OPEN:
-      data.open = normalizeNumber(value);
+      data.open = normalizePrice(value);
       break;
     case TICK_TYPE.CLOSE:
-      data.close = normalizeNumber(value);
+      data.close = normalizePrice(value);
       break;
     case TICK_TYPE.VOLUME:
       data.volume = normalizeNumber(value);
@@ -107,10 +124,10 @@ export function updatePriceFromTickPrice(data, tickType, value) {
 
     // ── Misc Stats (generic tick 165) ─────────────────────────────────────
     case TICK_TYPE.LOW_52_WEEK:    // 19
-      data.week52Low = normalizeNumber(value);
+      data.week52Low = normalizePrice(value);
       break;
     case TICK_TYPE.HIGH_52_WEEK:   // 20
-      data.week52High = normalizeNumber(value);
+      data.week52High = normalizePrice(value);
       break;
     case TICK_TYPE.AVG_VOLUME:     // 21
       data.avgVolume = normalizeNumber(value);
@@ -121,31 +138,31 @@ export function updatePriceFromTickPrice(data, tickType, value) {
     // absent. VIX/VVIX always receive delayed ticks because they require a
     // separate CBOE index subscription.
     case TICK_TYPE.DELAYED_BID:         // 66
-      data.bid = normalizeNumber(value);
+      data.bid = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.DELAYED_ASK:         // 67
-      data.ask = normalizeNumber(value);
+      data.ask = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.DELAYED_LAST:        // 68
-      data.last = normalizeNumber(value);
+      data.last = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.DELAYED_HIGH:        // 72
-      data.high = normalizeNumber(value);
+      data.high = normalizePrice(value);
       break;
     case TICK_TYPE.DELAYED_LOW:         // 73
-      data.low = normalizeNumber(value);
+      data.low = normalizePrice(value);
       break;
     case TICK_TYPE.DELAYED_VOLUME:      // 74
       data.volume = normalizeNumber(value);
       break;
     case TICK_TYPE.DELAYED_CLOSE:       // 75
-      data.close = normalizeNumber(value);
+      data.close = normalizePrice(value);
       break;
     case TICK_TYPE.DELAYED_OPEN:        // 76
-      data.open = normalizeNumber(value);
+      data.open = normalizePrice(value);
       break;
 
     default:
