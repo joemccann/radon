@@ -52,6 +52,12 @@ class ExitOrdersHandler(BaseHandler):
         self.ib_port = ib_port
         self.client_id = client_id
         self.max_gap_pct = max_gap_pct
+        # Orders that transmitted to IB but whose journal UPDATE failed —
+        # the row still reads PENDING, so without this guard the next cycle
+        # would place the SAME live order again (T-010). Keyed
+        # (journal_trade_id, order_type) -> live order_id; healed (journal
+        # marked PLACED) on a later cycle once the DB write succeeds.
+        self._unrecorded_placements: Dict[tuple, int] = {}
 
     def _open_db(self) -> Any:
         if self.db is not None:
@@ -95,34 +101,33 @@ class ExitOrdersHandler(BaseHandler):
                 if not trade:
                     continue
                 exit_orders = trade.get("exit_orders", {})
-                
-                # Check target orders
-                target = exit_orders.get("target", {})
-                if target.get("status") == "PENDING":
+
+                for order_type in ("target", "stop"):
+                    section = exit_orders.get(order_type, {})
+                    if section.get("status") != "PENDING":
+                        continue
+                    guard_key = (journal_trade_id, order_type)
+                    if guard_key in self._unrecorded_placements:
+                        # Already live at IB from a prior cycle whose journal
+                        # write failed. Never re-place; retry the journal
+                        # write so the row eventually reads PLACED.
+                        if self._update_journal_trade(
+                            trade.get("id"),
+                            order_type,
+                            self._unrecorded_placements[guard_key],
+                            journal_trade_id,
+                        ):
+                            del self._unrecorded_placements[guard_key]
+                        continue
                     pending.append({
                         "trade_id": trade.get("id"),
                         "ticker": trade.get("ticker"),
                         "structure": trade.get("structure"),
-                        "order_type": "target",
-                        "target_price": target.get("price"),
-                        "contracts": target.get("contracts"),
-                        "contract_spec": target.get("contract_spec"),
+                        "order_type": order_type,
+                        "target_price": section.get("price"),
+                        "contracts": section.get("contracts"),
+                        "contract_spec": section.get("contract_spec"),
                         "action": "SELL",  # Exit orders are sells
-                        "journal_trade_id": journal_trade_id,
-                    })
-                
-                # Check stop orders
-                stop = exit_orders.get("stop", {})
-                if stop.get("status") == "PENDING":
-                    pending.append({
-                        "trade_id": trade.get("id"),
-                        "ticker": trade.get("ticker"),
-                        "structure": trade.get("structure"),
-                        "order_type": "stop",
-                        "target_price": stop.get("price"),
-                        "contracts": stop.get("contracts"),
-                        "contract_spec": stop.get("contract_spec"),
-                        "action": "SELL",
                         "journal_trade_id": journal_trade_id,
                     })
                     
@@ -145,8 +150,13 @@ class ExitOrdersHandler(BaseHandler):
         order_type: str,
         order_id: int,
         journal_trade_id: Optional[str] = None,
-    ) -> None:
-        """Update the Turso journal row with a placed order ID."""
+    ) -> bool:
+        """Update the Turso journal row with a placed order ID.
+
+        Returns True on success. A failed write MUST be visible to the
+        caller — the order is already live at IB, and pretending the cycle
+        was clean is how the same order gets placed twice (T-010).
+        """
         try:
             db = self._open_db()
             rows = []
@@ -195,8 +205,10 @@ class ExitOrdersHandler(BaseHandler):
             if hasattr(db, "commit"):
                 db.commit()
             logger.info(f"Updated journal: trade {trade_id} {order_type} -> order #{order_id}")
+            return True
         except Exception as e:
             logger.error(f"Failed to update journal trade: {e}")
+            return False
     
     def execute(self) -> Dict[str, Any]:
         """
@@ -306,13 +318,29 @@ class ExitOrdersHandler(BaseHandler):
                             "current_mid": mid
                         })
 
-                        # Update journal
-                        self._update_journal_trade(
+                        # Update journal. On failure the order is LIVE but the
+                        # row still says PENDING — arm the re-place guard and
+                        # surface an error so the watchdog sees the cycle.
+                        recorded = self._update_journal_trade(
                             order_info["trade_id"],
                             order_info["order_type"],
                             order_id,
                             order_info.get("journal_trade_id"),
                         )
+                        if not recorded:
+                            guard_key = (
+                                order_info.get("journal_trade_id"),
+                                order_info["order_type"],
+                            )
+                            self._unrecorded_placements[guard_key] = order_id
+                            result["journal_update_failures"] = (
+                                result.get("journal_update_failures", 0) + 1
+                            )
+                            result["error"] = (
+                                "journal update failed after live placement "
+                                f"(order #{order_id} {order_info['ticker']} "
+                                f"{order_info['order_type']}); re-place suppressed"
+                            )
                     else:
                         gap_pct = abs(target_price - mid) / mid * 100
                         logger.debug(
