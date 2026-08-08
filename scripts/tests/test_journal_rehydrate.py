@@ -30,6 +30,7 @@ sys.path.insert(0, str(SCRIPTS_DIR / "trade_blotter"))
 from journal_rehydrate import (  # noqa: E402
     rehydrate_from_executions,
     rehydrate,
+    _is_duplicate,
     _structure_label,
 )
 from trade_blotter.models import Execution, SecurityType, Side  # noqa: E402
@@ -885,3 +886,139 @@ class TestFlexNotesParsing:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# T-035 — APPEND this class to scripts/tests/test_journal_rehydrate.py
+# (uses the module's existing `_make_execution` helper)
+#
+# One import line changes at the top of that file:
+#     from journal_rehydrate import (  # noqa: E402
+#         rehydrate_from_executions,
+#         rehydrate,
+#         _is_duplicate,          # <-- add
+#         _structure_label,
+#     )
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectionSuffixDedupe:
+    """T-035: Flex replays corrections; the importer must not double-count.
+
+    IB re-delivers a corrected execution as ``<root>.02`` against ``<root>.01``.
+    Rehydrate is SKIP-ONLY here (unlike the real-time handler, which
+    supersedes): a Flex bucket aggregates many executions under one composite
+    ``ib_exec_id``, so there is no 1:1 journal row whose quantity a correction
+    could replace. Refusing to double-count is the invariant; repairing an
+    already-written stale row is the backfill script's job.
+    """
+
+    ROOT = "0002920b.6a19d5a9.01"
+    ORIGINAL = f"{ROOT}.01"
+    CORRECTED = f"{ROOT}.02"
+
+    def _exec(self, exec_id: str, quantity: int, *, side: Side = Side.SELL, when=None) -> Execution:
+        return _make_execution(
+            exec_id=exec_id,
+            symbol="MU",
+            sec_type=SecurityType.OPTION,
+            side=side,
+            quantity=quantity,
+            price=110.0,
+            commission=1.0,
+            strike=1050,
+            right="C",
+            expiry="20260717",
+            when=when or datetime(2026, 7, 10, 14, 30, 0),
+        )
+
+    def _imported_row(self) -> dict:
+        return {
+            "id": 1,
+            "date": "2026-07-10",
+            "ticker": "MU",
+            "structure": "Short Call $1050 2026-07-17",
+            "action": "SELL_TO_OPEN",
+            "contracts": 3,
+            "ib_exec_id": self.ORIGINAL,
+        }
+
+    def test_correction_of_an_imported_exec_is_skipped(self):
+        existing = {"trades": [self._imported_row()]}
+        updated, imported, skipped, _ = rehydrate_from_executions(
+            [self._exec(self.CORRECTED, 5)], existing
+        )
+
+        assert imported == 0
+        assert skipped == 1
+        assert len(updated["trades"]) == 1
+
+    def test_correction_does_not_swallow_a_genuinely_new_execution(self):
+        """The correction and a new execution share a contract bucket. Leaving
+        the correction in makes the whole bucket read as a duplicate and the
+        new execution is silently dropped (the MSFT $460C class)."""
+        existing = {"trades": [self._imported_row()]}
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            [
+                self._exec(self.CORRECTED, 5),
+                self._exec("00021ab9.69f202e9.03.01", 4, side=Side.BUY,
+                           when=datetime(2026, 7, 10, 15, 0, 0)),
+            ],
+            existing,
+        )
+
+        assert imported == 1
+        assert [t["ib_exec_id"] for t in updated["trades"] if t["ib_exec_id"] != self.ORIGINAL] == [
+            "00021ab9.69f202e9.03.01"
+        ]
+
+    def test_original_and_correction_in_one_pull_keep_only_the_correction(self):
+        """Both land in one contract bucket whose quantity is a SUM — 3 + 5
+        would book an 8-contract fill for a 5-contract execution."""
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            [self._exec(self.ORIGINAL, 3), self._exec(self.CORRECTED, 5)], {"trades": []}
+        )
+
+        assert imported == 1
+        assert len(updated["trades"]) == 1
+        assert updated["trades"][0]["contracts"] == 5
+
+    def test_distinct_executions_of_one_order_still_aggregate(self):
+        """Only the trailing two-digit segment is a correction counter: these
+        two ids are separate fills and must both be booked."""
+        updated, imported, _skipped, _ = rehydrate_from_executions(
+            [
+                self._exec("00021ab9.69f202e9.02.01", 2, side=Side.BUY),
+                self._exec("00021ab9.69f202e8.02.01", 4, side=Side.BUY,
+                           when=datetime(2026, 7, 11, 10, 0, 0)),
+            ],
+            {"trades": []},
+        )
+
+        assert imported == 1
+        assert updated["trades"][0]["contracts"] == 6
+        assert updated["trades"][0]["ib_exec_id"] == (
+            "00021ab9.69f202e8.02.01+00021ab9.69f202e9.02.01"
+        )
+
+    def test_composite_part_dedupe_is_unchanged(self):
+        existing = {
+            "trades": [dict(self._imported_row(), ib_exec_id="FILL-A+FILL-B", contracts=77)]
+        }
+        updated, imported, skipped, _ = rehydrate_from_executions(
+            [self._exec("FILL-A", 3)], existing
+        )
+
+        assert imported == 0
+        assert skipped == 1
+        assert len(updated["trades"]) == 1
+
+    def test_is_duplicate_is_correction_aware_on_its_own(self):
+        """The predicate guards any future caller that bypasses the
+        pre-filter."""
+        entry = {"ib_exec_id": self.CORRECTED, "ticker": "MU", "date": "2026-07-11",
+                 "structure": "Short Call $1050 2026-07-17"}
+
+        assert _is_duplicate(entry, {self.ORIGINAL}, set(), {self.ROOT}) is True
+        assert _is_duplicate(entry, {self.ORIGINAL}, set(), set()) is False
+        assert _is_duplicate(entry, {self.ORIGINAL}, set()) is False

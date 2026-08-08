@@ -1212,3 +1212,283 @@ class TestStructureLabel:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# T-035 — APPEND this class to
+# scripts/tests/test_monitor_daemon/test_journal_sync.py
+# (uses the module's existing `_mock_fill` helper + `trade_log_path` fixture)
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectionSuffixSupersede:
+    """T-035: a corrected execution REPLACES its original, never appends.
+
+    IB re-delivers a corrected execution under the same exec-id root with the
+    trailing two-digit segment incremented (`…01.01` → `…01.02`). Deduping on
+    exact string equality imported the correction as an ADDITIONAL row, so the
+    contract's quantity and cost were counted twice — the journal showed 3 + 5
+    contracts for one 5-contract fill. Distinct executions differ in the
+    segments BEFORE the counter (`…69f202e9.02.01` vs `…69f202e9.03.01` are two
+    real fills of one order), so only the final segment may be collapsed.
+    Same convention as web/lib/journal/realizedPnl.ts:stripCorrectionSuffix.
+    """
+
+    ROOT = "0002920b.6a19d5a9.01"
+    ORIGINAL = f"{ROOT}.01"
+    CORRECTED = f"{ROOT}.02"
+
+    # -- doubles -----------------------------------------------------------
+
+    def _journal_row(self, exec_id: str, contracts: int, **overrides) -> dict:
+        row = {
+            "id": 1,
+            "date": "2026-07-10",
+            "ticker": "MU",
+            "structure": "Short Call $1050 2026-07-17",
+            "decision": "IB_AUTO_IMPORT",
+            "action": "SELL_TO_OPEN",
+            "contracts": contracts,
+            "total_cost": contracts * 11000.0,
+            "strike": 1050.0,
+            "right": "C",
+            "expiry": "20260717",
+            "ib_exec_id": exec_id,
+        }
+        row.update(overrides)
+        return row
+
+    def _fake_db(self, rows: list[dict]):
+        """Dispatch on the three SELECT shapes journal_sync issues: the
+        4-column journal read, the trade_id coverage scan, and the
+        prior-qty-per-contract scan."""
+        recovery = [
+            (r["ib_exec_id"], json.dumps(r), "2026-07-10T18:30:00Z", "2026-07-10T18:30:01Z")
+            for r in rows
+        ]
+        coverage = [(r["ib_exec_id"],) for r in rows]
+        prior = [(json.dumps(r), "2026-07-10T18:30:00Z", "2026-07-10T18:30:00Z") for r in rows]
+
+        def execute(sql, *args, **kwargs):
+            result = MagicMock(spec=["fetchall"])
+            statement = " ".join(str(sql).split())
+            if "trade_id, payload, filled_at, written_at" in statement:
+                result.fetchall.return_value = recovery
+            elif "SELECT trade_id FROM journal" in statement:
+                result.fetchall.return_value = coverage
+            else:
+                result.fetchall.return_value = prior
+            return result
+
+        db = MagicMock()
+        db.execute.side_effect = execute
+        return db
+
+    def _option_fill(self, exec_id: str, shares: int, *, side: str = "SLD", when=None):
+        return _mock_fill(
+            exec_id=exec_id,
+            symbol="MU",
+            side=side,
+            shares=shares,
+            price=110.0,
+            sec_type="OPT",
+            strike=1050.0,
+            right="C",
+            expiry="20260717",
+            when=when or datetime(2026, 7, 10, 14, 30, 0),
+        )
+
+    def _run(self, trade_log_path, journal_rows: list[dict], fills: list, *, mirror=True):
+        """One execute() cycle. Returns (result, mirror rows, upsert calls)."""
+        upserts: list[tuple] = []
+
+        def fake_upsert(trade_id, entry, filled_at=None):
+            upserts.append((str(trade_id), entry))
+
+        if mirror:
+            atomic_save(str(trade_log_path), {"trades": [dict(r) for r in journal_rows]})
+
+        db = self._fake_db(journal_rows)
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler(trade_log_path=trade_log_path if mirror else None)
+            result = handler.execute()
+
+        rows = verified_load(str(trade_log_path))["trades"] if mirror else []
+        return result, rows, upserts
+
+    # -- supersede ---------------------------------------------------------
+
+    def test_correction_supersedes_the_imported_original(self, trade_log_path):
+        """One row for the root, carrying the CORRECTED contracts."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [self._journal_row(self.ORIGINAL, 3)],
+            [self._option_fill(self.CORRECTED, 5)],
+        )
+
+        for_root = [r for r in rows if str(r["ib_exec_id"]).startswith(self.ROOT)]
+        assert len(for_root) == 1, (
+            f"correction appended a second row for one execution: {for_root}"
+        )
+        assert for_root[0]["contracts"] == 5
+        assert result["imported"] == 0
+        assert result["superseded"] == 1
+        assert [trade_id for trade_id, _entry in upserts] == [self.ORIGINAL], (
+            "the correction must upsert the SAME trade_id so Turso replaces the row"
+        )
+
+    def test_prod_wiring_supersedes_without_a_disk_mirror(self):
+        """trade_log_path=None (monitor_daemon/run.py): dedupe + supersede both
+        source from the journal TABLE."""
+        result, _rows, upserts = self._run(
+            None,
+            [self._journal_row(self.ORIGINAL, 3)],
+            [self._option_fill(self.CORRECTED, 5)],
+            mirror=False,
+        )
+
+        assert result["superseded"] == 1
+        trade_id, entry = upserts[0]
+        assert trade_id == self.ORIGINAL
+        assert entry["contracts"] == 5
+        assert entry["ib_exec_id"] == self.ORIGINAL
+        assert entry["ib_exec_id_corrected"] == self.CORRECTED, (
+            "the absorbed correction number must be persisted or the next cycle "
+            "re-supersedes the same row forever"
+        )
+
+    def test_lower_numbered_late_arrival_is_skipped(self, trade_log_path):
+        """The pre-correction execution replays after the correction landed."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [self._journal_row(self.CORRECTED, 5)],
+            [self._option_fill(self.ORIGINAL, 3)],
+        )
+
+        assert result["imported"] == 0
+        assert result["superseded"] == 0
+        assert result["skipped"] == 1
+        assert upserts == []
+        assert [r["contracts"] for r in rows] == [5], "stale quantity overwrote the correction"
+
+    def test_redelivery_after_a_supersede_is_idempotent(self, trade_log_path):
+        """Both ids stay in the session cache all afternoon: the cycle must not
+        rewrite the row every 300s."""
+        absorbed = self._journal_row(self.ORIGINAL, 5, ib_exec_id_corrected=self.CORRECTED)
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [absorbed],
+            [self._option_fill(self.ORIGINAL, 3), self._option_fill(self.CORRECTED, 5)],
+        )
+
+        assert (result["imported"], result["superseded"], result["skipped"]) == (0, 0, 2)
+        assert upserts == []
+        assert [r["contracts"] for r in rows] == [5]
+
+    def test_original_and_correction_in_one_cycle_collapse(self, trade_log_path):
+        """Nothing imported yet: the pair must write ONE row, corrected."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [],
+            [
+                self._option_fill(self.ORIGINAL, 3, when=datetime(2026, 7, 10, 14, 30, 0)),
+                self._option_fill(self.CORRECTED, 5, when=datetime(2026, 7, 10, 14, 30, 0)),
+            ],
+        )
+
+        assert len(rows) == 1, f"correction pair wrote {len(rows)} rows"
+        assert rows[0]["contracts"] == 5
+        assert rows[0]["ib_exec_id"] == self.ORIGINAL
+        assert len(upserts) == 1
+
+    def test_corrected_sell_keeps_its_closing_label(self, trade_log_path):
+        """A correction is labelled against the position BEFORE the fill it
+        replaces. Rebasing wrong reads the original as already-closed and
+        relabels the close to SELL_TO_OPEN (the phantom-short class)."""
+        opened = {
+            "id": 1,
+            "date": "2026-07-09",
+            "ticker": "MU",
+            "structure": "Long Call $1050 2026-07-17",
+            "action": "BUY_OPTION",
+            "contracts": 25,
+            "total_cost": 25000.0,
+            "strike": 1050.0,
+            "right": "C",
+            "expiry": "20260717",
+            "ib_exec_id": "OPEN-BUY",
+        }
+        sold = self._journal_row(self.ORIGINAL, 25, id=2, action="SELL_OPTION")
+
+        _result, rows, _upserts = self._run(
+            trade_log_path, [opened, sold], [self._option_fill(self.CORRECTED, 30)]
+        )
+
+        corrected = next(r for r in rows if r["ib_exec_id"] == self.ORIGINAL)
+        assert corrected["action"] == "SELL_OPTION", (
+            f"got {corrected['action']} — the corrected sell was labelled against "
+            "a net-flat position instead of the 25-contract long it closes"
+        )
+        assert corrected["contracts"] == 30
+
+    # -- invariants the root logic must not break --------------------------
+
+    def test_distinct_executions_of_one_order_are_not_collapsed(self, trade_log_path):
+        """Real IB shape: the THIRD segment separates executions; only the
+        fourth is the correction counter."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [],
+            [
+                self._option_fill("00021ab9.69f202e9.02.01", 2, side="BOT"),
+                self._option_fill(
+                    "00021ab9.69f202e9.03.01", 4, side="BOT",
+                    when=datetime(2026, 7, 10, 14, 31, 0),
+                ),
+            ],
+        )
+
+        assert result["imported"] == 2
+        assert sorted(r["contracts"] for r in rows) == [2, 4]
+        assert sorted(trade_id for trade_id, _entry in upserts) == [
+            "00021ab9.69f202e9.02.01",
+            "00021ab9.69f202e9.03.01",
+        ]
+
+    def test_composite_exec_id_dedupe_is_unchanged(self, trade_log_path):
+        """journal_rehydrate's '+'-joined ids stay opaque: their PARTS are the
+        correctable units, so part-wise exact dedupe still governs."""
+        composite = {
+            "id": 1,
+            "date": "2026-07-10",
+            "ticker": "WULF",
+            "structure": "Long Call $17 2027-01-15",
+            "action": "BUY_OPTION",
+            "contracts": 77,
+            "total_cost": 7700.0,
+            "strike": 17.0,
+            "right": "C",
+            "expiry": "20270115",
+            "ib_exec_id": "FILL-A+FILL-B",
+        }
+        known_part = _mock_fill(
+            exec_id="FILL-A", symbol="WULF", side="BOT", shares=8, price=5.2,
+            sec_type="OPT", strike=17.0, right="C", expiry="20270115",
+        )
+        unrelated = _mock_fill(
+            exec_id="FILL-C", symbol="WULF", side="BOT", shares=9, price=5.3,
+            sec_type="OPT", strike=17.0, right="C", expiry="20270115",
+        )
+
+        result, rows, upserts = self._run(trade_log_path, [composite], [known_part])
+        assert (result["imported"], result["superseded"]) == (0, 0)
+        assert [r["contracts"] for r in rows] == [77]
+        assert upserts == []
+
+        result, _rows, _upserts = self._run(trade_log_path, [composite], [unrelated])
+        assert result["imported"] == 1
