@@ -46,6 +46,10 @@
 
 | T-046 | DONE | (T-046 commit) | RED: `2 failed, 1 passed` — the incident-born ladder was dead code under test AND `total += batch_size` inflated the reported count (200 for a 7-row tail, written into service_health detail). GREEN: page COUNT(*) before the batched DELETE; fallback-then-re-arm and wedged-page-abort now pinned against a scriptable Hrana seam. Neighbors 73/73; full pytest layer 5018 passed/14 skipped. |
 
+| T-050 | **BLOCKED** | — | Measured: honest product-only coverage (test dirs omitted) = **58.00%** vs the 64 gate — the 73.01% baseline carries ~15 points of test-file self-coverage. Shipping the omit alone turns CI red; lowering the gate is forbidden by the ratchet's own contract ("never lower it to make a red build pass") and by this backlog's AC ("report, don't lower silently"). MAINTAINER DECISION REQUIRED: adopt honest metric + re-based ratchet (omit config + `--cov-fail-under=55`, preserving the original ~2.5pt-under-measured design) or keep the inflated metric. Omit config drafted and reverted; measurement evidence in this row. Root cause hypothesis: coverage config never excluded test modules and the ratchet was calibrated on the inflated number. |
+| T-051 | DONE | (T-051 commit) | Root `tests/` (TWR builder, 20 money-math cases + 2 more) added to the CI pytest command. Local: `pytest tests` 3× `22 passed`; exact new CI command green under the EXISTING gate: `74.52%` ≥ 64, `5040 passed, 14 skipped`. |
+| T-054 | DONE | (T-054 commit) | pyproject comment corrected: scripts/test_ib_realtime.py is a manual live harness collecting 0 tests (runner evidence: pytest exit 5); broad collection protects trade_blotter + root tests/, not it. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
