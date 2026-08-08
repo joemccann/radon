@@ -27,10 +27,20 @@ type TickerDetailContextValue = {
   setActivePositionId: (id: number | null) => void;
   getPrices: () => Record<string, PriceData>;
   getFundamentals: () => Record<string, FundamentalsData>;
+  /** Ref snapshot (non-reactive). Prefer `portfolio` for UI that must re-render. */
   getPortfolio: () => PortfolioData | null;
+  /** Ref snapshot (non-reactive). Prefer `orders` for UI that must re-render. */
   getOrders: () => OrdersData | null;
   getDepths: () => Record<string, DepthBook>;
   getTape: () => Record<string, Trade[]>;
+  /**
+   * Reactive portfolio snapshot. High-frequency feeds (prices/depths/tape) stay
+   * ref-only; portfolio/orders land rarely and MUST re-render cockpit consumers
+   * after client-side navigation (NEW_FINDINGS wave-2: getPortfolio alone never
+   * scheduled a render when setPortfolio wrote the ref).
+   */
+  portfolio: PortfolioData | null;
+  orders: OrdersData | null;
   setPrices: (p: Record<string, PriceData>) => void;
   setFundamentals: (f: Record<string, FundamentalsData>) => void;
   setPortfolio: (p: PortfolioData | null) => void;
@@ -67,6 +77,8 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
   const [depthFutureExpiry, setDepthFutureExpiryState] = useState<string | null>(null);
   const [focusedBookKey, setFocusedBookKeyState] = useState<string | null>(null);
   const [orderPrefill, setOrderPrefillState] = useState<OrderPrefill | null>(null);
+  const [portfolio, setPortfolioState] = useState<PortfolioData | null>(null);
+  const [orders, setOrdersState] = useState<OrdersData | null>(null);
   const prefillNonceRef = useRef(0);
   const pricesRef = useRef<Record<string, PriceData>>({});
   const fundamentalsRef = useRef<Record<string, FundamentalsData>>({});
@@ -137,10 +149,12 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
 
   const setPortfolio = useCallback((p: PortfolioData | null) => {
     portfolioRef.current = p;
+    setPortfolioState(p);
   }, []);
 
   const setOrders = useCallback((o: OrdersData | null) => {
     ordersRef.current = o;
+    setOrdersState(o);
   }, []);
 
   const setDepths = useCallback((d: Record<string, DepthBook>) => {
@@ -153,7 +167,36 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
 
   return (
     <TickerDetailContext.Provider
-      value={{ activeTicker, activePositionId, setActiveTicker, setActivePositionId, getPrices, getFundamentals, getPortfolio, getOrders, getDepths, getTape, setPrices, setFundamentals, setPortfolio, setOrders, setDepths, setTape, chainContracts, setChainContracts, depthSymbol, setDepthSymbol, depthFutureExpiry, setDepthFutureExpiry, focusedBookKey, setFocusedBookKey, orderPrefill, setOrderPrefill }}
+      value={{
+        activeTicker,
+        activePositionId,
+        setActiveTicker,
+        setActivePositionId,
+        getPrices,
+        getFundamentals,
+        getPortfolio,
+        getOrders,
+        getDepths,
+        getTape,
+        portfolio,
+        orders,
+        setPrices,
+        setFundamentals,
+        setPortfolio,
+        setOrders,
+        setDepths,
+        setTape,
+        chainContracts,
+        setChainContracts,
+        depthSymbol,
+        setDepthSymbol,
+        depthFutureExpiry,
+        setDepthFutureExpiry,
+        focusedBookKey,
+        setFocusedBookKey,
+        orderPrefill,
+        setOrderPrefill,
+      }}
     >
       {children}
     </TickerDetailContext.Provider>
