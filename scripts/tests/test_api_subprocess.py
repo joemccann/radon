@@ -318,3 +318,43 @@ async def _run_raw_script(script_path: str, timeout: float = 10.0) -> ScriptResu
 
     except json.JSONDecodeError as e:
         return ScriptResult(ok=False, error=f"Invalid JSON output: {e}")
+
+
+class TestTrailingJsonShadowing:
+    """T-012: a JSON-parseable line printed AFTER the result must not
+    replace the real order result (the reverse walk returned the first
+    parse from the END — i.e. the trailing junk)."""
+
+    def test_trailing_json_line_does_not_shadow_the_order_result(self):
+        stdout = (
+            "Step 1: qualifying contract\n"
+            '{"status": "ok", "orderId": 42, "permId": 420042}\n'
+            '{"progress": 100, "phase": "cleanup"}\n'
+        )
+        payload = _extract_json_payload(stdout)
+        assert isinstance(payload, dict)
+        assert payload.get("status") == "ok"
+        assert payload.get("permId") == 420042
+
+    def test_trailing_list_literal_does_not_shadow_the_order_result(self):
+        stdout = (
+            '{"status": "error", "message": "IB rejected: margin"}\n'
+            "[1, 1]\n"
+        )
+        payload = _extract_json_payload(stdout)
+        assert isinstance(payload, dict)
+        assert payload.get("status") == "error"
+
+    def test_last_status_dict_wins_when_script_prints_two(self):
+        stdout = (
+            '{"status": "retrying", "attempt": 1}\n'
+            '{"status": "ok", "orderId": 7}\n'
+        )
+        payload = _extract_json_payload(stdout)
+        assert payload.get("status") == "ok"
+
+    def test_array_only_output_still_returns_the_array(self):
+        stdout = 'Computing...\n[{"ticker": "AAPL"}, {"ticker": "TSLA"}]\n'
+        payload = _extract_json_payload(stdout)
+        assert isinstance(payload, list)
+        assert len(payload) == 2
