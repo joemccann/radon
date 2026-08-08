@@ -26,9 +26,12 @@ emits an INFO line on every dispatch with structured fields
 
 The row only flips to ``state=error`` when:
   - Pushover returns a non-2xx code (channel transport failure)
+  - Pushover is HALF configured (one of PUSHOVER_USER / PUSHOVER_TOKEN
+    unset) while a P1 fires — env drift the operator must fix. Both
+    unset is the documented no-external-channel mode and stays ``ok``.
   - ``write_service_health_http`` itself raises (DB write failure)
 
-In both cases ``last_error`` carries a dispatcher-specific string
+In each case ``last_error`` carries a dispatcher-specific string
 (``"pushover 500: …"``, ``"db write failed: …"``) so the banner
 surfaces a real, actionable notifier outage — not stale alert history.
 
@@ -56,6 +59,7 @@ import json
 import logging
 import os
 import sys
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -82,10 +86,17 @@ PUSHOVER_EMERGENCY_EXPIRE_SECS = 3600
 
 # ── env-driven channel registry ─────────────────────────────────────
 
+PUSHOVER_ENV_VARS = ("PUSHOVER_USER", "PUSHOVER_TOKEN")
+
+
 def _pushover_creds() -> Optional[tuple[str, str]]:
     user = os.environ.get("PUSHOVER_USER")
     token = os.environ.get("PUSHOVER_TOKEN")
     return (user, token) if user and token else None
+
+
+def _missing_pushover_vars() -> list[str]:
+    return [name for name in PUSHOVER_ENV_VARS if not os.environ.get(name)]
 
 
 def enabled_channels() -> set[str]:
@@ -129,6 +140,38 @@ def _http_post(url: str, payload: dict, headers: Optional[dict] = None) -> tuple
 # ── per-channel emitters ────────────────────────────────────────────
 
 _EMOJI = {"P1": "🚨", "P2": "❌", "P3": "⚠️"}
+
+PUSHOVER_UNCONFIGURED = "pushover_not_configured"
+PUSHOVER_INCOMPLETE = "pushover_credentials_incomplete"
+
+
+@dataclass(frozen=True)
+class ChannelResult:
+    """What actually happened when an alert was handed to a channel.
+
+    Three states the dispatcher must tell apart:
+
+     * **delivered** (``attempted`` and no ``error``) — the only state
+       that may arm the cooldown. Stamping ``notified`` for a page that
+       never left the box mutes the condition for up to
+       ``cooldown.REARM_CEILING`` (24h).
+     * **error** — the channel was tried and refused (non-2xx /
+       transport). Flips the ``watchdog-alerts`` row to ``error``.
+     * **skip_reason** — no attempt was made because the channel is not
+       configured. Not a dispatcher failure, and not a delivery either.
+    """
+
+    attempted: bool
+    error: Optional[str] = None
+    skip_reason: Optional[str] = None
+
+    @property
+    def delivered(self) -> bool:
+        return self.attempted and self.error is None
+
+
+# Non-P1 severities never touch Pushover; the digest owns them.
+CHANNEL_NOT_APPLICABLE = ChannelResult(attempted=False)
 
 
 def _format_summary(outcome: CheckOutcome) -> str:
@@ -218,18 +261,41 @@ def _post_pushover(payload: dict) -> Optional[str]:
     return None
 
 
-def _emit_pushover(outcome: CheckOutcome) -> Optional[str]:
+def _unconfigured_pushover() -> ChannelResult:
+    """Distinguish the two ways credentials can be absent.
+
+    Both vars unset is the documented "service_health is the only
+    channel" mode (``log_startup_warning``) — degraded, expected on a
+    laptop, and not an error state. Exactly one var set is env drift:
+    the operator believes Pushover is wired up and it is not, so it
+    surfaces on the dispatcher row. NEITHER is a delivery.
+    """
+    missing = _missing_pushover_vars()
+    if len(missing) == len(PUSHOVER_ENV_VARS):
+        return ChannelResult(attempted=False, skip_reason=PUSHOVER_UNCONFIGURED)
+    return ChannelResult(
+        attempted=False,
+        error=f"pushover credentials incomplete: {', '.join(missing)} unset",
+        skip_reason=PUSHOVER_INCOMPLETE,
+    )
+
+
+def _emit_pushover(outcome: CheckOutcome) -> ChannelResult:
     """P1 only — emergency priority cuts through iOS DnD and repeats
-    until acknowledged. Returns a dispatcher error string on failure,
-    ``None`` on success or when this channel is not applicable
-    (non-P1, no creds). Non-P1 outcomes batch into the daily digest
+    until acknowledged. Non-P1 outcomes batch into the daily digest
     instead (see ``flush_daily_digest``).
+
+    Returns a :class:`ChannelResult` rather than a bare error string:
+    ``None`` used to mean both "Pushover accepted it" and "there is no
+    Pushover to accept it", and ``dispatch`` read that ``None`` as
+    delivery — so a P1 fired while the credentials were missing armed
+    the cooldown and muted the condition for up to 24h.
     """
     if outcome.severity != "P1":
-        return None
+        return CHANNEL_NOT_APPLICABLE
     creds = _pushover_creds()
     if not creds:
-        return None
+        return _unconfigured_pushover()
     user, token = creds
     payload = build_pushover_payload(
         user=user,
@@ -239,7 +305,7 @@ def _emit_pushover(outcome: CheckOutcome) -> Optional[str]:
         severity="P1",
         tag=outcome.service,  # so cancel_emergency(service) clears it on recovery
     )
-    return _post_pushover(payload)
+    return ChannelResult(attempted=True, error=_post_pushover(payload))
 
 
 def _write_dispatcher_health(
@@ -416,6 +482,18 @@ def _mark_notified_best_effort(*, service: str, severity: str, now) -> None:
         )
 
 
+def _reached_a_channel(outcome: CheckOutcome, pushover: ChannelResult) -> bool:
+    """True only when the alert actually left the dispatcher.
+
+    P1 pages through Pushover, so nothing short of an accepted POST
+    counts. P2/P3 batch into the on-disk daily digest, which always
+    accepts the hand-off — their cooldown arms as before.
+    """
+    if outcome.severity == "P1":
+        return pushover.delivered
+    return True
+
+
 def dispatch(
     outcome: CheckOutcome,
     *,
@@ -423,6 +501,11 @@ def dispatch(
 ) -> Optional[str]:
     """Route ``outcome`` to every enabled channel matching its
     severity, then stamp the cooldown row only after successful delivery.
+
+    "Successful delivery" means the channel took it: for a P1 that is
+    credentials present AND a 2xx from Pushover. An unpaged P1 leaves
+    the cooldown un-armed so the condition is still fireable on the next
+    cycle instead of being muted for the 24h re-arm ceiling.
 
     Callers should pre-check ``cooldown_allows_fire()``; ``dispatch``
     does NOT skip on cooldown so end-to-end tests can verify channel
@@ -438,16 +521,23 @@ def dispatch(
         return None
 
     _log_alert_event(outcome)
-    dispatcher_error = _emit_pushover(outcome)
+    pushover = _emit_pushover(outcome)
     if outcome.severity and outcome.severity != "P1":
         _enqueue_digest(outcome)
+    if pushover.skip_reason:
+        log.warning(
+            "P1 for %s was NOT paged (%s) — cooldown left un-armed so the "
+            "next cycle re-fires once the channel is configured",
+            outcome.service,
+            pushover.skip_reason,
+        )
     if record_health:
-        _write_dispatcher_health(now=outcome.now, dispatcher_error=dispatcher_error)
+        _write_dispatcher_health(now=outcome.now, dispatcher_error=pushover.error)
 
-    if outcome.severity and dispatcher_error is None:
+    if outcome.severity and _reached_a_channel(outcome, pushover):
         _mark_notified_best_effort(
             service=outcome.service,
             severity=outcome.severity,
             now=outcome.now,
         )
-    return dispatcher_error
+    return pushover.error
