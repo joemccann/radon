@@ -222,6 +222,117 @@ class TestRunIncremental:
         assert payload["scan_time"] != "old"
         assert self.db_writes == [False]
 
+    def test_open_market_fetches_and_publishes_provisional_current_session(self):
+        series = compute_change_series(
+            [
+                _row("2026-08-01", 1.28),
+                _row("2026-08-03", 1.31),
+                _row("2026-08-04", 1.30),
+            ]
+        )
+        self._cached(series)
+        client = _StubClient({
+            ("2026-08-21", "2026-08-05"): UW_NEAR_PAYLOAD,
+            ("2026-09-18", "2026-08-05"): UW_PAYLOAD,
+        })
+
+        # 15:00 UTC = 11:00 ET during EDT, inside regular trading hours.
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 15, 0, tzinfo=timezone.utc)
+        )
+
+        assert ("2026-08-21", "2026-08-05") in client.calls
+        assert ("2026-09-18", "2026-08-05") in client.calls
+        assert payload["market_status"] == "open"
+        assert payload["current"]["date"] == "2026-08-05"
+        assert payload["current"]["is_intraday"] is True
+        assert payload["current"]["as_of"] == "2026-08-05T15:00:00Z"
+        assert payload["current"]["ratio"] == pytest.approx(CM_RATIO, abs=1e-9)
+        assert payload["current"]["change"] == pytest.approx(CM_RATIO - 1.30, abs=1e-9)
+        assert payload["series"][-1] == payload["current"]
+        assert payload["count"] == 4
+        # Provisional RTH rows belong in the snapshot only, never durable
+        # skew_history, and do not move the completed-session distribution.
+        assert payload["stats"] == compute_stats(series)
+        assert self.db_writes == [False]
+
+    def test_cached_intraday_row_is_replaced_not_promoted_or_duplicated(self):
+        durable = compute_change_series(
+            [_row("2026-08-03", 1.31), _row("2026-08-04", 1.30)]
+        )
+        stale_intraday = {
+            **_row("2026-08-05", 1.40),
+            "change": 0.10,
+            "is_intraday": True,
+            "as_of": "2026-08-05T14:00:00Z",
+        }
+        self._cached([*durable, stale_intraday])
+        self.monkeypatch.setattr(self.mod, "_read_history_rows", lambda: durable)
+        client = _StubClient({
+            ("2026-08-21", "2026-08-05"): UW_NEAR_PAYLOAD,
+            ("2026-09-18", "2026-08-05"): UW_PAYLOAD,
+        })
+
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 16, 0, tzinfo=timezone.utc)
+        )
+
+        assert [row["date"] for row in payload["series"]] == [
+            "2026-08-03", "2026-08-04", "2026-08-05",
+        ]
+        assert payload["current"]["ratio"] == pytest.approx(CM_RATIO, abs=1e-9)
+        assert payload["current"]["as_of"] == "2026-08-05T16:00:00Z"
+        assert self.db_writes == [False]
+
+    def test_post_close_grace_keeps_last_live_snapshot_without_finalizing_early(self):
+        durable = compute_change_series(
+            [_row("2026-08-03", 1.31), _row("2026-08-04", 1.30)]
+        )
+        cached_intraday = {
+            **_row("2026-08-05", 1.24),
+            "change": -0.06,
+            "is_intraday": True,
+            "as_of": "2026-08-05T19:59:00Z",
+        }
+        self._cached([*durable, cached_intraday])
+        client = _StubClient({})
+
+        # 20:30 UTC = 16:30 ET, after the close but before the established
+        # 16:45 ET finalization window. Do not promote an immature close.
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 20, 30, tzinfo=timezone.utc)
+        )
+
+        assert client.calls == []
+        assert payload["current"] == cached_intraday
+        assert self.db_writes == [False]
+
+    def test_after_close_grace_finalizes_today_and_removes_intraday_marker(self):
+        durable = compute_change_series(
+            [_row("2026-08-03", 1.31), _row("2026-08-04", 1.30)]
+        )
+        cached_intraday = {
+            **_row("2026-08-05", 1.40),
+            "change": 0.10,
+            "is_intraday": True,
+            "as_of": "2026-08-05T19:59:00Z",
+        }
+        self._cached([*durable, cached_intraday])
+        client = _StubClient({
+            ("2026-08-21", "2026-08-05"): UW_NEAR_PAYLOAD,
+            ("2026-09-18", "2026-08-05"): UW_PAYLOAD,
+        })
+
+        payload = self.mod.run(
+            client=client, now=datetime(2026, 8, 5, 20, 46, tzinfo=timezone.utc)
+        )
+
+        assert payload["current"]["date"] == "2026-08-05"
+        assert payload["current"]["ratio"] == pytest.approx(CM_RATIO, abs=1e-9)
+        assert "is_intraday" not in payload["current"]
+        assert "as_of" not in payload["current"]
+        assert self.db_writes == [True]
+
     def test_missing_session_fetches_both_brackets_and_upserts_the_cm_row(self):
         series = compute_change_series([_row("2026-08-03", 1.31), _row("2026-08-04", 1.30)])
         self._cached(series)

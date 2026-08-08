@@ -40,6 +40,7 @@ const DYNAMIC_ROUTES = [
   "app/api/knowledge/prior-evals/route.ts",
   "app/api/options/rv-ratio/route.ts",
   "app/api/bpi/route.ts",
+  "app/api/skew/route.ts",
 ];
 
 // Client-side fetch sites that hit a disk-backed dynamic route. Each fetch
@@ -280,6 +281,7 @@ const NO_STORE_ROUTES = [
   "app/api/knowledge/search/route.ts",
   "app/api/knowledge/prior-evals/route.ts",
   "app/api/bpi/route.ts",
+  "app/api/skew/route.ts",
 ];
 
 describe("API route handlers — every response must set Cache-Control: no-store", () => {

@@ -30,6 +30,7 @@ const SERIES = buildSeries();
 const SKEW_MOCK = {
   scan_time: new Date().toISOString(),
   source: "unusual_whales",
+  market_status: "open",
   count: SERIES.length,
   current: {
     date: SERIES[SERIES.length - 1].date,
@@ -39,6 +40,8 @@ const SKEW_MOCK = {
     call_iv: 0.123408,
     expiry: "2026-09-18",
     dte: 44,
+    is_intraday: true,
+    as_of: new Date().toISOString(),
   },
   stats: { high: 0.13, low: -0.16, avg: 0.0004, stddev: 0.04 },
   series: SERIES,
@@ -97,6 +100,8 @@ test.describe("/regime/skew — SPX 1M 25-delta put/call skew tab", () => {
     await expect(page.locator('[data-testid="skew-strip-put-iv"]')).toContainText("16.0%");
     await expect(page.locator('[data-testid="skew-strip-call-iv"]')).toContainText("12.3%");
     await expect(page.locator('[data-testid="skew-strip-tenor"]')).toContainText("2026-09-18");
+    await expect(page.locator('[data-testid="skew-live-status"]')).toContainText("LIVE");
+    await expect(page.locator('[data-testid="skew-strip-date"]')).toContainText("INTRADAY");
   });
 
   test("renders the chart, the view chips, and the brush", async ({ page }) => {
