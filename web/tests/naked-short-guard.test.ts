@@ -10,6 +10,8 @@ import { describe, it, expect } from "vitest";
 import {
   checkNakedShortRisk,
   auditOpenOrders,
+  _checkNakedShortRiskImpl,
+  _auditOpenOrdersImpl,
   type OrderPayload,
   type NakedShortPortfolio,
   type NakedShortOpenOrder,
@@ -124,8 +126,12 @@ describe("checkNakedShortRisk — stock warn branch (SPX-05)", () => {
   });
 });
 
-// Guard is disabled at the export boundary; suite skipped.
-describe.skip("checkNakedShortRisk", () => {
+// Gate 4 is disabled at the EXPORT boundary only. These cases run against
+// the preserved _Impl directly (T-052): they are the tripwire that makes the
+// documented re-enable safe — a refactor to the shared helpers that breaks
+// the detection math goes red HERE, not after the gate is flipped back on.
+describe("_checkNakedShortRiskImpl (Gate-4 re-enable tripwire)", () => {
+  const checkNakedShortRisk = _checkNakedShortRiskImpl;
   it("1. BUY stock → allowed", () => {
     const order = makeOrder({ action: "BUY", type: "stock", symbol: "AAPL" });
     const result = checkNakedShortRisk(order, makePortfolio());
@@ -457,7 +463,8 @@ describe.skip("checkNakedShortRisk", () => {
   });
 });
 
-describe.skip("auditOpenOrders", () => {
+describe("_auditOpenOrdersImpl (Gate-4 re-enable tripwire)", () => {
+  const auditOpenOrders = _auditOpenOrdersImpl;
   it("11. open SELL call order with no stock → returns violation", () => {
     const orders: NakedShortOpenOrder[] = [
       {
