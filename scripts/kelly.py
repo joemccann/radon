@@ -42,10 +42,14 @@ def kelly_size_batch(
     """Vectorized Kelly sizing for N candidates simultaneously.
 
     Returns an array of dollar position sizes, one per candidate.
-    Guards: odds <= 0 → 0, full_kelly <= 0 → 0, hard cap at bankroll * max_pct.
+    Guards: odds <= 0 → 0, full_kelly <= 0 → 0, hard cap at bankroll * max_pct,
+    non-finite or non-positive bankroll → treated as 0 (never a NaN or negative size).
     """
     if len(prob_wins) == 0:
         return np.array([])
+
+    if not np.isfinite(bankroll) or bankroll <= 0:
+        bankroll = 0.0
 
     prob_wins = np.asarray(prob_wins, dtype=np.float64)
     odds = np.asarray(odds, dtype=np.float64)
@@ -80,7 +84,7 @@ if __name__ == "__main__":
     args = p.parse_args()
 
     result = kelly(args.prob, args.odds, args.fraction)
-    if args.bankroll:
+    if args.bankroll is not None:
         result["dollar_size"] = round(args.bankroll * result["fractional_kelly_pct"] / 100, 2)
         result["max_per_position"] = round(args.bankroll * 0.025, 2)
         result["use_size"] = min(result["dollar_size"], result["max_per_position"])
