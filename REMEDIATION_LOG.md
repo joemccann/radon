@@ -44,6 +44,8 @@
 
 | T-031 | DONE | (T-031 commit) | RED: `2 failed` — the permId==0 + errorEvent exit returned no ib_error_code/ib_error_text. GREEN: structured fields added (matching the terminal-failed builder); order identity (orderId/permId=0) preserved. Place-path 10/10; full pytest layer 5014 passed/14 skipped. |
 
+| T-046 | DONE | (T-046 commit) | RED: `2 failed, 1 passed` — the incident-born ladder was dead code under test AND `total += batch_size` inflated the reported count (200 for a 7-row tail, written into service_health detail). GREEN: page COUNT(*) before the batched DELETE; fallback-then-re-arm and wedged-page-abort now pinned against a scriptable Hrana seam. Neighbors 73/73; full pytest layer 5018 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.

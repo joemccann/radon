@@ -391,6 +391,20 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
 
         if use_batch:
             try:
+                # Hrana has no rowcount — count the page BEFORE deleting it.
+                # `total += batch_size` reported 200 deletions for a 7-row
+                # tail and the inflated figure went verbatim into the
+                # archive job's service_health detail (T-046).
+                count_rows = _hrana_with_retry(
+                    lambda: hrana_query(
+                        "SELECT COUNT(*) FROM ("
+                        "SELECT taken_at FROM portfolio_snapshots "
+                        "WHERE taken_at < ? ORDER BY taken_at LIMIT ?)",
+                        (cutoff, batch_size),
+                        timeout=_DELETE_HTTP_TIMEOUT_S,
+                    )
+                )
+                page_count = int(count_rows[0][0]) if count_rows and count_rows[0] else 0
                 _hrana_with_retry(
                     lambda: hrana_execute(
                         "DELETE FROM portfolio_snapshots WHERE taken_at IN ("
@@ -400,8 +414,7 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
                         timeout=_DELETE_HTTP_TIMEOUT_S,
                     )
                 )
-                # Best-effort progress accounting (Hrana has no rowcount).
-                total += batch_size
+                total += page_count
                 continue
             except Exception as exc:  # noqa: BLE001
                 print(
