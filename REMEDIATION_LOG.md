@@ -6,7 +6,9 @@
 
 | Task | Status | Commits | Evidence |
 |---|---|---|---|
-| T-001 | DONE | (this commit) | RED: `playwright test --list` imported e2e/prices-performance.test.js which printed "Starting Next.js server for testing..." and spawned `npm run dev` during LISTING (rtk tee 1786165991_playwright.log); full-run crash 7s in at audit time (runs/playwright-r1.log, spawn /bin/sh ENOENT). GREEN: with `testIgnore: ["**/*.test.js"]` in both configs, `--list` exits clean: "Total: 419 tests in 123 files", no side effects. |
+| T-001 | DONE | ec0d9596 | RED: `playwright test --list` imported e2e/prices-performance.test.js which printed "Starting Next.js server for testing..." and spawned `npm run dev` during LISTING (rtk tee 1786165991_playwright.log); full-run crash 7s in at audit time (runs/playwright-r1.log, spawn /bin/sh ENOENT). GREEN: with `testIgnore: ["**/*.test.js"]` in both configs, `--list` exits clean: "Total: 419 tests in 123 files", no side effects. |
+| T-002 | DONE | (T-002 commit) | RED: audit 3x cloud runs — test_external_signal_status_is_preserved_after_recovery[int,hup] deterministic fail on darwin (communicate(timeout=5) → SIGKILL rc -9; runs/cloud-r{1,2,3}.log). GREEN: darwin-scoped skipif added beside the GNU-timeout skipif; `pytest -k external_signal` → `2 skipped in 0.03s`; params still collect and run on linux. |
+| T-003 | DONE | (T-003 commit) | RED: fixture with period_label removed → both build_html tests FAIL (KeyError path, identical to the live-cache failure at scripts/performance_explainer_report.py:259): `2 failed, 1 passed, 1 skipped`. GREEN after restore + completing the fixture (series[].drawdown, last_sync discovered by execution): `3 passed, 1 skipped in 0.07s`. build_html now has deterministic CI coverage; live-cache pass kept behind RADON_LIVE_CACHE_SMOKE=1. |
 
 ## Baseline
 
