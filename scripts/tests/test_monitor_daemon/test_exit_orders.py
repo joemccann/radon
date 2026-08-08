@@ -316,5 +316,112 @@ class TestExitOrdersTradeLogUpdate:
             assert db.commits == 1
 
 
+def _pending_goog_trade():
+    return {
+        "id": 8,
+        "ticker": "GOOG",
+        "structure": "Bull Call Spread",
+        "exit_orders": {
+            "target": {
+                "price": 15.00,
+                "status": "PENDING",
+                "order_id": None,
+                "contracts": 44,
+                "contract_spec": {
+                    "symbol": "GOOG",
+                    "expiry": "20260417",
+                    "strike": 315,
+                    "right": "C",
+                },
+            }
+        },
+    }
+
+
+def _wire_placeable_ib(mock_cls):
+    """Mock IBClient wiring where the GOOG target is placeable (25% gap)."""
+    mock_client = make_mock_client()
+    mock_cls.return_value = mock_client
+    mock_contract = MagicMock()
+    mock_contract.localSymbol = "GOOG  260417C00315000"
+    mock_client.qualify_contracts.return_value = [mock_contract]
+    mock_ticker = MagicMock()
+    mock_ticker.bid = 11.90
+    mock_ticker.ask = 12.10
+    mock_client.get_quote.return_value = mock_ticker
+    mock_trade = MagicMock()
+    mock_trade.order.orderId = 99
+    mock_trade.orderStatus.status = "Submitted"
+    mock_client.place_order.return_value = mock_trade
+    return mock_client
+
+
+class FlakyUpdateJournalDb(FakeJournalDb):
+    """UPDATEs raise for the first `fail_updates` attempts (Turso outage),
+    then succeed — SELECTs keep working throughout, like a real Hrana
+    write-path failure."""
+
+    def __init__(self, trades, fail_updates=10**9):
+        super().__init__(trades)
+        self.fail_updates = fail_updates
+        self.update_attempts = 0
+
+    def execute(self, sql, args=()):
+        if sql.strip().upper().startswith("UPDATE"):
+            self.update_attempts += 1
+            if self.update_attempts <= self.fail_updates:
+                raise RuntimeError("hrana: stream not found")
+        return super().execute(sql, args)
+
+
+class TestExitOrdersJournalFailureGuard:
+    """T-010: a failed post-placement journal write must NOT re-place the
+    same live order on the next cycle — the row still says PENDING, but the
+    order is already resting at IB."""
+
+    def test_journal_update_failure_does_not_replace_on_next_cycle(self):
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            mock_client = _wire_placeable_ib(mock_cls)
+            db = FlakyUpdateJournalDb([_pending_goog_trade()])
+
+            handler = ExitOrdersHandler(db=db)
+            handler.execute()  # places, journal UPDATE fails, row stays PENDING
+            handler.execute()  # same row loads again — must NOT re-place
+
+            assert mock_client.place_order.call_count == 1
+
+    def test_journal_update_failure_surfaces_as_cycle_error(self):
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            _wire_placeable_ib(mock_cls)
+            db = FlakyUpdateJournalDb([_pending_goog_trade()])
+
+            handler = ExitOrdersHandler(db=db)
+            result = handler.execute()
+
+            # BaseHandler records state=error off result["error"] — a swallowed
+            # journal failure after a LIVE placement must page, not pass silently.
+            assert result.get("error"), "journal-update failure must surface in the cycle result"
+
+    def test_journal_heals_on_later_cycle_without_replacing(self):
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            mock_client = _wire_placeable_ib(mock_cls)
+            db = FlakyUpdateJournalDb([_pending_goog_trade()], fail_updates=1)
+
+            handler = ExitOrdersHandler(db=db)
+            handler.execute()  # placed; first UPDATE fails
+            handler.execute()  # heal: journal marked PLACED with the REAL order id
+
+            assert mock_client.place_order.call_count == 1
+            updated = db.trades["trade-8"]["exit_orders"]["target"]
+            assert updated["status"] == "PLACED"
+            assert updated["order_id"] == 99
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
