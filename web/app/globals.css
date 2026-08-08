@@ -16826,6 +16826,114 @@ body[data-mobile="true"] td.right {
   border-bottom: none;
 }
 
+.ticker-flow-history-disclosure {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: 12px;
+}
+
+.ticker-flow-history-toggle {
+  appearance: none;
+  background: transparent;
+  border: 1px solid var(--border-dim);
+  border-radius: 4px;
+  color: var(--text-secondary, var(--text-muted));
+  cursor: pointer;
+  font-family: var(--font-ui, inherit);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  padding: 6px 10px;
+  text-transform: uppercase;
+}
+
+.ticker-flow-history-toggle:hover {
+  border-color: var(--signal-core, #05AD98);
+  color: var(--text-primary);
+}
+
+.ticker-flow-history-toggle:focus-visible {
+  outline: 1px solid var(--signal-core, #05AD98);
+  outline-offset: 2px;
+}
+
+.ticker-flow-history-chart {
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border-dim);
+}
+
+.ticker-flow-history-chart-title {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.ticker-flow-history-chart-svg {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.ticker-flow-history-chart-grid {
+  stroke: var(--line-grid, var(--border-dim));
+  stroke-width: 1;
+  stroke-dasharray: 2 3;
+}
+
+.ticker-flow-history-chart-mid {
+  stroke: var(--text-muted);
+  stroke-width: 1;
+  stroke-dasharray: 4 3;
+  opacity: 0.55;
+}
+
+.ticker-flow-history-chart-line {
+  stroke: var(--signal-core, #05AD98);
+  stroke-width: 1.75;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.ticker-flow-history-chart-dot {
+  fill: var(--text-muted);
+  stroke: var(--panel, #0f1519);
+  stroke-width: 1;
+}
+
+.ticker-flow-history-chart-dot.accum {
+  fill: var(--signal-core, #05AD98);
+}
+
+.ticker-flow-history-chart-dot.distrib {
+  fill: var(--negative, #e35d6a);
+}
+
+.ticker-flow-history-chart-axis {
+  fill: var(--text-muted);
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+}
+
+.ticker-flow-history-chart-empty {
+  margin-top: 12px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.ticker-flow-history-compact .section-header {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.ticker-flow-history-compact .section-body {
+  padding-left: 0;
+  padding-right: 0;
+}
+
 @media (max-width: 640px) {
   .ticker-flow-hero {
     padding: 12px;

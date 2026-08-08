@@ -37,7 +37,7 @@ function bullishReport(ticker: string, fetchedAt: string) {
   return {
     ticker,
     fetched_at: fetchedAt,
-    lookback_days: 5,
+    lookback_days: 20,
     verdict: { direction: "BULLISH", confidence: 78 },
     analysis: { signal: "STRONG", direction: "ACCUMULATION", strength: 78 },
     dark_pool: {

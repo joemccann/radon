@@ -1,3 +1,23 @@
+# Task: 20-session Daily Dark Pool History + progressive disclosure (2026-08-07)
+
+## Summary
+
+Per-ticker flow report lookback 5 → 20 trading days. UI shows 5 sessions
+by default; expand reveals full table + buy-% chart.
+
+## Checklist
+
+- [x] flow_report DEFAULT_LOOKBACK_DAYS=20 + API timeout 300s
+- [x] darkpool_cache MAX_AGE_DAYS=45
+- [x] DailyDarkPoolHistory progressive disclosure + chart
+- [x] Tests (pytest + vitest)
+
+## Review
+
+Pending browser/prod verify after deploy.
+
+---
+
 # Task: Dark pool multi-page pagination (2026-08-07)
 
 ## Summary
