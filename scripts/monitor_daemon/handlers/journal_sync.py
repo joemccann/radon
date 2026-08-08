@@ -33,6 +33,7 @@ from .base import BaseHandler, et_session_date
 from clients.ib_client import IBClient, DEFAULT_HOST
 from clients.journal_basis import normalize_expiry_compact, prior_net_qty_for_contract
 from utils.atomic_io import atomic_save, verified_load
+from utils.exec_ids import exec_id_root
 
 try:
     # Phase-3 dual-write: each new row also lands in Turso so app.radon.run
@@ -91,6 +92,7 @@ class JournalSyncHandler(BaseHandler):
         result: Dict[str, Any] = {
             "imported": 0,
             "skipped": 0,
+            "superseded": 0,
             "fills_seen": 0,
             "reconciled": 0,
             "timestamp": datetime.now().isoformat(),
@@ -160,14 +162,18 @@ class JournalSyncHandler(BaseHandler):
         if not fills:
             return result
 
-        candidates = self._fills_to_entries(fills, existing, db=db)
+        candidates, corrections = self._fills_to_entries(fills, existing, db=db)
         result["imported"] = len(candidates)
-        result["skipped"] = result["fills_seen"] - len(candidates)
+        result["superseded"] = len(corrections)
+        result["skipped"] = result["fills_seen"] - len(candidates) - len(corrections)
 
-        if candidates:
-            self._dual_write(candidates)
+        if candidates or corrections:
+            # Corrections carry the superseded row's ib_exec_id, so the upsert
+            # REPLACES that journal row instead of adding a second one.
+            self._dual_write(candidates + corrections)
             if self.trade_log_path is not None:
                 existing["trades"].extend(candidates)
+                self._apply_corrections(existing, corrections)
                 atomic_save(str(self.trade_log_path), existing)
             # A live fill that filled a previously-missing exec_id may have
             # closed the gap the daily journal-reconcile flagged.
@@ -295,6 +301,25 @@ class JournalSyncHandler(BaseHandler):
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.warning("journal_sync: DB upsert failed: %s", exc)
+
+    @staticmethod
+    def _apply_corrections(
+        existing: Dict[str, Any],
+        corrections: List[Dict[str, Any]],
+    ) -> None:
+        """Overwrite superseded rows in the disk mirror — never append.
+
+        A correction keeps the superseded row's ``ib_exec_id`` (= its Turso
+        trade_id), so the mirror stays a faithful copy of the journal table.
+        """
+        by_exec_id = {str(trade.get("ib_exec_id")): trade for trade in existing["trades"]}
+        for entry in corrections:
+            target = by_exec_id.get(str(entry.get("ib_exec_id")))
+            if target is None:
+                existing["trades"].append(entry)
+                continue
+            target.clear()
+            target.update(entry)
 
     # -- internals ---------------------------------------------------------
 
@@ -484,14 +509,68 @@ class JournalSyncHandler(BaseHandler):
                     ids.add(part)
         return ids
 
+    @staticmethod
+    def _correction_index(trades: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Map exec-id root → the already-imported row that owns it.
+
+        ``ib_exec_id`` stays the row's stable identity (its Turso trade_id);
+        ``ib_exec_id_corrected`` records the highest correction absorbed, so a
+        re-delivered correction is skipped instead of re-written every cycle.
+        Ids with no IB correction suffix — including composites — are absent
+        and keep plain exact-match dedupe.
+        """
+        index: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            exec_id = str(trade.get("ib_exec_id") or "").strip()
+            if not exec_id:
+                continue
+            root, correction = exec_id_root(trade.get("ib_exec_id_corrected") or exec_id)
+            if correction <= 0:
+                continue
+            known = index.get(root)
+            if known is None or correction > known["correction"]:
+                index[root] = {"correction": correction, "row": trade, "in_cycle": False}
+        return index
+
+    @staticmethod
+    def _trade_signed_qty(trade: Dict[str, Any]) -> float:
+        """Signed qty of an already-written journal row (BUY +, SELL/CLOSED −).
+
+        Mirrors ``clients.journal_basis._signed_qty`` — the same convention
+        that produced the prior-qty this rebases.
+        """
+        qty_raw = trade.get("contracts")
+        if qty_raw is None:
+            qty_raw = trade.get("shares")
+        try:
+            qty = abs(float(qty_raw))
+        except (TypeError, ValueError):
+            return 0.0
+        action = str(trade.get("action") or "").upper()
+        if action.startswith("BUY"):
+            return qty
+        if action.startswith("SELL") or action.startswith("SHORT") or action == "CLOSED":
+            return -qty
+        return 0.0
+
     def _fills_to_entries(
         self,
         fills: List[Any],
         existing: Dict[str, Any],
         *,
         db: Any = None,
-    ) -> List[Dict[str, Any]]:
+    ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """Split this cycle's fills into (new rows, correction rows).
+
+        A correction row SUPERSEDES an execution already in the journal: IB
+        re-delivers a corrected execution as ``<root>.02`` against the
+        original ``<root>.01``, so it must replace that row's quantity/cost
+        under the SAME trade_id, never append a second row (T-035). A
+        lower-or-equal correction number is a stale re-delivery and is
+        dropped.
+        """
         seen_ids = self._existing_exec_ids(existing["trades"])
+        corrected_roots = self._correction_index(existing["trades"])
         next_id = max((t.get("id", 0) for t in existing["trades"]), default=0) + 1
 
         # Per-contract running signed net qty. Seeded lazily from the
@@ -503,6 +582,7 @@ class JournalSyncHandler(BaseHandler):
         prior_state: Dict[str, float] = {}
 
         rows: List[Dict[str, Any]] = []
+        corrections: List[Dict[str, Any]] = []
         # Walk fills in EXECUTION-TIME order, not delivery order: IB can
         # replay executions out of order (corrections after a reconnect,
         # cross-session replay), and labelling a close before its own
@@ -510,24 +590,71 @@ class JournalSyncHandler(BaseHandler):
         # Same rule as journal_rehydrate.py / the backfill importer. The
         # sort is stable, so unknown-time fills keep delivery order.
         for fill in sorted(fills, key=self._fill_exec_sort_key):
+            exec_id = self._fill_exec_id(fill)
+            root, correction = exec_id_root(exec_id)
+            superseded = corrected_roots.get(root) if correction > 0 else None
+            if superseded is not None:
+                if correction <= superseded["correction"]:
+                    continue  # stale re-delivery of an already-corrected fill
+            elif exec_id and exec_id in seen_ids:
+                continue
+
             contract_key = self._fill_contract_key(fill)
             if contract_key and contract_key not in prior_state:
                 prior_state[contract_key] = self._lookup_prior_qty(db, fill)
 
             prior_qty = prior_state.get(contract_key, 0.0) if contract_key else 0.0
+            if superseded is not None:
+                # The correction REPLACES the earlier fill, so it must be
+                # labelled against the position as it stood BEFORE that fill —
+                # otherwise a corrected sell reads its own predecessor as
+                # already-closed and relabels to SELL_TO_OPEN.
+                prior_qty -= self._trade_signed_qty(superseded["row"])
 
             entry = self._fill_to_entry(fill, next_id, prior_qty=prior_qty)
             if entry is None:
                 continue
-            if str(entry["ib_exec_id"]) in seen_ids:
-                continue
-            seen_ids.add(str(entry["ib_exec_id"]))
-            rows.append(entry)
-            next_id += 1
+
+            if superseded is None:
+                rows.append(entry)
+                next_id += 1
+                seen_ids.add(str(entry["ib_exec_id"]))
+            else:
+                entry = self._as_correction_of(entry, superseded, exec_id)
+                if not superseded["in_cycle"]:
+                    corrections.append(entry)
+            if correction > 0:
+                corrected_roots[root] = {
+                    "correction": correction,
+                    "row": entry,
+                    "in_cycle": True,
+                }
 
             if contract_key:
                 prior_state[contract_key] = prior_qty + self._fill_signed_qty(fill)
-        return rows
+        return rows, corrections
+
+    @staticmethod
+    def _as_correction_of(
+        entry: Dict[str, Any],
+        superseded: Dict[str, Any],
+        exec_id: str,
+    ) -> Dict[str, Any]:
+        """Re-key a freshly built entry onto the row it supersedes.
+
+        Rows produced earlier in THIS cycle are rewritten in place (they are
+        already queued for the write), so a second correction of the same
+        execution never queues a second row.
+        """
+        target = superseded["row"]
+        entry["id"] = target.get("id", entry["id"])
+        entry["ib_exec_id"] = str(target.get("ib_exec_id") or entry["ib_exec_id"])
+        entry["ib_exec_id_corrected"] = str(exec_id)
+        if not superseded["in_cycle"]:
+            return entry
+        target.clear()
+        target.update(entry)
+        return target
 
     @staticmethod
     def _open_db() -> Any:
@@ -560,6 +687,15 @@ class JournalSyncHandler(BaseHandler):
             return (1, t.timestamp())
         except (AttributeError, TypeError, ValueError, OSError, OverflowError):
             return (0, 0.0)
+
+    @staticmethod
+    def _fill_exec_id(fill: Any) -> str:
+        """The fill's journal identity: IB execId, else permId, else empty."""
+        execution = getattr(fill, "execution", None)
+        if execution is None:
+            return ""
+        exec_id = getattr(execution, "execId", None) or getattr(execution, "permId", None)
+        return str(exec_id) if exec_id else ""
 
     @staticmethod
     def _fill_contract_key(fill: Any) -> Optional[str]:
@@ -623,7 +759,7 @@ class JournalSyncHandler(BaseHandler):
         if execution is None or contract is None:
             return None
 
-        exec_id = getattr(execution, "execId", None) or getattr(execution, "permId", None)
+        exec_id = self._fill_exec_id(fill)
         if not exec_id:
             return None
 
