@@ -574,9 +574,13 @@ aws --endpoint-url "$RADON_ARCHIVE_S3_ENDPOINT" s3 sync \
   "s3://${RADON_ARCHIVE_S3_BUCKET}/media/" /tmp/media-restore/
 ```
 
-Enable on VPS (after deploy lands the unit files):
+Enable on VPS. The CI deploy never installs unit files -- copy them as root
+first (and bump `cloud/config/installed-units.sha256` in the matching commit):
 
 ```bash
+sudo install -m 0644 /home/radon/radon/cloud/services/radon-media-backup.service \
+  /home/radon/radon/cloud/services/radon-media-backup.timer /etc/systemd/system/
+sudo systemctl daemon-reload
 sudo systemctl enable --now radon-media-backup.timer
 sudo systemctl start radon-media-backup.service   # optional immediate run
 journalctl -u radon-media-backup -n 50 --no-pager
