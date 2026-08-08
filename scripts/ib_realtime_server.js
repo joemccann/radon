@@ -1643,6 +1643,17 @@ function safeInitialState(data) {
   return data;
 }
 
+/**
+ * Build the initial `price` message for a subscription restored after an IB
+ * reconnect. cleanupSymbolStateForReconnect() only cancels tickers — every
+ * symbol's cached PriceData survives with its prior-session timestamp — so this
+ * broadcast is an INITIAL snapshot in exactly the same sense as the three
+ * subscribe paths and must clear stale quotes the same way.
+ */
+function buildRestorePriceMessage(key, state) {
+  return { type: "price", symbol: key, data: safeInitialState(state.data) };
+}
+
 function hydrateAndBroadcast(symbol) {
   const state = symbolStates.get(symbol);
   if (!state) return;
@@ -1800,11 +1811,7 @@ function restoreSubscriptions() {
     }
     const state = symbolStates.get(key);
     if (state) {
-      sendToSymbolSubscribers(key, {
-        type: "price",
-        symbol: key,
-        data: state.data,
-      });
+      sendToSymbolSubscribers(key, buildRestorePriceMessage(key, state));
     }
   }
 }

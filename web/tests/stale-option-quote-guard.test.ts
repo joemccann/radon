@@ -21,6 +21,36 @@ const safeInitialState: (data: Record<string, unknown>) => Record<string, unknow
   `${fnMatch[0]}; return safeInitialState;`,
 )();
 
+/* ─── Extract and eval buildRestorePriceMessage ──────────────────────────── */
+
+type PriceState = { data: Record<string, unknown> };
+type RestoreMessage = { type: string; symbol: string; data: Record<string, unknown> };
+type RestoreBuilder = (key: string, state: PriceState) => RestoreMessage;
+
+// Same slice-and-eval mechanism as safeInitialState above. The builder is
+// declared immediately after safeInitialState in the relay so this slice stays
+// contiguous and free of module-state dependencies.
+const restoreMatch = source.match(
+  /const QUOTE_STALE_MS[\s\S]*?^function buildRestorePriceMessage\(key, state\) \{[\s\S]*?^\}/m,
+);
+// Nullable on purpose: before the restore-path guard lands this is null, and
+// each test below then fails with its own explicit message instead of the whole
+// file throwing at import time and taking the safeInitialState suite down too.
+// eslint-disable-next-line no-new-func
+const restoreBuilderOrNull: RestoreBuilder | null = restoreMatch
+  ? (new Function(`${restoreMatch[0]}; return buildRestorePriceMessage;`)() as RestoreBuilder)
+  : null;
+
+function restoreBuilder(): RestoreBuilder {
+  if (!restoreBuilderOrNull) {
+    throw new Error(
+      "buildRestorePriceMessage not found in scripts/ib_realtime_server.js — " +
+        "restoreSubscriptions still broadcasts raw cached state, bypassing the stale-quote guard",
+    );
+  }
+  return restoreBuilderOrNull;
+}
+
 /* ─── helpers ────────────────────────────────────────────────────────────── */
 
 function makePriceData(overrides: Record<string, unknown> = {}): Record<string, unknown> {
@@ -161,5 +191,104 @@ describe("safeInitialState — present in all three subscribe paths", () => {
 
   it("QUOTE_STALE_MS is defined as 8 hours in milliseconds", () => {
     expect(source).toContain("const QUOTE_STALE_MS = 8 * 60 * 60 * 1000");
+  });
+});
+
+/* ─── restore path (post-reconnect) ──────────────────────────────────────── */
+
+describe("buildRestorePriceMessage — restore path routes through the stale guard", () => {
+  it("nulls bid/ask on a 9h-old cached state", () => {
+    const build = restoreBuilder();
+    const state = { data: makePriceData({ timestamp: hoursAgo(9), lastIsCalculated: true }) };
+
+    const message = build("SPY_20260918_740_P", state);
+
+    expect(message.data.bid).toBeNull();
+    expect(message.data.ask).toBeNull();
+    expect(message.data.bidSize).toBeNull();
+    expect(message.data.askSize).toBeNull();
+    expect(message.data.lastIsCalculated).toBe(false);
+  });
+
+  it("passes a fresh (<8h) state through unchanged", () => {
+    const build = restoreBuilder();
+    const state = { data: makePriceData({ timestamp: hoursAgo(1) }) };
+
+    const message = build("SPY_20260918_740_P", state);
+
+    expect(message.data.bid).toBe(32.49);
+    expect(message.data.ask).toBe(32.58);
+    expect(message.data.bidSize).toBe(10);
+    expect(message.data.askSize).toBe(10);
+    // Fresh data forwards by reference — the guard makes no copy.
+    expect(message.data).toBe(state.data);
+  });
+
+  it("keeps non-quote fields when nulling a stale restore", () => {
+    const build = restoreBuilder();
+    const state = { data: makePriceData({ timestamp: hoursAgo(14), close: 57.09, delta: -0.89 }) };
+
+    const message = build("SPY_20260918_740_P", state);
+
+    expect(message.data.close).toBe(57.09);
+    expect(message.data.delta).toBe(-0.89);
+    expect(message.data.impliedVol).toBe(0.1504);
+    expect(message.data.undPrice).toBe(722.96);
+  });
+
+  it("leaves the relay's own cached state untouched", () => {
+    // cleanupSymbolStateForReconnect keeps PriceData across a reconnect, so the
+    // guard must sanitise the outbound copy only, never the live cache.
+    const build = restoreBuilder();
+    const state = { data: makePriceData({ timestamp: hoursAgo(9) }) };
+
+    const message = build("SPY_20260918_740_P", state);
+
+    expect(message.data).not.toBe(state.data);
+    expect(state.data.bid).toBe(32.49);
+    expect(state.data.ask).toBe(32.58);
+  });
+
+  it("emits the price message shape keyed by the subscription key", () => {
+    const build = restoreBuilder();
+    // The key comes from symbolSubscribers, not from data.symbol.
+    const state = { data: makePriceData({ symbol: "STALE_KEY", timestamp: hoursAgo(1) }) };
+
+    const message = build("VIX_20260916_20_C", state);
+
+    expect(message.type).toBe("price");
+    expect(message.symbol).toBe("VIX_20260916_20_C");
+    expect(message.data).toBe(state.data);
+  });
+
+  it("shares the 8-hour threshold with the subscribe paths (boundary)", () => {
+    const build = restoreBuilder();
+    const justInside = build("SPY", {
+      data: makePriceData({ timestamp: new Date(Date.now() - (8 * 60 * 60 * 1000 - 5000)).toISOString() }),
+    });
+    const justOutside = build("SPY", {
+      data: makePriceData({ timestamp: new Date(Date.now() - 8 * 60 * 60 * 1000 - 2000).toISOString() }),
+    });
+
+    expect(justInside.data.bid).toBe(32.49);
+    expect(justOutside.data.bid).toBeNull();
+  });
+});
+
+describe("safeInitialState — present in the restore path too", () => {
+  const restoreBlock = source.match(/^function restoreSubscriptions\(\) \{[\s\S]*?^\}/m)?.[0] ?? "";
+
+  it("restoreSubscriptions broadcasts through buildRestorePriceMessage", () => {
+    expect(restoreBlock).toContain("buildRestorePriceMessage(key, state)");
+  });
+
+  it("restoreSubscriptions no longer sends raw state.data", () => {
+    expect(restoreBlock).not.toMatch(/data:\s*state\.data/);
+  });
+
+  it("buildRestorePriceMessage delegates to safeInitialState", () => {
+    const builderBlock =
+      source.match(/^function buildRestorePriceMessage\(key, state\) \{[\s\S]*?^\}/m)?.[0] ?? "";
+    expect(builderBlock).toContain("safeInitialState(state.data)");
   });
 });
