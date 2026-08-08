@@ -119,7 +119,11 @@ class TestServiceHealthLog:
         """
         from watchdog import notify
 
+        # BOTH vars: a half-configured channel is deliberately an error row
+        # since T-039, and PUSHOVER_TOKEN can leak in from a load_dotenv'd
+        # .env when earlier test modules import dotenv-loading code.
         monkeypatch.delenv("PUSHOVER_USER", raising=False)
+        monkeypatch.delenv("PUSHOVER_TOKEN", raising=False)
         notify.dispatch(sample_alert)
         rows = db_conn.execute(
             "SELECT service, state, last_error FROM service_health WHERE service='watchdog-alerts'"
