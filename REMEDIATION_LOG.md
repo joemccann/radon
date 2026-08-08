@@ -14,6 +14,8 @@
 
 | T-011 | DONE | (T-011 commit) | RED: new test — restart branch re-ran ib_place_order.py (`1 failed, 1 passed`; control proves ib_sync.py retry preserved). GREEN: `_NON_IDEMPOTENT_IB_SCRIPTS` carve-out returns an explicit INDETERMINATE error ("not automatically retried… check open orders") instead of re-running; targeted 4/4, scripts/api/tests 513 passed, full pytest layer 4935 passed/14 skipped. |
 
+| T-012 | DONE | (T-012 commit) | RED: `2 failed, 2 passed` — trailing `{"progress":100}` and trailing `[1,1]` both shadowed the status-bearing result. GREEN: status-dict-wins rule (last status dict from the end; legacy last-parse fallback preserved for arrays/status-less outputs): file 23/23, full pytest layer 4939 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
