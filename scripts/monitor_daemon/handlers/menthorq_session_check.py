@@ -38,10 +38,17 @@ WARN_DAYS = 3
 
 # Only these cookies decide whether the dashboard still authenticates.
 # The jar is full of analytics cookies (_hjSession, _uetsid, MR, __cf_bm)
-# that expire constantly and mean nothing — in the 2026-08-07 jar the
-# authjs session tokens were still valid for another 19 days while the
-# dead ``cognito`` cookie was the one that actually broke every request.
-AUTH_COOKIE_PREFIXES = ("cognito", "__Secure-authjs.session-token")
+# that expire constantly and mean nothing.
+#
+# The DURABLE ``__Secure-authjs.session-token`` (~30d, dashboard.menthorq.io)
+# governs: it is the credential actually sent with dashboard requests. The
+# ``cognito`` cookie is EPHEMERAL (~1h TTL, lives on the amazoncognito
+# domain, never sent to the dashboard) and self-heals — the client's
+# credential-based re-login (9a49bad6) re-mints it on next use. Governing
+# on min(all auth cookies) false-alarmed daily: a jar minted minutes ago
+# scored days_remaining=0 and any jar >1h old scored expired.
+DURABLE_COOKIE_PREFIX = "__Secure-authjs.session-token"
+AUTH_COOKIE_PREFIXES = ("cognito", DURABLE_COOKIE_PREFIX)
 
 
 def _is_auth_cookie(name: str) -> bool:
@@ -64,8 +71,8 @@ def evaluate_session(
     if not isinstance(cookies, list):
         return _dead("dashboard session jar has no cookies", None)
 
-    expiries = [
-        cookie.get("expires")
+    auth_cookies = [
+        (cookie["name"], cookie["expires"])
         for cookie in cookies
         if isinstance(cookie, dict)
         and isinstance(cookie.get("name"), str)
@@ -73,15 +80,23 @@ def evaluate_session(
         and isinstance(cookie.get("expires"), (int, float))
         and cookie["expires"] > 0
     ]
-    if not expiries:
+    if not auth_cookies:
         return _dead("dashboard session jar carries no auth cookie", None)
 
-    # The EARLIEST auth cookie governs: the session dies with its first
-    # expiring credential, not its longest-lived one.
-    earliest = min(expiries)
-    seconds_remaining = earliest - now.timestamp()
+    # The DURABLE authjs credential governs when present: the ephemeral
+    # cognito cookie self-heals via credential re-login and would false-alarm
+    # daily (see AUTH_COOKIE_PREFIXES). Cognito-only jars fall back to the
+    # cognito expiry — with no durable credential it is all the jar has.
+    durable = [
+        expires for name, expires in auth_cookies
+        if name.startswith(DURABLE_COOKIE_PREFIX)
+    ]
+    governing = min(durable) if durable else min(
+        expires for _, expires in auth_cookies
+    )
+    seconds_remaining = governing - now.timestamp()
     days_remaining = int(seconds_remaining // 86400)
-    expires_at = datetime.fromtimestamp(earliest, timezone.utc).isoformat()
+    expires_at = datetime.fromtimestamp(governing, timezone.utc).isoformat()
 
     if seconds_remaining <= 0:
         return _dead(
