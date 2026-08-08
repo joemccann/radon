@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, type ReactNode } from "react";
+import { useState, useCallback, useMemo, type ReactNode } from "react";
 import type { PortfolioData, AccountSummary, ExecutedOrder } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { computeExposureDetailed, type ExposureDataWithBreakdown } from "@/lib/exposureBreakdown";
@@ -14,6 +14,7 @@ import {
   formatLeveragePct,
   formatLeverageMultiplier,
 } from "@/lib/dollarDeltaLeverage";
+import { filterExecutedToEtToday } from "@/lib/orders/executedToday";
 import ExposureBreakdownModal, { type ExposureMetric } from "./ExposureBreakdownModal";
 import FillsModal from "./FillsModal";
 import PnlBreakdownModal from "./PnlBreakdownModal";
@@ -584,6 +585,13 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
   const [initMarginModalOpen, setInitMarginModalOpen] = useState(false);
   const [grossPosModalOpen, setGrossPosModalOpen] = useState(false);
 
+  // Match the ET day-cut used by computeRealizedPnlFromFills / /orders so the
+  // modal itemizes the same fills the total sums (NEW_FINDINGS wave-2).
+  const todayExecutedFills = useMemo(
+    () => filterExecutedToEtToday(executedOrders),
+    [executedOrders],
+  );
+
   const isPortfolio = section === "portfolio";
   if (!portfolio) {
     if (!isPortfolio) return null;
@@ -743,7 +751,7 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
           "Unrealized P&L = SUM( market_value − entry_cost ) per position\n" +
           "Entry cost and market value are signed (credits and short marks negative)\n" +
           "so each row satisfies P&L = MKT VALUE − ENTRY COST.\n" +
-          "Return uses verified max loss, full-loss debit, or fill-linked opening margin; otherwise N/A.\n" +
+          "Return uses verified max loss, full-loss debit, or isolated broker-observed opening margin; otherwise N/A.\n" +
           "Source: IB market data synced via IB Gateway"
         }
         col1Header="ENTRY COST"
@@ -770,10 +778,10 @@ export default function MetricCards({ portfolio, prices, realizedPnl, executedOr
         onClose={() => setDayMoveModalOpen(false)}
       />
 
-      {/* TODAY'S P&L: Realized → session fills with P&L */}
+      {/* TODAY'S P&L: Realized → session fills with P&L (ET day-cut) */}
       <FillsModal
         open={fillsModalOpen}
-        fills={executedOrders}
+        fills={todayExecutedFills}
         totalRealizedPnl={realized}
         netLiquidation={acct?.net_liquidation}
         onClose={() => setFillsModalOpen(false)}
