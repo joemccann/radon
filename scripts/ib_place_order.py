@@ -444,7 +444,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         perm_id = trade.order.permId
         status = trade.orderStatus.status if trade.orderStatus else "Unknown"
 
-        # Surface any IB error events caught during the wait
+        # Surface any IB error events caught during the wait — with the
+        # STRUCTURED code/text fields the terminal-failed builder already
+        # carries, so a locate reject is distinguishable from a margin
+        # reject at the route/journald layer (T-031).
         if ib_errors:
             code, msg = ib_errors[0]
             return {
@@ -453,6 +456,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 "orderId": order_id,
                 "permId": perm_id,
                 "initialStatus": status,
+                "ib_error_code": code,
+                "ib_error_text": msg,
             }
 
         # Refuse to claim success if IB hasn't actually accepted the order.

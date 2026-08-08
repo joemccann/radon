@@ -42,6 +42,8 @@
 
 | T-024 | DONE | (T-024 commit) | RED: `1 failed, 3 passed` — failure on the first INSERT after DELETE-all left the table EMPTY over an autocommit-faithful fake (real working orders invisible on /orders). GREEN: upsert-new-snapshot-first (chunked multi-row per Hrana bounding), delete-extraneous-last — any-point failure leaves old/new/union, never empty; error still propagates. Writer neighborhood 80/80; full pytest layer 5011 passed/14 skipped. |
 
+| T-031 | DONE | (T-031 commit) | RED: `2 failed` — the permId==0 + errorEvent exit returned no ib_error_code/ib_error_text. GREEN: structured fields added (matching the terminal-failed builder); order identity (orderId/permId=0) preserved. Place-path 10/10; full pytest layer 5014 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
