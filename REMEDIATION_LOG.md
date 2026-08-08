@@ -20,6 +20,8 @@
 
 | T-014 | DONE | (T-014 commit) | RED: reverse-chronological delivery ([SELL@14:05, BUY@14:00]) labelled the SELL as SELL_TO_OPEN (`1 failed`). GREEN: `_fills_to_entries` now walks `sorted(fills, key=_fill_exec_sort_key)` (numeric exception-proof key; stable for unknown times) — file 31/31, full pytest layer 4942 passed/14 skipped. Matches the sibling sort in journal_rehydrate.py:135 and the backfill importer. |
 
+| T-015 | DONE | (T-015 commit) | RED: `2 failed, 2 passed` — production wiring (trade_log_path=None) bricked on an EMPTY journal table ("journal read failed: … empty; cannot recover") which also blocked the next-cycle upsert retry. GREEN: `_load_existing_from_journal(db, allow_empty=True)` on the prod path (recovery path still raises on empty); 4 prod-config tests now pin journal-table dedupe, reconciled==0, read-failure abort-without-upserts, and within-session upsert retry. File 35/35; full pytest layer 4946 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
