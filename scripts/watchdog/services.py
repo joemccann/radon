@@ -69,6 +69,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "exit-orders":      {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     "menthorq-session": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
+    # Daily LIVE probe of the MenthorQ credential re-login chain (the
+    # metadata check above cannot see a broken chain). Playwright-only.
+    "menthorq-login-probe": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # closed = 3d (not 1d) to cover the Fri->Mon weekend gap — these run on
     # Mon-Fri-only timers, so over the weekend they're legitimately silent.
     # Matches web/lib/serviceHealthWindows.ts.
@@ -225,6 +228,7 @@ BUCKETS: dict[str, list[str]] = {
         "cash-flow-sync",
         "flex-token-check",
         "menthorq-session",
+        "menthorq-login-probe",
         "cta-sync",
         # Once-per-day writers — hourly check surfaces a delay within 1h
         # of the window expiring.

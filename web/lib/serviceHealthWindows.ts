@@ -123,6 +123,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // MenthorQ dashboard session powering /options/net-gex. Daily check;
   // its jar died silently for 11 days before this row existed (2026-08-07).
   "menthorq-session": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
+  // Daily LIVE probe of the MenthorQ credential re-login chain via a real
+  // /options/exposure fetch — the metadata check above cannot see a broken
+  // chain (2026-08-07: WAF-blocked re-login went unnoticed for 11 days).
+  "menthorq-login-probe": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
 
   // ``llm-token-index`` fires once per UTC day at 06:30 via
   // radon-llm-index.timer (Hetzner). The timer is scheduled daily but
