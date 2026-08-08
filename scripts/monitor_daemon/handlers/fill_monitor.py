@@ -15,7 +15,7 @@ import logging
 from datetime import datetime
 from typing import Any, Dict, Optional
 
-from .base import BaseHandler
+from .base import BaseHandler, et_session_date
 from clients.ib_client import IBClient, DEFAULT_HOST
 
 try:
@@ -25,6 +25,18 @@ try:
     from db.writer import upsert_journal_entry  # type: ignore
 except ImportError:  # pragma: no cover — DB layer optional in unit tests
     upsert_journal_entry = None  # type: ignore[assignment]
+
+def _identity_int(value: Any) -> int:
+    """Coerce an IB identity field (conId/permId) to int, else 0.
+
+    Keeps the synthetic journal key deterministic when a source hands back
+    a non-numeric placeholder instead of the int IB provides in production.
+    """
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return 0
+
 
 try:
     from db.client import get_db  # type: ignore
@@ -294,7 +306,9 @@ class FillMonitorHandler(BaseHandler):
 
         order_id = fill_info["order_id"]
         total_filled = fill_info["total_filled"]
-        fill_date = datetime.now().strftime("%Y-%m-%d")
+        # ET session date, not host wall-clock — a UTC host stamps evening
+        # fills onto the next day, skewing the trade_id key + row date (T-023).
+        fill_date = et_session_date()
         # Synthetic trade_id: each progressive fill state gets its own row.
         # Real ib_exec_id would be ideal but is not exposed on order status.
         # The key MUST carry contract + session identity: bare orderIds
@@ -303,8 +317,8 @@ class FillMonitorHandler(BaseHandler):
         # overwrites another order's journal row (T-013). conId pins the
         # contract, permId pins the order across sessions, the date pins
         # the day; re-detecting the SAME fill state stays idempotent.
-        con_id = getattr(contract, "conId", 0) or 0
-        perm_id = getattr(order, "permId", 0) or 0
+        con_id = _identity_int(getattr(contract, "conId", 0))
+        perm_id = _identity_int(getattr(order, "permId", 0))
         order_key = perm_id or order_id
         trade_id = (
             f"fill-monitor:con-{con_id}:order-{order_key}:"

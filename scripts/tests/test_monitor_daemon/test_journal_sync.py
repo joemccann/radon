@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -431,6 +431,57 @@ class TestTradeLogRecovery:
         assert result["skipped"] == 1
         loaded = verified_load(str(trade_log_path))
         assert [row["ib_exec_id"] for row in loaded["trades"]] == ["DUP-RECOVER"]
+
+
+class TestEtSessionDates:
+    """T-023: journal dates derived from a bare strftime on the UTC exec
+    time stamp fills after ~20:00 ET onto the NEXT calendar day, shifting
+    the journal_basis cutoff (retroactive label flips) and same-day P&L."""
+
+    def _import_one(self, when, trade_log_path):
+        fill = _mock_fill(
+            exec_id=f"ET-{when.isoformat()}",
+            symbol="USAX",
+            side="BOT",
+            shares=10,
+            price=1.0,
+            sec_type="OPT",
+            strike=45.0,
+            right="C",
+            expiry="20260619",
+            when=when,
+        )
+        empty_db = MagicMock()
+        empty_result = MagicMock(spec=["fetchall"])
+        empty_result.fetchall.return_value = []
+        empty_db.execute.return_value = empty_result
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = [fill]
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            handler.execute()
+        loaded = verified_load(str(trade_log_path))
+        return loaded["trades"][-1]
+
+    def test_evening_utc_fill_lands_on_the_et_session_date(self, trade_log_path):
+        # 2026-06-26 00:30 UTC == 2026-06-25 20:30 EDT — the ET session date
+        # is the 25th; the bare-strftime bug wrote the 26th.
+        when = datetime(2026, 6, 26, 0, 30, tzinfo=timezone.utc)
+        row = self._import_one(when, trade_log_path)
+        assert row["date"] == "2026-06-25", f"got {row['date']}"
+
+    def test_dst_transition_evening_fill_uses_est(self, trade_log_path):
+        # DST ended 2026-11-01 06:00Z; 2026-11-02 00:30 UTC == 19:30 EST on
+        # 2026-11-01.
+        when = datetime(2026, 11, 2, 0, 30, tzinfo=timezone.utc)
+        row = self._import_one(when, trade_log_path)
+        assert row["date"] == "2026-11-01", f"got {row['date']}"
+
+    def test_naive_mid_session_time_is_unchanged(self, trade_log_path):
+        row = self._import_one(datetime(2026, 4, 25, 10, 30, 0), trade_log_path)
+        assert row["date"] == "2026-04-25"
 
 
 class TestProductionNoMirrorConfig:
