@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -431,6 +431,224 @@ class TestTradeLogRecovery:
         assert result["skipped"] == 1
         loaded = verified_load(str(trade_log_path))
         assert [row["ib_exec_id"] for row in loaded["trades"]] == ["DUP-RECOVER"]
+
+
+class TestEtSessionDates:
+    """T-023: journal dates derived from a bare strftime on the UTC exec
+    time stamp fills after ~20:00 ET onto the NEXT calendar day, shifting
+    the journal_basis cutoff (retroactive label flips) and same-day P&L."""
+
+    def _import_one(self, when, trade_log_path):
+        fill = _mock_fill(
+            exec_id=f"ET-{when.isoformat()}",
+            symbol="USAX",
+            side="BOT",
+            shares=10,
+            price=1.0,
+            sec_type="OPT",
+            strike=45.0,
+            right="C",
+            expiry="20260619",
+            when=when,
+        )
+        empty_db = MagicMock()
+        empty_result = MagicMock(spec=["fetchall"])
+        empty_result.fetchall.return_value = []
+        empty_db.execute.return_value = empty_result
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = [fill]
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            handler.execute()
+        loaded = verified_load(str(trade_log_path))
+        return loaded["trades"][-1]
+
+    def test_evening_utc_fill_lands_on_the_et_session_date(self, trade_log_path):
+        # 2026-06-26 00:30 UTC == 2026-06-25 20:30 EDT — the ET session date
+        # is the 25th; the bare-strftime bug wrote the 26th.
+        when = datetime(2026, 6, 26, 0, 30, tzinfo=timezone.utc)
+        row = self._import_one(when, trade_log_path)
+        assert row["date"] == "2026-06-25", f"got {row['date']}"
+
+    def test_dst_transition_evening_fill_uses_est(self, trade_log_path):
+        # DST ended 2026-11-01 06:00Z; 2026-11-02 00:30 UTC == 19:30 EST on
+        # 2026-11-01.
+        when = datetime(2026, 11, 2, 0, 30, tzinfo=timezone.utc)
+        row = self._import_one(when, trade_log_path)
+        assert row["date"] == "2026-11-01", f"got {row['date']}"
+
+    def test_naive_mid_session_time_is_unchanged(self, trade_log_path):
+        row = self._import_one(datetime(2026, 4, 25, 10, 30, 0), trade_log_path)
+        assert row["date"] == "2026-04-25"
+
+
+class TestProductionNoMirrorConfig:
+    """T-015: production wires JournalSyncHandler() with trade_log_path=None
+    (monitor_daemon/run.py) — a configuration no execute()-level test used.
+    Dedupe sources from the journal TABLE, the reconcile step is skipped
+    (reconciled == 0), and the journal read is the cycle's hard dependency."""
+
+    @staticmethod
+    def _journal_db(rows):
+        """Fake DB dispatching on the two SELECT shapes the prod path issues:
+        the 4-column trade-log-recovery read and the prior-qty lookup."""
+        db = MagicMock()
+
+        def execute(sql, args=()):
+            result = MagicMock(spec=["fetchall"])
+            if "trade_id, payload, filled_at, written_at" in sql:
+                result.fetchall.return_value = rows
+            else:
+                result.fetchall.return_value = []
+            return result
+
+        db.execute.side_effect = execute
+        return db
+
+    @staticmethod
+    def _journal_row(exec_id, ticker="USAX"):
+        payload = {
+            "ticker": ticker,
+            "action": "BUY_OPTION",
+            "contracts": 10,
+            "total_cost": 1000.0,
+            "ib_exec_id": exec_id,
+            "date": "2026-04-20",
+        }
+        return (exec_id, json.dumps(payload), "2026-04-20T14:00:00Z", "2026-04-20T14:00:01Z")
+
+    def _run(self, db, fills, upsert_mock):
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", upsert_mock):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler()  # trade_log_path=None — prod wiring
+            return handler.execute(), handler
+
+    def test_prod_dedupe_sources_from_journal_table(self):
+        db = self._journal_db([self._journal_row("SEEN-1")])
+        fills = [
+            _mock_fill(exec_id="SEEN-1", symbol="USAX", side="BOT", shares=10, price=1.0),
+            _mock_fill(exec_id="NEW-1", symbol="MU", side="BOT", shares=5, price=2.0),
+        ]
+        upsert = MagicMock()
+
+        result, _ = self._run(db, fills, upsert)
+
+        assert result.get("error") is None
+        assert result["imported"] == 1
+        assert result["reconciled"] == 0
+        upserted = [str(c.args[0]) for c in upsert.call_args_list]
+        assert upserted == ["NEW-1"]
+
+    def test_prod_empty_journal_still_imports_first_fill(self):
+        """An EMPTY journal is a legitimate state (fresh host), not a read
+        failure — the importer must not brick itself on it."""
+        db = self._journal_db([])
+        fills = [_mock_fill(exec_id="FIRST-1", symbol="USAX", side="BOT", shares=10, price=1.0)]
+        upsert = MagicMock()
+
+        result, _ = self._run(db, fills, upsert)
+
+        assert result.get("error") is None, f"cycle errored: {result.get('error')}"
+        assert result["imported"] == 1
+        assert [str(c.args[0]) for c in upsert.call_args_list] == ["FIRST-1"]
+
+    def test_prod_journal_read_failure_aborts_without_upserts(self):
+        db = MagicMock()
+        db.execute.side_effect = RuntimeError("hrana: upstream forward failed")
+        fills = [_mock_fill(exec_id="X-1", symbol="USAX", side="BOT", shares=10, price=1.0)]
+        upsert = MagicMock()
+
+        result, _ = self._run(db, fills, upsert)
+
+        assert str(result.get("error", "")).startswith("journal read failed:")
+        upsert.assert_not_called()  # importing without dedupe would double-write
+
+    def test_prod_failed_upsert_is_retried_next_cycle(self):
+        db = self._journal_db([])
+        fills = [_mock_fill(exec_id="RETRY-1", symbol="USAX", side="BOT", shares=10, price=1.0)]
+        upsert = MagicMock(side_effect=[RuntimeError("hrana: stream not found"), None])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler()
+            handler.execute()   # upsert raises (swallowed by _dual_write)
+            handler.execute()   # fill still in the session window — re-derived
+
+        assert upsert.call_count == 2
+        assert str(upsert.call_args_list[1].args[0]) == "RETRY-1"
+
+
+class TestOutOfOrderFillLabeling:
+    """T-014: fills labelled in DELIVERY order, not execution-time order.
+
+    IB can replay executions out of chronological order (corrections after
+    a reconnect, cross-session replay). Processing a closing SELL before
+    its own opening BUY sees prior_qty=0 and writes SELL_TO_OPEN — the
+    phantom-short mislabel. Both sibling paths sort by execution time
+    (journal_rehydrate.py, backfill_journal_from_executed_orders.py); the
+    real-time handler must too.
+    """
+
+    def test_reverse_chronological_delivery_still_labels_close_correctly(self, trade_log_path):
+        buy_open = _mock_fill(
+            exec_id="OOO-BUY",
+            symbol="USAX",
+            side="BOT",
+            shares=65,
+            price=1.02,
+            sec_type="OPT",
+            strike=45.0,
+            right="C",
+            expiry="20260619",
+            when=datetime(2026, 5, 22, 14, 0, 0),
+        )
+        sell_close = _mock_fill(
+            exec_id="OOO-SELL",
+            symbol="USAX",
+            side="SLD",
+            shares=65,
+            price=4.0,
+            sec_type="OPT",
+            strike=45.0,
+            right="C",
+            expiry="20260619",
+            when=datetime(2026, 5, 22, 14, 5, 0),
+        )
+
+        empty_db = MagicMock()
+        empty_result = MagicMock(spec=["fetchall"])
+        empty_result.fetchall.return_value = []
+        empty_db.execute.return_value = empty_result
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db):
+            mock_client = MagicMock()
+            # DELIVERY order is reversed: the 14:05 close arrives first.
+            mock_client.get_fills.return_value = [sell_close, buy_open]
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            result = handler.execute()
+
+        assert result["imported"] == 2
+        loaded = verified_load(str(trade_log_path))
+        by_exec = {t["ib_exec_id"]: t for t in loaded["trades"] if t["ib_exec_id"] in ("OOO-BUY", "OOO-SELL")}
+        assert by_exec["OOO-BUY"]["action"] == "BUY_OPTION"
+        assert by_exec["OOO-SELL"]["action"] == "SELL_OPTION", (
+            f"got {by_exec['OOO-SELL']['action']} — the 14:05 SELL was labelled "
+            "against prior_qty=0 because the 14:00 BUY had not been walked yet "
+            "(delivery-order labelling; fills must sort by execution time)"
+        )
 
 
 class TestSellCloseLabeling:
@@ -994,3 +1212,283 @@ class TestStructureLabel:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# ---------------------------------------------------------------------------
+# T-035 — APPEND this class to
+# scripts/tests/test_monitor_daemon/test_journal_sync.py
+# (uses the module's existing `_mock_fill` helper + `trade_log_path` fixture)
+# ---------------------------------------------------------------------------
+
+
+class TestCorrectionSuffixSupersede:
+    """T-035: a corrected execution REPLACES its original, never appends.
+
+    IB re-delivers a corrected execution under the same exec-id root with the
+    trailing two-digit segment incremented (`…01.01` → `…01.02`). Deduping on
+    exact string equality imported the correction as an ADDITIONAL row, so the
+    contract's quantity and cost were counted twice — the journal showed 3 + 5
+    contracts for one 5-contract fill. Distinct executions differ in the
+    segments BEFORE the counter (`…69f202e9.02.01` vs `…69f202e9.03.01` are two
+    real fills of one order), so only the final segment may be collapsed.
+    Same convention as web/lib/journal/realizedPnl.ts:stripCorrectionSuffix.
+    """
+
+    ROOT = "0002920b.6a19d5a9.01"
+    ORIGINAL = f"{ROOT}.01"
+    CORRECTED = f"{ROOT}.02"
+
+    # -- doubles -----------------------------------------------------------
+
+    def _journal_row(self, exec_id: str, contracts: int, **overrides) -> dict:
+        row = {
+            "id": 1,
+            "date": "2026-07-10",
+            "ticker": "MU",
+            "structure": "Short Call $1050 2026-07-17",
+            "decision": "IB_AUTO_IMPORT",
+            "action": "SELL_TO_OPEN",
+            "contracts": contracts,
+            "total_cost": contracts * 11000.0,
+            "strike": 1050.0,
+            "right": "C",
+            "expiry": "20260717",
+            "ib_exec_id": exec_id,
+        }
+        row.update(overrides)
+        return row
+
+    def _fake_db(self, rows: list[dict]):
+        """Dispatch on the three SELECT shapes journal_sync issues: the
+        4-column journal read, the trade_id coverage scan, and the
+        prior-qty-per-contract scan."""
+        recovery = [
+            (r["ib_exec_id"], json.dumps(r), "2026-07-10T18:30:00Z", "2026-07-10T18:30:01Z")
+            for r in rows
+        ]
+        coverage = [(r["ib_exec_id"],) for r in rows]
+        prior = [(json.dumps(r), "2026-07-10T18:30:00Z", "2026-07-10T18:30:00Z") for r in rows]
+
+        def execute(sql, *args, **kwargs):
+            result = MagicMock(spec=["fetchall"])
+            statement = " ".join(str(sql).split())
+            if "trade_id, payload, filled_at, written_at" in statement:
+                result.fetchall.return_value = recovery
+            elif "SELECT trade_id FROM journal" in statement:
+                result.fetchall.return_value = coverage
+            else:
+                result.fetchall.return_value = prior
+            return result
+
+        db = MagicMock()
+        db.execute.side_effect = execute
+        return db
+
+    def _option_fill(self, exec_id: str, shares: int, *, side: str = "SLD", when=None):
+        return _mock_fill(
+            exec_id=exec_id,
+            symbol="MU",
+            side=side,
+            shares=shares,
+            price=110.0,
+            sec_type="OPT",
+            strike=1050.0,
+            right="C",
+            expiry="20260717",
+            when=when or datetime(2026, 7, 10, 14, 30, 0),
+        )
+
+    def _run(self, trade_log_path, journal_rows: list[dict], fills: list, *, mirror=True):
+        """One execute() cycle. Returns (result, mirror rows, upsert calls)."""
+        upserts: list[tuple] = []
+
+        def fake_upsert(trade_id, entry, filled_at=None):
+            upserts.append((str(trade_id), entry))
+
+        if mirror:
+            atomic_save(str(trade_log_path), {"trades": [dict(r) for r in journal_rows]})
+
+        db = self._fake_db(journal_rows)
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", fake_upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler(trade_log_path=trade_log_path if mirror else None)
+            result = handler.execute()
+
+        rows = verified_load(str(trade_log_path))["trades"] if mirror else []
+        return result, rows, upserts
+
+    # -- supersede ---------------------------------------------------------
+
+    def test_correction_supersedes_the_imported_original(self, trade_log_path):
+        """One row for the root, carrying the CORRECTED contracts."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [self._journal_row(self.ORIGINAL, 3)],
+            [self._option_fill(self.CORRECTED, 5)],
+        )
+
+        for_root = [r for r in rows if str(r["ib_exec_id"]).startswith(self.ROOT)]
+        assert len(for_root) == 1, (
+            f"correction appended a second row for one execution: {for_root}"
+        )
+        assert for_root[0]["contracts"] == 5
+        assert result["imported"] == 0
+        assert result["superseded"] == 1
+        assert [trade_id for trade_id, _entry in upserts] == [self.ORIGINAL], (
+            "the correction must upsert the SAME trade_id so Turso replaces the row"
+        )
+
+    def test_prod_wiring_supersedes_without_a_disk_mirror(self):
+        """trade_log_path=None (monitor_daemon/run.py): dedupe + supersede both
+        source from the journal TABLE."""
+        result, _rows, upserts = self._run(
+            None,
+            [self._journal_row(self.ORIGINAL, 3)],
+            [self._option_fill(self.CORRECTED, 5)],
+            mirror=False,
+        )
+
+        assert result["superseded"] == 1
+        trade_id, entry = upserts[0]
+        assert trade_id == self.ORIGINAL
+        assert entry["contracts"] == 5
+        assert entry["ib_exec_id"] == self.ORIGINAL
+        assert entry["ib_exec_id_corrected"] == self.CORRECTED, (
+            "the absorbed correction number must be persisted or the next cycle "
+            "re-supersedes the same row forever"
+        )
+
+    def test_lower_numbered_late_arrival_is_skipped(self, trade_log_path):
+        """The pre-correction execution replays after the correction landed."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [self._journal_row(self.CORRECTED, 5)],
+            [self._option_fill(self.ORIGINAL, 3)],
+        )
+
+        assert result["imported"] == 0
+        assert result["superseded"] == 0
+        assert result["skipped"] == 1
+        assert upserts == []
+        assert [r["contracts"] for r in rows] == [5], "stale quantity overwrote the correction"
+
+    def test_redelivery_after_a_supersede_is_idempotent(self, trade_log_path):
+        """Both ids stay in the session cache all afternoon: the cycle must not
+        rewrite the row every 300s."""
+        absorbed = self._journal_row(self.ORIGINAL, 5, ib_exec_id_corrected=self.CORRECTED)
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [absorbed],
+            [self._option_fill(self.ORIGINAL, 3), self._option_fill(self.CORRECTED, 5)],
+        )
+
+        assert (result["imported"], result["superseded"], result["skipped"]) == (0, 0, 2)
+        assert upserts == []
+        assert [r["contracts"] for r in rows] == [5]
+
+    def test_original_and_correction_in_one_cycle_collapse(self, trade_log_path):
+        """Nothing imported yet: the pair must write ONE row, corrected."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [],
+            [
+                self._option_fill(self.ORIGINAL, 3, when=datetime(2026, 7, 10, 14, 30, 0)),
+                self._option_fill(self.CORRECTED, 5, when=datetime(2026, 7, 10, 14, 30, 0)),
+            ],
+        )
+
+        assert len(rows) == 1, f"correction pair wrote {len(rows)} rows"
+        assert rows[0]["contracts"] == 5
+        assert rows[0]["ib_exec_id"] == self.ORIGINAL
+        assert len(upserts) == 1
+
+    def test_corrected_sell_keeps_its_closing_label(self, trade_log_path):
+        """A correction is labelled against the position BEFORE the fill it
+        replaces. Rebasing wrong reads the original as already-closed and
+        relabels the close to SELL_TO_OPEN (the phantom-short class)."""
+        opened = {
+            "id": 1,
+            "date": "2026-07-09",
+            "ticker": "MU",
+            "structure": "Long Call $1050 2026-07-17",
+            "action": "BUY_OPTION",
+            "contracts": 25,
+            "total_cost": 25000.0,
+            "strike": 1050.0,
+            "right": "C",
+            "expiry": "20260717",
+            "ib_exec_id": "OPEN-BUY",
+        }
+        sold = self._journal_row(self.ORIGINAL, 25, id=2, action="SELL_OPTION")
+
+        _result, rows, _upserts = self._run(
+            trade_log_path, [opened, sold], [self._option_fill(self.CORRECTED, 30)]
+        )
+
+        corrected = next(r for r in rows if r["ib_exec_id"] == self.ORIGINAL)
+        assert corrected["action"] == "SELL_OPTION", (
+            f"got {corrected['action']} — the corrected sell was labelled against "
+            "a net-flat position instead of the 25-contract long it closes"
+        )
+        assert corrected["contracts"] == 30
+
+    # -- invariants the root logic must not break --------------------------
+
+    def test_distinct_executions_of_one_order_are_not_collapsed(self, trade_log_path):
+        """Real IB shape: the THIRD segment separates executions; only the
+        fourth is the correction counter."""
+        result, rows, upserts = self._run(
+            trade_log_path,
+            [],
+            [
+                self._option_fill("00021ab9.69f202e9.02.01", 2, side="BOT"),
+                self._option_fill(
+                    "00021ab9.69f202e9.03.01", 4, side="BOT",
+                    when=datetime(2026, 7, 10, 14, 31, 0),
+                ),
+            ],
+        )
+
+        assert result["imported"] == 2
+        assert sorted(r["contracts"] for r in rows) == [2, 4]
+        assert sorted(trade_id for trade_id, _entry in upserts) == [
+            "00021ab9.69f202e9.02.01",
+            "00021ab9.69f202e9.03.01",
+        ]
+
+    def test_composite_exec_id_dedupe_is_unchanged(self, trade_log_path):
+        """journal_rehydrate's '+'-joined ids stay opaque: their PARTS are the
+        correctable units, so part-wise exact dedupe still governs."""
+        composite = {
+            "id": 1,
+            "date": "2026-07-10",
+            "ticker": "WULF",
+            "structure": "Long Call $17 2027-01-15",
+            "action": "BUY_OPTION",
+            "contracts": 77,
+            "total_cost": 7700.0,
+            "strike": 17.0,
+            "right": "C",
+            "expiry": "20270115",
+            "ib_exec_id": "FILL-A+FILL-B",
+        }
+        known_part = _mock_fill(
+            exec_id="FILL-A", symbol="WULF", side="BOT", shares=8, price=5.2,
+            sec_type="OPT", strike=17.0, right="C", expiry="20270115",
+        )
+        unrelated = _mock_fill(
+            exec_id="FILL-C", symbol="WULF", side="BOT", shares=9, price=5.3,
+            sec_type="OPT", strike=17.0, right="C", expiry="20270115",
+        )
+
+        result, rows, upserts = self._run(trade_log_path, [composite], [known_part])
+        assert (result["imported"], result["superseded"]) == (0, 0)
+        assert [r["contracts"] for r in rows] == [77]
+        assert upserts == []
+
+        result, _rows, _upserts = self._run(trade_log_path, [composite], [unrelated])
+        assert result["imported"] == 1

@@ -391,6 +391,20 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
 
         if use_batch:
             try:
+                # Hrana has no rowcount — count the page BEFORE deleting it.
+                # `total += batch_size` reported 200 deletions for a 7-row
+                # tail and the inflated figure went verbatim into the
+                # archive job's service_health detail (T-046).
+                count_rows = _hrana_with_retry(
+                    lambda: hrana_query(
+                        "SELECT COUNT(*) FROM ("
+                        "SELECT taken_at FROM portfolio_snapshots "
+                        "WHERE taken_at < ? ORDER BY taken_at LIMIT ?)",
+                        (cutoff, batch_size),
+                        timeout=_DELETE_HTTP_TIMEOUT_S,
+                    )
+                )
+                page_count = int(count_rows[0][0]) if count_rows and count_rows[0] else 0
                 _hrana_with_retry(
                     lambda: hrana_execute(
                         "DELETE FROM portfolio_snapshots WHERE taken_at IN ("
@@ -400,8 +414,7 @@ def delete_portfolio_snapshots_before(cutoff: str, batch_size: int = PORTFOLIO_D
                         timeout=_DELETE_HTTP_TIMEOUT_S,
                     )
                 )
-                # Best-effort progress accounting (Hrana has no rowcount).
-                total += batch_size
+                total += page_count
                 continue
             except Exception as exc:  # noqa: BLE001
                 print(
@@ -964,24 +977,48 @@ def upsert_executed_order(
 def replace_open_orders_for_session(
     open_orders: list[tuple[int, dict[str, Any]]],
 ) -> None:
-    """Phase 3 — atomic replace: delete all open_orders + insert new set.
+    """Phase 3 — replace the open_orders snapshot without an empty window.
 
     Used by ib_orders.py after a full sync since IB returns the full
-    open-orders snapshot. Cancelled / filled orders disappear from IB's
-    snapshot; this DELETE+INSERT keeps the DB in lockstep without manual
-    diff logic.
+    open-orders snapshot. The direct-to-cloud pipeline autocommits per
+    statement, so the old DELETE-all-then-insert shape left the table
+    EMPTY (or partial) when any statement failed mid-replace — /orders
+    rendered a flat book over real working orders (T-024). Order of
+    operations now: multi-row UPSERT the new snapshot FIRST (chunked per
+    the Hrana bounding rules), THEN delete rows not in it. A failure at
+    any point leaves old rows, new rows, or their union — never an empty
+    table while orders are working — and the next 60s sync converges.
+    Errors propagate to the caller.
     """
     db = get_db()
     now = _now_iso()
-    db.execute("DELETE FROM open_orders")
-    for perm_id, payload in open_orders:
+    if not open_orders:
+        db.execute("DELETE FROM open_orders")
+        db.commit()
+        return
+
+    rows = [(int(perm_id), json.dumps(payload), now) for perm_id, payload in open_orders]
+    chunk_size = 200
+    for start in range(0, len(rows), chunk_size):
+        chunk = rows[start:start + chunk_size]
+        placeholders = ", ".join(["(?, ?, ?)"] * len(chunk))
+        params = [value for row in chunk for value in row]
         db.execute(
-            """
+            f"""
             INSERT INTO open_orders (perm_id, payload, updated_at)
-            VALUES (?, ?, ?)
+            VALUES {placeholders}
+            ON CONFLICT(perm_id) DO UPDATE SET
+              payload    = excluded.payload,
+              updated_at = excluded.updated_at
             """,
-            (int(perm_id), json.dumps(payload), now),
+            params,
         )
+
+    id_placeholders = ", ".join(["?"] * len(rows))
+    db.execute(
+        f"DELETE FROM open_orders WHERE perm_id NOT IN ({id_placeholders})",
+        [row[0] for row in rows],
+    )
     db.commit()
 
 

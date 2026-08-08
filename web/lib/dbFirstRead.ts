@@ -18,6 +18,18 @@
  * max-age budget. Routes gate background rescans on it: the served
  * snapshot is the fresher of the two, so "served snapshot is stale"
  * means BOTH sources are stale.
+ *
+ * Freshness alone doesn't catch a source that's structurally present but
+ * content-degraded — a writer that ran, found/produced nothing, and still
+ * wrote a timestamped row (`missing: true`, an empty result set). Without
+ * a validity check, that row can beat an older, genuinely populated
+ * snapshot on timestamp alone. Callers may opt in with `isDegraded`: a
+ * fresher degraded source then loses to a non-degraded older one, and two
+ * degraded sources keep the existing freshness order. NOT on by default —
+ * several routes have a LEGITIMATE empty/degraded-shaped fresh state
+ * (discover's "0 candidates today", performance's insufficient_data
+ * writing series:[] on purpose so the UI shows empty rather than a stale
+ * curve), so there is no universal heuristic; each call site wires its own.
  */
 
 import { parseScanTime } from "./parseScanTime";
@@ -62,6 +74,18 @@ export type DbFirstReadOptions<T> = {
   now?: () => number;
   /** Per-source read deadline. Prevents a hung DB read from blocking disk fallback. */
   sourceTimeoutMs?: number;
+  /**
+   * Optional per-route validity gate. A source whose `data` this predicate
+   * flags degraded loses to a non-degraded source even when it's fresher —
+   * a stalled-but-newer writer must never regress the UI from real data to
+   * an empty/error shape. Two degraded sources (or two healthy ones) fall
+   * through to the normal freshness order, unchanged. Omitted by default:
+   * see the module docstring for why there's no safe universal default.
+   * `isMissingPayload` below covers the common `missing: true` / absent
+   * case; routes with their own degraded shape (e.g. an empty results
+   * array that's never legitimately empty) can compose their own.
+   */
+  isDegraded?: (data: T) => boolean;
 };
 
 const DEFAULT_SOURCE_TIMEOUT_MS = 3_000;
@@ -72,10 +96,32 @@ export function contentTimestampMs(value: unknown): number | null {
   return parseScanTime(value)?.getTime() ?? null;
 }
 
+/**
+ * Shape-agnostic degraded check: an absent payload, or one explicitly
+ * flagged with the house `missing: true` marker (feedback_http_status_
+ * for_real_errors — the same marker web/public/sw-decisions.js treats as
+ * never cache-worthy). Safe as a shared default across every route: no
+ * caller anywhere treats a missing payload or an explicit missing:true as
+ * valid fresh data. Deliberately does NOT gate on empty arrays/objects —
+ * that's legitimate fresh state for several routes (see DbFirstReadOptions
+ * .isDegraded doc) and has to be opted into per call site instead.
+ */
+export function isMissingPayload(payload: unknown): boolean {
+  if (payload == null) return true;
+  if (typeof payload !== "object") return false;
+  return (payload as { missing?: unknown }).missing === true;
+}
+
 export async function dbFirstRead<T>(
   options: DbFirstReadOptions<T>,
 ): Promise<DbFirstResult<T>> {
-  const { label, maxAgeMs, now = Date.now, sourceTimeoutMs = DEFAULT_SOURCE_TIMEOUT_MS } = options;
+  const {
+    label,
+    maxAgeMs,
+    now = Date.now,
+    sourceTimeoutMs = DEFAULT_SOURCE_TIMEOUT_MS,
+    isDegraded,
+  } = options;
 
   const [db, disk] = await Promise.all([
     readSource(options.fromDb, "DB", label, sourceTimeoutMs),
@@ -83,7 +129,7 @@ export async function dbFirstRead<T>(
   ]);
   if (!db && !disk) return { ok: false };
 
-  const source = pickFresherSource(db, disk);
+  const source = pickFresherSource(db, disk, isDegraded);
   const chosen = (source === "db" ? db : disk) as TimestampedRead<T>;
   if (source === "disk") warnDiskServed(label, db !== null);
 
@@ -99,9 +145,20 @@ export async function dbFirstRead<T>(
 function pickFresherSource<T>(
   db: TimestampedRead<T> | null,
   disk: TimestampedRead<T> | null,
+  isDegraded?: (data: T) => boolean,
 ): "db" | "disk" {
   if (!db) return "disk";
   if (!disk) return "db";
+
+  if (isDegraded) {
+    const dbDegraded = isDegraded(db.data);
+    const diskDegraded = isDegraded(disk.data);
+    // Exactly one side is degraded: the healthy one wins outright, even if
+    // the degraded side is the fresher of the two. Both degraded (or both
+    // healthy) falls through to the ordinary freshness comparison below.
+    if (dbDegraded !== diskDegraded) return dbDegraded ? "disk" : "db";
+  }
+
   const dbTs = db.timestampMs ?? Number.NEGATIVE_INFINITY;
   const diskTs = disk.timestampMs ?? Number.NEGATIVE_INFINITY;
   return diskTs > dbTs ? "disk" : "db";

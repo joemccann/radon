@@ -61,6 +61,8 @@ try:
 except ImportError:
     pass
 
+from utils.exec_ids import exec_id_root  # noqa: E402 — needs the sys.path above
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -122,6 +124,27 @@ def _group_key(exec_obj: Any) -> str:
     if sec_type == "STK":
         return f"{exec_obj.symbol}|{sec_type}"
     return f"{exec_obj.symbol}|{sec_type}|{exec_obj.strike}|{exec_obj.expiry}|{exec_obj.right}"
+
+
+def _drop_superseded_executions(executions: List[Any]) -> List[Any]:
+    """Keep only the highest-numbered correction per exec-id root.
+
+    A Flex pull can carry both the original execution and its correction
+    (``…01.01`` and ``…01.02``). They land in the same contract bucket, whose
+    quantity is a SUM — so keeping both inflates the fill instead of replacing
+    it. Executions without a correction suffix pass through untouched.
+    """
+    highest: Dict[str, Any] = {}
+    passthrough: List[Any] = []
+    for exec_obj in executions:
+        root, correction = exec_id_root(getattr(exec_obj, "exec_id", None))
+        if correction <= 0:
+            passthrough.append(exec_obj)
+            continue
+        incumbent = highest.get(root)
+        if incumbent is None or correction > exec_id_root(incumbent.exec_id)[1]:
+            highest[root] = exec_obj
+    return passthrough + list(highest.values())
 
 
 def _group_executions(executions: List[Any]) -> Dict[str, Dict[str, Any]]:
@@ -476,6 +499,36 @@ def _existing_exec_ids(trades: List[Dict[str, Any]]) -> set[str]:
     return ids
 
 
+def _existing_exec_roots(exec_ids: Iterable[str]) -> set[str]:
+    """Correction roots of every exec id already in the journal.
+
+    IB re-delivers a corrected execution as ``<root>.02`` superseding
+    ``<root>.01``, so exact-string dedupe imports the correction as an
+    ADDITIONAL row and double-counts the contract. Composite ids contribute
+    the roots of their constituent parts.
+    """
+    roots: set[str] = set()
+    for exec_id in exec_ids:
+        for part in str(exec_id).split("+"):
+            root, correction = exec_id_root(part)
+            if correction > 0:
+                roots.add(root)
+    return roots
+
+
+def _root_already_journaled(exec_id: Any, exec_roots: set[str]) -> bool:
+    """True when a correction of this exec's root is already imported.
+
+    Skip-only by design: a Flex bucket aggregates many executions under one
+    composite ``ib_exec_id``, so there is no 1:1 journal row whose quantity a
+    correction could replace. The live path (``monitor_daemon/handlers/
+    journal_sync.py``) owns in-session supersede; here we refuse to
+    double-count.
+    """
+    root, correction = exec_id_root(exec_id)
+    return correction > 0 and root in exec_roots
+
+
 def _existing_legacy_keys(trades: List[Dict[str, Any]]) -> set[Tuple[str, str, str]]:
     """Fallback fingerprint for rows imported before ib_exec_id existed.
 
@@ -496,14 +549,22 @@ def _is_duplicate(
     entry: Dict[str, Any],
     existing_exec_ids: set[str],
     legacy_keys: set[Tuple[str, str, str]],
+    exec_roots: Optional[set[str]] = None,
 ) -> bool:
-    """Prefer execId match, else fall back to (ticker, date, structure)."""
+    """Prefer execId match, else fall back to (ticker, date, structure).
+
+    ``exec_roots`` makes the execId match correction-aware: a re-delivered
+    ``<root>.02`` is the same execution as the imported ``<root>.01``, not a
+    second fill.
+    """
     exec_id = entry.get("ib_exec_id")
     if exec_id and str(exec_id) in existing_exec_ids:
         return True
     if exec_id:
         for part in str(exec_id).split("+"):
             if part and part in existing_exec_ids:
+                return True
+            if part and exec_roots and _root_already_journaled(part, exec_roots):
                 return True
 
     legacy_key = (entry["ticker"], entry["date"], entry.get("structure", ""))
@@ -530,6 +591,7 @@ def rehydrate_from_executions(
     """
     trades = list(existing.get("trades", []))
     exec_ids = _existing_exec_ids(trades)
+    exec_roots = _existing_exec_roots(exec_ids)
     legacy_keys = _existing_legacy_keys(trades)
     next_id = max((t.get("id", 0) for t in trades), default=0) + 1
 
@@ -544,13 +606,19 @@ def rehydrate_from_executions(
     # on the known constituent — an assignment booked against an
     # already-imported open (MSFT $460C 2026-08-03) silently never
     # imported, so monthly P&L missed the close entirely.
-    new_executions = [e for e in executions if str(e.exec_id) not in exec_ids]
-    known_executions = [e for e in executions if str(e.exec_id) in exec_ids]
+    # A correction of an already-imported root counts as journaled too: left
+    # in, it would poison an otherwise-new bucket into a whole-bucket skip.
+    def _already_journaled(exec_obj: Any) -> bool:
+        exec_id = str(exec_obj.exec_id)
+        return exec_id in exec_ids or _root_already_journaled(exec_id, exec_roots)
+
+    new_executions = [e for e in executions if not _already_journaled(e)]
+    known_executions = [e for e in executions if _already_journaled(e)]
     # Keep the reporting contract: already-imported executions count as
     # skipped entries (one per contract bucket, as before the pre-filter).
     skipped = len(_group_executions(known_executions)) if known_executions else 0
 
-    grouped = _group_executions(new_executions)
+    grouped = _group_executions(_drop_superseded_executions(new_executions))
     candidate_entries: List[Dict[str, Any]] = []
     for bucket in grouped.values():
         key = _bucket_contract_key(bucket)
@@ -564,13 +632,14 @@ def rehydrate_from_executions(
 
     imported = 0
     for entry in candidate_entries:
-        if _is_duplicate(entry, exec_ids, legacy_keys):
+        if _is_duplicate(entry, exec_ids, legacy_keys, exec_roots):
             skipped += 1
             continue
         entry["id"] = next_id
         next_id += 1
         trades.append(entry)
         exec_ids.add(str(entry["ib_exec_id"]))
+        exec_roots |= _existing_exec_roots([str(entry["ib_exec_id"])])
         legacy_keys.add((entry["ticker"], entry["date"], entry.get("structure", "")))
         imported += 1
 

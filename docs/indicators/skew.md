@@ -56,7 +56,9 @@ change_t       = ratio_t - ratio_{t-1}        (None on the first stored session)
   returns daily putIV-callIV **difference** per expiry.
 - **Rejected**: Cboe SKEW index (tail-risk measure from the whole strip — NOT
   the 25d ratio; never substitute). IB (no historical IV-by-delta; forward-only).
-- Cadence: session data final after the close; timer at **21:45 UTC** daily.
+- Cadence: provisional current-session data every minute during RTH; session
+  data final after a 16:45 ET grace. The timer also runs at **21:45 UTC**
+  daily for finalization and weekend/holiday health heartbeats.
 - Licensing: UW is the repo's licensed provider (priority #2; IB fails on fit);
   derived-indicator display is normal in-app use like GEX/IV-rank.
 - Fixture: `scripts/tests/fixtures/skew_uw_sample.json` (379 KB, raw greeks
@@ -77,12 +79,17 @@ Bearer + honest UA. Pure functions:
 - `compute_change_series(rows) -> list[dict]` — ascending by date; attaches
   `change` (None first row).
 - `compute_stats(series) -> {high, low, avg, stddev} | None` over non-null changes.
-- `run(client=None, *, now=None)` — **gap-filling incremental**: determine the
-  last COMPLETED ET session (16:00 boundary, `ZoneInfo`), list missing trading
+- `run(client=None, *, now=None)` — **gap-filling incremental plus live overlay**: determine the
+  last FINALIZABLE ET session (16:45 boundary, `ZoneInfo`), list missing trading
   days after the last stored date (bounded to the most recent 10; use
   `scripts/utils/market_calendar`), fetch + compute each, upsert. No missing
-  sessions → cached payload with fresh `scan_time`, `rows_changed=False`
-  (heartbeat-only fast path, mirrors straddle's 304 path). Empty chain for a
+  sessions → cached payload with fresh `scan_time`, `rows_changed=False`.
+  During RTH, fetch today's same two chains and append/replace a snapshot-only
+  row with `is_intraday:true` and `as_of`; its change is versus the prior
+  finalized ratio and it is excluded from historical stats and
+  `skew_history`. Cached provisional rows are filtered before rehydrating the
+  durable base. From 16:00-16:45 ET the last live point is retained; at/after
+  16:45 the normal gap fill finalizes today. Empty chain for a
   session → skip it with a stderr note (self-heals on a later run), never
   write an empty/partial row.
 - `--backfill [START]` — one-shot: iterate trading days from START (default
@@ -99,13 +106,14 @@ Bearer + honest UA. Pure functions:
 ```jsonc
 {
   "scan_time": "2026-08-05T21:45:00Z",
-  "source": "unusual_whales",
+  "source": "unusual_whales", "market_status": "open",
   "count": 730,
   "current": {
     "date": "2026-08-05", "ratio": 1.242056, "change": -0.12,
     "put_iv": 0.147926, "call_iv": 0.119098,
     "expiry": "2026-08-21", "dte": 16,
-    "expiry_far": "2026-09-18", "dte_far": 44
+    "expiry_far": "2026-09-18", "dte_far": 44,
+    "is_intraday": true, "as_of": "2026-08-05T15:42:00Z"
   },
   "stats": { "high": 0.13, "low": -0.16, "avg": 0.0004, "stddev": 0.04 },
   "series": [ { "date": "2023-09-06", "ratio": 1.31, "change": null }, ... ]
@@ -140,13 +148,12 @@ Writer: `SKEW_UPSERT_SQL` (single-row, sqlite3-executable, args
 
 Copy the straddle route: GET only, `dynamic="force-dynamic"`,
 `runtime="nodejs"`, `dbFirstRead` (Turso `scan_snapshots service='skew'`
-latest, disk `data/skew.json`), `MAX_AGE_MS = 48h` (daily 21:45 UTC timer,
-weekend runs heartbeat via the no-missing-sessions fast path), exact missing
-contract above, `setCacheResponseHeaders` 300/3600 `tags: ["skew"]`.
-Hook `web/lib/useSkew.ts`: `useSyncHook({ endpoint: "/api/skew", interval:
-60 * 60_000, hasPost: false, extractTimestamp: d => d.scan_time })`.
-`serviceHealthWindows.ts`: `skew`, scheduled, uniform 26h, `requires_ib:
-false` (mirror straddle/margin-debt) + exhaustive pin test update. Python
+latest, disk `data/skew.json`), `MAX_AGE_MS = 48h`, exact missing contract
+above, and `setNoStoreResponseHeaders` so a minute snapshot cannot be hidden
+behind an intermediary cache. Hook `web/lib/useSkew.ts` uses GET-only
+`useSyncHook`: 60-second polling during RTH and paused polling while closed.
+`serviceHealthWindows.ts`: `skew`, scheduled, 5m open / 26h off-hours,
+`requires_ib:false`. Python
 watchdog window matches (ingestion worktree owns `scripts/watchdog/services.py`).
 
 ## UI — `web/components/SkewPanel.tsx` (+ `web/lib/skew.ts`)
@@ -184,7 +191,9 @@ Panel:
   Whales chain. The chart plots the day-over-day change: sharp drops mean put
   skew collapsing or call demand spiking; sharp rises mean downside fear
   getting bid. Beyond 2 sigma is a tail repricing event." (no em dashes)
-- Freshness copy derived only (header clock = `lastSync`; latest date cell).
+- Freshness is explicit: a `LIVE` badge requires an open-market intraday row
+  with an `as_of` no more than three minutes old; latest-date metadata says
+  `INTRADAY` and includes the ET observation time. Final rows render `DAILY`.
 - Registration: RegimePanel all six places (union, values, regex, desktop row,
   mobile chips, dispatch), label `SKEW`; `web/app/regime/skew/page.tsx`;
   `regime-tab-routes` table + render case; e2e `web/e2e/skew-tab.spec.ts`.
@@ -194,10 +203,11 @@ Panel:
 `cloud/services/radon-skew.{service,timer}`: oneshot venv-python direct,
 `EnvironmentFile=/home/radon/radon-cloud/.env` (UW_TOKEN must resolve there —
 confirm it exists on the VPS env; it does for GEX/leap timers),
-`RADON_DB_NO_REPLICA=1`, `TimeoutStartSec=300`; timer
-`OnCalendar=*-*-* 21:45:00 UTC` (comment: session greeks final after the
-16:00 ET close; 21:45 UTC = 17:45 EDT / 16:45 EST clears both regimes),
-`RandomizedDelaySec=300`, `Persistent=true`. Register in `setup-vps.sh`
+`RADON_DB_NO_REPLICA=1`, `TimeoutStartSec=300`; timer runs each minute in the
+broad 13:00-21:59 UTC weekday DST window (the fetcher gates on the shared ET
+market calendar) plus `OnCalendar=*-*-* 21:45:00 UTC` for finalization and
+off-hours health. `RandomizedDelaySec=5`, `AccuracySec=1s`,
+`Persistent=false`. Register in `setup-vps.sh`
 `SERVICE_FILES` + `cloud/tests/test_systemd_services.py`.
 
 ## Test evidence pins (fixture-derived 2026-08-05)
