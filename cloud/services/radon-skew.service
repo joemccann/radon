@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon Skew Indicator (UW SPX 1M 25-delta put/call IV ratio pull, daily)
+Description=Radon Skew Indicator (UW SPX 1M 25-delta put/call IV ratio, live RTH)
 After=network.target
 
 StartLimitIntervalSec=300

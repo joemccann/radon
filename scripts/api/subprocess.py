@@ -112,13 +112,19 @@ def _extract_json_payload(stdout: str) -> Optional[object]:
 
     Strategy:
       1. Walk stdout lines in REVERSE order.
-      2. For each line that strips to a `{...}`/`[...]` body, attempt
-         `json.loads` — the FIRST line that fully parses wins.
-      3. If no single line parses, fall back to the slice-from-first-`{`
+      2. A parseable dict carrying a "status" key wins immediately — that is
+         the result contract for the order paths, so a stray JSON line
+         printed AFTER the result can never shadow it (T-012: the previous
+         "first parse from the end" rule returned the trailing junk, which
+         made a rejected order render as a 200 with a bogus body).
+      3. Otherwise remember the LAST line that parses at all (legacy
+         behaviour — covers array results and status-less dicts).
+      4. If no single line parses, fall back to the slice-from-first-`{`
          strategy via `_find_json_start` (preserving the original
          behaviour for scripts that emit pretty-printed multi-line JSON).
     """
     lines = stdout.splitlines()
+    fallback: Optional[object] = None
     for line in reversed(lines):
         stripped = line.strip()
         if not stripped:
@@ -126,10 +132,16 @@ def _extract_json_payload(stdout: str) -> Optional[object]:
         if stripped[0] not in ("{", "["):
             continue
         try:
-            return json.loads(stripped)
+            value = json.loads(stripped)
         except json.JSONDecodeError:
             # Not a single-line JSON — could be a partial line. Keep walking.
             continue
+        if isinstance(value, dict) and "status" in value:
+            return value
+        if fallback is None:
+            fallback = value
+    if fallback is not None:
+        return fallback
 
     # Fallback: multi-line JSON. Slice from the first '{' or '[' to end.
     start = _find_json_start(stdout)

@@ -365,7 +365,11 @@ class TestGroupedCooldownDeliverySemantics:
         )
 
         with (
-            patch.object(grouping.notify, "_emit_pushover", return_value=None) as emit,
+            patch.object(
+                grouping.notify,
+                "_emit_pushover",
+                return_value=grouping.notify.ChannelResult(attempted=True),
+            ) as emit,
             patch.object(grouping.notify, "_write_dispatcher_health"),
         ):
             summary = grouping.dispatch_with_grouping(

@@ -231,3 +231,102 @@ class TestReconciliationLog:
         ).fetchall()
         assert rows[0][0] == "2026-05-06T20:00:00Z"
         assert json.loads(rows[0][1]) == {"diffs": []}
+
+
+class _AutocommitFlakyDb:
+    """Direct-to-cloud faithful fake: every statement commits immediately
+    (Hrana autocommits per request) and the Nth execute raises — the
+    mid-replace transport failure shape."""
+
+    def __init__(self, fail_on_execute: int = 10**9):
+        self.conn = sqlite3.connect(":memory:")
+        self.conn.isolation_level = None  # autocommit, like the HTTP pipeline
+        self.conn.execute(
+            """
+            CREATE TABLE open_orders (
+              perm_id     INTEGER PRIMARY KEY,
+              payload     TEXT    NOT NULL,
+              updated_at  TEXT    NOT NULL
+            )
+            """
+        )
+        self.fail_on_execute = fail_on_execute
+        self.calls = 0
+
+    def execute(self, sql, params=()):
+        self.calls += 1
+        if self.calls >= self.fail_on_execute:
+            raise RuntimeError("hrana: upstream forward failed (502)")
+        return self.conn.execute(sql, params)
+
+    def commit(self):
+        pass  # autocommit
+
+    def perm_ids(self):
+        return sorted(r[0] for r in self.conn.execute("SELECT perm_id FROM open_orders"))
+
+
+class TestReplaceOpenOrdersAtomicity:
+    """T-024: DELETE-all + N INSERTs over an autocommitting pipeline left
+    /orders EMPTY (indistinguishable from a flat book) when any statement
+    failed mid-replace — the operator can double-place against invisible
+    working orders."""
+
+    def _seed(self, db, ids=(1, 2, 3)):
+        for pid in ids:
+            db.conn.execute(
+                "INSERT INTO open_orders (perm_id, payload, updated_at) VALUES (?, ?, ?)",
+                (pid, json.dumps({"a": pid}), "2026-08-07T00:00:00Z"),
+            )
+
+    def _patched_writer(self, monkeypatch, db):
+        import db.writer as writer_mod
+        monkeypatch.setattr(writer_mod, "get_db", lambda: db)
+        return writer_mod
+
+    def test_failure_on_first_write_statement_keeps_prior_snapshot(self, monkeypatch):
+        db = _AutocommitFlakyDb(fail_on_execute=1)
+        self._seed(db)
+        writer_mod = self._patched_writer(monkeypatch, db)
+
+        with pytest.raises(RuntimeError):
+            writer_mod.replace_open_orders_for_session([(4, {"a": 4}), (5, {"a": 5})])
+
+        assert db.perm_ids() == [1, 2, 3], (
+            "a mid-replace failure must never leave /orders empty or partial-"
+            f"only; got {db.perm_ids()}"
+        )
+
+    def test_failure_mid_replace_never_leaves_the_table_empty(self, monkeypatch):
+        db = _AutocommitFlakyDb(fail_on_execute=2)
+        self._seed(db)
+        writer_mod = self._patched_writer(monkeypatch, db)
+
+        with pytest.raises(RuntimeError):
+            writer_mod.replace_open_orders_for_session([(4, {"a": 4}), (5, {"a": 5})])
+
+        survivors = db.perm_ids()
+        assert survivors, "table went EMPTY mid-replace — invisible working orders"
+        assert set(survivors) & {1, 2, 3, 4, 5}, f"unexpected content: {survivors}"
+
+    def test_happy_path_replaces_and_updates_payloads(self, monkeypatch):
+        db = _AutocommitFlakyDb()
+        self._seed(db)
+        writer_mod = self._patched_writer(monkeypatch, db)
+
+        writer_mod.replace_open_orders_for_session([(2, {"a": "new2"}), (4, {"a": 4})])
+
+        assert db.perm_ids() == [2, 4]
+        payload2 = json.loads(
+            db.conn.execute("SELECT payload FROM open_orders WHERE perm_id = 2").fetchone()[0]
+        )
+        assert payload2 == {"a": "new2"}
+
+    def test_empty_snapshot_still_clears_the_table(self, monkeypatch):
+        db = _AutocommitFlakyDb()
+        self._seed(db)
+        writer_mod = self._patched_writer(monkeypatch, db)
+
+        writer_mod.replace_open_orders_for_session([])
+
+        assert db.perm_ids() == []

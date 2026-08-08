@@ -316,5 +316,228 @@ class TestExitOrdersTradeLogUpdate:
             assert db.commits == 1
 
 
+def _pending_goog_trade():
+    return {
+        "id": 8,
+        "ticker": "GOOG",
+        "structure": "Bull Call Spread",
+        "exit_orders": {
+            "target": {
+                "price": 15.00,
+                "status": "PENDING",
+                "order_id": None,
+                "contracts": 44,
+                "contract_spec": {
+                    "symbol": "GOOG",
+                    "expiry": "20260417",
+                    "strike": 315,
+                    "right": "C",
+                },
+            }
+        },
+    }
+
+
+def _wire_placeable_ib(mock_cls):
+    """Mock IBClient wiring where the GOOG target is placeable (25% gap)."""
+    mock_client = make_mock_client()
+    mock_cls.return_value = mock_client
+    mock_contract = MagicMock()
+    mock_contract.localSymbol = "GOOG  260417C00315000"
+    mock_client.qualify_contracts.return_value = [mock_contract]
+    mock_ticker = MagicMock()
+    mock_ticker.bid = 11.90
+    mock_ticker.ask = 12.10
+    mock_client.get_quote.return_value = mock_ticker
+    mock_trade = MagicMock()
+    mock_trade.order.orderId = 99
+    mock_trade.orderStatus.status = "Submitted"
+    mock_client.place_order.return_value = mock_trade
+    return mock_client
+
+
+class FlakyUpdateJournalDb(FakeJournalDb):
+    """UPDATEs raise for the first `fail_updates` attempts (Turso outage),
+    then succeed — SELECTs keep working throughout, like a real Hrana
+    write-path failure."""
+
+    def __init__(self, trades, fail_updates=10**9):
+        super().__init__(trades)
+        self.fail_updates = fail_updates
+        self.update_attempts = 0
+
+    def execute(self, sql, args=()):
+        if sql.strip().upper().startswith("UPDATE"):
+            self.update_attempts += 1
+            if self.update_attempts <= self.fail_updates:
+                raise RuntimeError("hrana: stream not found")
+        return super().execute(sql, args)
+
+
+class TestExitOrdersJournalFailureGuard:
+    """T-010: a failed post-placement journal write must NOT re-place the
+    same live order on the next cycle — the row still says PENDING, but the
+    order is already resting at IB."""
+
+    def test_journal_update_failure_does_not_replace_on_next_cycle(self):
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            mock_client = _wire_placeable_ib(mock_cls)
+            db = FlakyUpdateJournalDb([_pending_goog_trade()])
+
+            handler = ExitOrdersHandler(db=db)
+            handler.execute()  # places, journal UPDATE fails, row stays PENDING
+            handler.execute()  # same row loads again — must NOT re-place
+
+            assert mock_client.place_order.call_count == 1
+
+    def test_journal_update_failure_surfaces_as_cycle_error(self):
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            _wire_placeable_ib(mock_cls)
+            db = FlakyUpdateJournalDb([_pending_goog_trade()])
+
+            handler = ExitOrdersHandler(db=db)
+            result = handler.execute()
+
+            # BaseHandler records state=error off result["error"] — a swallowed
+            # journal failure after a LIVE placement must page, not pass silently.
+            assert result.get("error"), "journal-update failure must surface in the cycle result"
+
+    def test_journal_heals_on_later_cycle_without_replacing(self):
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            mock_client = _wire_placeable_ib(mock_cls)
+            db = FlakyUpdateJournalDb([_pending_goog_trade()], fail_updates=1)
+
+            handler = ExitOrdersHandler(db=db)
+            handler.execute()  # placed; first UPDATE fails
+            handler.execute()  # heal: journal marked PLACED with the REAL order id
+
+            assert mock_client.place_order.call_count == 1
+            updated = db.trades["trade-8"]["exit_orders"]["target"]
+            assert updated["status"] == "PLACED"
+            assert updated["order_id"] == 99
+
+
+class TestExitOrdersQuoteStateGates:
+    """T-044: which quote states may price an exit.
+
+    ``mid = (bid + ask) / 2 if bid and ask else 0`` needs BOTH sides, so a
+    one-sided or empty book yields mid 0 and the order is skipped. A HALT
+    is different: IB keeps serving the last two-sided book, so the mid
+    still looks priceable and the exit would go out against a pre-halt
+    price. ``_is_halted`` gates that.
+    """
+
+    @staticmethod
+    def _run(*, bid, ask, halted="unset"):
+        """Execute one cycle against a placeable GOOG target (25% gap at a
+        11.90/12.10 book) with the given quote state."""
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            mock_client = _wire_placeable_ib(mock_cls)
+            ticker = mock_client.get_quote.return_value
+            ticker.bid = bid
+            ticker.ask = ask
+            if halted == "absent":
+                del ticker.halted
+            elif halted != "unset":
+                ticker.halted = halted
+
+            db = FakeJournalDb([_pending_goog_trade()])
+            handler = ExitOrdersHandler(db=db)
+            result = handler.execute()
+            return mock_client, db, result
+
+    @staticmethod
+    def _reasons(result):
+        return [entry.get("reason") for entry in result["skipped"]]
+
+    def test_empty_book_skips_as_no_market_data(self):
+        """Both sides zero — nothing to price against."""
+        client, db, result = self._run(bid=0, ask=0)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert result["orders_skipped"] == 1
+        assert self._reasons(result) == ["no_market_data"]
+        assert db.trades["trade-8"]["exit_orders"]["target"]["status"] == "PENDING"
+
+    def test_nan_quotes_skip_as_no_market_data(self):
+        """ib_insync leaves bid/ask at nan until a tick arrives."""
+        client, _db, result = self._run(bid=float("nan"), ask=float("nan"))
+
+        client.place_order.assert_not_called()
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_bid_only_book_cannot_price_a_mid(self):
+        """A one-sided book must not be averaged against a zero: (11.90 +
+        0) / 2 would place at half the real bid."""
+        client, _db, result = self._run(bid=11.90, ask=0)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_ask_only_book_cannot_price_a_mid(self):
+        client, _db, result = self._run(bid=0, ask=12.10)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_negative_bid_is_treated_as_absent(self):
+        """IB sends -1 for "no data available" on illiquid options."""
+        client, _db, result = self._run(bid=-1, ask=12.10)
+
+        client.place_order.assert_not_called()
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_halted_contract_is_not_priced(self):
+        """Ticker.halted == 1 (general halt) with a live-looking book."""
+        client, db, result = self._run(bid=11.90, ask=12.10, halted=1.0)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert self._reasons(result) == ["halted"]
+        assert db.trades["trade-8"]["exit_orders"]["target"]["status"] == "PENDING", (
+            "a halted skip must leave the journal row PENDING for a later cycle"
+        )
+
+    def test_volatility_halt_is_not_priced(self):
+        """Ticker.halted == 2 (volatility halt)."""
+        client, _db, result = self._run(bid=11.90, ask=12.10, halted=2)
+
+        client.place_order.assert_not_called()
+        assert self._reasons(result) == ["halted"]
+
+    def test_unhalted_flag_still_places(self):
+        """Control: halted == 0 is trading normally."""
+        client, db, result = self._run(bid=11.90, ask=12.10, halted=0.0)
+
+        client.place_order.assert_called_once()
+        assert result["orders_placed"] == 1
+        assert db.trades["trade-8"]["exit_orders"]["target"]["status"] == "PLACED"
+
+    def test_unknown_halt_flag_still_places(self):
+        """Control: -1 / nan mean "no halt information", not "halted"."""
+        for unknown in (-1.0, float("nan")):
+            client, _db, result = self._run(bid=11.90, ask=12.10, halted=unknown)
+            assert result["orders_placed"] == 1, f"halted={unknown!r} must not block"
+            client.place_order.assert_called_once()
+
+    def test_missing_halt_attribute_still_places(self):
+        """Control: a ticker with no ``halted`` field at all (older
+        ib_insync, synthetic quote) must not be read as halted."""
+        client, _db, result = self._run(bid=11.90, ask=12.10, halted="absent")
+
+        client.place_order.assert_called_once()
+        assert result["orders_placed"] == 1
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

@@ -316,3 +316,59 @@ def test_short_position_with_negative_journal_basis_absolute_valued():
     assert pos["avgCost"] == pytest.approx(1700.0, abs=0.0001), (
         "avg_cost = abs(basis) / abs(position_size) = 8500 / 5 = 1700.0"
     )
+
+
+def test_opposite_sign_journal_net_rejects_override(capsys):
+    """T-022: a sign-flipped journal (net +10 LONG) against an IB SHORT of 10
+    passed the |journal_net| == |position| guard and applied a long lot's
+    basis to a short position. The completeness check must be SIGNED."""
+    from ib_sync import _with_net_qty
+
+    journal_basis_lookup = {"USAX|20260717|C|43.0": 12345.67}
+    enriched = _with_net_qty(journal_basis_lookup, {"USAX|20260717|C|43.0": 10.0})
+
+    position = _make_position(
+        symbol="USAX",
+        sec_type="OPT",
+        position=-10,          # IB truth: SHORT 10
+        avg_cost=999.99,
+        strike=43,
+        right="C",
+        expiry="20260717",
+    )
+    client = SimpleNamespace(get_positions=lambda: [position])
+
+    positions = ib_sync.fetch_positions(client, journal_basis_lookup=enriched)
+    pos = positions[0]
+
+    assert pos["avgCost"] == pytest.approx(999.99, abs=0.0001), (
+        "sign-flipped journal net (+10 vs position -10) must keep IB avgCost"
+    )
+    assert pos["entry_cost"] == pytest.approx(9999.90, abs=0.01)
+    warning = capsys.readouterr().out
+    assert "SKIPPED" in warning
+
+
+def test_zero_journal_net_with_open_position_rejects_override(capsys):
+    """journal_net == 0 with a live 10-lot short is definitionally incomplete."""
+    from ib_sync import _with_net_qty
+
+    journal_basis_lookup = {"USAX|20260717|C|43.0": 12345.67}
+    enriched = _with_net_qty(journal_basis_lookup, {"USAX|20260717|C|43.0": 0.0})
+
+    position = _make_position(
+        symbol="USAX",
+        sec_type="OPT",
+        position=-10,
+        avg_cost=999.99,
+        strike=43,
+        right="C",
+        expiry="20260717",
+    )
+    client = SimpleNamespace(get_positions=lambda: [position])
+
+    positions = ib_sync.fetch_positions(client, journal_basis_lookup=enriched)
+    pos = positions[0]
+
+    assert pos["avgCost"] == pytest.approx(999.99, abs=0.0001)
+    assert "SKIPPED" in capsys.readouterr().out

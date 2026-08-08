@@ -150,4 +150,12 @@ describe("GET /api/skew", () => {
     const route = await import("../app/api/skew/route");
     expect(route.dynamic).toBe("force-dynamic");
   });
+
+  it("disables intermediary caching for intraday snapshots", async () => {
+    await insertSnapshot(buildPayload());
+    const { GET } = await import("../app/api/skew/route");
+    const res = await GET();
+    const cacheControl = res.headers.get("cache-control") ?? "";
+    expect(cacheControl).toContain("no-store");
+  });
 });
