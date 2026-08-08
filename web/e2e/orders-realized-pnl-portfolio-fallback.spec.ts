@@ -22,7 +22,13 @@
 
 import { test, expect, type Page } from "@playwright/test";
 
-const TODAY_ISO = "2026-05-06T15:00:00Z";
+// Window-relative, not a fixed calendar date: "Today's Executed Orders" filters
+// fills to the real wall-clock ET calendar day (lib/orders/executedToday.ts:
+// filterExecutedToEtToday / isFillOnEtCalendarDay), so a hardcoded past ISO
+// timestamp here rots the moment the suite runs on a later date (it did: this
+// spec pinned 2026-05-06 and, run today, every fixture fill silently fell
+// outside "today" and the table rendered its empty state instead).
+const TODAY_ISO = new Date().toISOString();
 
 const PORTFOLIO_WITH_SHORT_PUT = {
   bankroll: 100_000,
