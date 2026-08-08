@@ -294,9 +294,22 @@ class FillMonitorHandler(BaseHandler):
 
         order_id = fill_info["order_id"]
         total_filled = fill_info["total_filled"]
+        fill_date = datetime.now().strftime("%Y-%m-%d")
         # Synthetic trade_id: each progressive fill state gets its own row.
         # Real ib_exec_id would be ideal but is not exposed on order status.
-        trade_id = f"fill-monitor:order-{order_id}:filled-{total_filled}"
+        # The key MUST carry contract + session identity: bare orderIds
+        # restart per session/clientId, and JOURNAL_UPSERT_SQL is ON
+        # CONFLICT(trade_id) DO UPDATE — a colliding key destructively
+        # overwrites another order's journal row (T-013). conId pins the
+        # contract, permId pins the order across sessions, the date pins
+        # the day; re-detecting the SAME fill state stays idempotent.
+        con_id = getattr(contract, "conId", 0) or 0
+        perm_id = getattr(order, "permId", 0) or 0
+        order_key = perm_id or order_id
+        trade_id = (
+            f"fill-monitor:con-{con_id}:order-{order_key}:"
+            f"{fill_date}:filled-{total_filled}"
+        )
 
         sec_type = getattr(contract, "secType", "STK") or "STK"
         side_label = "BUY" if str(order.action).upper() == "BUY" else "SELL"
@@ -307,7 +320,7 @@ class FillMonitorHandler(BaseHandler):
         newly_filled = fill_info.get("newly_filled", 0)
         multiplier = 100 if sec_type in ("OPT", "BAG") else 1
         total_cost = float(newly_filled) * float(avg_price) * multiplier
-        filled_at = datetime.now().strftime("%Y-%m-%d")
+        filled_at = fill_date
 
         strike = getattr(contract, "strike", None) if sec_type in ("OPT", "BAG") else None
         right = getattr(contract, "right", None) if sec_type in ("OPT", "BAG") else None
