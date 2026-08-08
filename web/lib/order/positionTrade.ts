@@ -31,7 +31,13 @@ export interface PositionTradeOrder {
   riskInput: OptionOrderRiskInput;
   /** Body for POST /api/orders/place. */
   payload: Record<string, unknown>;
-  /** True when this action closes/reduces the target (vs. opening more). */
+  /**
+   * True when this action is a PURE close of the target — the traded quantity
+   * never exceeds the held size, so the order adds no new exposure and
+   * `riskInput.closeOut` carries the realised-P&L basis. An order LARGER than
+   * the held size reports false: it opens net-new exposure and routes through
+   * the risk-augmentation pipeline instead of the close-out short-circuit.
+   */
   isClosing: boolean;
 }
 
@@ -43,6 +49,40 @@ function rightOf(leg: PortfolioLeg): "C" | "P" {
 
 function cleanExpiry(expiry: string): string {
   return expiry.replace(/-/g, "");
+}
+
+/** Contracts of this leg currently held, floored at 0 for malformed rows. */
+function heldContracts(leg: PortfolioLeg): number {
+  const held = Math.trunc(leg.contracts);
+  return Number.isFinite(held) && held > 0 ? held : 0;
+}
+
+/** Option legs of the position, in the order the BAG payload emits them. */
+function tradeableOptionLegs(position: PortfolioPosition): PortfolioLeg[] {
+  return position.legs.filter((l) => l.strike != null && l.type !== "Stock");
+}
+
+function greatestCommonDivisor(a: number, b: number): number {
+  let x = Math.abs(Math.trunc(a));
+  let y = Math.abs(Math.trunc(b));
+  while (y !== 0) [x, y] = [y, x % y];
+  return x || 1;
+}
+
+/**
+ * Combo units held: the GCD of the per-leg contract counts — the same
+ * reduction `normalizeComboOrder` performs on a chain-built BAG.
+ *
+ * One unit of the BAG is `ratio_i = contracts_i / units` of each leg, so
+ * `units × ratio_i === contracts_i` and a FULL close is exactly `units`
+ * combos. `position.contracts` is NOT this number: `ib_sync.py` sets it to the
+ * first LONG leg's contract count, which for a 5x3 ratio structure reads 5
+ * while the BAG only holds 1 unit of a 5:3 combo.
+ */
+export function heldComboUnits(position: PortfolioPosition): number {
+  const contracts = tradeableOptionLegs(position).map(heldContracts).filter((c) => c > 0);
+  if (contracts.length === 0) return 1;
+  return contracts.reduce(greatestCommonDivisor);
 }
 
 /** The action that CLOSES the target (so the UI can default to it). */
@@ -83,17 +123,24 @@ export function buildPositionTradeOrder(params: {
 
   if (target.kind === "combo") {
     if (position.legs.length < 2) return null;
-    const legs = position.legs
-      .filter((l) => l.strike != null && l.type !== "Stock")
-      .map((l) => ({
-        expiry: cleanExpiry(position.expiry),
-        strike: l.strike as number,
-        right: rightOf(l),
-        // ComboLeg.action = STRUCTURE (never derived from debit/credit).
-        action: (l.direction === "LONG" ? "BUY" : "SELL") as TradeAction,
-        ratio: 1,
-      }));
-    if (legs.length < 2) return null;
+    const optionLegs = tradeableOptionLegs(position);
+    if (optionLegs.length < 2) return null;
+    // ComboLeg.ratio encodes the HELD structure. A 5x3 ratio reverse risk
+    // reversal is a 5:3 BAG — shipping 1:1 makes IB trade equal contracts per
+    // side, over-trading the smaller leg. Ratios are the contract counts
+    // reduced by their GCD, so `payload.quantity` counts combo UNITS and
+    // `quantity × ratio_i` is the contracts traded on leg i.
+    const comboUnits = heldComboUnits(position);
+    const legs = optionLegs.map((l) => ({
+      expiry: cleanExpiry(position.expiry),
+      strike: l.strike as number,
+      right: rightOf(l),
+      // ComboLeg.action = STRUCTURE (never derived from debit/credit).
+      action: (l.direction === "LONG" ? "BUY" : "SELL") as TradeAction,
+      // Floor at 1: IB rejects a zero-ratio BAG leg, so a malformed
+      // zero-contract row still ships a routable combo.
+      ratio: Math.max(1, heldContracts(l) / comboUnits),
+    }));
 
     const payload = {
       type: "combo",
@@ -130,12 +177,16 @@ export function buildPositionTradeOrder(params: {
       payload,
       riskInput: {
         ticker,
+        // `ChainOrderLeg.quantity` is contractually the RAW contract count for
+        // the leg (the augmenter derives the per-combo ratio itself). For a
+        // ratio BAG that is `quantity × ratio`, not `quantity` — passing the
+        // combo count for every leg makes the risk model price a 1:1 structure.
         chainLegs: legs.map((l) => ({
           action: l.action,
           right: l.right,
           strike: l.strike,
           expiry: l.expiry,
-          quantity,
+          quantity: quantity * l.ratio,
         })),
         netPremium: limitPrice,
         description,
@@ -168,10 +219,19 @@ export function buildPositionTradeOrder(params: {
     right,
   };
 
-  const closingLong = leg.direction === "LONG" && action === "SELL";
-  const closingShort = leg.direction === "SHORT" && action === "BUY";
-  // Per-contract basis magnitude (avg_cost is already ×100 for options).
-  const basisMagnitude = quantity * Math.abs(leg.avg_cost);
+  // A trade is a close only up to the HELD size. SELL 10 against 5 held longs
+  // closes 5 and OPENS 5 naked shorts; routing that through `closeOut` makes
+  // `useOrderRisk` short-circuit max-loss/max-gain to 0 and hide the residue.
+  // Mirrors `computeLinearRisk`'s partial-cover split: at-or-below held size is
+  // a pure close, above it the whole order goes to the augmentation pipeline so
+  // held coverage nets the closed portion and only the excess reads as naked.
+  const held = heldContracts(leg);
+  const withinHeldSize = quantity <= held;
+  const closingLong = leg.direction === "LONG" && action === "SELL" && withinHeldSize;
+  const closingShort = leg.direction === "SHORT" && action === "BUY" && withinHeldSize;
+  // Per-contract basis magnitude (avg_cost is already ×100 for options). Only
+  // the closed portion carries basis — never more contracts than are held.
+  const basisMagnitude = Math.min(quantity, held) * Math.abs(leg.avg_cost);
 
   if (closingLong) {
     // Sell-to-close a long leg: receive proceeds; basis is what we paid.
@@ -208,8 +268,10 @@ export function buildPositionTradeOrder(params: {
     };
   }
 
-  // Opening / adding to a leg (BUY a long, SELL more short): hand the single
-  // chain leg to the augmenter so portfolio coverage attaches automatically.
+  // Opening / adding to a leg (BUY a long, SELL more short) OR over-closing it
+  // (quantity > held): hand the single chain leg — at its RAW order quantity,
+  // never pre-netted — to the augmenter so held coverage attaches automatically
+  // and only the uncovered excess is modelled as naked.
   return {
     isClosing: false,
     payload,
