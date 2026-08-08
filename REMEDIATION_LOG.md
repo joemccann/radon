@@ -52,6 +52,8 @@
 
 | T-021 | DONE | (T-021 commit) | RED: `9 failed \| 14 passed` — TimeoutError deleted the idempotency key (identical resubmit re-placed: 2 FastAPI calls) and the route returned generic 500 INTERNAL_ERROR. GREEN: timeout/abort-class failures (matched by error NAME, preserving deterministic-failure suites) retain the key as an indeterminate terminal outcome (60s floor over short content-key TTLs); route returns 504 `UPSTREAM_TIMEOUT_ORDER_INDETERMINATE` + "check open orders" copy; identical resubmit hits placement ONCE. Neighborhood 81/81; full vitest layer 5228 passed. |
 
+| T-052 | DONE | (T-052 commit) | Gate-4 tripwire armed: web suites un-skipped against exported `_checkNakedShortRiskImpl`/`_auditOpenOrdersImpl` (31/31), python class un-skipped via autouse impl-routing fixture (16 passed, 0 skipped — was 3/13-skipped). Teeth: coverage-comparison mutation → `2 failed`; revert → 31/31. The missing docs/naked-short-reenable.md runbook remains a product follow-up (audit §5 item 28). |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.

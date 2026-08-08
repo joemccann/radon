@@ -90,8 +90,19 @@ def make_spread_position(ticker, contracts, long_strike, short_strike):
 # Test: find_naked_short_violations
 # ===========================================================================
 
-@pytest.mark.skip(reason="naked short guard disabled at module entry point")
 class TestFindNakedShortViolations:
+    """Gate-4 re-enable tripwire (T-052): the guard is disabled at the
+    PUBLIC entry point only — these cases exercise the preserved impl so
+    the documented re-enable stays verifiable."""
+
+    @pytest.fixture(autouse=True)
+    def _route_to_impl(self, monkeypatch):
+        import naked_short_audit
+        monkeypatch.setitem(
+            globals(),
+            "find_naked_short_violations",
+            naked_short_audit._find_naked_short_violations_impl,
+        )
     def test_no_orders_no_violations(self):
         assert find_naked_short_violations([], []) == []
 
