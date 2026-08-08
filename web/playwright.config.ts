@@ -48,7 +48,10 @@ export default defineConfig({
     command: `npx next dev --turbopack -p ${PORT}`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: true,
-    timeout: 60_000,
+    // Turbopack cold-start in the CI container exceeds 60s (run 31267802396
+    // aborted here before any spec ran); a warm local start is ~5-10s, so a
+    // larger ceiling only matters in CI and is harmless locally.
+    timeout: 180_000,
     env: {
       ...process.env,
       RADON_AUTHLESS_TEST: "1",
