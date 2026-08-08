@@ -50,6 +50,8 @@
 | T-051 | DONE | (T-051 commit) | Root `tests/` (TWR builder, 20 money-math cases + 2 more) added to the CI pytest command. Local: `pytest tests` 3× `22 passed`; exact new CI command green under the EXISTING gate: `74.52%` ≥ 64, `5040 passed, 14 skipped`. |
 | T-054 | DONE | (T-054 commit) | pyproject comment corrected: scripts/test_ib_realtime.py is a manual live harness collecting 0 tests (runner evidence: pytest exit 5); broad collection protects trade_blotter + root tests/, not it. |
 
+| T-021 | DONE | (T-021 commit) | RED: `9 failed \| 14 passed` — TimeoutError deleted the idempotency key (identical resubmit re-placed: 2 FastAPI calls) and the route returned generic 500 INTERNAL_ERROR. GREEN: timeout/abort-class failures (matched by error NAME, preserving deterministic-failure suites) retain the key as an indeterminate terminal outcome (60s floor over short content-key TTLs); route returns 504 `UPSTREAM_TIMEOUT_ORDER_INDETERMINATE` + "check open orders" copy; identical resubmit hits placement ONCE. Neighborhood 81/81; full vitest layer 5228 passed. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
