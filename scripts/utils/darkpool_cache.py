@@ -45,9 +45,9 @@ CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "darkpool_c
 # Bump when on-disk payload semantics change (forces re-fetch of stale rows).
 CACHE_SCHEMA = 2
 
-# Entries older than this are never read again (lookback windows are <= ~5 days),
-# so they are pruned to keep the directory bounded.
-MAX_AGE_DAYS = 15
+# Entries older than this are never read again. Flow reports use a 20-trading-day
+# window (~28 calendar days); keep a buffer for weekends/holidays.
+MAX_AGE_DAYS = 45
 _PRUNE_EVERY = 50  # run a prune sweep roughly every N writes
 _write_count = 0
 
