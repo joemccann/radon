@@ -10,9 +10,11 @@
 | T-002 | DONE | (T-002 commit) | RED: audit 3x cloud runs — test_external_signal_status_is_preserved_after_recovery[int,hup] deterministic fail on darwin (communicate(timeout=5) → SIGKILL rc -9; runs/cloud-r{1,2,3}.log). GREEN: darwin-scoped skipif added beside the GNU-timeout skipif; `pytest -k external_signal` → `2 skipped in 0.03s`; params still collect and run on linux. |
 | T-003 | DONE | (T-003 commit) | RED: fixture with period_label removed → both build_html tests FAIL (KeyError path, identical to the live-cache failure at scripts/performance_explainer_report.py:259): `2 failed, 1 passed, 1 skipped`. GREEN after restore + completing the fixture (series[].drawdown, last_sync discovered by execution): `3 passed, 1 skipped in 0.07s`. build_html now has deterministic CI coverage; live-cache pass kept behind RADON_LIVE_CACHE_SMOKE=1. |
 
+| T-010 | DONE | (T-010 commit) | RED: 3 new tests in TestExitOrdersJournalFailureGuard all failed against current code (`3 failed in 0.23s` — place_order called TWICE across two cycles; no error surfaced; no heal). GREEN after fix: file 14/14; monitor_daemon+exit_order_service 271/271; full pytest layer 4932 passed/14 skipped in 69s. Fix: `_update_journal_trade` returns bool; `_unrecorded_placements` guard keyed (journal_trade_id, order_type) blocks re-placement while the row still reads PENDING, retries the journal write on later cycles (heal), and the cycle surfaces `result["error"]` so BaseHandler records state=error (watchdog visibility). |
+
 ## Baseline
 
-_(pending — pytest gate + vitest on clean 2a75496a; running via wt-baseline.sh)_
+Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
 
 ## Entries
 
