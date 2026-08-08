@@ -530,11 +530,83 @@ class TestUWRetryPolicy:
         mock_client = MagicMock()
         mock_client.get_flow_alerts.side_effect = [
             UWRateLimitError("429", status_code=429),
-            {"data": [{"ticker": "AAPL"}]},
+            {"data": [{"ticker": "AAPL", "created_at": "2026-08-07T15:00:00Z"}]},
         ]
 
         with patch("fetch_flow.time_module.sleep"):
             result = fetch_flow_alerts("AAPL", _client=mock_client)
 
-        assert result == [{"ticker": "AAPL"}]
+        assert result == [{"ticker": "AAPL", "created_at": "2026-08-07T15:00:00Z"}]
         assert mock_client.get_flow_alerts.call_count == 2
+
+
+class TestFlowAlertsPagination:
+    def test_single_short_page(self):
+        from fetch_flow import FLOW_ALERTS_PAGE_LIMIT, fetch_flow_alerts
+
+        page = [
+            {
+                "ticker": "AAPL",
+                "option_chain": f"AAPL{i}",
+                "created_at": f"2026-08-07T15:00:{i:02d}Z",
+                "total_premium": "100000",
+            }
+            for i in range(3)
+        ]
+        mock_client = MagicMock()
+        mock_client.get_flow_alerts.return_value = {"data": page}
+
+        result = fetch_flow_alerts("AAPL", _client=mock_client)
+
+        assert len(result) == 3
+        assert mock_client.get_flow_alerts.call_count == 1
+        kwargs = mock_client.get_flow_alerts.call_args.kwargs
+        assert kwargs.get("limit") == FLOW_ALERTS_PAGE_LIMIT
+        assert kwargs.get("older_than") is None
+
+    def test_full_page_then_partial_walks_older_than(self):
+        from fetch_flow import FLOW_ALERTS_PAGE_LIMIT, _flow_alerts_page_cursor, fetch_flow_alerts
+
+        page1 = [
+            {
+                "ticker": "GLD",
+                "option_chain": f"GLD{i}",
+                "created_at": f"2026-08-07T18:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+                "total_premium": str(100000 + i),
+            }
+            for i in range(FLOW_ALERTS_PAGE_LIMIT)
+        ]
+        oldest = _flow_alerts_page_cursor(page1)
+        page2 = [
+            {
+                "ticker": "GLD",
+                "option_chain": f"GLDx{i}",
+                "created_at": f"2026-08-07T12:00:{i:02d}Z",
+                "total_premium": "50000",
+            }
+            for i in range(12)
+        ]
+        mock_client = MagicMock()
+        mock_client.get_flow_alerts.side_effect = [
+            {"data": page1},
+            {"data": page2},
+        ]
+
+        result = fetch_flow_alerts("GLD", min_premium=50000, _client=mock_client)
+
+        assert len(result) == FLOW_ALERTS_PAGE_LIMIT + 12
+        assert mock_client.get_flow_alerts.call_count == 2
+        second = mock_client.get_flow_alerts.call_args_list[1].kwargs
+        assert second["older_than"] == oldest
+        assert second["limit"] == FLOW_ALERTS_PAGE_LIMIT
+
+    def test_market_wide_allows_none_ticker(self):
+        from fetch_flow import fetch_flow_alerts
+
+        mock_client = MagicMock()
+        mock_client.get_flow_alerts.return_value = {
+            "data": [{"ticker": "X", "created_at": "2026-08-07T10:00:00Z", "option_chain": "X1"}],
+        }
+        result = fetch_flow_alerts(ticker=None, min_premium=500000, _client=mock_client)
+        assert len(result) == 1
+        assert mock_client.get_flow_alerts.call_args.kwargs.get("ticker") is None

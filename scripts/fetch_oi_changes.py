@@ -34,50 +34,91 @@ except Exception:  # pragma: no cover — DB layer optional
     def mirror_scan_snapshot(*args, **kwargs):  # type: ignore
         return None
 
+# UW /api/stock/{ticker}/oi-change supports limit + page (page from 0).
+# Walk until a short page so M3B is not stuck on the first page.
+_OI_PAGE_LIMIT = 500
+_OI_MAX_PAGES = 40
+# Market-wide /api/market/oi-change: max 200, no page cursor.
+_MARKET_OI_LIMIT = 200
+
+
+def _passes_filters(item: dict, min_oi_change: int, min_premium: float) -> bool:
+    oi_diff = item.get("oi_diff_plain", 0) or 0
+    premium = float(item.get("prev_total_premium", 0) or 0)
+    return abs(oi_diff) >= min_oi_change and premium >= min_premium
+
+
+def _sort_oi_significance(rows: list) -> list:
+    """Largest absolute OI move, then premium — not API response order."""
+    return sorted(
+        rows,
+        key=lambda item: (
+            abs(item.get("oi_diff_plain", 0) or 0),
+            float(item.get("prev_total_premium", 0) or 0),
+        ),
+        reverse=True,
+    )
+
+
+def _apply_limit(rows: list, limit: Optional[int]) -> list:
+    if limit is None or limit <= 0:
+        return rows
+    return rows[:limit]
+
 
 def fetch_ticker_oi_changes(
     ticker: str,
     min_oi_change: int = 0,
     min_premium: float = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
 ) -> list:
-    """Fetch OI changes for a specific ticker."""
+    """Fetch OI changes for a specific ticker (full multi-page walk).
+
+    ``limit`` caps results *after* paging + filter + significance sort.
+    Pass ``None`` (default) for the complete filtered set — used by eval M3B.
+    """
     with UWClient() as client:
-        result = client.get_stock_oi_change(ticker)
-        data = result.get('data', [])
-        
-        # Filter
-        filtered = []
-        for item in data:
-            oi_diff = item.get('oi_diff_plain', 0) or 0
-            premium = float(item.get('prev_total_premium', 0) or 0)
-            
-            if abs(oi_diff) >= min_oi_change and premium >= min_premium:
-                filtered.append(item)
-        
-        return filtered[:limit]
+        all_rows: list = []
+        for page in range(_OI_MAX_PAGES):
+            result = client.get_stock_oi_change(
+                ticker, limit=_OI_PAGE_LIMIT, page=page,
+            )
+            page_rows = result.get("data") or []
+            if not isinstance(page_rows, list) or not page_rows:
+                break
+            all_rows.extend(page_rows)
+            if len(page_rows) < _OI_PAGE_LIMIT:
+                break
+
+        filtered = [
+            item for item in all_rows
+            if _passes_filters(item, min_oi_change, min_premium)
+        ]
+        return _apply_limit(_sort_oi_significance(filtered), limit)
 
 
 def fetch_market_oi_changes(
     min_oi_change: int = 0,
     min_premium: float = 0,
-    limit: int = 50,
+    limit: Optional[int] = None,
 ) -> list:
-    """Fetch market-wide biggest OI changes."""
+    """Fetch market-wide biggest OI changes.
+
+    UW market endpoint has no page cursor (max 200). Request the max, then
+    filter/sort; ``limit`` only truncates the final ranked list.
+    """
     with UWClient() as client:
-        result = client.get_oi_change()
-        data = result.get('data', [])
-        
-        # Filter
-        filtered = []
-        for item in data:
-            oi_diff = item.get('oi_diff_plain', 0) or 0
-            premium = float(item.get('prev_total_premium', 0) or 0)
-            
-            if abs(oi_diff) >= min_oi_change and premium >= min_premium:
-                filtered.append(item)
-        
-        return filtered[:limit]
+        result = client.get_oi_change(limit=_MARKET_OI_LIMIT)
+        data = result.get("data") or []
+        if not isinstance(data, list):
+            data = []
+
+        filtered = [
+            item for item in data
+            if _passes_filters(item, min_oi_change, min_premium)
+        ]
+        ranked = _sort_oi_significance(filtered)
+        return _apply_limit(ranked, limit)
 
 
 def categorize_signal(item: dict) -> dict:
@@ -202,20 +243,25 @@ Examples:
     parser.add_argument('--market', '-m', action='store_true', help='Market-wide OI changes')
     parser.add_argument('--min-oi-change', type=int, default=0, help='Minimum OI change (contracts)')
     parser.add_argument('--min-premium', type=float, default=0, help='Minimum premium ($)')
-    parser.add_argument('--limit', type=int, default=50, help='Max results')
+    parser.add_argument(
+        '--limit', type=int, default=50,
+        help='Max results after full fetch+rank (default 50; 0 = no cap)',
+    )
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     
     args = parser.parse_args()
     
     if not args.ticker and not args.market:
         parser.error('Either provide a ticker or use --market for market-wide scan')
+
+    result_limit = None if args.limit == 0 else args.limit
     
     try:
         if args.market:
             data = fetch_market_oi_changes(
                 min_oi_change=args.min_oi_change,
                 min_premium=args.min_premium,
-                limit=args.limit,
+                limit=result_limit,
             )
             ticker = None
         else:
@@ -223,7 +269,7 @@ Examples:
                 args.ticker.upper(),
                 min_oi_change=args.min_oi_change,
                 min_premium=args.min_premium,
-                limit=args.limit,
+                limit=result_limit,
             )
             ticker = args.ticker.upper()
         

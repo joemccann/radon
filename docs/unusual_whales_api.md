@@ -71,7 +71,12 @@ Liquid names (GLD, SPY) routinely need multiple pages per session day.
 - `is_otm`: Boolean - OTM contracts only
 - `rule_name[]`: Filter by alert type (RepeatedHits, FloorTradeLargeCap, etc.)
 - `issue_types[]`: Common Stock, ETF, Index
-- `limit`: Max 200
+- `limit`: Default 100, **max 200**
+- `older_than` / `newer_than`: time cursors for multi-page walks
+
+**Pagination:** one request never returns more than 200 alerts. Radon
+`fetch_flow.fetch_flow_alerts` walks `older_than` until a short page
+(market-wide or per-ticker). Discover and `fetch_options` reuse that helper.
 
 **Response Fields:**
 ```json

@@ -1,3 +1,18 @@
+# Task: UW P0+P1 truncation fixes (2026-08-07)
+
+## Summary
+
+- P0: `portfolio_report` uses paginated `fetch_darkpool` + disk cache.
+- P1: `fetch_flow_alerts` multi-page walk (max 200); discover + fetch_options reuse it.
+- P1: `fetch_oi_changes` pages ticker OI; market requests limit=200; eval M3B unlimited after rank.
+
+## Checklist
+
+- [x] Implement
+- [x] Tests green
+
+---
+
 # Task: 20-session Daily Dark Pool History + progressive disclosure (2026-08-07)
 
 ## Summary

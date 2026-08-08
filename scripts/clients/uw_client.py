@@ -679,9 +679,19 @@ class UWClient:
         """GET /api/market/total-options-volume - Total market options volume."""
         return self._get("market/total-options-volume")
 
-    def get_oi_change(self) -> dict:
-        """GET /api/market/oi-change - Biggest OI changes."""
-        return self._get("market/oi-change")
+    def get_oi_change(
+        self,
+        *,
+        date: Optional[str] = None,
+        limit: Optional[int] = None,
+        order: Optional[str] = None,
+    ) -> dict:
+        """GET /api/market/oi-change - Biggest OI changes.
+
+        UW max ``limit`` is 200; no page cursor on this route.
+        """
+        params = self._build_params(date=date, limit=limit, order=order)
+        return self._get("market/oi-change", params=params)
 
     def get_economic_calendar(self) -> dict:
         """GET /api/market/economic-calendar - Economic events."""

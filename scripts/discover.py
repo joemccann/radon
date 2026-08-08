@@ -84,19 +84,23 @@ def get_existing_tickers() -> set:
     return {t for t in tickers if t}
 
 
-def fetch_options_flow(min_premium: int = 500000, limit: int = 100, _client: UWClient = None) -> list:
-    """Fetch market-wide options flow alerts."""
-    def _fetch(client):
-        try:
-            resp = client.get_flow_alerts(min_premium=min_premium, limit=limit)
-            return resp.get("data", [])
-        except UWAPIError:
-            return []
+def fetch_options_flow(min_premium: int = 500000, limit: int = 200, _client: UWClient = None) -> list:
+    """Fetch market-wide options flow alerts (full multi-page walk).
 
-    if _client is not None:
-        return _fetch(_client)
-    with UWClient() as client:
-        return _fetch(client)
+    Delegates to ``fetch_flow.fetch_flow_alerts`` so market-wide discovery
+    is not stuck at a single UW page (max 200).
+    """
+    from fetch_flow import fetch_flow_alerts
+
+    try:
+        return fetch_flow_alerts(
+            ticker=None,
+            min_premium=min_premium,
+            _client=_client,
+            limit=limit,
+        )
+    except UWAPIError:
+        return []
 
 
 def analyze_darkpool_day(trades: list) -> dict:
@@ -443,9 +447,14 @@ def discover_targeted(tickers: list, dp_days: int = 3,
 
     with UWClient() as client:
         def _process_targeted(ticker):
+            from fetch_flow import fetch_flow_alerts
+
             try:
-                resp = client.get_flow_alerts(ticker=ticker, min_premium=min_premium, limit=50)
-                alerts = resp.get("data", [])
+                alerts = fetch_flow_alerts(
+                    ticker=ticker,
+                    min_premium=min_premium,
+                    _client=client,
+                )
             except UWAPIError:
                 alerts = []
 
