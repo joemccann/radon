@@ -20,6 +20,7 @@ import {
   contentKey,
   CONTENT_HASH_TTL_MS,
   CLIENT_KEY_TTL_MS,
+  IndeterminatePlacementError,
 } from "@/lib/orders/orderIdempotency";
 
 export const runtime = "nodejs";
@@ -73,6 +74,21 @@ async function readOrdersSnapshotBestEffort() {
   } catch {
     return EMPTY_ORDERS;
   }
+}
+
+/** Operator instruction for an order whose fate at IB is unknown. Never phrased
+ *  as a plain failure — a plain failure invites the retry that double-places. */
+const INDETERMINATE_PLACEMENT_MESSAGE =
+  "Order status unknown: the request to IB timed out. The order may have reached IB. Check open orders before re-placing.";
+
+function indeterminatePlacementDetail(error: IndeterminatePlacementError): string {
+  if (error.deduplicated) {
+    return "A duplicate submit inside the idempotency window returned the first attempt's indeterminate result. The order was NOT sent again.";
+  }
+  const cause = error.cause;
+  const reason =
+    cause instanceof Error ? `${cause.name}: ${cause.message}` : "upstream request aborted";
+  return `Placement was not confirmed (${reason}). The idempotency key is held so an identical resubmit cannot double-place.`;
 }
 
 export async function POST(request: Request): Promise<Response> {
@@ -326,6 +342,22 @@ export async function POST(request: Request): Promise<Response> {
             status: 502,
             code: "UPSTREAM_ERROR",
             detail: JSON.stringify(placeErr.result),
+            requestId,
+          }),
+          requestId,
+        );
+      }
+      if (placeErr instanceof IndeterminatePlacementError) {
+        // The 30s client abort fires after FastAPI has the request (25s budget),
+        // so IB may already hold a live order. The generic 500 INTERNAL_ERROR
+        // envelope reads as "nothing happened" and invites the resubmit that
+        // double-places — answer with the ambiguity, explicitly.
+        return setNoStoreResponseHeaders(
+          jsonApiError({
+            message: INDETERMINATE_PLACEMENT_MESSAGE,
+            status: 504,
+            code: "UPSTREAM_TIMEOUT_ORDER_INDETERMINATE",
+            detail: indeterminatePlacementDetail(placeErr),
             requestId,
           }),
           requestId,

@@ -2,6 +2,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   runIdempotentOrder,
   contentKey,
+  markIndeterminatePlacement,
+  IndeterminatePlacementError,
+  CONTENT_HASH_TTL_MS,
+  INDETERMINATE_RETENTION_MS,
   __resetOrderIdempotency,
 } from "@/lib/orders/orderIdempotency";
 
@@ -89,5 +93,114 @@ describe("contentKey", () => {
     expect(contentKey({ symbol: "PLTR", qty: 100 })).not.toBe(
       contentKey({ symbol: "PLTR", qty: 200 }),
     );
+  });
+});
+
+/**
+ * T-021 — the ambiguity window. `radonFetch` aborts the placement at 30s while
+ * FastAPI's own script budget is 25s, so the abort fires AFTER the request
+ * reached the upstream and IB may already hold a live order. Clearing the key on
+ * that rejection let an identical operator retry re-place a live order.
+ */
+describe("runIdempotentOrder — indeterminate (timeout-class) placement", () => {
+  const timeoutError = () =>
+    new DOMException("The operation was aborted due to timeout", "TimeoutError");
+
+  /** Resolve with the rejection reason; fail loudly if the promise fulfils. */
+  function rejection(promise: Promise<unknown>): Promise<unknown> {
+    return promise.then(
+      () => {
+        throw new Error("expected an indeterminate rejection, got a resolved placement");
+      },
+      (err: unknown) => err,
+    );
+  }
+
+  it("RETAINS the key on a TimeoutError — the retry gets the same answer, IB is not hit twice", async () => {
+    const cause = timeoutError();
+    const placement = vi
+      .fn()
+      .mockRejectedValueOnce(cause)
+      .mockResolvedValueOnce("SECOND-ORDER-AT-IB");
+
+    const first = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    expect(first).toBeInstanceOf(IndeterminatePlacementError);
+    expect((first as IndeterminatePlacementError).deduplicated).toBe(false);
+    expect((first as IndeterminatePlacementError).cause).toBe(cause);
+
+    const retry = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    expect(retry).toBeInstanceOf(IndeterminatePlacementError);
+    expect((retry as IndeterminatePlacementError).deduplicated).toBe(true);
+    expect(placement).toHaveBeenCalledTimes(1); // the order was NOT placed again
+  });
+
+  it("treats an AbortError the same as a TimeoutError", async () => {
+    const placement = vi
+      .fn()
+      .mockRejectedValueOnce(new DOMException("The operation was aborted", "AbortError"))
+      .mockResolvedValueOnce("ok");
+
+    await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    const retry = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+
+    expect(retry).toBeInstanceOf(IndeterminatePlacementError);
+    expect(placement).toHaveBeenCalledTimes(1);
+  });
+
+  it("gives a CONCURRENT duplicate the same indeterminate answer", async () => {
+    let failPlacement: (err: unknown) => void = () => {};
+    const placement = vi.fn(() => new Promise((_res, rej) => (failPlacement = rej)));
+
+    const first = rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    const second = rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    failPlacement(timeoutError());
+
+    expect(await first).toBeInstanceOf(IndeterminatePlacementError);
+    const duplicate = await second;
+    expect(duplicate).toBeInstanceOf(IndeterminatePlacementError);
+    expect((duplicate as IndeterminatePlacementError).deduplicated).toBe(true);
+    expect(placement).toHaveBeenCalledTimes(1);
+  });
+
+  it("holds the key for the retention floor, not the caller's short content-hash TTL", async () => {
+    vi.useFakeTimers();
+    const placement = vi.fn().mockRejectedValueOnce(timeoutError()).mockResolvedValueOnce("ok");
+
+    await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+
+    vi.advanceTimersByTime(CONTENT_HASH_TTL_MS + 1_000); // past the 4s content-hash TTL
+    const stillHeld = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    expect(stillHeld).toBeInstanceOf(IndeterminatePlacementError);
+    expect(placement).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(INDETERMINATE_RETENTION_MS); // past the retention floor
+    const afterExpiry = await runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement);
+    expect(afterExpiry).toEqual({ value: "ok", deduplicated: false });
+    expect(placement).toHaveBeenCalledTimes(2); // normal behaviour restored
+  });
+
+  it("honours an error the caller marks indeterminate", async () => {
+    const marked = markIndeterminatePlacement(new Error("upstream aborted mid-placement"));
+    const placement = vi.fn().mockRejectedValueOnce(marked).mockResolvedValueOnce("ok");
+
+    await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+    const retry = await rejection(runIdempotentOrder("k", CONTENT_HASH_TTL_MS, placement));
+
+    expect(retry).toBeInstanceOf(IndeterminatePlacementError);
+    expect(placement).toHaveBeenCalledTimes(1);
+  });
+
+  it("still clears the key for a deterministic failure whose message merely says 'timed out'", async () => {
+    const upstream = Object.assign(new Error("IB gateway timed out waiting for the order"), {
+      name: "RadonApiError",
+    });
+    const placement = vi.fn().mockRejectedValueOnce(upstream).mockResolvedValueOnce("ok");
+
+    await expect(runIdempotentOrder("k", 10_000, placement)).rejects.toThrow(
+      "IB gateway timed out",
+    );
+    const retry = await runIdempotentOrder("k", 10_000, placement);
+    expect(retry).toEqual({ value: "ok", deduplicated: false });
+    expect(placement).toHaveBeenCalledTimes(2);
   });
 });
