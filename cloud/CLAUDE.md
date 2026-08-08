@@ -171,6 +171,14 @@ Canonical unit files are copied root-owned to `/etc/systemd/system`; they are
 not symlinked from the checkout. Unit changes require the non-restarting
 control-plane bootstrap or an equivalent reviewed root transaction.
 
+Neither the CI deploy nor bootstrap installs timers or other
+non-control-plane units. Editing a unit in `services/` leaves a root
+install-copy owed (`install -m 0644 cloud/services/<unit>
+/etc/systemd/system/ && systemctl daemon-reload`); record it by bumping the
+unit's hash in `config/installed-units.sha256` in the same commit, or add a
+drift-allowlist acknowledgment for the pending window --
+`tests/test_unit_install_acknowledgment.py` fails CI otherwise.
+
 The drift audit runs from `/home/radon/radon/cloud` and compares live Caddy,
 Compose, systemd, polkit, sudoers, and installed helpers with this source. It
 must never read or report `.env*` contents.
