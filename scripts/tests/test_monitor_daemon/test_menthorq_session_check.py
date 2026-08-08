@@ -67,15 +67,59 @@ class TestSessionExpiryEvaluation:
         with patch.object(handler, "record_cycle_health") as health:
             result = handler.execute()
         assert result["expired"] is False
-        assert result["days_remaining"] == 9  # the EARLIEST auth cookie governs
+        # The DURABLE authjs credential governs, not the earliest cookie:
+        # cognito is short-lived (~1h TTL) and self-heals via the
+        # credential-based re-login (9a49bad6).
+        assert result["days_remaining"] == 19
         assert health.call_args is None or health.call_args[0][0] != "error"
 
-    def test_expired_auth_cookie_reports_error(self, tmp_path: Path):
+    def test_fresh_jar_with_hour_scale_cognito_does_not_alarm(self, tmp_path: Path):
+        """2026-08-07 incident regression: a jar minted MINUTES ago carries a
+        cognito cookie with ~1h TTL. min(expiries) scored it days_remaining=0
+        -> warn -> error row against a fully working session."""
         jar = _jar(tmp_path / "jar.json", [
-            # The exact production shape: session tokens still valid, the
-            # cognito auth cookie dead — the jar LOOKS healthy at a glance.
-            _cookie("cognito", expires_at=NOW - timedelta(days=11)),
-            _cookie("__Secure-authjs.session-token.0", expires_at=_in_days(19)),
+            _cookie("cognito", expires_at=NOW + timedelta(hours=1)),
+            _cookie("__Secure-authjs.session-token.0", expires_at=_in_days(30)),
+            _cookie("__Secure-authjs.session-token.1", expires_at=_in_days(30)),
+        ])
+        handler = _handler(jar)
+        with patch.object(handler, "record_cycle_health") as health:
+            result = handler.execute()
+        assert result["expired"] is False
+        assert result["should_warn"] is False
+        assert result["days_remaining"] == 30
+        assert not health.called
+
+    def test_lapsed_cognito_with_live_authjs_is_healthy(self, tmp_path: Path):
+        """Any jar >1h old has a lapsed cognito while the 30d authjs session
+        tokens keep authenticating fine (cognito lives on the amazoncognito
+        domain and is never even sent to dashboard.menthorq.io; the client
+        re-mints it from credentials on next use). Not an alarm."""
+        jar = _jar(tmp_path / "jar.json", [
+            _cookie("cognito", expires_at=NOW - timedelta(hours=3)),
+            _cookie("__Secure-authjs.session-token.0", expires_at=_in_days(29)),
+        ])
+        handler = _handler(jar)
+        with patch.object(handler, "record_cycle_health") as health:
+            result = handler.execute()
+        assert result["expired"] is False
+        assert result["should_warn"] is False
+        assert result["days_remaining"] == 29
+        assert not health.called
+
+    @pytest.mark.parametrize(
+        "cognito_expires_at",
+        [NOW - timedelta(days=11), NOW + timedelta(hours=1)],
+        ids=["cognito-lapsed", "cognito-still-valid"],
+    )
+    def test_expired_authjs_reports_error_regardless_of_cognito(
+        self, tmp_path: Path, cognito_expires_at: datetime
+    ):
+        """The durable authjs credential lapsing is the real 'jar can no
+        longer authenticate' condition — cognito state is irrelevant."""
+        jar = _jar(tmp_path / "jar.json", [
+            _cookie("cognito", expires_at=cognito_expires_at),
+            _cookie("__Secure-authjs.session-token.0", expires_at=NOW - timedelta(days=2)),
         ])
         handler = _handler(jar)
         with patch.object(handler, "record_cycle_health") as health:
@@ -84,6 +128,19 @@ class TestSessionExpiryEvaluation:
         assert health.called
         assert health.call_args[0][0] == "error"
         assert "menthorq" in json.dumps(health.call_args[1]["error"]).lower()
+
+    def test_authjs_within_warn_days_warns_before_it_dies(self, tmp_path: Path):
+        jar = _jar(tmp_path / "jar.json", [
+            _cookie("cognito", expires_at=NOW - timedelta(hours=3)),
+            _cookie("__Secure-authjs.session-token.0", expires_at=_in_days(2)),
+        ])
+        handler = _handler(jar)
+        with patch.object(handler, "record_cycle_health") as health:
+            result = handler.execute()
+        assert result["expired"] is False
+        assert result["should_warn"] is True
+        assert result["days_remaining"] == 2
+        assert health.called and health.call_args[0][0] == "error"
 
     def test_missing_jar_reports_error_not_silence(self, tmp_path: Path):
         handler = _handler(tmp_path / "absent.json")
