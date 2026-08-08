@@ -2,11 +2,38 @@
  * E2E: Realized P&L card on /portfolio
  *
  * RED/GREEN TDD:
- * - RED: No fills today → Realized P&L shows $0.00 (not -$6,835 from IB account summary)
+ * - RED: No fills today → Realized reads zero (not -$6,835 from IB account summary)
  * - GREEN: Fills present → shows correct sum; click card → fills modal appears
+ *
+ * SPEC REPAIR 2026-08-08 — selector/copy drift, no behavior change:
+ *  1. The card lives in the TODAY'S P&L row and is labelled "Realized", not
+ *     "Realized P&L", and the ACCOUNT row deliberately has no Realized card
+ *     ("Account row (IB authoritative) — 4 cards, no Realized duplicate",
+ *     components/MetricCards.tsx:96). The old `.metric-card` + hasText
+ *     "Realized P&L" locator matched the ACCOUNT "Unrealized P&L" card —
+ *     hasText is a case-insensitive SUBSTRING match and "Unrealized P&L"
+ *     contains "realized P&L" — so every assertion read unrealized_pnl
+ *     (-$212,251.69) and the click opened the unrealized modal.
+ *     Cards are anchored on their exact label text and pinned to one match.
+ *  2. Value formatting: cards render `fmtSigned` = sign + `fmt`
+ *     (components/MetricCards.tsx:30-36), i.e. whole dollars with a leading
+ *     sign — "+$0" / "+$258", never "$0.00". The modal total uses
+ *     FillsModal's own `fmtPnl` (components/FillsModal.tsx:16-20) which IS
+ *     2-decimal — "+$258.00".
+ * Financial expectations are unchanged: zero stays zero, and the fill sum is
+ * re-derived from the mock below rather than loosened.
  */
 
 import { test, expect } from "@playwright/test";
+
+/**
+ * The Realized card, anchored on its exact label rather than a substring of
+ * the row's text. `toHaveCount(1)` keeps a future duplicate/rename from
+ * silently re-introducing the ambiguity this spec was rotting on.
+ */
+function realizedCard(page: import("@playwright/test").Page) {
+  return page.locator(".metric-card").filter({ has: page.getByText("Realized", { exact: true }) });
+}
 
 // ── Shared mock data ────────────────────────────────────────────────────────
 
@@ -113,7 +140,7 @@ async function setupBaseMocks(page: import("@playwright/test").Page) {
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 test.describe("Realized P&L — fills-derived, not IB account summary", () => {
-  test("RED: no fills today → Realized P&L shows $0.00 not -$6,835", async ({ page }) => {
+  test("RED: no fills today → Realized reads zero, not -$6,835", async ({ page }) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_NO_FILLS) }),
@@ -121,18 +148,21 @@ test.describe("Realized P&L — fills-derived, not IB account summary", () => {
 
     await page.goto("/portfolio");
 
-    // Find the Realized P&L card in the ACCOUNT row
-    const realizedCard = page.locator(".metric-card", { hasText: "Realized P&L" }).first();
-    await realizedCard.waitFor({ timeout: 10_000 });
+    // The Realized card lives in the TODAY'S P&L row (MetricCards.tsx:494-497
+    // live branch / :510-516 market-closed branch), not the ACCOUNT row.
+    const card = realizedCard(page);
+    await expect(card).toHaveCount(1, { timeout: 15_000 });
 
-    // Must show $0.00 (no fills), NOT -$6,835 from IB account summary
-    const value = realizedCard.locator(".metric-value");
-    await expect(value).toHaveText("$0.00");
-    await expect(value).not.toContainText("-$6,835");
-    await expect(value).not.toContainText("-6,835");
+    // computeRealizedPnlFromFills([]) === 0 (lib/realized-pnl.ts:51), and
+    // fmtSigned(0) === "+$0" (MetricCards.tsx:30-36 — `fmt` renders whole
+    // dollars, so "$0.00" was never the rendered form). The financial point
+    // stands: zero fills must NOT surface account_summary.realized_pnl.
+    const value = card.locator(".metric-value");
+    await expect(value).toHaveText("+$0");
+    await expect(value).not.toContainText("6,835");
   });
 
-  test("GREEN: fills present → Realized P&L shows sum of fill P&L", async ({ page }) => {
+  test("GREEN: fills present → Realized shows sum of fill P&L", async ({ page }) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_WITH_FILLS) }),
@@ -140,15 +170,19 @@ test.describe("Realized P&L — fills-derived, not IB account summary", () => {
 
     await page.goto("/portfolio");
 
-    // $473 + (-$215) = $258
-    const realizedCard = page.locator(".metric-card", { hasText: "Realized P&L" }).first();
-    await realizedCard.waitFor({ timeout: 10_000 });
+    const card = realizedCard(page);
+    await expect(card).toHaveCount(1, { timeout: 15_000 });
 
-    const value = realizedCard.locator(".metric-value");
-    await expect(value).toContainText("258");
+    // Derivation (lib/realized-pnl.ts:50-56 — sum realizedPNL over fills whose
+    // ET date is today; null counts as 0):
+    //   exec-1 AAPL BOT  realizedPNL null →     0
+    //   exec-2 AAPL SLD  realizedPNL 473  →  +473
+    //   exec-3 GOOG SLD  realizedPNL -215 →  -215
+    //   total = 258 → fmtSigned(258) = "+$258"
+    await expect(card.locator(".metric-value")).toHaveText("+$258");
   });
 
-  test("GREEN: click Realized P&L card → fills modal appears with breakdown", async ({ page }) => {
+  test("GREEN: click Realized card → fills modal appears with breakdown", async ({ page }) => {
     await setupBaseMocks(page);
     await page.route("**/api/orders", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS_WITH_FILLS) }),
@@ -156,20 +190,22 @@ test.describe("Realized P&L — fills-derived, not IB account summary", () => {
 
     await page.goto("/portfolio");
 
-    const realizedCard = page.locator(".metric-card", { hasText: "Realized P&L" }).first();
-    await realizedCard.waitFor({ timeout: 10_000 });
-    await realizedCard.click();
+    const card = realizedCard(page);
+    await expect(card).toHaveCount(1, { timeout: 15_000 });
+    await card.click();
 
-    // Modal should appear with fills breakdown
-    const modal = page.locator(".fills-modal");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    // FillsModal renders through Modal, which puts role="dialog" +
+    // aria-labelledby={title} on the panel (components/Modal.tsx:76-83) and the
+    // `fills-modal` class on the BACKDROP. Address it by role/name.
+    const modal = page.getByRole("dialog", { name: "TODAY'S FILLS" });
+    await expect(modal).toBeVisible({ timeout: 10_000 });
 
     // Should list the fills
     await expect(modal).toContainText("AAPL");
     await expect(modal).toContainText("GOOG");
 
-    // Should show total
-    await expect(modal).toContainText("258");
+    // Total row uses FillsModal's own 2-decimal fmtPnl (FillsModal.tsx:16-20):
+    // 473 + (-215) = 258 → "+$258.00".
+    await expect(modal.locator(".fills-total-value")).toContainText("+$258.00");
   });
 });

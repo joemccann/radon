@@ -46,6 +46,14 @@ import { isMarketOpen } from "./lib/marketCalendar.js";
 import { shouldSkipTicketValidation } from "./lib/wsTrust.js";
 import { applyDepthOp } from "./lib/depthLadder.js";
 import { createReconnectGate } from "./lib/reconnectGate.js";
+import { decideSend, HARD_CAP_BYTES } from "./lib/sendBackpressure.js";
+import {
+  etDateYYYYMMDD,
+  isResolvedFutureStale,
+  pickNearestExpiry,
+  shouldAttemptReresolve,
+} from "./lib/futuresRollover.js";
+import { createForwardSubRegistry } from "./lib/forwardSubRegistry.js";
 
 const DEFAULT_WS_PORT = 8765;
 const DEFAULT_IB_HOST = process.env.IB_GATEWAY_HOST || "127.0.0.1";
@@ -442,6 +450,19 @@ const forwardKeyToIndex = new Map(); // "@fwd:VIX" or "@fwd:VIX:20260618" -> "VI
 // to publish that future's price under in prices[index].fwdCurve. The relay owns
 // the option->future matching so the client does a plain fwdCurve[legExpiry].
 const fwdKeyToCurveExpiries = new Map();
+/* Refcounted holds on the internal forward lines above (lib/forwardSubRegistry).
+ * A forward is opened on demand by a client-facing subscription but lives under a
+ * key no client ever names, so unsubscribeClientFromSymbol / disconnectClient —
+ * both walk client-facing keys — never cancelled it: one leaked IB market-data
+ * line per expiry ever subscribed. Holds are keyed by (client, client-facing
+ * subject) so two strikes of one expiry, or two clients on one option, each hold
+ * the shared line independently and only the last release cancels it. */
+const forwardSubs = createForwardSubRegistry();
+/* Curve holds ride the same registry under their own namespace, so releasing ONE
+ * option expiry prunes just its fwdCurve entry instead of the whole future's set. */
+const CURVE_HOLD_PREFIX = "@curve:";
+const clientOwnerIds = new Map(); // client → stable id used in registry owner tokens
+let nextClientOwnerId = 0;
 const FUTURES_RESOLVE_TIMEOUT_MS = 6000;
 // key → { depthTickerId, contract, kind, isFutures, ladders:{bid:Map,ask:Map}, focusedAt }
 const symbolDepthStates = new Map();
@@ -455,6 +476,13 @@ const resolvedFuturesContracts = new Map();
 // Full non-expired futures chain per root (nearest-expiry first), for the
 // per-expiry forward curve. root → Contract[].
 const resolvedFuturesChain = new Map();
+// Rollover bookkeeping (lib/futuresRollover.js): when the cached resolution was
+// written, when we last ATTEMPTED a re-resolve, and which roots are mid-flight.
+// Without these the cache lived forever and a rolled contract kept feeding
+// prices[root].fwd / fwdCurve after it stopped trading.
+const futuresResolvedAt = new Map(); // root → epoch ms of the cached resolution
+const futuresResolveAttemptAt = new Map(); // root → epoch ms of the last attempt
+const futuresResolveInFlight = new Set(); // roots with a background re-resolve open
 // In-flight reqContractDetails resolutions: reqId → { root, resolve, timer, candidates }
 const futuresResolveRequests = new Map();
 
@@ -840,11 +868,38 @@ function removeBatchBuffer(client) {
   clientTapeBuffers.delete(client);
 }
 
+/* ─── Per-client backpressure ──────────────────────────────────────────────
+ * readyState OPEN says nothing about whether the peer is DRAINING. A stalled
+ * client keeps the socket open (and keeps ponging) while ws queues every frame
+ * on the relay heap. lib/sendBackpressure.js owns the policy: shed coalescable
+ * snapshot batches past the soft mark, tear the socket down at the hard cap.
+ * Drops are counted per client and reported on disconnect. */
+const clientDroppedFrames = new Map(); // client → frames shed by backpressure
+
+function countDroppedFrame(client) {
+  clientDroppedFrames.set(client, (clientDroppedFrames.get(client) ?? 0) + 1);
+}
+
 function sendMessage(client, payload) {
   try {
-    if (client.readyState === client.OPEN) {
-      client.send(JSON.stringify(payload));
+    if (client.readyState !== client.OPEN) return;
+    const decision = decideSend(client.bufferedAmount, payload?.type);
+    if (decision === "drop") {
+      countDroppedFrame(client);
+      return;
     }
+    if (decision === "close") {
+      countDroppedFrame(client);
+      console.warn(
+        `\x1b[33m[backpressure] closing client: ${client.bufferedAmount} buffered bytes ` +
+          `≥ hard cap ${HARD_CAP_BYTES}\x1b[0m`,
+      );
+      // A close handshake would queue behind the same undrained backlog, so the
+      // only action that reclaims the heap is destroying the socket.
+      try { client.terminate(); } catch { try { client.close(); } catch { /* ignore */ } }
+      return;
+    }
+    client.send(JSON.stringify(payload));
   } catch {
     // Ignore send failures.
   }
@@ -951,13 +1006,17 @@ function startLiveSubscription(key, ibContract) {
 // ticks feed prices[index].fwd via publishForwardFromFutureTick. Resolution can
 // fail during a data-farm flap (returns null) — we just skip and the client
 // falls back to the cash spot until the next tick re-arms it.
-async function ensureForwardSubscription(indexKey) {
+async function ensureForwardSubscription(indexKey, client) {
   if (!FORWARD_PRICED_INDICES.has(indexKey) || !ibConnected) return;
   const fwdKey = FORWARD_KEY_PREFIX + indexKey;
+  const owner = activeForwardOwner(client, indexKey);
+  if (owner) forwardSubs.acquire(fwdKey, owner);
   const existing = symbolStates.get(fwdKey);
   if (existing && existing.tickerId != null) return; // already streaming
   const contract = await resolveFuturesFrontMonth(indexKey);
-  if (!contract) return;
+  // The holder can unsubscribe while the resolve is in flight — opening a line
+  // nobody holds leaks it, because no release is left to cancel it.
+  if (!contract || forwardSubs.holderCount(fwdKey) === 0) return;
   forwardKeyToIndex.set(fwdKey, indexKey);
   startLiveSubscription(fwdKey, contract);
 }
@@ -967,7 +1026,7 @@ async function ensureForwardSubscription(indexKey) {
 // in prices[index].fwdCurve under the OPTION expiry so each leg prices off the
 // future of its own expiry. Degrades silently (falls back to front-month `fwd`
 // then cash) when the chain can't resolve during a data-farm flap.
-async function ensureForwardForOptionExpiry(indexKey, optExpiryRaw) {
+async function ensureForwardForOptionExpiry(indexKey, optExpiryRaw, client, subjectKey) {
   if (!FORWARD_PRICED_INDICES.has(indexKey) || !ibConnected) return;
   const optExp = String(optExpiryRaw || "").replace(/\D/g, "").slice(0, 8);
   if (optExp.length !== 8) return;
@@ -976,12 +1035,124 @@ async function ensureForwardForOptionExpiry(indexKey, optExpiryRaw) {
   if (!fut) return;
   const futExp = String(fut.lastTradeDateOrContractMonth || "").slice(0, 8);
   const fwdKey = `${FORWARD_KEY_PREFIX}${indexKey}:${futExp}`;
+  // The forward key is only known after the async chain resolve, so the hold is
+  // taken here — and only if the subject survived the resolve.
+  const owner = activeForwardOwner(client, subjectKey);
+  if (owner) {
+    forwardSubs.acquire(fwdKey, owner);
+    forwardSubs.acquire(curveHoldKey(fwdKey, optExp), owner);
+  }
+  if (forwardSubs.holderCount(fwdKey) === 0) return;
   forwardKeyToIndex.set(fwdKey, indexKey);
   let expiries = fwdKeyToCurveExpiries.get(fwdKey);
   if (!expiries) { expiries = new Set(); fwdKeyToCurveExpiries.set(fwdKey, expiries); }
   expiries.add(optExp);
   const existing = symbolStates.get(fwdKey);
   if (!existing || existing.tickerId == null) startLiveSubscription(fwdKey, fut);
+}
+
+/* Registry owner token: one client's hold on ONE client-facing subject. Two
+ * subjects of the same client hold a shared forward independently, so dropping
+ * one leaves the line up for the other. */
+function forwardOwner(client, subjectKey) {
+  let id = clientOwnerIds.get(client);
+  if (id === undefined) {
+    id = nextClientOwnerId += 1;
+    clientOwnerIds.set(client, id);
+  }
+  return `${id}|${subjectKey}`;
+}
+
+/* Owner token for an ACQUIRE, or null when the client already dropped the
+ * subject. Forward resolution is async, so a hold taken after its subject is
+ * gone could never be released — exactly the leak this registry closes. */
+function activeForwardOwner(client, subjectKey) {
+  if (!client || !clientSymbols.get(client)?.has(subjectKey)) return null;
+  return forwardOwner(client, subjectKey);
+}
+
+function curveHoldKey(fwdKey, optExp) {
+  return `${CURVE_HOLD_PREFIX}${fwdKey}|${optExp}`;
+}
+
+/* Drop this client's holds on the forwards behind ONE client-facing subject.
+ * The internal forward keys are unreachable from clientSymbols, so the registry
+ * is the only thing that can tell us when a line has no requirements left. */
+function releaseForwardsForSubject(client, subjectKey) {
+  if (!clientOwnerIds.has(client)) return;
+  const retired = forwardSubs.releaseAllForOwner(forwardOwner(client, subjectKey));
+  // Curve entries first: they resolve their index THROUGH forwardKeyToIndex, which
+  // retiring the forward line deletes.
+  for (const key of retired) {
+    if (key.startsWith(CURVE_HOLD_PREFIX)) dropCurveExpiry(key);
+  }
+  for (const key of retired) {
+    if (!key.startsWith(CURVE_HOLD_PREFIX)) stopForwardSubscription(key);
+  }
+}
+
+/* Last holder of one option expiry on a shared future: stop publishing that
+ * expiry in prices[index].fwdCurve. Other expiries on the same future stay. */
+function dropCurveExpiry(holdKey) {
+  const body = holdKey.slice(CURVE_HOLD_PREFIX.length);
+  const separator = body.lastIndexOf("|");
+  if (separator < 0) return;
+  const fwdKey = body.slice(0, separator);
+  const optExp = body.slice(separator + 1);
+  const idxState = symbolStates.get(forwardKeyToIndex.get(fwdKey));
+  if (idxState?.data?.fwdCurve) delete idxState.data.fwdCurve[optExp];
+  const expiries = fwdKeyToCurveExpiries.get(fwdKey);
+  if (!expiries) return;
+  expiries.delete(optExp);
+  if (expiries.size === 0) fwdKeyToCurveExpiries.delete(fwdKey);
+}
+
+/* Last holder of an internal forward line: cancel the IB market-data ticket and
+ * drop every map keyed by it, including any curve entries it still publishes
+ * (a re-mapped expiry after a roll can outlive its own curve hold). */
+function stopForwardSubscription(fwdKey) {
+  const idxState = symbolStates.get(forwardKeyToIndex.get(fwdKey));
+  const expiries = fwdKeyToCurveExpiries.get(fwdKey);
+  if (idxState?.data?.fwdCurve && expiries) {
+    for (const optExp of expiries) delete idxState.data.fwdCurve[optExp];
+  }
+  stopLiveSubscription(fwdKey);
+  forwardKeyToIndex.delete(fwdKey);
+  fwdKeyToCurveExpiries.delete(fwdKey);
+}
+
+// Re-open the internal forward L1(s) a client-facing subject needs (index →
+// front month, forward-priced index OPTION → the future of its own expiry).
+// Both are internal keys, so nothing that walks client-facing subscriptions
+// restores them. Re-arms per SUBSCRIBER so the hold is re-acquired too: after a
+// roll the option can match a DIFFERENT future, and an un-held line would leak.
+function rearmForwardsForSubject(key) {
+  const subscribers = symbolSubscribers.get(key);
+  if (!subscribers || subscribers.size === 0) return;
+  if (FORWARD_PRICED_INDICES.has(key)) {
+    for (const client of subscribers) void ensureForwardSubscription(key, client);
+    return;
+  }
+  const parts = key.split("_");
+  if (parts.length >= 4 && FORWARD_PRICED_INDICES.has(parts[0])) {
+    for (const client of subscribers) {
+      void ensureForwardForOptionExpiry(parts[0], parts[1], client, key);
+    }
+  }
+}
+
+// A re-resolve replaced the cached chain (rolled expiry, or a newly listed one):
+// re-arm the forwards so the index stops pricing off a contract that no longer
+// trades. Refreshing the CACHE alone would leave the live L1 on the dead conId.
+function rearmForwardsAfterRoll(root) {
+  if (!FORWARD_PRICED_INDICES.has(root)) return;
+  const fwdKey = FORWARD_KEY_PREFIX + root;
+  const front = resolvedFuturesContracts.get(root);
+  const live = symbolStates.get(fwdKey);
+  if (front && live && live.contract?.conId !== front.conId) stopLiveSubscription(fwdKey);
+  for (const key of [...symbolSubscribers.keys()]) {
+    if (key === root || key.startsWith(`${root}_`)) rearmForwardsForSubject(key);
+  }
 }
 
 function isFinitePositive(n) {
@@ -1026,13 +1197,18 @@ function publishForwardFromFutureTick(fwdKey, fwdState) {
 
 function stopLiveSubscription(symbol) {
   const state = symbolStates.get(symbol);
-  if (!state || state.tickerId == null) return;
-  try {
-    ib.cancelMktData(state.tickerId);
-  } catch {
-    // Ignore.
+  if (!state) return;
+  // A null tickerId means the ticket was already cancelled (reconnect cleanup,
+  // IB error 200/354) — the STATE still has to go. Returning early on it leaked
+  // one symbolStates entry per such symbol for the life of the process.
+  if (state.tickerId != null) {
+    try {
+      ib.cancelMktData(state.tickerId);
+    } catch {
+      // Ignore.
+    }
+    requestIdToSymbol.delete(state.tickerId);
   }
-  requestIdToSymbol.delete(state.tickerId);
   symbolStates.delete(symbol);
 }
 
@@ -1119,9 +1295,51 @@ function evictOldestDepth(exceptKey) {
  * Bounded await: resolves null on timeout/error so the caller never hangs. */
 function resolveFuturesFrontMonth(root) {
   const cached = resolvedFuturesContracts.get(root);
-  if (cached) return Promise.resolve(cached);
+  if (cached) {
+    // Serve the cached contract even when it is stale and re-resolve behind it:
+    // blanking prices[root].fwd / fwdCurve while reqContractDetails is in flight
+    // would drop every VIX option back to cash spot for seconds at a time.
+    if (isCachedFuturesResolutionStale(root)) refreshFuturesResolution(root);
+    return Promise.resolve(cached);
+  }
   if (!ibConnected) return Promise.resolve(null);
+  return startFuturesResolve(root);
+}
 
+/* Has the cached resolution for `root` rolled (expiry behind ET today) or gone
+ * unverified past the re-check TTL? An absent contract (including a chain that
+ * resolved empty) counts as stale — there is nothing to serve, so re-resolving
+ * can only help. Rate-limiting lives in refreshFuturesResolution. */
+function isCachedFuturesResolutionStale(root, now = Date.now()) {
+  const cached = resolvedFuturesContracts.get(root);
+  if (!cached) return true;
+  return isResolvedFutureStale(
+    cached.lastTradeDateOrContractMonth,
+    futuresResolvedAt.get(root),
+    now,
+    etDateYYYYMMDD(now),
+  );
+}
+
+/* Background re-resolve for a stale root. One request per root at a time and at
+ * most one attempt per FUTURES_RERESOLVE_MIN_GAP_MS, so a root whose re-resolve
+ * keeps failing (IB down, no non-expired expiry) cannot storm reqContractDetails
+ * from every subscribe. On success the internal forward L1s re-arm onto the new
+ * contract — a fresh CACHE alone would leave the live line on the dead one. */
+function refreshFuturesResolution(root) {
+  if (!ibConnected || futuresResolveInFlight.has(root)) return;
+  const now = Date.now();
+  if (!shouldAttemptReresolve(futuresResolveAttemptAt.get(root), now)) return;
+  futuresResolveAttemptAt.set(root, now);
+  futuresResolveInFlight.add(root);
+  void startFuturesResolve(root)
+    .then((front) => {
+      if (front) rearmForwardsAfterRoll(root);
+    })
+    .finally(() => futuresResolveInFlight.delete(root));
+}
+
+function startFuturesResolve(root) {
   const exchange = futuresExchangeForRoot(root);
   const probe = {
     symbol: root,
@@ -1175,32 +1393,8 @@ function pickFrontMonth(candidates) {
   return chain.length ? chain[0] : null;
 }
 
-// Pick the future whose expiry is nearest the option expiry (abs date distance).
-// VIX monthly options settle into the same-dated future; nearest absorbs the
-// few-day option/future offset and routes weeklies to the closest listed future.
-function pickNearestExpiry(chain, optExpiryDigits) {
-  if (!Array.isArray(chain) || chain.length === 0) return null;
-  const target = toEpochDays(optExpiryDigits);
-  if (target == null) return chain[0];
-  let best = null;
-  let bestDist = Infinity;
-  for (const c of chain) {
-    const e = toEpochDays(String(c.lastTradeDateOrContractMonth || "").slice(0, 8));
-    if (e == null) continue;
-    const dist = Math.abs(e - target);
-    if (dist < bestDist) { bestDist = dist; best = c; }
-  }
-  return best || chain[0];
-}
-
-function toEpochDays(yyyymmdd) {
-  if (!yyyymmdd || yyyymmdd.length < 8) return null;
-  const y = Number(yyyymmdd.slice(0, 4));
-  const m = Number(yyyymmdd.slice(4, 6));
-  const d = Number(yyyymmdd.slice(6, 8));
-  if (!Number.isFinite(y) || !Number.isFinite(m) || !Number.isFinite(d)) return null;
-  return Math.floor(Date.UTC(y, m - 1, d) / 86_400_000);
-}
+// Option expiry → the future it prices off: lib/futuresRollover.js:pickNearestExpiry
+// (a future expiring BEFORE the option can never be its forward).
 
 function onContractDetails(reqId, contractDetails) {
   const req = futuresResolveRequests.get(reqId);
@@ -1216,6 +1410,10 @@ function onContractDetailsEnd(reqId) {
   const front = chain.length ? chain[0] : null;
   if (front) {
     resolvedFuturesContracts.set(req.root, front);
+    // Stamp the resolution so the rollover re-check has an age to measure. A
+    // failed resolve deliberately leaves the previous stamp (and contract) in
+    // place — the cache keeps serving and refreshFuturesResolution retries.
+    futuresResolvedAt.set(req.root, Date.now());
     verbose(`futures resolve ${req.root} → ${front.localSymbol || front.lastTradeDateOrContractMonth} (conId ${front.conId}), ${chain.length} listed`);
     req.finish(front);
   } else {
@@ -1227,7 +1425,12 @@ function onContractDetailsEnd(reqId) {
 // Full non-expired chain for a root, resolving (and caching) on first use by
 // piggybacking on the front-month reqContractDetails flow.
 async function resolveFuturesChain(root) {
-  if (resolvedFuturesChain.has(root)) return resolvedFuturesChain.get(root);
+  if (resolvedFuturesChain.has(root)) {
+    // Same rollover contract as the front-month lookup: keep serving the cached
+    // curve, re-resolve behind it when it has rolled or aged out.
+    if (isCachedFuturesResolutionStale(root)) refreshFuturesResolution(root);
+    return resolvedFuturesChain.get(root);
+  }
   await resolveFuturesFrontMonth(root); // populates resolvedFuturesChain as a side effect
   return resolvedFuturesChain.get(root) || [];
 }
@@ -1526,12 +1729,17 @@ function unsubscribeClientFromSymbol(client, symbol) {
     clientSet.delete(symbol);
   }
 
+  // The internal forward line(s) this subject required are not client-facing
+  // keys, so only the refcount registry can retire them.
+  releaseForwardsForSubject(client, symbol);
+
   return unsubscribed;
 }
 
 function disconnectClient(client) {
   removeBatchBuffer(client);
   clientLastPong.delete(client);
+  clientDroppedFrames.delete(client);
   if (DEPTH_ENABLED) {
     for (const key of [...depthSubscribers.keys()]) {
       unsubscribeClientFromDepth(client, key);
@@ -1539,10 +1747,14 @@ function disconnectClient(client) {
   }
   const clientSet = clientSymbols.get(client);
   if (!clientSet) {
+    clientOwnerIds.delete(client);
     return;
   }
 
   for (const symbol of clientSet) {
+    // Retire this client's forward holds before the subject goes away — a
+    // disconnect is just a bulk unsubscribe as far as the registry is concerned.
+    releaseForwardsForSubject(client, symbol);
     const subscribers = symbolSubscribers.get(symbol);
     if (!subscribers) continue;
 
@@ -1554,6 +1766,7 @@ function disconnectClient(client) {
   }
 
   clientSymbols.delete(client);
+  clientOwnerIds.delete(client);
 }
 
 function sendSubscribedConfirmation(client, symbols) {
@@ -1802,18 +2015,10 @@ function restoreSubscriptions() {
     const ibContract = existing?.contract;
     if (!ibContract) continue;
     startLiveSubscription(key, ibContract);
-    // Re-arm the front-month future L1 behind a forward-priced index — its
-    // ticker was cancelled by cleanupSymbolStateForReconnect and it is not a
-    // client-facing subscription, so restoreSubscriptions would otherwise skip it.
-    if (FORWARD_PRICED_INDICES.has(key)) void ensureForwardSubscription(key);
-    // Re-arm the per-expiry forward curve for a restored forward-priced index
-    // OPTION (key = "VIX_YYYYMMDD_STRIKE_C"): the curve future is internal too.
-    if (key.includes("_")) {
-      const parts = key.split("_");
-      if (parts.length >= 4 && FORWARD_PRICED_INDICES.has(parts[0])) {
-        void ensureForwardForOptionExpiry(parts[0], parts[1]);
-      }
-    }
+    // Re-arm the internal forward L1(s) behind this subject: their tickers were
+    // cancelled by cleanupSymbolStateForReconnect and they are not client-facing
+    // subscriptions, so the loop above would otherwise skip them.
+    rearmForwardsForSubject(key);
     const state = symbolStates.get(key);
     if (state) {
       sendToSymbolSubscribers(key, buildRestorePriceMessage(key, state));
@@ -1978,7 +2183,7 @@ async function handleClientMessage(client, data) {
           // Forward-priced index option (VIX): subscribe the future of THIS
           // option's expiry so it prices off its own forward (prices[idx].fwdCurve).
           if (FORWARD_PRICED_INDICES.has(String(c.symbol).toUpperCase())) {
-            void ensureForwardForOptionExpiry(String(c.symbol).toUpperCase(), c.expiry);
+            void ensureForwardForOptionExpiry(String(c.symbol).toUpperCase(), c.expiry, client, key);
           }
           const state = symbolStates.get(key);
           if (state) {
@@ -2001,7 +2206,7 @@ async function handleClientMessage(client, data) {
           startLiveSubscription(key, ibContract);
           // Forward-priced index (VIX): also open the front-month future L1 so
           // prices[key].fwd carries the forward options are priced against.
-          if (FORWARD_PRICED_INDICES.has(key)) void ensureForwardSubscription(key);
+          if (FORWARD_PRICED_INDICES.has(key)) void ensureForwardSubscription(key, client);
           const state = symbolStates.get(key);
           if (state) {
             sendMessage(client, {
@@ -2420,7 +2625,8 @@ wss.on("connection", (client) => {
   });
 
   client.on("close", () => {
-    verbose(`WS client disconnected (remaining: ${clients.size - 1})`);
+    const dropped = clientDroppedFrames.get(client) ?? 0;
+    verbose(`WS client disconnected (remaining: ${clients.size - 1}, dropped_frames: ${dropped})`);
     disconnectClient(client);
     clients.delete(client);
   });

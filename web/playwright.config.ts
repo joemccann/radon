@@ -1,6 +1,15 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = process.env.PLAYWRIGHT_PORT ? Number(process.env.PLAYWRIGHT_PORT) : 3000;
+// The browser origin. Defaults to "localhost" (the app's canonical local host).
+// CI sets PLAYWRIGHT_BASE_HOST=127.0.0.1: chromium's async DNS in the Playwright
+// container resolves the "localhost" NAME flakily, and the literal loopback IP
+// needs no resolution at all. 127.0.0.1 is in the middleware's LOCAL_HOSTS set,
+// so the authless bypass (which reads the client host from the Host header)
+// stays intact. This is unrelated to reachability — the server is always up;
+// the historical "can't reach loopback" failures were a Clerk dev-browser
+// handshake 307 to an unresolvable host, fixed in web/middleware.ts.
+const HOST = process.env.PLAYWRIGHT_BASE_HOST ?? "localhost";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -10,12 +19,20 @@ export default defineConfig({
   // T-001). Specs are *.spec.ts only.
   testIgnore: ["**/*.test.js"],
   fullyParallel: false,
-  retries: 0,
+  // One retry in CI absorbs container jitter (a lost click during a reactive
+  // re-render, a slow first paint) without masking a real regression — a
+  // deterministic failure still fails both attempts. Local stays at 0.
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://${HOST}:${PORT}`,
     trace: "on-first-retry",
+    // A cold `next dev` compiles each route on first navigation; in
+    // the CI container that first hit can exceed the 30s default. A larger
+    // ceiling only bites when a nav is genuinely slow, so it is harmless
+    // locally where routes compile in a few seconds.
+    navigationTimeout: 90_000,
   },
   projects: [
     {
@@ -31,12 +48,24 @@ export default defineConfig({
       },
     },
   ],
-  // Start Next.js dev server before tests
+  // Start Next.js before tests. Default is the dev server for fast local
+  // iteration. CI overrides with a prebuilt `next start` via
+  // PLAYWRIGHT_WEBSERVER_CMD: `next dev` (either bundler) never readies inside
+  // the resource-constrained Playwright container — cold-compiling this app's
+  // heavy routes on demand hangs there (runs 31268084987 / 31268824260 timed
+  // out right after the middleware line). Production `next start` serves
+  // prebuilt routes and readies in seconds — the same build+start pattern
+  // perimeter-smoke already runs green in this workflow.
   webServer: {
-    command: `npx next dev --turbopack -p ${PORT}`,
-    url: `http://localhost:${PORT}`,
+    command: process.env.PLAYWRIGHT_WEBSERVER_CMD ?? `npx next dev --turbopack -p ${PORT}`,
+    // Probe a STATIC asset for readiness, not "/". Under a production
+    // `next start` the root route SSRs a Clerk `useSession` and can 500,
+    // which would fail a readiness check on "/" even though every spec route
+    // (/portfolio, /orders) renders fine. The manifest is served statically
+    // (always 200) so readiness reflects "server up", nothing more.
+    url: `http://${HOST}:${PORT}/manifest.webmanifest`,
     reuseExistingServer: true,
-    timeout: 60_000,
+    timeout: 180_000,
     env: {
       ...process.env,
       RADON_AUTHLESS_TEST: "1",
