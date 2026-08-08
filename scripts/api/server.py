@@ -1903,7 +1903,13 @@ async def run_flow_report(ticker: str):
                 pass
         return demo_disabled_payload(f"Live flow analysis for {upper}")
 
-    result = await run_script("flow_report.py", [upper], timeout=120)
+    # 20 trading-day dark-pool history (flow_report DEFAULT_LOOKBACK_DAYS).
+    # Cold liquid names paginate UW heavily; allow longer than the old 120s.
+    result = await run_script(
+        "flow_report.py",
+        [upper, "--days", "20"],
+        timeout=300,
+    )
     if not result.ok:
         raise HTTPException(status_code=502, detail=result.error)
     if not result.data:
