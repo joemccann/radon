@@ -16,6 +16,11 @@ export default defineConfig({
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
+    // A cold webpack `next dev` compiles each route on first navigation; in
+    // the CI container that first hit can exceed the 30s default. A larger
+    // ceiling only bites when a nav is genuinely slow, so it is harmless
+    // locally where routes compile in a few seconds.
+    navigationTimeout: 90_000,
   },
   projects: [
     {
@@ -43,14 +48,17 @@ export default defineConfig({
       },
     },
   ],
-  // Start Next.js dev server before tests
+  // Start Next.js before tests. Default is the dev server for fast local
+  // iteration. CI overrides with a prebuilt `next start` via
+  // PLAYWRIGHT_WEBSERVER_CMD: `next dev --turbopack` HANGS on startup inside
+  // the Playwright container (never readies; run 31268084987 timed out with
+  // only the middleware-deprecation line logged), whereas production start
+  // serves prebuilt routes and readies in seconds — the same build+start
+  // pattern the perimeter-smoke job already runs green in this workflow.
   webServer: {
-    command: `npx next dev --turbopack -p ${PORT}`,
+    command: process.env.PLAYWRIGHT_WEBSERVER_CMD ?? `npx next dev --turbopack -p ${PORT}`,
     url: `http://localhost:${PORT}`,
     reuseExistingServer: true,
-    // Turbopack cold-start in the CI container exceeds 60s (run 31267802396
-    // aborted here before any spec ran); a warm local start is ~5-10s, so a
-    // larger ceiling only matters in CI and is harmless locally.
     timeout: 180_000,
     env: {
       ...process.env,
