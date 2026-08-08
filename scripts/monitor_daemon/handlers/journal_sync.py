@@ -120,7 +120,10 @@ class JournalSyncHandler(BaseHandler):
 
         try:
             if self.trade_log_path is None:
-                existing = self._load_existing_from_journal(db)
+                # Production wiring: the journal table IS the dedupe source.
+                # An EMPTY table is a legitimate state (fresh host, first
+                # session) — only a failed READ may abort the cycle (T-015).
+                existing = self._load_existing_from_journal(db, allow_empty=True)
                 recovery = None
             else:
                 existing, recovery = self._load_existing_with_recovery(db)
@@ -336,7 +339,14 @@ class JournalSyncHandler(BaseHandler):
             return True
         return isinstance(exc, ValueError) and "Checksum mismatch" in str(exc)
 
-    def _load_existing_from_journal(self, db: Any) -> Dict[str, Any]:
+    def _load_existing_from_journal(self, db: Any, allow_empty: bool = False) -> Dict[str, Any]:
+        """Load the trade set from the journal table.
+
+        ``allow_empty=False`` (trade_log RECOVERY): an empty journal cannot
+        rebuild a mirror, so it raises. ``allow_empty=True`` (production
+        no-mirror wiring): empty means "no prior fills" and returns an empty
+        trade set — raising here bricked the importer's first-ever cycle.
+        """
         if db is None:
             raise RuntimeError("journal DB unavailable for trade_log recovery")
         try:
@@ -375,7 +385,7 @@ class JournalSyncHandler(BaseHandler):
                     trade["date"] = str(timestamp)[:10]
             trades.append(trade)
 
-        if not trades:
+        if not trades and not allow_empty:
             raise RuntimeError("journal table is empty; cannot recover trade_log mirror")
         return self._normalize_trade_log({"trades": trades})
 
