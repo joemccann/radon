@@ -143,10 +143,26 @@ async function installMockWebSocket(page: import("@playwright/test").Page) {
       }
     }
 
+    // Only the Radon relay socket is mocked; Turbopack HMR and any other
+    // sockets pass through to the real implementation. Replacing
+    // window.WebSocket wholesale hijacks the dev-server's own HMR socket and
+    // stalls hydration — the page paints its SSR shell but React never takes
+    // over, so `usePortfolio()`'s fetch effect never fires and the page is
+    // stuck on "Waiting for portfolio data..." even though `/api/portfolio`
+    // itself is mocked correctly. See
+    // feedback_e2e_ws_mock_relay_only_and_44px_button_floor and the canonical
+    // pattern in e2e/mobile-short-strangle-skew.spec.ts.
+    const NativeWebSocket = window.WebSocket;
+    const RelayAwareWebSocket = function (url: string | URL, protocols?: string | string[]) {
+      return String(url).includes("localhost:8765")
+        ? (new MockWebSocket(String(url)) as unknown as WebSocket)
+        : new NativeWebSocket(url, protocols);
+    } as unknown as typeof WebSocket;
+    Object.assign(RelayAwareWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
     Object.defineProperty(window, "WebSocket", {
       configurable: true,
       writable: true,
-      value: MockWebSocket,
+      value: RelayAwareWebSocket,
     });
   });
 }
@@ -207,11 +223,31 @@ async function setupMocks(page: import("@playwright/test").Page) {
 test.describe("/portfolio same-day combo today pnl", () => {
   test("renders a same-day risk reversal using entry-cost-based today pnl", async ({ page }) => {
     await setupMocks(page);
-    await page.goto("http://127.0.0.1:3000/portfolio");
+    await page.goto("/portfolio");
 
     const row = page.locator("tr", { hasText: "PLTR" }).first();
+    // "Today P&L" and (unconditionally) "P&L" both land on -$188: same-day
+    // Today P&L = Total P&L = MV - EC = -1760.00 - (-1571.92) = -188.08 →
+    // fmtUsd rounds to whole dollars ("-$188").
     await expect(row).toContainText("-$188");
-    await expect(row).toContainText("-$188 (-12.0%)");
+
+    // "Day Chg" and "Today P&L" are now separate <td> cells (no combined
+    // "$X (Y%)" string — components/PositionTable.tsx:483-491, column defs at
+    // :130-131), so this asserts the % independently rather than as an
+    // adjacent substring.
+    //
+    // Derivation, lib/positionUtils.ts:457-471 `getOptionDailyChg` same-day
+    // branch — `((mv - ec) / |ec|) * 100`, both leg-recomputed
+    // (lib/positionUtils.ts:86-117) and equal to the fixture's top-level
+    // fields here:
+    //   mv = +4960.00 (LONG call) - 6720.00 (SHORT put) = -1760.00
+    //   ec = +5034.01 (LONG call) - 6605.93 (SHORT put) = -1571.92
+    //   pct = (-1760.00 - (-1571.92)) / 1571.92 * 100 = -188.08 / 1571.92 * 100
+    //       = -11.964985...% → .toFixed(2) (PositionTable.tsx:485) = "-11.96%"
+    // (The spec's prior "-12.0%" was a stale 1-decimal expectation that no
+    // longer matches the current 2-decimal `.toFixed(2)` formatting.)
+    await expect(row).toContainText("-11.96%");
+
     await expect(row).not.toContainText("-$14,440");
   });
 });

@@ -132,18 +132,27 @@ jobs:
       # tests (29 collected) are orphaned — pythonpath includes the dir, but it
       # is not a collection target unless named.
       #
-      # --cov-fail-under is a non-regressing RATCHET, not a vanity target. With
-      # --cov-branch over the whole scripts+api tree the measured combined
-      # statement+branch coverage is 66.5% (the bare 71% statement figure does
-      # not count partial branches). 64 sits ~2.5pts below that so it passes
-      # today while catching a coverage regression. Raise it over time as
-      # coverage climbs; never lower it to make a red build pass.
+      # --cov-fail-under is a non-regressing RATCHET, not a vanity target.
+      # 2026-08-08 (TEST_AUDIT T-050): rebased onto an HONEST metric. The
+      # prior 64 gate counted test files as covered surface area — test
+      # modules self-cover ~99% just by being collected/executed, which
+      # inflated the combined statement+branch figure to 73.01% (climbing to
+      # 74.88% by the end of the T-001..T-052 remediation pass). pyproject.toml
+      # now carries `[tool.coverage.run] omit` for scripts/tests,
+      # scripts/api/tests, scripts/trade_blotter/test_*.py, and tests/, so
+      # this number measures PRODUCT code only. Measured honest coverage on
+      # this branch: 58.85%. The gate dropping from 64 to 56 is the metric
+      # excluding test files from the numerator, not a coverage regression —
+      # product coverage was unchanged (in fact still rising) at rebase time.
+      # 56 sits ~2.5pts below the measured honest figure, preserving the
+      # original ratchet design. Raise it over time as coverage climbs; never
+      # lower it to make a red build pass.
       # `tests` (repo root) carries the TWR money-math suite (20 cases) —
       # it passed locally for months while gating nothing (TEST_AUDIT T-051).
       - run: >-
           python -m pytest scripts/tests scripts/api/tests scripts/trade_blotter tests
           --cov=scripts --cov=api --cov-branch --cov-report=term-missing
-          --cov-fail-under=64
+          --cov-fail-under=56
       - name: Cloud infra pytest
         run: python -m pytest cloud/tests -q
 
@@ -234,41 +243,80 @@ jobs:
           assert_status /api/probe/freshness 200 "Bearer ${RADON_PROBE_FRESHNESS_TOKEN}"
           exit $fail
 
-  # ───────────────────────────────────────────────────────────────────────────
-  # e2e-smoke (DEFERRED — blocker now CONFIRMED on GitHub runners, NOT just local)
-  # ───────────────────────────────────────────────────────────────────────────
-  # GOAL: a curated, fully-mocked Playwright subset gating deploy on the shipped
-  # P0/P1 financial regressions (/orders + /portfolio P&L, account metric cards,
-  # share-pnl). Specs are page.route-mocked end-to-end (no live IB/network/DB),
-  # web-first assertions, zero waitForTimeout — deterministic by construction.
-  #
-  # BLOCKER (empirically confirmed on ubuntu-latest, 4 CI iterations 2026-06-13):
-  #   Playwright's headless chromium returns net::ERR_NAME_NOT_RESOLVED for the
-  #   server on loopback — for the literal IP http://127.0.0.1:3000, not just the
-  #   "localhost" hostname. RULED OUT, with in-job diagnostics each time:
-  #     • Proxy:    `env | grep proxy` → none set; --no-proxy-server changed nothing.
-  #     • DNS:      using the literal IP (no name to resolve); --disable-features=
-  #                 AsyncDns (force system resolver) changed nothing.
-  #     • Bind:     `ss -tlnp` → next-server LISTEN on *:3000 (all ifaces).
-  #     • Reach:    `curl http://127.0.0.1:3000/portfolio` → 200 from the SAME shell.
-  #     • Sandbox:  --no-sandbox --disable-dev-shm-usage changed nothing.
-  #   So the server is up and shell-reachable; only the BROWSER process cannot open
-  #   a loopback connection. This is the same isolation seen locally — the original
-  #   plan's assumption that it "does NOT exist on GitHub runners" is DISPROVEN.
-  #
-  # MOST PROMISING NEXT LEAD (do this on a throwaway branch, never iterate on main):
-  #   The server also listens on the runner's LAN IP (next prints "Network:
-  #   http://10.1.0.x:3000"); chromium's normal (non-loopback) network stack may
-  #   work there. BUT navigating via the LAN IP bypasses the loopback check in
-  #   web/middleware.ts:isLocalAuthlessTestBypassEnabled, so Clerk would block the
-  #   pages. Landing this needs EITHER: (a) extend the authless bypass to accept the
-  #   runner's private IP under RADON_AUTHLESS_TEST (scoped, CI-only), then point
-  #   baseURL at that IP; OR (b) run the job inside a container image where chromium
-  #   loopback works; OR (c) assert at the API layer (page.request.get returns 200
-  #   on loopback even when page.goto fails) — but these specs assert DOM, so (c)
-  #   means rewriting them. Promote to deploy.needs ONLY after a GREEN run is
-  #   observed; never gate on a spec set whose first CI run was red.
-  # ───────────────────────────────────────────────────────────────────────────
+  e2e-financial-smoke:
+    name: Playwright P0-financial smoke (non-gating)
+    runs-on: ubuntu-latest
+    # The earlier "chromium can't reach loopback" reading (2026-06-13) was a
+    # misdiagnosis: the navigation actually failed because a Clerk DEVELOPMENT
+    # instance (pk_test_) answered every cookie-less browser navigation with a
+    # dev-browser handshake 307 to an unresolvable dummy Clerk host, surfacing as
+    # ERR_NAME_NOT_RESOLVED. Fixed in web/middleware.ts by running the authless
+    # bypass OUTSIDE clerkMiddleware (bypassed requests never trigger the
+    # handshake) and by reading the client host from the Host header (nextUrl is
+    # the 0.0.0.0 bind address under `next start -H 0.0.0.0`). The browser now
+    # navigates the loopback 127.0.0.1 directly (PLAYWRIGHT_BASE_HOST below).
+    # `next dev` still never readies in the constrained container (cold-compiling
+    # heavy routes hangs), so the job builds once and serves a prebuilt
+    # `next start` (the perimeter-smoke pattern). day-move-ib-daily-pnl is held
+    # out (dev-vs-prod Day Move divergence, TEST_AUDIT NEW_FINDINGS); still runs
+    # locally.
+    container:
+      image: mcr.microsoft.com/playwright:v1.58.2-jammy
+    concurrency:
+      group: ci-e2e-smoke-${{ github.ref }}
+      cancel-in-progress: true
+    timeout-minutes: 25
+    env:
+      CI: "1"
+      RADON_AUTHLESS_TEST: "1"
+      NEXT_PUBLIC_RADON_AUTHLESS_TEST: "1"
+      NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
+      CLERK_SECRET_KEY: sk_test_radon_ci_e2e_smoke_dummy # gitleaks:allow
+      PLAYWRIGHT_PORT: "3000"
+      # Serve on all interfaces, navigate the loopback IP literal (no DNS — the
+      # container's chromium resolves the "localhost" NAME flakily; the literal
+      # never needs resolution and is in the middleware's LOCAL_HOSTS set).
+      PLAYWRIGHT_BASE_HOST: "127.0.0.1"
+      PLAYWRIGHT_WEBSERVER_CMD: "npx next start -H 0.0.0.0 -p 3000"
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # The Playwright image ships without unzip, which setup-bun needs to
+      # extract its release archive (first-run failure 2026-08-08).
+      - run: apt-get update -qq && apt-get install -y -qq unzip
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: "1.3.14"
+      - run: bun install --frozen-lockfile
+      - run: bun install --frozen-lockfile
+        working-directory: web
+      # Prebuild so `next start` serves compiled routes (locked compile mode;
+      # see web/CLAUDE.md). playwright.config.ts's webServer runs next start.
+      - run: bun run build
+        working-directory: web
+      # Curated P0-financial subset (page.route-mocked end-to-end, web-first
+      # assertions, no live IB/network/DB). The full 123-file suite stays local
+      # until it earns its way in. NOT in deploy.needs yet — per the
+      # long-standing rule, promote only after GREEN runs are observed here.
+      - name: Run curated P0-financial specs
+        working-directory: web
+        run: >-
+          npx playwright test
+          e2e/account-metric-cards.spec.ts
+          e2e/order-combo.spec.ts
+          e2e/realized-pnl.spec.ts
+          e2e/share-pnl.spec.ts
+          e2e/wulf-close-order-naked-short.spec.ts
+          e2e/portfolio-same-day-combo-pnl.spec.ts
+          e2e/orders-realized-pnl-portfolio-fallback.spec.ts
+          e2e/orders-partial-realized-pnl.spec.ts
+          e2e/share-pnl-entry-exit.spec.ts
+      - name: Upload traces on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: playwright-traces
+          path: web/test-results/
+          retention-days: 7
 
   deploy:
     name: Deploy to VPS

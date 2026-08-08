@@ -6,6 +6,13 @@
  * - RISK row: all 4 cards (BUYING POWER, MAINTENANCE MARGIN, EXCESS LIQUIDITY, SETTLED CASH) are clickable
  * - Clicking NET LIQUIDATION opens a modal containing "Net Liquidation" text and the formula
  * - All RISK section cards have the `metric-card-clickable` class
+ *
+ * Section collapse contract (components/MetricCards.tsx:552-559): only ACCOUNT
+ * and TODAY'S P&L are expanded on mount; RISK / MARGIN / CAPITAL / EXPOSURE
+ * start collapsed, so their cards are NOT in the DOM until the section header is
+ * clicked. Every RISK assertion below therefore expands the section first via
+ * `expandRiskSection()`. Collapse state is component-local `useState` with no
+ * persistence, so each fresh `page.goto` starts collapsed again.
  */
 
 import { test, expect } from "@playwright/test";
@@ -95,6 +102,52 @@ async function setupMocks(page: import("@playwright/test").Page) {
   );
 }
 
+/** A metric card addressed by its `.metric-label` text. */
+function metricCard(page: import("@playwright/test").Page, label: string) {
+  return page
+    .locator(".metric-card")
+    .filter({ has: page.getByText(label, { exact: true }) })
+    .first();
+}
+
+/** The single open explanation modal (components/Modal.tsx renders role="dialog"). */
+function openModal(page: import("@playwright/test").Page) {
+  return page.getByRole("dialog");
+}
+
+/**
+ * Click a metric card and wait for its modal, retrying the whole open.
+ *
+ * The portfolio context resolves into React state after mount (reactive
+ * TickerDetailContext, #14), so MetricCards can re-render right as the click
+ * dispatches and detach the card node — the click is then lost and no modal
+ * appears. Re-resolving the card and re-clicking inside `toPass` synchronizes
+ * on the settled render without weakening any content assertion that follows.
+ */
+async function openCardModal(page: import("@playwright/test").Page, label: string) {
+  const { expect } = await import("@playwright/test");
+  await metricCard(page, label).waitFor({ timeout: 10_000 });
+  await expect(async () => {
+    await metricCard(page, label).click();
+    await expect(openModal(page)).toBeVisible({ timeout: 1_500 });
+  }).toPass({ timeout: 15_000 });
+  return openModal(page);
+}
+
+/**
+ * Expand the collapsed RISK section.
+ *
+ * `SectionHeader` (components/MetricCards.tsx:78-94) is a bare <div> with an
+ * onClick and no role/testid, so the toggle can only be addressed by its class
+ * plus the exact section label. Suggested testid: `metric-section-toggle-risk`.
+ */
+async function expandRiskSection(page: import("@playwright/test").Page) {
+  const riskToggle = page.locator(".section-label-toggle", { hasText: /^RISK$/ });
+  await riskToggle.waitFor({ timeout: 10_000 });
+  await riskToggle.click();
+  await metricCard(page, "Buying Power").waitFor({ timeout: 10_000 });
+}
+
 // ── Tests ────────────────────────────────────────────────────────────────────
 
 test.describe("Account metric cards — clickable with explanation modals", () => {
@@ -102,7 +155,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    const card = page.locator(".metric-card", { hasText: "Net Liquidation" }).first();
+    const card = metricCard(page, "Net Liquidation");
     await card.waitFor({ timeout: 10_000 });
 
     await expect(card).toHaveClass(/metric-card-clickable/);
@@ -112,7 +165,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    const card = page.locator(".metric-card", { hasText: "Day P&L" }).first();
+    const card = metricCard(page, "Day P&L");
     await card.waitFor({ timeout: 10_000 });
 
     await expect(card).toHaveClass(/metric-card-clickable/);
@@ -122,7 +175,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    const card = page.locator(".metric-card", { hasText: "Dividends" }).first();
+    const card = metricCard(page, "Dividends");
     await card.waitFor({ timeout: 10_000 });
 
     await expect(card).toHaveClass(/metric-card-clickable/);
@@ -132,14 +185,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    const card = page.locator(".metric-card", { hasText: "Net Liquidation" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    // Modal should appear
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Net Liquidation");
 
     // Title
     await expect(modal).toContainText("Net Liquidation Value");
@@ -148,7 +194,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await expect(modal).toContainText("reqAccountSummary");
     await expect(modal).toContainText("Cash");
 
-    // Displays the value
+    // Displays the value — fmtExact(1_131_051.65) per components/MetricCards.tsx:38
     await expect(modal).toContainText("1,131,051.65");
   });
 
@@ -156,13 +202,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    const card = page.locator(".metric-card", { hasText: "Day P&L" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Day P&L");
     await expect(modal).toContainText("Day P&L");
     await expect(modal).toContainText("reqPnL()");
   });
@@ -171,13 +211,7 @@ test.describe("Account metric cards — clickable with explanation modals", () =
     await setupMocks(page);
     await page.goto("/portfolio");
 
-    const card = page.locator(".metric-card", { hasText: "Dividends" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Dividends");
     await expect(modal).toContainText("Accrued Dividends");
     await expect(modal).toContainText("DividendReceivedYear");
   });
@@ -187,54 +221,41 @@ test.describe("Risk metric cards — all four are clickable with explanation mod
   test("BUYING POWER card has metric-card-clickable class", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Buying Power" }).first();
-    await card.waitFor({ timeout: 10_000 });
-
-    await expect(card).toHaveClass(/metric-card-clickable/);
+    await expect(metricCard(page, "Buying Power")).toHaveClass(/metric-card-clickable/);
   });
 
   test("MAINTENANCE MARGIN card has metric-card-clickable class", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Maintenance Margin" }).first();
-    await card.waitFor({ timeout: 10_000 });
-
-    await expect(card).toHaveClass(/metric-card-clickable/);
+    await expect(metricCard(page, "Maintenance Margin")).toHaveClass(/metric-card-clickable/);
   });
 
   test("EXCESS LIQUIDITY card has metric-card-clickable class", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Excess Liquidity" }).first();
-    await card.waitFor({ timeout: 10_000 });
-
-    await expect(card).toHaveClass(/metric-card-clickable/);
+    await expect(metricCard(page, "Excess Liquidity")).toHaveClass(/metric-card-clickable/);
   });
 
   test("SETTLED CASH card has metric-card-clickable class", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Settled Cash" }).first();
-    await card.waitFor({ timeout: 10_000 });
-
-    await expect(card).toHaveClass(/metric-card-clickable/);
+    await expect(metricCard(page, "Settled Cash")).toHaveClass(/metric-card-clickable/);
   });
 
   test("clicking BUYING POWER opens modal with formula mentioning BuyingPower", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Buying Power" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Buying Power");
     await expect(modal).toContainText("Buying Power");
     await expect(modal).toContainText("BuyingPower");
     await expect(modal).toContainText("Excess Liquidity");
@@ -243,14 +264,9 @@ test.describe("Risk metric cards — all four are clickable with explanation mod
   test("clicking MAINTENANCE MARGIN opens modal with margin call warning", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Maintenance Margin" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Maintenance Margin");
     await expect(modal).toContainText("Maintenance Margin");
     await expect(modal).toContainText("MaintMarginReq");
     await expect(modal).toContainText("margin call");
@@ -259,14 +275,9 @@ test.describe("Risk metric cards — all four are clickable with explanation mod
   test("clicking EXCESS LIQUIDITY opens modal with cushion formula", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Excess Liquidity" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Excess Liquidity");
     await expect(modal).toContainText("Excess Liquidity");
     await expect(modal).toContainText("Net Liquidation");
     await expect(modal).toContainText("Maintenance Margin");
@@ -275,14 +286,9 @@ test.describe("Risk metric cards — all four are clickable with explanation mod
   test("clicking SETTLED CASH opens modal with T+1/T+2 settlement note", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Settled Cash" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
-
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
+    const modal = await openCardModal(page, "Settled Cash");
     await expect(modal).toContainText("Settled Cash");
     await expect(modal).toContainText("T+1");
     await expect(modal).toContainText("T+2");
@@ -291,17 +297,12 @@ test.describe("Risk metric cards — all four are clickable with explanation mod
   test("modal can be dismissed by clicking the close button", async ({ page }) => {
     await setupMocks(page);
     await page.goto("/portfolio");
+    await expandRiskSection(page);
 
-    const card = page.locator(".metric-card", { hasText: "Buying Power" }).first();
-    await card.waitFor({ timeout: 10_000 });
-    await card.click();
+    const modal = await openCardModal(page, "Buying Power");
 
-    const modal = page.locator(".modal-content");
-    await modal.waitFor({ timeout: 5_000 });
-    await expect(modal).toBeVisible();
-
-    // Click the close button
-    await modal.locator(".modal-close").click();
+    // Close button is the aria-labelled control in components/Modal.tsx:86
+    await modal.getByRole("button", { name: "Close" }).click();
     await expect(modal).not.toBeVisible();
   });
 });

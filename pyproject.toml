@@ -9,6 +9,13 @@ ignore = ["E501"]  # line length handled separately
 [tool.ruff.lint.isort]
 known-first-party = ["utils", "trade_blotter"]
 
+[tool.coverage.run]
+# The ratchet must measure PRODUCT code, not test code. Test modules
+# self-cover ~99% (their own bodies execute just by being collected), which
+# was inflating the CI coverage gate ~15pts (73.01% inflated vs 58.00%
+# honest product-only) — TEST_AUDIT T-050.
+omit = ["scripts/tests/*", "scripts/api/tests/*", "scripts/trade_blotter/test_*.py", "tests/*"]
+
 [tool.pytest.ini_options]
 # Pin import roots so collection is cwd-independent. Without this, running
 # pytest from inside scripts/ (or a CI job that cd's there) silently loses
