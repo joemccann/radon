@@ -121,7 +121,27 @@ const PRICE_FIXTURES = {
 
 function installMockWebSocket(page: import("@playwright/test").Page) {
   return page.addInitScript((priceFixtures) => {
-    class MockWebSocket {
+    // window.WebSocket is a GLOBAL override, so a naive replacement also stands
+    // in for Next's own Turbopack HMR client socket (a DIFFERENT URL), not only
+    // the app's price-relay socket (usePrices/IBStatusContext/TickerSearch all
+    // dial resolveRealtimeWebSocketUrl() -> ws://localhost:8765 in this env).
+    // Root-caused 2026-08-08 via an A/B diagnostic: with a global mock, Next's
+    // dev client assigns `.onopen` (property-style — fine) but then calls
+    // `socket.addEventListener(...)` from inside that handler for its own
+    // listeners; a property-only mock threw "socket.addEventListener is not a
+    // function" there, uncaught, from the mock's own setTimeout callback —
+    // which silently wedged Fast Refresh/HMR wiring for the rest of the page
+    // closely enough that usePortfolio's mount-effect fetch of /api/portfolio
+    // never ran (confirmed: instrumenting window.fetch showed zero calls for
+    // 15s+) and the page hung forever on "Waiting for portfolio data...".
+    // Removing only the WebSocket override made /api/portfolio fire normally,
+    // isolating the global override (not the app or the route stubs) as the
+    // cause. Fix: keep the mock EventTarget-based (real addEventListener) AND
+    // scope it to the relay URL only — every other WebSocket (Next's HMR
+    // client included) goes through the real, unmodified constructor.
+    const RealWebSocket = window.WebSocket;
+
+    class MockWebSocket extends EventTarget {
       static CONNECTING = 0;
       static OPEN = 1;
       static CLOSING = 2;
@@ -135,10 +155,12 @@ function installMockWebSocket(page: import("@playwright/test").Page) {
       onerror: ((event?: unknown) => void) | null = null;
 
       constructor(url: string) {
+        super();
         this.url = url;
         setTimeout(() => {
           this.readyState = MockWebSocket.OPEN;
           this.onopen?.({});
+          this.dispatchEvent(new Event("open"));
           this.emit({
             type: "status",
             ib_connected: true,
@@ -175,32 +197,55 @@ function installMockWebSocket(page: import("@playwright/test").Page) {
       close() {
         this.readyState = MockWebSocket.CLOSED;
         this.onclose?.({});
+        this.dispatchEvent(new Event("close"));
       }
 
       emit(payload: unknown) {
-        this.onmessage?.({ data: JSON.stringify(payload) });
+        const data = JSON.stringify(payload);
+        this.onmessage?.({ data });
+        this.dispatchEvent(new MessageEvent("message", { data }));
+      }
+    }
+
+    // Passthrough wrapper: only the IB relay URL gets the mock. Anything else
+    // (Next's HMR socket, any other future WS consumer) gets the real thing.
+    class RelayScopedWebSocket {
+      static CONNECTING = 0;
+      static OPEN = 1;
+      static CLOSING = 2;
+      static CLOSED = 3;
+      constructor(url: string, protocols?: string | string[]) {
+        if (typeof url === "string" && url.includes(":8765")) {
+          return new MockWebSocket(url) as unknown as RelayScopedWebSocket;
+        }
+        return new RealWebSocket(url, protocols) as unknown as RelayScopedWebSocket;
       }
     }
 
     // @ts-expect-error test-only replacement
-    window.WebSocket = MockWebSocket;
+    window.WebSocket = RelayScopedWebSocket;
   }, PRICE_FIXTURES);
 }
 
-function stubApis(page: import("@playwright/test").Page) {
-  page.route("**/api/portfolio", (route) =>
+// Each page.route() registration is itself async (it round-trips to install
+// the interception in the browser context) and must be awaited before goto()
+// fires the page's own requests — otherwise the first load of /api/portfolio
+// can race ahead of the stub and fall through to a real (failing) fetch,
+// which is why the page was hanging on "Waiting for portfolio data...".
+async function stubApis(page: import("@playwright/test").Page) {
+  await page.route("**/api/portfolio", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(PORTFOLIO) }),
   );
-  page.route("**/api/orders", (route) =>
+  await page.route("**/api/orders", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ORDERS) }),
   );
-  page.route("**/api/regime", (route) =>
+  await page.route("**/api/regime", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ score: 15, cri: { score: 15 } }) }),
   );
-  page.route("**/api/ib-status", (route) =>
+  await page.route("**/api/ib-status", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
   );
-  page.route("**/api/blotter", (route) =>
+  await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -211,9 +256,13 @@ function stubApis(page: import("@playwright/test").Page) {
 
 test("portfolio day move prefers IB daily P&L over positive mark-to-close math for same-day WULF position", async ({ page }) => {
   await installMockWebSocket(page);
-  stubApis(page);
+  await stubApis(page);
 
-  await page.goto("http://127.0.0.1:3000/portfolio");
+  // Relative path through baseURL (playwright.config.ts derives it from
+  // PLAYWRIGHT_PORT) — a hardcoded :3000 origin here silently pointed at
+  // whatever (or nothing) was running on that port instead of this run's
+  // dev server, which is how ".metric-card" ended up timing out.
+  await page.goto("/portfolio");
 
   const todayPnlRow = page.locator(".metrics-grid-3").filter({ hasText: "Day Move" }).first();
   await expect(todayPnlRow).toContainText("Day Move");

@@ -171,8 +171,23 @@ async function installMockWebSocket(page: import("@playwright/test").Page) {
       }
     }
 
-    // @ts-expect-error test-only replacement
-    window.WebSocket = MockWebSocket;
+    // Only the Radon relay socket is mocked; Turbopack HMR and any other
+    // sockets pass through to the real implementation. Replacing
+    // window.WebSocket wholesale hijacks the dev-server's own HMR socket and
+    // stalls hydration (see feedback_e2e_ws_mock_relay_only_and_44px_button_floor
+    // and the canonical pattern in e2e/mobile-short-strangle-skew.spec.ts) —
+    // the symptom is exactly what this spec is diagnosing against: a page
+    // that paints its SSR shell but never hydrates, so React state (the
+    // resolved position) never reaches the DOM and every locator resolves to
+    // the pre-hydration default ("New Order" / "No position").
+    const NativeWebSocket = window.WebSocket;
+    const RelayAwareWebSocket = function (url: string | URL, protocols?: string | string[]) {
+      return String(url).includes("localhost:8765")
+        ? (new MockWebSocket(String(url)) as unknown as WebSocket)
+        : new NativeWebSocket(url, protocols);
+    } as unknown as typeof WebSocket;
+    Object.assign(RelayAwareWebSocket, { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 });
+    window.WebSocket = RelayAwareWebSocket;
   }, PRICE_FIXTURES);
 }
 
@@ -258,6 +273,10 @@ test("WULF close-position order tab does not show a false naked-short warning", 
   await expect(confirmButton).toBeEnabled();
   await confirmButton.click();
 
-  await expect(page.locator(".toast-success")).toContainText(/Order placed: SELL 77 WULF/i);
+  // A relay-connect toast ("IB Gateway · uplink restored") also fires as the
+  // mocked relay comes up, so scope to the specific order-placed toast rather
+  // than the bare `.toast-success` class (now ambiguous — two may be mounted).
+  const orderToast = page.locator(".toast-success").filter({ hasText: /Order placed/i });
+  await expect(orderToast).toContainText(/Order placed: SELL 77 WULF/i);
   await expect(page.locator(".order-error").filter({ hasText: /Naked short call/i })).toHaveCount(0);
 });

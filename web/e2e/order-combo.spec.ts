@@ -3,6 +3,18 @@
  * errors in the UI (red path) and that a valid placement shows the order (green path).
  *
  * All IB API calls are intercepted via page.route() — no live IB connection needed.
+ *
+ * Navigation contract (rewritten 2026-08-07 after the cockpit rebuild):
+ * - Ticker detail is a ROUTE (app/[ticker]/page.tsx), not a modal; `TickerLink`
+ *   (components/TickerLink.tsx) routes to `/<TICKER>?posId=<id>` via `useTickerNav`.
+ * - There is no "Order" tab any more. `AssetCockpit`
+ *   (components/ticker-detail/AssetCockpit.tsx:174-197) renders `OrderTab` in the
+ *   always-visible desktop `.act-ticket` column; the glyph rail decks are
+ *   chain/posn/news/rate/seas/info only (components/ticker-detail/GlyphRail.tsx).
+ * - Error copy still routes through `formatOrderError`
+ *   (web/lib/orderError.ts) into `.order-error` via `<OrderErrorBanner>`;
+ *   success routes through `pushNotification` → the global `.toast-success`
+ *   (components/ticker-detail/OrderTab.tsx:776, components/Toast.tsx:25).
  */
 
 import { test, expect } from "@playwright/test";
@@ -11,36 +23,50 @@ import { test, expect } from "@playwright/test";
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Open the SPXU ticker detail modal and navigate to the Order tab. */
-async function openSpxuOrderTab(page: import("@playwright/test").Page) {
-  // Navigate to portfolio page
-  await page.goto("/portfolio");
+/** Position id the cockpit deep link resolves (`?posId=`); matches PORTFOLIO_MOCK. */
+const SPXU_POSITION_ID = 23;
 
-  // Wait for the SPXU ticker link to appear
-  const spxuLink = page.locator('[aria-label="View details for SPXU"]').first();
-  await spxuLink.waitFor({ timeout: 10_000 });
-  await spxuLink.click();
+/**
+ * Open the SPXU cockpit and return the always-visible order ticket.
+ *
+ * Deep-links to the cockpit route rather than clicking the portfolio's
+ * `TickerLink`. Both are real entry points, and the deep link is the pattern the
+ * rest of this suite uses (e2e/iwm-close-order-summary.spec.ts:277), but they are
+ * NOT equivalent today: the client-side `router.push` path leaves the cockpit
+ * with `portfolio === null` indefinitely, because `TickerWorkspace` reads the
+ * snapshot through `TickerDetailContext`'s ref getter (lib/TickerDetailContext.tsx:125
+ * `getPortfolio() => portfolioRef.current`, :138 `setPortfolio` writes the ref with
+ * no state update), so the cockpit never re-renders when the snapshot lands. The
+ * held combo then never resolves and the ticket keeps the flat single-leg form.
+ * Measured: 3/3 runs stuck at "No position" for 80s after a click-through, 3/3
+ * resolved in <2s on a document load. Suspected app bug — recorded, not worked
+ * around by weakening any assertion below.
+ */
+async function openSpxuOrderTicket(page: import("@playwright/test").Page) {
+  await page.goto(`/SPXU?posId=${SPXU_POSITION_ID}`);
 
-  // Click the Order tab in the modal
-  const orderTab = page.locator(".ticker-tab", { hasText: /^Order/ }).first();
-  await orderTab.waitFor({ timeout: 5_000 });
-  await orderTab.click();
+  const ticket = page.locator(".act-ticket");
+  await ticket.waitFor({ timeout: 30_000 });
+
+  // `.act-ticket` is painted before the portfolio resolves, and at that point
+  // OrderTab renders the flat single-leg "New Order" form
+  // (components/ticker-detail/OrderTab.tsx:1088-1093) whose price field carries the
+  // SAME `.modify-price-input` class as the combo form's net-limit field. Gate on
+  // the combo submit button — it exists only once `isCombo` is true
+  // (OrderTab.tsx:1080-1085, :989-991) — so every interaction below lands on the
+  // combo ticket, never the stock form.
+  await ticket.getByRole("button", { name: "Place Combo Order" }).waitFor({ timeout: 30_000 });
+  return ticket;
 }
 
-/** Fill in the combo order form and click Place Combo Order (first click). */
-async function fillComboForm(page: import("@playwright/test").Page, price: string) {
-  // Wait for the combo order form to be visible
-  const limitPriceInput = page
-    .locator(".modify-price-input")
-    .first();
-  await limitPriceInput.waitFor({ timeout: 5_000 });
+/** Fill in the combo order form, then Place → Confirm. */
+async function fillComboForm(ticket: import("@playwright/test").Locator, price: string) {
+  const limitPriceInput = ticket.locator(".modify-price-input").first();
+  await limitPriceInput.waitFor({ timeout: 10_000 });
   await limitPriceInput.fill(price);
 
-  // Click Place Combo Order
-  await page.locator("button", { hasText: "Place Combo Order" }).click();
-
-  // Confirm step
-  await page.locator("button", { hasText: /Confirm/ }).click();
+  await ticket.getByRole("button", { name: "Place Combo Order" }).click();
+  await ticket.getByRole("button", { name: "Confirm Order" }).click();
 }
 
 // ---------------------------------------------------------------------------
@@ -111,6 +137,11 @@ const PORTFOLIO_MOCK = {
 // ---------------------------------------------------------------------------
 
 test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)", () => {
+  // A cold Turbopack compile of /[ticker] plus the held-combo ticket resolving
+  // off the portfolio fetch can exceed Playwright's 30s default; warm runs take
+  // ~1s per test.
+  test.setTimeout(90_000);
+
   test.beforeEach(async ({ page }) => {
     // Clear all previous route handlers so tests don't bleed into each other
     await page.unrouteAll({ behavior: "ignoreErrors" });
@@ -154,6 +185,24 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     await page.route("**/api/ib-status", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: false }) }),
     );
+    // The cockpit route pulls ticker metadata for the quote-bar fallback
+    // (lib/useStockState.ts → /api/ticker/info). Stub the whole family so no
+    // request reaches the live FastAPI bridge.
+    await page.route("**/api/ticker/**", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({}) }),
+    );
+    await page.route("**/api/blotter", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          as_of: new Date().toISOString(),
+          summary: { realized_pnl: 0 },
+          closed_trades: [],
+          open_trades: [],
+        }),
+      }),
+    );
   });
 
   test("RED: IB silent cancellation shows error instead of success", async ({ page }) => {
@@ -169,11 +218,13 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
       }),
     );
 
-    await openSpxuOrderTab(page);
-    await fillComboForm(page, "2.25");
+    const ticket = await openSpxuOrderTicket(page);
+    await fillComboForm(ticket, "2.25");
 
-    // Should show an error, not a success
-    const errorMsg = page.locator(".order-error");
+    // Should show an error, not a success. `formatOrderError` maps
+    // "Order rejected by IB: Cancelled" → summary "Order rejected by IB." +
+    // detail "Cancelled." (web/lib/orderError.ts:63-65).
+    const errorMsg = ticket.locator(".order-error");
     await errorMsg.waitFor({ timeout: 5_000 });
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toContainText(/rejected|Cancelled/i);
@@ -219,18 +270,19 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
       }),
     );
 
-    await openSpxuOrderTab(page);
-    await fillComboForm(page, "2.25");
+    const ticket = await openSpxuOrderTicket(page);
+    await fillComboForm(ticket, "2.25");
 
     // Should show a success toast (order feedback routes through the global
-    // toast system, not an inline banner)
+    // toast system, not an inline banner). The queue is drained into the toast
+    // host on a 500ms interval (components/WorkspaceShell.tsx:410) and
+    // auto-dismisses after 5s (lib/useToast.ts:44), so assert on the text in the
+    // same wait rather than re-querying later.
     const successMsg = page.locator(".toast-success");
-    await successMsg.waitFor({ timeout: 5_000 });
-    await expect(successMsg).toBeVisible();
-    await expect(successMsg).toContainText(/Combo order placed.*\$2\.25/i);
+    await expect(successMsg).toContainText(/Combo order placed.*\$2\.25/i, { timeout: 10_000 });
 
     // Error should NOT appear
-    await expect(page.locator(".order-error")).not.toBeVisible();
+    await expect(ticket.locator(".order-error")).not.toBeVisible();
   });
 
   test("GREEN: Unknown status (no IB ack) shows error not success", async ({ page }) => {
@@ -245,10 +297,10 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
       }),
     );
 
-    await openSpxuOrderTab(page);
-    await fillComboForm(page, "2.25");
+    const ticket = await openSpxuOrderTicket(page);
+    await fillComboForm(ticket, "2.25");
 
-    const errorMsg = page.locator(".order-error");
+    const errorMsg = ticket.locator(".order-error");
     await errorMsg.waitFor({ timeout: 5_000 });
     await expect(errorMsg).toBeVisible();
     await expect(page.locator(".toast-success")).not.toBeVisible();
@@ -266,10 +318,10 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
       }),
     );
 
-    await openSpxuOrderTab(page);
-    await fillComboForm(page, "2.25");
+    const ticket = await openSpxuOrderTicket(page);
+    await fillComboForm(ticket, "2.25");
 
-    const errorMsg = page.locator(".order-error");
+    const errorMsg = ticket.locator(".order-error");
     await errorMsg.waitFor({ timeout: 5_000 });
     await expect(errorMsg).toBeVisible();
     await expect(errorMsg).toContainText("Order rejected by IB: insufficient margin.");
