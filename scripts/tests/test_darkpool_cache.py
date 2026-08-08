@@ -69,6 +69,44 @@ class TestPriorDayRoundTrip:
         payload = json.loads(path.read_text())
         assert payload["count"] == 2
         assert payload["date"] == date
+        assert payload["schema"] == dpc.CACHE_SCHEMA
+
+
+class TestCacheSchemaPagination:
+    """Pre-pagination disk rows (schema missing / < 2) are single-page
+    truncated at UW's 500 limit. Reject them so liquid names re-fetch.
+    """
+
+    def test_legacy_schema_miss_forces_refetch(self):
+        date = _yesterday()
+        path = dpc._path("GLD", date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "ticker": "GLD",
+            "date": date,
+            "count": 500,
+            "trades": [{"price": 1, "size": 1}] * 500,
+            # no schema key — pre-pagination write
+        }))
+        assert dpc.get_cached_darkpool("GLD", date) is None
+
+    def test_schema_v1_miss(self):
+        date = _yesterday()
+        path = dpc._path("GLD", date)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({
+            "ticker": "GLD",
+            "date": date,
+            "count": 500,
+            "schema": 1,
+            "trades": [{"price": 1, "size": 1}] * 500,
+        }))
+        assert dpc.get_cached_darkpool("GLD", date) is None
+
+    def test_current_schema_hit(self):
+        date = _yesterday()
+        dpc.set_cached_darkpool("GLD", date, SAMPLE_TRADES)
+        assert dpc.get_cached_darkpool("GLD", date) == SAMPLE_TRADES
 
 
 # ── today is never cached ───────────────────────────────────────────

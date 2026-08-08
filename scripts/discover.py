@@ -161,13 +161,15 @@ def fetch_darkpool_multi(ticker: str, days: int = 3, _client: UWClient = None) -
         # Prior (closed) sessions are immutable — serve from the shared on-disk
         # cache and skip UW. Only today hits the API. (Same P0 reduction as
         # fetch_flow; discover scans market-wide so this is high-impact.)
+        # Full-day multi-page walk lives in fetch_flow.fetch_darkpool (UW 500 cap).
+        from fetch_flow import fetch_darkpool
+
         trades = get_cached_darkpool(ticker, date)
         if trades is None:
             try:
-                resp = client.get_darkpool_flow(ticker, date=date)
+                trades = fetch_darkpool(ticker, date=date, _client=client)
             except UWAPIError:
                 return None, []
-            trades = resp.get("data", [])
             if isinstance(trades, list):
                 set_cached_darkpool(ticker, date, trades)
         if isinstance(trades, list):

@@ -264,16 +264,32 @@ class UWClient:
         max_premium: Optional[int] = None,
         min_size: Optional[int] = None,
         max_size: Optional[int] = None,
+        min_volume: Optional[int] = None,
+        max_volume: Optional[int] = None,
+        newer_than: Optional[str] = None,
+        older_than: Optional[str] = None,
         limit: Optional[int] = None,
+        order: Optional[str] = None,
+        order_by: Optional[str] = None,
     ) -> dict:
-        """GET /api/darkpool/{ticker} - Dark pool trades for a ticker."""
+        """GET /api/darkpool/{ticker} - Dark pool trades for a ticker.
+
+        UW hard-caps ``limit`` at 500. Walk the day with ``older_than`` /
+        ``newer_than`` (time cursors) when a full page is returned.
+        """
         params = self._build_params(
             date=date,
             min_premium=min_premium,
             max_premium=max_premium,
             min_size=min_size,
             max_size=max_size,
+            min_volume=min_volume,
+            max_volume=max_volume,
+            newer_than=newer_than,
+            older_than=older_than,
             limit=limit,
+            order=order,
+            order_by=order_by,
         )
         return self._get(f"darkpool/{ticker.upper()}", params=params)
 

@@ -1,3 +1,153 @@
+# Task: Dark pool multi-page pagination (2026-08-07)
+
+## Summary
+
+UW `/api/darkpool/{ticker}` returns max 500 prints per request. Liquid names
+(GLD) saturate Daily Dark Pool History at 500. Paginate with `older_than`
+until a short page; bust single-page disk cache.
+
+## Dependency graph
+
+- T1 depends_on: [] - Failing tests for client params, page loop, cache schema v2
+- T2 depends_on: [T1] - Implement pagination in fetch_darkpool + client + cache + discover
+- T3 depends_on: [T2] - Docs + focused pytest green
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Implement
+- [x] T3 Verify
+
+## Review
+
+- `fetch_darkpool` walks UW pages with `older_than` (max 40×500).
+- Disk cache schema v2; legacy single-page rows miss and re-fetch.
+- `discover.fetch_darkpool_multi` reuses paginated fetch.
+- Focused pytest: 311 passed.
+
+---
+
+# Task: Implement execution-linked return capital v2 (2026-08-07)
+
+## Summary
+
+Replace the rejected structure-key Reg-T producer with a fail-closed capital
+basis ledger keyed to immutable position instances and exact executions.
+
+## User story
+
+As the portfolio operator, I want Return % to use exact loss/debit or an
+isolated broker-observed opening margin delta so credit and undefined-risk
+positions show defensible performance instead of premium-based or modeled ROE.
+
+## Acceptance criteria
+
+- Generic Return % accepts only exact or isolated-observed capital.
+- Every observed basis links account, position instance, conIds, orderRef or
+  permId, execIds, currency, multiplier, and before/after margin samples.
+- Open/add/reduce/close/zero-cross/reopen lifecycle replay is deterministic and
+  idempotent; reopen never inherits an old basis.
+- What-if and modeled Reg-T remain estimated and never become generic Return %.
+- SMART combo error 360 without an isolated observation remains unavailable.
+- `/orders/place` performs no what-if, capital write, or reconciliation wait.
+- Missing schema, ambiguous linkage, concurrent account events, stale samples,
+  currency mismatch, or invalid provenance fails closed to `N/A`.
+
+## Non-goals
+
+- Do not allocate Portfolio Margin using summed leg estimates.
+- Do not backfill verified capital from ticker/expiry/structure similarity.
+- Do not mutate live orders or run a production capture during implementation.
+
+## Risks and assumptions
+
+- IB exposes account-level margin, not native per-position margin; observed
+  attribution is valid only inside an isolated execution window.
+- Historical fills may lack enough identity or margin samples and must remain
+  unavailable.
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace execution identity, fill ingestion, account-margin sampling, journal persistence, and UI hydration contracts.
+- T2 depends_on: [T1] - Add red regression coverage for lifecycle identity, provenance, isolation rejection, API safety, and UI fail-closed behavior.
+- T3 depends_on: [T2] - Replace migration and rejected helpers with the v2 instance/execution/sample/observation ledger.
+- T4 depends_on: [T3] - Integrate future-fill sampling and asynchronous reconciliation outside `/orders/place`.
+- T5 depends_on: [T3, T4] - Hydrate exact/observed v2 payloads and keep estimates unavailable in every portfolio surface.
+- T6 depends_on: [T5] - Run focused and full Python/TypeScript suites, Playwright/browser verification, migration checks, and document rollout.
+
+## Checklist
+
+- [x] T1 Trace identity and sampling paths.
+- [x] T2 Red regression coverage.
+- [x] T3 V2 ledger and migration.
+- [x] T4 Asynchronous sampling/reconciliation.
+- [x] T5 Portfolio/UI hydration.
+- [x] T6 Verification and rollout review.
+
+## Review
+
+- Replaced the rejected ticker/expiry/size key and modeled Reg-T producer with
+  immutable account-scoped execution facts, position episodes, lifecycle
+  events, account margin samples, and isolated capital observations.
+- Existing portfolio and orders syncs provide the evidence without another IB
+  socket: portfolio sync records one-minute `InitMarginReq` plus signed conId
+  vectors; orders sync preserves account, conId, permId/orderRef, execId,
+  currency, multiplier, exact time, and correction lineage.
+- Replay covers open, add, reduce, close, zero-cross, and reopen. Duplicate
+  execution syncs are idempotent; corrections and ambiguous/concurrent/stale
+  windows fail closed instead of inheriting or overwriting an old basis.
+- The web accepts only v2 exact or isolated-observed provenance. Legacy,
+  versionless, what-if, Reg-T modeled, unlinked, mismatched, or incomplete
+  payloads render `N/A`. Defined max risk and demonstrable full-loss debit keep
+  exact priority.
+- `/orders/place` still performs no what-if, capital write, IB evidence read,
+  or reconciliation wait. It only stamps a durable 32-character `orderRef` for
+  later execution linkage.
+- Verification: focused Python 13 passed; affected Python 604 passed with only
+  seven unrelated pre-existing dark-pool cache fixture failures. Full Python
+  reached 4,978 passed / 13 skipped with one unrelated stale
+  `data/performance.json` `period_label` failure. Full Vitest passed 5,006 with
+  26 skipped; TypeScript, focused ESLint, production build, and the 144-manifest
+  output-trace audit passed. Playwright passed and the rendered SPCX +70.9%
+  isolated-observed Return was visually inspected.
+- No IB calls, Turso writes, migrations, commits, pushes, or deployments were
+  performed during implementation.
+
+---
+
+# Task: Isolate SKEW and redesign return capital (2026-08-07)
+
+## Dependency graph
+
+- T1 depends_on: [] - Freeze the SKEW commit scope and preserve unrelated return-capital work.
+- T2 depends_on: [T1] - Commit the verified real-time SKEW implementation on a feature branch.
+- T3 depends_on: [T1] - Start a separate read-only agent workflow for the return-capital redesign.
+- T4 depends_on: [T1] - Remove only the generated gold/silver research bundle using a recoverable operation.
+- T5 depends_on: [T2, T3, T4] - Verify repository state and record the handoff.
+
+## Checklist
+
+- [x] T1 Freeze scope.
+- [x] T2 Commit SKEW.
+- [x] T3 Start return-capital redesign workflow.
+- [x] T4 Discard gold/silver research bundle.
+- [x] T5 Verify and hand off.
+
+## Review
+
+- Real-time SKEW was committed alone as `af255787` on `feat/realtime-skew`; it
+  was not pushed. Return-capital files remained uncommitted and unstaged.
+- The redesign audit rejected the current producer because it labels a
+  current Reg-T heuristic as fill-linked opening margin. The replacement uses
+  immutable position instances, execution-linked lifecycle events, and only
+  exact or isolated observed capital for generic Return %.
+- Twenty-three generated gold/silver research files were moved to the macOS
+  Trash for recovery rather than permanently deleted.
+- `data/earnings_dates/HONA.json` is a generated Theta Harvester earnings
+  fallback cache and remains untouched.
+
+---
+
 # Task: Keep Upcoming Catalysts current (2026-08-07)
 
 ## Goal
