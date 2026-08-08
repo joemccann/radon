@@ -860,4 +860,231 @@ describe("journalRowsToBlotter", () => {
     expect(groupPnl).toBeGreaterThan(9000);
     expect(out.open_trades.filter((t) => t.symbol === "AAOI")).toHaveLength(0);
   });
+
+  /* ─── T-036: journal-vs-journal exec-id dedupe ─────────────────────── */
+
+  describe("journal-vs-journal exec-id dedupe (T-036)", () => {
+    it("'a' (single, ib_reconcile-style) + 'a+b' (composite, rehydrate-style) → one trade, pnl counted once, composite kept", () => {
+      // ib_reconcile.py can log a same-day contract group under its OWN
+      // (possibly single-exec) ib_exec_id, carrying IB-native realized_pnl
+      // but no cost_basis/proceeds (scripts/ib_reconcile.py:find_new_trades).
+      // journal_rehydrate.py later reprocesses the full Flex history and
+      // re-buckets fill "a" together with a sibling fill into ONE composite
+      // row "a+b" carrying the full lot-matched breakdown
+      // (_bucket_to_entry). Nothing retracts the earlier single row, so
+      // without dedupe both render and the summary double-counts.
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "IWM",
+            structure: "Closed Call $200 2026-06-19",
+            action: "SELL_OPTION",
+            fill_price: 3.0,
+            total_cost: 3000,
+            contracts: 10,
+            commission: 1.5,
+            ib_exec_id: "a",
+            realized_pnl: 140, // IB-native single-fill view — no cost_basis/proceeds.
+          },
+          "2026-06-10",
+        ),
+        row(
+          {
+            id: 2,
+            ticker: "IWM",
+            structure: "Closed Call $200 2026-06-19",
+            action: "SELL_OPTION",
+            fill_price: 3.0,
+            total_cost: 3000,
+            contracts: 10,
+            commission: 1.5,
+            ib_exec_id: "a+b",
+            cost_basis: 2650,
+            proceeds: 3000,
+            realized_pnl: 165, // Rehydrate's authoritative lot-matched number.
+          },
+          "2026-06-10",
+        ),
+      ];
+
+      const out = journalRowsToBlotter(rows);
+      expect(out.summary.closed_trades).toBe(1);
+      expect(out.closed_trades).toHaveLength(1);
+      expect(out.summary.realized_pnl).toBeCloseTo(165, 4);
+      expect(out.closed_trades[0].realized_pnl).toBeCloseTo(165, 4);
+      expect(out.closed_trades[0].executions[0].exec_id).toBe("a+b");
+    });
+
+    it("keeps the composite even when it appears BEFORE the single row in array order", () => {
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "ORD",
+            action: "SELL_OPTION",
+            fill_price: 4,
+            total_cost: 4000,
+            contracts: 10,
+            commission: 2,
+            ib_exec_id: "x+y",
+            cost_basis: 3500,
+            proceeds: 4000,
+            realized_pnl: 480,
+          },
+          "2026-06-13",
+        ),
+        row(
+          {
+            id: 2,
+            ticker: "ORD",
+            action: "SELL_OPTION",
+            fill_price: 4,
+            total_cost: 4000,
+            contracts: 10,
+            commission: 2,
+            ib_exec_id: "x",
+            realized_pnl: 90,
+          },
+          "2026-06-13",
+        ),
+      ];
+
+      const out = journalRowsToBlotter(rows);
+      expect(out.summary.closed_trades).toBe(1);
+      expect(out.summary.realized_pnl).toBeCloseTo(480, 4);
+      expect(out.closed_trades[0].executions[0].exec_id).toBe("x+y");
+    });
+
+    it("exact-duplicate ib_exec_id rows collapse to one trade, pnl counted once", () => {
+      const dupRow = {
+        id: 1,
+        ticker: "DUP",
+        structure: "Closed Call $50 2026-06-19",
+        action: "SELL_OPTION",
+        fill_price: 2.0,
+        total_cost: 2000,
+        contracts: 10,
+        commission: 1.0,
+        ib_exec_id: "dup-exec-1",
+        realized_pnl: 200,
+      };
+      const rows: JournalRow[] = [
+        row({ ...dupRow }, "2026-06-11"),
+        row({ ...dupRow, id: 2 }, "2026-06-11"),
+      ];
+
+      const out = journalRowsToBlotter(rows);
+      expect(out.summary.closed_trades).toBe(1);
+      expect(out.closed_trades).toHaveLength(1);
+      expect(out.summary.realized_pnl).toBeCloseTo(200, 4);
+    });
+
+    it("disjoint composite ids are unaffected (no shared exec-id parts)", () => {
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "AAA",
+            action: "SELL_OPTION",
+            fill_price: 1,
+            total_cost: 1000,
+            contracts: 10,
+            commission: 1,
+            ib_exec_id: "c1+c2",
+            realized_pnl: 50,
+          },
+          "2026-06-12",
+        ),
+        row(
+          {
+            id: 2,
+            ticker: "BBB",
+            action: "SELL_OPTION",
+            fill_price: 1,
+            total_cost: 1000,
+            contracts: 10,
+            commission: 1,
+            ib_exec_id: "c3+c4",
+            realized_pnl: 75,
+          },
+          "2026-06-12",
+        ),
+      ];
+
+      const out = journalRowsToBlotter(rows);
+      expect(out.summary.closed_trades).toBe(2);
+      expect(out.summary.realized_pnl).toBeCloseTo(125, 4);
+      const symbols = out.closed_trades.map((t) => t.symbol).sort();
+      expect(symbols).toEqual(["AAA", "BBB"]);
+    });
+
+    it("dedupe + legacy-matching compose: a duplicated composite row doesn't double the legacy-matched P&L", () => {
+      // Same fixture as "composite exec_id 'a+b' matches legacy exec_id 'a'"
+      // above, but the composite journal row is accidentally duplicated
+      // (e.g. a retried dual-write). Dedupe must collapse it to one row
+      // BEFORE legacy matching runs, so the legacy-preference path (still
+      // fully untouched) sees exactly the same single row it always did.
+      const rows: JournalRow[] = [
+        row(
+          {
+            id: 1,
+            ticker: "AMD",
+            structure: "Closed Call $200",
+            action: "CLOSED",
+            fill_price: 2.0,
+            total_cost: 4000,
+            contracts: 20,
+            commission: 1.5,
+            ib_exec_id: "fill-a+fill-b+fill-c",
+          },
+          "2026-04-20",
+        ),
+        row(
+          {
+            id: 2,
+            ticker: "AMD",
+            structure: "Closed Call $200",
+            action: "CLOSED",
+            fill_price: 2.0,
+            total_cost: 4000,
+            contracts: 20,
+            commission: 1.5,
+            ib_exec_id: "fill-a+fill-b+fill-c",
+          },
+          "2026-04-20",
+        ),
+      ];
+      const legacy = legacyPayload([
+        legacyTrade({
+          symbol: "AMD",
+          is_closed: true,
+          total_commission: 1.5,
+          realized_pnl: 567.89,
+          cost_basis: 3500,
+          proceeds: 4067.89,
+          executions: [
+            {
+              exec_id: "fill-b",
+              time: "2026-04-20T10:00:00",
+              side: "SLD",
+              quantity: 20,
+              price: 2.0,
+              commission: 1.5,
+              notional_value: 4000,
+              net_cash_flow: 3998.5,
+            },
+          ],
+        }),
+      ]);
+
+      const out = journalRowsToBlotter(rows, legacy);
+      expect(out.summary.closed_trades).toBe(1);
+      const trade = out.closed_trades[0];
+      expect(trade.symbol).toBe("AMD");
+      expect(trade.realized_pnl).toBeCloseTo(567.89, 4);
+      expect(trade.cost_basis).toBeCloseTo(3500, 2);
+      expect(trade.proceeds).toBeCloseTo(4067.89, 2);
+    });
+  });
 });
