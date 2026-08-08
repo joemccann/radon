@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import {
+  demoOrderRefusal,
+  resolveDemoOrderDecision,
+} from "@/lib/demo/orderBlockade";
+import {
   EMPTY_ORDERS,
   readOrdersSnapshotFromDb,
 } from "@/lib/orders/readOrdersFromDb";
@@ -25,6 +29,18 @@ export async function POST(request: Request): Promise<Response> {
     const body = (await request.json()) as CancelBody;
     const orderId = body.orderId ?? 0;
     const permId = body.permId ?? 0;
+
+    // Demo blockade (T-018) — above every radonFetch in this file. A demo user
+    // has no live order to cancel (paper fills settle immediately, and there is
+    // no /paper/cancel), so an active demo cancel is refused rather than
+    // forwarded, and an unresolvable cohort is refused rather than guessed.
+    const refusal = demoOrderRefusal(await resolveDemoOrderDecision(), "cancel");
+    if (refusal) {
+      return NextResponse.json(
+        { error: refusal.message, code: refusal.code },
+        { status: refusal.status },
+      );
+    }
 
     if (orderId === 0 && permId === 0) {
       return NextResponse.json(
