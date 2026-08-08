@@ -7,6 +7,10 @@ export type ErrorCode =
   | "NOT_FOUND"
   | "CONFIG_ERROR"
   | "UPSTREAM_ERROR"
+  // Upstream request abandoned mid-flight on an operation that may already have
+  // taken effect (an order placement). Distinct from UPSTREAM_ERROR: the client
+  // must NOT retry blindly.
+  | "UPSTREAM_TIMEOUT_ORDER_INDETERMINATE"
   | "VALIDATION_ERROR"
   | "DB_UNAVAILABLE"
   | "INTERNAL_ERROR";
