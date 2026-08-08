@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import type { NextFetchEvent, NextRequest } from "next/server";
 import {
   getRequestId,
   jsonApiError,
@@ -15,6 +15,27 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "::1", "[::1]"]);
 
 function isLocalHost(url: URL): boolean {
   return LOCAL_HOSTS.has(url.hostname);
+}
+
+// The host the CLIENT addressed, taken from the Host header — NOT
+// request.nextUrl.hostname. Under `next start -H 0.0.0.0` (how the e2e job and
+// every containerized deploy serve), nextUrl.hostname is the server BIND
+// address "0.0.0.0", not the host the request was sent to; the local bypass
+// checks must see "localhost" / "127.0.0.1" instead. Falls back to nextUrl when
+// no Host header is present (never in practice for an HTTP/1.1+ request).
+// Reading a client-controlled header is safe here because the ONLY thing it can
+// unlock — the authless bypass — is additionally gated on RADON_AUTHLESS_TEST,
+// which is never set in production.
+export function requestHostUrl(request: NextRequest): URL {
+  const hostHeader = request.headers.get("host");
+  if (hostHeader) {
+    try {
+      return new URL(`http://${hostHeader}`);
+    } catch {
+      // Malformed Host header — fall through to nextUrl.
+    }
+  }
+  return request.nextUrl;
 }
 
 // ── Enforced Content-Security-Policy (per-request nonce) ────────────────────
@@ -103,8 +124,15 @@ export function withNonceCsp(request: NextRequest): NextResponse {
 }
 
 // Explicit test-flag override (used by Playwright via RADON_AUTHLESS_TEST=1).
-// Kept for parity with FastAPI's own bypass and to allow CI-driven authless runs.
-export function isLocalAuthlessTestBypassEnabled(url: URL, flag = process.env.RADON_AUTHLESS_TEST): boolean {
+// Kept for parity with FastAPI's own bypass and to allow CI-driven authless
+// runs. Scoped to local hosts and never enabled in production (the flag is
+// unset there). The host is read from the Host header via requestHostUrl at the
+// call site, so `next start -H 0.0.0.0` — whose nextUrl.hostname is the bind
+// address 0.0.0.0 — still matches "localhost" / "127.0.0.1".
+export function isLocalAuthlessTestBypassEnabled(
+  url: URL,
+  flag = process.env.RADON_AUTHLESS_TEST,
+): boolean {
   if (flag !== "1") return false;
   return isLocalHost(url);
 }
@@ -271,19 +299,16 @@ export async function handleProbeBearerGate(
   return setNoStoreResponseHeaders(response, requestId);
 }
 
-export default clerkMiddleware(async (auth, request) => {
-  // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
-  // so the gate behaves identically in dev, tests, and production.
-  const probeGate = await handleProbeBearerGate(request);
-  if (probeGate) return probeGate;
-
-  if (
-    isLocalDevAuthBypassEnabled(request.nextUrl) ||
-    isLocalAuthlessTestBypassEnabled(request.nextUrl)
-  ) {
-    return NextResponse.next();
-  }
-
+// The Clerk-wrapped handler. Reached ONLY for requests that are not
+// authless-bypassed (see the default export below): production, and any
+// non-local host. Keeping Clerk out of the bypass path is essential — a Clerk
+// DEVELOPMENT instance (pk_test_) answers any cookie-less browser NAVIGATION
+// with a dev-browser handshake 307 to clerk.<frontend-api>/v1/client/handshake,
+// which in a hermetic e2e run points at an unresolvable dummy Clerk host and
+// fails the navigation with ERR_NAME_NOT_RESOLVED. Returning next() from INSIDE
+// this wrapper did NOT suppress that handshake; only never entering the wrapper
+// does.
+const clerkHandler = clerkMiddleware(async (auth, request) => {
   // Public HTML auth pages (/sign-in, /sign-up) still render through the root
   // layout + ThemeBootstrap, so they need the nonce + enforced CSP too. The
   // enumerated public *API* routes (share/webhook) return JSON with no inline
@@ -350,6 +375,29 @@ export default clerkMiddleware(async (auth, request) => {
   // CSP. This is the former implicit `return;` (NextResponse.next) fall-through.
   return withNonceCsp(request);
 });
+
+// Entry point. The probe bearer gate and the local/authless bypass run BEFORE
+// (and OUTSIDE) clerkMiddleware, so a bypassed request never triggers Clerk's
+// dev-browser handshake. Everything else delegates to the Clerk-wrapped handler.
+export default async function middleware(
+  request: NextRequest,
+  event: NextFetchEvent,
+) {
+  // Probe routes are bearer-gated EVERYWHERE — before the local-dev bypass —
+  // so the gate behaves identically in dev, tests, and production.
+  const probeGate = await handleProbeBearerGate(request);
+  if (probeGate) return probeGate;
+
+  const hostUrl = requestHostUrl(request);
+  if (
+    isLocalDevAuthBypassEnabled(hostUrl) ||
+    isLocalAuthlessTestBypassEnabled(hostUrl)
+  ) {
+    return NextResponse.next();
+  }
+
+  return clerkHandler(request, event);
+}
 
 export const config = {
   matcher: [
