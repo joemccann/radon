@@ -1,6 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = process.env.PLAYWRIGHT_PORT ? Number(process.env.PLAYWRIGHT_PORT) : 3000;
+// The browser origin. Defaults to "localhost" (the app's canonical local host).
+// CI sets PLAYWRIGHT_BASE_HOST=127.0.0.1 because chromium's async DNS in the
+// Playwright container cannot resolve the "localhost" NAME (ERR_NAME_NOT_RESOLVED)
+// and the --host-resolver-rules launch arg did not take effect there; the
+// literal loopback IP needs no resolution. 127.0.0.1 is in the middleware's
+// LOCAL_HOSTS set, so the authless bypass stays intact.
+const HOST = process.env.PLAYWRIGHT_BASE_HOST ?? "localhost";
 
 export default defineConfig({
   testDir: "./e2e",
@@ -17,7 +24,7 @@ export default defineConfig({
   workers: 1,
   reporter: "list",
   use: {
-    baseURL: `http://localhost:${PORT}`,
+    baseURL: `http://${HOST}:${PORT}`,
     trace: "on-first-retry",
     // A cold `next dev` compiles each route on first navigation; in
     // the CI container that first hit can exceed the 30s default. A larger
@@ -28,19 +35,7 @@ export default defineConfig({
   projects: [
     {
       name: "chromium",
-      use: {
-        ...devices["Desktop Chrome"],
-        launchOptions: {
-          // chromium's in-container async DNS resolver returns
-          // ERR_NAME_NOT_RESOLVED for "localhost" (CI run 31263267789,
-          // container mcr.microsoft.com/playwright) even though loopback
-          // itself works there. Map the name straight to the loopback IP so
-          // baseURL can stay "localhost" — keeping every localhost-keyed app
-          // path and page.route mock identical to local runs. No-op locally,
-          // where localhost already resolves to 127.0.0.1.
-          args: ["--host-resolver-rules=MAP localhost 127.0.0.1"],
-        },
-      },
+      use: { ...devices["Desktop Chrome"] },
     },
     {
       name: "mobile",
@@ -61,7 +56,7 @@ export default defineConfig({
   // perimeter-smoke already runs green in this workflow.
   webServer: {
     command: process.env.PLAYWRIGHT_WEBSERVER_CMD ?? `npx next dev --turbopack -p ${PORT}`,
-    url: `http://localhost:${PORT}`,
+    url: `http://${HOST}:${PORT}`,
     reuseExistingServer: true,
     timeout: 180_000,
     env: {
