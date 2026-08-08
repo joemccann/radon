@@ -73,6 +73,14 @@
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
 
+## Exit protocol (B3) — all criteria met
+
+- **3 consecutive full-suite runs, all green** (`runs/wt-final-*`): pytest gate (incl. root `tests/`) 3× `5107 passed, 1 skipped` rc=0 (~72s each); cloud 3× `723 passed, 4 skipped` rc=0; vitest 3× `5316 passed, 0 skipped` rc=0. The 1 pytest skip is the opt-in live-cache smoke (T-003); the 4 cloud skips are 2 pre-existing + 2 darwin-scoped (T-002, linux coverage intact).
+- **Coverage did not decrease** (CI metric, before → after): TOTAL **73.01% → 74.88%** (gate 64, passing; the honest product-only figure is 58.00% — T-050 BLOCKED for the metric-rebase decision). Critical paths (miss/stmts, term-missing %): ib_place_order 110/223→80/245 (65%), exit_orders handler 28/157→21/178 (84%), fill_monitor 25/184→16/193 (87%), journal_sync 81/460→87/545 (81%, +85 stmts of new logic covered), journal_basis 17/160→17/187 (91%), db/writer 215/494→151/469 (62%), db/readers 98/216→73/186, kelly 12/37→12/39, ib_sync 433/881→428/871 (50.8%→50.9% stmt — one-line fix, no decrease). exit_order_service.py (legacy manual-exit CLI, distinct from the daemon handler) unchanged at 25% — not a backlog target. Vitest coverage ratchet (75/78/65) passing (`wt-final-vitest-cov.log`, rc=0).
+- **No quarantined test without a BLOCKED entry**: no quarantines outstanding — the three signal-repair items are DONE with scoped, documented skips.
+- **Flake count**: 0 nondeterministic tests before (audit 3× protocol) → 0 after (the one latent address-dependent assertion found mid-loop was fixed under T-023, and the two WIP-attributed files belonged to the concurrent session).
+- **Commit-attribution note**: content for T-019/T-020 and T-036/T-042 landed across adjacent commits (staging happened after both patches were applied); every change is in history and each task's red→green evidence above is per-stage.
+
 ## Entries
 
 ### T-001 — un-break the Playwright runner
