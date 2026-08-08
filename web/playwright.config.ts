@@ -4,6 +4,11 @@ const PORT = process.env.PLAYWRIGHT_PORT ? Number(process.env.PLAYWRIGHT_PORT) :
 
 export default defineConfig({
   testDir: "./e2e",
+  // Playwright's default testMatch also collects *.test.js — which pulled in
+  // e2e/prices-performance.test.js, a standalone node script that self-spawns
+  // `npm run dev` AT IMPORT TIME and crashed every run 7s in (TEST_AUDIT.md
+  // T-001). Specs are *.spec.ts only.
+  testIgnore: ["**/*.test.js"],
   fullyParallel: false,
   retries: 0,
   workers: 1,
