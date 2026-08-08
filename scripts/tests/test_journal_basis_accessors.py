@@ -28,6 +28,7 @@ Branch map:
 from __future__ import annotations
 
 import json
+import logging
 import sys
 from pathlib import Path
 from types import SimpleNamespace
@@ -822,3 +823,168 @@ class TestComputeOpenBasisExactArithmetic:
             "opening_qty=15, opening_cost=9200; "
             "avg=9200/15=613.333; open_basis=613.333*12=7360.00"
         )
+
+
+# ---------------------------------------------------------------------------
+# T-045 — APPEND this class to scripts/tests/test_journal_basis_accessors.py
+# (uses the module's existing `_tuple_row` / `_FakeDb` doubles)
+#
+# One import line is added at the top of that file:  `import logging`
+# ---------------------------------------------------------------------------
+
+
+class TestCompositeExecIdOverlap:
+    """T-045: one execution must be counted once, whichever row carries it.
+
+    ``journal_rehydrate`` collapses a contract's Flex executions into ONE row
+    whose ``ib_exec_id`` joins every constituent id with ``+``; the real-time
+    daemon appends one row PER fill. When both writers have covered the same
+    fills the journal legitimately holds A, B and A+B for one contract, and
+    the accumulators — which had no exec-id awareness — summed all three:
+
+        8 + 69 + 77 = 154 contracts for a 77-contract position
+
+    Rows arrive oldest-first (``ORDER BY COALESCE(filled_at, written_at),
+    written_at``), so the first rows to cover an execution win and any later
+    row that introduces no new execution is skipped.
+
+    Fixture arithmetic (one WULF $17 C 2027-01-15 position, $100/contract):
+        A         BUY  8 @ total_cost   800.00
+        B         BUY 69 @ total_cost 6,900.00
+        A+B       BUY 77 @ total_cost 7,777.00   (≠ 7,700 on purpose, so the
+                                                  counted row is observable)
+        net_qty    = 8 + 69 = 77
+        open_basis = (800 + 6,900) / 77 * 77 = 7,700.00
+    """
+
+    KEY = "WULF|20270115|C|17.0"
+    PART_A = "0001de5f.69f22890.01.01"
+    PART_B = "0001de5f.69f23721.02.01"
+
+    def _fill(self, exec_id, contracts, total_cost, action="BUY_OPTION", strike=17):
+        payload = {
+            "ticker": "WULF",
+            "action": action,
+            "contracts": contracts,
+            "total_cost": total_cost,
+            "strike": strike,
+            "right": "C",
+            "expiry": "20270115",
+        }
+        if exec_id is not None:
+            payload["ib_exec_id"] = exec_id
+        return payload
+
+    def _net(self, rows):
+        return prior_net_qty_for_contract(
+            _FakeDb(rows),
+            ticker="WULF",
+            sec_type="OPT",
+            strike=17,
+            right="C",
+            expiry="20270115",
+        )
+
+    def _basis(self, rows):
+        return compute_open_basis_for_ticker(_FakeDb(rows), "WULF").get(self.KEY)
+
+    def _part_a(self):
+        return self._fill(self.PART_A, 8, 800.00)
+
+    def _part_b(self):
+        return self._fill(self.PART_B, 69, 6900.00)
+
+    def _composite(self, total_cost=7777.00):
+        return self._fill(f"{self.PART_A}+{self.PART_B}", 77, total_cost)
+
+    def test_parts_and_composite_count_once(self):
+        """A(8) + B(69) + A+B(77): the composite adds no new execution."""
+        rows = [
+            _tuple_row(self._part_a()),
+            _tuple_row(self._part_b()),
+            _tuple_row(self._composite()),
+        ]
+
+        assert self._net(rows) == pytest.approx(77.0), (
+            "the composite re-counted its own constituent fills (8 + 69 + 77 = 154)"
+        )
+        assert self._basis(rows) == pytest.approx(7700.00, abs=0.01), (
+            "single lot: (800 + 6900) / 77 * 77 = 7700.00"
+        )
+
+    def test_parts_only_are_unaffected(self):
+        rows = [_tuple_row(self._part_a()), _tuple_row(self._part_b())]
+
+        assert self._net(rows) == pytest.approx(77.0)
+        assert self._basis(rows) == pytest.approx(7700.00, abs=0.01)
+
+    def test_composite_only_is_unaffected(self):
+        """No per-fill twins: the aggregate is the only record of the position."""
+        rows = [_tuple_row(self._composite(total_cost=7700.00))]
+
+        assert self._net(rows) == pytest.approx(77.0)
+        assert self._basis(rows) == pytest.approx(7700.00, abs=0.01)
+
+    def test_composite_written_first_wins(self):
+        """Order-based: whichever rows cover the executions FIRST are counted,
+        so a composite ahead of its twins is the one that books the position."""
+        rows = [
+            _tuple_row(self._composite(), "2026-07-10"),
+            _tuple_row(self._part_a(), "2026-07-11"),
+            _tuple_row(self._part_b(), "2026-07-11"),
+        ]
+
+        assert self._net(rows) == pytest.approx(77.0)
+        assert self._basis(rows) == pytest.approx(7777.00, abs=0.01)
+
+    def test_rows_without_exec_id_keep_legacy_behaviour(self):
+        """Manual / pre-execId rows carry no identity to dedupe on: count them."""
+        rows = [
+            _tuple_row(self._fill(None, 8, 800.00)),
+            _tuple_row(self._fill(None, 69, 6900.00)),
+        ]
+
+        assert self._net(rows) == pytest.approx(77.0)
+        assert self._basis(rows) == pytest.approx(7700.00, abs=0.01)
+
+    def test_partial_overlap_is_skipped_with_a_warning(self, caplog):
+        """A composite covering one counted and one uncounted execution cannot
+        be split — it carries a single aggregate quantity. Skipping
+        under-counts (ib_sync then rejects the basis and keeps IB's avgCost);
+        counting it would silently double the 8 contracts already booked.
+        """
+        rows = [_tuple_row(self._part_a()), _tuple_row(self._composite())]
+
+        with caplog.at_level(logging.WARNING, logger="clients.journal_basis"):
+            net_qty = self._net(rows)
+
+        assert net_qty == pytest.approx(8.0)
+        assert "partially overlapping" in caplog.text
+
+    def test_other_contracts_in_the_ticker_are_independent(self):
+        """The seen-parts set never suppresses a different contract's fills."""
+        rows = [
+            _tuple_row(self._part_a()),
+            _tuple_row(
+                self._fill("0001de5f.69f24000.01.01", 10, 1000.00, strike=20)
+            ),
+        ]
+
+        assert self._net(rows) == pytest.approx(8.0)
+        assert sorted(compute_open_basis_for_ticker(_FakeDb(rows), "WULF")) == [
+            "WULF|20270115|C|17.0",
+            "WULF|20270115|C|20.0",
+        ]
+
+    def test_partial_close_after_a_composite_still_nets(self):
+        """A later closing fill is a new execution and must still reduce net."""
+        rows = [
+            _tuple_row(self._composite(), "2026-07-10"),
+            _tuple_row(
+                self._fill("0001de5f.69f25000.01.01", 25, 2500.00, action="SELL_OPTION"),
+                "2026-07-11",
+            ),
+        ]
+
+        # 77 − 25 = 52
+        assert self._net(rows) == pytest.approx(52.0)

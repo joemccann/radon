@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import json
+import logging
 import re
 from typing import Any, Optional
+
+logger = logging.getLogger(__name__)
 
 
 # Both journal queries below SELECT exactly these columns, in this order.
@@ -102,6 +105,55 @@ def _bucket_key(payload: dict[str, Any]) -> Optional[str]:
     return f"{ticker}|{expiry}|{right}|{strike}"
 
 
+def _exec_id_parts(payload: dict[str, Any]) -> list[str]:
+    """The execution ids a journal row accounts for.
+
+    ``journal_rehydrate`` collapses a contract's fills into ONE row whose
+    ``ib_exec_id`` joins every constituent exec id with ``+``; the real-time
+    writer appends one row PER fill. So a single row can stand for several
+    executions.
+    """
+    raw = str(payload.get("ib_exec_id") or "").strip()
+    if not raw:
+        return []
+    return [part.strip() for part in raw.split("+") if part.strip()]
+
+
+def _claim_exec_parts(counted: set[str], parts: list[str], contract: str) -> bool:
+    """True when this row's quantity has NOT been accounted for yet.
+
+    When both writers have covered the same fills the journal legitimately
+    holds A, B and A+B for one contract — summing all three double-counts it
+    (8 + 69 + 77 = 154 for a 77-contract position). Rows arrive oldest-first,
+    so the first rows to cover an execution win and any later row that adds no
+    new execution is skipped.
+
+    A PARTIAL overlap (a composite covering one counted and one uncounted
+    execution) cannot be split — the composite carries a single aggregate
+    quantity — so it is skipped with a warning: under-counting is recoverable
+    (``ib_sync`` rejects a journal basis whose net qty misses the position and
+    keeps IB's avgCost) while double-counting silently inflates the basis.
+
+    Rows with no ``ib_exec_id`` (legacy / manual entries) always count.
+    """
+    if not parts:
+        return True
+    fresh = [part for part in parts if part not in counted]
+    if not fresh:
+        return False
+    if len(fresh) != len(parts):
+        logger.warning(
+            "journal_basis: %s skipped partially overlapping row %s — "
+            "already counted %s and an aggregate quantity cannot be split",
+            contract,
+            "+".join(parts),
+            "+".join(part for part in parts if part not in fresh),
+        )
+        return False
+    counted.update(parts)
+    return True
+
+
 def _row_is_before_cutoff(row: Any, before: str) -> bool:
     timestamp = _row_value(row, "filled_at") or _row_value(row, "written_at")
     if not timestamp:
@@ -177,6 +229,9 @@ def prior_net_qty_for_contract(
     )
 
     net_qty = 0.0
+    # Executions already accounted for by an earlier row, so a rehydrate
+    # composite and the per-fill rows it collapses can't both be counted.
+    counted_parts: set[str] = set()
     for row in result.fetchall():
         if before is not None and not _row_is_before_cutoff(row, before):
             continue
@@ -201,7 +256,17 @@ def prior_net_qty_for_contract(
         except (TypeError, ValueError):
             continue
 
-        net_qty += _signed_qty(payload.get("action"), qty)
+        signed_qty = _signed_qty(payload.get("action"), qty)
+        if signed_qty == 0:
+            continue
+        if not _claim_exec_parts(
+            counted_parts,
+            _exec_id_parts(payload),
+            target_key or normalized_ticker,
+        ):
+            continue
+
+        net_qty += signed_qty
 
     return net_qty
 
@@ -233,6 +298,10 @@ def compute_open_basis_for_ticker(db, ticker: str) -> dict[str, float]:
     )
 
     buckets: dict[str, dict[str, Any]] = {}
+    # Executions already accounted for by an earlier row (see
+    # ``_claim_exec_parts``). Exec ids are globally unique, so one set covers
+    # every bucket in this ticker's scan.
+    counted_parts: set[str] = set()
     for row in result.fetchall():
         payload = _payload_from_row(row)
         if _normalize_ticker(payload.get("ticker") or payload.get("symbol")) != normalized_ticker:
@@ -275,6 +344,9 @@ def compute_open_basis_for_ticker(db, ticker: str) -> dict[str, float]:
             )
         except (TypeError, ValueError):
             persisted_open_basis = None
+
+        if not _claim_exec_parts(counted_parts, _exec_id_parts(payload), key):
+            continue
 
         bucket = buckets.setdefault(
             key,
