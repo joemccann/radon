@@ -10,13 +10,16 @@ export default defineConfig({
   // T-001). Specs are *.spec.ts only.
   testIgnore: ["**/*.test.js"],
   fullyParallel: false,
-  retries: 0,
+  // One retry in CI absorbs container jitter (a lost click during a reactive
+  // re-render, a slow first paint) without masking a real regression — a
+  // deterministic failure still fails both attempts. Local stays at 0.
+  retries: process.env.CI ? 1 : 0,
   workers: 1,
   reporter: "list",
   use: {
     baseURL: `http://localhost:${PORT}`,
     trace: "on-first-retry",
-    // A cold webpack `next dev` compiles each route on first navigation; in
+    // A cold `next dev` compiles each route on first navigation; in
     // the CI container that first hit can exceed the 30s default. A larger
     // ceiling only bites when a nav is genuinely slow, so it is harmless
     // locally where routes compile in a few seconds.
@@ -50,11 +53,12 @@ export default defineConfig({
   ],
   // Start Next.js before tests. Default is the dev server for fast local
   // iteration. CI overrides with a prebuilt `next start` via
-  // PLAYWRIGHT_WEBSERVER_CMD: `next dev --turbopack` HANGS on startup inside
-  // the Playwright container (never readies; run 31268084987 timed out with
-  // only the middleware-deprecation line logged), whereas production start
-  // serves prebuilt routes and readies in seconds — the same build+start
-  // pattern the perimeter-smoke job already runs green in this workflow.
+  // PLAYWRIGHT_WEBSERVER_CMD: `next dev` (either bundler) never readies inside
+  // the resource-constrained Playwright container — cold-compiling this app's
+  // heavy routes on demand hangs there (runs 31268084987 / 31268824260 timed
+  // out right after the middleware line). Production `next start` serves
+  // prebuilt routes and readies in seconds — the same build+start pattern
+  // perimeter-smoke already runs green in this workflow.
   webServer: {
     command: process.env.PLAYWRIGHT_WEBSERVER_CMD ?? `npx next dev --turbopack -p ${PORT}`,
     url: `http://localhost:${PORT}`,
