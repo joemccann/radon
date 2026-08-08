@@ -15,12 +15,20 @@ type TickerWorkspaceProps = {
 export default function TickerWorkspace({ ticker, theme }: TickerWorkspaceProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { getPrices, getFundamentals, getPortfolio, getOrders, getDepths, getTape, setDepthSymbol } = useTickerDetail();
+  // portfolio/orders are reactive context state (must re-render when WorkspaceShell
+  // syncs after client navigation). High-frequency feeds stay ref snapshots.
+  const {
+    getPrices,
+    getFundamentals,
+    portfolio,
+    orders,
+    getDepths,
+    getTape,
+    setDepthSymbol,
+  } = useTickerDetail();
 
   const prices = getPrices();
   const fundamentals = getFundamentals();
-  const portfolio = getPortfolio();
-  const orders = getOrders();
   const depths = getDepths();
   const tape = getTape();
 
