@@ -13,6 +13,7 @@ import OrderErrorBanner from "@/components/OrderErrorBanner";
 import {
   buildPositionTradeOrder,
   closingActionFor,
+  heldComboUnits,
   type TradeAction,
   type TradeTarget,
 } from "@/lib/order/positionTrade";
@@ -82,7 +83,13 @@ export default function PositionTradeTicket({
   onOrderPlaced,
 }: PositionTradeTicketProps) {
   const orderActions = useOrderActionsOptional();
-  const heldQty = target.kind === "leg" ? position.legs[target.index]?.contracts ?? 1 : position.contracts;
+  // Combo quantity counts BAG UNITS, not contracts. `position.contracts` is the
+  // first LONG leg's count (ib_sync.py), so defaulting to it against real
+  // per-leg ratios would over-trade a ratio structure by the ratio itself.
+  const heldQty =
+    target.kind === "leg"
+      ? position.legs[target.index]?.contracts ?? 1
+      : heldComboUnits(position);
 
   const [action, setAction] = useState<TradeAction>(() => closingActionFor(position, target));
   const [quantity, setQuantity] = useState(String(heldQty));

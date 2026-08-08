@@ -14,12 +14,16 @@ import {
   normalizeOptionRight,
 } from "@/lib/placeOrderBodySchema";
 import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
-import { resolveDemoOrderDecision } from "@/lib/demo/orderBlockade";
+import {
+  AUTH_UNAVAILABLE_MESSAGE,
+  resolveDemoOrderDecision,
+} from "@/lib/demo/orderBlockade";
 import {
   runIdempotentOrder,
   contentKey,
   CONTENT_HASH_TTL_MS,
   CLIENT_KEY_TTL_MS,
+  IndeterminatePlacementError,
 } from "@/lib/orders/orderIdempotency";
 
 export const runtime = "nodejs";
@@ -75,6 +79,21 @@ async function readOrdersSnapshotBestEffort() {
   }
 }
 
+/** Operator instruction for an order whose fate at IB is unknown. Never phrased
+ *  as a plain failure — a plain failure invites the retry that double-places. */
+const INDETERMINATE_PLACEMENT_MESSAGE =
+  "Order status unknown: the request to IB timed out. The order may have reached IB. Check open orders before re-placing.";
+
+function indeterminatePlacementDetail(error: IndeterminatePlacementError): string {
+  if (error.deduplicated) {
+    return "A duplicate submit inside the idempotency window returned the first attempt's indeterminate result. The order was NOT sent again.";
+  }
+  const cause = error.cause;
+  const reason =
+    cause instanceof Error ? `${cause.name}: ${cause.message}` : "upstream request aborted";
+  return `Placement was not confirmed (${reason}). The idempotency key is held so an identical resubmit cannot double-place.`;
+}
+
 export async function POST(request: Request): Promise<Response> {
   const requestId = getRequestId();
   try {
@@ -125,7 +144,23 @@ export async function POST(request: Request): Promise<Response> {
     // it is forwarded to the paper-fill engine. Active demo → paper; expired →
     // 403 (the middleware also blocks expired demo users; this is defense in
     // depth). Non-demo users fall straight through to the real path below.
+    //
+    // Cohort UNKNOWN (Clerk threw) → 503, never the real path (T-018). The
+    // order is explicitly refused rather than placed on a guess: silently
+    // routing an unknown caller to IB is the exact failure this gate exists to
+    // prevent, and silently papering a real operator's order is no better.
     const demoDecision = await resolveDemoOrderDecision();
+    if (demoDecision.action === "auth-unavailable") {
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message: `${AUTH_UNAVAILABLE_MESSAGE} Order not placed. Retry in a moment.`,
+          status: 503,
+          code: "UPSTREAM_ERROR",
+          requestId,
+        }),
+        requestId,
+      );
+    }
     if (demoDecision.action === "block-expired") {
       return setNoStoreResponseHeaders(
         jsonApiError({
@@ -326,6 +361,22 @@ export async function POST(request: Request): Promise<Response> {
             status: 502,
             code: "UPSTREAM_ERROR",
             detail: JSON.stringify(placeErr.result),
+            requestId,
+          }),
+          requestId,
+        );
+      }
+      if (placeErr instanceof IndeterminatePlacementError) {
+        // The 30s client abort fires after FastAPI has the request (25s budget),
+        // so IB may already hold a live order. The generic 500 INTERNAL_ERROR
+        // envelope reads as "nothing happened" and invites the resubmit that
+        // double-places — answer with the ambiguity, explicitly.
+        return setNoStoreResponseHeaders(
+          jsonApiError({
+            message: INDETERMINATE_PLACEMENT_MESSAGE,
+            status: 504,
+            code: "UPSTREAM_TIMEOUT_ORDER_INDETERMINATE",
+            detail: indeterminatePlacementDetail(placeErr),
             requestId,
           }),
           requestId,

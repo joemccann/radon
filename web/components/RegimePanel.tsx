@@ -399,7 +399,7 @@ export default function RegimePanel({
     return (
       <div className="regime-panel">
         {tabBar}
-        <SkewPanel />
+        <SkewPanel marketState={marketState} />
       </div>
     );
   }

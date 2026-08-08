@@ -580,6 +580,113 @@ function buildLotMatchedFields(rows: JournalRow[]): Map<number, SynthFields> {
   return out;
 }
 
+/* ─── Journal-vs-journal exec-id dedupe ────────────────────────────────── */
+
+/**
+ * Normalized exec-id "parts" for a journal row: the raw ib_exec_id split on
+ * '+' (journal_rehydrate's multi-fill composite join — see
+ * _composite_exec_id in scripts/journal_rehydrate.py), each constituent
+ * stripped of its IB correction-reissue suffix (same convention as
+ * lib/fillToasts.ts:execKey — a trailing ".01" → ".02" bump is a corrected
+ * report of the SAME execution, not a new one). Empty for rows with no
+ * ib_exec_id — those never collide with anything, they just pass through.
+ */
+function execIdParts(execId: unknown): string[] {
+  if (typeof execId !== "string" || execId === "") return [];
+  return execId
+    .split("+")
+    .map((part) => part.replace(/\.\d+$/, ""))
+    .filter((part) => part.length > 0);
+}
+
+function findRoot(parent: number[], i: number): number {
+  while (parent[i] !== i) {
+    parent[i] = parent[parent[i]];
+    i = parent[i];
+  }
+  return i;
+}
+
+function unionRows(parent: number[], a: number, b: number): void {
+  const rootA = findRoot(parent, a);
+  const rootB = findRoot(parent, b);
+  if (rootA !== rootB) parent[rootA] = rootB;
+}
+
+/**
+ * Drop journal rows that re-report an execution another kept row already
+ * covers. Two collisions happen in production (both silently DOUBLE the
+ * summary realized_pnl if left unhandled — each colliding row renders its
+ * own BlotterTrade and both get summed):
+ *
+ *   - Exact duplicate ib_exec_id — the same fill journaled twice.
+ *   - The real-time-vs-rehydrate race: journal_sync.py journals a fill the
+ *     moment it happens, keyed on its own raw exec_id ("a") and carrying
+ *     only fill_price/total_cost/commission — no cost_basis, proceeds, or
+ *     realized_pnl (see journal_sync.py:_fill_to_entry). A later
+ *     journal_rehydrate.py pass re-buckets that same fill together with its
+ *     sibling(s) into ONE composite row ("a+b"), carrying the full
+ *     lot-matched cost_basis / proceeds / realized_pnl (see
+ *     journal_rehydrate.py:_bucket_to_entry / _composite_exec_id). Nothing
+ *     upstream retracts the earlier single row, so both render.
+ *
+ * Rows are grouped by shared exec-id part via union-find (a row can bridge
+ * two otherwise-unrelated ids, e.g. a stray "a+c" alongside standalone "a"
+ * and "c+d" rows). Within a group, the row with the MOST parts wins:
+ * journal_rehydrate only ever emits a composite id for a bucket of 2+ fills
+ * — a single-fill bucket keeps its bare id (_composite_exec_id: `if
+ * len(exec_ids) == 1: return exec_ids[0]`) — so "more parts" always means
+ * "the rehydrate row," never a coincidence. It's also the row this module
+ * already treats as authoritative everywhere else: buildLotMatchedFields
+ * skips synthesizing P&L for any row that already carries explicit
+ * cost_basis/proceeds/realized_pnl, precisely because those fields (from
+ * journal_rehydrate's lot-matcher, or ib_reconcile's IB-provided
+ * realized_pnl) are "authoritative" per its own docstring. A bare
+ * real-time single-fill row is the one WITHOUT that authority. Ties (equal
+ * part count — true exact duplicates) keep the LAST row in array order,
+ * matching this file's existing "later write is fresher" stance (see the
+ * legacy-vs-journal preference below).
+ *
+ * Rows without an ib_exec_id are never grouped — there's nothing to key on,
+ * so they always pass through untouched.
+ */
+export function dedupeJournalRows(rows: JournalRow[]): JournalRow[] {
+  const parts = rows.map((row) => execIdParts(row?.payload?.ib_exec_id));
+  const parent = rows.map((_, i) => i);
+  const partOwner = new Map<string, number>();
+
+  parts.forEach((rowParts, i) => {
+    for (const part of rowParts) {
+      const owner = partOwner.get(part);
+      if (owner === undefined) {
+        partOwner.set(part, i);
+      } else {
+        unionRows(parent, i, owner);
+      }
+    }
+  });
+
+  const groups = new Map<number, number[]>();
+  rows.forEach((_, i) => {
+    const root = findRoot(parent, i);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root)!.push(i);
+  });
+
+  const keepIdx = new Set<number>();
+  for (const members of groups.values()) {
+    let winner = members[0];
+    for (const idx of members) {
+      const hasMoreParts = parts[idx].length > parts[winner].length;
+      const tiedButLater = parts[idx].length === parts[winner].length && idx > winner;
+      if (hasMoreParts || tiedButLater) winner = idx;
+    }
+    keepIdx.add(winner);
+  }
+
+  return rows.filter((_, i) => keepIdx.has(i));
+}
+
 /* ─── Legacy blotter payload integration ───────────────────────────────── */
 
 /**
@@ -670,13 +777,20 @@ export function journalRowsToBlotter(
   let totalCommissions = 0;
   let realizedPnl = 0;
 
+  // Pre-pass: collapse journal-vs-journal exec-id collisions (exact
+  // duplicate rows, or a real-time single-fill row superseded by a later
+  // journal_rehydrate composite) BEFORE any P&L synthesis or aggregation
+  // sees them — see dedupeJournalRows. Everything below reads dedupedRows,
+  // never the raw `rows` param.
+  const dedupedRows = dedupeJournalRows(rows);
+
   // Pre-pass: synthesize cost_basis / proceeds / realized_pnl for legacy
   // rows that lack them. Rows that already carry the explicit fields are
   // skipped (rowToBlotterTrade reads them directly).
-  const synthFields = buildLotMatchedFields(rows);
+  const synthFields = buildLotMatchedFields(dedupedRows);
   const legacyByExecId = indexLegacyByExecId(legacyBlotter);
 
-  rows.forEach((row, idx) => {
+  dedupedRows.forEach((row, idx) => {
     if (!row?.payload || typeof row.payload !== "object") return;
 
     const payload = row.payload;
@@ -767,7 +881,7 @@ export function journalRowsToBlotter(
   // Splice in legacy trades that the journal never matched. These are the
   // pre-journal historical records (before the Turso table existed).
   if (legacyBlotter && legacyByExecId.size > 0) {
-    const claimed = collectClaimedLegacyExecIds(rows, legacyByExecId);
+    const claimed = collectClaimedLegacyExecIds(dedupedRows, legacyByExecId);
     const splice = (trade: BlotterTradeShape) => {
       const anyClaimed = (trade.executions ?? []).some(
         (e) => e?.exec_id && claimed.has(e.exec_id),
@@ -786,7 +900,7 @@ export function journalRowsToBlotter(
   }
 
   // as_of = max(journal max(filled_at), legacy as_of).
-  const journalAsOf = maxFilledAt(rows);
+  const journalAsOf = maxFilledAt(dedupedRows);
   const legacyAsOf = legacyBlotter?.as_of ?? "";
   const asOf = journalAsOf > legacyAsOf ? journalAsOf : legacyAsOf;
 

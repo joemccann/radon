@@ -176,7 +176,11 @@ function warnFromImpl(result: GuardResult): GuardResult {
   return { allowed: true, reason: result.reason };
 }
 
-function _checkNakedShortRiskImpl(
+// Exported ONLY as the Gate-4 re-enable tripwire seam (TEST_AUDIT T-052):
+// the preserved logic must stay executable by tests while the public
+// wrappers keep it disabled. Production callers use checkNakedShortRisk /
+// auditOpenOrders exclusively.
+export function _checkNakedShortRiskImpl(
   order: OrderPayload,
   portfolio: NakedShortPortfolio,
 ): GuardResult {
@@ -313,7 +317,7 @@ export function auditOpenOrders(
   return [];
 }
 
-function _auditOpenOrdersImpl(
+export function _auditOpenOrdersImpl(
   orders: NakedShortOpenOrder[],
   portfolio: NakedShortPortfolio,
 ): { orderId: number; permId: number; reason: string }[] {

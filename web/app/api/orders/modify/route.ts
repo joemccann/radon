@@ -1,5 +1,9 @@
 import { NextResponse } from "next/server";
 import { radonFetch } from "@/lib/radonApi";
+import {
+  demoOrderRefusal,
+  resolveDemoOrderDecision,
+} from "@/lib/demo/orderBlockade";
 import type { ModifyCancelTarget, ReplaceComboOrder } from "@/lib/orderModify";
 import {
   EMPTY_ORDERS,
@@ -93,6 +97,20 @@ export async function POST(request: Request): Promise<Response> {
     const newPrice = body.newPrice;
     const newQuantity = body.newQuantity;
     const replaceOrder = body.replaceOrder;
+
+    // Demo blockade (T-018) — FIRST statement that can reach IB, deliberately
+    // ABOVE every radonFetch in this file: the replaceOrder branch below runs a
+    // REAL /orders/cancel + /orders/place pair, so a gate placed any lower would
+    // leave demo users a live order path. There is no /paper/modify (a paper
+    // fill settles immediately, so there is nothing to amend), hence 403 rather
+    // than a paper redirect. Non-demo users fall straight through.
+    const refusal = demoOrderRefusal(await resolveDemoOrderDecision(), "modify");
+    if (refusal) {
+      return NextResponse.json(
+        { error: refusal.message, code: refusal.code },
+        { status: refusal.status },
+      );
+    }
 
     if (orderId === 0 && permId === 0) {
       return NextResponse.json(

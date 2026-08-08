@@ -10,6 +10,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import {
   dbFirstRead,
   contentTimestampMs,
+  isMissingPayload,
   type TimestampedRead,
 } from "../lib/dbFirstRead";
 
@@ -24,6 +25,9 @@ function source<T>(data: T, timestampMs: number | null) {
 const absent = async () => null;
 
 const baseOptions = { maxAgeMs: 10 * MINUTE, now: () => NOW };
+
+/** T-042 fixture predicate: a route whose degraded shape is an empty `results` array. */
+const isEmptyResults = (data: { results: unknown[] }): boolean => data.results.length === 0;
 
 let warn: ReturnType<typeof vi.spyOn>;
 
@@ -249,6 +253,85 @@ describe("dbFirstRead — source deadlines", () => {
   });
 });
 
+describe("dbFirstRead — isDegraded gate (T-042)", () => {
+  it("a fresher structurally-empty {results: []} source loses to a populated older source", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ results: [1, 2, 3] }, NOW - 20 * MINUTE),
+      fromDisk: source({ results: [] as number[] }, NOW - 1 * MINUTE),
+      isDegraded: isEmptyResults,
+    });
+    expect(result).toEqual({
+      ok: true,
+      source: "db",
+      data: { results: [1, 2, 3] },
+      timestampMs: NOW - 20 * MINUTE,
+      fresh: false,
+    });
+  });
+
+  it("(and vice versa) a fresher structurally-empty DB source loses to a populated older disk source", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ results: [] as number[] }, NOW - 1 * MINUTE),
+      fromDisk: source({ results: [1] }, NOW - 20 * MINUTE),
+      isDegraded: isEmptyResults,
+    });
+    expect(result.ok && result.source).toBe("disk");
+    expect(result.ok && result.data).toEqual({ results: [1] });
+  });
+
+  it("missing:true loses to a populated older source regardless of freshness", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ v: "stale-but-real" }, NOW - 30 * MINUTE),
+      fromDisk: source({ v: "x", missing: true }, NOW - 1 * MINUTE),
+      isDegraded: isMissingPayload,
+    });
+    expect(result.ok && result.source).toBe("db");
+    expect(result.ok && result.data).toEqual({ v: "stale-but-real" });
+  });
+
+  it("both sources degraded → keeps the ordinary freshness order (fresher of the two still wins)", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ results: [] as number[] }, NOW - 20 * MINUTE),
+      fromDisk: source({ results: [] as number[] }, NOW - 1 * MINUTE),
+      isDegraded: isEmptyResults,
+    });
+    expect(result.ok && result.source).toBe("disk");
+  });
+
+  it("both sources degraded and tied on timestamp → DB still wins ties", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ results: [] as number[] }, NOW - 5 * MINUTE),
+      fromDisk: source({ results: [] as number[] }, NOW - 5 * MINUTE),
+      isDegraded: isEmptyResults,
+    });
+    expect(result.ok && result.source).toBe("db");
+  });
+
+  it("neither source degraded → behaves exactly like the freshness-only path", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ results: [1] }, NOW - 1 * MINUTE),
+      fromDisk: source({ results: [2] }, NOW - 5 * MINUTE),
+      isDegraded: isEmptyResults,
+    });
+    expect(result.ok && result.source).toBe("db");
+  });
+
+  it("without isDegraded (opt-out routes), a fresher empty payload still wins on timestamp alone — unchanged legacy behavior", async () => {
+    const result = await dbFirstRead({
+      ...baseOptions,
+      fromDb: source({ results: [1, 2, 3] }, NOW - 20 * MINUTE),
+      fromDisk: source({ results: [] as number[] }, NOW - 1 * MINUTE),
+    });
+    expect(result.ok && result.source).toBe("disk");
+  });
+});
+
 describe("contentTimestampMs", () => {
   it("parses naive ISO strings as UTC (Hetzner Python writers)", () => {
     expect(contentTimestampMs("2026-06-12T15:00:00")).toBe(NOW);
@@ -264,5 +347,28 @@ describe("contentTimestampMs", () => {
     expect(contentTimestampMs("")).toBeNull();
     expect(contentTimestampMs("not-a-date")).toBeNull();
     expect(contentTimestampMs(12345)).toBeNull();
+  });
+});
+
+describe("isMissingPayload", () => {
+  it("treats null/undefined payloads as missing", () => {
+    expect(isMissingPayload(null)).toBe(true);
+    expect(isMissingPayload(undefined)).toBe(true);
+  });
+
+  it("treats an explicit missing:true marker as missing", () => {
+    expect(isMissingPayload({ missing: true, v: "x" })).toBe(true);
+  });
+
+  it("treats a populated object without missing:true as present", () => {
+    expect(isMissingPayload({ v: "x" })).toBe(false);
+    expect(isMissingPayload({ missing: false, v: "x" })).toBe(false);
+    expect(isMissingPayload({})).toBe(false);
+  });
+
+  it("treats non-object primitives as present (never absent by construction)", () => {
+    expect(isMissingPayload("x")).toBe(false);
+    expect(isMissingPayload(0)).toBe(false);
+    expect(isMissingPayload(false)).toBe(false);
   });
 });

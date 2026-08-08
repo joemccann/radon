@@ -13,8 +13,11 @@ known-first-party = ["utils", "trade_blotter"]
 # Pin import roots so collection is cwd-independent. Without this, running
 # pytest from inside scripts/ (or a CI job that cd's there) silently loses
 # modules that resolve `import ib_sync` / `from api.*` / `trade_blotter`.
-# Do NOT add `testpaths` — it would orphan scripts/test_ib_realtime.py and
-# scripts/trade_blotter/test_*.py (29 tests). Keep collection broad.
+# Do NOT add `testpaths` — it would orphan scripts/trade_blotter/test_*.py
+# (29 tests) and the root tests/ money-math suite. Keep collection broad.
+# (scripts/test_ib_realtime.py is a MANUAL live-connectivity harness — pytest
+# collects 0 tests from it (exit 5); broad collection is not what keeps it
+# runnable. T-054.)
 pythonpath = [".", "scripts", "scripts/trade_blotter"]
 # cloud/ has its own tests/ package (former radon-cloud). Collecting it with
 # the app suite collides on import path `tests.conftest`. Run cloud tests via

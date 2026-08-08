@@ -2127,3 +2127,29 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 
 - Methodology: CM-30d put/call 25d IV ratio interpolated in delta per monthly then in DTE between bracketing monthlies; daily change charted. Three verification-caught defects fixed pre-ship: monthly-roll artifact (stddev 0.081 -> 0.034), 2023/2024 holidays missing from market_holidays.json (UW garbage chains on closures; plausibility guard [0.8, 3.0] added), Hrana stream death dropping 588/737 checkpoint rows (reset_connection per batch). Post-ship VPS first run caught the JSON-only base read; Turso-first union fixed and verified in prod.
 - Outstanding: authenticated app.radon.run/regime/skew operator screenshot (same Chrome-extension limitation as straddle).
+
+# Task: Real-time SKEW during trading hours (2026-08-07)
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace the production SKEW source, ingestion schedule, storage/API freshness rules, and browser refresh behavior; measure the current stale state.
+- T2 depends_on: [T1] - Add regression coverage that fails when an open-market SKEW response cannot expose a current intraday sample or is cached as prior-day data.
+- T3 depends_on: [T2] - Implement the smallest reliable intraday SKEW update path and surface freshness/provenance without changing the indicator methodology.
+- T4 depends_on: [T3] - Run focused and full Python/TypeScript suites, then verify the rendered `/regime/skew` page and refresh cadence in a browser.
+- T5 depends_on: [T4] - Document the delivered behavior, measured before/after freshness, operational constraints, and any unrelated baseline failures.
+
+## Checklist
+
+- [x] T1 Trace and measure the current SKEW freshness path.
+- [x] T2 Add red regression tests for RTH intraday freshness.
+- [x] T3 Implement real-time ingestion/API/UI refresh.
+- [x] T4 Verify tests, live rendering, and freshness behavior.
+- [x] T5 Add review notes and handoff.
+
+## Review
+
+- Root cause: the healthy SKEW pipeline was intentionally end-of-day only. `fetch_skew.py` excluded the active session, the systemd timer ran once at 21:45 UTC, `/api/skew` allowed 300s cache plus 3600s stale-while-revalidate, and open tabs polled hourly.
+- Delivered behavior: the centralized writer fetches the two current UW SPX monthly chains every minute during RTH, publishes a snapshot-only `is_intraday` row with `as_of`, computes its change against the prior finalized ratio, and keeps high/low/stddev based on finalized sessions. Provisional rows are filtered before rehydration and cannot enter `skew_history`; the 16:00-16:45 ET grace retains the last live sample before the final row is fetched.
+- Freshness/UI: `/api/skew` is no-store; the active tab polls every 60s during RTH and pauses while closed; `LIVE` requires an open-market sample no more than three minutes old; the latest-date cell identifies the value as intraday with an ET observation time. Watchdog freshness is 5m open / 26h closed.
+- Measurement: production baseline at 2026-08-07 RTH still showed finalized 2026-08-06 ratio `1.275877`. A read-only run of the new path returned 2026-08-07 ratio `1.231600`, change `-0.044277`, in 1.267s; repeated UW probes changed intraday, confirming the REST surface updates during the session.
+- Verification: affected Python 45 passed; SKEW/API/hook/frontend Vitest 225 passed; Playwright SKEW 3 passed with visual screenshot inspection; full Vitest 4,976 passed / 26 skipped; cloud 724 passed / 2 skipped; production build, typecheck, lint, output-trace audit, and `git diff --check` passed. Full Python collection remains blocked by the known optional `mcp` dependency; excluding it produced 4,820 passed / 13 skipped and one unrelated stale `data/performance.json` `period_label` failure. `systemd-analyze` is unavailable on macOS; 273 systemd contract tests passed.

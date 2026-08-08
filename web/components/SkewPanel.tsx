@@ -9,7 +9,7 @@ import InfoTooltip from "./InfoTooltip";
 import MetricCell from "./mobile/MetricCell";
 import SectionEmptyState from "./SectionEmptyState";
 import SpectralLoader from "./SpectralLoader";
-import { RegimeStrip, RegimeStripCell } from "./RegimeStrip";
+import { LiveBadge, RegimeStrip, RegimeStripCell } from "./RegimeStrip";
 import { chartSeriesColor } from "@/lib/chartSystem";
 import {
   defaultPresetForLength,
@@ -22,12 +22,14 @@ import {
   formatSkewChange,
   formatSkewRatio,
   formatZ,
+  isFreshIntradaySkew,
   skewChangeColor,
   zScore,
   type SkewChartView,
 } from "@/lib/skew";
 import { useSkew } from "@/lib/useSkew";
 import { useViewport } from "@/lib/useViewport";
+import { MarketState } from "@/lib/useMarketHours";
 
 const SKEW_TOOLTIP =
   "Ratio of SPX 25-delta put IV to 25-delta call IV at a constant 30-day maturity: each wing is interpolated in delta from the Unusual Whales chain, then in time between the two bracketing monthly expiries. The chart plots the day-over-day change: sharp drops mean put skew collapsing or call demand spiking; sharp rises mean downside fear getting bid. Beyond 2 sigma is a tail repricing event.";
@@ -61,8 +63,8 @@ function formatDayTick(d: Date): string {
   });
 }
 
-export default function SkewPanel() {
-  const { data, loading, syncing, lastSync } = useSkew();
+export default function SkewPanel({ marketState }: { marketState?: MarketState }) {
+  const { data, loading, syncing, lastSync } = useSkew(marketState ?? null);
   const { isMobile, hasMounted } = useViewport();
   const compact = hasMounted && isMobile;
 
@@ -103,6 +105,15 @@ export default function SkewPanel() {
   const stats = data.stats;
   const changeColor = skewChangeColor(current.change, stats.stddev);
   const z = zScore(current.change, stats.stddev);
+  const live = data.market_status === "open" && isFreshIntradaySkew(current);
+  const asOf = current.as_of
+    ? new Date(current.as_of).toLocaleTimeString("en-US", {
+        hour: "numeric",
+        minute: "2-digit",
+        timeZone: "America/New_York",
+        timeZoneName: "short",
+      })
+    : null;
 
   const rows: SkewPanelChartRow[] = buildSkewChartRows(series, view);
   const [start, end] = chartRange;
@@ -136,6 +147,9 @@ export default function SkewPanel() {
             <Sigma size={14} />
             25-Delta Put/Call Skew
             <InfoTooltip text={SKEW_TOOLTIP} />
+            <span data-testid="skew-live-status">
+              <LiveBadge live={live} />
+            </span>
           </div>
           {lastSync && (
             <span style={{ fontFamily: "var(--font-mono)", fontSize: "9px", color: "var(--text-muted)" }}>
@@ -219,7 +233,7 @@ export default function SkewPanel() {
               testId="skew-strip-date"
               label="LATEST DATE"
               value={current.date}
-              sub={<>DAILY UW GREEKS SERIES</>}
+              sub={current.is_intraday ? <>INTRADAY{asOf ? ` · AS OF ${asOf}` : ""}</> : <>FINAL SESSION</>}
             />
             <RegimeStripCell
               testId="skew-strip-tenor"

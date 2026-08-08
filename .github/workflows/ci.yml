@@ -138,8 +138,10 @@ jobs:
       # not count partial branches). 64 sits ~2.5pts below that so it passes
       # today while catching a coverage regression. Raise it over time as
       # coverage climbs; never lower it to make a red build pass.
+      # `tests` (repo root) carries the TWR money-math suite (20 cases) —
+      # it passed locally for months while gating nothing (TEST_AUDIT T-051).
       - run: >-
-          python -m pytest scripts/tests scripts/api/tests scripts/trade_blotter
+          python -m pytest scripts/tests scripts/api/tests scripts/trade_blotter tests
           --cov=scripts --cov=api --cov-branch --cov-report=term-missing
           --cov-fail-under=64
       - name: Cloud infra pytest

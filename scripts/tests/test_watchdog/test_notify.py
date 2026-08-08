@@ -135,7 +135,10 @@ class TestCooldownDeliverySemantics:
         from watchdog import notify
 
         with (
-            patch("watchdog.notify._emit_pushover", return_value="pushover 503"),
+            patch(
+                "watchdog.notify._emit_pushover",
+                return_value=notify.ChannelResult(attempted=True, error="pushover 503"),
+            ),
             patch("watchdog.notify.cooldown_mod.mark_notified") as mark_notified,
         ):
             notify.dispatch(sample_alert)
@@ -146,7 +149,10 @@ class TestCooldownDeliverySemantics:
         from watchdog import notify
 
         with (
-            patch("watchdog.notify._emit_pushover", return_value=None),
+            patch(
+                "watchdog.notify._emit_pushover",
+                return_value=notify.ChannelResult(attempted=True),
+            ),
             patch("watchdog.notify.cooldown_mod.mark_notified") as mark_notified,
         ):
             notify.dispatch(sample_alert)

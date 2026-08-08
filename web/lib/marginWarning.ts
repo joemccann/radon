@@ -16,6 +16,12 @@ export interface MarginAssessment {
   cashToClear: number | null;
   /** Stable identifier for transition logic. Hashes the (level, rounded cushion) so the same condition produces the same key across polls but a worsening triggers a fresh fire. */
   key: string;
+  /**
+   * True when level="none" was forced by missing or non-finite (NaN/Infinity)
+   * inputs rather than a genuinely healthy account. Callers must not treat a
+   * degraded "none" as a verified-safe reading.
+   */
+  degraded: boolean;
 }
 
 const RANK: Record<MarginLevel, number> = { none: 0, warning: 1, critical: 2 };
@@ -75,12 +81,14 @@ function depositSuffix(cashToClear: number): string {
  *   - warning:  EquityWithLoanValue ≤ MaintMarginReq × 1.10  (IBKR's own published rule)
  *   - none:     otherwise
  *
- * Returns level=none with cushionPct=null when inputs are missing or
- * net_liquidation is non-positive (avoid division-by-zero / cry-wolf).
+ * Returns level=none with cushionPct=null and degraded=true when inputs are
+ * missing, non-finite (NaN/Infinity), or net_liquidation is non-positive
+ * (avoid division-by-zero / cry-wolf / a NaN or Infinity cushion masquerading
+ * as a healthy "none").
  */
 export function assessMargin(account: AccountSummary | null | undefined): MarginAssessment {
   if (!account) {
-    return { level: "none", message: "", cushionPct: null, cashToClear: null, key: "none:no-account" };
+    return { level: "none", message: "", cushionPct: null, cashToClear: null, key: "none:no-account", degraded: true };
   }
 
   const nlv = account.net_liquidation;
@@ -88,8 +96,8 @@ export function assessMargin(account: AccountSummary | null | undefined): Margin
   const mmr = account.maintenance_margin ?? null;
   const ewl = account.equity_with_loan ?? null;
 
-  if (nlv == null || nlv <= 0 || el == null) {
-    return { level: "none", message: "", cushionPct: null, cashToClear: null, key: "none:missing" };
+  if (nlv == null || el == null || !Number.isFinite(nlv) || !Number.isFinite(el) || nlv <= 0) {
+    return { level: "none", message: "", cushionPct: null, cashToClear: null, key: "none:missing", degraded: true };
   }
 
   const cashToClear = cashToClearWarning({ nlv, el, mmr, ewl });
@@ -103,6 +111,7 @@ export function assessMargin(account: AccountSummary | null | undefined): Margin
       cushionPct: 0,
       cashToClear,
       key: "critical:excess-liquidity-non-positive",
+      degraded: false,
     };
   }
 
@@ -116,6 +125,7 @@ export function assessMargin(account: AccountSummary | null | undefined): Margin
       cushionPct,
       cashToClear,
       key: "critical:cushion-below-1pct",
+      degraded: false,
     };
   }
 
@@ -126,6 +136,7 @@ export function assessMargin(account: AccountSummary | null | undefined): Margin
       cushionPct,
       cashToClear,
       key: "warning:cushion-below-5pct",
+      degraded: false,
     };
   }
 
@@ -137,8 +148,9 @@ export function assessMargin(account: AccountSummary | null | undefined): Margin
       cushionPct,
       cashToClear,
       key: "warning:ewl-within-10pct-of-mmr",
+      degraded: false,
     };
   }
 
-  return { level: "none", message: "", cushionPct, cashToClear: null, key: "none:healthy" };
+  return { level: "none", message: "", cushionPct, cashToClear: null, key: "none:healthy", degraded: false };
 }

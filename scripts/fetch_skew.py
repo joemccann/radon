@@ -28,6 +28,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 # ── path setup ────────────────────────────────────────────────────
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -44,6 +45,7 @@ except Exception:
 
 from utils.market_calendar import (  # noqa: E402 — needs the sys.path insert
     get_last_n_trading_days,
+    market_state,
     last_completed_session_date,
     load_holidays,
 )
@@ -62,6 +64,8 @@ _MAX_GAP_SESSIONS = 10
 _BACKFILL_START = "2023-09-06"  # UW greeks history floor for this token
 _BACKFILL_THROTTLE_S = 0.3
 _BACKFILL_CHECKPOINT_EVERY = 50
+_FINALIZATION_GRACE = timedelta(minutes=45)
+_ET = ZoneInfo("America/New_York")
 _BASE_ROW_KEYS = ("date", "expiry", "dte", "expiry_far", "dte_far", "put_iv", "call_iv", "ratio")
 
 
@@ -232,7 +236,12 @@ def _write_db_cache(
     try:
         writer.ensure_no_replica_for_writers()
         if rows_changed:
-            writer.upsert_skew_rows(payload["series"], recorded_at=scan_time)
+            # Intraday points are display-only. Persisting one would make the
+            # post-close run believe today's final session already exists.
+            durable_rows = [
+                row for row in payload["series"] if not row.get("is_intraday")
+            ]
+            writer.upsert_skew_rows(durable_rows, recorded_at=scan_time)
         writer.upsert_scan_snapshot("skew", scan_time, payload)
         writer.record_service_health("skew", "ok", finished_at=scan_time)
     except Exception as exc:  # noqa: BLE001 — best-effort mirror
@@ -330,9 +339,12 @@ def _fetch_session_row(client: Any, session: str) -> Optional[dict[str, Any]]:
 
 
 def _missing_sessions(last_stored: str, now: datetime) -> list[str]:
-    """Trading days after ``last_stored`` up to the last COMPLETED ET session
-    (16:00 boundary), ascending, bounded to the most recent 10."""
-    last_completed = last_completed_session_date(now)
+    """Trading days after ``last_stored`` up to the last FINALIZABLE ET
+    session (16:45 boundary), ascending, bounded to the most recent 10."""
+    # UW's 16:00 print can still settle immediately after the bell. Preserve
+    # the established 16:45 ET finalization window even though the high-
+    # frequency timer also fires through the UTC DST shoulder.
+    last_completed = last_completed_session_date(now - _FINALIZATION_GRACE)
     if last_stored >= last_completed:
         return []
     anchor = datetime.strptime(last_completed, "%Y-%m-%d").replace(hour=16, minute=30)
@@ -350,15 +362,22 @@ def _scan_time_iso(now: datetime) -> str:
 
 
 def _build_payload(
-    scan_time: str, series: list[dict[str, Any]]
+    scan_time: str,
+    series: list[dict[str, Any]],
+    *,
+    stats_series: Optional[list[dict[str, Any]]] = None,
+    market_status: str = "closed",
 ) -> dict[str, Any]:
     return {
         "scan_time": scan_time,
         "source": "unusual_whales",
         "count": len(series),
         "current": series[-1] if series else None,
-        "stats": compute_stats(series),
+        # A provisional move is compared with the completed-session
+        # distribution; it must not move its own high/low/stddev baseline.
+        "stats": compute_stats(stats_series if stats_series is not None else series),
         "series": series,
+        "market_status": market_status,
     }
 
 
@@ -378,8 +397,17 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
     # date (reads are Turso-first; the JSON file is only a fallback). Trusting
     # the JSON alone restarted the series at the 10-session gap bound on a
     # fresh host and clobbered the full snapshot (VPS first run, 2026-08-06).
+    cached_payload = _read_json_cache() or {}
+    cached_rows = cached_payload.get("series") or []
+    cached_intraday = next(
+        (row for row in reversed(cached_rows) if row.get("is_intraday")),
+        None,
+    )
+
     by_date = {row["date"]: row for row in _base_rows(_read_history_rows())}
-    for row in _base_rows((_read_json_cache() or {}).get("series") or []):
+    # Never promote the JSON mirror's provisional row into the durable base.
+    # _base_rows intentionally strips metadata, so filter before calling it.
+    for row in _base_rows([row for row in cached_rows if not row.get("is_intraday")]):
         by_date[row["date"]] = row
     base = [by_date[day] for day in sorted(by_date)]
 
@@ -397,11 +425,45 @@ def run(client: Optional[Any] = None, *, now: Optional[datetime] = None) -> dict
         if row:
             new_rows.append(row)
 
-    series = compute_change_series(base + new_rows)
-    if not series:
+    completed_series = compute_change_series(base + new_rows)
+    if not completed_series:
         raise ValueError("skew series computed to zero rows")
 
-    payload = _build_payload(scan_time, series)
+    state = market_state(now)
+    is_open = bool(state.get("is_open"))
+    market_status = "open" if is_open else "closed"
+    current_session = now.astimezone(_ET).date().isoformat()
+    intraday: Optional[dict[str, Any]] = None
+
+    if is_open and completed_series[-1]["date"] < current_session:
+        print(f"[skew] fetching intraday {current_session}", file=sys.stderr)
+        live_row = _fetch_session_row(client, current_session)
+        if live_row is None:
+            # Do not advance scan_time or write a false-ok heartbeat. The last
+            # good snapshot remains available and naturally ages to STALE.
+            raise ValueError(f"no usable intraday skew chain for {current_session}")
+        intraday = {
+            **live_row,
+            "change": live_row["ratio"] - completed_series[-1]["ratio"],
+            "is_intraday": True,
+            "as_of": scan_time,
+        }
+    elif (
+        cached_intraday
+        and cached_intraday.get("date") == current_session
+        and completed_series[-1]["date"] < current_session
+    ):
+        # Between the close and the 16:45 ET finalization run, retain the last
+        # good live sample instead of reverting the UI to yesterday.
+        intraday = cached_intraday
+
+    display_series = [*completed_series, intraday] if intraday else completed_series
+    payload = _build_payload(
+        scan_time,
+        display_series,
+        stats_series=completed_series,
+        market_status=market_status,
+    )
     _write_db_cache(payload, scan_time, rows_changed=bool(new_rows))
     _write_json_cache(payload)
     return payload

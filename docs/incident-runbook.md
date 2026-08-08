@@ -294,3 +294,20 @@ stays with the dedicated units (`feedback_ib_auto_recovery_conservative`,
 `feedback_watchdog_works_dont_deploy_autoheal`), and paging stays with
 `scripts/watchdog`. This tool's job is evidence: a structured artifact a human
 or `/incident` can act on.
+
+## Laptop responder + pending-diagnoses session hook
+
+`scripts/incident_responder.py` (launchd `com.radon.incident-responder`, 10 min)
+mirrors the VPS incident dir to `data/incidents_remote/`, runs
+`/incident <file> --analyze-only` via headless Claude Code on open incidents
+older than 12 min, writes `<incident_id>.diagnosis.md` beside the mirror, and
+fires macOS notifications. Analyze-only by design — shipping a fix is human-gated.
+
+macOS banners are easy to miss, so `.claude/hooks/pending_diagnoses.py` closes
+the loop at the next Claude Code session start in this repo (SessionStart hook,
+registered in `.claude/settings.local.json` — per-machine, not committed). It
+scans `data/incidents_remote/*.diagnosis.md`, pairs each with its
+`incident-<id>.json`, and surfaces any whose incident is not `resolved` (open or
+missing) as a session-start banner plus model context, so the session opens
+ready to address the diagnosis. Resolved incidents never nag. No output = hook
+silent.

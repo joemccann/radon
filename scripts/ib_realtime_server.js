@@ -44,6 +44,7 @@ import {
 } from "./lib/staleDataMachine.js";
 import { isMarketOpen } from "./lib/marketCalendar.js";
 import { shouldSkipTicketValidation } from "./lib/wsTrust.js";
+import { applyDepthOp } from "./lib/depthLadder.js";
 import { createReconnectGate } from "./lib/reconnectGate.js";
 
 const DEFAULT_WS_PORT = 8765;
@@ -1344,20 +1345,24 @@ function applyDepthDelta(key, position, marketMaker, operation, side, price, siz
   const state = symbolDepthStates.get(key);
   if (!state) return;
   const ladder = side === 1 ? state.ladders.bid : state.ladders.ask;
-  const level = { price, size, marketMaker: marketMaker || null };
-  switch (operation) {
-    case 0: // insert: shift every level at/below position down one.
-      ladder.splice(position, 0, level);
-      break;
-    case 1: // update in place; defensive OOB update => insert.
-      if (position < ladder.length) ladder[position] = level;
-      else ladder.splice(position, 0, level);
-      break;
-    case 2: // delete: shift every level below position up one; ignore OOB.
-      if (position < ladder.length) ladder.splice(position, 1);
-      break;
-    default:
-      break;
+  const maxRows = state.isFutures ? DEPTH_NUM_ROWS_FUTURES : DEPTH_NUM_ROWS_EQUITY;
+  // Pure position-SHIFT reducer (scripts/lib/depthLadder.js, T-041): OOB
+  // ops mean the ladder desynced from IB — reject rather than corrupt
+  // every later position-addressed update, and never exceed the row budget.
+  const result = applyDepthOp(
+    ladder,
+    { operation, position, price, size, marketMaker: marketMaker || null },
+    maxRows,
+  );
+  if (!result.applied) {
+    state.desyncCount = (state.desyncCount || 0) + 1;
+    if (state.desyncCount === 1 || state.desyncCount % 50 === 0) {
+      console.warn(
+        `[depth] rejected ${result.reason} for ${key} (pos=${position}, op=${operation}, ` +
+        `desyncs=${state.desyncCount}) — ladder kept intact`,
+      );
+    }
+    return;
   }
   hydrateAndBroadcastDepth(key);
 }
@@ -1643,6 +1648,17 @@ function safeInitialState(data) {
   return data;
 }
 
+/**
+ * Build the initial `price` message for a subscription restored after an IB
+ * reconnect. cleanupSymbolStateForReconnect() only cancels tickers — every
+ * symbol's cached PriceData survives with its prior-session timestamp — so this
+ * broadcast is an INITIAL snapshot in exactly the same sense as the three
+ * subscribe paths and must clear stale quotes the same way.
+ */
+function buildRestorePriceMessage(key, state) {
+  return { type: "price", symbol: key, data: safeInitialState(state.data) };
+}
+
 function hydrateAndBroadcast(symbol) {
   const state = symbolStates.get(symbol);
   if (!state) return;
@@ -1800,11 +1816,7 @@ function restoreSubscriptions() {
     }
     const state = symbolStates.get(key);
     if (state) {
-      sendToSymbolSubscribers(key, {
-        type: "price",
-        symbol: key,
-        data: state.data,
-      });
+      sendToSymbolSubscribers(key, buildRestorePriceMessage(key, state));
     }
   }
 }

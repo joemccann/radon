@@ -24,6 +24,10 @@ export interface SkewCurrent {
    * rows priced from a single usable monthly. */
   expiry_far?: string | null;
   dte_far?: number | null;
+  /** Snapshot-only current-session observation; never a finalized DB row. */
+  is_intraday?: boolean;
+  /** UTC observation timestamp for an intraday row. */
+  as_of?: string;
 }
 
 export interface SkewStats {
@@ -43,6 +47,20 @@ export interface SkewData {
   current: SkewCurrent | null;
   stats: SkewStats | null;
   series: SkewEntry[];
+  market_status?: "open" | "closed";
+}
+
+export const SKEW_LIVE_MAX_AGE_MS = 3 * 60_000;
+
+export function isFreshIntradaySkew(
+  current: SkewCurrent | null | undefined,
+  nowMs = Date.now(),
+): boolean {
+  if (!current?.is_intraday || !current.as_of) return false;
+  const asOfMs = Date.parse(current.as_of);
+  if (!Number.isFinite(asOfMs)) return false;
+  const age = nowMs - asOfMs;
+  return age >= 0 && age <= SKEW_LIVE_MAX_AGE_MS;
 }
 
 /* ─── Formatting ─────────────────────────────────────── */
