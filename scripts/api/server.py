@@ -3771,6 +3771,11 @@ _IB_CONN_REFUSED_PATTERNS = (
 _IB_SCRIPT_COOLDOWN_SECS = 15.0
 _ib_last_failure: float = 0.0  # monotonic timestamp of last IB connection failure
 
+# Scripts that transmit orders are NOT idempotent: a connection-flavored
+# failure can surface after placeOrder already reached IB, so the automatic
+# post-restart re-run would place a second identical live order (T-011).
+_NON_IDEMPOTENT_IB_SCRIPTS = frozenset({"ib_place_order.py"})
+
 
 def _is_ib_connection_error(error_msg: str) -> bool:
     """Check if an error message indicates IB Gateway is unreachable."""
@@ -3906,12 +3911,28 @@ async def _run_ib_script_with_recovery(
             gw_result = await restart_ib_gateway()
 
             if gw_result.get("restarted") and gw_result.get("port_listening"):
-                logger.info("IB Gateway restarted, retrying %s", script)
                 _ib_last_failure = 0.0  # Clear cooldown after successful restart
                 if ib_pool:
                     await ib_pool.disconnect_all()
                     await ib_pool.connect_all()
-                result = await _runner(script, args, timeout=timeout)
+                if script in _NON_IDEMPOTENT_IB_SCRIPTS:
+                    logger.warning(
+                        "IB Gateway restarted after %s failed — NOT re-running a "
+                        "non-idempotent order script; outcome is indeterminate",
+                        script,
+                    )
+                    result = ScriptResult(
+                        ok=False,
+                        error=(
+                            "IB Gateway was restarted after the placement attempt "
+                            "failed. The order was NOT automatically retried — the "
+                            "first attempt may have reached IB before the failure. "
+                            "Check open orders before re-placing."
+                        ),
+                    )
+                else:
+                    logger.info("IB Gateway restarted, retrying %s", script)
+                    result = await _runner(script, args, timeout=timeout)
             else:
                 logger.error("IB Gateway restart failed: %s", gw_result)
                 result = ScriptResult(
