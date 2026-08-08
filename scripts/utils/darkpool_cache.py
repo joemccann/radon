@@ -20,6 +20,11 @@ This cache persists prior-day prints to disk so only TODAY hits UW intraday:
 
 This collapses scanner/flow dark-pool load from ~5 calls/ticker/run to ~1
 (today only) — an ~80% cut against the UW daily request budget.
+
+Schema:
+  - v1 / missing: single-page fetch (UW 500 cap) — treat as miss so liquid
+    names re-fetch with multi-page pagination.
+  - v2: full-day cursor walk complete.
 """
 
 from __future__ import annotations
@@ -36,6 +41,9 @@ _ET = pytz.timezone("America/New_York")
 
 # Module-level so tests can monkeypatch it to a tmp dir.
 CACHE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "darkpool_cache"
+
+# Bump when on-disk payload semantics change (forces re-fetch of stale rows).
+CACHE_SCHEMA = 2
 
 # Entries older than this are never read again (lookback windows are <= ~5 days),
 # so they are pruned to keep the directory bounded.
@@ -77,6 +85,10 @@ def get_cached_darkpool(ticker: str, date: str) -> Optional[List[dict]]:
             payload = json.load(f)
     except (OSError, ValueError):
         return None
+    # Reject pre-pagination rows (missing/legacy schema) so liquid names
+    # re-walk UW pages instead of serving a 500-print truncated day forever.
+    if payload.get("schema") != CACHE_SCHEMA:
+        return None
     trades = payload.get("trades")
     return trades if isinstance(trades, list) else None
 
@@ -103,6 +115,7 @@ def set_cached_darkpool(ticker: str, date: str, trades) -> None:
         "ticker": ticker.upper(),
         "date": date,
         "count": len(trades),
+        "schema": CACHE_SCHEMA,
         "cached_at": datetime.now(_ET).isoformat(),
         "trades": trades,
     }

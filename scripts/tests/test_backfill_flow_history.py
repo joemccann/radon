@@ -31,6 +31,7 @@ def _write_cache_file(ticker: str, date: str, trades: list) -> None:
         "ticker": ticker.upper(),
         "date": date,
         "count": len(trades),
+        "schema": darkpool_cache.CACHE_SCHEMA,
         "cached_at": datetime.now().isoformat(),
         "trades": trades,
     }

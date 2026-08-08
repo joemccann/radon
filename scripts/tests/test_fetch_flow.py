@@ -316,6 +316,107 @@ class TestFetchFlowCombinedSignal:
         assert result["combined_signal"] == "DP_ACCUMULATION_ONLY"
 
 
+class TestDarkpoolPagination:
+    """UW hard-caps each darkpool response at 500. Liquid names (GLD)
+    need older_than cursor walks so Daily Dark Pool History is not stuck
+    at 500 prints forever.
+    """
+
+    def _trade(self, i: int, executed_at: str) -> dict:
+        return {
+            "size": 100 + i,
+            "price": 50.0,
+            "premium": 5000,
+            "nbbo_bid": 49.9,
+            "nbbo_ask": 50.1,
+            "executed_at": executed_at,
+            "tracking_id": i,
+        }
+
+    def test_single_short_page_one_call(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, fetch_darkpool
+
+        mock_client = MagicMock()
+        page = [self._trade(i, f"2026-08-06T14:00:{i:02d}Z") for i in range(3)]
+        mock_client.get_darkpool_flow.return_value = {"data": page}
+
+        result = fetch_darkpool("GLD", date="2026-08-06", _client=mock_client)
+
+        assert result == page
+        assert mock_client.get_darkpool_flow.call_count == 1
+        kwargs = mock_client.get_darkpool_flow.call_args.kwargs
+        assert kwargs.get("limit") == DARKPOOL_PAGE_LIMIT
+        assert kwargs.get("older_than") is None
+
+    def test_full_page_then_partial_walks_older_than(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, _darkpool_page_cursor, fetch_darkpool
+
+        # Strictly desc timestamps so cursor is unambiguous.
+        page1 = [
+            self._trade(i, f"2026-08-06T16:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z")
+            for i in range(DARKPOOL_PAGE_LIMIT)
+        ]
+        oldest_p1 = _darkpool_page_cursor(page1)
+        page2 = [
+            self._trade(500 + i, f"2026-08-06T12:00:{i:02d}Z") for i in range(42)
+        ]
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.side_effect = [
+            {"data": page1},
+            {"data": page2},
+        ]
+
+        result = fetch_darkpool("GLD", date="2026-08-06", _client=mock_client)
+
+        assert len(result) == DARKPOOL_PAGE_LIMIT + 42
+        assert mock_client.get_darkpool_flow.call_count == 2
+        second = mock_client.get_darkpool_flow.call_args_list[1].kwargs
+        assert second["older_than"] == oldest_p1
+        assert second["date"] == "2026-08-06"
+        assert second["limit"] == DARKPOOL_PAGE_LIMIT
+
+    def test_three_full_pages_then_empty_stops(self):
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, _darkpool_page_cursor, fetch_darkpool
+
+        pages = []
+        for p in range(3):
+            pages.append([
+                self._trade(
+                    p * DARKPOOL_PAGE_LIMIT + i,
+                    f"2026-08-06T{16 - p:02d}:{59 - (i // 60):02d}:{59 - (i % 60):02d}Z",
+                )
+                for i in range(DARKPOOL_PAGE_LIMIT)
+            ])
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.side_effect = [
+            {"data": pages[0]},
+            {"data": pages[1]},
+            {"data": pages[2]},
+            {"data": []},
+        ]
+
+        result = fetch_darkpool("GLD", date="2026-08-06", _client=mock_client)
+
+        assert len(result) == 3 * DARKPOOL_PAGE_LIMIT
+        assert mock_client.get_darkpool_flow.call_count == 4
+        assert mock_client.get_darkpool_flow.call_args_list[3].kwargs["older_than"] == (
+            _darkpool_page_cursor(pages[2])
+        )
+
+    def test_stops_when_cursor_cannot_advance(self):
+        """If UW returns a full page without a usable older cursor, stop."""
+        from fetch_flow import DARKPOOL_PAGE_LIMIT, fetch_darkpool
+
+        page = [{"size": 1, "price": 1.0, "premium": 1} for _ in range(DARKPOOL_PAGE_LIMIT)]
+        mock_client = MagicMock()
+        mock_client.get_darkpool_flow.return_value = {"data": page}
+
+        result = fetch_darkpool("GLD", date="2026-08-06", _client=mock_client)
+
+        assert len(result) == DARKPOOL_PAGE_LIMIT
+        assert mock_client.get_darkpool_flow.call_count == 1
+
+
 class TestUWRetryPolicy:
     """Regression for the 2026-05-15 EWY incident: a transient UW
     rate-limit on per-day darkpool calls was silently swallowed and

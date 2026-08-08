@@ -25,7 +25,13 @@ The `UW_TOKEN` environment variable should contain your API key.
 - `date` (query, optional): ISO date (YYYY-MM-DD), defaults to current/last market day
 - `min_premium`, `max_premium`: Filter by trade premium
 - `min_size`, `max_size`: Filter by trade size
-- `limit`: Max 500
+- `limit`: Default 500, **max 500** (hard cap per request)
+- `older_than` / `newer_than`: time cursors (unix ms/s or ISO/RFC3339) for pagination
+- `order`: `desc` (default) or `asc`; `order_by` defaults to `executed_at`
+
+**Pagination:** one request never returns more than 500 prints. Radon
+`fetch_flow.fetch_darkpool` walks `older_than` (desc) until a short page.
+Liquid names (GLD, SPY) routinely need multiple pages per session day.
 
 **Response Fields:**
 ```json

@@ -353,6 +353,22 @@ class TestDarkPoolEndpoints:
         assert call_kwargs["params"]["min_premium"] == 100000
         assert call_kwargs["params"]["limit"] == 100
 
+    def test_get_darkpool_flow_pagination_cursors(self, client, mock_session):
+        """UW pages darkpool by time: older_than / newer_than + limit."""
+        mock_session.get.return_value = _make_response(200, {"data": []})
+        client.get_darkpool_flow(
+            "GLD",
+            date="2026-08-06",
+            limit=500,
+            older_than="2026-08-06T15:30:00Z",
+            order="desc",
+        )
+        params = mock_session.get.call_args[1]["params"]
+        assert params["date"] == "2026-08-06"
+        assert params["limit"] == 500
+        assert params["older_than"] == "2026-08-06T15:30:00Z"
+        assert params["order"] == "desc"
+
     def test_get_darkpool_flow_uppercases_ticker(self, client, mock_session):
         mock_session.get.return_value = _make_response(200, {"data": []})
         client.get_darkpool_flow("aapl")

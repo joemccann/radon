@@ -46,6 +46,12 @@ logger = logging.getLogger(__name__)
 # retry covers the common transient case without amplifying the throttle.
 _UW_TRANSIENT_RETRY_SLEEP_S = 2.0
 
+# UW /api/darkpool/{ticker}: limit default 500, max 500. Full days on liquid
+# names (GLD, SPY, …) require older_than cursor walks (default order=desc).
+DARKPOOL_PAGE_LIMIT = 500
+# Safety ceiling: 40 pages × 500 = 20k prints/day. Beyond that log and stop.
+DARKPOOL_MAX_PAGES = 40
+
 # Session calendar is always US/Eastern. Host-local/UTC datetime.now() on CI
 # runners (and the VPS after 20:00 ET) invents an extra "today" that is not
 # yet a US session day and breaks the darkpool cache immutability contract.
@@ -281,6 +287,22 @@ def _call_uw_with_retry(call, *, what: str, retry_transient: bool = True):
         raise
 
 
+def _darkpool_page_cursor(trades: List[Dict]) -> Optional[str]:
+    """Oldest executed_at on a desc-ordered page → next older_than cursor.
+
+    Returns None when the page has no usable timestamps (cannot advance).
+    """
+    oldest: Optional[str] = None
+    for trade in trades:
+        ts = trade.get("executed_at") or trade.get("trf_executed_at")
+        if not ts:
+            continue
+        ts_s = str(ts)
+        if oldest is None or ts_s < oldest:
+            oldest = ts_s
+    return oldest
+
+
 def fetch_darkpool(
     ticker: str,
     date: Optional[str] = None,
@@ -288,7 +310,10 @@ def fetch_darkpool(
     *,
     retry_transient: bool = True,
 ) -> List[Dict]:
-    """Fetch dark pool trade prints for a ticker.
+    """Fetch dark pool trade prints for a ticker (full day, multi-page).
+
+    UW hard-caps each response at ``DARKPOOL_PAGE_LIMIT`` (500). Walks
+    older pages with ``older_than`` until a short page or empty page.
 
     Returns list of individual dark pool transactions with price, size,
     NBBO context, and premium.
@@ -298,16 +323,58 @@ def fetch_darkpool(
     flow_report build rather than build a structurally-degraded report
     that gets cached.
     """
-    def _fetch(client):
-        what = f"darkpool({ticker}, date={date})"
-        resp = _call_uw_with_retry(
-            lambda: client.get_darkpool_flow(ticker, date=date),
+    def _fetch_page(client, *, older_than: Optional[str]):
+        what = f"darkpool({ticker}, date={date}, older_than={older_than})"
+        return _call_uw_with_retry(
+            lambda: client.get_darkpool_flow(
+                ticker,
+                date=date,
+                limit=DARKPOOL_PAGE_LIMIT,
+                older_than=older_than,
+                order="desc",
+            ),
             what=what,
             retry_transient=retry_transient,
         )
-        if resp is None:
-            return []
-        return resp.get("data", [])
+
+    def _fetch(client):
+        all_trades: List[Dict] = []
+        older_than: Optional[str] = None
+        seen_ids: set = set()
+        for page_idx in range(DARKPOOL_MAX_PAGES):
+            resp = _fetch_page(client, older_than=older_than)
+            if resp is None:
+                break
+            page = resp.get("data") or []
+            if not isinstance(page, list) or not page:
+                break
+
+            for trade in page:
+                tid = trade.get("tracking_id")
+                if tid is not None:
+                    if tid in seen_ids:
+                        continue
+                    seen_ids.add(tid)
+                all_trades.append(trade)
+
+            if len(page) < DARKPOOL_PAGE_LIMIT:
+                break
+
+            next_cursor = _darkpool_page_cursor(page)
+            if next_cursor is None or next_cursor == older_than:
+                logger.warning(
+                    "darkpool(%s, date=%s): full page without advancing cursor; "
+                    "stopping at %d prints",
+                    ticker, date, len(all_trades),
+                )
+                break
+            older_than = next_cursor
+        else:
+            logger.warning(
+                "darkpool(%s, date=%s): hit DARKPOOL_MAX_PAGES=%d (%d prints)",
+                ticker, date, DARKPOOL_MAX_PAGES, len(all_trades),
+            )
+        return all_trades
 
     if _client is not None:
         return _fetch(_client)
