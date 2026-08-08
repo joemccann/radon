@@ -9,7 +9,10 @@ import {
   firstPlaceOrderSchemaErrorMessage,
   normalizeOptionRight,
 } from "@/lib/placeOrderBodySchema";
-import { resolveDemoOrderDecision } from "@/lib/demo/orderBlockade";
+import {
+  AUTH_UNAVAILABLE_MESSAGE,
+  resolveDemoOrderDecision,
+} from "@/lib/demo/orderBlockade";
 
 /**
  * POST /api/orders/whatif — read-only IB margin preview.
@@ -81,13 +84,19 @@ export async function POST(request: Request): Promise<Response> {
     body.type = body.type ?? "stock";
 
     // Demo users have no live IB account — the paper engine computes no IB
-    // margin, so surface "unavailable" rather than forwarding anywhere.
+    // margin, so surface "unavailable" rather than forwarding anywhere. Same
+    // for an UNKNOWN cohort (Clerk threw): a preview is informational, so it
+    // degrades instead of reaching the operator's live account on a guess
+    // (T-018). Anything that is not an explicit `allow` stops here.
     const demoDecision = await resolveDemoOrderDecision();
-    if (demoDecision.action === "paper" || demoDecision.action === "block-expired") {
+    if (demoDecision.action !== "allow") {
       return setNoStoreResponseHeaders(
         NextResponse.json({
           ...UNAVAILABLE,
-          warning: "Margin preview requires a live IB account",
+          warning:
+            demoDecision.action === "auth-unavailable"
+              ? `Margin preview unavailable. ${AUTH_UNAVAILABLE_MESSAGE}`
+              : "Margin preview requires a live IB account",
           requestId,
         }),
         requestId,

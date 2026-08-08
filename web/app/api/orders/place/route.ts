@@ -14,7 +14,10 @@ import {
   normalizeOptionRight,
 } from "@/lib/placeOrderBodySchema";
 import { getMarketStateFromDate } from "@/lib/serviceHealthWindows";
-import { resolveDemoOrderDecision } from "@/lib/demo/orderBlockade";
+import {
+  AUTH_UNAVAILABLE_MESSAGE,
+  resolveDemoOrderDecision,
+} from "@/lib/demo/orderBlockade";
 import {
   runIdempotentOrder,
   contentKey,
@@ -141,7 +144,23 @@ export async function POST(request: Request): Promise<Response> {
     // it is forwarded to the paper-fill engine. Active demo → paper; expired →
     // 403 (the middleware also blocks expired demo users; this is defense in
     // depth). Non-demo users fall straight through to the real path below.
+    //
+    // Cohort UNKNOWN (Clerk threw) → 503, never the real path (T-018). The
+    // order is explicitly refused rather than placed on a guess: silently
+    // routing an unknown caller to IB is the exact failure this gate exists to
+    // prevent, and silently papering a real operator's order is no better.
     const demoDecision = await resolveDemoOrderDecision();
+    if (demoDecision.action === "auth-unavailable") {
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message: `${AUTH_UNAVAILABLE_MESSAGE} Order not placed. Retry in a moment.`,
+          status: 503,
+          code: "UPSTREAM_ERROR",
+          requestId,
+        }),
+        requestId,
+      );
+    }
     if (demoDecision.action === "block-expired") {
       return setNoStoreResponseHeaders(
         jsonApiError({
