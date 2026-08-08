@@ -52,6 +52,10 @@ DARKPOOL_PAGE_LIMIT = 500
 # Safety ceiling: 40 pages × 500 = 20k prints/day. Beyond that log and stop.
 DARKPOOL_MAX_PAGES = 40
 
+# UW /api/option-trades/flow-alerts: default 100, max 200. Walk older_than.
+FLOW_ALERTS_PAGE_LIMIT = 200
+FLOW_ALERTS_MAX_PAGES = 25
+
 # Session calendar is always US/Eastern. Host-local/UTC datetime.now() on CI
 # runners (and the VPS after 20:00 ET) invents an extra "today" that is not
 # yet a US session day and breaks the darkpool cache immutability contract.
@@ -383,29 +387,100 @@ def fetch_darkpool(
         return _fetch(client)
 
 
+def _flow_alerts_page_cursor(alerts: List[Dict]) -> Optional[str]:
+    """Oldest created_at on a desc-ordered page → next older_than cursor."""
+    oldest: Optional[str] = None
+    for alert in alerts:
+        ts = alert.get("created_at") or alert.get("executed_at") or alert.get("timestamp")
+        if not ts:
+            continue
+        ts_s = str(ts)
+        if oldest is None or ts_s < oldest:
+            oldest = ts_s
+    return oldest
+
+
+def _flow_alert_dedupe_key(alert: Dict) -> Optional[str]:
+    """Stable identity for multi-page alert de-duplication."""
+    chain = alert.get("option_chain") or alert.get("option_symbol")
+    created = alert.get("created_at") or alert.get("executed_at") or ""
+    prem = alert.get("total_premium") or alert.get("premium") or ""
+    size = alert.get("total_size") or alert.get("size") or ""
+    if chain or created:
+        return f"{chain}|{created}|{prem}|{size}"
+    return None
+
+
 def fetch_flow_alerts(
-    ticker: str,
+    ticker: Optional[str] = None,
     min_premium: int = 50000,
     _client: Optional[UWClient] = None,
     *,
     retry_transient: bool = True,
+    limit: int = FLOW_ALERTS_PAGE_LIMIT,
 ) -> List[Dict]:
-    """Fetch options flow alerts for a ticker.
+    """Fetch options flow alerts (full multi-page walk).
 
-    Filters for larger trades (default $50k+ premium) that are more likely
-    to represent institutional activity. Same retry / raise semantics as
+    UW hard-caps each response at ``FLOW_ALERTS_PAGE_LIMIT`` (200). Walks
+    older pages with ``older_than`` until a short page.
+
+    ``ticker`` may be None for market-wide alerts (discover). Filters for
+    larger trades (default $50k+ premium). Same retry / raise semantics as
     `fetch_darkpool`.
     """
-    def _fetch(client):
-        what = f"flow_alerts({ticker}, min_premium={min_premium})"
-        resp = _call_uw_with_retry(
-            lambda: client.get_flow_alerts(ticker=ticker, min_premium=min_premium, limit=100),
+    page_limit = max(1, min(int(limit or FLOW_ALERTS_PAGE_LIMIT), FLOW_ALERTS_PAGE_LIMIT))
+
+    def _fetch_page(client, *, older_than: Optional[str]):
+        label = ticker or "MARKET"
+        what = f"flow_alerts({label}, min_premium={min_premium}, older_than={older_than})"
+        return _call_uw_with_retry(
+            lambda: client.get_flow_alerts(
+                ticker=ticker,
+                min_premium=min_premium,
+                limit=page_limit,
+                older_than=older_than,
+            ),
             what=what,
             retry_transient=retry_transient,
         )
-        if resp is None:
-            return []
-        return resp.get("data", [])
+
+    def _fetch(client):
+        all_alerts: List[Dict] = []
+        older_than: Optional[str] = None
+        seen: set = set()
+        for _page_idx in range(FLOW_ALERTS_MAX_PAGES):
+            resp = _fetch_page(client, older_than=older_than)
+            if resp is None:
+                break
+            page = resp.get("data") or []
+            if not isinstance(page, list) or not page:
+                break
+
+            for alert in page:
+                key = _flow_alert_dedupe_key(alert)
+                if key is not None:
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                all_alerts.append(alert)
+
+            if len(page) < page_limit:
+                break
+
+            next_cursor = _flow_alerts_page_cursor(page)
+            if next_cursor is None or next_cursor == older_than:
+                logger.warning(
+                    "flow_alerts(%s): full page without advancing cursor; stopping at %d",
+                    ticker or "MARKET", len(all_alerts),
+                )
+                break
+            older_than = next_cursor
+        else:
+            logger.warning(
+                "flow_alerts(%s): hit FLOW_ALERTS_MAX_PAGES=%d (%d alerts)",
+                ticker or "MARKET", FLOW_ALERTS_MAX_PAGES, len(all_alerts),
+            )
+        return all_alerts
 
     if _client is not None:
         return _fetch(_client)

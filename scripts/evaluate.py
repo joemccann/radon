@@ -483,7 +483,8 @@ def _run_parallel_milestones(
         return ("M3", fetch_options(ticker, source="uw"))
 
     def _m3b():
-        return ("M3B", fetch_ticker_oi_changes(ticker))
+        # Full OI book (paginated); no arbitrary top-50 slice for M3B.
+        return ("M3B", fetch_ticker_oi_changes(ticker, limit=None))
 
     def _m1d():
         return ("M1D", fetch_news(ticker, days=7, limit=20))

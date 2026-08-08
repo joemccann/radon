@@ -136,15 +136,19 @@ def fetch_ib_data(ib) -> Tuple[List[Dict], Dict[str, str]]:
 def fetch_dark_pool_flow(tickers: List[str], days: int = 5) -> Dict[str, Dict]:
     """Fetch dark pool flow for multiple tickers in parallel.
 
+    Uses ``fetch_flow.fetch_darkpool`` (multi-page UW walk + disk cache) so
+    liquid names are not silently capped at 500 prints/day.
+
     Returns per-ticker aggregate + daily breakdown. The daily data is ordered
     oldest-first so sparkline builders can iterate left→right, with the
     *last* element being today.
     """
-    import requests as _req
-
     token = os.environ.get('UW_TOKEN', '')
     if not token:
         return {t: _no_flow('NO_TOKEN') for t in tickers}
+
+    from fetch_flow import fetch_darkpool
+    from utils.darkpool_cache import get_cached_darkpool, set_cached_darkpool
 
     # Last N business days (most recent first → we reverse later)
     date_list = []
@@ -154,29 +158,36 @@ def fetch_dark_pool_flow(tickers: List[str], days: int = 5) -> Dict[str, Dict]:
             date_list.append(d.strftime('%Y-%m-%d'))
         d -= timedelta(days=1)
 
+    def _day_trades(ticker: str, dt: str) -> List[dict]:
+        trades = get_cached_darkpool(ticker, dt)
+        if trades is not None:
+            return trades if isinstance(trades, list) else []
+        try:
+            trades = fetch_darkpool(ticker, date=dt)
+        except Exception:
+            return []
+        if isinstance(trades, list):
+            set_cached_darkpool(ticker, dt, trades)
+            return trades
+        return []
+
     def _fetch_one(ticker: str) -> Tuple[str, Dict]:
         try:
             daily = defaultdict(lambda: {'buy_vol': 0, 'sell_vol': 0})
-            headers = {'Authorization': f'Bearer {token}'}
 
             for dt in date_list:
-                try:
-                    url = f"https://api.unusualwhales.com/api/darkpool/{ticker}?date={dt}"
-                    resp = _req.get(url, headers=headers, timeout=10)
-                    if resp.status_code != 200:
+                for trade in _day_trades(ticker, dt):
+                    if trade.get('canceled'):
                         continue
-                    for trade in resp.json().get('data', []):
-                        price = float(trade.get('price', 0) or 0)
-                        bid = float(trade.get('nbbo_bid', 0) or 0)
-                        ask = float(trade.get('nbbo_ask', 0) or 0)
-                        size = int(trade.get('size', 0) or 0)
-                        mid = (bid + ask) / 2 if bid > 0 and ask > 0 else price
-                        if price >= mid:
-                            daily[dt]['buy_vol'] += size
-                        else:
-                            daily[dt]['sell_vol'] += size
-                except Exception:
-                    continue
+                    price = float(trade.get('price', 0) or 0)
+                    bid = float(trade.get('nbbo_bid', 0) or 0)
+                    ask = float(trade.get('nbbo_ask', 0) or 0)
+                    size = int(trade.get('size', 0) or 0)
+                    mid = (bid + ask) / 2 if bid > 0 and ask > 0 else price
+                    if price >= mid:
+                        daily[dt]['buy_vol'] += size
+                    else:
+                        daily[dt]['sell_vol'] += size
 
             if not daily:
                 return ticker, _no_flow('NO_DATA')
