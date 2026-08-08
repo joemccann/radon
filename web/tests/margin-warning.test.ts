@@ -188,3 +188,113 @@ describe("assessMargin — key stability", () => {
     expect(a.key).not.toBe(b.key);
   });
 });
+describe("assessMargin — equality boundaries and non-finite guards", () => {
+  // --- Equality boundaries -------------------------------------------------
+  // web/CLAUDE.md documents all four thresholds with strict operators
+  // (`cushion < 0.05`, `cushion < 0.01`, `excess_liquidity <= 0`,
+  // `equity_with_loan <= maint_margin_req * 1.10`). These pin the exact
+  // equality point to whichever side the CURRENT code puts it on. See
+  // NOTES.md (T-037) for a note on whether the two `<` thresholds might be
+  // intended as `<=` — this file encodes the documented/shipped contract,
+  // it does not change threshold semantics.
+
+  it("none: cushion exactly 0.05 does not warn (code is strictly `cushion < 0.05`)", () => {
+    const r = assessMargin(acct({ excess_liquidity: 50_000, net_liquidation: 1_000_000 }));
+    expect(r.level).toBe("none");
+    expect(r.cushionPct).toBeCloseTo(5, 5);
+    expect(r.degraded).toBe(false);
+  });
+
+  it("warning: cushion exactly 0.01 is a warning, not critical (code is strictly `cushion < 0.01`)", () => {
+    const r = assessMargin(acct({ excess_liquidity: 10_000, net_liquidation: 1_000_000 }));
+    expect(r.level).toBe("warning");
+    expect(r.cushionPct).toBeCloseTo(1, 5);
+  });
+
+  it("critical: excess_liquidity exactly 0 (full boundary table — also covered above)", () => {
+    const r = assessMargin(acct({ excess_liquidity: 0 }));
+    expect(r.level).toBe("critical");
+    expect(r.cushionPct).toBe(0);
+  });
+
+  it("warning: equity_with_loan exactly equal to maint_margin_req × 1.10 (documented rule is `<=`)", () => {
+    const mmr = 100_000;
+    const r = assessMargin(
+      acct({
+        excess_liquidity: 200_000, // 20% cushion — clear of both cushion thresholds
+        net_liquidation: 1_000_000,
+        maintenance_margin: mmr,
+        equity_with_loan: mmr * 1.1, // computed, not a literal — matches the source's own `mmr * 1.1` bit-for-bit
+      }),
+    );
+    expect(r.level).toBe("warning");
+    expect(r.message).toMatch(/within 10% of maintenance margin/i);
+  });
+
+  // --- Non-finite inputs -----------------------------------------------------
+  // excess_liquidity / net_liquidation can arrive NaN or Infinity from an
+  // upstream parse/compute error. Contract: a non-finite input must NEVER
+  // report level "none" with a NaN (or Infinity) cushionPct — that reads as
+  // "healthy" to WorkspaceShell's transition logic and to anyone inspecting
+  // the value. It must degrade to a NULL cushion with `degraded: true`
+  // instead of a silent healthy-looking "none" (or, worse, a false alarm —
+  // see the net_liquidation +Infinity case below).
+
+  it("degraded: excess_liquidity NaN never reports none with a NaN cushionPct", () => {
+    const r = assessMargin(acct({ excess_liquidity: NaN }));
+    expect(r.level).toBe("none");
+    expect(Number.isNaN(r.cushionPct)).toBe(false);
+    expect(r.cushionPct).toBeNull();
+    expect(r.cashToClear).toBeNull();
+    expect(r.degraded).toBe(true);
+  });
+
+  it("degraded: excess_liquidity +Infinity never reports none with an Infinity cushionPct", () => {
+    const r = assessMargin(acct({ excess_liquidity: Infinity }));
+    expect(r.level).toBe("none");
+    expect(r.cushionPct).toBeNull();
+    expect(r.degraded).toBe(true);
+  });
+
+  it("degraded: excess_liquidity -Infinity does not fabricate an Infinity cashToClear / '$∞' message", () => {
+    const r = assessMargin(acct({ excess_liquidity: -Infinity }));
+    expect(r.level).toBe("none");
+    expect(r.cushionPct).toBeNull();
+    expect(r.cashToClear).toBeNull();
+    expect(r.message).toBe("");
+    expect(r.degraded).toBe(true);
+  });
+
+  it("degraded: net_liquidation NaN never reports none with a NaN cushionPct", () => {
+    const r = assessMargin(acct({ net_liquidation: NaN }));
+    expect(r.level).toBe("none");
+    expect(Number.isNaN(r.cushionPct)).toBe(false);
+    expect(r.cushionPct).toBeNull();
+    expect(r.degraded).toBe(true);
+  });
+
+  it("degraded: net_liquidation +Infinity does not fabricate a false CRITICAL (cushion collapses to 0)", () => {
+    // Pre-fix this computed cushion = el / Infinity = 0 and fired the
+    // `cushion < 0.01` CRITICAL branch off a garbage net_liquidation — a
+    // false alarm, not just a missing warning.
+    const r = assessMargin(acct({ net_liquidation: Infinity }));
+    expect(r.level).toBe("none");
+    expect(r.cushionPct).toBeNull();
+    expect(r.degraded).toBe(true);
+  });
+
+  it("degraded: net_liquidation -Infinity stays none (already caught by the existing <= 0 guard)", () => {
+    const r = assessMargin(acct({ net_liquidation: -Infinity }));
+    expect(r.level).toBe("none");
+    expect(r.cushionPct).toBeNull();
+    expect(r.degraded).toBe(true);
+  });
+
+  it("degraded=false on a genuinely healthy account (not a guard trigger)", () => {
+    const r = assessMargin(acct());
+    expect(r.level).toBe("none");
+    expect(r.cushionPct).toBeCloseTo(10, 5);
+    expect(r.degraded).toBe(false);
+  });
+});
+
