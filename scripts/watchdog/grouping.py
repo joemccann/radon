@@ -28,6 +28,14 @@ Cooldown semantics: the grouped alert key is ``ib-gateway-grouped``
 with severity ``P1``. ``cooldown.mark_notified`` + ``cooldown_allows_fire``
 operate on this synthetic service name so repeated grouped fires
 inside the 1h window are suppressed exactly like per-service alerts.
+
+A delivered grouped page also stamps the cooldown row of every service
+it NAMED. That roster is the armed set: while the grouped key is muted,
+a service whose own row still allows firing was never in a delivered
+page, so it is NOT absorbed — it falls through to the per-service path
+and pages once. Without that, a service joining the outage after the
+grouped page (exit-orders going stale 40 min into a 2FA window) was
+returned as ``grouped_handled`` every cycle and never paged at all.
 """
 from __future__ import annotations
 
@@ -256,6 +264,70 @@ def dispatch_with_grouping(*, outcomes: Iterable[CheckOutcome], now: datetime) -
     )
 
 
+def _covered_by_armed_page(outcome: CheckOutcome, *, now: datetime) -> bool:
+    """True when this service's own cooldown row still suppresses it.
+
+    That row is what a delivered grouped page stamps, so "suppressed"
+    means "an already-delivered page named this service". An outcome
+    with no severity has no per-service page to fall through to, so it
+    stays absorbed.
+    """
+    if not outcome.severity:
+        return True
+    return not _cooldown_allows_fire(
+        service=outcome.service, severity=outcome.severity, now=now
+    )
+
+
+def _absorb_only_services_already_paged(
+    *, ib_outcomes: list[CheckOutcome], now: datetime
+) -> tuple[set[str], Optional[str], bool]:
+    """The grouped key is muted: absorb the cohort it already covers and
+    let anything newer through.
+
+    Returning every currently-failing IB service here swallowed the
+    alert for services that STARTED failing after the grouped page was
+    armed — for the whole muted window, up to the 24h re-arm ceiling.
+    """
+    covered = {o.service for o in ib_outcomes if _covered_by_armed_page(o, now=now)}
+    newcomers = sorted({o.service for o in ib_outcomes} - covered)
+    if newcomers:
+        log.info(
+            "grouped IB alert muted; %d service(s) began failing after it was "
+            "armed — falling through to per-service: %s",
+            len(newcomers),
+            ",".join(newcomers),
+        )
+    else:
+        log.info("grouped IB alert suppressed by cooldown")
+    return covered, None, False
+
+
+def _mark_grouped_page_delivered(
+    *, ib_outcomes: list[CheckOutcome], now: datetime
+) -> None:
+    """Stamp the grouped key and every service the page NAMED.
+
+    Those per-service rows are the armed roster. Keeping it in the rows
+    the per-service gate already reads means one state model: no second
+    store to migrate, no roster to lose on a deploy, and recovery
+    (``cooldown.record_success``) re-arms each service exactly as it
+    does for a per-service page.
+    """
+    notify._mark_notified_best_effort(
+        service=GROUPED_ALERT_KEY,
+        severity=GROUPED_ALERT_SEVERITY,
+        now=now,
+    )
+    for outcome in ib_outcomes:
+        if outcome.severity:
+            notify._mark_notified_best_effort(
+                service=outcome.service,
+                severity=outcome.severity,
+                now=now,
+            )
+
+
 def _dispatch_grouped(
     *,
     ib_outcomes: list[CheckOutcome],
@@ -266,9 +338,9 @@ def _dispatch_grouped(
 
     Returns ``(suppressed_services, dispatcher_error, attempted)``.
 
-    Cooldown applies to the grouped key. If we're inside the cooldown
-    window we skip the push but STILL return the suppression set —
-    the grouped condition is active, we just don't spam the channel.
+    Cooldown applies to the grouped key. Inside the cooldown window we
+    skip the push and return only the services the armed page already
+    covers — newcomers are left for the per-service path.
     """
     services = [o.service for o in ib_outcomes]
 
@@ -288,19 +360,14 @@ def _dispatch_grouped(
         severity=GROUPED_ALERT_SEVERITY,
         now=now,
     ):
-        log.info("grouped IB alert suppressed by cooldown")
-        return set(services), None, False
+        return _absorb_only_services_already_paged(ib_outcomes=ib_outcomes, now=now)
 
     message = _format_grouped_message(auth_state=auth_state, services=services)
     title = f"radon watchdog: IB Gateway {auth_state}"
     dispatcher_error = _emit_grouped_pushover(title=title, message=message)
 
     if dispatcher_error is None:
-        notify._mark_notified_best_effort(
-            service=GROUPED_ALERT_KEY,
-            severity=GROUPED_ALERT_SEVERITY,
-            now=now,
-        )
+        _mark_grouped_page_delivered(ib_outcomes=ib_outcomes, now=now)
     return set(services), dispatcher_error, True
 
 
