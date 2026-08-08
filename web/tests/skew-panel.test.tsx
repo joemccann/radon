@@ -18,6 +18,7 @@ import {
   formatSkewChange,
   formatSkewRatio,
   formatZ,
+  isFreshIntradaySkew,
   skewChangeColor,
   zScore,
   type SkewData,
@@ -60,6 +61,30 @@ describe("zScore — change over stddev", () => {
     expect(zScore(null, 0.04)).toBeNull();
     expect(zScore(-0.12, null)).toBeNull();
     expect(zScore(-0.12, 0)).toBeNull();
+  });
+});
+
+describe("isFreshIntradaySkew", () => {
+  const now = Date.parse("2026-08-05T15:45:00Z");
+
+  it("accepts a provisional sample no more than three minutes old", () => {
+    expect(isFreshIntradaySkew({
+      date: "2026-08-05", ratio: 1.24, change: -0.04,
+      put_iv: 0.14, call_iv: 0.11, expiry: "2026-08-21", dte: 16,
+      is_intraday: true, as_of: "2026-08-05T15:42:00Z",
+    }, now)).toBe(true);
+  });
+
+  it("rejects stale, finalized, malformed, and future samples", () => {
+    const current = {
+      date: "2026-08-05", ratio: 1.24, change: -0.04,
+      put_iv: 0.14, call_iv: 0.11, expiry: "2026-08-21", dte: 16,
+      is_intraday: true,
+    };
+    expect(isFreshIntradaySkew({ ...current, as_of: "2026-08-05T15:41:59Z" }, now)).toBe(false);
+    expect(isFreshIntradaySkew({ ...current, is_intraday: false, as_of: "2026-08-05T15:44:00Z" }, now)).toBe(false);
+    expect(isFreshIntradaySkew({ ...current, as_of: "bad" }, now)).toBe(false);
+    expect(isFreshIntradaySkew({ ...current, as_of: "2026-08-05T15:46:00Z" }, now)).toBe(false);
   });
 });
 
@@ -227,6 +252,23 @@ describe("SkewPanel — header strip", () => {
     renderPanel(hookState({ data: buildData() }));
     const change = screen.getByTestId("skew-change-value");
     expect(change.style.color).toBe("var(--warning)");
+  });
+
+  it("labels a provisional current-session value as live with its sample time", () => {
+    const asOf = new Date().toISOString();
+    const data = buildData({
+      scan_time: asOf,
+      market_status: "open",
+      current: {
+        ...buildData().current!,
+        is_intraday: true,
+        as_of: asOf,
+      },
+    });
+    renderPanel(hookState({ data, lastSync: data.scan_time }));
+
+    expect(screen.getByTestId("skew-live-status").textContent).toContain("LIVE");
+    expect(screen.getByTestId("skew-strip-date").textContent).toContain("INTRADAY");
   });
 });
 

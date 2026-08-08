@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
-import { getRequestId, setCacheResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
 import { getDb } from "@/lib/db";
 import { contentTimestampMs, dbFirstRead, type TimestampedRead } from "@/lib/dbFirstRead";
 // Disable Next.js static caching: this handler reads live disk state
@@ -58,11 +58,5 @@ export async function GET(): Promise<Response> {
     label: "skew",
   });
   const response = NextResponse.json(result.ok ? result.data : MISSING_SKEW);
-  return setCacheResponseHeaders(response, {
-    maxAgeSeconds: 300,
-    staleWhileRevalidateSeconds: 3600,
-    requestId,
-    cacheState: "HIT",
-    tags: ["skew"],
-  });
+  return setNoStoreResponseHeaders(response, requestId);
 }

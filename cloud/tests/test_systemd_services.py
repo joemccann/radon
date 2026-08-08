@@ -308,6 +308,17 @@ class TestOiChanges:
         assert "20:00:00 UTC" in raw
 
 
+class TestSkew:
+    """SKEW publishes provisional intraday snapshots during RTH."""
+
+    def test_timer_runs_every_minute_across_both_et_dst_windows(self, unit, services_dir):
+        timer = unit("radon-skew.timer")["Timer"]
+        raw = (services_dir / "radon-skew.timer").read_text()
+        assert "Mon..Fri *-*-* 13..21:*:00" in raw
+        assert "*-*-* 21:45:00 UTC" in raw
+        assert timer.get("persistent") == "false"
+
+
 
 class TestMediaBackup:
     """Nightly media.radon.run tree backup to B2 (prefix media/)."""

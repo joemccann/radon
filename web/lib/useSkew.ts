@@ -2,19 +2,21 @@
 
 import { useSyncHook, type UseSyncReturn } from "./useSyncHook";
 import type { SkewData } from "./skew";
+import { MarketState } from "./useMarketHours";
 
 /* ─── Hook ───────────────────────────────────────────────────── */
 
-// GET-only: the series updates once per session (radon-skew timer runs the
-// fetcher directly), so there is no manual-scan POST and an hourly poll is
-// already generous. Types + pure helpers live in lib/skew.ts.
+// GET-only: the centralized writer owns UW calls. Browsers read the shared
+// snapshot every minute during RTH without amplifying provider traffic.
 const SKEW_SYNC_CONFIG = {
   endpoint: "/api/skew",
-  interval: 60 * 60_000,
+  interval: 60_000,
   hasPost: false,
   extractTimestamp: (d: SkewData) => d.scan_time,
 };
 
-export function useSkew(): UseSyncReturn<SkewData> {
-  return useSyncHook<SkewData>(SKEW_SYNC_CONFIG, true);
+export function useSkew(marketState: MarketState | null = null): UseSyncReturn<SkewData> {
+  const actualState = marketState ?? MarketState.OPEN;
+  const interval = actualState === MarketState.OPEN ? 60_000 : 0;
+  return useSyncHook<SkewData>({ ...SKEW_SYNC_CONFIG, interval }, true);
 }
