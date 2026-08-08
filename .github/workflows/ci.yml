@@ -246,19 +246,20 @@ jobs:
   e2e-financial-smoke:
     name: Playwright P0-financial smoke (non-gating)
     runs-on: ubuntu-latest
-    # 2026-06-13 loopback blocker resolved 2026-08-08 in the Playwright
-    # container. Two container specifics: (1) chromium's async DNS returns
-    # ERR_NAME_NOT_RESOLVED for the "localhost" NAME (the --host-resolver-rules
-    # arg did not take effect), so the browser navigates the literal loopback IP
-    # via PLAYWRIGHT_BASE_HOST=127.0.0.1 — still in the middleware LOCAL_HOSTS
-    # set, so the authless bypass holds; (2) `next dev` (either bundler) never
-    # readies here — cold-compiling this app's heavy routes on demand hangs in
-    # the constrained container (runs 31268084987 / 31268824260 timed out after
-    # the middleware line) — so the job builds once and serves a prebuilt
-    # `next start`, the same build+start pattern perimeter-smoke runs green.
-    # day-move-ib-daily-pnl is held out: its IB-daily Day Move value renders
-    # under `next dev` but not `next start` (dev-vs-prod divergence, TEST_AUDIT
-    # NEW_FINDINGS) — it still runs locally.
+    # The earlier "chromium can't reach loopback" reading (2026-06-13) was a
+    # misdiagnosis: the navigation actually failed because a Clerk DEVELOPMENT
+    # instance (pk_test_) answered every cookie-less browser navigation with a
+    # dev-browser handshake 307 to an unresolvable dummy Clerk host, surfacing as
+    # ERR_NAME_NOT_RESOLVED. Fixed in web/middleware.ts by running the authless
+    # bypass OUTSIDE clerkMiddleware (bypassed requests never trigger the
+    # handshake) and by reading the client host from the Host header (nextUrl is
+    # the 0.0.0.0 bind address under `next start -H 0.0.0.0`). The browser now
+    # navigates the loopback 127.0.0.1 directly (PLAYWRIGHT_BASE_HOST below).
+    # `next dev` still never readies in the constrained container (cold-compiling
+    # heavy routes hangs), so the job builds once and serves a prebuilt
+    # `next start` (the perimeter-smoke pattern). day-move-ib-daily-pnl is held
+    # out (dev-vs-prod Day Move divergence, TEST_AUDIT NEW_FINDINGS); still runs
+    # locally.
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     concurrency:
@@ -272,8 +273,11 @@ jobs:
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
       CLERK_SECRET_KEY: sk_test_radon_ci_e2e_smoke_dummy # gitleaks:allow
       PLAYWRIGHT_PORT: "3000"
+      # Serve on all interfaces, navigate the loopback IP literal (no DNS — the
+      # container's chromium resolves the "localhost" NAME flakily; the literal
+      # never needs resolution and is in the middleware's LOCAL_HOSTS set).
       PLAYWRIGHT_BASE_HOST: "127.0.0.1"
-      PLAYWRIGHT_WEBSERVER_CMD: "npx next start -p 3000"
+      PLAYWRIGHT_WEBSERVER_CMD: "npx next start -H 0.0.0.0 -p 3000"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       # The Playwright image ships without unzip, which setup-bun needs to

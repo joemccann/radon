@@ -2,11 +2,13 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = process.env.PLAYWRIGHT_PORT ? Number(process.env.PLAYWRIGHT_PORT) : 3000;
 // The browser origin. Defaults to "localhost" (the app's canonical local host).
-// CI sets PLAYWRIGHT_BASE_HOST=127.0.0.1 because chromium's async DNS in the
-// Playwright container cannot resolve the "localhost" NAME (ERR_NAME_NOT_RESOLVED)
-// and the --host-resolver-rules launch arg did not take effect there; the
-// literal loopback IP needs no resolution. 127.0.0.1 is in the middleware's
-// LOCAL_HOSTS set, so the authless bypass stays intact.
+// CI sets PLAYWRIGHT_BASE_HOST=127.0.0.1: chromium's async DNS in the Playwright
+// container resolves the "localhost" NAME flakily, and the literal loopback IP
+// needs no resolution at all. 127.0.0.1 is in the middleware's LOCAL_HOSTS set,
+// so the authless bypass (which reads the client host from the Host header)
+// stays intact. This is unrelated to reachability — the server is always up;
+// the historical "can't reach loopback" failures were a Clerk dev-browser
+// handshake 307 to an unresolvable host, fixed in web/middleware.ts.
 const HOST = process.env.PLAYWRIGHT_BASE_HOST ?? "localhost";
 
 export default defineConfig({
@@ -56,7 +58,12 @@ export default defineConfig({
   // perimeter-smoke already runs green in this workflow.
   webServer: {
     command: process.env.PLAYWRIGHT_WEBSERVER_CMD ?? `npx next dev --turbopack -p ${PORT}`,
-    url: `http://${HOST}:${PORT}`,
+    // Probe a STATIC asset for readiness, not "/". Under a production
+    // `next start` the root route SSRs a Clerk `useSession` and can 500,
+    // which would fail a readiness check on "/" even though every spec route
+    // (/portfolio, /orders) renders fine. The manifest is served statically
+    // (always 200) so readiness reflects "server up", nothing more.
+    url: `http://${HOST}:${PORT}/manifest.webmanifest`,
     reuseExistingServer: true,
     timeout: 180_000,
     env: {
