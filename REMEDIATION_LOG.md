@@ -40,6 +40,8 @@
 | T-033 | DONE | (T-033 commit) | Deadline pin: mutation `12.0→6.0` for combo → `1 failed, 1 passed`; reverted → 2/2. Combo 12s / single-leg 6s confirm budget now enforced by test. |
 | T-034 | DONE | (T-034 commit) | RED in cluster run above. GREEN: quantity<=0, non-integral quantity, and limitPrice<=0 refused with operator-readable errors BEFORE IBClient construction (mirrors modify guard ib_order_manage.py:189-192). Full pytest layer 5007 passed/14 skipped. |
 
+| T-024 | DONE | (T-024 commit) | RED: `1 failed, 3 passed` — failure on the first INSERT after DELETE-all left the table EMPTY over an autocommit-faithful fake (real working orders invisible on /orders). GREEN: upsert-new-snapshot-first (chunked multi-row per Hrana bounding), delete-extraneous-last — any-point failure leaves old/new/union, never empty; error still propagates. Writer neighborhood 80/80; full pytest layer 5011 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
