@@ -54,6 +54,9 @@
 
 | T-052 | DONE | (T-052 commit) | Gate-4 tripwire armed: web suites un-skipped against exported `_checkNakedShortRiskImpl`/`_auditOpenOrdersImpl` (31/31), python class un-skipped via autouse impl-routing fixture (16 passed, 0 skipped — was 3/13-skipped). Teeth: coverage-comparison mutation → `2 failed`; revert → 31/31. The missing docs/naked-short-reenable.md runbook remains a product follow-up (audit §5 item 28). |
 
+| T-019 | DONE | (T-019 commit) | RED: `3 failed \| 10 passed` — SELL 10 vs 5 held rendered a riskless close (closeOut short-circuit; 5 naked shorts invisible). GREEN: qty>held → isClosing:false, raw legs flow to the augmenter whose pass-1 netting flags exactly the naked residue (verified: SELL 10 @ $41 vs 5 held → "Uncovered short put", maxLoss $359k); close basis = min(qty, held)×|avg_cost|. All 11 pre-existing cases unchanged. |
+| T-020 | DONE | (T-020 commit) | RED: `7 failed \| 13 passed`. GREEN: combo legs carry real per-leg ratios (contracts÷GCD via exported `heldComboUnits`); SECOND live defect found+fixed en route: `position.contracts` is the first LONG leg's count, NOT the combo unit — the ticket's qty default alone would over-trade even with correct ratios; default now `heldComboUnits`. The defect-pinning assertion (ratio:1 on a 5x3 fixture) corrected to 3/5 — documented as correcting a wrong pin. Risk neighborhood 120/120; FULL vitest layer 5266 passed, 0 skipped (T-052 removed the last 26 skips). |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
