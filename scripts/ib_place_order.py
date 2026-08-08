@@ -89,32 +89,48 @@ def _extract_error_from_trade_log(trade):
 
 
 def _build_terminal_error(status: str, order_id: int, perm_id: int,
-                          ib_error_code, ib_error_text) -> dict:
+                          ib_error_code, ib_error_text,
+                          filled: float = 0.0, avg_fill_price: float = 0.0) -> dict:
     """Build the error return dict for a terminal-failed order.
 
     If an IB reason was captured (from the error buffer or trade.log), include
     it as structured fields and embed it in the human-readable message.
     When no reason arrived, fall back to a clean message naming the status.
+
+    A nonzero `filled` means IB executed part of the order before the
+    terminal state landed (e.g. partial-fill-then-Cancelled) — surfaced as
+    `filled`/`avg_fill_price` and in the message so the UI doesn't report a
+    partially-executed order as a clean no-op.
     """
+    fill_suffix = (
+        f" — {int(filled)} filled @ ${avg_fill_price:.2f} before {status.lower()}"
+        if filled else ""
+    )
+
     if ib_error_code is not None:
-        message = f"Order {status} — IB error {ib_error_code}: {ib_error_text}"
-        return {
+        result = {
             "status": "error",
-            "message": message,
+            "message": f"Order {status} — IB error {ib_error_code}: {ib_error_text}{fill_suffix}",
             "orderId": order_id,
             "permId": perm_id,
             "initialStatus": status,
             "ib_error_code": ib_error_code,
             "ib_error_text": ib_error_text,
         }
+    else:
+        result = {
+            "status": "error",
+            "message": f"Order {status} (no IB reason received){fill_suffix}",
+            "orderId": order_id,
+            "permId": perm_id,
+            "initialStatus": status,
+        }
 
-    return {
-        "status": "error",
-        "message": f"Order {status} (no IB reason received)",
-        "orderId": order_id,
-        "permId": perm_id,
-        "initialStatus": status,
-    }
+    if filled:
+        result["filled"] = int(filled)
+        result["avg_fill_price"] = avg_fill_price
+
+    return result
 
 
 # IB reports OrderState margins as strings; an unset / withheld field is '' or
@@ -134,6 +150,15 @@ def _margin(value) -> "float | None":
     if abs(parsed) >= _MARGIN_SENTINEL:
         return None
     return parsed
+
+
+def _fill_value(value) -> float:
+    """Coerce an IB OrderStatus numeric field (filled/remaining/avgFillPrice)
+    to a float, defaulting to 0.0 when unset or non-numeric."""
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _whatif_result(state) -> dict:
@@ -174,8 +199,21 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
-    quantity = int(params["quantity"])
+
+    raw_quantity = params["quantity"]
+    # int() truncates silently (10.5 -> 10) — refuse a non-integral quantity
+    # instead of placing an order for a different size than the caller asked
+    # for.
+    if isinstance(raw_quantity, float) and not raw_quantity.is_integer():
+        return {"status": "error", "message": f"quantity must be a whole number, got {raw_quantity}"}
+    quantity = int(raw_quantity)
+    if quantity <= 0:
+        return {"status": "error", "message": f"quantity must be > 0, got {quantity}"}
+
     limit_price = float(params["limitPrice"])
+    if limit_price <= 0:
+        return {"status": "error", "message": f"limitPrice must be > 0, got {limit_price}"}
+
     tif = params.get("tif", "DAY").upper()
     # Allow the order to fill OUTSIDE regular trading hours (extended/after-hours
     # session). Required to actually trade a stock limit order after hours —
@@ -454,16 +492,27 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                 client, ib_errors, trade
             )
             return _build_terminal_error(
-                status, order_id, perm_id, ib_error_code, ib_error_text
+                status, order_id, perm_id, ib_error_code, ib_error_text,
+                filled=_fill_value(trade.orderStatus.filled),
+                avg_fill_price=_fill_value(trade.orderStatus.avgFillPrice),
             )
 
-        return {
+        result = {
             "status": "ok",
             "orderId": order_id,
             "permId": perm_id,
             "initialStatus": status,
             "message": f"{action} {quantity} {symbol} @ ${limit_price:.2f} — {status}",
         }
+        # A resting order is usually filled=0 at acknowledgement time; only
+        # surface fill fields once IB actually reports a nonzero fill so the
+        # common case doesn't gain a meaningless filled:0/avgFillPrice:0 triplet.
+        filled = _fill_value(trade.orderStatus.filled) if trade.orderStatus else 0.0
+        if filled:
+            result["filled"] = int(filled)
+            result["remaining"] = _fill_value(trade.orderStatus.remaining)
+            result["avgFillPrice"] = _fill_value(trade.orderStatus.avgFillPrice)
+        return result
 
     except Exception as e:
         return {"status": "error", "message": str(e)}
