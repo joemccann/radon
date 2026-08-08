@@ -136,6 +136,20 @@ class ExitOrdersHandler(BaseHandler):
         
         return pending
     
+    @staticmethod
+    def _is_halted(ticker_data: Any) -> bool:
+        """True when IB flags this contract as halted.
+
+        ``ib_insync.Ticker.halted`` is ``nan`` until the tick arrives,
+        ``0`` / ``-1`` while trading normally, and ``1`` / ``2`` when
+        halted (general / volatility). Anything non-numeric means "no
+        halt information", never "halted". A halt often leaves the last
+        two-sided book intact, so without this gate the exit gets priced
+        off a pre-halt mid.
+        """
+        halted = getattr(ticker_data, "halted", None)
+        return isinstance(halted, (int, float)) and halted > 0
+
     def _can_place_order(self, current_price: float, target_price: float) -> bool:
         """Check if order is within IB's acceptable gap."""
         if current_price <= 0:
@@ -278,6 +292,16 @@ class ExitOrdersHandler(BaseHandler):
                     mid = (bid + ask) / 2 if bid and ask else 0
 
                     client.cancel_market_data(contract)
+
+                    if self._is_halted(ticker_data):
+                        logger.warning(f"Trading halted for {contract.localSymbol}")
+                        result["orders_skipped"] += 1
+                        result["skipped"].append({
+                            "ticker": ticker,
+                            "contract": contract.localSymbol,
+                            "reason": "halted"
+                        })
+                        continue
 
                     if mid <= 0:
                         logger.warning(f"No market data for {contract.localSymbol}")
