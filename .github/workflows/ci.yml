@@ -246,13 +246,17 @@ jobs:
   e2e-financial-smoke:
     name: Playwright P0-financial smoke (non-gating)
     runs-on: ubuntu-latest
-    # 2026-06-13 blocker, resolved via lead (b): headless chromium on the BARE
-    # runner cannot open loopback connections (net::ERR_NAME_NOT_RESOLVED for
-    # the literal IP; proxy/DNS/bind/sandbox all ruled out in-job — full
-    # forensics in this block's git history). The Playwright container image
-    # gives the browser process a working loopback stack; the dev server and
-    # chromium share localhost inside the container, which also keeps the
-    # loopback-scoped authless bypass (web/middleware.ts) intact.
+    # 2026-06-13 loopback blocker resolved 2026-08-08 with the Playwright
+    # container image (working loopback stack for the browser). Two container
+    # specifics: (1) chromium's async DNS returns ERR_NAME_NOT_RESOLVED for the
+    # "localhost" name, bypassed by a --host-resolver-rules MAP arg keeping
+    # baseURL "localhost" (playwright.config.ts) so the loopback-scoped authless
+    # bypass stays intact; (2) `next dev --turbopack` HANGS on startup here
+    # (run 31268084987 timed out with only the middleware-deprecation line), so
+    # the webServer runs plain webpack `next dev` via PLAYWRIGHT_WEBSERVER_CMD.
+    # Production `next start` was rejected: it renders several WS-mock-driven
+    # specs differently than dev (dev-vs-prod divergence), and the specs were
+    # authored and validated against the dev server.
     container:
       image: mcr.microsoft.com/playwright:v1.58.2-jammy
     concurrency:
@@ -264,6 +268,8 @@ jobs:
       NEXT_PUBLIC_RADON_AUTHLESS_TEST: "1"
       NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY: pk_test_Y2xlcmsuZXhhbXBsZS5jb20k # gitleaks:allow
       CLERK_SECRET_KEY: sk_test_radon_ci_e2e_smoke_dummy # gitleaks:allow
+      PLAYWRIGHT_PORT: "3000"
+      PLAYWRIGHT_WEBSERVER_CMD: "npx next dev -p 3000"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       # The Playwright image ships without unzip, which setup-bun needs to
@@ -277,10 +283,9 @@ jobs:
         working-directory: web
       # Curated P0-financial subset (remediated + re-verified 2026-08-08,
       # 43 tests ~34s locally): page.route-mocked end-to-end, web-first
-      # assertions, no live IB/network/DB. The full 123-file suite stays
-      # local until it earns its way in. NOT in deploy.needs yet — per the
-      # long-standing rule, promote only after GREEN runs are observed here;
-      # never gate deploys on a spec set whose first CI run was red.
+      # assertions, no live IB/network/DB. The full 123-file suite stays local
+      # until it earns its way in. NOT in deploy.needs yet — per the
+      # long-standing rule, promote only after GREEN runs are observed here.
       - name: Run curated P0-financial specs
         working-directory: web
         run: >-
