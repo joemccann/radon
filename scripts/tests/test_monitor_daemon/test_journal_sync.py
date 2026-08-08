@@ -433,6 +433,110 @@ class TestTradeLogRecovery:
         assert [row["ib_exec_id"] for row in loaded["trades"]] == ["DUP-RECOVER"]
 
 
+class TestProductionNoMirrorConfig:
+    """T-015: production wires JournalSyncHandler() with trade_log_path=None
+    (monitor_daemon/run.py) — a configuration no execute()-level test used.
+    Dedupe sources from the journal TABLE, the reconcile step is skipped
+    (reconciled == 0), and the journal read is the cycle's hard dependency."""
+
+    @staticmethod
+    def _journal_db(rows):
+        """Fake DB dispatching on the two SELECT shapes the prod path issues:
+        the 4-column trade-log-recovery read and the prior-qty lookup."""
+        db = MagicMock()
+
+        def execute(sql, args=()):
+            result = MagicMock(spec=["fetchall"])
+            if "trade_id, payload, filled_at, written_at" in sql:
+                result.fetchall.return_value = rows
+            else:
+                result.fetchall.return_value = []
+            return result
+
+        db.execute.side_effect = execute
+        return db
+
+    @staticmethod
+    def _journal_row(exec_id, ticker="USAX"):
+        payload = {
+            "ticker": ticker,
+            "action": "BUY_OPTION",
+            "contracts": 10,
+            "total_cost": 1000.0,
+            "ib_exec_id": exec_id,
+            "date": "2026-04-20",
+        }
+        return (exec_id, json.dumps(payload), "2026-04-20T14:00:00Z", "2026-04-20T14:00:01Z")
+
+    def _run(self, db, fills, upsert_mock):
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", upsert_mock):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler()  # trade_log_path=None — prod wiring
+            return handler.execute(), handler
+
+    def test_prod_dedupe_sources_from_journal_table(self):
+        db = self._journal_db([self._journal_row("SEEN-1")])
+        fills = [
+            _mock_fill(exec_id="SEEN-1", symbol="USAX", side="BOT", shares=10, price=1.0),
+            _mock_fill(exec_id="NEW-1", symbol="MU", side="BOT", shares=5, price=2.0),
+        ]
+        upsert = MagicMock()
+
+        result, _ = self._run(db, fills, upsert)
+
+        assert result.get("error") is None
+        assert result["imported"] == 1
+        assert result["reconciled"] == 0
+        upserted = [str(c.args[0]) for c in upsert.call_args_list]
+        assert upserted == ["NEW-1"]
+
+    def test_prod_empty_journal_still_imports_first_fill(self):
+        """An EMPTY journal is a legitimate state (fresh host), not a read
+        failure — the importer must not brick itself on it."""
+        db = self._journal_db([])
+        fills = [_mock_fill(exec_id="FIRST-1", symbol="USAX", side="BOT", shares=10, price=1.0)]
+        upsert = MagicMock()
+
+        result, _ = self._run(db, fills, upsert)
+
+        assert result.get("error") is None, f"cycle errored: {result.get('error')}"
+        assert result["imported"] == 1
+        assert [str(c.args[0]) for c in upsert.call_args_list] == ["FIRST-1"]
+
+    def test_prod_journal_read_failure_aborts_without_upserts(self):
+        db = MagicMock()
+        db.execute.side_effect = RuntimeError("hrana: upstream forward failed")
+        fills = [_mock_fill(exec_id="X-1", symbol="USAX", side="BOT", shares=10, price=1.0)]
+        upsert = MagicMock()
+
+        result, _ = self._run(db, fills, upsert)
+
+        assert str(result.get("error", "")).startswith("journal read failed:")
+        upsert.assert_not_called()  # importing without dedupe would double-write
+
+    def test_prod_failed_upsert_is_retried_next_cycle(self):
+        db = self._journal_db([])
+        fills = [_mock_fill(exec_id="RETRY-1", symbol="USAX", side="BOT", shares=10, price=1.0)]
+        upsert = MagicMock(side_effect=[RuntimeError("hrana: stream not found"), None])
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=db), \
+             patch("monitor_daemon.handlers.journal_sync.upsert_journal_entry", upsert):
+            mock_client = MagicMock()
+            mock_client.get_fills.return_value = fills
+            mock_cls.return_value = mock_client
+            handler = JournalSyncHandler()
+            handler.execute()   # upsert raises (swallowed by _dual_write)
+            handler.execute()   # fill still in the session window — re-derived
+
+        assert upsert.call_count == 2
+        assert str(upsert.call_args_list[1].args[0]) == "RETRY-1"
+
+
 class TestOutOfOrderFillLabeling:
     """T-014: fills labelled in DELIVERY order, not execution-time order.
 
