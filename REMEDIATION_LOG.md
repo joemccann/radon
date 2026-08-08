@@ -26,6 +26,9 @@
 
 | T-023 | DONE | (T-023 commit) | RED (true, after an import fix in the test itself): "got 2026-06-26" / "got 2026-11-02" — UTC-aware evening fills stamped the NEXT day (incl. the DST-week case). GREEN: shared `et_session_date()` in handlers/base.py (aware→ET, naive assumed ET, no-arg=now ET); wired into journal_sync `_fill_to_entry` and fill_monitor's `fill_date`. Collateral fixed en route: the T-013 key made legacy `test_partial_fill_writes_to_journal` mock-address-dependent (`int(MagicMock())==1` shadowing orderId; '5'-in-id passed only when a mock repr contained 5) — fixture now carries realistic conId/permId(0), assertion untouched; `_identity_int` guards non-int identity junk. Stability: monitor_daemon 3x 270/270; full pytest layer 4951 passed/14 skipped. |
 
+| T-043 | DONE | (T-043 commit) | Classifier pins green on arrival (by design for pins); teeth PROVEN by mutation: removing the `"stream"` marker → `3 failed, 10 passed`; reverted → 13/13. Bonus finding pinned loudly (not fixed, logged in NEW_FINDINGS): `_hrana_with_retry`'s isinstance bypass retries ANY HranaHttpError once — `_is_delete_transport_error` is effectively dead code at the real DELETE call sites. Full layer 4972 passed. |
+| T-053 | DONE | (T-053 commit) | hrana_http failure-mode contract pinned via fake urlopen: socket.timeout + wrapped URLError classify as transport; statement-level `results[0].type=='error'` does NOT; malformed JSON raises HranaHttpError (unclassified — pinned); explicit timeout kwarg PROVEN to reach urlopen. 6 tests green (in the same 19-test run as T-043). |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
