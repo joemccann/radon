@@ -423,5 +423,121 @@ class TestExitOrdersJournalFailureGuard:
             assert updated["order_id"] == 99
 
 
+class TestExitOrdersQuoteStateGates:
+    """T-044: which quote states may price an exit.
+
+    ``mid = (bid + ask) / 2 if bid and ask else 0`` needs BOTH sides, so a
+    one-sided or empty book yields mid 0 and the order is skipped. A HALT
+    is different: IB keeps serving the last two-sided book, so the mid
+    still looks priceable and the exit would go out against a pre-halt
+    price. ``_is_halted`` gates that.
+    """
+
+    @staticmethod
+    def _run(*, bid, ask, halted="unset"):
+        """Execute one cycle against a placeable GOOG target (25% gap at a
+        11.90/12.10 book) with the given quote state."""
+        with patch('monitor_daemon.handlers.exit_orders.IBClient') as mock_cls, \
+             patch('monitor_daemon.handlers.exit_orders.Option'), \
+             patch('monitor_daemon.handlers.exit_orders.LimitOrder'):
+            mock_client = _wire_placeable_ib(mock_cls)
+            ticker = mock_client.get_quote.return_value
+            ticker.bid = bid
+            ticker.ask = ask
+            if halted == "absent":
+                del ticker.halted
+            elif halted != "unset":
+                ticker.halted = halted
+
+            db = FakeJournalDb([_pending_goog_trade()])
+            handler = ExitOrdersHandler(db=db)
+            result = handler.execute()
+            return mock_client, db, result
+
+    @staticmethod
+    def _reasons(result):
+        return [entry.get("reason") for entry in result["skipped"]]
+
+    def test_empty_book_skips_as_no_market_data(self):
+        """Both sides zero — nothing to price against."""
+        client, db, result = self._run(bid=0, ask=0)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert result["orders_skipped"] == 1
+        assert self._reasons(result) == ["no_market_data"]
+        assert db.trades["trade-8"]["exit_orders"]["target"]["status"] == "PENDING"
+
+    def test_nan_quotes_skip_as_no_market_data(self):
+        """ib_insync leaves bid/ask at nan until a tick arrives."""
+        client, _db, result = self._run(bid=float("nan"), ask=float("nan"))
+
+        client.place_order.assert_not_called()
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_bid_only_book_cannot_price_a_mid(self):
+        """A one-sided book must not be averaged against a zero: (11.90 +
+        0) / 2 would place at half the real bid."""
+        client, _db, result = self._run(bid=11.90, ask=0)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_ask_only_book_cannot_price_a_mid(self):
+        client, _db, result = self._run(bid=0, ask=12.10)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_negative_bid_is_treated_as_absent(self):
+        """IB sends -1 for "no data available" on illiquid options."""
+        client, _db, result = self._run(bid=-1, ask=12.10)
+
+        client.place_order.assert_not_called()
+        assert self._reasons(result) == ["no_market_data"]
+
+    def test_halted_contract_is_not_priced(self):
+        """Ticker.halted == 1 (general halt) with a live-looking book."""
+        client, db, result = self._run(bid=11.90, ask=12.10, halted=1.0)
+
+        client.place_order.assert_not_called()
+        assert result["orders_placed"] == 0
+        assert self._reasons(result) == ["halted"]
+        assert db.trades["trade-8"]["exit_orders"]["target"]["status"] == "PENDING", (
+            "a halted skip must leave the journal row PENDING for a later cycle"
+        )
+
+    def test_volatility_halt_is_not_priced(self):
+        """Ticker.halted == 2 (volatility halt)."""
+        client, _db, result = self._run(bid=11.90, ask=12.10, halted=2)
+
+        client.place_order.assert_not_called()
+        assert self._reasons(result) == ["halted"]
+
+    def test_unhalted_flag_still_places(self):
+        """Control: halted == 0 is trading normally."""
+        client, db, result = self._run(bid=11.90, ask=12.10, halted=0.0)
+
+        client.place_order.assert_called_once()
+        assert result["orders_placed"] == 1
+        assert db.trades["trade-8"]["exit_orders"]["target"]["status"] == "PLACED"
+
+    def test_unknown_halt_flag_still_places(self):
+        """Control: -1 / nan mean "no halt information", not "halted"."""
+        for unknown in (-1.0, float("nan")):
+            client, _db, result = self._run(bid=11.90, ask=12.10, halted=unknown)
+            assert result["orders_placed"] == 1, f"halted={unknown!r} must not block"
+            client.place_order.assert_called_once()
+
+    def test_missing_halt_attribute_still_places(self):
+        """Control: a ticker with no ``halted`` field at all (older
+        ib_insync, synthetic quote) must not be read as halted."""
+        client, _db, result = self._run(bid=11.90, ask=12.10, halted="absent")
+
+        client.place_order.assert_called_once()
+        assert result["orders_placed"] == 1
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
