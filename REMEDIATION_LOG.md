@@ -12,6 +12,8 @@
 
 | T-010 | DONE | (T-010 commit) | RED: 3 new tests in TestExitOrdersJournalFailureGuard all failed against current code (`3 failed in 0.23s` — place_order called TWICE across two cycles; no error surfaced; no heal). GREEN after fix: file 14/14; monitor_daemon+exit_order_service 271/271; full pytest layer 4932 passed/14 skipped in 69s. Fix: `_update_journal_trade` returns bool; `_unrecorded_placements` guard keyed (journal_trade_id, order_type) blocks re-placement while the row still reads PENDING, retries the journal write on later cycles (heal), and the cycle surfaces `result["error"]` so BaseHandler records state=error (watchdog visibility). |
 
+| T-011 | DONE | (T-011 commit) | RED: new test — restart branch re-ran ib_place_order.py (`1 failed, 1 passed`; control proves ib_sync.py retry preserved). GREEN: `_NON_IDEMPOTENT_IB_SCRIPTS` carve-out returns an explicit INDETERMINATE error ("not automatically retried… check open orders") instead of re-running; targeted 4/4, scripts/api/tests 513 passed, full pytest layer 4935 passed/14 skipped. |
+
 ## Baseline
 
 Worktree (clean 2a75496a + T-001/T-002 applied): **pytest rc=0** (4927 passed / 14 skipped, 74.9s — perf-explainer skips here because data/performance.json is absent, proving the T-003 CI-blindness), **vitest rc=0** (41.6s), **cloud rc=0** (723 passed / 4 skipped incl. the 2 darwin skips, 102.6s). Logs: scratchpad runs/wt-baseline-*.log.
