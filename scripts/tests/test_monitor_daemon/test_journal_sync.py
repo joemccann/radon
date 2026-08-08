@@ -433,6 +433,69 @@ class TestTradeLogRecovery:
         assert [row["ib_exec_id"] for row in loaded["trades"]] == ["DUP-RECOVER"]
 
 
+class TestOutOfOrderFillLabeling:
+    """T-014: fills labelled in DELIVERY order, not execution-time order.
+
+    IB can replay executions out of chronological order (corrections after
+    a reconnect, cross-session replay). Processing a closing SELL before
+    its own opening BUY sees prior_qty=0 and writes SELL_TO_OPEN — the
+    phantom-short mislabel. Both sibling paths sort by execution time
+    (journal_rehydrate.py, backfill_journal_from_executed_orders.py); the
+    real-time handler must too.
+    """
+
+    def test_reverse_chronological_delivery_still_labels_close_correctly(self, trade_log_path):
+        buy_open = _mock_fill(
+            exec_id="OOO-BUY",
+            symbol="USAX",
+            side="BOT",
+            shares=65,
+            price=1.02,
+            sec_type="OPT",
+            strike=45.0,
+            right="C",
+            expiry="20260619",
+            when=datetime(2026, 5, 22, 14, 0, 0),
+        )
+        sell_close = _mock_fill(
+            exec_id="OOO-SELL",
+            symbol="USAX",
+            side="SLD",
+            shares=65,
+            price=4.0,
+            sec_type="OPT",
+            strike=45.0,
+            right="C",
+            expiry="20260619",
+            when=datetime(2026, 5, 22, 14, 5, 0),
+        )
+
+        empty_db = MagicMock()
+        empty_result = MagicMock(spec=["fetchall"])
+        empty_result.fetchall.return_value = []
+        empty_db.execute.return_value = empty_result
+
+        with patch("monitor_daemon.handlers.journal_sync.IBClient") as mock_cls, \
+             patch("monitor_daemon.handlers.journal_sync.get_db", return_value=empty_db):
+            mock_client = MagicMock()
+            # DELIVERY order is reversed: the 14:05 close arrives first.
+            mock_client.get_fills.return_value = [sell_close, buy_open]
+            mock_cls.return_value = mock_client
+
+            handler = JournalSyncHandler(trade_log_path=trade_log_path)
+            result = handler.execute()
+
+        assert result["imported"] == 2
+        loaded = verified_load(str(trade_log_path))
+        by_exec = {t["ib_exec_id"]: t for t in loaded["trades"] if t["ib_exec_id"] in ("OOO-BUY", "OOO-SELL")}
+        assert by_exec["OOO-BUY"]["action"] == "BUY_OPTION"
+        assert by_exec["OOO-SELL"]["action"] == "SELL_OPTION", (
+            f"got {by_exec['OOO-SELL']['action']} — the 14:05 SELL was labelled "
+            "against prior_qty=0 because the 14:00 BUY had not been walked yet "
+            "(delivery-order labelling; fills must sort by execution time)"
+        )
+
+
 class TestSellCloseLabeling:
     """Regression for 2026-05-22 SELL_TO_OPEN mislabel bug.
 

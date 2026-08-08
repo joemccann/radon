@@ -493,7 +493,13 @@ class JournalSyncHandler(BaseHandler):
         prior_state: Dict[str, float] = {}
 
         rows: List[Dict[str, Any]] = []
-        for fill in fills:
+        # Walk fills in EXECUTION-TIME order, not delivery order: IB can
+        # replay executions out of order (corrections after a reconnect,
+        # cross-session replay), and labelling a close before its own
+        # opener sees prior_qty=0 → SELL_TO_OPEN phantom short (T-014).
+        # Same rule as journal_rehydrate.py / the backfill importer. The
+        # sort is stable, so unknown-time fills keep delivery order.
+        for fill in sorted(fills, key=self._fill_exec_sort_key):
             contract_key = self._fill_contract_key(fill)
             if contract_key and contract_key not in prior_state:
                 prior_state[contract_key] = self._lookup_prior_qty(db, fill)
@@ -528,6 +534,22 @@ class JournalSyncHandler(BaseHandler):
         except Exception as exc:  # noqa: BLE001
             logger.warning("journal_sync: prior-qty DB unavailable: %s", exc)
             return None
+
+    @staticmethod
+    def _fill_exec_sort_key(fill: Any) -> tuple:
+        """Numeric, exception-proof ordering key for a fill's exec time.
+
+        Unknown/unparseable times sort first (0, 0.0) and, thanks to sort
+        stability, retain their delivery order among themselves — the
+        import path must never crash on a malformed timestamp.
+        """
+        t = getattr(getattr(fill, "execution", None), "time", None)
+        if t is None:
+            return (0, 0.0)
+        try:
+            return (1, t.timestamp())
+        except (AttributeError, TypeError, ValueError, OSError, OverflowError):
+            return (0, 0.0)
 
     @staticmethod
     def _fill_contract_key(fill: Any) -> Optional[str]:
