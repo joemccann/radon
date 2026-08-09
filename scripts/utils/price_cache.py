@@ -101,6 +101,10 @@ def write_cache(cache_dir: Path, key: str, data: Dict[str, float], source: str, 
         "data": data,
     }
     atomic_save(str(path), payload)
+    # R-033: the 500-file cap used to be enforced only by the shelved
+    # performance rebuild — every other writer grew the cache unboundedly.
+    # Cheap: prune_cache is a no-op count check below the cap.
+    prune_cache(subdir)
 
 
 def prune_cache(cache_dir: Path, max_files: int = 500) -> int:

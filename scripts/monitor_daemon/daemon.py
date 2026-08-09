@@ -325,21 +325,52 @@ class MonitorDaemon:
                 )
     
     def load_state(self) -> None:
-        """Load handler states from file."""
+        """Load handler states from file.
+
+        R-045: a corrupt file is preserved as ``.corrupt-<ts>`` before the
+        daemon starts blank — it holds ``fill_monitor.known_orders`` (the
+        fill-dedupe baselines) and silently discarding it destroyed the
+        only forensic record.
+        """
         if not self.state_file or not self.state_file.exists():
             return
-        
+
         try:
             state = verified_load(str(self.state_file))
             handler_states = state.get("handlers", {})
-            
+
             for handler in self.handlers:
                 if handler.name in handler_states:
                     handler.set_state(handler_states[handler.name])
                     logger.debug(f"Restored state for {handler.name}")
-                    
+
         except Exception as e:
             logger.warning(f"Failed to load state: {e}")
+            try:
+                backup = self.state_file.with_name(
+                    self.state_file.name
+                    + f".corrupt-{datetime.now().strftime('%Y%m%dT%H%M%S')}"
+                )
+                backup.write_text(self.state_file.read_text())
+                logger.warning(f"Corrupt state preserved at {backup.name}")
+            except Exception as backup_exc:  # noqa: BLE001
+                logger.warning(f"Could not back up corrupt state: {backup_exc}")
+
+    def install_signal_handlers(self) -> None:
+        """SIGTERM (every deploy) must reach save_state — only
+        KeyboardInterrupt did before (R-045), losing up to one cycle of
+        handler state on every restart."""
+        import signal as _signal
+
+        def _terminate(signum, frame):
+            logger.info("SIGTERM received — saving state and exiting")
+            self._running = False
+            try:
+                self.save_state()
+            finally:
+                raise SystemExit(0)
+
+        _signal.signal(_signal.SIGTERM, _terminate)
     
     def status(self) -> Dict[str, Any]:
         """Get daemon status summary."""
