@@ -161,7 +161,7 @@ def _executed_orders_since(db: Any, since_date: str) -> list[dict[str, Any]]:
     """executed_orders payloads + fill dates with fill_time >= since_date."""
     cursor = db.execute(
         """
-        SELECT exec_id, order_ref, payload, fill_time, recorded_at
+        SELECT exec_id, perm_id, payload, fill_time, recorded_at
         FROM executed_orders
         WHERE fill_time >= ?
         ORDER BY fill_time ASC
