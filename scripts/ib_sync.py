@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1340,6 +1341,32 @@ def build_account_position_vector(raw_positions: list, account_id: str) -> dict[
     }
 
 
+class EmptySnapshotError(RuntimeError):
+    """Zero-position snapshot refused: the prior snapshot was non-empty.
+
+    A degraded IB session (reqPositions failure → empty ib_insync cache)
+    must not overwrite a non-empty book with a flat one (REL-016 / R-018).
+    """
+
+
+def _refuse_empty_snapshot(portfolio: dict, allow_empty: bool) -> None:
+    if portfolio.get("positions"):
+        return
+    if allow_empty or os.environ.get("RADON_ALLOW_EMPTY_SNAPSHOT") == "1":
+        return
+    try:
+        prior = read_latest_portfolio_snapshot() or {}
+    except Exception:
+        return  # no readable prior — a genuinely-flat book stays writable
+    prior_positions = prior.get("positions") or []
+    if prior_positions:
+        raise EmptySnapshotError(
+            f"refusing zero-position snapshot: prior snapshot holds "
+            f"{len(prior_positions)} position(s) — likely a degraded IB session. "
+            f"Override with RADON_ALLOW_EMPTY_SNAPSHOT=1 or --allow-empty."
+        )
+
+
 def save_portfolio(
     portfolio: dict,
     *,
@@ -1347,6 +1374,7 @@ def save_portfolio(
     raw_positions: Optional[list] = None,
     margin_observed_from: str = "",
     margin_observed_through: str = "",
+    allow_empty: bool = False,
 ):
     """Save portfolio to the canonical Turso portfolio_snapshots table."""
     from db.service_cycle import service_cycle
@@ -1354,6 +1382,7 @@ def save_portfolio(
 
     taken_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     with service_cycle("portfolio-sync", market_hours_class="intraday") as cycle:
+        _refuse_empty_snapshot(portfolio, allow_empty)
         cycle.finished_at = taken_at
         account_summary = portfolio.get("account_summary") or {}
         initial_margin = account_summary.get("initial_margin")
@@ -1400,6 +1429,11 @@ def main():
         "--db-optional",
         action="store_true",
         help="Keep returning live portfolio JSON if the Turso snapshot write fails",
+    )
+    parser.add_argument(
+        "--allow-empty",
+        action="store_true",
+        help="Allow a zero-position snapshot even when the prior snapshot was non-empty",
     )
     parser.add_argument("--no-prices", action="store_true", help="Skip market price fetch")
     parser.add_argument("--skip-audit", action="store_true", help="Skip naked short audit after sync")
@@ -1559,6 +1593,7 @@ def main():
                     raw_positions=positions,
                     margin_observed_from=margin_observed_from,
                     margin_observed_through=margin_observed_through,
+                    allow_empty=args.allow_empty,
                 )
             except Exception as exc:
                 db_save_error = exc
