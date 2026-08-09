@@ -67,6 +67,9 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "cash-flow-sync":   {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
     "fill-monitor":     {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "exit-orders":      {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
+    # position-reconcile — 30-min RTH IB-vs-snapshot drift check (REL-001).
+    # 45min open = one missed cycle + slack; mirrors serviceHealthWindows.ts.
+    "position-reconcile": {"open": 45 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "flex-token-check": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     "menthorq-session": {"open": 25 * _HOUR, "closed": 25 * _HOUR, "requires_ib": False},
     # Daily LIVE probe of the MenthorQ credential re-login chain (the
@@ -205,6 +208,9 @@ BUCKETS: dict[str, list[str]] = {
         "orders-sync",
         "portfolio-sync",
         "skew",
+        # RTH position-drift sensor (REL-001) — silent during RTH = the
+        # reconcile spine is down, page like the other intraday writers.
+        "position-reconcile",
     ],
     "continuous": [
         "newsfeed-scraper",
