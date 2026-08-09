@@ -182,12 +182,43 @@ class FillMonitorHandler(BaseHandler):
                 # Update known state
                 self.known_orders[order_id] = order_info
             
-            # Check for completed orders (no longer in open orders)
+            # Check for completed orders (no longer in open orders).
+            # REL-009 / R-016: "vanished from the snapshot" is NOT proof of
+            # a fill — cancels vanish too, and a degraded session returns
+            # an empty snapshot for every order at once.
             completed_ids = set(self.known_orders.keys()) - current_order_ids
+
+            if completed_ids and not trades:
+                accounts = client.get_managed_accounts()
+                if not accounts:
+                    # Connected-but-degraded (post-restart pre-auth): the
+                    # empty snapshot is meaningless. Keep every baseline so
+                    # partials during the blip are detected after recovery.
+                    result["error"] = (
+                        "session degraded (no managed accounts) — open-order "
+                        "snapshot untrusted; completion check skipped"
+                    )
+                    logger.warning(result["error"])
+                    return result
+
+            filled_order_ids = None
+            if completed_ids:
+                try:
+                    filled_order_ids = {
+                        f.execution.orderId for f in client.get_fills()
+                    }
+                except Exception as e:  # noqa: BLE001 — defer, don't guess
+                    result["error"] = (
+                        f"execution cross-check unavailable ({e}); "
+                        f"completion judgment deferred"
+                    )
+                    logger.warning(result["error"])
+                    return result
+
             for order_id in completed_ids:
                 prev_order = self.known_orders[order_id]
-                result["complete_fills"] += 1
-                
+                genuinely_filled = order_id in (filled_order_ids or set())
+
                 completed_info = {
                     "order_id": order_id,
                     "symbol": prev_order.get("symbol"),
@@ -195,17 +226,23 @@ class FillMonitorHandler(BaseHandler):
                     "action": prev_order.get("action"),
                     "quantity": prev_order.get("quantity"),
                     "filled": prev_order.get("filled"),
-                    "status": "COMPLETED"
+                    "status": "COMPLETED" if genuinely_filled else "CANCELLED_OR_GONE",
                 }
                 result["completed"].append(completed_info)
-                
-                logger.info(f"Order completed: #{order_id} {prev_order.get('symbol')}")
-                
-                # Send notification for complete fill
-                if self.send_notifications:
-                    self._notify_complete(completed_info)
-                
-                # Remove from tracking
+
+                if genuinely_filled:
+                    result["complete_fills"] += 1
+                    logger.info(f"Order completed: #{order_id} {prev_order.get('symbol')}")
+                    if self.send_notifications:
+                        self._notify_complete(completed_info)
+                else:
+                    result["cancelled_or_gone"] = result.get("cancelled_or_gone", 0) + 1
+                    logger.info(
+                        f"Order gone without execution (cancelled/expired): "
+                        f"#{order_id} {prev_order.get('symbol')}"
+                    )
+
+                # Remove from tracking (gone either way)
                 del self.known_orders[order_id]
             
         except Exception as e:
