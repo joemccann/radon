@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 import sys
 import time
+import uuid
 from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -2115,6 +2116,12 @@ async def orders_place(request: Request):
             "echo": body,
         }
 
+    # REL-006: mint the orderRef HERE so it survives a SIGKILLed subprocess —
+    # it is the durable handle for "did this order arrive at IB or not".
+    if not body.get("orderRef"):
+        body["orderRef"] = f"radon-{uuid.uuid4().hex[:20]}"
+    order_ref = body["orderRef"]
+
     order_json = json.dumps(body)
     # 25s timeout accommodates: connect (~3s) + qualify (~2s) + place + the
     # 12s combo confirm-poll inside ib_place_order.py + finally-disconnect.
@@ -2136,6 +2143,22 @@ async def orders_place(request: Request):
             body.get("symbol", "?"),
             result.error,
         )
+        # REL-006 / R-009: a killed placement subprocess ("Script timed out")
+        # may have transmitted before dying — that is an INDETERMINATE
+        # outcome, never a plain failure the caller would retry.
+        if "timed out" in (result.error or "").lower():
+            raise HTTPException(
+                status_code=504,
+                detail={
+                    "code": "ORDER_INDETERMINATE",
+                    "orderRef": order_ref,
+                    "message": (
+                        f"Placement timed out after transmit may have occurred — "
+                        f"outcome indeterminate. CHECK OPEN ORDERS (orderRef "
+                        f"{order_ref}) before re-placing. Upstream: {result.error}"
+                    ),
+                },
+            )
         raise HTTPException(status_code=502, detail=result.error)
     if result.data and result.data.get("status") == "error":
         # SPX-02: log the full structured detail (including ib_error_code / ib_error_text
