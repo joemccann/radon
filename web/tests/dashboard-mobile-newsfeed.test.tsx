@@ -15,10 +15,6 @@ vi.mock("@/components/DashboardNewsFeed", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-news-feed" }),
 }));
 
-vi.mock("../components/dashboard/FeedPanel", () => ({
-  default: () => React.createElement("div", { "data-testid": "mock-feed-panel" }),
-}));
-
 vi.mock("../components/dashboard/ScannerHero", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-scanner-hero" }),
 }));
