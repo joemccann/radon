@@ -57,6 +57,7 @@ DEFAULT_PORT = DEFAULT_GATEWAY_PORT
 DEFAULT_CLIENT_ID = CLIENT_IDS.get("ib_execute", 25)
 DEFAULT_TIMEOUT = 60  # 1 minute default monitor timeout
 DEFAULT_INTERVAL = 3  # Check every 3 seconds
+EXIT_FILLED_NOT_JOURNALED = 4
 
 
 class OrderExecutor:
@@ -289,8 +290,9 @@ class OrderExecutor:
         try:
             from db.readers import read_next_journal_numeric_id
             next_id = read_next_journal_numeric_id()
-        except Exception:
-            next_id = 1
+        except Exception as exc:  # noqa: BLE001
+            print(f"  Error: journal id read failed (refusing next_id=1 fallback): {exc}")
+            return False
         
         # Determine contract type and structure
         if hasattr(contract, 'lastTradeDateOrContractMonth'):
@@ -463,27 +465,35 @@ def main():
         result = executor.monitor_order(trade, timeout=args.timeout, interval=args.interval)
         
         # Log if filled
+        journaled = True
         if result['status'] == 'filled' and not args.no_log:
-            executor.log_trade(
-                result, 
-                contract, 
-                args.side, 
+            journaled = executor.log_trade(
+                result,
+                contract,
+                args.side,
                 limit_price,
                 thesis=args.thesis,
                 notes=args.notes
             )
-        
+
         # Final summary
         print(f"\n{'=' * 50}")
         if result['status'] == 'filled':
-            print(f"✅ COMPLETE")
+            if journaled:
+                print(f"✅ COMPLETE")
+            else:
+                print("🚨" * 25)
+                print("🚨 FILLED BUT NOT JOURNALED")
+                print("🚨 The order filled at IB but the journal write failed.")
+                print("🚨 Record this fill manually or run journal_sync now.")
+                print("🚨" * 25)
             print(f"   Symbol: {result['symbol']}")
             print(f"   Quantity: {result['quantity']}")
             print(f"   Avg Price: ${result['avg_price']:.2f}")
             print(f"   Total Value: ${result['total_value']:,.2f}")
             if result.get('commission'):
                 print(f"   Commission: ${result['commission']:.2f}")
-            sys.exit(0)
+            sys.exit(0 if journaled else EXIT_FILLED_NOT_JOURNALED)
         elif result['status'] == 'timeout':
             print(f"⏳ Order still working after {args.timeout}s")
             print(f"   Order ID: {result['order_id']}")
