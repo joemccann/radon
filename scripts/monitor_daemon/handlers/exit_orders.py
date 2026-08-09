@@ -83,7 +83,12 @@ class ExitOrdersHandler(BaseHandler):
         return parsed if isinstance(parsed, dict) else None
     
     def _load_pending_orders(self) -> List[Dict]:
-        """Load pending exit orders from the Turso journal."""
+        """Load pending exit orders from the Turso journal.
+
+        Raises on a failed read (REL-007 / R-019): a swallowed failure
+        here returned [] and heartbeated ok while exit protection
+        silently stopped being placed.
+        """
         pending = []
 
         try:
@@ -133,7 +138,8 @@ class ExitOrdersHandler(BaseHandler):
                     
         except Exception as e:
             logger.error(f"Failed to load journal exit orders: {e}")
-        
+            raise RuntimeError(f"journal exit-order load failed: {e}") from e
+
         return pending
     
     @staticmethod
@@ -385,7 +391,12 @@ class ExitOrdersHandler(BaseHandler):
         except ImportError:
             pass
 
-        pending = self._load_pending_orders()
+        try:
+            pending = self._load_pending_orders()
+        except Exception as e:
+            # Soft failure: error heartbeat, retry next cycle (REL-007).
+            result["error"] = str(e)
+            return result
 
         if not pending:
             logger.debug("No pending exit orders")

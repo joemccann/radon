@@ -170,7 +170,14 @@ class JournalSyncHandler(BaseHandler):
         if candidates or corrections:
             # Corrections carry the superseded row's ib_exec_id, so the upsert
             # REPLACES that journal row instead of adding a second one.
-            self._dual_write(candidates + corrections)
+            _written, failed = self._dual_write(candidates + corrections)
+            if failed:
+                result["db_write_failures"] = failed
+                result["error"] = (
+                    f"{failed} journal upsert(s) failed this cycle "
+                    f"(write-only Turso failure; will re-import from "
+                    f"get_fills() next cycle)"
+                )
             if self.trade_log_path is not None:
                 existing["trades"].extend(candidates)
                 self._apply_corrections(existing, corrections)
@@ -283,15 +290,20 @@ class JournalSyncHandler(BaseHandler):
                     covered.add(part)
         return covered
 
-    def _dual_write(self, candidates: List[Dict[str, Any]]) -> None:
+    def _dual_write(self, candidates: List[Dict[str, Any]]) -> tuple:
         """Mirror new rows to the Turso ``journal`` table.
 
-        Failures are logged and swallowed. The Turso ``journal`` table is the
-        canonical app store. If a local mirror was explicitly configured, the
-        next execute() cycle's reconcile step retries any failed upsert.
+        Returns (written, failed). Failures are logged AND counted so the
+        cycle can heartbeat error (REL-007 / R-020) — in production
+        (trade_log_path=None) there is no per-cycle reconcile retry, so a
+        silently-swallowed failure here was invisible until the daily
+        gap alert. Recovery remains the next cycle's ``get_fills()``
+        (dedupe source is the DB, so an unwritten fill re-imports).
         """
         if upsert_journal_entry is None:
-            return
+            return 0, 0
+        written = 0
+        failed = 0
         for entry in candidates:
             try:
                 upsert_journal_entry(
@@ -299,8 +311,11 @@ class JournalSyncHandler(BaseHandler):
                     entry,
                     filled_at=entry.get("filled_at") or entry.get("date"),
                 )
+                written += 1
             except Exception as exc:  # noqa: BLE001
+                failed += 1
                 logger.warning("journal_sync: DB upsert failed: %s", exc)
+        return written, failed
 
     @staticmethod
     def _apply_corrections(
