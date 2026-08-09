@@ -6,7 +6,10 @@ Manages multiple handlers with different intervals.
 Supports state persistence and market hours awareness.
 """
 
+import concurrent.futures
 import logging
+import os
+import socket
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,6 +19,32 @@ from .handlers.base import BaseHandler
 from utils.atomic_io import atomic_save, verified_load
 
 logger = logging.getLogger(__name__)
+
+# Default hard deadline per handler.run() (REL-008 / R-013). ib_insync has
+# no request timeouts — an auth-wedged gateway used to hang the current
+# handler and, because the loop is single-threaded, every handler after
+# it. Handlers may override via a class-level ``max_runtime_seconds``.
+DEFAULT_HANDLER_DEADLINE_SECONDS = 120.0
+
+
+def sd_notify(state: str) -> None:
+    """Best-effort systemd notify (READY=1 / WATCHDOG=1).
+
+    No-op outside systemd (NOTIFY_SOCKET unset). Mirrors the relay's
+    WatchdogSec liveness contract so an alive-but-dead daemon gets
+    restarted instead of silently idling.
+    """
+    addr = os.environ.get("NOTIFY_SOCKET")
+    if not addr:
+        return
+    if addr.startswith("@"):
+        addr = "\0" + addr[1:]
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM) as sock:
+            sock.connect(addr)
+            sock.send(state.encode())
+    except Exception as exc:  # noqa: BLE001 — liveness ping must never crash the loop
+        logger.debug(f"sd_notify failed: {exc}")
 
 
 class MonitorDaemon:
@@ -154,9 +183,9 @@ class MonitorDaemon:
         for handler in self.handlers:
             if self._handler_can_run_now(handler, market_hours=market_hours):
                 logger.info(f"Running handler: {handler.name}")
-                result = handler.run()
+                result = self._run_handler_bounded(handler)
                 results[handler.name] = result
-                
+
                 if result["status"] == "error":
                     logger.error(f"Handler {handler.name} error: {result.get('error')}")
             else:
@@ -168,8 +197,39 @@ class MonitorDaemon:
         # Save state after each run
         if self.state_file and results:
             self.save_state()
-        
+
         return results
+
+    def _run_handler_bounded(self, handler: BaseHandler) -> Dict[str, Any]:
+        """Run one handler under a hard deadline (REL-008).
+
+        A timed-out handler's thread is abandoned (Python threads cannot
+        be killed) — the loop moves on, the cycle records an error so the
+        watchdog pages, and the stray thread either finishes late or dies
+        with its wedged socket. The alternative was the whole daemon
+        wedging alive-but-dead with open positions unmanaged.
+        """
+        deadline = float(getattr(handler, "max_runtime_seconds",
+                                 DEFAULT_HANDLER_DEADLINE_SECONDS))
+        executor = concurrent.futures.ThreadPoolExecutor(
+            max_workers=1, thread_name_prefix=f"handler-{handler.name}"
+        )
+        try:
+            future = executor.submit(handler.run)
+            try:
+                return future.result(timeout=deadline)
+            except concurrent.futures.TimeoutError:
+                error = f"handler {handler.name} timed out after {deadline:.0f}s"
+                logger.error(error)
+                try:
+                    handler.record_cycle_health(
+                        "error", error={"timeout_seconds": deadline}
+                    )
+                except Exception as exc:  # noqa: BLE001 — heartbeat is best-effort here
+                    logger.warning(f"timeout heartbeat failed for {handler.name}: {exc}")
+                return {"status": "error", "error": error, "handler": handler.name}
+        finally:
+            executor.shutdown(wait=False, cancel_futures=True)
     
     def run_loop(self) -> None:
         """
@@ -179,9 +239,13 @@ class MonitorDaemon:
         """
         self._running = True
         logger.info(f"Starting daemon loop (interval: {self.loop_interval}s)")
-        
+        sd_notify("READY=1")
+
         try:
             while self._running:
+                # Liveness ping keyed to LOOP progress — a wedged loop stops
+                # pinging and systemd's WatchdogSec restarts the unit.
+                sd_notify("WATCHDOG=1")
                 market_hours = self.is_market_hours() if self.respect_market_hours else None
                 # Run handlers
                 results = self.run_once(market_hours=market_hours)
