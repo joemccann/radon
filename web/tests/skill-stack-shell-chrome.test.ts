@@ -9,13 +9,24 @@ const WEB = join(import.meta.dirname, "..");
 const src = (rel: string) => readFileSync(join(WEB, rel), "utf8");
 
 describe("skill-stack shell chrome", () => {
-  it("T1: hard edge cap has no soft box-shadow glow", () => {
+  it("removes the ruled left-edge treatment from every instrument shell", () => {
     const css = src("app/globals.css");
-    const afterIdx = css.indexOf(".panel-edge-trace::after");
-    expect(afterIdx).toBeGreaterThan(0);
-    const block = css.slice(afterIdx, afterIdx + 450);
-    expect(block).toMatch(/border-top:\s*2px\s+solid/);
-    expect(block).not.toMatch(/box-shadow/);
+    expect(css).not.toContain("panel-edge-trace");
+
+    for (const file of [
+      "components/DashboardNewsFeed.tsx",
+      "components/ScannerInstrumentShell.tsx",
+      "components/alerts/AlertsPanel.tsx",
+      "components/dashboard/CatalystsQuadrant.tsx",
+      "components/dashboard/EngineStatePanel.tsx",
+      "components/dashboard/FeedPanel.tsx",
+      "components/dashboard/ScannerHero.tsx",
+      "components/flow-analysis/InformedFlowPanel.tsx",
+      "components/instruments/InstrumentPanel.tsx",
+      "components/ui/InstrumentSkeleton.tsx",
+    ]) {
+      expect(src(file)).not.toContain("panel-edge-trace");
+    }
   });
 
   it("T10: optimizePackageImports includes lucide-react", () => {
@@ -68,7 +79,6 @@ describe("skill-stack shell chrome", () => {
 
   it("T3: news feed uses instrument shell atoms", () => {
     const feed = src("components/DashboardNewsFeed.tsx");
-    expect(feed).toContain("panel-edge-trace");
     expect(feed).toContain("Feed / 01");
     expect(feed).toContain("Live market analysis");
     expect(feed).toContain("panel-meta-rail");
@@ -76,16 +86,15 @@ describe("skill-stack shell chrome", () => {
     expect(feed).not.toMatch(/from "lucide-react".*Radio|Radio size=/);
   });
 
-  it("T4: dashboard panels expose meta rails and edge traces", () => {
+  it("T4: dashboard panels expose meta rails", () => {
     for (const file of [
-      "components/dashboard/FeedPanel.tsx",
+      "components/DashboardNewsFeed.tsx",
       "components/dashboard/ScannerHero.tsx",
       "components/dashboard/CatalystsQuadrant.tsx",
       "components/dashboard/EngineStatePanel.tsx",
     ]) {
       const body = src(file);
       expect(body).toContain("panel-meta-rail");
-      expect(body).toContain("panel-edge-trace");
     }
   });
 

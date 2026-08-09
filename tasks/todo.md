@@ -2189,3 +2189,27 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Freshness/UI: `/api/skew` is no-store; the active tab polls every 60s during RTH and pauses while closed; `LIVE` requires an open-market sample no more than three minutes old; the latest-date cell identifies the value as intraday with an ET observation time. Watchdog freshness is 5m open / 26h closed.
 - Measurement: production baseline at 2026-08-07 RTH still showed finalized 2026-08-06 ratio `1.275877`. A read-only run of the new path returned 2026-08-07 ratio `1.231600`, change `-0.044277`, in 1.267s; repeated UW probes changed intraday, confirming the REST surface updates during the session.
 - Verification: affected Python 45 passed; SKEW/API/hook/frontend Vitest 225 passed; Playwright SKEW 3 passed with visual screenshot inspection; full Vitest 4,976 passed / 26 skipped; cloud 724 passed / 2 skipped; production build, typecheck, lint, output-trace audit, and `git diff --check` passed. Full Python collection remains blocked by the known optional `mcp` dependency; excluding it produced 4,820 passed / 13 skipped and one unrelated stale `data/performance.json` `period_label` failure. `systemd-analyze` is unavailable on macOS; 273 systemd contract tests passed.
+
+# Task: Remove dashboard left-border treatment (2026-08-09)
+
+## Dependency graph
+
+- T1 depends_on: [] - Locate the shared implementation and every rendered occurrence of the ruled left-border treatment across the web application.
+- T2 depends_on: [T1] - Add regression coverage that rejects the treatment anywhere in the affected dashboard surface.
+- T3 depends_on: [T2] - Remove the treatment completely without adding a replacement visual treatment.
+- T4 depends_on: [T3] - Run focused and full web verification, then inspect the rendered application at desktop and mobile widths.
+- T5 depends_on: [T4] - Record the changed surface and verification evidence in this task review.
+
+## Checklist
+
+- [x] T1 Locate all occurrences and shared styling.
+- [x] T2 Add failing regression coverage.
+- [x] T3 Remove the treatment globally.
+- [x] T4 Verify tests and rendered output.
+- [x] T5 Add review notes.
+
+## Review
+
+- Removed the shared ruled `.panel-edge-trace` gutter, its tone/fill variants, all rendered markup, and the compensating asymmetric padding from dashboard, scanner, alerts, flow-analysis, instrument, and loading shells. No replacement treatment was added.
+- Regression coverage rejects the class in CSS and every current source shell; desktop and mobile Playwright coverage confirms zero rendered traces, symmetric panel padding, and no repeating-gradient gutter. Visual screenshots were inspected at 2048px and 393px widths.
+- Verification: focused Vitest 11 passed; full Vitest 507 files / 5,194 tests passed; Playwright desktop 1 and mobile 1 passed; typecheck and lint passed; `git diff --check` passed. Next compile passed; the pre-existing output-trace audit remains red because `api/orders/place/route` includes 5,906 files / 9.09 GiB from `data/db_backups` and `data/journal_archive`.

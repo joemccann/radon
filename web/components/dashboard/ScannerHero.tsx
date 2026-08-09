@@ -44,7 +44,6 @@ export default function ScannerHero() {
 
   return (
     <section className="signals-hero snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
       <header className="signals-hero__header">
         <div>
           <p className="panel-eyebrow">Signals / 02</p>

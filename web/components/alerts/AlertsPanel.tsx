@@ -111,7 +111,6 @@ export function AlertsPanel() {
 
   return (
     <section className="snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Alerts</p>
         <h3 className="panel-title">Signal Alert Rules</h3>

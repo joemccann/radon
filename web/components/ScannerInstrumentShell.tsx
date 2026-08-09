@@ -5,8 +5,8 @@ import type { ReactNode } from "react";
 /**
  * ScannerInstrumentShell — rack-mount grammar for every scanner module.
  *
- * Signature of Radon Flow (scanner family): calibrated left edge gauge +
- * device-label eyebrow + instrument title + control rail. Replaces the
+ * Signature of Radon Flow (scanner family): device-label eyebrow + instrument
+ * title + control rail. Replaces the
  * generic "lucide icon + section title" SaaS table header so scanners read
  * as mountable instruments, not dashboard cards.
  *
@@ -43,7 +43,6 @@ export default function ScannerInstrumentShell({
   const sectionClass = ["section", "instrument-section", className].filter(Boolean).join(" ");
   return (
     <section className={sectionClass} data-testid={testId}>
-      <span className="panel-edge-trace" aria-hidden />
       <header className="section-header instrument-section__header">
         <div className="instrument-section__heading">
           <p className="panel-eyebrow">{moduleId}</p>

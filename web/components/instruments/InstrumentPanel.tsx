@@ -1,23 +1,22 @@
 "use client";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 
 /**
  * InstrumentPanel — the production-grade primitive every hero / signal-summary
  * card extends. Encodes the brand-identity.md § 4 container grammar:
  *
  *   ┌─────────────────────────────────────────────────┐
- *   │ ▎  SIGNAL CANDIDATE / 01           ◆ DISLOCATED │ ← eyebrow + badge
- *   │ ▎  Vol-Credit Gap                               │ ← title
- *   │ ▎                                               │
- *   │ ▎  +2.73σ                                       │ ← metric
- *   │ ▎  20-SESSION BASELINE DEVIATION                │ ← metricLabel
- *   │ ▎                                               │
- *   │ ▎  vix.vvix.ratio                          5.4  │ ← meta rail
- *   │ ▎  engine                                Eigen  │
- *   │ ▎  basis                          20d residual  │
+ *   │  SIGNAL CANDIDATE / 01            ◆ DISLOCATED │ ← eyebrow + badge
+ *   │  Vol-Credit Gap                                │ ← title
+ *   │                                                │
+ *   │  +2.73σ                                        │ ← metric
+ *   │  20-SESSION BASELINE DEVIATION                 │ ← metricLabel
+ *   │                                                │
+ *   │  vix.vvix.ratio                           5.4  │ ← meta rail
+ *   │  engine                                 Eigen  │
+ *   │  basis                           20d residual  │
  *   └─────────────────────────────────────────────────┘
- *      ↑ 2px left signal trace (.panel-edge-trace)
  *
  * The four dashboard hero cards (CRI Composite / Vol Dislocation / Markov
  * State / Portfolio Convexity) are all thin wrappers around this primitive
@@ -50,20 +49,9 @@ export type InstrumentPanelProps = {
   metricLabel: string;
   /** Meta-rail rows along the bottom. Convention: lowercased.dotted keys. */
   meta: InstrumentPanelMetaRow[];
-  /** Color of the left edge gauge / trace. Defaults to "core". */
-  trace?: PanelTone;
-  /**
-   * 0–100 gauge fill — the metric's normalized magnitude. Fills the calibrated
-   * edge gutter and shows the cap marker. Omit for a resting (unfilled) gutter.
-   */
-  level?: number;
   /** Force the metric to a muted "awaiting feed" rendering. */
   awaiting?: boolean;
 };
-
-function toneClass(prefix: string, tone: PanelTone): string {
-  return `${prefix}-${tone}`;
-}
 
 export function InstrumentPanel({
   eyebrow,
@@ -72,23 +60,10 @@ export function InstrumentPanel({
   metric,
   metricLabel,
   meta,
-  trace = "core",
-  level,
   awaiting = false,
 }: InstrumentPanelProps) {
-  const hasLevel = typeof level === "number";
-  const clamped = hasLevel ? Math.max(0, Math.min(100, level)) : 0;
   return (
     <section className="instrument-panel">
-      <span
-        className={`panel-edge-trace ${toneClass("panel-edge-trace", trace)}`}
-        style={
-          hasLevel
-            ? ({ ["--edge-level"]: `${clamped}%` } as CSSProperties)
-            : undefined
-        }
-        aria-hidden
-      />
       <header className="instrument-panel__header">
         <div className="instrument-panel__heading">
           <p className="panel-eyebrow">{eyebrow}</p>

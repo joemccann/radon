@@ -32,7 +32,6 @@ export default function FeedPanel() {
 
   return (
     <section className="feed-panel snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
       <header className="feed-panel__header">
         <div>
           <p className="panel-eyebrow">Feed / 01</p>

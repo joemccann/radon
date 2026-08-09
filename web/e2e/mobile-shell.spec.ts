@@ -140,6 +140,7 @@ test.describe("MobileShell — phase 1 foundation", () => {
   test("dashboard shows Live Market Feed as section 01 with contained Refresh control", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
+    await expect(page.locator(".panel-edge-trace")).toHaveCount(0);
 
     const visualOrder = await page.locator(".dashboard-section").evaluateAll((sections) =>
       sections
