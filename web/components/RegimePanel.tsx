@@ -13,6 +13,7 @@ import BreadthPanel from "./BreadthPanel";
 import BpiPanel from "./BpiPanel";
 import MarginDebtPanel from "./MarginDebtPanel";
 import StraddlePanel from "./StraddlePanel";
+import CorPanel from "./CorPanel";
 import SkewPanel from "./SkewPanel";
 import YieldCurvePanel from "./YieldCurvePanel";
 import GammaRotationPanel from "./GammaRotationPanel";
@@ -32,14 +33,14 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
-type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "skew" | "curve" | "llm" | "backtest";
+type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "curve" | "llm" | "backtest";
 
-const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "skew", "curve", "llm", "backtest"] as const;
+const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "curve", "llm", "backtest"] as const;
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|skew|curve|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew|curve|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -293,7 +294,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "skew", "curve", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "curve", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -316,6 +317,7 @@ export default function RegimePanel({
       <button className={`ticker-tab ${activeTab === "bpi" ? "active" : ""}`} onClick={() => goToTab("bpi")}>BULLISH %</button>
       <button className={`ticker-tab ${activeTab === "margin" ? "active" : ""}`} onClick={() => goToTab("margin")}>MARGIN</button>
       <button className={`ticker-tab ${activeTab === "straddle" ? "active" : ""}`} onClick={() => goToTab("straddle")}>STRADDLE</button>
+      <button className={`ticker-tab ${activeTab === "cor" ? "active" : ""}`} onClick={() => goToTab("cor")}>COR</button>
       <button className={`ticker-tab ${activeTab === "skew" ? "active" : ""}`} onClick={() => goToTab("skew")}>SKEW</button>
       <button className={`ticker-tab ${activeTab === "curve" ? "active" : ""}`} onClick={() => goToTab("curve")}>CURVE</button>
       <button className={`ticker-tab ${activeTab === "llm" ? "active" : ""}`} onClick={() => goToTab("llm")}>LLM</button>
@@ -391,6 +393,15 @@ export default function RegimePanel({
       <div className="regime-panel">
         {tabBar}
         <StraddlePanel prices={prices} />
+      </div>
+    );
+  }
+
+  if (activeTab === "cor") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <CorPanel />
       </div>
     );
   }

@@ -54,6 +54,7 @@ describe.each([
   ["bpi", "app/regime/bpi/page.tsx"],
   ["margin", "app/regime/margin/page.tsx"],
   ["straddle", "app/regime/straddle/page.tsx"],
+  ["cor", "app/regime/cor/page.tsx"],
   ["skew", "app/regime/skew/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
@@ -101,6 +102,9 @@ vi.mock("../components/MarginDebtPanel", () => ({
 }));
 vi.mock("../components/StraddlePanel", () => ({
   default: () => <div data-testid="straddle-panel-stub" />,
+}));
+vi.mock("../components/CorPanel", () => ({
+  default: () => <div data-testid="cor-panel-stub" />,
 }));
 vi.mock("../components/SkewPanel", () => ({
   default: () => <div data-testid="skew-panel-stub" />,
@@ -240,6 +244,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^STRADDLE$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/straddle");
+  });
+
+  it("renders the Cor panel when pathname is /regime/cor", () => {
+    mockedPathname = "/regime/cor";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("cor-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("straddle-panel-stub")).toBeNull();
+  });
+
+  it("clicking COR tab pushes /regime/cor", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^COR$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/cor");
   });
 
   it("renders the Skew panel when pathname is /regime/skew", () => {
