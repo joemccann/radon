@@ -437,6 +437,13 @@ def main():
             print(f"\n🔍 DRY RUN - Order NOT submitted")
             sys.exit(0)
         
+        # Kill switch (REL-004): the --yes flag must not bypass a halt.
+        from trading_halt import is_trading_halted, get_halt_state
+        if is_trading_halted():
+            print(f"✗ TRADING HALTED — order not placed "
+                  f"({get_halt_state().get('reason', 'manual halt')})")
+            sys.exit(3)
+
         # Confirm
         if not args.yes:
             print(f"\n" + "=" * 50)
@@ -444,7 +451,7 @@ def main():
             if confirm != 'YES':
                 print("Order cancelled.")
                 sys.exit(0)
-        
+
         # Place order
         trade = executor.place_order(contract, args.side, args.qty, limit_price)
         
