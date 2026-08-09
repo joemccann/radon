@@ -12,6 +12,7 @@ remains authoritative until Phase 6 retires it.
 from __future__ import annotations
 
 import json
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
@@ -19,12 +20,16 @@ from typing import Any, Optional
 try:
     # When imported as `scripts.db.writer` from project root.
     from .client import get_db
+    from .order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args
     from ..clients.journal_basis import normalize_expiry_compact
 except ImportError:  # pragma: no cover
     # When imported flat after sys.path.insert(scripts/) like the existing
     # services do (cta_sync_service.py et al).
     from db.client import get_db  # type: ignore[no-redef]
+    from db.order_events_sql import ORDER_EVENT_INSERT_SQL, order_event_args  # type: ignore[no-redef]
     from clients.journal_basis import normalize_expiry_compact  # type: ignore[no-redef]
+
+logger = logging.getLogger("radon.db.writer")
 
 
 def _hrana_execute(sql: str, args: tuple = (), *, timeout: float | None = None) -> None:
@@ -475,6 +480,51 @@ def upsert_portfolio_snapshot(taken_at: str, payload: dict[str, Any]) -> None:
         PORTFOLIO_SNAPSHOT_UPSERT_SQL,
         (taken_at, json.dumps(payload)),
     )
+
+
+def append_order_event(
+    event_type: str,
+    *,
+    order_ref: Optional[str] = None,
+    order_id: Optional[int] = None,
+    perm_id: Optional[int] = None,
+    symbol: Optional[str] = None,
+    action: Optional[str] = None,
+    quantity: Optional[float] = None,
+    limit_price: Optional[float] = None,
+    status: Optional[str] = None,
+    detail: Optional[dict[str, Any]] = None,
+) -> bool:
+    """Best-effort append to the order_events audit trail (REL-019).
+
+    Rides the bounded hrana transport — an order path must never gain a
+    hang risk from its own audit write. NEVER raises: a failed audit write
+    logs a warning and returns False; the order outcome already happened
+    and the caller's response must not change.
+    """
+    try:
+        _hrana_execute(
+            ORDER_EVENT_INSERT_SQL,
+            order_event_args(
+                event_type,
+                order_ref=order_ref,
+                order_id=order_id,
+                perm_id=perm_id,
+                symbol=symbol,
+                action=action,
+                quantity=quantity,
+                limit_price=limit_price,
+                status=status,
+                detail=detail,
+            ),
+        )
+        return True
+    except Exception as exc:
+        logger.warning(
+            "order_events append failed (%s orderRef=%s orderId=%s): %s",
+            event_type, order_ref, order_id, exc,
+        )
+        return False
 
 
 def upsert_cash_flow(
