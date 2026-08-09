@@ -124,11 +124,16 @@ class TestFillMonitorExecute:
             assert result["fills"][0]["newly_filled"] == 10
 
     def test_detects_complete_fill(self):
-        """Handler detects complete fills (order no longer in open orders)."""
+        """Handler detects complete fills (order vanished AND an execution
+        exists for it — REL-009: vanishing alone is not proof of a fill)."""
         with patch('monitor_daemon.handlers.fill_monitor.IBClient') as mock_cls:
             # No open orders now
             mock_client = make_mock_client(trades=[])
             mock_cls.return_value = mock_client
+            mock_client.get_managed_accounts.return_value = ["DU123"]
+            fill = MagicMock()
+            fill.execution.orderId = 5
+            mock_client.get_fills.return_value = [fill]
 
             # But we had an order before
             handler = FillMonitorHandler()
