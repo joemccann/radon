@@ -263,11 +263,99 @@ class ExitOrdersHandler(BaseHandler):
             )
             if hasattr(db, "commit"):
                 db.commit()
+
+            # Read-back verification (REL-003 / R-012): a concurrent
+            # wholesale payload upsert can silently swallow this write.
+            # Trusting an unverified write is how a PLACED row reverts to
+            # PENDING and the same live order gets placed twice.
+            verify_rows = db.execute(
+                "SELECT trade_id, payload FROM journal WHERE trade_id = ?",
+                (target_trade_id,),
+            ).fetchall()
+            verified = False
+            for row in verify_rows:
+                candidate = self._decode_payload(self._row_value(row, 1, "payload"))
+                if not candidate:
+                    continue
+                section = candidate.get("exit_orders", {}).get(order_type, {})
+                if section.get("status") == "PLACED" and section.get("order_id") == order_id:
+                    verified = True
+                    break
+            if not verified:
+                logger.error(
+                    f"Journal update for trade {trade_id} {order_type} did not "
+                    f"persist (lost write) — treating as failed"
+                )
+                return False
+
             logger.info(f"Updated journal: trade {trade_id} {order_type} -> order #{order_id}")
             return True
         except Exception as e:
             logger.error(f"Failed to update journal trade: {e}")
             return False
+
+    def get_state(self) -> Dict[str, Any]:
+        """State including the unrecorded-placements guard (REL-003).
+
+        The guard marks orders LIVE at IB whose journal write failed; it
+        must survive daemon restarts or every deploy re-arms the T-010
+        double-place. JSON-safe list form for daemon_state.json.
+        """
+        state = super().get_state()
+        state["unrecorded_placements"] = [
+            [journal_trade_id, order_type, order_id]
+            for (journal_trade_id, order_type), order_id
+            in self._unrecorded_placements.items()
+        ]
+        return state
+
+    def set_state(self, state: Dict[str, Any]) -> None:
+        """Restore state including the unrecorded-placements guard."""
+        super().set_state(state)
+        restored: Dict[tuple, int] = {}
+        for entry in state.get("unrecorded_placements", []) or []:
+            try:
+                journal_trade_id, order_type, order_id = entry
+                restored[(journal_trade_id, order_type)] = order_id
+            except (TypeError, ValueError):
+                logger.warning(f"Skipping malformed guard entry: {entry!r}")
+        self._unrecorded_placements = restored
+
+    _ACTIVE_ORDER_STATUSES = {"Submitted", "PreSubmitted", "PendingSubmit", "ApiPending"}
+
+    def _active_sell_index(self, client: Any) -> Dict[Any, Any]:
+        """Index of working SELL orders at IB keyed by conId and localSymbol.
+
+        Broker truth: before placing an exit, any working SELL on the same
+        contract means a prior cycle already placed it (crash between
+        place and journal-update, lost write, restarted daemon) — adopt
+        it, never duplicate it.
+        """
+        index: Dict[Any, Any] = {}
+        for trade in client.get_open_orders():
+            order = getattr(trade, "order", None)
+            if getattr(order, "action", None) != "SELL":
+                continue
+            if getattr(trade.orderStatus, "status", None) not in self._ACTIVE_ORDER_STATUSES:
+                continue
+            contract = getattr(trade, "contract", None)
+            con_id = getattr(contract, "conId", None)
+            local_symbol = getattr(contract, "localSymbol", None)
+            if isinstance(con_id, int) and con_id:
+                index[("conid", con_id)] = trade
+            if isinstance(local_symbol, str) and local_symbol:
+                index[("local", local_symbol)] = trade
+
+        return index
+
+    def _find_active_sell(self, index: Dict[Any, Any], contract: Any) -> Optional[Any]:
+        con_id = getattr(contract, "conId", None)
+        if isinstance(con_id, int) and ("conid", con_id) in index:
+            return index[("conid", con_id)]
+        local_symbol = getattr(contract, "localSymbol", None)
+        if isinstance(local_symbol, str) and ("local", local_symbol) in index:
+            return index[("local", local_symbol)]
+        return None
     
     def execute(self) -> Dict[str, Any]:
         """
@@ -299,6 +387,19 @@ class ExitOrdersHandler(BaseHandler):
             client.connect(host=DEFAULT_HOST, port=self.ib_port, client_id=self.client_id)
             logger.debug("Connected to IB")
 
+            # REL-003: broker truth before any placement. If the working-
+            # order snapshot is unavailable we cannot rule out a live
+            # duplicate — defer every placement this cycle (fail-safe).
+            try:
+                active_sells = self._active_sell_index(client)
+            except Exception as e:
+                result["error"] = (
+                    f"open-order cross-check unavailable ({e}); "
+                    f"exit placements deferred this cycle"
+                )
+                logger.warning(result["error"])
+                return result
+
             for order_info in pending:
                 ticker = order_info["ticker"]
                 target_price = order_info["target_price"]
@@ -327,6 +428,39 @@ class ExitOrdersHandler(BaseHandler):
                         continue
 
                     contract = qualified[0]
+
+                    # REL-003: a working SELL already at IB for this
+                    # contract is a prior cycle's placement whose journal
+                    # write never landed — adopt it, never duplicate it.
+                    live = self._find_active_sell(active_sells, contract)
+                    if live is not None:
+                        live_order_id = live.order.orderId
+                        adopted = self._update_journal_trade(
+                            order_info["trade_id"],
+                            order_info["order_type"],
+                            live_order_id,
+                            order_info.get("journal_trade_id"),
+                        )
+                        if adopted:
+                            result["orders_adopted"] = result.get("orders_adopted", 0) + 1
+                            logger.warning(
+                                f"Adopted live exit order #{live_order_id} for "
+                                f"{ticker} {order_info['order_type']} (journal "
+                                f"row was PENDING — prior write never landed)"
+                            )
+                        else:
+                            guard_key = (
+                                order_info.get("journal_trade_id"),
+                                order_info["order_type"],
+                            )
+                            self._unrecorded_placements[guard_key] = live_order_id
+                            result["error"] = (
+                                f"live exit order #{live_order_id} found for "
+                                f"{ticker} {order_info['order_type']} but journal "
+                                f"adoption write failed; re-place suppressed"
+                            )
+                            logger.error(result["error"])
+                        continue
 
                     # Get current price
                     ticker_data = client.get_quote(contract)
