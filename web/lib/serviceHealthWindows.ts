@@ -167,6 +167,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // live writer; the daily heartbeat preserves the off-hours window.
   "skew": { open: 5 * MIN, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``skew2d`` — radon-skew2d.timer fires daily 21:50 UTC every calendar day
+  // (derived from skew_history; weekend runs heartbeat when parent is quiet),
+  // so a uniform 26h window fits like margin-debt / yield-curve / straddle.
+  // Turso skew_history transform only — no IB.
+  "skew2d": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
   // market-hours gate — connectors read Turso + repo files). Heartbeats
