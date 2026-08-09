@@ -957,6 +957,62 @@ def upsert_skew_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = No
     db.commit()
 
 
+SKEW2D_UPSERT_SQL = """
+INSERT INTO skew2d_history
+  (date, expiry, dte, put_iv, call_iv, ratio, change, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  expiry      = excluded.expiry,
+  dte         = excluded.dte,
+  put_iv      = excluded.put_iv,
+  call_iv     = excluded.call_iv,
+  ratio       = excluded.ratio,
+  change      = excluded.change,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_skew2d_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """Skew 2D indicator — one row per completed SPX session, idempotent on
+    date. change is NULL on the first two sessions (no two-session lag).
+
+    Chunked multi-row INSERTs (same Hrana I/O bounding as upsert_skew_rows).
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    row["expiry"],
+                    int(row["dte"]),
+                    float(row["put_iv"]),
+                    float(row["call_iv"]),
+                    float(row["ratio"]),
+                    row.get("change"),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO skew2d_history (date, expiry, dte, put_iv, call_iv, ratio, change, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "expiry = excluded.expiry, dte = excluded.dte, "
+            "put_iv = excluded.put_iv, call_iv = excluded.call_iv, "
+            "ratio = excluded.ratio, change = excluded.change, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
+
 def upsert_option_close(
     symbol: str,
     expiry: str,
