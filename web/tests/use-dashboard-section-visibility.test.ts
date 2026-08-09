@@ -41,33 +41,33 @@ describe("useDashboardSectionVisibility", () => {
   it("defaults to nothing hidden", () => {
     const { result } = renderHook(() => useDashboardSectionVisibility());
 
-    expect(result.current.isHidden("portfolio")).toBe(false);
-    expect(result.current.isHidden("news")).toBe(false);
+    expect(result.current.isHidden("feed")).toBe(false);
+    expect(result.current.isHidden("signals")).toBe(false);
   });
 
   it("hides a section and writes the id to localStorage", async () => {
     const { result } = renderHook(() => useDashboardSectionVisibility());
 
     act(() => {
-      result.current.toggle("portfolio");
+      result.current.toggle("feed");
     });
 
-    expect(result.current.isHidden("portfolio")).toBe(true);
+    expect(result.current.isHidden("feed")).toBe(true);
     await waitFor(() => {
-      expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual(["portfolio"]);
+      expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual(["feed"]);
     });
   });
 
   it("rehydrates hidden sections from localStorage", async () => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(["portfolio", "news"]));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(["feed", "signals"]));
 
     const { result } = renderHook(() => useDashboardSectionVisibility());
 
     await waitFor(() => {
-      expect(result.current.isHidden("portfolio")).toBe(true);
-      expect(result.current.isHidden("news")).toBe(true);
+      expect(result.current.isHidden("feed")).toBe(true);
+      expect(result.current.isHidden("signals")).toBe(true);
     });
-    expect(result.current.isHidden("orders")).toBe(false);
+    expect(result.current.isHidden("catalysts")).toBe(false);
   });
 
   it("resets a legacy all-hidden dashboard instead of rendering blank forever", async () => {
@@ -84,35 +84,35 @@ describe("useDashboardSectionVisibility", () => {
   });
 
   it("does not allow the final visible section to be hidden", async () => {
-    const initiallyHidden = DASHBOARD_SECTION_IDS.filter((id) => id !== "news");
+    const initiallyHidden = DASHBOARD_SECTION_IDS.filter((id) => id !== "signals");
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(initiallyHidden));
 
     const { result } = renderHook(() => useDashboardSectionVisibility());
 
     await waitFor(() => {
-      expect(result.current.isHidden("portfolio")).toBe(true);
-      expect(result.current.isHidden("news")).toBe(false);
+      expect(result.current.isHidden("feed")).toBe(true);
+      expect(result.current.isHidden("signals")).toBe(false);
     });
 
     act(() => {
-      result.current.toggle("news");
+      result.current.toggle("signals");
     });
 
-    expect(result.current.isHidden("news")).toBe(false);
+    expect(result.current.isHidden("signals")).toBe(false);
     await waitFor(() => {
       expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual(initiallyHidden);
     });
   });
 
   it("ignores malformed and unknown stored values", async () => {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(["portfolio", "not-a-section", 42]));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(["feed", "not-a-section", 42]));
 
     const { result } = renderHook(() => useDashboardSectionVisibility());
 
     await waitFor(() => {
-      expect(result.current.isHidden("portfolio")).toBe(true);
+      expect(result.current.isHidden("feed")).toBe(true);
       expect(result.current.isHidden("not-a-section")).toBe(false);
     });
-    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual(["portfolio"]);
+    expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual(["feed"]);
   });
 });
