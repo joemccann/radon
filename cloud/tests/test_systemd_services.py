@@ -76,6 +76,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-straddle.timer",
     "radon-skew.service",
     "radon-skew.timer",
+    "radon-skew2d.service",
+    "radon-skew2d.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
