@@ -65,6 +65,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # + US holidays. Longest legit gap: Fri 17:00 ET → Mon 17:00 ET ≈ 72h.
     # Prior 25h closed window tripped every Saturday. Widened to 4 days.
     "cash-flow-sync":   {"open": 25 * _HOUR, "closed": 4 * _DAY, "requires_ib": False},
+    # execution-sweep fires at 20:30 ET on trading days only (evening
+    # after-hours fill import, REL-012); skips weekends + US holidays.
+    # Longest legit gap: Fri 20:30 ET → Mon 20:30 ET ≈ 72h, so closed is
+    # 4 days like cash-flow-sync; open 26h catches a missed weekday run.
+    "execution-sweep":  {"open": 26 * _HOUR, "closed": 4 * _DAY, "requires_ib": True},
     "fill-monitor":     {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     "exit-orders":      {"open": 5 * _MIN, "closed": 3 * _DAY, "requires_ib": True},
     # position-reconcile — 30-min RTH IB-vs-snapshot drift check (REL-001).
@@ -232,6 +237,9 @@ BUCKETS: dict[str, list[str]] = {
     ],
     "daily": [
         "cash-flow-sync",
+        # Daily 20:30 ET evening execution sweep (monitor daemon) — hourly
+        # check surfaces a missed run within 1h of the 26h window expiring.
+        "execution-sweep",
         "flex-token-check",
         "menthorq-session",
         "menthorq-login-probe",

@@ -110,6 +110,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // holiday-drift day; ``open`` stays at 25h to catch a missed weekday
   // run quickly during trading hours.
   "cash-flow-sync": { open: 25 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: false },
+  // ``execution-sweep`` fires once per ET trading day at 20:30 ET (the
+  // REL-012 evening after-hours fill sweep inside the monitor daemon)
+  // and skips weekends + US holidays. The longest legitimate quiet
+  // period is Fri 20:30 ET → Mon 20:30 ET ≈ 72h, so ``closed`` and
+  // ``extended`` are 4 days like cash-flow-sync; ``open`` is 26h to
+  // catch a missed weekday run. Pulls get_fills() from IB Gateway.
+  "execution-sweep": { open: 26 * HOUR, extended: 4 * DAY, closed: 4 * DAY, category: "scheduled", requires_ib: true },
 
   // Both ``fill-monitor`` and ``exit-orders`` only run during market
   // hours via the monitor daemon. Their 1h closed window assumed the

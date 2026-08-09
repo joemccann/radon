@@ -490,6 +490,7 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
     ["fill-monitor", true],
     ["exit-orders", true],
     ["journal-sync", true],
+    ["execution-sweep", true],
     ["orders-read-compare", true],
     ["newsfeed-scraper", false],
     ["replica-watchdog", false],
@@ -526,6 +527,8 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       "fill-monitor",
       "exit-orders",
       "journal-sync",
+      // Evening after-hours fill sweep (REL-012) — get_fills() from IB.
+      "execution-sweep",
       "orders-read-compare",
       // REL-001: PositionReconcileHandler fetches IB positions every cycle.
       "position-reconcile",

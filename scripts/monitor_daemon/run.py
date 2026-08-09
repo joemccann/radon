@@ -34,6 +34,7 @@ from monitor_daemon.handlers.flex_token_check import FlexTokenCheck
 from monitor_daemon.handlers.menthorq_session_check import MenthorQSessionCheck
 from monitor_daemon.handlers.menthorq_login_probe import MenthorQLoginProbe
 from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
+from monitor_daemon.handlers.evening_execution_sweep import EveningExecutionSweepHandler
 from monitor_daemon.handlers.journal_reconcile import JournalReconcileHandler
 from monitor_daemon.handlers.journal_gap_sli import JournalGapSliHandler
 from monitor_daemon.handlers.position_reconcile import PositionReconcileHandler
@@ -102,6 +103,10 @@ def create_daemon() -> MonitorDaemon:
     ))
 
     daemon.register(CashFlowSyncHandler())
+
+    daemon.register(EveningExecutionSweepHandler(
+        ib_port=4001
+    ))
 
     daemon.register(JournalReconcileHandler())
 
