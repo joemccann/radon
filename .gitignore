@@ -175,6 +175,7 @@ web/verify-regime-internals.mjs
 /.claude/skills/*
 !/.claude/skills/incident-response/
 !/.claude/skills/long-horizon-jobs/
+!/.claude/skills/reliability-weekend/
 /.pi/skills/
 /skills-lock.json
 /radon-dark-full.png
@@ -226,3 +227,6 @@ tasks/artifacts/*.png
 # Rendered security-audit reports are sensitive (enumerate attack surface + topology).
 # Keep them in the PRIVATE radon-cloud:security-archive, never this public repo.
 docs/security-audit-*.html
+
+# Weekend reliability runner marker (dedicated clone only, never committed)
+.radon-weekend-runner
