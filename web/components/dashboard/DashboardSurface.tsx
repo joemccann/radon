@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight } from "lucide-react";
 import { useViewport } from "@/lib/useViewport";
 import { useDashboardSectionVisibility } from "@/lib/useDashboardSectionVisibility";
 import DashboardNewsFeed from "@/components/DashboardNewsFeed";
-import FeedPanel from "./FeedPanel";
 import { KpiStrip } from "./KpiStrip";
 import ScannerHero from "./ScannerHero";
 import CatalystsQuadrant from "./CatalystsQuadrant";
@@ -79,8 +78,9 @@ function DashboardSection({
  * DashboardSurface — terminal dashboard. A full-width KPI telemetry strip,
  * then a two-column grid:
  *
- *   LEFT — Feed / 01: featured story + headline list (desktop FeedPanel;
- *     the mobile shell keeps the paginated DashboardNewsFeed).
+ *   LEFT — Feed / 01: the paginated DashboardNewsFeed rail (tag bar,
+ *     lightbox, bookmarks) inside the height-clamped scrollable
+ *     .dashboard-surface__feed container.
  *
  *   RIGHT — Signals / 02: theta-harvester / 7-step-strength ranked tables,
  *     then the quadrant row: Catalysts / 03 grouped TODAY / THIS WEEK /
@@ -95,8 +95,6 @@ export default function DashboardSurface({
   marketState,
 }: DashboardSurfaceProps) {
   const { isHidden, toggle } = useDashboardSectionVisibility();
-  const { isMobile, hasMounted } = useViewport();
-  const mobile = isMobile && hasMounted;
 
   const positionTickers = useMemo(
     () => new Set((portfolio?.positions ?? []).map((p) => p.ticker).filter(Boolean)),
@@ -109,7 +107,7 @@ export default function DashboardSurface({
       <div className="dashboard-surface__grid">
         <div className="dashboard-surface__feed">
           <DashboardSection id="feed" label="Live Market Feed" count="01" open={!isHidden("feed")} onToggle={toggle}>
-            {mobile ? <DashboardNewsFeed /> : <FeedPanel />}
+            <DashboardNewsFeed />
           </DashboardSection>
         </div>
         <div className="dashboard-surface__right">

@@ -17,13 +17,10 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 
 // ── Stub the heavy dashboard siblings so the render isolates the
-//    CatalystsQuadrant mount. (FeedPanel/DashboardNewsFeed pull in the app
-//    router; ScannerHero/EngineStatePanel pull in their own hooks.) ──
+//    CatalystsQuadrant mount. (DashboardNewsFeed pulls in the app router;
+//    ScannerHero/EngineStatePanel pull in their own hooks.) ──
 vi.mock("@/components/DashboardNewsFeed", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-news-feed" }),
-}));
-vi.mock("@/components/dashboard/FeedPanel", () => ({
-  default: () => React.createElement("div", { "data-testid": "mock-feed-panel" }),
 }));
 vi.mock("@/components/dashboard/ScannerHero", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-scanner-hero" }),

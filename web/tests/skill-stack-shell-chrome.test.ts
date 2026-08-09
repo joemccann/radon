@@ -19,7 +19,6 @@ describe("skill-stack shell chrome", () => {
       "components/alerts/AlertsPanel.tsx",
       "components/dashboard/CatalystsQuadrant.tsx",
       "components/dashboard/EngineStatePanel.tsx",
-      "components/dashboard/FeedPanel.tsx",
       "components/dashboard/ScannerHero.tsx",
       "components/flow-analysis/InformedFlowPanel.tsx",
       "components/instruments/InstrumentPanel.tsx",

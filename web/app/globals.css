@@ -1779,6 +1779,31 @@ body[data-mobile="true"] .watchlist-list {
 
 .dashboard-surface__feed {
   min-width: 0;
+  /* Pin the feed to the top of the dashboard's scroll viewport and let
+     its newsfeed scroll inside instead of dragging the entire page down.
+     The 120px allowance covers the workspace header (48px), footer
+     telemetry strip (~26px), and the content area's vertical padding
+     (40px). Adjust if any of those change. */
+  position: sticky;
+  top: 0;
+  max-height: calc(100vh - 120px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* The clamp container carries no chrome of its own, so an OS scrollbar
+   would float in the gutter outside the card border — hide it entirely;
+   wheel/trackpad/keyboard scrolling is unaffected. */
+.dashboard-surface__feed {
+  scrollbar-width: none;
+}
+.dashboard-surface__feed::-webkit-scrollbar { display: none; }
+
+/* The mobile shell never clamps the feed. */
+body[data-mobile="true"] .dashboard-surface__feed {
+  position: static;
+  max-height: none;
+  overflow-y: visible;
 }
 
 .dashboard-surface__right {
@@ -1970,8 +1995,14 @@ body[data-mobile="true"] .watchlist-list {
 }
 
 @media (max-width: 1280px) {
-  /* Single column: feed stacks above the signals column. */
+  /* Single column: feed stacks above the signals column and must grow
+     naturally — drop the sticky/clamp behaviour. */
   .dashboard-surface__grid { grid-template-columns: 1fr; }
+  .dashboard-surface__feed {
+    position: static;
+    max-height: none;
+    overflow-y: visible;
+  }
 }
 
 @media (max-width: 720px) {
@@ -2089,172 +2120,6 @@ body[data-mobile="true"] .watchlist-list {
   .dashboard-kpi__cell:nth-child(even) { border-left: 1px solid var(--line-grid); }
 }
 
-/* ───────────────────────────────────────────────────────────
-   FeedPanel — featured story + headline list.
-   ─────────────────────────────────────────────────────────── */
-.feed-panel__header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.feed-panel__header-meta {
-  font-family: var(--font-mono);
-  font-size: 10px;
-  letter-spacing: 0.1em;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.feed-panel__featured {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-width: 0;
-}
-
-.feed-panel__featured-title-link { text-decoration: none; }
-
-.feed-panel__featured-title {
-  margin: 0;
-  font-size: 21px;
-  font-weight: 600;
-  line-height: 1.25;
-  letter-spacing: -0.015em;
-  color: var(--text-primary);
-  text-wrap: pretty;
-}
-
-.feed-panel__featured-title-link:hover .feed-panel__featured-title {
-  color: var(--signal-strong);
-}
-
-.feed-panel__featured-body {
-  margin: 0;
-  font-size: 14px;
-  line-height: 1.7;
-  color: var(--text-secondary);
-  text-wrap: pretty;
-  max-width: 62ch;
-  display: -webkit-box;
-  -webkit-line-clamp: 10;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-
-.feed-panel__media {
-  display: block;
-  padding: 8px;
-  background: var(--bg-canvas);
-  border: 1px solid var(--line-grid);
-  border-radius: 4px;
-  cursor: zoom-in;
-}
-
-.feed-panel__media-image {
-  width: 100%;
-  height: auto;
-  display: block;
-}
-
-.feed-panel__featured-foot {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.feed-panel__tag {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  padding: 3px 8px;
-  border: 1px solid var(--line-grid);
-  border-radius: 999px;
-  color: var(--text-secondary);
-}
-
-.feed-panel__featured-time {
-  margin-left: auto;
-  font-family: var(--font-mono);
-  font-size: 10px;
-  color: var(--text-muted);
-  white-space: nowrap;
-}
-
-.feed-panel__divider {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.feed-panel__divider-label {
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.feed-panel__divider::after {
-  content: "";
-  flex: 1;
-  height: 1px;
-  background: var(--line-grid);
-}
-
-.feed-panel__headlines {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-}
-
-.feed-panel__headline {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  width: 100%;
-  padding: 10px 12px;
-  background: transparent;
-  border: 0;
-  border-left: 2px solid transparent;
-  border-bottom: 1px solid var(--line-grid);
-  text-align: left;
-  cursor: pointer;
-  transition: background var(--dur-fast, 150ms);
-}
-
-.feed-panel__headline:hover { background: var(--bg-panel-raised); }
-
-.feed-panel__headline.is-active {
-  border-left-color: var(--signal-core);
-  background: color-mix(in srgb, var(--signal-core) 4%, transparent);
-}
-
-.feed-panel__headline-title {
-  font-size: 13px;
-  font-weight: 500;
-  line-height: 1.4;
-  color: var(--text-primary);
-  text-wrap: pretty;
-}
-
-.feed-panel__headline-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-family: var(--font-mono);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--text-muted);
-}
-
-.feed-panel__full-feed,
 .signals-hero__open-scanner {
   margin-left: auto;
   font-family: var(--font-mono);
@@ -2265,7 +2130,6 @@ body[data-mobile="true"] .watchlist-list {
   white-space: nowrap;
 }
 
-.feed-panel__full-feed:hover,
 .signals-hero__open-scanner:hover {
   color: var(--signal-strong);
   text-decoration: underline;
@@ -2335,7 +2199,10 @@ body[data-mobile="true"] .watchlist-list {
 }
 
 .signals-hero__row--strength {
-  grid-template-columns: 26px 72px minmax(90px, 1fr) minmax(140px, 196px) 52px 90px;
+  /* The gate ladder is the shrink absorber (minmax(0,…)): fixed tracks +
+     the ticker's 90px floor must fit the narrowest panel the dashboard
+     grid allows, or PASSED/STATE overflow the panel border. */
+  grid-template-columns: 26px 72px minmax(90px, 1fr) minmax(0, 196px) 52px 90px;
 }
 
 a.signals-hero__row:hover { background: var(--bg-panel-raised); }
