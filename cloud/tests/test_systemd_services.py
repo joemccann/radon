@@ -74,6 +74,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-yield-curve.timer",
     "radon-straddle.service",
     "radon-straddle.timer",
+    "radon-cor.service",
+    "radon-cor.timer",
     "radon-skew.service",
     "radon-skew.timer",
 ]
