@@ -1,0 +1,15 @@
+[Unit]
+Description=Radon COR Indicator - daily Cboe implied-correlation pull
+
+[Timer]
+# Cboe overwrites the COR EOD files after each session (~18:31 ET latest
+# observed); 02:20 UTC clears that with hours of slack and runs 5 minutes
+# after radon-straddle to stagger the CDN hits. Runs daily including
+# weekends: weekend/holiday runs are 304 heartbeats that keep
+# service_health fresh inside the staleness window.
+OnCalendar=*-*-* 02:20:00 UTC
+Persistent=true
+RandomizedDelaySec=120
+
+[Install]
+WantedBy=timers.target
