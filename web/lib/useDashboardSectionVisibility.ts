@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 
 export const DASHBOARD_SECTION_IDS = [
-  "portfolio",
-  "news",
-  "orders",
-  "opportunities",
-  "flow-surprise",
+  "feed",
+  "signals",
   "catalysts",
+  "engine",
 ] as const;
 
 const STORAGE_KEY = "radon:mobile-dashboard:hidden-sections";

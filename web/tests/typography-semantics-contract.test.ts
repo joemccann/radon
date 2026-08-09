@@ -22,14 +22,14 @@ describe("workspace typography semantics", () => {
 
     expect(dashboard).toContain('<h2 className="dashboard-section__heading"');
     expect(workspace).toContain('<h2 className="section-title">');
-    expect(source("components/dashboard/CatalystCard.tsx")).toContain('<h3 className="panel-title">');
+    expect(source("components/dashboard/CatalystsQuadrant.tsx")).toContain('<h3 className="panel-title">');
   });
 
   it("exposes full operational strings hidden by visual ellipsis", () => {
     expect(source("components/ServiceHealthBanner.tsx")).toContain('title={fullMessage}');
     expect(source("components/ticker-detail/OptionsChainTab.tsx")).toContain('title={`${ticker} ${formatExpiry(leg.expiry)}');
-    expect(source("components/dashboard/CatalystCard.tsx")).toContain('title={r.title}');
-    expect(source("components/dashboard/OpportunitiesCard.tsx")).toContain('className="snapshot-row__signal" title=');
+    expect(source("components/dashboard/CatalystsQuadrant.tsx")).toContain('title={row.title}');
+    expect(source("components/dashboard/ScannerHero.tsx")).toContain('title={cell.title}');
     expect(source("components/mobile/MobileAppBar.tsx")).toContain('className="mobile-app-bar__title" title={title}');
   });
 });

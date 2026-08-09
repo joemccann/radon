@@ -16,22 +16,20 @@ import React from "react";
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, screen, waitFor, cleanup } from "@testing-library/react";
 
-// ── Stub the heavy dashboard siblings so the render isolates CatalystCard.
-//    (DashboardNewsFeed pulls in the app router; not under test here.) ──
+// ── Stub the heavy dashboard siblings so the render isolates the
+//    CatalystsQuadrant mount. (FeedPanel/DashboardNewsFeed pull in the app
+//    router; ScannerHero/EngineStatePanel pull in their own hooks.) ──
 vi.mock("@/components/DashboardNewsFeed", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-news-feed" }),
 }));
-vi.mock("@/components/dashboard/PortfolioSnapshotCard", () => ({
-  PortfolioSnapshotCard: () => React.createElement("div", { "data-testid": "mock-portfolio-card" }),
+vi.mock("@/components/dashboard/FeedPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-feed-panel" }),
 }));
-vi.mock("@/components/dashboard/OrdersSnapshotCard", () => ({
-  OrdersSnapshotCard: () => React.createElement("div", { "data-testid": "mock-orders-card" }),
+vi.mock("@/components/dashboard/ScannerHero", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-scanner-hero" }),
 }));
-vi.mock("@/components/dashboard/OpportunitiesCard", () => ({
-  OpportunitiesCard: () => React.createElement("div", { "data-testid": "mock-opportunities-card" }),
-}));
-vi.mock("@/components/dashboard/FlowSurpriseCard", () => ({
-  FlowSurpriseCard: () => React.createElement("div", { "data-testid": "mock-flow-surprise-card" }),
+vi.mock("@/components/dashboard/EngineStatePanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-engine-panel" }),
 }));
 
 // ── Mock the data hooks the mounted panels depend on ──
@@ -100,13 +98,13 @@ afterEach(() => {
 });
 
 describe("FU3 panel mounts", () => {
-  it("DashboardSurface mounts the CatalystCard surface", async () => {
-    render(<DashboardSurface portfolio={null} orders={null} />);
+  it("DashboardSurface mounts the CatalystsQuadrant surface", async () => {
+    render(<DashboardSurface portfolio={null} marketState={null} />);
     await waitFor(() =>
       expect(screen.getByRole("heading", { level: 2, name: /upcoming catalysts/i })).toBeTruthy(),
     );
-    expect(screen.getByRole("heading", { level: 3, name: /upcoming catalysts/i })).toBeTruthy();
-    expect(screen.getByText("APPLE INC").getAttribute("title")).toBe("APPLE INC");
+    expect(screen.getByRole("heading", { level: 3, name: /upcoming/i })).toBeTruthy();
+    expect(screen.getByText(/APPLE INC/)).toBeTruthy();
   });
 
   it("flow-analysis surface mounts InformedFlowPanel for the active ticker", async () => {

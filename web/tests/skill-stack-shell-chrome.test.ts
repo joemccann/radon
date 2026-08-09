@@ -69,22 +69,23 @@ describe("skill-stack shell chrome", () => {
   it("T3: news feed uses instrument shell atoms", () => {
     const feed = src("components/DashboardNewsFeed.tsx");
     expect(feed).toContain("panel-edge-trace");
-    expect(feed).toContain("Feed / 02");
+    expect(feed).toContain("Feed / 01");
     expect(feed).toContain("Live market analysis");
     expect(feed).toContain("panel-meta-rail");
     expect(feed).toContain("capture.basis");
     expect(feed).not.toMatch(/from "lucide-react".*Radio|Radio size=/);
   });
 
-  it("T4: snapshot cards expose meta rails and edge levels", () => {
+  it("T4: dashboard panels expose meta rails and edge traces", () => {
     for (const file of [
-      "components/dashboard/PortfolioSnapshotCard.tsx",
-      "components/dashboard/OrdersSnapshotCard.tsx",
-      "components/dashboard/OpportunitiesCard.tsx",
+      "components/dashboard/FeedPanel.tsx",
+      "components/dashboard/ScannerHero.tsx",
+      "components/dashboard/CatalystsQuadrant.tsx",
+      "components/dashboard/EngineStatePanel.tsx",
     ]) {
       const body = src(file);
       expect(body).toContain("panel-meta-rail");
-      expect(body).toContain("--edge-level");
+      expect(body).toContain("panel-edge-trace");
     }
   });
 

@@ -1,0 +1,121 @@
+import { describe, expect, it } from "vitest";
+import { deriveKpis, fmtMoneyExact } from "../lib/dashboardKpis";
+import type { PortfolioData } from "../lib/types";
+
+function portfolioWith(account: Partial<PortfolioData["account_summary"]> | undefined): PortfolioData {
+  return {
+    bankroll: 0,
+    peak_value: 0,
+    last_sync: "2026-08-07T16:35:18-04:00",
+    positions: [],
+    total_deployed_pct: 0,
+    total_deployed_dollars: 0,
+    remaining_capacity_pct: 0,
+    position_count: 0,
+    defined_risk_count: 0,
+    undefined_risk_count: 0,
+    avg_kelly_optimal: null,
+    account_summary: account
+      ? ({
+          net_liquidation: 2_847_120,
+          daily_pnl: 18_432,
+          unrealized_pnl: 0,
+          realized_pnl: 0,
+          settled_cash: 0,
+          maintenance_margin: 894_000,
+          excess_liquidity: 1_100_000,
+          buying_power: 1_204_580,
+          dividends: 0,
+          ...account,
+        } as PortfolioData["account_summary"])
+      : undefined,
+  };
+}
+
+describe("deriveKpis", () => {
+  it("returns four cells with null values when portfolio is absent", () => {
+    const cells = deriveKpis(null, 0);
+    expect(cells).toHaveLength(4);
+    expect(cells.map((c) => c.key)).toEqual(["netLiq", "todayPnl", "buyingPower", "marginUsed"]);
+    for (const cell of cells) {
+      expect(cell.value).toBeNull();
+      expect(cell.display).toBe("—");
+      expect(cell.barPct).toBeNull();
+    }
+  });
+
+  it("maps net liquidation with exact digits", () => {
+    const [netLiq] = deriveKpis(portfolioWith({}), 0);
+    expect(netLiq.value).toBe(2_847_120);
+    expect(netLiq.display).toBe("$2,847,120");
+  });
+
+  it("prefers IB daily_pnl for today P&L and tones positive as core", () => {
+    const [, todayPnl] = deriveKpis(portfolioWith({ daily_pnl: 18_432 }), 999);
+    expect(todayPnl.value).toBe(18_432);
+    expect(todayPnl.tone).toBe("core");
+  });
+
+  it("falls back to realized fills when daily_pnl is null", () => {
+    const [, todayPnl] = deriveKpis(portfolioWith({ daily_pnl: null }), -1_250);
+    expect(todayPnl.value).toBe(-1_250);
+    expect(todayPnl.tone).toBe("fault");
+  });
+
+  it("leaves today P&L null when daily_pnl is null and no fills", () => {
+    const [, todayPnl] = deriveKpis(portfolioWith({ daily_pnl: null }), 0);
+    expect(todayPnl.value).toBeNull();
+    expect(todayPnl.tone).toBe("neutral");
+  });
+
+  it("derives buying-power bar from available_funds / equity_with_loan", () => {
+    const [, , bp] = deriveKpis(
+      portfolioWith({ available_funds: 900_000, equity_with_loan: 3_000_000 }),
+      0,
+    );
+    expect(bp.value).toBe(1_204_580);
+    expect(bp.barPct).toBeCloseTo(30, 5);
+  });
+
+  it("omits the buying-power bar when capacity inputs are missing", () => {
+    const [, , bp] = deriveKpis(portfolioWith({}), 0);
+    expect(bp.barPct).toBeNull();
+  });
+
+  it("derives margin used % from maintenance_margin / net_liquidation", () => {
+    const cells = deriveKpis(portfolioWith({}), 0);
+    const margin = cells[3];
+    expect(margin.value).toBeCloseTo((894_000 / 2_847_120) * 100, 5);
+    expect(margin.display).toBe(`${((894_000 / 2_847_120) * 100).toFixed(1)}%`);
+    expect(margin.barPct).toBeCloseTo((894_000 / 2_847_120) * 100, 5);
+  });
+
+  it("tones margin warn when assessMargin is none, fault when warning", () => {
+    const healthy = deriveKpis(portfolioWith({}), 0)[3];
+    expect(healthy.barTone).toBe("warn");
+
+    const strained = deriveKpis(
+      portfolioWith({ excess_liquidity: 50_000 }), // cushion < 5%
+      0,
+    )[3];
+    expect(strained.barTone).toBe("fault");
+  });
+
+  it("keeps margin null when net_liquidation is non-positive", () => {
+    const margin = deriveKpis(portfolioWith({ net_liquidation: 0 }), 0)[3];
+    expect(margin.value).toBeNull();
+    expect(margin.barPct).toBeNull();
+  });
+});
+
+describe("fmtMoneyExact", () => {
+  it("renders full digits without abbreviation", () => {
+    expect(fmtMoneyExact(2_847_120)).toBe("$2,847,120");
+  });
+  it("renders placeholder for nullish", () => {
+    expect(fmtMoneyExact(null)).toBe("—");
+  });
+  it("uses typographic minus for negatives", () => {
+    expect(fmtMoneyExact(-1_250)).toBe("−$1,250");
+  });
+});

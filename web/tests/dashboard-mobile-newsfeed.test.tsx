@@ -15,16 +15,20 @@ vi.mock("@/components/DashboardNewsFeed", () => ({
   default: () => React.createElement("div", { "data-testid": "mock-news-feed" }),
 }));
 
-vi.mock("../components/dashboard/PortfolioSnapshotCard", () => ({
-  PortfolioSnapshotCard: () => React.createElement("div", { "data-testid": "mock-portfolio-card" }),
+vi.mock("../components/dashboard/FeedPanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-feed-panel" }),
 }));
 
-vi.mock("../components/dashboard/OrdersSnapshotCard", () => ({
-  OrdersSnapshotCard: () => React.createElement("div", { "data-testid": "mock-orders-card" }),
+vi.mock("../components/dashboard/ScannerHero", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-scanner-hero" }),
 }));
 
-vi.mock("../components/dashboard/OpportunitiesCard", () => ({
-  OpportunitiesCard: () => React.createElement("div", { "data-testid": "mock-opportunities-card" }),
+vi.mock("../components/dashboard/CatalystsQuadrant", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-catalysts-quadrant" }),
+}));
+
+vi.mock("../components/dashboard/EngineStatePanel", () => ({
+  default: () => React.createElement("div", { "data-testid": "mock-engine-panel" }),
 }));
 
 const css = readFileSync(join(__dirname, "..", "app", "globals.css"), "utf8");
@@ -52,20 +56,37 @@ function resetLocalStorage(): void {
   });
 }
 
-function mediaBlock(query: string): string {
-  const start = css.indexOf(`@media ${query}`);
-  expect(start).toBeGreaterThanOrEqual(0);
-  const open = css.indexOf("{", start);
-  expect(open).toBeGreaterThan(start);
-  let depth = 0;
-  for (let i = open; i < css.length; i += 1) {
-    if (css[i] === "{") depth += 1;
-    if (css[i] === "}") {
-      depth -= 1;
-      if (depth === 0) return css.slice(open + 1, i);
+function mediaBlocks(query: string): string[] {
+  const blocks: string[] = [];
+  let from = 0;
+  for (;;) {
+    const start = css.indexOf(`@media ${query}`, from);
+    if (start === -1) break;
+    const open = css.indexOf("{", start);
+    expect(open).toBeGreaterThan(start);
+    let depth = 0;
+    for (let i = open; i < css.length; i += 1) {
+      if (css[i] === "{") depth += 1;
+      if (css[i] === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          blocks.push(css.slice(open + 1, i));
+          from = i;
+          break;
+        }
+      }
     }
+    if (from <= start) break;
   }
-  throw new Error(`unterminated media block for ${query}`);
+  expect(blocks.length).toBeGreaterThan(0);
+  return blocks;
+}
+
+/** The media block (for `query`) that contains `selector`. */
+function mediaBlock(query: string, selector: string): string {
+  const block = mediaBlocks(query).find((b) => b.includes(selector));
+  expect(block, `no @media ${query} block contains ${selector}`).toBeDefined();
+  return block!;
 }
 
 function ruleBlock(source: string, selector: string): string {
@@ -86,79 +107,68 @@ afterEach(() => {
 describe("dashboard mobile newsfeed layout", () => {
   it("assigns dashboard section counts and keeps collapse affordances", () => {
     const { getByTestId } = render(
-      <DashboardSurface portfolio={null} orders={null} realizedPnl={0} />,
+      <DashboardSurface portfolio={null} realizedPnl={0} marketState={null} />,
     );
 
     // Open desktop: outer chrome is collapse-only (count + chevron); the
     // snapshot card owns the mount label (skill-stack T2).
     expect(
-      within(getByTestId("dashboard-section-portfolio")).getByRole("button").textContent,
+      within(getByTestId("dashboard-section-feed")).getByRole("button").textContent,
     ).toMatch(/01/);
     expect(
-      within(getByTestId("dashboard-section-news")).getByRole("button").textContent,
+      within(getByTestId("dashboard-section-signals")).getByRole("button").textContent,
     ).toMatch(/02/);
     expect(
-      within(getByTestId("dashboard-section-orders")).getByRole("button").textContent,
+      within(getByTestId("dashboard-section-catalysts")).getByRole("button").textContent,
     ).toMatch(/03/);
+    expect(
+      within(getByTestId("dashboard-section-engine")).getByRole("button").textContent,
+    ).toMatch(/04/);
 
     expect(
-      within(getByTestId("dashboard-section-portfolio")).getByRole("button").getAttribute("aria-label"),
-    ).toBe("Portfolio");
-    expect(
-      within(getByTestId("dashboard-section-news")).getByRole("button").getAttribute("aria-label"),
+      within(getByTestId("dashboard-section-feed")).getByRole("button").getAttribute("aria-label"),
     ).toBe("Live Market Feed");
+    expect(
+      within(getByTestId("dashboard-section-signals")).getByRole("button").getAttribute("aria-label"),
+    ).toBe("Top Candidates");
   });
 
   it("fails open when persisted state hides every dashboard section", async () => {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify(DASHBOARD_SECTION_IDS));
 
     render(
-      <DashboardSurface portfolio={null} orders={null} realizedPnl={0} />,
+      <DashboardSurface portfolio={null} realizedPnl={0} marketState={null} />,
     );
 
     await waitFor(() => {
-      expect(document.getElementById("dashboard-section-body-portfolio")?.hasAttribute("hidden")).toBe(false);
-      expect(document.getElementById("dashboard-section-body-news")?.hasAttribute("hidden")).toBe(false);
+      expect(document.getElementById("dashboard-section-body-feed")?.hasAttribute("hidden")).toBe(false);
+      expect(document.getElementById("dashboard-section-body-signals")?.hasAttribute("hidden")).toBe(false);
       expect(JSON.parse(window.localStorage.getItem(STORAGE_KEY)!)).toEqual([]);
     });
   });
 
-  it("keeps the mobile visual order aligned with the section numbers", () => {
-    const mobile = mediaBlock("(max-width: 720px)");
+  it("keeps the DOM order feed → signals → catalysts → engine so mobile stacking needs no order rules", () => {
+    const { container } = render(
+      <DashboardSurface portfolio={null} realizedPnl={0} marketState={null} />,
+    );
 
-    expect(ruleBlock(mobile, ".dashboard-surface")).toMatch(/align-items:\s*stretch/);
-    expect(ruleBlock(mobile, ".dashboard-surface__rail")).toMatch(/flex:\s*0\s+0\s+100%/);
-    expect(ruleBlock(mobile, ".dashboard-surface__rail")).toMatch(/width:\s*100%/);
-    expect(ruleBlock(mobile, ".dashboard-section,\n  .dashboard-section__body,\n  .dashboard-news,\n  .snapshot-card")).toMatch(/flex:\s*0\s+0\s+100%/);
-    expect(ruleBlock(mobile, ".dashboard-section--portfolio")).toMatch(/order:\s*1/);
-    expect(ruleBlock(mobile, ".dashboard-section--news")).toMatch(/order:\s*2/);
-    expect(ruleBlock(mobile, ".dashboard-section--orders")).toMatch(/order:\s*3/);
-    expect(ruleBlock(mobile, ".dashboard-section--opportunities")).toMatch(/order:\s*4/);
-    expect(ruleBlock(mobile, ".dashboard-section--flow-surprise")).toMatch(/order:\s*5/);
-    expect(ruleBlock(mobile, ".dashboard-section--catalysts")).toMatch(/order:\s*6/);
+    const sections = Array.from(container.querySelectorAll("[data-testid^='dashboard-section-']")).map(
+      (el) => el.getAttribute("data-testid"),
+    );
+    expect(sections).toEqual([
+      "dashboard-section-feed",
+      "dashboard-section-signals",
+      "dashboard-section-catalysts",
+      "dashboard-section-engine",
+    ]);
   });
 
-  it("never leads the mobile dashboard with Flow Surprise", () => {
-    const mobile = mediaBlock("(max-width: 720px)");
+  it("collapses the body grid to one column below 1280 and the KPI strip to two below 720", () => {
+    const tablet = mediaBlock("(max-width: 1280px)", ".dashboard-surface__grid");
+    expect(ruleBlock(tablet, ".dashboard-surface__grid")).toMatch(/grid-template-columns:\s*1fr/);
 
-    // `.dashboard-surface__main` is `display: contents`, so every section becomes
-    // a flex child of `.dashboard-surface`. A section without an explicit order
-    // defaults to flex order 0 and sorts above the portfolio snapshot (order 1),
-    // which is exactly how Flow Surprise once floated to the top on mobile.
-    const orderOf = (modifier: string): number => {
-      const match = ruleBlock(mobile, `.dashboard-section--${modifier}`).match(/order:\s*(\d+)/);
-      expect(match, `order missing for ${modifier}`).not.toBeNull();
-      return Number(match![1]);
-    };
-
-    const portfolioOrder = orderOf("portfolio");
-    const flowSurpriseOrder = orderOf("flow-surprise");
-
-    expect(portfolioOrder).toBe(1);
-    expect(flowSurpriseOrder).toBeGreaterThan(portfolioOrder);
-    // Flow Surprise sits below the primary actionable surfaces, matching desktop intent.
-    expect(flowSurpriseOrder).toBeGreaterThan(orderOf("orders"));
-    expect(flowSurpriseOrder).toBeGreaterThan(orderOf("opportunities"));
+    const mobile = mediaBlock("(max-width: 720px)", ".dashboard-kpi");
+    expect(ruleBlock(mobile, ".dashboard-kpi")).toMatch(/repeat\(2,/);
   });
 
   it("stacks the mobile news header actions so Refresh stays inside the panel border", () => {

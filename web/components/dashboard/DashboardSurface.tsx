@@ -1,21 +1,22 @@
 "use client";
 
-import { type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import { useViewport } from "@/lib/useViewport";
 import { useDashboardSectionVisibility } from "@/lib/useDashboardSectionVisibility";
 import DashboardNewsFeed from "@/components/DashboardNewsFeed";
-import { PortfolioSnapshotCard } from "./PortfolioSnapshotCard";
-import { OrdersSnapshotCard } from "./OrdersSnapshotCard";
-import { OpportunitiesCard } from "./OpportunitiesCard";
-import { FlowSurpriseCard } from "./FlowSurpriseCard";
-import { CatalystCard } from "./CatalystCard";
-import type { OrdersData, PortfolioData } from "@/lib/types";
+import FeedPanel from "./FeedPanel";
+import { KpiStrip } from "./KpiStrip";
+import ScannerHero from "./ScannerHero";
+import CatalystsQuadrant from "./CatalystsQuadrant";
+import EngineStatePanel from "./EngineStatePanel";
+import type { PortfolioData } from "@/lib/types";
+import type { MarketState } from "@/lib/useMarketHours";
 
 type DashboardSurfaceProps = {
   portfolio: PortfolioData | null;
-  orders: OrdersData | null;
   realizedPnl?: number;
+  marketState: MarketState | null;
 };
 
 function DashboardSection({
@@ -75,52 +76,56 @@ function DashboardSection({
 }
 
 /**
- * DashboardSurface — actionable trading dashboard. Two equal columns:
+ * DashboardSurface — terminal dashboard. A full-width KPI telemetry strip,
+ * then a two-column grid:
  *
- *   LEFT (50%) — what the trader needs to act on right now:
- *     - Portfolio snapshot (Net Liq / Today P&L / Open Risk / Cash)
- *     - Open orders + today's fills (compressed; click-through to /orders)
- *     - Trading opportunities (scanner + discover tabs; click to ticker)
+ *   LEFT — Feed / 01: featured story + headline list (desktop FeedPanel;
+ *     the mobile shell keeps the paginated DashboardNewsFeed).
  *
- *   RIGHT (50%) — live market intel (the surface the trader actually reads):
- *     - DashboardNewsFeed (full width, with tag filter + image lightbox)
+ *   RIGHT — Signals / 02: theta-harvester / 7-step-strength ranked tables,
+ *     then the quadrant row: Catalysts / 03 grouped TODAY / THIS WEEK /
+ *     POSITIONS, and Structure / 04 engine state (CRI · MARKOV · VCG · GEX).
  *
- * Regime-focused panels (CRI / VCG / Markov state lattice / Spectral
- * decomposition / Flow projection) live on /regime sub-tabs, not here.
- * The MarkovStateGraph / FlowProjectionTrace / SpectralBars primitives
- * remain available via `components/instruments/` for re-use there.
+ * Orders live on /orders; flow surprise and the wider scanner matrix live on
+ * their own surfaces.
  */
 export default function DashboardSurface({
   portfolio,
-  orders,
   realizedPnl = 0,
+  marketState,
 }: DashboardSurfaceProps) {
   const { isHidden, toggle } = useDashboardSectionVisibility();
+  const { isMobile, hasMounted } = useViewport();
+  const mobile = isMobile && hasMounted;
+
+  const positionTickers = useMemo(
+    () => new Set((portfolio?.positions ?? []).map((p) => p.ticker).filter(Boolean)),
+    [portfolio],
+  );
 
   return (
     <div className="dashboard-surface">
-      <div className="dashboard-surface__main">
-        <DashboardSection id="portfolio" label="Portfolio" count="01" open={!isHidden("portfolio")} onToggle={toggle}>
-          <PortfolioSnapshotCard portfolio={portfolio} realizedPnl={realizedPnl} />
-        </DashboardSection>
-        <DashboardSection id="orders" label="Working & Filled" count="03" open={!isHidden("orders")} onToggle={toggle}>
-          <OrdersSnapshotCard orders={orders} />
-        </DashboardSection>
-        <DashboardSection id="opportunities" label="Trading Candidates" count="04" open={!isHidden("opportunities")} onToggle={toggle}>
-          <OpportunitiesCard />
-        </DashboardSection>
-        <DashboardSection id="flow-surprise" label="Flow Surprise" count="05" open={!isHidden("flow-surprise")} onToggle={toggle}>
-          <FlowSurpriseCard />
-        </DashboardSection>
-        <DashboardSection id="catalysts" label="Upcoming Catalysts" count="06" open={!isHidden("catalysts")} onToggle={toggle}>
-          <CatalystCard />
-        </DashboardSection>
+      <KpiStrip portfolio={portfolio} realizedPnl={realizedPnl} />
+      <div className="dashboard-surface__grid">
+        <div className="dashboard-surface__feed">
+          <DashboardSection id="feed" label="Live Market Feed" count="01" open={!isHidden("feed")} onToggle={toggle}>
+            {mobile ? <DashboardNewsFeed /> : <FeedPanel />}
+          </DashboardSection>
+        </div>
+        <div className="dashboard-surface__right">
+          <DashboardSection id="signals" label="Top Candidates" count="02" open={!isHidden("signals")} onToggle={toggle}>
+            <ScannerHero />
+          </DashboardSection>
+          <div className="dashboard-quadrants">
+            <DashboardSection id="catalysts" label="Upcoming Catalysts" count="03" open={!isHidden("catalysts")} onToggle={toggle}>
+              <CatalystsQuadrant positionTickers={positionTickers} />
+            </DashboardSection>
+            <DashboardSection id="engine" label="Engine State" count="04" open={!isHidden("engine")} onToggle={toggle}>
+              <EngineStatePanel marketState={marketState} />
+            </DashboardSection>
+          </div>
+        </div>
       </div>
-      <aside className="dashboard-surface__rail" aria-label="Newsfeed">
-        <DashboardSection id="news" label="Live Market Feed" count="02" open={!isHidden("news")} onToggle={toggle}>
-          <DashboardNewsFeed />
-        </DashboardSection>
-      </aside>
     </div>
   );
 }

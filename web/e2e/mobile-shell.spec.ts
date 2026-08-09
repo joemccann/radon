@@ -137,7 +137,7 @@ test.describe("MobileShell — phase 1 foundation", () => {
     }
   });
 
-  test("dashboard shows Live Market Feed as section 02 with contained Refresh control", async ({ page }) => {
+  test("dashboard shows Live Market Feed as section 01 with contained Refresh control", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page.getByTestId("mobile-tab-bar")).toBeVisible();
 
@@ -156,32 +156,32 @@ test.describe("MobileShell — phase 1 foundation", () => {
         .map(({ id, label }) => ({ id, label })),
     );
 
-    expect(visualOrder.slice(0, 4)).toEqual([
-      { id: "dashboard-section-portfolio", label: "Portfolio 01" },
-      { id: "dashboard-section-news", label: "Live Market Feed 02" },
-      { id: "dashboard-section-orders", label: "Working & Filled 03" },
-      { id: "dashboard-section-opportunities", label: "Trading Candidates 04" },
+    expect(visualOrder).toEqual([
+      { id: "dashboard-section-feed", label: "Live Market Feed 01" },
+      { id: "dashboard-section-signals", label: "Top Candidates 02" },
+      { id: "dashboard-section-catalysts", label: "Upcoming Catalysts 03" },
+      { id: "dashboard-section-engine", label: "Engine State 04" },
     ]);
 
-    const newsSection = page.getByTestId("dashboard-section-news");
+    const newsSection = page.getByTestId("dashboard-section-feed");
     const newsPanel = newsSection.locator(".dashboard-news");
     const refresh = newsPanel.locator(".news-feed-refresh");
 
     await expect(refresh).toBeVisible();
     const geometry = await page.evaluate(() => {
-      const panel = document.querySelector('[data-testid="dashboard-section-news"] .dashboard-news');
-      const portfolioPanel = document.querySelector('[data-testid="dashboard-section-portfolio"] .snapshot-card, [data-testid="dashboard-section-portfolio"] .snap-mobile-grid');
-      const headerEl = panel?.querySelector(".section-header");
+      const panel = document.querySelector('[data-testid="dashboard-section-feed"] .dashboard-news');
+      const portfolioPanel = document.querySelector('[data-testid="dashboard-section-signals"] .snapshot-card');
+      const headerEl = panel?.querySelector(".dashboard-news__header");
       const refreshEl = panel?.querySelector(".news-feed-refresh");
       const panelRect = panel?.getBoundingClientRect();
       const portfolioPanelRect = portfolioPanel?.getBoundingClientRect();
       const headerRect = headerEl?.getBoundingClientRect();
       const refreshRect = refreshEl?.getBoundingClientRect();
       const sectionRects = [
-        "dashboard-section-portfolio",
-        "dashboard-section-news",
-        "dashboard-section-orders",
-        "dashboard-section-opportunities",
+        "dashboard-section-feed",
+        "dashboard-section-signals",
+        "dashboard-section-catalysts",
+        "dashboard-section-engine",
       ].map((id) => {
         const rect = document.querySelector(`[data-testid="${id}"]`)?.getBoundingClientRect();
         return rect
@@ -225,7 +225,7 @@ test.describe("MobileShell — phase 1 foundation", () => {
     expect(geometry.scrollWidth).toBeLessThanOrEqual(geometry.clientWidth + 1);
     expect(geometry.sectionRects.every(Boolean)).toBe(true);
     const sectionRects = geometry.sectionRects.filter((rect): rect is NonNullable<typeof rect> => Boolean(rect));
-    const portfolioRect = sectionRects.find((rect) => rect.id === "dashboard-section-portfolio")!;
+    const portfolioRect = sectionRects.find((rect) => rect.id === "dashboard-section-feed")!;
     for (const rect of sectionRects) {
       expect(Math.abs(rect.left - portfolioRect.left)).toBeLessThanOrEqual(1);
       expect(Math.abs(rect.right - portfolioRect.right)).toBeLessThanOrEqual(1);
