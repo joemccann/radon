@@ -208,6 +208,29 @@ class JournalSyncHandler(BaseHandler):
         )
         return result
 
+    def import_fills(self, fills: List[Any], db: Any = None) -> Dict[str, int]:
+        """Import a batch of IB fills through the same dedupe/labelling/write
+        path ``execute()`` uses, against the journal table directly (no disk
+        mirror). Shared by the evening execution sweep (REL-012) so
+        after-hours fills reuse this machinery instead of a copy.
+
+        Raises on a failed journal read so daily callers soft-fail
+        (``feedback_dont_latch_last_run_on_soft_failure``) instead of
+        importing against an empty dedupe set and double-writing.
+        """
+        if db is None:
+            db = self._open_db()
+        existing = self._load_existing_from_journal(db, allow_empty=True)
+        candidates, corrections = self._fills_to_entries(fills, existing, db=db)
+        if candidates or corrections:
+            self._dual_write(candidates + corrections)
+            self._maybe_heal_reconcile(db)
+        return {
+            "imported": len(candidates),
+            "superseded": len(corrections),
+            "skipped": len(fills) - len(candidates) - len(corrections),
+        }
+
     def _reconcile_db_missing(
         self,
         existing: Dict[str, Any],

@@ -37,6 +37,7 @@ _WRITER_NAMES = (
     "delete_journal_entry",
     "record_service_health",
     "upsert_cash_flow",
+    "upsert_executed_order",
     "prune_service_health_events",
 )
 
@@ -62,6 +63,7 @@ def _block_writes_in_monitor_daemon_tests(monkeypatch: pytest.MonkeyPatch):
         "monitor_daemon.handlers.cash_flow_sync",
         "monitor_daemon.handlers.replica_watchdog",
         "monitor_daemon.handlers.journal_reconcile",
+        "monitor_daemon.handlers.evening_execution_sweep",
     ):
         try:
             module = __import__(module_name, fromlist=["*"])

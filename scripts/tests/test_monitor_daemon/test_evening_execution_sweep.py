@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""REL-012 — Evening execution sweep (R-011). Red/Green TDD.
+
+Fills outside RTH + journal_sync's 15-min post-close grace (outsideRth
+GTC fills, manual TWS trades, late busts/corrections) reach neither
+journal_sync (next morning's fresh IB session no longer returns them)
+nor executed_orders (orders-sync is market-hours-gated). The sweep runs
+once per ET trading day ~20:30 ET, pulls the evening session's fills
+and imports any exec_id not yet in the journal via JournalSyncHandler's
+machinery, mirroring executions into executed_orders.
+"""
+
+from __future__ import annotations
+
+import sys
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock, patch
+
+import pytest
+from zoneinfo import ZoneInfo
+
+SCRIPTS_DIR = Path(__file__).resolve().parent.parent.parent
+if str(SCRIPTS_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPTS_DIR))
+
+from monitor_daemon.handlers.evening_execution_sweep import (  # noqa: E402
+    EveningExecutionSweepHandler,
+)
+
+ET = ZoneInfo("America/New_York")
+
+
+def _et_to_utc(year: int, month: int, day: int, hour: int, minute: int = 0) -> datetime:
+    return datetime(year, month, day, hour, minute, tzinfo=ET).astimezone(timezone.utc)
+
+
+def _recent_after_hours_fill_time() -> datetime:
+    """Window-relative: an after-hours execution a few hours ago (never a
+    hardcoded date — house rule, feedback_window_relative_test_dates)."""
+    return datetime.now(timezone.utc) - timedelta(hours=3)
+
+
+def _fill(*, exec_id: str, symbol: str = "URTY", side: str = "SLD", shares: int = 10,
+          price: float = 42.5, when: datetime | None = None) -> SimpleNamespace:
+    """Plain-attribute fake fill: journal import AND the executed_orders
+    serializer (ib_orders.fetch_executed_orders) both walk real values."""
+    execution = SimpleNamespace(
+        execId=exec_id,
+        acctNumber="U000TEST",
+        permId=900100,
+        orderId=77,
+        clientId=31,
+        orderRef="",
+        side=side,
+        shares=shares,
+        price=price,
+        avgPrice=price,
+        cumQty=shares,
+        time=when or _recent_after_hours_fill_time(),
+        exchange="ISLAND",
+    )
+    contract = SimpleNamespace(
+        symbol=symbol,
+        secType="STK",
+        strike=None,
+        right=None,
+        lastTradeDateOrContractMonth="",
+        conId=123456,
+        currency="USD",
+        multiplier=None,
+        localSymbol=symbol,
+        tradingClass=symbol,
+        comboLegs=None,
+    )
+    commission = SimpleNamespace(commission=1.0, currency="USD", realizedPNL=None)
+    return SimpleNamespace(execution=execution, contract=contract, commissionReport=commission)
+
+
+class _FakeJournalDb:
+    """Minimal journal-table stand-in for _load_existing_from_journal."""
+
+    def __init__(self, rows: list[tuple] | None = None):
+        self.rows = rows or []
+
+    def execute(self, sql, params=None):
+        cursor = MagicMock()
+        if "FROM journal" in sql:
+            cursor.fetchall.return_value = self.rows
+        else:
+            cursor.fetchall.return_value = []
+        return cursor
+
+
+def _connected_client(fills):
+    client = MagicMock()
+    client.get_fills.return_value = fills
+    return client
+
+
+@pytest.fixture
+def captured_journal_upserts(monkeypatch):
+    """Capture journal writes through journal_sync's import machinery."""
+    import monitor_daemon.handlers.journal_sync as js_mod
+
+    upserts = MagicMock(name="upsert_journal_entry")
+    monkeypatch.setattr(js_mod, "upsert_journal_entry", upserts)
+    return upserts
+
+
+class TestIdentity:
+    def test_wiring(self):
+        h = EveningExecutionSweepHandler()
+        assert h.name == "evening_execution_sweep"
+        assert h.service_name == "execution-sweep"
+        assert h.requires_market_hours is False
+        assert h.client_id == "auto"
+
+
+class TestDailyFireWindow:
+    """Once per ET trading day, at/after 20:30 ET (post IB evening processing)."""
+
+    def _at(self, handler, now_utc):
+        return patch(
+            "monitor_daemon.handlers.evening_execution_sweep._now_utc",
+            return_value=now_utc,
+        )
+
+    def test_fires_at_20_45_et_on_a_trading_day(self):
+        h = EveningExecutionSweepHandler()
+        with self._at(h, _et_to_utc(2026, 5, 11, 20, 45)):  # Monday
+            assert h.is_due() is True
+
+    def test_does_not_fire_before_20_30_et(self):
+        h = EveningExecutionSweepHandler()
+        with self._at(h, _et_to_utc(2026, 5, 11, 20, 15)):
+            assert h.is_due() is False
+
+    def test_does_not_fire_on_saturday(self):
+        h = EveningExecutionSweepHandler()
+        with self._at(h, _et_to_utc(2026, 5, 9, 20, 45)):
+            assert h.is_due() is False
+
+    def test_does_not_refire_same_et_day(self):
+        h = EveningExecutionSweepHandler()
+        h.last_run = _et_to_utc(2026, 5, 11, 20, 35)
+        with self._at(h, _et_to_utc(2026, 5, 11, 21, 30)):
+            assert h.is_due() is False
+
+    def test_late_fire_when_yesterday_missed(self):
+        h = EveningExecutionSweepHandler()
+        h.last_run = _et_to_utc(2026, 5, 8, 20, 35)  # Friday
+        with self._at(h, _et_to_utc(2026, 5, 11, 23, 30)):  # Monday late
+            assert h.is_due() is True
+
+
+class TestSweepImport:
+    def test_imports_missing_after_hours_execution(self, captured_journal_upserts):
+        fill = _fill(exec_id="0001.EVE.01", side="BOT")
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=_connected_client([fill]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_open_journal_db",
+            return_value=_FakeJournalDb(),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_fetch_executed_rows", return_value=[],
+        ):
+            result = h.execute()
+
+        assert result["imported"] == 1
+        assert captured_journal_upserts.call_count == 1
+        exec_id, entry = captured_journal_upserts.call_args[0][:2]
+        assert exec_id == "0001.EVE.01"
+        assert entry["ib_exec_id"] == "0001.EVE.01"
+        # Window-relative: the fill landed on today's ET session date.
+        assert entry["date"] == datetime.now(ET).strftime("%Y-%m-%d")
+
+    def test_already_imported_exec_ids_are_skipped(self, captured_journal_upserts):
+        """Idempotent: a re-run over the same evening's fills writes nothing."""
+        fill = _fill(exec_id="0001.EVE.01")
+        seeded_row = (
+            "0001.EVE.01",
+            '{"ib_exec_id": "0001.EVE.01", "ticker": "URTY", "action": "SELL"}',
+            _recent_after_hours_fill_time().isoformat(),
+            _recent_after_hours_fill_time().isoformat(),
+        )
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=_connected_client([fill]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_open_journal_db",
+            return_value=_FakeJournalDb([seeded_row]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_fetch_executed_rows", return_value=[],
+        ):
+            result = h.execute()
+
+        assert result["imported"] == 0
+        assert result["skipped"] == 1
+        assert captured_journal_upserts.call_count == 0
+
+    def test_mirrors_executions_into_executed_orders(self, captured_journal_upserts, monkeypatch):
+        import monitor_daemon.handlers.evening_execution_sweep as sweep_mod
+
+        mirrored = MagicMock(name="upsert_executed_order")
+        monkeypatch.setattr(sweep_mod, "upsert_executed_order", mirrored)
+
+        fill = _fill(exec_id="0001.EVE.02", side="SLD")
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=_connected_client([fill]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_open_journal_db",
+            return_value=_FakeJournalDb(),
+        ):
+            result = h.execute()
+
+        assert result["executed_mirrored"] == 1
+        assert mirrored.call_count == 1
+        assert mirrored.call_args[0][0] == "0001.EVE.02"
+
+
+class TestSoftFailure:
+    """IB/DB unavailability raises so BaseHandler never latches last_run
+    (feedback_dont_latch_last_run_on_soft_failure)."""
+
+    def test_ib_connect_failure_raises(self):
+        h = EveningExecutionSweepHandler()
+        broken = MagicMock()
+        broken.connect.side_effect = ConnectionRefusedError("gateway down")
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=broken,
+        ):
+            with pytest.raises(Exception, match="gateway down"):
+                h.execute()
+
+    def test_journal_db_unavailable_raises(self):
+        h = EveningExecutionSweepHandler()
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=_connected_client([_fill(exec_id="0001.EVE.03")]),
+        ), patch.object(
+            EveningExecutionSweepHandler, "_open_journal_db", return_value=None,
+        ), patch.object(
+            EveningExecutionSweepHandler, "_fetch_executed_rows", return_value=[],
+        ):
+            with pytest.raises(Exception):
+                h.execute()
+
+    def test_failure_sets_short_embargo_not_daily_burn(self):
+        """A failed attempt embargoes ~5 min (record_soft_failure), and the
+        handler stays due again afterwards the same ET day."""
+        h = EveningExecutionSweepHandler()
+        now = _et_to_utc(2026, 5, 11, 20, 45)
+        broken = MagicMock()
+        broken.connect.side_effect = ConnectionRefusedError("gateway down")
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep._now_utc",
+            return_value=now,
+        ), patch(
+            "monitor_daemon.handlers.evening_execution_sweep.IBClient",
+            return_value=broken,
+        ):
+            with pytest.raises(Exception):
+                h.execute()
+            assert h.is_due() is False  # inside the 5-min embargo
+
+        later = now + timedelta(minutes=6)
+        with patch(
+            "monitor_daemon.handlers.evening_execution_sweep._now_utc",
+            return_value=later,
+        ):
+            assert h.is_due() is True
+
+
+class TestRegistration:
+    def test_registered_in_create_daemon(self, tmp_path: Path):
+        with patch("monitor_daemon.run.STATE_FILE", tmp_path / "daemon_state.json"):
+            from monitor_daemon.run import create_daemon
+
+            daemon = create_daemon()
+        names = {h.name for h in daemon.handlers}
+        assert "evening_execution_sweep" in names
+
+
+if __name__ == "__main__":
+    pytest.main([__file__, "-v"])
