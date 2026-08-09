@@ -436,6 +436,21 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(getFreshnessWindowMs("skew", "closed")).toBe(26 * HOUR);
     expect(requiresIb("skew")).toBe(false);
   });
+
+  // ``skew2d`` — radon-skew2d.timer fires daily 21:50 UTC every calendar day
+  // (weekend heartbeats), so a uniform 26h window matches margin-debt /
+  // yield-curve / straddle. Derived from skew_history — no IB.
+  it("skew2d is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["skew2d"]).toBeDefined();
+    expect(getServiceCategory("skew2d")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("skew2d", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("skew2d", state)).toBe(
+        getFreshnessWindowMs("margin-debt", state),
+      );
+    }
+    expect(requiresIb("skew2d")).toBe(false);
+  });
 });
 
 describe("getServiceCategory", () => {
