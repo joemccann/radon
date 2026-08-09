@@ -107,7 +107,15 @@ def test_orders_place_source_has_no_margin_persistence_or_db_writer_dependency()
         elif isinstance(node, ast.Call):
             dependencies.append(dotted_name(node.func))
 
-    forbidden = ("db.writer", "position_entry_margin", "entry_margin", "persist")
+    forbidden = (
+        "db.writer",
+        "position_entry_margin",
+        "entry_margin",
+        "return_capital",
+        "reconcile",
+        "capture",
+        "persist",
+    )
     violations = [
         dependency
         for dependency in dependencies

@@ -155,7 +155,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
                 {fmtPnl(pnl)}
               </div>
               <div title={returnTitle} style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: pnlTone === "pos" ? "var(--positive)" : pnlTone === "neg" ? "var(--negative)" : "var(--text-muted)" }}>
-                {fmtPct(pnlPct)}
+                {pnlPct == null ? "N/A" : fmtPct(pnlPct)}
               </div>
             </div>
             <span className="mobile-card__chevron" aria-hidden>
@@ -175,7 +175,7 @@ function PositionCard({ pos, prices, showExpiry, onLegClick }: { pos: PortfolioP
           />
           <MetricCell
             label="Return %"
-            value={fmtPct(pnlPct)}
+            value={pnlPct == null ? "N/A" : fmtPct(pnlPct)}
             tone={pnlTone}
             title={returnTitle}
           />

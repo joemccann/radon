@@ -7,7 +7,7 @@
  *  2. Exact max risk wins for defined-risk positions
  *  3. Undefined risk without verified opening margin returns unavailable
  *  4. Bare projected margin is ignored
- *  5. Fill-linked opening margin is accepted only for undefined risk
+ *  5. Isolated observed opening margin is accepted only with v2 provenance
  */
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
@@ -185,15 +185,41 @@ function buildPosition(
   };
 }
 
-function fillLinkedMargin(amount: number): PositionReturnCapitalPayload {
-  return {
+function withObservedMargin(pos: PortfolioPosition, amount: number): PortfolioPosition {
+  const position_instance_id = `PI-${pos.structure}`;
+  const legs = pos.legs.map((leg, index) => ({ ...leg, con_id: 10_000 + index }));
+  const conIds = legs.map((leg) => leg.con_id!);
+  const return_capital: PositionReturnCapitalPayload = {
+    version: 2,
     amount,
-    kind: "opening-margin",
-    source: "ib-fill-ledger",
-    as_of: "2026-08-01T15:31:00Z",
-    quality: "fill-linked",
-    fill_linked: true,
+    currency: "USD",
+    measurement: {
+      quality: "observed",
+      method: "isolated-account-margin-delta",
+      measured_at: "2026-08-01T15:31:00Z",
+      observation_id: `OBS-${pos.structure}`,
+      isolation: "isolated",
+      before_sample_id: "S1",
+      after_sample_id: "S2",
+      window_seconds: 60,
+      concurrent_exec_ids: [],
+    },
+    linkage: {
+      state: "linked",
+      account_id: "U1",
+      position_instance_id,
+      con_ids: conIds,
+      order_refs: [`radon-${pos.structure}`],
+      perm_ids: [],
+      exec_ids: conIds.map((id) => `E-${id}`),
+      legs: conIds.map((con_id, index) => ({
+        con_id,
+        currency: "USD",
+        multiplier: legs[index]?.type === "Stock" ? 1 : 100,
+      })),
+    },
   };
+  return { ...pos, account_id: "U1", position_instance_id, legs, return_capital };
 }
 
 const UNDEFINED = CATALOG.filter((s) => s.risk_profile === "undefined");
@@ -251,11 +277,10 @@ describe.each(UNDEFINED.map((s) => [s.name, s] as const))(
       expect(getPnlCapital(pos)).toBe(getPnlCapital(withoutBareField));
     });
 
-    it("uses verified fill-linked opening margin", () => {
-      const pos = buildPosition(struct, {
+    it("uses isolated observed opening margin", () => {
+      const pos = withObservedMargin(buildPosition(struct, {
         max_risk: null,
-        return_capital: fillLinkedMargin(50_000),
-      });
+      }), 50_000);
       expect(getPnlCapital(pos)).toBe(50_000);
       const pnl = getPnlDollars(pos)!;
       const pct = getPnlPct(pos)!;
@@ -268,11 +293,10 @@ describe.each(UNDEFINED.map((s) => [s.name, s] as const))(
       }
     });
 
-    it("ignores max_risk for undefined risk but accepts verified margin", () => {
-      const pos = buildPosition(struct, {
-        return_capital: fillLinkedMargin(40_000),
+    it("ignores max_risk for undefined risk but accepts observed margin", () => {
+      const pos = withObservedMargin(buildPosition(struct, {
         max_risk: 5_000,
-      });
+      }), 40_000);
       expect(getPnlCapital(pos)).toBe(40_000);
     });
   },
@@ -299,10 +323,9 @@ describe.each(DEFINED.map((s) => [s.name, s] as const))(
     });
 
     it("exact max risk wins over opening margin", () => {
-      const pos = buildPosition(struct, {
-        return_capital: fillLinkedMargin(8_000),
+      const pos = withObservedMargin(buildPosition(struct, {
         max_risk: 3_000,
-      });
+      }), 8_000);
       expect(getPnlCapital(pos)).toBe(3_000);
     });
 
@@ -320,11 +343,10 @@ describe.each(DEFINED.map((s) => [s.name, s] as const))(
 describe.each(HYBRID.map((s) => [s.name, s] as const))(
   "hybrid defined-or-undefined: %s",
   (_name, struct) => {
-    it("uses verified fill-linked margin when classified undefined", () => {
-      const pos = buildPosition(struct, {
-        return_capital: fillLinkedMargin(15_000),
+    it("uses isolated observed margin when classified undefined", () => {
+      const pos = withObservedMargin(buildPosition(struct, {
         max_risk: null,
-      });
+      }), 15_000);
       // catalog hybrid → treated as undefined path in builder when includes "undefined"
       expect(getPnlCapital(pos)).toBe(15_000);
       expect(getPnlPct(pos)).not.toBeNull();
@@ -340,7 +362,7 @@ describe("credit vs debit extremes (catalog-derived)", () => {
     // short put premium 8 > long call 5 → net credit
     expect(ec).toBeLessThan(0);
     expect(getPnlPct(pos)).toBeNull();
-    const withMargin = getPnlPct({ ...pos, return_capital: fillLinkedMargin(100_000) });
+    const withMargin = getPnlPct(withObservedMargin(pos, 100_000));
     expect(withMargin).toBeCloseTo((getPnlDollars(pos)! / 100_000) * 100, 6);
   });
 
@@ -369,7 +391,7 @@ describe("credit vs debit extremes (catalog-derived)", () => {
     expect(getPnlCapital(pos)).toBe(4_000);
   });
 
-  it("Seagull / Jade Lizard / ratio spreads accept fill-linked margin", () => {
+  it("Seagull / Jade Lizard / ratio spreads accept isolated observed margin", () => {
     for (const name of [
       "Seagull Spread",
       "Jade Lizard",
@@ -378,7 +400,7 @@ describe("credit vs debit extremes (catalog-derived)", () => {
       "Naked Strangle (Short 1xN Strangle)",
     ]) {
       const struct = CATALOG.find((s) => s.name === name)!;
-      const pos = buildPosition(struct, { return_capital: fillLinkedMargin(33_000) });
+      const pos = withObservedMargin(buildPosition(struct), 33_000);
       expect(getPnlCapital(pos), name).toBe(33_000);
     }
   });

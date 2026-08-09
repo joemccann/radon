@@ -137,8 +137,9 @@ IB recomputes `pos.avgCost` server-side on every fill including partial closes, 
 `(MV − EC) / verified risk capital × 100`
 
 Use exact positive `max_risk` for defined-risk positions. When exact max loss is
-unavailable, require positive fill-linked opening margin with complete source
-and as-of provenance; a bare projected what-if value is invalid. Debit paid is
+unavailable, require positive isolated broker-observed opening margin with
+complete v2 execution, sample, and as-of provenance; a bare projected what-if
+value is invalid. Debit paid is
 a valid denominator only when it is demonstrably the full maximum loss,
 including long stock. Otherwise render Return as unavailable. Never divide an
 opening credit by its absolute premium.

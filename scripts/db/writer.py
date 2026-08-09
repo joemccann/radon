@@ -949,6 +949,126 @@ def upsert_open_order(perm_id: int, payload: dict[str, Any]) -> None:
     db.commit()
 
 
+def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -> bool:
+    """Persist a lossless IB execution fact without overwriting its identity.
+
+    Repeated syncs are idempotent.  The same account/exec/revision with a
+    different canonical payload is a hard conflict rather than a silent
+    replacement, because lifecycle history must not be rewritten in place.
+    """
+    import hashlib
+
+    try:
+        from ..position_return_capital import normalize_execution
+    except ImportError:  # pragma: no cover - flat scripts/ import mode
+        from position_return_capital import normalize_execution  # type: ignore[no-redef]
+
+    item = normalize_execution(payload)
+    revision = int(payload.get("revision") or 1)
+    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
+    # Commission/realized-P&L reports can arrive after execDetails. They do
+    # not change lifecycle identity, so late enrichment must not manufacture
+    # an execution correction or conflict.
+    lifecycle_payload = {key: value for key, value in item.items() if key != "commission"}
+    payload_hash = hashlib.sha256(
+        json.dumps(lifecycle_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    target = db or get_db()
+    row = target.execute(
+        """SELECT payload_sha256 FROM position_execution_facts
+           WHERE account_id = ? AND exec_id = ? AND revision = ?""",
+        (item["account_id"], item["exec_id"], revision),
+    ).fetchone()
+    if row is not None:
+        existing_hash = row[0] if not isinstance(row, dict) else row.get("payload_sha256")
+        if existing_hash != payload_hash:
+            raise ValueError(
+                f"execution fact conflict for {item['account_id']}:{item['exec_id']}:{revision}"
+            )
+        return False
+
+    target.execute(
+        """
+        INSERT INTO position_execution_facts
+          (account_id, exec_id, revision, payload_sha256, perm_id, order_ref,
+           con_id, side, quantity, price, multiplier, currency, filled_at,
+           payload, ingested_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            item["account_id"], item["exec_id"], revision, payload_hash,
+            item["perm_id"], item["order_ref"] or None, item["con_id"],
+            item["side"], item["quantity"], item["price"], item["multiplier"],
+            item["currency"], item["filled_at"], canonical, _now_iso(),
+        ),
+    )
+    target.commit()
+    return True
+
+
+def insert_account_margin_sample(
+    account_id: str,
+    *,
+    observed_from: str,
+    observed_through: str,
+    initial_margin: float,
+    maintenance_margin: Optional[float],
+    currency: str,
+    positions: dict[str, float],
+    db: Any = None,
+) -> Optional[str]:
+    """Append an acquisition-bounded margin + signed conId position vector."""
+    import hashlib
+
+    account = str(account_id or "").strip()
+    ccy = str(currency or "").upper().strip()
+    try:
+        initial = float(initial_margin)
+        maintenance = float(maintenance_margin) if maintenance_margin is not None else None
+    except (TypeError, ValueError):
+        return None
+    if (
+        not account
+        or not ccy
+        or not observed_from
+        or not observed_through
+        or observed_from > observed_through
+        or initial < 0
+        or (maintenance is not None and maintenance < 0)
+    ):
+        return None
+    clean_positions = {
+        str(int(key)): float(value)
+        for key, value in positions.items()
+        if abs(float(value)) > 1e-9
+    }
+    positions_json = json.dumps(clean_positions, sort_keys=True, separators=(",", ":"))
+    positions_hash = hashlib.sha256(positions_json.encode()).hexdigest()
+    identity = json.dumps(
+        [account, observed_from, observed_through, initial, maintenance, ccy, positions_hash],
+        separators=(",", ":"),
+    )
+    identity_hash = hashlib.sha256(identity.encode()).hexdigest()
+    sample_id = f"margin-{identity_hash[:24]}"
+    target = db or get_db()
+    target.execute(
+        """
+        INSERT OR IGNORE INTO account_margin_samples
+          (sample_id, account_id, observed_from, observed_through, initial_margin,
+           maintenance_margin, currency, positions, positions_sha256, source,
+           idempotency_key, recorded_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'ib-account-values', ?, ?)
+        """,
+        (
+            sample_id, account, observed_from, observed_through, initial, maintenance, ccy,
+            positions_json, positions_hash, identity_hash, _now_iso(),
+        ),
+    )
+    target.commit()
+    return sample_id
+
+
+
 def upsert_executed_order(
     exec_id: str,
     payload: dict[str, Any],

@@ -1,7 +1,6 @@
 import type {
-  LegacyEntryMarginMetadata,
   PortfolioPosition,
-  PositionReturnCapitalPayload,
+  PositionReturnCapitalPayloadV2,
 } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
@@ -166,7 +165,7 @@ export type ReturnCapitalBasis =
       kind: "opening-margin";
       source: string;
       asOf: string;
-      quality: "exact" | "fill-linked";
+      quality: "exact" | "observed";
     }
   | {
       amount: number;
@@ -180,33 +179,60 @@ function normalizedRiskProfile(pos: PortfolioPosition): string {
   return String(pos.risk_profile ?? "").trim().toLowerCase();
 }
 
-function isVerifiedOpeningMargin(
-  payload: PositionReturnCapitalPayload | null | undefined,
-): payload is PositionReturnCapitalPayload & {
-  amount: number;
-  source: string;
-  as_of: string;
-  quality: "exact" | "fill-linked";
-  fill_linked: true;
+function isVerifiedReturnCapitalV2(
+  pos: PortfolioPosition,
+  payload: PositionReturnCapitalPayloadV2 | null | undefined,
+): payload is PositionReturnCapitalPayloadV2 & {
+  linkage: Extract<PositionReturnCapitalPayloadV2["linkage"], { state: "linked" }>;
 } {
-  const source = typeof payload?.source === "string" ? payload.source.trim() : "";
-  const asOf = typeof payload?.as_of === "string" ? payload.as_of.trim() : "";
-  return payload?.kind === "opening-margin"
-    && payload.fill_linked === true
-    && (payload.quality === "exact" || payload.quality === "fill-linked")
-    && source.length > 0
-    && !/what[-_ ]?if/i.test(source)
-    && asOf.length > 0
-    && Number.isFinite(Date.parse(asOf))
-    && payload.amount != null
-    && Number.isFinite(payload.amount)
-    && payload.amount > 0;
-}
+  if (payload?.version !== 2
+      || !Number.isFinite(payload.amount)
+      || payload.amount <= 0
+      || typeof payload.currency !== "string"
+      || payload.currency.trim().length === 0
+      || payload.linkage.state !== "linked") return false;
 
-function legacyOpeningMarginPayload(pos: PortfolioPosition): PositionReturnCapitalPayload | null {
-  const meta: LegacyEntryMarginMetadata | null | undefined = pos.init_margin_at_entry_metadata;
-  if (!meta) return null;
-  return { ...meta, amount: pos.init_margin_at_entry ?? null };
+  const linkage = payload.linkage;
+  if (!pos.position_instance_id
+      || linkage.position_instance_id !== pos.position_instance_id
+      || !linkage.account_id
+      || (pos.account_id != null && linkage.account_id !== pos.account_id)
+      || linkage.exec_ids.length === 0
+      || linkage.con_ids.length === 0
+      || (linkage.order_refs.length === 0 && linkage.perm_ids.length === 0)
+      || linkage.legs.length !== linkage.con_ids.length) return false;
+
+  const uniqueConIds = new Set(linkage.con_ids);
+  if (uniqueConIds.size !== linkage.con_ids.length
+      || linkage.exec_ids.some((id) => typeof id !== "string" || id.trim().length === 0)
+      || linkage.legs.some((leg) => !Number.isInteger(leg.con_id)
+        || !uniqueConIds.has(leg.con_id)
+        || !Number.isFinite(leg.multiplier)
+        || leg.multiplier <= 0
+        || leg.currency !== payload.currency)) return false;
+
+  const positionConIds = pos.legs.map((leg) => leg.con_id).filter((id): id is number => Number.isInteger(id));
+  if (positionConIds.length !== pos.legs.length
+      || positionConIds.length !== linkage.con_ids.length
+      || positionConIds.some((id) => !uniqueConIds.has(id))) return false;
+
+  const measuredAt = payload.measurement.measured_at;
+  if (!measuredAt || !Number.isFinite(Date.parse(measuredAt))) return false;
+  if (payload.measurement.quality === "estimated") return false;
+  if (payload.measurement.quality === "observed") {
+    const measurement = payload.measurement;
+    return measurement.method === "isolated-account-margin-delta"
+      && measurement.isolation === "isolated"
+      && measurement.observation_id.trim().length > 0
+      && measurement.before_sample_id.trim().length > 0
+      && measurement.after_sample_id.trim().length > 0
+      && measurement.before_sample_id !== measurement.after_sample_id
+      && Number.isFinite(measurement.window_seconds)
+      && measurement.window_seconds > 0
+      && measurement.window_seconds <= 120
+      && measurement.concurrent_exec_ids.length === 0;
+  }
+  return payload.measurement.quality === "exact";
 }
 
 function isFullLossDebit(pos: PortfolioPosition, entryCost: number): boolean {
@@ -224,8 +250,8 @@ function isFullLossDebit(pos: PortfolioPosition, entryCost: number): boolean {
  * Resolve the economically valid denominator for an open-position return.
  *
  * Defined-risk max loss wins. Any position without exact max loss may use a
- * positive, fill-linked opening-margin record with complete provenance. A
- * projected what-if number alone is never accepted. Debit paid is used only
+ * positive, isolated broker-observed opening-margin record with complete v2
+ * provenance. A projected what-if number is never accepted. Debit paid is used only
  * where it is demonstrably the full loss.
  */
 export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis | null {
@@ -242,16 +268,19 @@ export function resolveReturnCapital(pos: PortfolioPosition): ReturnCapitalBasis
     }
   }
 
-  const payload = isVerifiedOpeningMargin(pos.return_capital)
+  const candidate = pos.return_capital
+    && "version" in pos.return_capital
+    && pos.return_capital.version === 2
     ? pos.return_capital
-    : legacyOpeningMarginPayload(pos);
-  if (isVerifiedOpeningMargin(payload)) {
+    : null;
+  if (isVerifiedReturnCapitalV2(pos, candidate)) {
+    const observed = candidate.measurement.quality === "observed";
     return {
-      amount: payload.amount,
+      amount: candidate.amount,
       kind: "opening-margin",
-      source: payload.source.trim(),
-      asOf: payload.as_of.trim(),
-      quality: payload.quality,
+      source: observed ? "ib-account-margin-delta" : candidate.measurement.method,
+      asOf: candidate.measurement.measured_at,
+      quality: observed ? "observed" : "exact",
     };
   }
 
@@ -282,7 +311,10 @@ export function describeReturnCapital(basis: ReturnCapitalBasis | null): string 
   if (basis.kind === "debit-paid") {
     return `Return on debit paid · ${amount} · exact${basis.asOf ? ` · as of ${basis.asOf}` : ""}`;
   }
-  return `Return on fill-linked opening margin · ${amount} · ${basis.source} · as of ${basis.asOf}`;
+  if (basis.quality === "observed") {
+    return `Return on isolated broker-observed opening margin · ${amount} · as of ${basis.asOf}`;
+  }
+  return `Return on exact opening capital · ${amount} · as of ${basis.asOf}`;
 }
 
 /** Unrealized P&L $ = market value − signed entry cost. */
