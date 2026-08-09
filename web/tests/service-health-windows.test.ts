@@ -426,6 +426,22 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     expect(requiresIb("straddle")).toBe(false);
   });
 
+  // ``cor`` — radon-cor.timer fires daily 02:20 UTC every calendar day
+  // (Cboe overwrites the COR CSVs after each session; weekend runs are 304
+  // heartbeats), so a uniform 26h window matches its straddle / margin-debt
+  // daily siblings. Cboe CDN CSVs only — no IB.
+  it("cor is registered as scheduled with a uniform 26h window", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["cor"]).toBeDefined();
+    expect(getServiceCategory("cor")).toBe("scheduled");
+    for (const state of ["open", "extended", "closed"] as MarketState[]) {
+      expect(getFreshnessWindowMs("cor", state)).toBe(26 * HOUR);
+      expect(getFreshnessWindowMs("cor", state)).toBe(
+        getFreshnessWindowMs("straddle", state),
+      );
+    }
+    expect(requiresIb("cor")).toBe(false);
+  });
+
   // ``skew`` publishes one-minute RTH snapshots and retains a daily
   // finalization heartbeat off-hours. UW-only, no IB.
   it("skew uses a tight open window and a daily off-hours window", () => {
