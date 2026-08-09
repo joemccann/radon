@@ -259,3 +259,123 @@ def test_continuous_bucket_cancels_external_probe_emergency_on_recovery() -> Non
 
     cancel.assert_called_once_with("external-health-probe")
     resolved.assert_called_once_with(service="external-health-probe")
+
+
+def _deploy_marker(tmp_path, monkeypatch, *, marker_age_minutes=None, journal_exists=False):
+    from scripts.watchdog import external_probe
+
+    marker = tmp_path / "last-green-deploy"
+    journal = tmp_path / "deploy-transition.json"
+    monkeypatch.setattr(external_probe, "DEPLOY_GREEN_MARKER_FILE", str(marker))
+    monkeypatch.setattr(external_probe, "DEPLOY_TRANSITION_JOURNAL_FILE", str(journal))
+    if marker_age_minutes is not None:
+        marker.write_text("deadbeef\n")
+        stamp = (NOW - timedelta(minutes=marker_age_minutes)).timestamp()
+        import os
+
+        os.utime(marker, (stamp, stamp))
+    if journal_exists:
+        journal.write_text("{}\n")
+
+
+def test_deploy_window_edge_5xx_with_healthy_aggregate_is_suppressed(tmp_path, monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+    assert "deploy window" in outcome.message
+
+
+def test_deploy_window_5xx_with_sick_aggregate_still_pages(tmp_path, monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: False)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_edge_5xx_outside_deploy_window_pages(tmp_path, monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=120)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_non_5xx_reason_inside_deploy_window_pages(tmp_path, monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="ping_unreachable:timeout"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, marker_age_minutes=1)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
+
+
+def test_inflight_transition_journal_suppresses_fresh_edge_5xx(tmp_path, monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="ping_http_503"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch, journal_exists=True)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.status == "healthy"
+    assert outcome.fired is False
+
+
+def test_missing_deploy_markers_never_suppress(tmp_path, monkeypatch) -> None:
+    from scripts.watchdog import external_probe
+
+    monkeypatch.setattr(
+        external_probe.turso_http,
+        "fetch_external_probe",
+        lambda timeout, source=None: _row(ok=0, age_minutes=2, detail="status_http_502"),
+    )
+    monkeypatch.setattr(external_probe, "_local_aggregate_is_healthy", lambda: True)
+    _deploy_marker(tmp_path, monkeypatch)
+
+    outcome = external_probe.check_external_probe(now=NOW)
+
+    assert outcome.fired is True
+    assert outcome.severity == "P1"
