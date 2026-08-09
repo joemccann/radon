@@ -13,9 +13,20 @@
  *    prior result. Content-hash keys use a short TTL (a deliberate identical
  *    repeat in seconds is implausible); an explicit client key uses a long TTL.
  *
- * In-memory, per Next.js worker (the app runs a single instance) — a CDN/edge
- * layer is not involved in order POSTs. Deduped responses are flagged
- * `deduplicated: true` so suppression is observable, never silent.
+ * Per Next.js worker (the app runs a single instance) — a CDN/edge layer is not
+ * involved in order POSTs. Deduped responses are flagged `deduplicated: true`
+ * so suppression is observable, never silent.
+ *
+ * DURABILITY (REL-022 / R-043): the in-process Map is the L1 read path, but a
+ * restart/deploy wipes it — exactly the window client retries straddle, so a
+ * double-submit across a deploy placed twice. Settled outcomes (success or
+ * indeterminate) are therefore mirrored SYNCHRONOUSLY to a JSON file
+ * (`data/order_idempotency.json`, overridable via
+ * `RADON_ORDER_IDEMPOTENCY_FILE`) and lazily rehydrated at first access after a
+ * restart. Expired entries are pruned on load and on every write. A corrupt or
+ * missing file starts empty — the durable layer must never fail an order route.
+ * Deterministic failures are never persisted (their key is cleared; a genuine
+ * retry must re-attempt).
  *
  * Failure is NOT one class:
  *
@@ -30,6 +41,10 @@
  *    retry inside the window gets that same answer, `deduplicated: true`, WITHOUT
  *    re-running placement.
  */
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 export const CONTENT_HASH_TTL_MS = 4_000;
 export const CLIENT_KEY_TTL_MS = 300_000;
@@ -50,9 +65,168 @@ interface Entry {
   settledAt: number | null;
   /** Set when placement failed indeterminately — the key is then retained. */
   indeterminate: { error: unknown } | null;
+  /** Set on success; carried so the outcome can be mirrored to disk. */
+  resolvedValue: { value: unknown } | null;
 }
 
 const registry = new Map<string, Entry>();
+let hydratedFromDisk = false;
+
+// ── Durable layer (L2) ────────────────────────────────────────────────
+
+interface PersistedEntry {
+  ttlMs: number;
+  settledAt: number;
+  value?: unknown;
+  indeterminate?: { name: string; message: string };
+}
+
+interface PersistedStore {
+  v: 1;
+  entries: Record<string, PersistedEntry>;
+}
+
+/**
+ * Per-module-instance token: under vitest, `vi.resetModules()` has always
+ * meant "fresh empty idempotency state" — a durable file shared across module
+ * instances would leak state between tests, so the default test path is unique
+ * per instance. Restart-simulation tests pin the path explicitly via
+ * `RADON_ORDER_IDEMPOTENCY_FILE` instead.
+ */
+const testInstanceId = `${process.pid}-${Math.random().toString(36).slice(2)}`;
+
+function storeFilePath(): string {
+  const override = process.env.RADON_ORDER_IDEMPOTENCY_FILE;
+  if (override) return override;
+  if (process.env.VITEST) {
+    // Hermetic default under vitest: never touch the real data/ store.
+    return path.join(
+      os.tmpdir(),
+      `radon-order-idempotency-vitest-${testInstanceId}.json`,
+    );
+  }
+  return path.join(resolveDataDir(), "order_idempotency.json");
+}
+
+/**
+ * The repo-root `data/` dir. `process.cwd()` is `web/` under the dev server and
+ * the repo root under vitest, so walk up like `lib/tools/runner.ts` does.
+ */
+function resolveDataDir(): string {
+  const candidates = [
+    process.cwd(),
+    path.resolve(process.cwd(), ".."),
+    path.resolve(process.cwd(), "..", ".."),
+  ];
+  for (const candidate of candidates) {
+    const dir = path.join(candidate, "data");
+    if (fs.existsSync(dir)) return dir;
+  }
+  return path.resolve(process.cwd(), "..", "data");
+}
+
+function isLiveAt(entry: { settledAt: number; ttlMs: number }, now: number): boolean {
+  return now - entry.settledAt <= entry.ttlMs;
+}
+
+function ensureHydrated(): void {
+  if (hydratedFromDisk) return;
+  hydratedFromDisk = true;
+  const now = Date.now();
+  for (const [key, persisted] of Object.entries(readStore().entries)) {
+    if (registry.has(key) || !isLiveAt(persisted, now)) continue;
+    registry.set(key, rehydrateEntry(persisted));
+  }
+}
+
+function readStore(): PersistedStore {
+  try {
+    const parsed: unknown = JSON.parse(fs.readFileSync(storeFilePath(), "utf8"));
+    const store = parsed as PersistedStore;
+    if (store && store.v === 1 && store.entries && typeof store.entries === "object") {
+      return store;
+    }
+  } catch {
+    // Missing or corrupt file → start empty; never fail an order route.
+  }
+  return { v: 1, entries: {} };
+}
+
+function rehydrateEntry(persisted: PersistedEntry): Entry {
+  if (persisted.indeterminate) {
+    const cause = Object.assign(new Error(persisted.indeterminate.message), {
+      name: persisted.indeterminate.name,
+    });
+    const promise = Promise.reject(cause);
+    promise.catch(() => {}); // pre-handled: rehydrated keys may never be re-hit
+    return {
+      promise,
+      ttlMs: persisted.ttlMs,
+      settledAt: persisted.settledAt,
+      indeterminate: { error: cause },
+      resolvedValue: null,
+    };
+  }
+  return {
+    promise: Promise.resolve(persisted.value),
+    ttlMs: persisted.ttlMs,
+    settledAt: persisted.settledAt,
+    indeterminate: null,
+    resolvedValue: { value: persisted.value },
+  };
+}
+
+/**
+ * Mirror every settled, unexpired outcome to disk, synchronously and
+ * atomically (tmp + rename). Snapshot semantics prune expired keys on every
+ * write, so the file cannot grow unboundedly. Best-effort: any fs failure is
+ * swallowed — the L1 Map keeps working and the order route never crashes.
+ */
+function persistStore(): void {
+  try {
+    const now = Date.now();
+    const entries: Record<string, PersistedEntry> = {};
+    for (const [key, entry] of registry) {
+      const persisted = serializeEntry(entry, now);
+      if (persisted) entries[key] = persisted;
+    }
+    const file = storeFilePath();
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    const tmp = `${file}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify({ v: 1, entries } satisfies PersistedStore));
+    fs.renameSync(tmp, file);
+  } catch {
+    // Durable layer is best-effort by contract.
+  }
+}
+
+function serializeEntry(entry: Entry, now: number): PersistedEntry | null {
+  if (entry.settledAt === null || !isLiveAt({ settledAt: entry.settledAt, ttlMs: entry.ttlMs }, now)) {
+    return null;
+  }
+  if (entry.indeterminate) {
+    const error = entry.indeterminate.error as { name?: unknown; message?: unknown };
+    return {
+      ttlMs: entry.ttlMs,
+      settledAt: entry.settledAt,
+      indeterminate: {
+        name: typeof error?.name === "string" ? error.name : "Error",
+        message: typeof error?.message === "string" ? error.message : "",
+      },
+    };
+  }
+  if (!entry.resolvedValue) return null; // deterministic failure — never persisted
+  try {
+    JSON.stringify(entry.resolvedValue.value);
+  } catch {
+    return null; // non-serializable result stays L1-only
+  }
+  return {
+    ttlMs: entry.ttlMs,
+    settledAt: entry.settledAt,
+    value: entry.resolvedValue.value,
+  };
+}
 
 function evict(now: number): void {
   for (const [key, entry] of registry) {
@@ -137,6 +311,7 @@ export async function runIdempotentOrder<T>(
   ttlMs: number,
   placement: () => Promise<T>,
 ): Promise<IdempotentResult<T>> {
+  ensureHydrated();
   evict(Date.now());
 
   const existing = registry.get(key);
@@ -159,17 +334,21 @@ export async function runIdempotentOrder<T>(
     ttlMs,
     settledAt: null,
     indeterminate: null,
+    resolvedValue: null,
   };
   entry.promise = (async () => {
     try {
       const value = await placement();
       entry.settledAt = Date.now();
+      entry.resolvedValue = { value };
+      persistStore();
       return value;
     } catch (err) {
       entry.settledAt = Date.now();
       if (isIndeterminatePlacementFailure(err)) {
         entry.indeterminate = { error: err };
         entry.ttlMs = Math.max(ttlMs, INDETERMINATE_RETENTION_MS);
+        persistStore();
       }
       throw err;
     }
@@ -210,7 +389,22 @@ function stableStringify(value: unknown): string {
   );
 }
 
-/** Test-only: clear the registry between cases. */
+/** Test-only: clear the registry AND the durable file between cases. */
 export function __resetOrderIdempotency(): void {
   registry.clear();
+  hydratedFromDisk = false;
+  try {
+    fs.rmSync(storeFilePath(), { force: true });
+  } catch {
+    // Best-effort, mirrors the durable layer's never-crash contract.
+  }
+}
+
+/**
+ * Test-only: simulate a process restart/deploy — drops the in-memory Map but
+ * NOT the durable file, so the next access rehydrates from disk (REL-022).
+ */
+export function __restartOrderIdempotencyForTests(): void {
+  registry.clear();
+  hydratedFromDisk = false;
 }
