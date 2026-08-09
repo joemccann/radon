@@ -92,7 +92,7 @@ ACCOUNT_TAGS = [
 ]
 
 
-def get_account_summary(client: IBClient) -> dict:
+def get_account_summary(client: IBClient, account_id: str = "") -> dict:
     """Fetch account summary from cached account values (instant, no round-trip).
 
     Uses ib.accountValues() which reads from ib_insync's internal cache
@@ -103,6 +103,8 @@ def get_account_summary(client: IBClient) -> dict:
 
     summary = {}
     for av in account_values:
+        if account_id and getattr(av, "account", "") != account_id:
+            continue
         if av.tag in ACCOUNT_TAGS and av.currency == 'USD':
             summary[av.tag] = float(av.value)
 
@@ -426,29 +428,27 @@ def _merge_covered_call_groups(groups: dict) -> dict:
     short_call_groups = {}  # ticker -> [(key, legs), ...]
     
     for key, legs in groups.items():
-        symbol = key[0]
+        account_id, symbol, _expiry = key
         
         # Is this a stock-only group?
         if all(l['secType'] == 'STK' for l in legs):
             long_shares = sum(l['position'] for l in legs if l['position'] > 0)
             if long_shares > 0:
-                stock_groups[symbol] = key
+                stock_groups[(account_id, symbol)] = key
         
         # Is this a short-call-only group?
         elif all(l['secType'] == 'OPT' for l in legs):
             opt_legs = legs
             if all(l.get('right') == 'C' and l['position'] < 0 for l in opt_legs):
-                if symbol not in short_call_groups:
-                    short_call_groups[symbol] = []
-                short_call_groups[symbol].append(key)
+                short_call_groups.setdefault((account_id, symbol), []).append(key)
     
     # Merge matching pairs
     merged = dict(groups)  # copy
-    for symbol, sc_keys in short_call_groups.items():
-        if symbol not in stock_groups:
+    for account_symbol, sc_keys in short_call_groups.items():
+        if account_symbol not in stock_groups:
             continue
-        
-        stk_key = stock_groups[symbol]
+
+        stk_key = stock_groups[account_symbol]
         stk_legs = merged[stk_key]
         total_shares = sum(l['position'] for l in stk_legs if l['position'] > 0)
         
@@ -482,7 +482,7 @@ def collapse_positions(positions: list) -> list:
     groups = defaultdict(list)
     for pos in positions:
         # Use N/A expiry for stocks to keep them separate
-        key = (pos['symbol'], pos['expiry'])
+        key = (pos.get('account_id') or '', pos['symbol'], pos['expiry'])
         groups[key].append(pos)
     
     # ── Second pass: merge covered calls ──
@@ -493,7 +493,7 @@ def collapse_positions(positions: list) -> list:
     collapsed = []
     position_id = 1
     
-    for (symbol, expiry), legs in groups.items():
+    for (account_id, symbol, expiry), legs in groups.items():
         structure_type, risk_profile = detect_structure_type(legs)
         structure_desc = format_structure_description(structure_type, legs)
         
@@ -561,6 +561,9 @@ def collapse_positions(positions: list) -> list:
         formatted_legs = []
         for leg in sorted(legs, key=lambda x: (x.get('right', 'Z'), x.get('strike', 0))):
             formatted_legs.append({
+                "con_id": leg.get('conId'),
+                "currency": leg.get('currency'),
+                "multiplier": leg.get('multiplier'),
                 "direction": "LONG" if leg['position'] > 0 else "SHORT",
                 "contracts": int(abs(leg['position'])),
                 "type": "Call" if leg.get('right') == 'C' else ("Put" if leg.get('right') == 'P' else "Stock"),
@@ -575,6 +578,7 @@ def collapse_positions(positions: list) -> list:
         
         collapsed.append({
             "id": position_id,
+            "account_id": account_id,
             "ticker": symbol,
             "structure": structure_desc,
             "structure_type": structure_type,
@@ -790,6 +794,7 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
                 )
         
         formatted.append({
+            "account_id": getattr(pos, 'account', '') or '',
             "symbol": contract.symbol,
             "secType": contract.secType,
             "position": position_size,
@@ -801,6 +806,8 @@ def fetch_positions(client: IBClient, journal_basis_lookup: Optional[dict[str, f
             "right": getattr(contract, 'right', None),
             "structure": format_option_structure(contract, position_size),
             "conId": contract.conId,  # Needed for reqPnLSingle
+            "currency": getattr(contract, 'currency', '') or 'USD',
+            "multiplier": float(getattr(contract, 'multiplier', '') or (100 if contract.secType == 'OPT' else 1)),
             "contract": contract  # Keep for market data requests
         })
     
@@ -1248,6 +1255,20 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
                 leg0["avg_cost"] = round(per_unit, 6)
                 leg0["entry_cost"] = round(per_unit * cur_contracts, 2)
 
+    # Hydrate only execution-instance-linked v2 capital. Structure similarity
+    # and modeled margin are intentionally never accepted here.
+    try:
+        from db.readers import read_active_position_return_capital
+        from position_return_capital import hydrate_return_capital
+
+        _active_bases = read_active_position_return_capital()
+        if _active_bases:
+            n_att = hydrate_return_capital(collapsed_positions, _active_bases)
+            if n_att:
+                print(f"  return_capital attached on {n_att} position(s)")
+    except Exception as exc:  # noqa: BLE001 — table may not exist yet
+        print(f"  return_capital hydrate skipped: {exc}")
+
     result = {
         "bankroll": round(bankroll, 2),
         "peak_value": round(bankroll, 2),  # Would need historical tracking
@@ -1308,15 +1329,53 @@ def _append_nav_snapshot(net_liq: float, daily_pnl=None) -> None:
     print(f"✓ NAV snapshot: {today} → ${net_liq:,.2f}")
 
 
-def save_portfolio(portfolio: dict):
+def build_account_position_vector(raw_positions: list, account_id: str) -> dict[str, float]:
+    """Canonical signed conId quantities for one IB account margin sample."""
+    return {
+        str(pos["conId"]): float(pos["position"])
+        for pos in raw_positions
+        if pos.get("conId")
+        and (not pos.get("account_id") or pos.get("account_id") == account_id)
+        and abs(float(pos.get("position") or 0)) > 1e-9
+    }
+
+
+def save_portfolio(
+    portfolio: dict,
+    *,
+    account_id: str = "",
+    raw_positions: Optional[list] = None,
+    margin_observed_from: str = "",
+    margin_observed_through: str = "",
+):
     """Save portfolio to the canonical Turso portfolio_snapshots table."""
     from db.service_cycle import service_cycle
-    from db.writer import upsert_portfolio_snapshot
+    from db.writer import insert_account_margin_sample, upsert_portfolio_snapshot
 
     taken_at = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     with service_cycle("portfolio-sync", market_hours_class="intraday") as cycle:
         cycle.finished_at = taken_at
+        account_summary = portfolio.get("account_summary") or {}
+        initial_margin = account_summary.get("initial_margin")
+        if account_id and initial_margin is not None and margin_observed_from and margin_observed_through:
+            position_vector = build_account_position_vector(raw_positions or [], account_id)
+            insert_account_margin_sample(
+                account_id,
+                observed_from=margin_observed_from,
+                observed_through=margin_observed_through,
+                initial_margin=float(initial_margin),
+                maintenance_margin=account_summary.get("maintenance_margin"),
+                currency="USD",
+                positions=position_vector,
+            )
         upsert_portfolio_snapshot(taken_at, portfolio)
+        try:
+            from capture_position_return_capital import reconcile_position_return_capital
+            from db.client import get_db
+
+            reconcile_position_return_capital(get_db(), apply=True)
+        except Exception as exc:  # noqa: BLE001 - migration/evidence may be unavailable during rollout
+            print(f"  return_capital reconcile skipped: {exc}")
     print(f"✓ Saved portfolio snapshot to Turso at {taken_at}")
 
     # Track daily NAV for performance history
@@ -1353,7 +1412,10 @@ def main():
     try:
         # ── Phase 1: Account summary (fast, no sleep needed) ──
         print("Fetching account summary...")
-        account = get_account_summary(client)
+        accounts = client.ib.managedAccounts()
+        ib_account = accounts[0] if accounts else ""
+        margin_observed_from = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+        account = get_account_summary(client, ib_account)
 
         # ── Phase 2: Request account PnL + positions concurrently ──
         # reqPnL is a subscription — request it, then do other work while it streams
@@ -1363,13 +1425,12 @@ def main():
         def _valid_pnl(val):
             return val is not None and not ib_util.isNan(val)
 
-        accounts = client.ib.managedAccounts()
-        ib_account = accounts[0] if accounts else ""
         pnl_obj = client.ib.reqPnL(ib_account) if ib_account else None
 
         # Fetch positions while PnL streams
         journal_basis_lookup = build_journal_basis_lookup(client)
         positions = fetch_positions(client, journal_basis_lookup=journal_basis_lookup)
+        margin_observed_through = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         if not args.no_prices and positions:
             # ── Phase 3: Set exchange + request ALL data at once ──
@@ -1492,7 +1553,13 @@ def main():
 
         if args.sync and portfolio is not None:
             try:
-                save_portfolio(portfolio)
+                save_portfolio(
+                    portfolio,
+                    account_id=ib_account,
+                    raw_positions=positions,
+                    margin_observed_from=margin_observed_from,
+                    margin_observed_through=margin_observed_through,
+                )
             except Exception as exc:
                 db_save_error = exc
                 if args.db_optional:

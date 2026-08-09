@@ -77,24 +77,51 @@ describe("getPnlPct - verified return capital", () => {
     expect(getPnlPct(pos)).toBeNull();
   });
 
-  it("uses a positive fill-linked opening margin with complete provenance", () => {
+  it("uses isolated broker-observed margin with complete v2 provenance", () => {
     const pos: PortfolioPosition = {
       ...SPCX_CREDIT_RR,
+      position_instance_id: "PI-U1-SPCX-1",
+      account_id: "U1",
+      legs: [
+        { ...SPCX_CREDIT_RR.legs[0], con_id: 101 },
+        { ...SPCX_CREDIT_RR.legs[1], con_id: 102 },
+      ],
       return_capital: {
+        version: 2,
         amount: 40_000,
-        kind: "opening-margin",
-        source: "ib-fill-ledger",
-        as_of: "2026-07-01T15:31:00Z",
-        quality: "fill-linked",
-        fill_linked: true,
+        currency: "USD",
+        measurement: {
+          quality: "observed",
+          method: "isolated-account-margin-delta",
+          measured_at: "2026-07-01T15:31:00Z",
+          observation_id: "OBS-1",
+          isolation: "isolated",
+          before_sample_id: "SAMPLE-1",
+          after_sample_id: "SAMPLE-2",
+          window_seconds: 60,
+          concurrent_exec_ids: [],
+        },
+        linkage: {
+          state: "linked",
+          account_id: "U1",
+          position_instance_id: "PI-U1-SPCX-1",
+          con_ids: [101, 102],
+          order_refs: ["radon-spcx-1"],
+          perm_ids: [9001],
+          exec_ids: ["E1", "E2"],
+          legs: [
+            { con_id: 101, currency: "USD", multiplier: 100 },
+            { con_id: 102, currency: "USD", multiplier: 100 },
+          ],
+        },
       },
     };
     expect(resolveReturnCapital(pos)).toEqual({
       amount: 40_000,
       kind: "opening-margin",
-      source: "ib-fill-ledger",
+      source: "ib-account-margin-delta",
       asOf: "2026-07-01T15:31:00Z",
-      quality: "fill-linked",
+      quality: "observed",
     });
     expect(getPnlPct(pos)).toBeCloseTo(70.91, 1);
   });
@@ -138,7 +165,45 @@ describe("getPnlPct - verified return capital", () => {
     expect(resolveReturnCapital(mislabeledWhatIf)).toBeNull();
   });
 
-  it("accepts the legacy field only with fill-linked companion metadata", () => {
+  it("rejects a linked v2 estimated margin observation", () => {
+    const pos: PortfolioPosition = {
+      ...SPCX_CREDIT_RR,
+      account_id: "U1",
+      position_instance_id: "PI-U1-SPCX-1",
+      legs: [
+        { ...SPCX_CREDIT_RR.legs[0], con_id: 101 },
+        { ...SPCX_CREDIT_RR.legs[1], con_id: 102 },
+      ],
+      return_capital: {
+        version: 2,
+        amount: 40_000,
+        currency: "USD",
+        measurement: {
+          quality: "estimated",
+          method: "ib-whatif",
+          measured_at: "2026-07-01T15:31:00Z",
+        },
+        linkage: {
+          state: "linked",
+          account_id: "U1",
+          position_instance_id: "PI-U1-SPCX-1",
+          con_ids: [101, 102],
+          order_refs: ["radon-spcx-1"],
+          perm_ids: [9001],
+          exec_ids: ["E1", "E2"],
+          legs: [
+            { con_id: 101, currency: "USD", multiplier: 100 },
+            { con_id: 102, currency: "USD", multiplier: 100 },
+          ],
+        },
+      },
+    };
+
+    expect(resolveReturnCapital(pos)).toBeNull();
+    expect(getPnlPct(pos)).toBeNull();
+  });
+
+  it("rejects legacy margin metadata even when labeled fill-linked", () => {
     const pos: PortfolioPosition = {
       ...SPCX_CREDIT_RR,
       init_margin_at_entry: 40_000,
@@ -150,7 +215,7 @@ describe("getPnlPct - verified return capital", () => {
         fill_linked: true,
       },
     };
-    expect(getPnlCapital(pos)).toBe(40_000);
+    expect(getPnlCapital(pos)).toBeNull();
   });
 
   it("prefers exact max risk for defined-risk positions", () => {
@@ -158,14 +223,6 @@ describe("getPnlPct - verified return capital", () => {
       ...SPCX_CREDIT_RR,
       risk_profile: "defined",
       max_risk: 10_000,
-      return_capital: {
-        amount: 50_000,
-        kind: "opening-margin",
-        source: "ib-fill-ledger",
-        as_of: "2026-07-01T15:31:00Z",
-        quality: "fill-linked",
-        fill_linked: true,
-      },
     };
     expect(resolveReturnCapital(pos)).toEqual({
       amount: 10_000,
@@ -253,7 +310,7 @@ describe("getPnlPct - verified return capital", () => {
     expect(resolveReturnCapital(shortStock)).toBeNull();
   });
 
-  it("accepts verified fill-linked margin for a complex position", () => {
+  it("rejects estimated and versionless capital for a complex position", () => {
     const complex: PortfolioPosition = {
       ...SPCX_CREDIT_RR,
       risk_profile: "complex",
@@ -264,9 +321,26 @@ describe("getPnlPct - verified return capital", () => {
         as_of: "2026-07-01T15:31:00Z",
         quality: "fill-linked",
         fill_linked: true,
-      },
+      } as never,
     };
-    expect(getPnlCapital(complex)).toBe(60_000);
-    expect(getPnlPct(complex)).toBeCloseTo(47.27, 1);
+    expect(getPnlCapital(complex)).toBeNull();
+    expect(getPnlPct(complex)).toBeNull();
+  });
+
+  it("rejects ib-reg-t-standalone even when mislabeled as fill-linked", () => {
+    const pos: PortfolioPosition = {
+      ...SPCX_CREDIT_RR,
+      return_capital: {
+        amount: 127_000,
+        kind: "opening-margin",
+        source: "ib-reg-t-standalone",
+        as_of: "2026-07-01T16:00:00Z",
+        quality: "fill-linked",
+        fill_linked: true,
+      } as never,
+    };
+    expect(resolveReturnCapital(pos)).toBeNull();
+    expect(getPnlCapital(pos)).toBeNull();
+    expect(getPnlPct(pos)).toBeNull();
   });
 });

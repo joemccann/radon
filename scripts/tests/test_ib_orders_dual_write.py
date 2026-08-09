@@ -28,6 +28,7 @@ def mock_writer(monkeypatch: pytest.MonkeyPatch):
         "record_service_health": [],
         "replace_open_orders_for_session": [],
         "upsert_executed_order": [],
+        "upsert_position_execution_fact": [],
     }
 
     fake = types.ModuleType("db.writer")
@@ -37,6 +38,7 @@ def mock_writer(monkeypatch: pytest.MonkeyPatch):
     fake.upsert_executed_order = lambda exec_id, payload, fill_time, perm_id=None: calls["upsert_executed_order"].append(  # type: ignore[attr-defined]
         {"exec_id": exec_id, "payload": payload, "fill_time": fill_time, "perm_id": perm_id}
     )
+    fake.upsert_position_execution_fact = lambda payload: calls["upsert_position_execution_fact"].append(payload)  # type: ignore[attr-defined]
 
     monkeypatch.setitem(sys.modules, "db.writer", fake)
 
@@ -80,6 +82,7 @@ def test_dual_write_upserts_each_executed_order_by_exec_id(mock_writer):
                 "quantity": 10,
                 "avgPrice": 10.0,
                 "time": "2026-05-06T18:17:23+00:00",
+                "permId": 7001,
                 "contract": {"symbol": "TSLA"},
             },
             {
@@ -103,6 +106,42 @@ def test_dual_write_upserts_each_executed_order_by_exec_id(mock_writer):
     upserts = mock_writer["upsert_executed_order"]
     assert sorted(u["exec_id"] for u in upserts) == ["exec-1", "exec-2"]
     assert all(u["fill_time"] for u in upserts)
+    assert next(u for u in upserts if u["exec_id"] == "exec-1")["perm_id"] == 7001
+    assert len(mock_writer["upsert_position_execution_fact"]) == 2
+
+
+def test_fetch_executed_orders_preserves_broker_identity_and_contract_metadata():
+    from types import SimpleNamespace
+    import ib_orders
+
+    fill = SimpleNamespace(
+        contract=SimpleNamespace(
+            conId=123, symbol="SPCX", secType="OPT", strike=120.0, right="P",
+            lastTradeDateOrContractMonth="20260821", currency="USD",
+            multiplier="100", localSymbol="SPCX  260821P00120000",
+            tradingClass="SPCX",
+        ),
+        execution=SimpleNamespace(
+            execId="E1", acctNumber="U1", permId=7001, orderId=51,
+            clientId=26, orderRef="radon-spcx-1", side="SLD", shares=30,
+            price=16.65, avgPrice=16.65, cumQty=30,
+            time="2026-08-07T16:00:30Z", exchange="SMART",
+        ),
+        commissionReport=SimpleNamespace(
+            realizedPNL=0, commission=19.5, currency="USD",
+        ),
+    )
+    client = SimpleNamespace(get_fills=lambda: [fill])
+
+    row = ib_orders.fetch_executed_orders(client)[0]
+
+    assert row["account_id"] == "U1"
+    assert row["permId"] == 7001
+    assert row["orderRef"] == "radon-spcx-1"
+    assert row["contract"]["conId"] == 123
+    assert row["contract"]["currency"] == "USD"
+    assert row["contract"]["multiplier"] == "100"
+    assert row["commissionCurrency"] == "USD"
 
 
 def test_dual_write_records_service_health_on_success(mock_writer):

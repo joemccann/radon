@@ -51,7 +51,7 @@ export default function PnlBreakdownModal({
       { content: row.col1, className: "eb-mono" },
       { content: row.col2, className: "eb-mono" },
       { content: fmtSigned(row.pnl, 2), className: "eb-mono", tone: row.pnl >= 0 ? "positive" : "negative" },
-      { content: row.pnlPct != null ? fmtPct(row.pnlPct) : "---", className: "eb-mono", tone: row.pnl >= 0 ? "positive" : "negative" },
+      { content: row.pnlPct != null ? fmtPct(row.pnlPct) : "N/A", className: "eb-mono", tone: row.pnl >= 0 ? "positive" : "negative" },
     ],
   }));
 

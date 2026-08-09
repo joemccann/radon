@@ -785,7 +785,13 @@ class JournalSyncHandler(BaseHandler):
             except Exception:
                 commission = 0.0
 
-        multiplier = 100 if sec_type in ("OPT", "BAG") else 1
+        multiplier_raw = getattr(contract, "multiplier", None)
+        if not isinstance(multiplier_raw, (str, int, float)):
+            multiplier_raw = None
+        try:
+            multiplier = float(multiplier_raw or (100 if sec_type in ("OPT", "BAG") else 1))
+        except (TypeError, ValueError):
+            multiplier = 100 if sec_type in ("OPT", "BAG") else 1
         total_cost = float(shares) * price * multiplier + commission
 
         ib_time = getattr(execution, "time", None)
@@ -793,6 +799,7 @@ class JournalSyncHandler(BaseHandler):
         # time — a fill after ~20:00 ET otherwise lands on the next
         # calendar day and shifts the basis cutoff + same-day P&L (T-023).
         date_str = et_session_date(ib_time if isinstance(ib_time, datetime) else None)
+        filled_at = ib_time.isoformat() if isinstance(ib_time, datetime) else str(ib_time or "")
 
         strike = getattr(contract, "strike", None) if sec_type in ("OPT", "BAG") else None
         right = getattr(contract, "right", None) if sec_type in ("OPT", "BAG") else None
@@ -802,6 +809,19 @@ class JournalSyncHandler(BaseHandler):
         expiry = normalize_expiry_compact(expiry)
 
         structure = self._structure_label(action, sec_type, strike, right, expiry)
+
+        account_id = getattr(execution, "acctNumber", "")
+        account_id = account_id if isinstance(account_id, str) else ""
+        con_id = getattr(contract, "conId", None)
+        con_id = con_id if isinstance(con_id, (int, float, str)) else None
+        perm_id = getattr(execution, "permId", None)
+        perm_id = perm_id if isinstance(perm_id, int) else None
+        order_ref = getattr(execution, "orderRef", "")
+        order_ref = order_ref if isinstance(order_ref, str) else ""
+        currency = getattr(contract, "currency", "")
+        currency = currency if isinstance(currency, str) else ""
+        commission_currency = getattr(commission_report, "currency", "") if commission_report is not None else ""
+        commission_currency = commission_currency if isinstance(commission_currency, str) else ""
 
         entry: Dict[str, Any] = {
             "id": next_id,
@@ -814,6 +834,14 @@ class JournalSyncHandler(BaseHandler):
             "total_cost": round(total_cost, 4),
             "commission": round(commission, 4),
             "ib_exec_id": str(exec_id),
+            "execution_time": filled_at,
+            "account_id": account_id,
+            "con_id": con_id,
+            "perm_id": perm_id,
+            "order_ref": order_ref,
+            "currency": currency,
+            "commission_currency": commission_currency,
+            "multiplier": multiplier,
             "notes": f"Imported from IB session fills on {datetime.now().strftime('%Y-%m-%d')}",
         }
 
