@@ -17,10 +17,11 @@ Actions detected:
 
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, time, timedelta
 from decimal import Decimal
 from pathlib import Path
 from typing import Optional
+from zoneinfo import ZoneInfo
 
 # Add parent to path for imports
 sys.path.insert(0, str(Path(__file__).parent))
@@ -253,6 +254,45 @@ def _normalize_expiry(expiry) -> str:
     return "".join(ch for ch in str(expiry or "") if ch.isdigit())
 
 
+# Equity/index options stop trading by 16:15 ET on expiry day; past this
+# cutoff a residual 0-qty row on a same-day expiry is expiration cleanup,
+# not live drift (a Friday-evening deploy otherwise reproduces the
+# 2026-08-09 SPCX page).
+_EXPIRY_SESSION_CUTOFF_ET = time(16, 15)
+
+
+def _now_et() -> datetime:
+    return datetime.now(ZoneInfo("America/New_York"))
+
+
+def _is_past_expiry(normalized_expiry: str, now_et: datetime = None) -> bool:
+    """True when the expiry parses and the contract can no longer trade.
+
+    Strictly before today (ET), or today once the session cutoff has
+    passed. Only the first 8 digits are parsed (FOP expiries carry a time
+    suffix). Unparseable expiry = NOT expired, so it stays real drift.
+    """
+    try:
+        expiry_date = datetime.strptime(normalized_expiry[:8], "%Y%m%d").date()
+    except ValueError:
+        return False
+    now = now_et or _now_et()
+    if expiry_date < now.date():
+        return True
+    return expiry_date == now.date() and now.time() >= _EXPIRY_SESSION_CUTOFF_ET
+
+
+def _is_expired_only_position(pos: dict, now_et: datetime = None) -> bool:
+    """True when every leg of a snapshot position is a past-expiry OPT."""
+    keys = list(_local_leg_quantity_keys(pos))
+    if not keys:
+        return False
+    for (_, sec_type, _, _, expiry), _signed in keys:
+        if sec_type != "OPT" or not _is_past_expiry(expiry, now_et):
+            return False
+    return True
+
+
 def _ib_contract_quantity_key(p: dict):
     """Per-contract key for an IB position row."""
     if p.get("sec_type") == "OPT":
@@ -281,18 +321,23 @@ def _local_leg_quantity_keys(pos: dict):
 def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
     """Find positions that differ between IB and the latest portfolio snapshot.
 
-    Three classes:
+    Four classes:
       missing_locally   — in IB, symbol absent from the snapshot
       missing_in_ib     — in the snapshot, symbol absent from IB (closed)
       quantity_mismatch — symbol on BOTH sides but per-contract signed
                           quantities differ (partial close, assignment,
                           manual TWS trade). R-005: this list was
                           initialized but never populated.
+      expired_locally   — snapshot still carries an OPT whose expiry is
+                          in the past and IB reports 0 (expiration emits
+                          no execution). Cleanup surface, not live drift
+                          — never pages. 2026-08-09 SPCX incident.
     """
     discrepancies = {
         "missing_locally": [],  # In IB but not in local snapshot
         "missing_in_ib": [],    # In local snapshot but not in IB (closed)
         "quantity_mismatch": [],
+        "expired_locally": [],
     }
 
     # Build lookup of local tickers (just by symbol for simplicity)
@@ -317,15 +362,22 @@ def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
             ib_positions_by_symbol[symbol] = []
         ib_positions_by_symbol[symbol].append(p)
 
-    # Find positions in IB not locally (new positions)
+    now_et = _now_et()
+
+    # Find positions in IB not locally (new positions). A 0-qty broker row
+    # (expired/closed residual) is never actionable drift.
     for symbol in ib_tickers - local_tickers:
         for p in ib_positions_by_symbol[symbol]:
-            discrepancies["missing_locally"].append(p)
+            if p.get("quantity") or 0:
+                discrepancies["missing_locally"].append(p)
 
     # Find positions locally not in IB (closed positions)
     for ticker in local_tickers - ib_tickers:
         for p in local_positions[ticker]:
-            discrepancies["missing_in_ib"].append(p)
+            if _is_expired_only_position(p, now_et):
+                discrepancies["expired_locally"].append(p)
+            else:
+                discrepancies["missing_in_ib"].append(p)
 
     # Per-contract signed-quantity comparison for symbols on BOTH sides.
     for symbol in ib_tickers & local_tickers:
@@ -350,7 +402,14 @@ def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
                 }
                 if sec_type == "OPT":
                     entry.update({"strike": strike, "right": right, "expiry": expiry})
-                discrepancies["quantity_mismatch"].append(entry)
+                # Past-expiry OPT the broker no longer holds (residual 0-qty
+                # row) is expiration cleanup; nonzero IB qty past expiry is
+                # still real drift.
+                expired = (
+                    sec_type == "OPT" and ib_n == 0 and _is_past_expiry(expiry, now_et)
+                )
+                bucket = "expired_locally" if expired else "quantity_mismatch"
+                discrepancies[bucket].append(entry)
 
     return discrepancies
 
@@ -363,6 +422,9 @@ def generate_reconciliation_report(new_trades: list, discrepancies: dict) -> dic
         "positions_missing_locally": discrepancies["missing_locally"],
         "positions_closed": discrepancies["missing_in_ib"],
         "quantity_mismatch": quantity_mismatch,
+        # .get(): legacy callers pass 3-key dicts. Cleanup surface only —
+        # deliberately excluded from needs_attention.
+        "expired_locally": discrepancies.get("expired_locally", []),
         "needs_attention": (
             len(new_trades) > 0
             or len(discrepancies["missing_locally"]) > 0
@@ -393,6 +455,8 @@ def _health_detail(report: dict) -> dict:
         "positions_closed_count": len(report.get("positions_closed", [])),
         "quantity_mismatch_count": len(report.get("quantity_mismatch", [])),
         "quantity_mismatch": report.get("quantity_mismatch", [])[:10],
+        "expired_locally_count": len(report.get("expired_locally", [])),
+        "expired_locally": report.get("expired_locally", [])[:10],
     }
 
 def main():
@@ -461,6 +525,16 @@ def main():
                     )
         else:
             log("✓ Trade log and portfolio are in sync", "success")
+
+        if discrepancies.get("expired_locally"):
+            log(
+                f"   • {len(discrepancies['expired_locally'])} expired local "
+                "option(s) awaiting snapshot cleanup (not paging)",
+                "warn",
+            )
+            for e in discrepancies["expired_locally"]:
+                label = e.get("symbol") or e.get("ticker")
+                log(f"     - {label}: expiry {e.get('expiry')}", "info")
 
     finally:
         client.disconnect()
