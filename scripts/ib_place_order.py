@@ -253,6 +253,11 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     except Exception as e:
         return {"status": "error", "message": f"Connection failed: {e}"}
 
+    # REL-006: once placeOrder has transmitted, ANY exception must return an
+    # indeterminate-outcome error (order may be live) instead of a generic
+    # failure that invites a duplicate re-place.
+    _transmitted: dict = {"done": False, "trade": None}
+
     try:
         # Build contract
         if order_type == "combo":
@@ -427,6 +432,8 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
 
         # Place
         trade = client.place_order(contract, order)
+        _transmitted["done"] = True
+        _transmitted["trade"] = trade
 
         # Poll trade.orderStatus until IB issues a permId OR the status moves
         # past PendingSubmit/ApiPending. Without this wait, `finally:
@@ -549,6 +556,20 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         return result
 
     except Exception as e:
+        if _transmitted["done"]:
+            live_trade = _transmitted["trade"]
+            order_id = getattr(live_trade.order, "orderId", None) if live_trade else None
+            return {
+                "status": "error",
+                "indeterminate": True,
+                "orderRef": order_ref,
+                "orderId": order_id,
+                "message": (
+                    f"Order outcome INDETERMINATE — the order was transmitted "
+                    f"but confirmation failed ({e}). CHECK OPEN ORDERS before "
+                    f"re-placing (orderRef {order_ref})."
+                ),
+            }
         return {"status": "error", "message": str(e)}
 
     finally:
