@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import shutil
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
@@ -43,6 +44,15 @@ except ImportError:  # pragma: no cover — DB layer optional in unit tests
     upsert_journal_entry = None  # type: ignore[assignment]
 
 try:
+    # REL-011: fill_monitor mirrors partial fills under a synthetic
+    # `fill-monitor:…` trade_id so a daemon restart cannot drop them.
+    # Once the real execId rows land here, the mirror is a duplicate the
+    # blotter cannot dedupe — this handler deletes covered mirrors.
+    from db.writer import delete_journal_entry  # type: ignore
+except ImportError:  # pragma: no cover — DB layer optional in unit tests
+    delete_journal_entry = None  # type: ignore[assignment]
+
+try:
     # Used to look up prior signed net qty per contract so closing sells
     # label as SELL_OPTION instead of SELL_TO_OPEN. Optional — hosts
     # without libsql fall back to prior_qty=0 (= old behaviour).
@@ -59,6 +69,14 @@ DEFAULT_CLIENT_ID: int | str = "auto"
 # Disk rows older than this are not retried by the reconciler — they're left
 # to journal_rehydrate / the manual backfill script.
 RECONCILE_WINDOW_DAYS = 14
+# Synthetic trade_id written by fill_monitor._persist_fill_to_journal —
+# con-/order-/date pin the execution's contract + order + ET session date,
+# filled-N is the order's running fill total at detection time.
+FILL_MONITOR_PREFIX = "fill-monitor:"
+_FILL_MONITOR_TRADE_ID = re.compile(
+    r"^fill-monitor:con-(?P<con>\d+):order-(?P<order>\d+):"
+    r"(?P<date>\d{4}-\d{2}-\d{2}):filled-(?P<filled>\d+)$"
+)
 
 
 class JournalSyncHandler(BaseHandler):
@@ -159,33 +177,35 @@ class JournalSyncHandler(BaseHandler):
         if result["reconciled"]:
             self._maybe_heal_reconcile(db)
 
-        if not fills:
-            return result
+        written: List[Dict[str, Any]] = []
+        if fills:
+            candidates, corrections = self._fills_to_entries(fills, existing, db=db)
+            result["imported"] = len(candidates)
+            result["superseded"] = len(corrections)
+            result["skipped"] = result["fills_seen"] - len(candidates) - len(corrections)
 
-        candidates, corrections = self._fills_to_entries(fills, existing, db=db)
-        result["imported"] = len(candidates)
-        result["superseded"] = len(corrections)
-        result["skipped"] = result["fills_seen"] - len(candidates) - len(corrections)
+            if candidates or corrections:
+                # Corrections carry the superseded row's ib_exec_id, so the upsert
+                # REPLACES that journal row instead of adding a second one.
+                written, failed = self._dual_write(candidates + corrections)
+                if failed:
+                    result["db_write_failures"] = failed
+                    result["error"] = (
+                        f"{failed} journal upsert(s) failed this cycle "
+                        f"(write-only Turso failure; will re-import from "
+                        f"get_fills() next cycle)"
+                    )
+                if self.trade_log_path is not None:
+                    existing["trades"].extend(candidates)
+                    self._apply_corrections(existing, corrections)
+                    atomic_save(str(self.trade_log_path), existing)
+                # A live fill that filled a previously-missing exec_id may have
+                # closed the gap the daily journal-reconcile flagged.
+                self._maybe_heal_reconcile(db)
 
-        if candidates or corrections:
-            # Corrections carry the superseded row's ib_exec_id, so the upsert
-            # REPLACES that journal row instead of adding a second one.
-            _written, failed = self._dual_write(candidates + corrections)
-            if failed:
-                result["db_write_failures"] = failed
-                result["error"] = (
-                    f"{failed} journal upsert(s) failed this cycle "
-                    f"(write-only Turso failure; will re-import from "
-                    f"get_fills() next cycle)"
-                )
-            if self.trade_log_path is not None:
-                existing["trades"].extend(candidates)
-                self._apply_corrections(existing, corrections)
-                atomic_save(str(self.trade_log_path), existing)
-            # A live fill that filled a previously-missing exec_id may have
-            # closed the gap the daily journal-reconcile flagged.
-            self._maybe_heal_reconcile(db)
-
+        result["mirror_superseded"] = self._supersede_fill_monitor_mirrors(
+            db, existing.get("trades", []), written
+        )
         return result
 
     def _reconcile_db_missing(
@@ -293,17 +313,18 @@ class JournalSyncHandler(BaseHandler):
     def _dual_write(self, candidates: List[Dict[str, Any]]) -> tuple:
         """Mirror new rows to the Turso ``journal`` table.
 
-        Returns (written, failed). Failures are logged AND counted so the
-        cycle can heartbeat error (REL-007 / R-020) — in production
-        (trade_log_path=None) there is no per-cycle reconcile retry, so a
-        silently-swallowed failure here was invisible until the daily
-        gap alert. Recovery remains the next cycle's ``get_fills()``
-        (dedupe source is the DB, so an unwritten fill re-imports).
+        Returns (written_entries, failed_count). Failures are logged AND
+        counted so the cycle can heartbeat error (REL-007 / R-020) — in
+        production (trade_log_path=None) there is no per-cycle reconcile
+        retry. Only entries whose upsert SUCCEEDED may count as coverage
+        when superseding fill_monitor mirror rows (REL-011). Recovery for
+        failures remains the next cycle's ``get_fills()`` (dedupe source
+        is the DB, so an unwritten fill re-imports).
         """
-        if upsert_journal_entry is None:
-            return 0, 0
-        written = 0
+        written: List[Dict[str, Any]] = []
         failed = 0
+        if upsert_journal_entry is None:
+            return written, failed
         for entry in candidates:
             try:
                 upsert_journal_entry(
@@ -311,11 +332,112 @@ class JournalSyncHandler(BaseHandler):
                     entry,
                     filled_at=entry.get("filled_at") or entry.get("date"),
                 )
-                written += 1
             except Exception as exc:  # noqa: BLE001
                 failed += 1
                 logger.warning("journal_sync: DB upsert failed: %s", exc)
+                continue
+            written.append(entry)
         return written, failed
+
+    def _supersede_fill_monitor_mirrors(
+        self,
+        db: Any,
+        existing_trades: List[Dict[str, Any]],
+        written: List[Dict[str, Any]],
+    ) -> int:
+        """Delete fill_monitor mirror rows whose fills are covered by execId rows.
+
+        fill_monitor journals each detected partial fill under a synthetic
+        ``fill-monitor:con-…:order-…:{date}:filled-N`` key so a daemon restart
+        between detection and this handler's next cycle cannot lose the fill.
+        Once the REAL executions (keyed by IB execId, carrying con_id/perm_id/
+        session date) are in the journal, the mirror is a duplicate that
+        ``fromJournal.ts:dedupeJournalRows`` cannot merge (REL-011 / R-010).
+
+        A mirror is deleted only when the execId rows for the same contract +
+        order + session date cover its running fill count ``N`` — a failed
+        upsert therefore never deletes the only record of a fill.
+        """
+        if db is None or delete_journal_entry is None:
+            return 0
+        mirrors = self._fill_monitor_mirror_rows(db)
+        if not mirrors:
+            return 0
+
+        covered = self._exec_qty_by_order(list(existing_trades) + list(written))
+        deleted = 0
+        for trade_id, order_key, filled_count in mirrors:
+            if covered.get(order_key, 0.0) < filled_count:
+                continue
+            try:
+                delete_journal_entry(trade_id)
+            except Exception as exc:  # noqa: BLE001 — never crash the cycle
+                logger.warning("journal_sync: mirror supersede failed for %s: %s", trade_id, exc)
+                continue
+            logger.info("journal_sync: superseded fill_monitor mirror %s", trade_id)
+            deleted += 1
+        return deleted
+
+    @staticmethod
+    def _fill_monitor_mirror_rows(db: Any) -> List[tuple]:
+        """Parse fill_monitor mirror trade_ids → (trade_id, (con, order, date), N)."""
+        mirrors: List[tuple] = []
+        try:
+            rows = db.execute(
+                "SELECT trade_id FROM journal WHERE trade_id LIKE 'fill-monitor:%'"
+            ).fetchall()
+            for row in rows:
+                raw = row[0] if isinstance(row, (tuple, list)) else getattr(row, "trade_id", None)
+                match = _FILL_MONITOR_TRADE_ID.match(str(raw or ""))
+                if match is None:
+                    continue
+                order_key = (int(match["con"]), int(match["order"]), match["date"])
+                mirrors.append((str(raw), order_key, int(match["filled"])))
+        except Exception as exc:  # noqa: BLE001 — scan is best-effort
+            logger.warning("journal_sync: fill-monitor mirror scan failed: %s", exc)
+            return []
+        return mirrors
+
+    @classmethod
+    def _exec_qty_by_order(cls, trades: List[Dict[str, Any]]) -> Dict[tuple, float]:
+        """(con_id, perm_id, date) → total qty across execId journal rows.
+
+        Deduped on exec-id root so a correction row queued this cycle does
+        not double-count the existing row it replaces.
+        """
+        by_root: Dict[str, Dict[str, Any]] = {}
+        for trade in trades:
+            exec_id = str(trade.get("ib_exec_id") or "").strip()
+            if not exec_id or exec_id.startswith(FILL_MONITOR_PREFIX):
+                continue
+            root, _correction = exec_id_root(exec_id)
+            by_root[root or exec_id] = trade
+
+        covered: Dict[tuple, float] = {}
+        for trade in by_root.values():
+            order_key = cls._trade_order_key(trade)
+            if order_key is None:
+                continue
+            qty_raw = trade.get("contracts", trade.get("shares"))
+            try:
+                qty = abs(float(qty_raw))
+            except (TypeError, ValueError):
+                continue
+            covered[order_key] = covered.get(order_key, 0.0) + qty
+        return covered
+
+    @staticmethod
+    def _trade_order_key(trade: Dict[str, Any]) -> Optional[tuple]:
+        """The (con_id, perm_id, date) identity a fill-monitor key pins."""
+        try:
+            con_id = int(float(trade.get("con_id")))  # type: ignore[arg-type]
+            perm_id = int(float(trade.get("perm_id")))  # type: ignore[arg-type]
+        except (TypeError, ValueError):
+            return None
+        date = str(trade.get("date") or "").strip()
+        if not date:
+            return None
+        return (con_id, perm_id, date)
 
     @staticmethod
     def _apply_corrections(
