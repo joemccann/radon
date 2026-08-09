@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.radon.reliability-audit</string>
+
+    <!-- __WEEKEND_REPO__ is substituted by scripts/setup_reliability_weekend.sh -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>__WEEKEND_REPO__/scripts/reliability_weekend.sh</string>
+        <string>audit</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>__WEEKEND_REPO__</string>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:__HOME__/.local/bin</string>
+        <key>RADON_WEEKEND_REPO</key>
+        <string>__WEEKEND_REPO__</string>
+        <key>HOME</key>
+        <string>__HOME__</string>
+    </dict>
+
+    <!-- Saturday 22:00 local — market closed, delta audit of the week's merges. -->
+    <key>StartCalendarInterval</key>
+    <dict>
+        <key>Weekday</key>
+        <integer>6</integer>
+        <key>Hour</key>
+        <integer>22</integer>
+        <key>Minute</key>
+        <integer>0</integer>
+    </dict>
+
+    <key>RunAtLoad</key>
+    <false/>
+
+    <key>StandardOutPath</key>
+    <string>__WEEKEND_REPO__/logs/reliability-weekend/launchd-audit.log</string>
+    <key>StandardErrorPath</key>
+    <string>__WEEKEND_REPO__/logs/reliability-weekend/launchd-audit.err</string>
+</dict>
+</plist>

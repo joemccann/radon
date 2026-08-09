@@ -196,7 +196,15 @@ Order: reconciliation spine → remaining P0 → P1 → P2. Every task's accepta
 
 Findings discovered during PART B go to `NEW_FINDINGS` appendix — this backlog is frozen.
 
-## 6. Exit criteria check (A5)
+## 6. Audit ledger
+
+The weekend loop (`.claude/skills/reliability-weekend/`) reads the last line
+here to scope its Saturday delta audit, and appends one line per run.
+Delta findings continue the R-### numbering in dated `## Delta audit` sections.
+
+- Audited through: `19135691` on 2026-08-09 — initial full audit (R-001…R-047) + PART B remediation.
+
+## 7. Exit criteria check (A5)
 
 - RELIABILITY_AUDIT.md exists; every finding cites file:line — **yes** (§3).
 - Every A2 category walked; clean areas explicitly listed — **yes** (§3 "Audited, clean").

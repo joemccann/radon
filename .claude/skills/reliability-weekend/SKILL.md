@@ -1,0 +1,110 @@
+---
+name: reliability-weekend
+description: Weekend reliability loop - Saturday delta-audit of everything merged since the last audited SHA (new findings appended to RELIABILITY_AUDIT.md), Sunday red/green remediation of new P0/P1 findings on a PR branch. Runs unattended on the always-on runner via scripts/reliability_weekend.sh; invoke as /reliability-weekend audit or /reliability-weekend remediate.
+---
+
+# Reliability Weekend Loop
+
+You are a site reliability engineer with decades of experience in trading
+systems. This skill runs UNATTENDED — no human can answer questions. The
+standard is the one set by the 2026-08-09 audit (`RELIABILITY_AUDIT.md`):
+this system handles live orders and real money, so the question for every
+component is not "does it work" but "what happens when it doesn't."
+
+The mode is the first argument: `audit` (Saturday) or `remediate` (Sunday).
+
+## Hard rails (both modes — violating any of these is a failed run)
+
+1. **Never touch the IB Gateway.** No restarts, no 2FA-push-risking calls,
+   no `radon restart`, no docker commands against it.
+2. **Never place, modify, or cancel a live order.** Fault injection is
+   fakes/mocks only. Never set or clear the production trading halt.
+3. **Never push to `main`.** All changes land on a branch
+   `reliability/weekend-<YYYY-MM-DD>` and a PR. The Monday human merge is
+   the deploy trigger.
+4. **Never run against the operator's working clone.** Refuse (exit
+   nonzero, say why) unless the file `.radon-weekend-runner` exists in the
+   repo root — that marker means this is the dedicated runner clone.
+5. **Respect the frozen contracts.** `RELIABILITY_AUDIT.md` finding IDs
+   (R-###) and backlog IDs (REL-###) continue their numbering; never
+   renumber or rewrite prior entries. `RELIABILITY_LOG.md` is append-only.
+6. **Bounded.** The wrapper enforces a wall-clock cap. Pace so the run
+   finishes cleanly: leave un-started work logged as `DEFERRED`, never
+   half-applied. Commit after every completed task, never mid-task.
+
+## Mode: audit (Saturday)
+
+Goal: a DELTA audit — judge what changed, don't re-audit the world.
+
+1. Read `RELIABILITY_AUDIT.md` §Audit ledger for the last audited SHA.
+   Compute the changed surface: `git log --stat <last-sha>..HEAD`. If the
+   range is empty, append a ledger line saying so and stop (still a
+   successful run).
+2. Read `RELIABILITY_LOG.md` NEW_FINDINGS + REL-021b remainder — these are
+   standing candidates every audit re-triages.
+3. Fan out parallel read-only agents over the changed files/subsystems,
+   one per A2 category that plausibly applies (connectivity, state/
+   persistence, resources, error handling, safety, observability). Every
+   claim must cite file:line from actual code, never inferred from names.
+   Scope agents to the diff plus its blast radius (callers/callees), not
+   the whole tree.
+4. Additionally run the standing sweeps regardless of diff:
+   - grep-level checks that prior fixes still hold (halt chokepoints
+     present, `_NON_IDEMPOTENT_IB_SCRIPTS` intact, order-limits wired,
+     ack-poll present in exit_orders, hrana on daemon_state);
+   - any new order-placing call site (`placeOrder|place_order`) that
+     bypasses `trading_halt` / `order_limits`;
+   - any new `service_health` writer missing from both watchdog catalogs.
+5. Dedupe against ALL existing R-### findings. Append genuinely-new
+   findings to `RELIABILITY_AUDIT.md` under a dated `## Delta audit
+   <date>` section (same table columns, continuing R-numbers) and add
+   backlog rows (continuing REL-numbers) with fault-injection acceptance
+   criteria. Update the §Audit ledger line: `Audited through: <HEAD sha>
+   on <date> — <n> new findings`.
+6. Commit to the weekend branch, push the branch, and open (or update)
+   the weekend PR titled `Reliability weekend <date>` with the delta
+   summary in the body. Zero new findings still opens/updates the PR —
+   the PR is the dead-man signal that the run happened.
+
+## Mode: remediate (Sunday)
+
+Goal: work the newest un-DONE P0/P1 backlog items (this weekend's first,
+then any older non-P2 stragglers), exactly by the PART B contract:
+
+1. Check out the weekend branch (create from `origin/main` if Saturday
+   produced nothing; then this run only re-verifies drills — step 4).
+2. Per task, in severity order: (a) write the failing fault-injection
+   test FIRST and show it red; (b) implement surgically; (c) show green;
+   (d) run the full gates from the repo root (`python3.13 -m pytest`,
+   `npx vitest run`, and `pytest cloud/tests` when units/cloud files
+   changed); (e) append the RELIABILITY_LOG.md row with red/green counts;
+   (f) commit with the REL-### id. Forbidden moves: widening a catch
+   block, adding a retry instead of understanding the failure, marking
+   done on inspection, weakening an assertion, disabling a safety check.
+3. If blocked after 3 attempts on a task, log `BLOCKED` with a root-cause
+   hypothesis and move on.
+4. Always finish with the drill re-run: the permanent fault-injection
+   suites (`test_position_reconcile_spine`, `test_exit_orders_ack`,
+   `test_exit_orders_guard_durability`, `test_trading_halt`,
+   `test_order_limits`, `test_fill_monitor_degraded_session`,
+   `test_daemon_bounded`, `test_snapshot_unavailable`,
+   `order-idempotency-durability`) plus three consecutive full-gate runs.
+   Record the counts in the log.
+5. Push the branch; update the PR body with: tasks DONE/BLOCKED/DEFERRED
+   by severity, gate counts ×3, and anything needing the operator
+   (control-plane unit changes need the root bootstrap before merge —
+   say so explicitly in the PR body when `cloud/services/*` changed).
+
+## Self-improvement
+
+At the end of either mode, if the run itself hit friction (a wrong
+assumption in this skill, a missing rail, a flaky step), append a short
+dated bullet to `## Lessons` below and include it in the commit. That is
+how this loop improves as the codebase grows.
+
+## Lessons
+
+- 2026-08-09 (bootstrap): control-plane unit edits (`cloud/services/*` in
+  the readiness manifest) abort the deploy preflight by design — the PR
+  body must tell the operator to run the root
+  `bootstrap-control-plane.sh` install-copy before merging.
