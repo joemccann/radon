@@ -154,9 +154,54 @@ class ExitOrdersHandler(BaseHandler):
         """Check if order is within IB's acceptable gap."""
         if current_price <= 0:
             return False
-        
+
         gap_pct = abs(target_price - current_price) / current_price
         return gap_pct <= self.max_gap_pct
+
+    # Ack polling mirrors the Order Placement Contract enforced by
+    # ib_place_order.py (single-leg deadline): IB silently discards an
+    # order still unacknowledged (permId==0, PendingSubmit) when the
+    # placing client disconnects, so PLACED must never be written on an
+    # unconfirmed trade (REL-002 / R-003).
+    ACK_DEADLINE_SECONDS = 6.0
+    ACK_POLL_STEP_SECONDS = 0.25
+    _TERMINAL_FAILED_STATUSES = {"Rejected", "Cancelled", "ApiCancelled", "Inactive"}
+    _ACCEPTED_STATUSES = {"Submitted", "PreSubmitted", "Filled"}
+
+    @staticmethod
+    def _ack_perm_id(trade: Any) -> Optional[int]:
+        """permId as a real int, or None for mock/None/junk (T-023 lesson:
+        never let a non-int truthy object count as an acknowledgement)."""
+        perm_id = getattr(trade.order, "permId", None)
+        return perm_id if isinstance(perm_id, int) and not isinstance(perm_id, bool) else None
+
+    def _confirm_placement(self, client: Any, trade: Any) -> tuple:
+        """Poll until IB acknowledges (nonzero permId or accepted status),
+        terminally rejects, or the deadline lapses.
+
+        Returns (confirmed: bool, last_status: str).
+        """
+        waited = 0.0
+        while True:
+            status = getattr(trade.orderStatus, "status", None)
+            if status in self._TERMINAL_FAILED_STATUSES:
+                return False, status
+            perm_id = self._ack_perm_id(trade)
+            if (perm_id is not None and perm_id != 0) or status in self._ACCEPTED_STATUSES:
+                return True, status
+            if waited >= self.ACK_DEADLINE_SECONDS:
+                return False, status
+            client.sleep(self.ACK_POLL_STEP_SECONDS)
+            waited += self.ACK_POLL_STEP_SECONDS
+
+    def _cancel_unconfirmed(self, client: Any, trade: Any) -> None:
+        """Best-effort cancel of a never-acked order so it cannot go live
+        after the handler moves on (a late ack would otherwise leave a
+        live order against a journal row still reading PENDING)."""
+        try:
+            client.cancel_order(trade.order)
+        except Exception as exc:  # noqa: BLE001 — cancel of a likely-dropped order
+            logger.warning(f"Cancel of unconfirmed exit order failed: {exc}")
     
     def _update_journal_trade(
         self,
@@ -324,7 +369,25 @@ class ExitOrdersHandler(BaseHandler):
                         )
 
                         trade = client.place_order(contract, limit_order)
-                        client.sleep(1)
+
+                        confirmed, ack_status = self._confirm_placement(client, trade)
+                        if not confirmed:
+                            if ack_status not in self._TERMINAL_FAILED_STATUSES:
+                                self._cancel_unconfirmed(client, trade)
+                            result["orders_failed"] = result.get("orders_failed", 0) + 1
+                            result.setdefault("failed", []).append({
+                                "ticker": ticker,
+                                "contract": contract.localSymbol,
+                                "order_type": order_info["order_type"],
+                                "status": ack_status,
+                            })
+                            result["error"] = (
+                                f"exit order not acknowledged by IB "
+                                f"({ticker} {order_info['order_type']}: "
+                                f"{ack_status or 'no status'}); journal left PENDING"
+                            )
+                            logger.warning(result["error"])
+                            continue
 
                         order_id = trade.order.orderId
 
