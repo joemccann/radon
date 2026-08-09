@@ -4023,7 +4023,9 @@ async def _run_ib_script_with_recovery(
 
     # Layer 2: Pre-flight pool check
     if not _pool_has_any_connection():
-        gw_status = await check_ib_gateway()
+        gw_status = await check_ib_gateway(
+            pool_status=ib_pool.status() if ib_pool else None
+        )
         port_ok = gw_status.get("port_listening", False)
         upstream_dead = gw_status.get("upstream_dead", False)
 
@@ -4036,6 +4038,25 @@ async def _run_ib_script_with_recovery(
             return ScriptResult(
                 ok=False,
                 error="IB Gateway is not accepting connections. Check IBKR Mobile for 2FA approval.",
+            )
+
+        # REL-017 (R-008): an awaiting-2FA Gateway keeps the API socket open,
+        # so the port check above passes and a placement subprocess would burn
+        # its 25s timeout returning an indeterminate result. Order-transmitting
+        # scripts require a fully authenticated session — refuse fast instead.
+        auth_state = gw_status.get("auth_state", "unknown")
+        if script in _NON_IDEMPOTENT_IB_SCRIPTS and auth_state != "authenticated":
+            logger.warning(
+                "Refusing %s — Gateway auth_state=%s (order placement requires 'authenticated')",
+                script, auth_state,
+            )
+            return ScriptResult(
+                ok=False,
+                error=(
+                    f"Order placement refused: IB Gateway auth state is "
+                    f"'{auth_state}', not 'authenticated'. Approve any pending "
+                    "IBKR Mobile 2FA prompt, then retry."
+                ),
             )
 
     result = await _runner(script, args, timeout=timeout)
