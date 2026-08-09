@@ -294,7 +294,7 @@ body {
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
   border-radius: 4px;
-  padding: 18px 20px 18px 30px;
+  padding: 18px 20px;
   min-height: 180px;
   display: flex;
   flex-direction: column;
@@ -1876,7 +1876,7 @@ body[data-mobile="true"] .watchlist-list {
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
   border-radius: 4px;
-  padding: 18px 20px 18px 30px;
+  padding: 18px 20px;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -3150,11 +3150,6 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   border: 1px solid var(--border-dim);
   margin-bottom: 20px;
   position: relative;
-  /* Note: deliberately NOT `overflow: hidden`. The panel-edge-trace is
-     position:absolute with top:0 / bottom:0, so it's already bounded by
-     the section's own height — clipping is unnecessary for that motif
-     and breaks any popover that extends past the section bottom (e.g.
-     the columns-toggle menu on short tables). */
 }
 
 .section-header {
@@ -3186,72 +3181,11 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 /* ───────────────────────────────────────────────────────────
    Instrument-panel grammar primitives (brand-identity.md § 4).
    Opt-in classes that any panel can use to express the brand:
-     .panel-edge-trace  — 2px left signal trace (calibrated edge marker)
      .panel-eyebrow     — uppercase mono module ID ("FLOW MODULE / 01")
      .panel-title       — sans-serif panel name
      .panel-meta-rail   — bottom telemetry rail (engine / basis / confidence)
    The classes are independent so panels can adopt them piecemeal.
    ─────────────────────────────────────────────────────────── */
-/* Calibrated gauge gutter — the global edge marker (brand-identity § 4).
-   Upgrades the former 2px signal stripe into an inset, tick-calibrated
-   instrument channel. Every .panel-edge-trace in the app inherits this with
-   no markup change.
-     • Resting (no --edge-level): ticks + faint tone wash + zero-baseline mark.
-     • Metered: a panel sets `--edge-level: <pct>%` inline and the accent fills
-       to that height, capped by a bright marker.
-   Tone modifiers set the accent color. Uses only existing tokens + color-mix. */
-.panel-edge-trace {
-  position: absolute;
-  left: 0;
-  top: 0;
-  bottom: 0;
-  width: 14px;
-  pointer-events: none;
-  z-index: 1;
-  background-color: var(--bg-canvas);
-  border-right: 1px solid var(--line-grid);
-  /* fine ticks every 8px (full width) + major ticks every 32px (outer 5px) */
-  background-image:
-    repeating-linear-gradient(to top, transparent 0 7px,
-      color-mix(in srgb, var(--text-muted) 55%, transparent) 7px 8px),
-    repeating-linear-gradient(to top, transparent 0 31px,
-      color-mix(in srgb, var(--text-muted) 80%, transparent) 31px 32px);
-  background-repeat: no-repeat;
-  background-size: 100% 100%, 5px 100%;
-  background-position: left, left;
-  --edge-acc: var(--signal-core);
-}
-
-.panel-edge-trace-warn        { --edge-acc: var(--warn); }
-.panel-edge-trace-fault       { --edge-acc: var(--fault); }
-.panel-edge-trace-dislocation { --edge-acc: var(--dislocation); }
-.panel-edge-trace-extreme     { --edge-acc: var(--extreme); }
-.panel-edge-trace-neutral     { --edge-acc: var(--neutral); }
-
-/* faint full-height tone wash so resting gutters still carry the panel's tone */
-.panel-edge-trace::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(to top,
-    color-mix(in srgb, var(--edge-acc) 16%, transparent), transparent 72%);
-}
-
-/* measured accent fill from the baseline to --edge-level; the top border is the
-   hard 2px cap marker (no soft glow — brand bans soft shadows). With no
-   --edge-level the height is 0, leaving just the 2px zero-baseline mark. */
-.panel-edge-trace::after {
-  content: "";
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  height: var(--edge-level, 0%);
-  background: linear-gradient(to top, var(--edge-acc),
-    color-mix(in srgb, var(--edge-acc) 35%, transparent));
-  border-top: 2px solid var(--edge-acc);
-}
-
 .panel-eyebrow {
   font-family: var(--font-mono);
   font-size: 10px;
@@ -3306,26 +3240,16 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 
 /* ───────────────────────────────────────────────────────────
    Instrument section (scanner family) — rack-mount module shell.
-   Signature of Radon Flow: calibrated edge + device eyebrow + control
-   rail. Composes existing panel-* tokens; does not invent new color.
+   Composes device eyebrow + control rail from existing panel-* tokens.
    ─────────────────────────────────────────────────────────── */
 .instrument-section {
-  /* Gutter for the edge gauge so body content never collides with ticks. */
-  padding-left: 0;
   overflow: visible;
-}
-
-.instrument-section > .panel-edge-trace {
-  /* Keep gauge inside the section border. */
-  border-radius: 4px 0 0 4px;
 }
 
 .instrument-section__header {
   align-items: flex-start;
   gap: 12px 16px;
   flex-wrap: wrap;
-  /* Align title block past the gauge channel. */
-  padding-left: 28px;
 }
 
 .instrument-section__heading {
@@ -3363,23 +3287,13 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   flex: 1 1 280px;
 }
 
-.instrument-section > .section-body,
-.instrument-section > .table-wrap,
-.instrument-section > .theta-harvester__table-wrap,
-.instrument-section > .theta-harvester__cards {
-  /* Body content clears the edge gauge. */
-  padding-left: 14px;
-}
-
 .instrument-section__rail {
   margin-top: 0;
-  padding-left: 28px;
 }
 
 /* ───────────────────────────────────────────────────────────
    InstrumentPanel — the production primitive for hero cards.
-   Composes .panel-eyebrow / .panel-title / .panel-edge-trace +
-   a big metric block + a meta-rail. See
+   Composes .panel-eyebrow / .panel-title + a big metric block + a meta-rail. See
    web/components/instruments/InstrumentPanel.tsx.
    ─────────────────────────────────────────────────────────── */
 .instrument-panel {
@@ -3387,7 +3301,7 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
   border-radius: 4px;
-  padding: 20px 22px 18px 30px;
+  padding: 20px 22px 18px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
@@ -4443,7 +4357,7 @@ td.last-price-cell {
   background: var(--bg-panel);
   border: 1px solid var(--line-grid);
   border-radius: 4px;
-  padding: 18px 16px 0 30px;
+  padding: 18px 16px 0;
   min-height: 0;
 }
 
@@ -4547,7 +4461,7 @@ td.last-price-cell {
 }
 
 body[data-mobile="true"] .dashboard-news {
-  padding: 14px 12px 0 28px;
+  padding: 14px 12px 0;
 }
 
 body[data-mobile="true"] .dashboard-news__header {

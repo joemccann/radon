@@ -9,7 +9,6 @@ export default function InstrumentSkeleton({
 }) {
   return (
     <div className="instrument-skeleton" data-testid={testId} aria-busy="true" aria-label="Loading module">
-      <span className="panel-edge-trace" aria-hidden />
       <div className="instrument-skeleton__header">
         <div className="instrument-skeleton__bar instrument-skeleton__bar--eyebrow" />
         <div className="instrument-skeleton__bar instrument-skeleton__bar--title" />

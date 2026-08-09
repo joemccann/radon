@@ -28,7 +28,6 @@ export default function EngineStatePanel({ marketState }: Props) {
 
   return (
     <section className="engine-panel snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
       <header className="engine-panel__header">
         <div>
           <p className="panel-eyebrow">Structure / 04</p>
