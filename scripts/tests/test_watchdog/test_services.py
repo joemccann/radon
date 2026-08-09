@@ -116,6 +116,10 @@ class TestServiceCatalogContract:
             "fill-monitor",
             "exit-orders",
             "journal-sync",
+            # REL-001: PositionReconcileHandler connects to IB every cycle
+            # (fetch_ib_positions via IBClient) — verified in
+            # scripts/monitor_daemon/handlers/position_reconcile.py.
+            "position-reconcile",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"

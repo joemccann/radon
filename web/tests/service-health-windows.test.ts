@@ -527,6 +527,8 @@ describe("SERVICE_FRESHNESS_WINDOWS — requires_ib field", () => {
       "exit-orders",
       "journal-sync",
       "orders-read-compare",
+      // REL-001: PositionReconcileHandler fetches IB positions every cycle.
+      "position-reconcile",
     ]);
     expect(ibTrue).toEqual(expected);
   });

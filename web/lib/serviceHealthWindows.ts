@@ -118,6 +118,10 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // ``closed`` to cover the worst-case weekend gap.
   "fill-monitor": { open: 5 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
   "exit-orders": { open: 5 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
+  // position-reconcile — 30-min RTH IB-vs-snapshot position drift check
+  // (monitor_daemon PositionReconcileHandler, REL-001). 45min open = one
+  // missed cycle + slack; closed folds the weekend like its siblings.
+  "position-reconcile": { open: 45 * MIN, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: true },
 
   "flex-token-check": { open: 25 * HOUR, extended: 25 * HOUR, closed: 25 * HOUR, category: "scheduled", requires_ib: false },
   // MenthorQ dashboard session powering /options/net-gex. Daily check;
