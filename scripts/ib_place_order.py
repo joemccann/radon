@@ -211,6 +211,15 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
                            f"Resume via POST /trading/resume.",
             }
 
+        # Server-side fat-finger bounds (REL-005) — authoritative for every
+        # placement path incl. the workflow bridge. what-if previews are
+        # exempt so the risk UI can still price an over-limit order.
+        from order_limits import check_order_limits
+
+        violation = check_order_limits(params)
+        if violation:
+            return {"status": "error", "message": violation["message"]}
+
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
