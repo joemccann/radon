@@ -547,8 +547,8 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           {activeSection === "dashboard" ? (
             <DashboardSurface
               portfolio={portfolio}
-              orders={orders}
               realizedPnl={todayRealizedPnl}
+              marketState={marketState}
             />
           ) : null}
 
