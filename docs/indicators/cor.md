@@ -51,7 +51,7 @@ closes strictly below the latest close.
 ## Identifiers
 
 - slug `cor` · service `cor` (kebab-case everywhere) · Name `Cor` · tab label
-  `COR` · migration `0039` · timer `radon-cor.timer`.
+  `COR` · migration `0040` · timer `radon-cor.timer`.
 
 ## Payload (`scan_snapshots.service = 'cor'` + `data/cor.json`)
 
@@ -111,7 +111,7 @@ closes strictly below the latest close.
   `data/cor.json`. Db mirror is best-effort try/except like STRADDLE.
 - CLI: `--json` payload to stdout; summary to stderr.
 
-## Storage — `scripts/db/migrations/0039_cor.sql`
+## Storage — `scripts/db/migrations/0040_cor.sql`
 
 ```sql
 CREATE TABLE IF NOT EXISTS cor_history (
@@ -123,7 +123,7 @@ CREATE TABLE IF NOT EXISTS cor_history (
   recorded_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_cor_history_date ON cor_history (date DESC);
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (39, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (40, datetime('now'));
 ```
 
 - `scripts/db/writer.py`: `COR_UPSERT_SQL` (single-row, 6 args, `ON

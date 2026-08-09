@@ -26,7 +26,7 @@ COR_CSV = {
     tenor: (FIXTURES / f"cor_sample_{tenor[3:].lower()}.csv").read_text()
     for tenor in ("cor1m", "cor3m", "cor6m", "cor1y")
 }
-MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0039_cor.sql"
+MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0040_cor.sql"
 
 
 # ── Cboe CSV parsing ──────────────────────────────────────────────
@@ -239,7 +239,7 @@ class TestCorStorage:
 
     def test_migration_applies_and_registers_version(self):
         db = self._db()
-        assert db.execute("SELECT version FROM schema_migrations").fetchone()[0] == 39
+        assert db.execute("SELECT version FROM schema_migrations").fetchone()[0] == 40
         cols = {r[1] for r in db.execute("PRAGMA table_info(cor_history)")}
         assert {"date", "cor1m", "cor3m", "cor6m", "cor1y", "recorded_at"} <= cols
 
