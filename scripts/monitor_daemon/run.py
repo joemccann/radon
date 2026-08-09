@@ -240,6 +240,7 @@ def main():
         print(f"State file: {STATE_FILE}")
         print(f"Press Ctrl+C to stop\n")
         try:
+            daemon.install_signal_handlers()
             daemon.run_loop()
         except KeyboardInterrupt:
             pass

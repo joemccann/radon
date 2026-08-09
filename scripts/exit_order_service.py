@@ -528,10 +528,16 @@ def show_status():
 
 
 def run_daemon():
-    """Run as a daemon, checking every 5 minutes during market hours"""
-    log("Starting exit order service daemon...")
-    log(f"Check interval: {CHECK_INTERVAL} seconds")
-    
+    """DISABLED (REL-021 / R-038): the monitor daemon's ExitOrdersHandler
+    is the sole exit-order placer. Running this legacy daemon beside it
+    means TWO placers racing the same PENDING rows — double-placed exits.
+    The one-shot check/CLI paths below remain usable.
+    """
+    log("REFUSED: this legacy exit-order daemon is disabled — the "
+        "monitor daemon (scripts/monitor_daemon, ExitOrdersHandler) owns "
+        "exit-order placement. See RELIABILITY_AUDIT.md R-038.")
+    sys.exit(2)
+
     while True:
         try:
             if is_market_open():
