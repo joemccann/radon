@@ -373,6 +373,18 @@ class ExitOrdersHandler(BaseHandler):
             "timestamp": datetime.now().isoformat()
         }
 
+        # Kill switch (REL-004): halted = no automated placements either.
+        # Deliberate operator state, not an error — heartbeat stays ok.
+        try:
+            from trading_halt import is_trading_halted
+
+            if is_trading_halted():
+                result["halted"] = True
+                logger.warning("Trading halted — exit-order placement suspended")
+                return result
+        except ImportError:
+            pass
+
         pending = self._load_pending_orders()
 
         if not pending:
