@@ -280,6 +280,28 @@ def _unconfigured_pushover() -> ChannelResult:
     )
 
 
+def send_direct_page(*, title: str, message: str, tag: str) -> Optional[str]:
+    """DB-free P1 emergency page (REL-010).
+
+    Used when Turso itself is the outage: no cooldown table, no
+    service_health write — just Pushover. Returns an error string or
+    None on delivery. The caller owns any cooldown (file-based).
+    """
+    creds = _pushover_creds()
+    if not creds:
+        return "pushover unconfigured: " + ", ".join(_missing_pushover_vars())
+    user, token = creds
+    payload = build_pushover_payload(
+        user=user,
+        token=token,
+        title=title,
+        message=message,
+        severity="P1",
+        tag=tag,
+    )
+    return _post_pushover(payload)
+
+
 def _emit_pushover(outcome: CheckOutcome) -> ChannelResult:
     """P1 only — emergency priority cuts through iOS DnD and repeats
     until acknowledged. Non-P1 outcomes batch into the daily digest

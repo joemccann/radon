@@ -10,6 +10,7 @@ Subcommands:
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,6 +37,97 @@ except Exception:
     pass
 
 
+# REL-010: consecutive snapshot-failure counter + page cooldown live in a
+# FILE because the failure mode being handled is "the DB is down".
+_SNAPSHOT_FAILURE_STATE = _PROJECT_DIR / "data" / "watchdog_snapshot_failures.json"
+SNAPSHOT_FAILURE_PAGE_THRESHOLD = 3
+SNAPSHOT_PAGE_COOLDOWN_SECS = 2 * 3600
+
+
+def _read_snapshot_failure_state() -> dict:
+    try:
+        return json.loads(_SNAPSHOT_FAILURE_STATE.read_text())
+    except Exception:  # noqa: BLE001 — missing/corrupt = fresh
+        return {"consecutive": 0, "last_paged_at": None}
+
+
+def _write_snapshot_failure_state(state: dict) -> None:
+    try:
+        _SNAPSHOT_FAILURE_STATE.parent.mkdir(parents=True, exist_ok=True)
+        _SNAPSHOT_FAILURE_STATE.write_text(json.dumps(state))
+    except Exception as exc:  # noqa: BLE001
+        print(f"[watchdog] snapshot-failure state write failed: {exc}")
+
+
+def _reset_snapshot_failure_counter() -> None:
+    state = _read_snapshot_failure_state()
+    if state.get("consecutive"):
+        state["consecutive"] = 0
+        _write_snapshot_failure_state(state)
+
+
+def _handle_snapshot_unavailable(*, bucket: str, now: datetime, reason: str) -> int:
+    """The DB is down: keep the DB-free checks alive and page when blind.
+
+    Previously this printed "skipped (off-window)" and exited 0 — the
+    units alarm, external-probe read, and every page were skipped exactly
+    when the DB was the outage (R-021).
+    """
+    from scripts.watchdog import external_probe, notify, units
+
+    print(f"[watchdog] bucket={bucket} SNAPSHOT UNAVAILABLE: {reason}")
+
+    state = _read_snapshot_failure_state()
+    state["consecutive"] = int(state.get("consecutive") or 0) + 1
+    _write_snapshot_failure_state(state)
+
+    # DB-free checks still run on the continuous cadence; fired outcomes
+    # page directly (the cooldown table is unreachable).
+    if bucket == "continuous":
+        try:
+            outcomes = list(units.check_units(now=now))
+            outcomes.append(external_probe.check_external_probe(now=now))
+            for outcome in outcomes:
+                print(f"  {outcome.service:24s} {outcome.status:8s} fired={outcome.fired}")
+                if outcome.fired:
+                    err = notify.send_direct_page(
+                        title=f"radon watchdog: {outcome.service}",
+                        message=outcome.message or f"{outcome.service} degraded "
+                                f"(paged direct — DB unavailable)",
+                        tag=outcome.service,
+                    )
+                    if err:
+                        print(f"  [direct-page] {outcome.service} failed: {err}")
+        except Exception as exc:  # noqa: BLE001 — never mask the blind-page below
+            print(f"[watchdog] DB-free checks failed: {exc}")
+
+    if int(state["consecutive"]) >= SNAPSHOT_FAILURE_PAGE_THRESHOLD:
+        last_paged = state.get("last_paged_at")
+        due = True
+        if last_paged:
+            try:
+                last_dt = datetime.fromisoformat(last_paged)
+                due = (now - last_dt).total_seconds() >= SNAPSHOT_PAGE_COOLDOWN_SECS
+            except ValueError:
+                due = True
+        if due:
+            err = notify.send_direct_page(
+                title="radon watchdog BLIND",
+                message=(
+                    f"service_health snapshot unavailable for "
+                    f"{state['consecutive']} consecutive bucket runs — the "
+                    f"on-box watchdog cannot see writer health ({reason})"
+                ),
+                tag="watchdog-blind",
+            )
+            if err:
+                print(f"[watchdog] blind-page failed: {err}")
+            else:
+                state["last_paged_at"] = now.isoformat()
+                _write_snapshot_failure_state(state)
+    return 0
+
+
 def _cmd_bucket(args: argparse.Namespace) -> int:
     from scripts.watchdog import check, grouping, notify
 
@@ -43,8 +135,14 @@ def _cmd_bucket(args: argparse.Namespace) -> int:
     now = datetime.now(timezone.utc)
     report = check.check_bucket(bucket=args.bucket, now=now)
     if not report.ran:
+        if report.skip_reason and "snapshot_unavailable" in report.skip_reason:
+            return _handle_snapshot_unavailable(
+                bucket=args.bucket, now=now, reason=report.skip_reason
+            )
         print(f"[watchdog] bucket={args.bucket} skipped (off-window)")
         return 0
+
+    _reset_snapshot_failure_counter()
 
     observed_outcomes = list(report.outcomes)
     for outcome in report.outcomes:

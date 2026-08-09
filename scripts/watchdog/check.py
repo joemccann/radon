@@ -44,6 +44,14 @@ class BucketReport:
     bucket: str
     ran: bool
     outcomes: list[CheckOutcome] = field(default_factory=list)
+    # Distinguishes "legitimately off-window" from "the snapshot the whole
+    # bucket depends on was unavailable" (REL-010 / R-021) — the caller
+    # escalates the latter instead of printing "skipped (off-window)".
+    skip_reason: Optional[str] = None
+
+
+class SnapshotUnavailable(RuntimeError):
+    """service_health snapshot could not be fetched or was degraded."""
 
 
 # ── helpers ─────────────────────────────────────────────────────────
@@ -389,21 +397,20 @@ def check_bucket(*, bucket: str, now: Optional[datetime] = None) -> BucketReport
         raise ValueError(f"unknown bucket: {bucket}")
 
     global _bucket_health_snapshot
-    if os.environ.get("PYTEST_CURRENT_TEST"):
-        outcomes = []
-        for service in services_mod.BUCKETS[bucket]:
-            outcomes.append(
-                check_service(service=service, kind=kind, now=now, market_state=market_state)
-            )
-        return BucketReport(bucket=bucket, ran=True, outcomes=outcomes)
     try:
-        from scripts.health_service.turso_http import fetch_service_health
-        snapshot = fetch_service_health(timeout=4.0)
-        if snapshot.get("state") != "ok":
-            return BucketReport(bucket=bucket, ran=False)
-        _bucket_health_snapshot = {
-            row["service"]: row for row in snapshot.get("rows", []) if row.get("service")
-        }
+        snapshot_map = _fetch_bucket_snapshot()
+    except SnapshotUnavailable as exc:
+        return BucketReport(
+            bucket=bucket, ran=False,
+            skip_reason=f"snapshot_unavailable: {exc}",
+        )
+    except Exception as exc:  # noqa: BLE001 — transport error = same class
+        return BucketReport(
+            bucket=bucket, ran=False,
+            skip_reason=f"snapshot_unavailable: {exc}",
+        )
+    try:
+        _bucket_health_snapshot = snapshot_map
         outcomes = []
         for service in services_mod.BUCKETS[bucket]:
             outcomes.append(
@@ -412,3 +419,22 @@ def check_bucket(*, bucket: str, now: Optional[datetime] = None) -> BucketReport
         return BucketReport(bucket=bucket, ran=True, outcomes=outcomes)
     finally:
         _bucket_health_snapshot = None
+
+
+def _fetch_bucket_snapshot() -> Optional[dict]:
+    """One shared service_health snapshot per bucket run.
+
+    None = per-service fetch fallback (pytest keeps checks network-free).
+    Raises SnapshotUnavailable when the snapshot cannot be trusted.
+    """
+    if os.environ.get("PYTEST_CURRENT_TEST"):
+        return None
+    from scripts.health_service.turso_http import fetch_service_health
+    snapshot = fetch_service_health(timeout=4.0)
+    if snapshot.get("state") != "ok":
+        raise SnapshotUnavailable(
+            f"service_health snapshot state={snapshot.get('state')!r}"
+        )
+    return {
+        row["service"]: row for row in snapshot.get("rows", []) if row.get("service")
+    }
