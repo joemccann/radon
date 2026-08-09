@@ -162,6 +162,12 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Cboe CDN CSVs only — no IB.
   "straddle": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``cor`` — radon-cor.timer fires daily 02:20 UTC every calendar day
+  // (Cboe overwrites the COR CSVs after each session; weekend runs are 304
+  // heartbeats), so a uniform 26h window fits like its straddle sibling.
+  // Cboe CDN CSVs only — no IB.
+  "cor": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``skew`` publishes every minute during RTH and finalizes daily at 21:45
   // UTC. Five minutes tolerates transient UW failures while surfacing a dead
   // live writer; the daily heartbeat preserves the off-hours window.
