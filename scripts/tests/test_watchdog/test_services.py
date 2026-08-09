@@ -120,6 +120,9 @@ class TestServiceCatalogContract:
             # (fetch_ib_positions via IBClient) — verified in
             # scripts/monitor_daemon/handlers/position_reconcile.py.
             "position-reconcile",
+            # Evening after-hours fill sweep (REL-012) — pulls get_fills()
+            # from IB Gateway once per trading evening.
+            "execution-sweep",
         }
         assert ib_dependent == expected, (
             f"requires_ib=true mismatch.\n"
