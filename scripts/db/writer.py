@@ -1149,9 +1149,13 @@ def upsert_daemon_state(
     last_status: Optional[str] = None,
     last_error: Optional[str] = None,
 ) -> None:
-    """Phase 4 — replaces data/daemon_state.json per-handler tick log."""
-    db = get_db()
-    db.execute(
+    """Phase 4 — replaces data/daemon_state.json per-handler tick log.
+
+    Bounded Hrana transport (REL-008 / R-013): this write runs after EVERY
+    daemon cycle — on native libsql a Turso stall held the GIL and froze
+    the whole loop, exit orders included.
+    """
+    _hrana_execute(
         """
         INSERT INTO daemon_state (handler, last_run, last_status, last_error, updated_at)
         VALUES (?, ?, ?, ?, ?)
@@ -1163,7 +1167,6 @@ def upsert_daemon_state(
         """,
         (handler, last_run, last_status, last_error, _now_iso()),
     )
-    db.commit()
 
 
 def upsert_app_config(key: str, value: str) -> None:

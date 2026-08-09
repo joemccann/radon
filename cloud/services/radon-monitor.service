@@ -14,7 +14,13 @@ StartLimitIntervalSec=300
 StartLimitBurst=5
 
 [Service]
-Type=simple
+# REL-008: Type=notify + WatchdogSec catch the alive-but-dead loop wedge
+# (a hung IB call froze every handler while Restart=always saw a live
+# process). The daemon sends READY=1 at loop start and WATCHDOG=1 each
+# iteration (scripts/monitor_daemon/daemon.py:sd_notify). 900s covers the
+# pathological all-IB-handlers-at-deadline cycle (~8 min) with slack.
+Type=notify
+WatchdogSec=900
 User=radon
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env

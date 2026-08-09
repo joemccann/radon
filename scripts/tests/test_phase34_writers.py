@@ -147,6 +147,19 @@ class TestExecutedOrders:
 # ── daemon_state (Phase 4) ───────────────────────────────────────────
 
 class TestDaemonState:
+    @pytest.fixture(autouse=True)
+    def _route_hrana_to_sqlite(self, db_with_schema, monkeypatch):
+        # REL-008: upsert_daemon_state moved to the bounded Hrana transport
+        # (native libsql held the GIL and wedged the daemon loop). Behavioral
+        # assertions below are unchanged — only the transport seam moved.
+        import db.writer as writer_mod
+
+        def fake_hrana(sql, args=(), *, timeout=None):
+            db_with_schema.execute(sql, args)
+            db_with_schema.commit()
+
+        monkeypatch.setattr(writer_mod, "_hrana_execute", fake_hrana)
+
     def test_inserts_new_handler(self, writer, db_with_schema):
         writer.upsert_daemon_state("fill_monitor", last_run=_now(), last_status="ok")
         rows = db_with_schema.execute(
