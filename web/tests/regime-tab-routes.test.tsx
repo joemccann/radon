@@ -55,6 +55,7 @@ describe.each([
   ["margin", "app/regime/margin/page.tsx"],
   ["straddle", "app/regime/straddle/page.tsx"],
   ["skew", "app/regime/skew/page.tsx"],
+  ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
@@ -104,6 +105,9 @@ vi.mock("../components/StraddlePanel", () => ({
 }));
 vi.mock("../components/SkewPanel", () => ({
   default: () => <div data-testid="skew-panel-stub" />,
+}));
+vi.mock("../components/Skew2dPanel", () => ({
+  default: () => <div data-testid="skew2d-panel-stub" />,
 }));
 vi.mock("../components/YieldCurvePanel", () => ({
   default: () => <div data-testid="curve-panel-stub" />,
@@ -254,6 +258,20 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^SKEW$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/skew");
+  });
+
+  it("renders the Skew2d panel when pathname is /regime/skew2d", () => {
+    mockedPathname = "/regime/skew2d";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("skew2d-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("skew-panel-stub")).toBeNull();
+  });
+
+  it("clicking SKEW 2D tab pushes /regime/skew2d", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^SKEW 2D$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/skew2d");
   });
 
   it("renders the Yield Curve panel when pathname is /regime/curve", () => {
