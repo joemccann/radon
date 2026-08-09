@@ -387,6 +387,217 @@ class TestHeartbeat:
             handler.execute()
 
 
+def _occ_symbol(root: str, expiry_compact: str, right: str, strike: float) -> str:
+    """OCC option symbol as the Flex rehydrate writer stores it in ticker."""
+    return f"{root:<6}{expiry_compact[2:]}{right}{int(round(strike * 1000)):08d}"
+
+
+class TestCrossConventionDedup:
+    """Production remediation 2026-08-09: the journal holds the SAME real
+    contract under two ticker conventions (real-time daemon: plain root +
+    per-exec rows; Flex rehydrate: OCC symbol + '+'-joined composite rows),
+    plus 'CLOSED' round-trip rows the sign map didn't know. The first sweep
+    cycle double-counted duplicated fills and closed a phantom short created
+    by a mislabeled SELL_TO_OPEN. These shapes are lifted verbatim from the
+    live Turso journal."""
+
+    def test_duplicate_fills_across_conventions_counted_once(self, upserts):
+        """SPCX shape: plain exec rows 8+8+9 and an OCC composite 25 are the
+        same fills — one close of 25, never 50."""
+        occ = _occ_symbol("SPCX", EXPIRED_COMPACT, "C", 150.0)
+        db = _make_db(
+            [
+                _journal_row("BUY_OPTION", 8, ib_exec_id="00018c6a.6a71e667.01.01"),
+                _journal_row("BUY_OPTION", 8, ib_exec_id="00018c6a.6a71e669.01.01"),
+                _journal_row("BUY_OPTION", 9, ib_exec_id="00018c6a.6a71e66a.01.01"),
+                _journal_row(
+                    "BUY_OPTION", 25, ticker=occ, ib_exec_id="9998981349+9998981410"
+                ),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 1
+        assert upserts.call_count == 1
+        trade_id, payload = upserts.call_args[0][0], upserts.call_args[0][1]
+        assert trade_id == f"ep-SPCX-{EXPIRED_COMPACT}-150C"
+        assert payload["ticker"] == "SPCX"
+        assert payload["contracts"] == 25
+        assert payload["action"] == "SELL_OPTION"
+
+    def test_phantom_short_from_mislabeled_close_not_swept(self, upserts):
+        """AAOI shape: OCC round trip (BUY 100 then SELL 100) plus the same
+        sale re-journaled as plain SELL_TO_OPEN 100. Real position is flat —
+        closing the phantom short fabricates a windfall gain."""
+        occ = _occ_symbol("AAOI", EXPIRED_COMPACT, "C", 105.0)
+        sale_date = (EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d")
+        buy_date = (EXPIRED - timedelta(days=40)).strftime("%Y-%m-%d")
+        db = _make_db(
+            [
+                _journal_row(
+                    "BUY_OPTION", 100, ticker=occ, strike=105.0,
+                    date_str=buy_date, ib_exec_id="9235885205+9235885212",
+                ),
+                _journal_row(
+                    "SELL_OPTION", 100, ticker=occ, strike=105.0,
+                    date_str=sale_date, ib_exec_id="9467415501+9467415506",
+                ),
+                _journal_row(
+                    "SELL_TO_OPEN", 100, ticker="AAOI", strike=105.0,
+                    date_str=sale_date, ib_exec_id="0002920b.69fe5a54.01.01",
+                ),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 0
+        upserts.assert_not_called()
+
+    def test_closed_round_trip_rows_net_zero(self, upserts):
+        """TSLA shape: OCC 'CLOSED' rows are completed round trips — they
+        contribute nothing; the independent plain short still sweeps."""
+        occ = _occ_symbol("TSLA", EXPIRED_COMPACT, "P", 400.0)
+        db = _make_db(
+            [
+                _journal_row(
+                    "CLOSED", 10, ticker=occ, strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=50)).strftime("%Y-%m-%d"),
+                    ib_exec_id="9217417513+9399322577",
+                ),
+                _journal_row(
+                    "SELL_TO_OPEN", 10, ticker="TSLA", strike=400.0, right="P",
+                    date_str=(EXPIRED - timedelta(days=7)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001eb2e.69fdf46c.01.01",
+                ),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 1
+        payload = upserts.call_args[0][1]
+        assert payload["action"] == "BUY_TO_CLOSE"
+        assert payload["contracts"] == 10
+        assert payload["ticker"] == "TSLA"
+
+    def test_occ_only_open_closes_under_normalized_ticker(self, upserts):
+        """ETHA shape: opener exists only under the OCC symbol — the close
+        row and synthetic id use the normalized root."""
+        occ = _occ_symbol("ETHA", EXPIRED_COMPACT, "C", 30.0)
+        db = _make_db(
+            [
+                _journal_row(
+                    "BUY_OPTION", 200, ticker=occ, strike=30.0,
+                    ib_exec_id="9076523139+9077019421",
+                )
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 1
+        trade_id, payload = upserts.call_args[0][0], upserts.call_args[0][1]
+        assert trade_id == f"ep-ETHA-{EXPIRED_COMPACT}-30C"
+        assert payload["ticker"] == "ETHA"
+        assert payload["contracts"] == 200
+
+    def test_unequal_cross_convention_overlap_is_guarded(self, upserts):
+        """Composite 25 vs plain 20 on the same day/side — cannot tell which
+        fills duplicate. Never guess, never write."""
+        occ = _occ_symbol("SPCX", EXPIRED_COMPACT, "C", 150.0)
+        db = _make_db(
+            [
+                _journal_row("BUY_OPTION", 20, ib_exec_id="00018c6a.6a71e667.01.01"),
+                _journal_row(
+                    "BUY_OPTION", 25, ticker=occ, ib_exec_id="9998981349+9998981410"
+                ),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 0
+        assert result["skipped_guarded"] == 1
+        upserts.assert_not_called()
+
+    def test_cross_date_mixed_convention_history_is_guarded(self, upserts):
+        """ETHA 15C shape: composite -200 and plain -200 on DIFFERENT dates
+        never pair in the per-day dedup, so the net doubles. Unpaired
+        contributions from both conventions = unattributable — skip."""
+        occ = _occ_symbol("ETHA", EXPIRED_COMPACT, "C", 15.0)
+        db = _make_db(
+            [
+                _journal_row(
+                    "SELL_TO_OPEN", 200, ticker="ETHA", strike=15.0,
+                    date_str=(EXPIRED - timedelta(days=20)).strftime("%Y-%m-%d"),
+                    ib_exec_id="0001aaaa.11111111.01.01",
+                ),
+                _journal_row(
+                    "SELL_OPTION", 200, ticker=occ, strike=15.0,
+                    date_str=(EXPIRED - timedelta(days=18)).strftime("%Y-%m-%d"),
+                    ib_exec_id="9076523139+9077019421",
+                ),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 0
+        assert result["skipped_guarded"] == 1
+        upserts.assert_not_called()
+
+    def test_numeric_flex_id_counts_as_rehydrate_row(self, upserts):
+        """Exact ETHA 15C production shape: the rehydrate twin carries a
+        single NUMERIC Flex trade id (no '+') under the OCC ticker, dated one
+        day off from the daemon's hex-exec-id row. Same real fill, never
+        pairs — must be ambiguous, not net -400."""
+        occ = _occ_symbol("ETHA", EXPIRED_COMPACT, "C", 15.0)
+        db = _make_db(
+            [
+                _journal_row(
+                    "SELL_TO_OPEN", 200, ticker="ETHA", strike=15.0,
+                    date_str=(EXPIRED - timedelta(days=19)).strftime("%Y-%m-%d"),
+                    ib_exec_id="00012871.6a34cc91.01.01",
+                ),
+                _journal_row(
+                    "SELL_TO_OPEN", 200, ticker=occ, strike=15.0,
+                    date_str=(EXPIRED - timedelta(days=20)).strftime("%Y-%m-%d"),
+                    ib_exec_id="9741721501",
+                ),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 0
+        assert result["skipped_guarded"] == 1
+        upserts.assert_not_called()
+
+    def test_unknown_action_guards_contract(self, upserts):
+        db = _make_db(
+            [
+                _journal_row("BUY_OPTION", 25),
+                _journal_row("MYSTERY_ACTION", 5, date_str=OPEN_DATE_ISO),
+            ]
+        )
+        handler = _make_handler(db)
+
+        result = handler.execute()
+
+        assert result["closed"] == 0
+        assert result["skipped_guarded"] == 1
+        upserts.assert_not_called()
+
+
 class TestSqlSchemaPins:
     """The MagicMock db here cannot catch schema drift — production incident
     2026-08-09: the executed_orders SELECT named a nonexistent order_ref

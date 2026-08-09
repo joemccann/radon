@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import date, datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -70,6 +71,23 @@ _ACTION_SIGNS = {
     "SELL_OPTION": -1,
     "SELL_TO_OPEN": -1,
 }
+
+# Flex rehydrate writes completed round trips as a single row — both sides
+# already netted, so it contributes nothing to the open quantity.
+_ROUND_TRIP_ACTION = "CLOSED"
+
+# OCC option symbol as the rehydrate writer stores it in ticker
+# ("SPCX  260807C00150000"); the real-time daemon stores the bare root.
+_OCC_TICKER_RE = re.compile(r"^([A-Z.]{1,6})\s+\d{6}[CP]\d{8}$")
+
+
+def _normalize_ticker(ticker: Any) -> str:
+    """Collapse both writer conventions onto the underlying root so the same
+    real contract aggregates under ONE key (first sweep cycle double-closed
+    contracts journaled under both)."""
+    raw = str(ticker or "").strip()
+    match = _OCC_TICKER_RE.match(raw)
+    return match.group(1) if match else raw
 
 
 def _format_strike(strike: Any) -> str:
@@ -126,34 +144,95 @@ def _load_option_rows(db: Any, since_date: str) -> list[dict[str, Any]]:
 
 def _contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
     return (
-        str(payload.get("ticker") or "").upper(),
+        _normalize_ticker(payload.get("ticker")).upper(),
         _format_strike(payload.get("strike")),
         str(payload.get("right") or ""),
-        str(payload.get("expiry") or ""),
+        "".join(ch for ch in str(payload.get("expiry") or "") if ch.isdigit())[:8],
     )
 
 
-def _aggregate_contracts(rows: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
-    """Per contract key: net signed qty, exec ids, latest journal date."""
-    contracts: dict[tuple, dict[str, Any]] = {}
+def _is_rehydrate_row(payload: dict[str, Any]) -> bool:
+    """Which writer journaled this row. Flex rehydrate: OCC-symbol ticker,
+    or numeric Flex trade ids ('9741721501', '+'-joined composites).
+    Real-time daemon: bare-root ticker with dotted-hex IB exec ids."""
+    if _OCC_TICKER_RE.match(str(payload.get("ticker") or "").strip()):
+        return True
+    exec_id = str(payload.get("ib_exec_id") or "")
+    return bool(exec_id) and all(part.isdigit() for part in exec_id.split("+"))
+
+
+def _net_open_quantity(rows: list[dict[str, Any]]) -> tuple[int, bool]:
+    """(net signed qty, ambiguous) across BOTH writer conventions.
+
+    The same fills can be journaled twice — per-exec rows by the real-time
+    daemon and a composite row by the Flex rehydrate (regardless of how
+    either writer labelled the action). Per (date, side): equal composite
+    and plain totals are the same fills, counted once; unequal totals on
+    both sides cannot be attributed and poison the contract (ambiguous).
+    Any action outside the sign map (except CLOSED round trips) is also
+    ambiguous — never guess with journal writes.
+    """
+    groups: dict[tuple, dict[str, int]] = {}
+    ambiguous = False
     for payload in rows:
-        key = _contract_key(payload)
-        state = contracts.setdefault(
-            key,
-            {"payload": payload, "net": 0, "exec_ids": set(), "last_date": ""},
+        action = str(payload.get("action") or "").upper()
+        if action == _ROUND_TRIP_ACTION:
+            continue
+        sign = _ACTION_SIGNS.get(action)
+        if sign is None:
+            ambiguous = True
+            continue
+        try:
+            qty = abs(int(payload.get("contracts") or 0))
+        except (TypeError, ValueError):
+            ambiguous = True
+            continue
+        group = groups.setdefault(
+            (str(payload.get("date") or "")[:10], sign), {"comp": 0, "plain": 0}
         )
-        sign = _ACTION_SIGNS.get(str(payload.get("action") or "").upper())
-        if sign is not None:
-            try:
-                state["net"] += sign * abs(int(payload.get("contracts") or 0))
-            except (TypeError, ValueError):
-                pass
-        exec_id = str(payload.get("ib_exec_id") or "")
-        if exec_id:
-            state["exec_ids"].add(exec_id)
-        row_date = str(payload.get("date") or "")
-        if row_date > state["last_date"]:
-            state["last_date"] = row_date
+        group["comp" if _is_rehydrate_row(payload) else "plain"] += qty
+
+    net = 0
+    unpaired_comp = unpaired_plain = False
+    for (_, sign), group in groups.items():
+        comp, plain = group["comp"], group["plain"]
+        if comp and plain:
+            if comp != plain:
+                ambiguous = True
+            net += sign * max(comp, plain)
+        else:
+            unpaired_comp = unpaired_comp or bool(comp)
+            unpaired_plain = unpaired_plain or bool(plain)
+            net += sign * (comp + plain)
+    # Both conventions contributed fills that never paired up (e.g. the same
+    # sale journaled under different trade dates) — the per-day dedup cannot
+    # attribute them, so the net may be doubled. Unattributable = ambiguous.
+    if unpaired_comp and unpaired_plain:
+        ambiguous = True
+    return net, ambiguous
+
+
+def _aggregate_contracts(rows: list[dict[str, Any]]) -> dict[tuple, dict[str, Any]]:
+    """Per contract key: duplication-aware net qty, exec ids, latest date."""
+    grouped: dict[tuple, list[dict[str, Any]]] = {}
+    for payload in rows:
+        grouped.setdefault(_contract_key(payload), []).append(payload)
+
+    contracts: dict[tuple, dict[str, Any]] = {}
+    for key, contract_rows in grouped.items():
+        net, ambiguous = _net_open_quantity(contract_rows)
+        contracts[key] = {
+            "payload": contract_rows[0],
+            "ticker": key[0],
+            "net": net,
+            "ambiguous": ambiguous,
+            "exec_ids": {
+                str(p.get("ib_exec_id") or "") for p in contract_rows if p.get("ib_exec_id")
+            },
+            "last_date": max(
+                (str(p.get("date") or "")[:10] for p in contract_rows), default=""
+            ),
+        }
     return contracts
 
 
@@ -184,10 +263,10 @@ def _executed_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]
     contract = payload.get("contract") or {}
     expiry_raw = str(contract.get("expiry") or contract.get("lastTradeDateOrContractMonth") or "")
     return (
-        str(payload.get("symbol") or contract.get("symbol") or "").upper(),
+        _normalize_ticker(payload.get("symbol") or contract.get("symbol")).upper(),
         _format_strike(contract.get("strike")),
         str(contract.get("right") or ""),
-        expiry_raw.replace("-", ""),
+        "".join(ch for ch in expiry_raw if ch.isdigit())[:8],
     )
 
 
@@ -261,18 +340,26 @@ class ExpirySweepHandler(BaseHandler):
 
     @staticmethod
     def _is_guarded(candidate: dict[str, Any], executed: list[dict[str, Any]]) -> bool:
+        if candidate["ambiguous"]:
+            logger.warning(
+                "journal-expiry-sweep: ambiguous journal history for %s "
+                "(unattributable duplicate fills or unknown action) — skipping",
+                candidate["ticker"],
+            )
+            return True
+
         expiry_date = candidate["expiry_date"]
         if expiry_date is None:
             logger.warning(
                 "journal-expiry-sweep: unparseable expiry %r for %s — skipping",
                 candidate["payload"].get("expiry"),
-                candidate["payload"].get("ticker"),
+                candidate["ticker"],
             )
             return True
 
         payload = candidate["payload"]
         close_id = synthetic_exec_id(
-            str(payload.get("ticker") or ""),
+            candidate["ticker"],
             str(payload.get("expiry") or ""),
             payload.get("strike"),
             str(payload.get("right") or ""),
@@ -302,7 +389,7 @@ class ExpirySweepHandler(BaseHandler):
         payload = candidate["payload"]
         net = candidate["net"]
         expiry_iso = candidate["expiry_date"].strftime("%Y-%m-%d")
-        ticker = str(payload.get("ticker") or "")
+        ticker = candidate["ticker"]
         close_id = synthetic_exec_id(
             ticker, str(payload.get("expiry") or ""), payload.get("strike"), str(payload.get("right") or "")
         )
