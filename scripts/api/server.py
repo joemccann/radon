@@ -59,6 +59,7 @@ from api import ib_gateway
 from api import services as admin_services
 from clients.ib_client import DEFAULT_GATEWAY_PORT
 from api.pool_order_manage import pool_cancel_order, pool_modify_order
+from api.order_audit import record_order_event
 from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
@@ -2115,6 +2116,19 @@ def _refuse_if_trading_halted() -> None:
         )
 
 
+_INDETERMINATE_PLACE_MARKERS = ("timed out", "not automatically retried")
+
+
+def _is_indeterminate_place_failure(error: Optional[str]) -> bool:
+    """True when a failed /orders/place attempt may still have reached IB:
+    subprocess timeout after transmit, or the recovery path restarted the
+    gateway and deliberately did not retry (non-idempotent). Pre-transmit
+    infra failures (script missing, gateway unreachable before connect)
+    are NOT indeterminate — the order never left the host."""
+    message = (error or "").lower()
+    return any(marker in message for marker in _INDETERMINATE_PLACE_MARKERS)
+
+
 @app.post("/orders/place")
 async def orders_place(request: Request):
     """Place an order via IB (on-demand connection, client_id=26)."""
@@ -2160,17 +2174,27 @@ async def orders_place(request: Request):
             body.get("symbol", "?"),
             result.error,
         )
-        # REL-006 / R-009: a killed placement subprocess ("Script timed out")
-        # may have transmitted before dying — that is an INDETERMINATE
-        # outcome, never a plain failure the caller would retry.
-        if "timed out" in (result.error or "").lower():
+        # REL-006 / R-009 + REL-019: a killed placement subprocess or a
+        # no-retry gateway-restart may have transmitted before failing —
+        # record the attempt AND answer 504 ORDER_INDETERMINATE, never a
+        # plain failure the caller would retry.
+        if _is_indeterminate_place_failure(result.error):
+            await record_order_event(
+                "indeterminate",
+                order_ref=order_ref,
+                symbol=body.get("symbol"),
+                action=body.get("action"),
+                quantity=body.get("quantity"),
+                limit_price=body.get("limitPrice"),
+                detail={"error": result.error},
+            )
             raise HTTPException(
                 status_code=504,
                 detail={
                     "code": "ORDER_INDETERMINATE",
                     "orderRef": order_ref,
                     "message": (
-                        f"Placement timed out after transmit may have occurred — "
+                        f"Placement failed after transmit may have occurred — "
                         f"outcome indeterminate. CHECK OPEN ORDERS (orderRef "
                         f"{order_ref}) before re-placing. Upstream: {result.error}"
                     ),
@@ -2192,7 +2216,33 @@ async def orders_place(request: Request):
             error_detail.get("message", "Order failed"),
             error_detail.get("ib_error_code"),
         )
+        # REL-019: audit-trail the rejection (best-effort, never fails the response).
+        await record_order_event(
+            "rejected",
+            order_ref=error_detail.get("orderRef") or body.get("orderRef"),
+            order_id=error_detail.get("orderId"),
+            perm_id=error_detail.get("permId"),
+            symbol=body.get("symbol"),
+            action=body.get("action"),
+            quantity=body.get("quantity"),
+            limit_price=body.get("limitPrice"),
+            status="error",
+            detail=error_detail,
+        )
         raise HTTPException(status_code=502, detail=error_detail)
+    # REL-019: audit-trail the successful submission (best-effort).
+    data = result.data or {}
+    await record_order_event(
+        "submitted",
+        order_ref=data.get("orderRef"),
+        order_id=data.get("orderId"),
+        perm_id=data.get("permId"),
+        symbol=body.get("symbol"),
+        action=body.get("action"),
+        quantity=body.get("quantity"),
+        limit_price=body.get("limitPrice"),
+        status=data.get("initialStatus"),
+    )
     return result.data
 
 
@@ -2269,6 +2319,14 @@ async def orders_cancel(request: Request):
         raise HTTPException(status_code=502, detail=result.error)
     if result.data and result.data.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.data.get("message", "Cancel failed"))
+    # REL-019: audit-trail the successful cancel (best-effort).
+    data = result.data or {}
+    await record_order_event(
+        "cancelled",
+        order_id=data.get("orderId") or order_id or None,
+        perm_id=perm_id or None,
+        status=data.get("finalStatus"),
+    )
     return result.data
 
 
@@ -2323,6 +2381,20 @@ async def orders_modify(request: Request):
         raise HTTPException(status_code=502, detail=result.error)
     if result.data and result.data.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.data.get("message", "Modify failed"))
+    # REL-019: audit-trail the successful modify (best-effort).
+    data = result.data or {}
+    await record_order_event(
+        "modified",
+        order_id=data.get("orderId") or order_id or None,
+        perm_id=perm_id or None,
+        limit_price=new_price,
+        status=data.get("finalStatus"),
+        detail={
+            "newPrice": new_price,
+            "newQuantity": new_quantity,
+            "outsideRth": outside_rth,
+        },
+    )
     return result.data
 
 
