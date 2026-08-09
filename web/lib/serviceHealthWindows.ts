@@ -371,6 +371,13 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // are normal run days so no wide closed window is needed.
   "journal-reconcile": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``journal-expiry-sweep`` writes deterministic $0.00 expiration close rows
+  // for option positions left open past expiry (expiration emits no execution,
+  // so no fill-driven path ever closes the opener — SPCX 2026-08-07 incident).
+  // Daily inside the monitor daemon (requires_market_hours=False). Pure Turso
+  // read/write — no IB dependency. 26h window = daily cadence + timer jitter.
+  "journal-expiry-sweep": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
+
   // ``journal-gap-sli`` is the continuous gap SLI (R6): same executed_orders
   // vs journal detection as journal-reconcile, every 5 minutes, with
   // structured missing_exec_id_count in service_health.last_error. Pure

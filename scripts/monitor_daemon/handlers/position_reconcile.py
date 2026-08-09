@@ -105,6 +105,7 @@ class PositionReconcileHandler(BaseHandler):
             "quantity_mismatch_count": detail["quantity_mismatch_count"],
             "positions_missing_locally_count": detail["positions_missing_locally_count"],
             "positions_closed_count": detail["positions_closed_count"],
+            "expired_locally_count": detail["expired_locally_count"],
         }
         if report["needs_attention"]:
             result["error"] = (

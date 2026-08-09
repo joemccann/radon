@@ -185,6 +185,11 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # dependency. 26h window = daily cadence + timer jitter; weekends are
     # normal run days so no wide closed window is needed.
     "journal-reconcile": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # journal-expiry-sweep — daily synthetic $0.00 close rows for option
+    # positions left open past expiry (expiration emits no execution).
+    # Runs 24/7 inside the monitor daemon. Pure Turso read/write — no IB
+    # dependency. 26h window = daily cadence + timer jitter.
+    "journal-expiry-sweep": {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # journal-gap-sli — continuous (5m) executed_orders vs journal gap SLI.
     # Structured missing_exec_id_count in last_error. Pure Turso, no IB.
     # 15m window = 3 missed cycles before stale.
@@ -277,6 +282,8 @@ BUCKETS: dict[str, list[str]] = {
         # Daily journal reconcile (monitor daemon) — hourly check surfaces a
         # missed run within 1h of the 26h window expiring.
         "journal-reconcile",
+        # Daily post-expiry journal sweep (monitor daemon) — same 26h window.
+        "journal-expiry-sweep",
         # Nightly portfolio_snapshots cold-archive on the VPS — 48h window.
         "portfolio-archive",
         # Nightly keep-latest snapshot retention sweep on the VPS — 48h window.

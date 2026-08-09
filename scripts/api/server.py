@@ -892,7 +892,28 @@ def _is_cri_cache_stale(data: Optional[dict], *, mtime_ms: Optional[float] = Non
     return (current_ms - mtime_ms) > 60_000
 
 
+# market_state() reasons that mean the whole day is a non-session (as opposed
+# to a trading day merely outside 09:30-16:00 ET). Unknown/new reasons fall
+# through as trading days so the gate can only ever fail open.
+_NON_TRADING_SESSION_REASONS = {"weekend", "static:holiday", "ibkr:closed"}
+
+
+def _is_trading_session_today() -> bool:
+    try:
+        from utils.market_calendar import market_state
+        return market_state()["reason"] not in _NON_TRADING_SESSION_REASONS
+    except Exception:
+        # Fail open: a calendar bug must never silently disable startup
+        # reconciliation forever.
+        return True
+
+
 async def _warm_journal_reconciliation_on_startup() -> None:
+    if not _is_trading_session_today():
+        # Weekend/holiday restarts see IB's Friday-frozen residuals (e.g.
+        # expired options with 0-qty rows) and would false-flag mismatches.
+        logger.info("Journal startup reconcile skipped: not a trading session")
+        return
     logger.info("Journal startup reconcile triggered")
     # raw=True: ib_reconcile.py emits a status report on stdout, not
     # JSON. The default runner crashes on the first '{' in the report.
