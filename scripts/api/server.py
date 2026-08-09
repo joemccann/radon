@@ -3989,6 +3989,25 @@ def _should_auto_restart_ib_gateway_after_runtime_failure() -> bool:
     return True
 
 
+async def _working_open_order_perm_ids() -> list:
+    """permIds of working orders from Turso ``open_orders`` — no IB call.
+
+    REL-018 (R-007): the auto-restart path must know what it is about to
+    orphan. A snapshot failure returns [] — inventory is advisory, never
+    restart-blocking.
+    """
+    try:
+        rows = await asyncio.to_thread(
+            db_http.hrana_execute,
+            "SELECT perm_id FROM open_orders ORDER BY updated_at DESC",
+            (),
+        )
+    except Exception as exc:
+        logger.warning("Working-order snapshot failed before gateway restart: %s", exc)
+        return []
+    return [row[0] for row in rows if row and row[0] is not None]
+
+
 async def _run_ib_script_with_recovery(
     script: str, args: list, timeout: float = 30, raw: bool = False
 ) -> ScriptResult:
@@ -4106,6 +4125,12 @@ async def _run_ib_script_with_recovery(
                     ),
                 )
         else:
+            working_perm_ids = await _working_open_order_perm_ids()
+            if working_perm_ids:
+                logger.warning(
+                    "restarting gateway with %d working orders: %s",
+                    len(working_perm_ids), working_perm_ids,
+                )
             logger.warning(
                 "IB Gateway unreachable (port=%s, upstream_dead=%s), attempting auto-restart...",
                 port_ok, upstream_dead,
@@ -4123,15 +4148,18 @@ async def _run_ib_script_with_recovery(
                         "non-idempotent order script; outcome is indeterminate",
                         script,
                     )
-                    result = ScriptResult(
-                        ok=False,
-                        error=(
-                            "IB Gateway was restarted after the placement attempt "
-                            "failed. The order was NOT automatically retried — the "
-                            "first attempt may have reached IB before the failure. "
-                            "Check open orders before re-placing."
-                        ),
+                    error_msg = (
+                        "IB Gateway was restarted after the placement attempt "
+                        "failed. The order was NOT automatically retried — the "
+                        "first attempt may have reached IB before the failure. "
+                        "Check open orders before re-placing."
                     )
+                    if working_perm_ids:
+                        error_msg += (
+                            f" {len(working_perm_ids)} working orders were live "
+                            f"at restart (permIds: {working_perm_ids})."
+                        )
+                    result = ScriptResult(ok=False, error=error_msg)
                 else:
                     logger.info("IB Gateway restarted, retrying %s", script)
                     result = await _runner(script, args, timeout=timeout)
