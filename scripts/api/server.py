@@ -1092,8 +1092,7 @@ async def _fetch_ib_expiry_candidates(ticker: str) -> List[str]:
     for exchange, sec_type in attempts:
         try:
             async with ib_pool.acquire("data") as client:
-                chains = await asyncio.to_thread(
-                    _fetch_ib_index_option_chain,
+                chains = await _bounded_chain_fetch(
                     client,
                     normalized_ticker,
                     exchange,
@@ -1122,6 +1121,24 @@ async def _fetch_ib_expiry_candidates(ticker: str) -> List[str]:
 
 def _preferred_index_exchange(ticker: str) -> str:
     return "NASDAQ" if ticker.upper() == "NDX" else "CBOE"
+
+
+# REL-013 / R-014: qualifyContracts + reqSecDefOptParams have no native
+# timeout — a wedged gateway would hold the pool's data-role lock forever
+# and strand one executor thread per exchange attempt. wait_for abandons
+# the thread but releases the lock and bounds the request.
+_CHAIN_FETCH_TIMEOUT_SECS = 15.0
+
+
+async def _bounded_chain_fetch(
+    client: Any, ticker: str, exchange: str, sec_type: str
+):
+    return await asyncio.wait_for(
+        asyncio.to_thread(
+            _fetch_ib_index_option_chain, client, ticker, exchange, sec_type
+        ),
+        timeout=_CHAIN_FETCH_TIMEOUT_SECS,
+    )
 
 
 def _fetch_ib_index_option_chain(client: Any, ticker: str, exchange: str, sec_type: str) -> object:
