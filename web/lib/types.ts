@@ -80,6 +80,7 @@ export type WorkspaceNavItem = {
 };
 
 export type PortfolioLeg = {
+  con_id?: number | null;
   direction: "LONG" | "SHORT";
   contracts: number;
   type: "Call" | "Put" | "Stock";
@@ -91,7 +92,7 @@ export type PortfolioLeg = {
   market_price_is_calculated?: boolean;
 };
 
-export type PositionReturnCapitalPayload = {
+export type LegacyPositionReturnCapitalPayload = {
   amount: number | null;
   kind: "opening-margin";
   source: string | null;
@@ -100,10 +101,57 @@ export type PositionReturnCapitalPayload = {
   fill_linked: boolean;
 };
 
-export type LegacyEntryMarginMetadata = Omit<PositionReturnCapitalPayload, "amount">;
+export type PositionReturnCapitalPayloadV2 = {
+  version: 2;
+  amount: number;
+  currency: string;
+  measurement:
+    | {
+        quality: "exact";
+        method: "payoff-max-loss" | "debit-paid";
+        measured_at: string;
+      }
+    | {
+        quality: "observed";
+        method: "isolated-account-margin-delta";
+        measured_at: string;
+        observation_id: string;
+        isolation: "isolated";
+        before_sample_id: string;
+        after_sample_id: string;
+        window_seconds: number;
+        concurrent_exec_ids: string[];
+      }
+    | {
+        quality: "estimated";
+        method: "ib-whatif" | "reg-t-model";
+        measured_at: string;
+      };
+  linkage:
+    | {
+        state: "linked";
+        account_id: string;
+        position_instance_id: string;
+        con_ids: number[];
+        order_refs: string[];
+        perm_ids: number[];
+        exec_ids: string[];
+        legs: Array<{ con_id: number; currency: string; multiplier: number }>;
+      }
+    | { state: "unlinked"; reason: string };
+};
+
+/** Legacy is retained for safe parsing only; the Return % resolver rejects it. */
+export type PositionReturnCapitalPayload =
+  | PositionReturnCapitalPayloadV2
+  | LegacyPositionReturnCapitalPayload;
+
+export type LegacyEntryMarginMetadata = Omit<LegacyPositionReturnCapitalPayload, "amount">;
 
 export type PortfolioPosition = {
   id: number;
+  account_id?: string | null;
+  position_instance_id?: string | null;
   ticker: string;
   structure: string;
   structure_type: string;

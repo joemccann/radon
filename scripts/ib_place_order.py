@@ -14,6 +14,7 @@ import asyncio
 import json
 import sys
 import time
+import uuid
 from pathlib import Path
 
 try:
@@ -356,6 +357,10 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             tif=tif,
             outsideRth=outside_rth,
         )
+        # Durable execution linkage only; this does not write capital, call
+        # what-if, or wait for reconciliation on the placement path.
+        order_ref = str(params.get("orderRef") or f"radon-{uuid.uuid4().hex[:20]}")[:32]
+        order.orderRef = order_ref
 
         if order_type == "combo":
             # `smartComboRoutingParams` applies ONLY to SMART-routed combos.
@@ -506,6 +511,7 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             "status": "ok",
             "orderId": order_id,
             "permId": perm_id,
+            "orderRef": order_ref,
             "initialStatus": status,
             "message": f"{action} {quantity} {symbol} @ ${limit_price:.2f} — {status}",
         }

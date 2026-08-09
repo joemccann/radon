@@ -88,6 +88,10 @@ def serialize_contract(contract, resolved_legs: dict = None) -> dict:
         "conId": getattr(contract, "conId", None),
         "symbol": contract.symbol,
         "secType": contract.secType,
+        "currency": getattr(contract, "currency", None) or None,
+        "multiplier": getattr(contract, "multiplier", None) or (100 if contract.secType == "OPT" else 1),
+        "localSymbol": getattr(contract, "localSymbol", None) or None,
+        "tradingClass": getattr(contract, "tradingClass", None) or None,
         "strike": getattr(contract, "strike", None),
         "right": getattr(contract, "right", None),
         "expiry": expiry or None,
@@ -171,6 +175,7 @@ def fetch_open_orders(client: IBClient) -> list:
         orders.append({
             "orderId": order.orderId,
             "permId": order.permId,
+            "orderRef": getattr(order, "orderRef", "") or "",
             "symbol": format_contract(contract),
             "contract": serialize_contract(contract, resolved_legs),
             "action": order.action,  # BUY or SELL
@@ -203,12 +208,20 @@ def fetch_executed_orders(client: IBClient) -> list:
 
         executed.append({
             "execId": execution.execId,
+            "account_id": getattr(execution, "acctNumber", "") or "",
+            "permId": getattr(execution, "permId", None),
+            "orderId": getattr(execution, "orderId", None),
+            "clientId": getattr(execution, "clientId", None),
+            "orderRef": getattr(execution, "orderRef", "") or "",
             "symbol": format_contract(contract),
             "contract": serialize_contract(contract),
             "side": execution.side,  # BOT or SLD
             "quantity": float(execution.shares),
+            "price": safe_float(getattr(execution, "price", None)),
             "avgPrice": safe_float(execution.avgPrice),
+            "cumQty": safe_float(getattr(execution, "cumQty", None)),
             "commission": commission,
+            "commissionCurrency": getattr(commission_report, "currency", None) or None,
             "realizedPNL": realized_pnl,
             "time": execution.time.isoformat() if hasattr(execution.time, "isoformat") else str(execution.time),
             "exchange": execution.exchange,
@@ -243,6 +256,7 @@ def _dual_write_orders_to_db(data: dict) -> None:
         from db.writer import (
             ensure_no_replica_for_writers,
             replace_open_orders_for_session,
+            upsert_position_execution_fact,
             upsert_executed_order,
         )
     except ImportError:
@@ -274,10 +288,24 @@ def _dual_write_orders_to_db(data: dict) -> None:
                 if not isinstance(exec_id, str) or not exec_id:
                     continue
                 fill_time = e.get("time") or ""
-                perm_id = e.get("contract", {}).get("permId") if isinstance(e.get("contract"), dict) else None
+                perm_id = e.get("permId")
                 if not isinstance(perm_id, int):
                     perm_id = None
                 upsert_executed_order(exec_id, e, fill_time, perm_id=perm_id)
+                try:
+                    upsert_position_execution_fact(e)
+                except ValueError:
+                    raise
+                except Exception as exc:  # noqa: BLE001 - migration may not be live yet
+                    print(f"  Warning: execution-ledger write skipped: {exc}", file=sys.stderr)
+
+            try:
+                from capture_position_return_capital import reconcile_position_return_capital
+                from db.client import get_db
+
+                reconcile_position_return_capital(get_db(), apply=True)
+            except Exception as exc:  # noqa: BLE001 - evidence can be incomplete
+                print(f"  Warning: return-capital reconcile skipped: {exc}", file=sys.stderr)
     except Exception as exc:  # noqa: BLE001 — best-effort
         print(f"  Warning: orders db dual-write failed: {exc}", file=sys.stderr)
 

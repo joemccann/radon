@@ -87,6 +87,134 @@ def read_portfolio_positions(db: Optional[Any] = None) -> list[dict[str, Any]]:
     return [p for p in positions if isinstance(p, dict)] if isinstance(positions, list) else []
 
 
+def read_active_position_return_capital(db: Optional[Any] = None) -> list[dict[str, Any]]:
+    """Read active v2 bases whose observation covers the latest event.
+
+    Missing migrations, closed episodes, stale observations, and malformed
+    evidence all fail closed by returning no basis for that instance.
+    """
+    try:
+        target = _db(db)
+        instance_rows = target.execute(
+            """
+            SELECT instance_id, account_id
+            FROM position_instances
+            """
+        ).fetchall()
+        event_rows = target.execute(
+            """
+            SELECT event_id, instance_id, effective_at, after_legs
+            FROM position_instance_events
+            ORDER BY effective_at ASC, event_id ASC
+            """
+        ).fetchall()
+        observation_rows = target.execute(
+            """
+            SELECT observation_id, instance_id, through_event_id, amount,
+                   currency, evidence, recorded_at
+            FROM position_capital_observations
+            WHERE status = 'VALID' AND quality = 'observed' AND amount > 0
+            ORDER BY recorded_at ASC, observation_id ASC
+            """
+        ).fetchall()
+        execution_rows = target.execute(
+            "SELECT account_id, exec_id FROM position_execution_facts"
+        ).fetchall()
+    except Exception:  # noqa: BLE001 — table may not exist pre-migration
+        return []
+
+    accounts = {
+        str(_cell(row, 0, "instance_id")): str(_cell(row, 1, "account_id") or "")
+        for row in instance_rows or []
+    }
+    latest_events: dict[str, dict[str, Any]] = {}
+    for row in event_rows or []:
+        instance_id = str(_cell(row, 1, "instance_id") or "")
+        try:
+            legs = json.loads(_cell(row, 3, "after_legs") or "{}")
+        except (TypeError, json.JSONDecodeError):
+            continue
+        latest_events[instance_id] = {
+            "event_id": str(_cell(row, 0, "event_id") or ""),
+            "effective_at": str(_cell(row, 2, "effective_at") or ""),
+            "legs": legs if isinstance(legs, dict) else {},
+        }
+
+    latest_observations: dict[str, dict[str, Any]] = {}
+    for row in observation_rows or []:
+        instance_id = str(_cell(row, 1, "instance_id") or "")
+        try:
+            evidence = json.loads(_cell(row, 5, "evidence") or "{}")
+            amount = float(_cell(row, 3, "amount"))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(evidence, dict) or amount <= 0:
+            continue
+        latest_observations[instance_id] = {
+            "observation_id": str(_cell(row, 0, "observation_id") or ""),
+            "through_event_id": str(_cell(row, 2, "through_event_id") or ""),
+            "amount": amount,
+            "currency": str(_cell(row, 4, "currency") or ""),
+            "evidence": evidence,
+        }
+
+    correction_counts: dict[tuple[str, str], int] = {}
+    for row in execution_rows or []:
+        account_id = str(_cell(row, 0, "account_id") or "")
+        exec_id = str(_cell(row, 1, "exec_id") or "")
+        root, separator, _suffix = exec_id.rpartition(".")
+        correction_root = root if separator else exec_id
+        key = (account_id, correction_root)
+        correction_counts[key] = correction_counts.get(key, 0) + 1
+
+    try:
+        from ..position_return_capital import build_return_capital_payload
+    except ImportError:  # pragma: no cover - flat scripts import mode
+        from position_return_capital import build_return_capital_payload  # type: ignore[no-redef]
+
+    result: list[dict[str, Any]] = []
+    for instance_id, event in latest_events.items():
+        if not event["legs"]:
+            continue
+        observation = latest_observations.get(instance_id)
+        if not observation or observation["through_event_id"] != event["event_id"]:
+            continue
+        evidence = observation["evidence"]
+        account_id = accounts.get(instance_id) or ""
+        if any(
+            correction_counts.get(
+                (account_id, exec_id.rpartition(".")[0] if "." in exec_id else exec_id),
+                0,
+            ) > 1
+            for exec_id in evidence.get("exec_ids", [])
+            if isinstance(exec_id, str)
+        ):
+            continue
+        payload = build_return_capital_payload(
+            amount=observation["amount"],
+            instance={
+                "instance_id": instance_id,
+                "account_id": accounts.get(instance_id),
+                "legs": event["legs"],
+            },
+            observation={
+                **evidence,
+                "observation_id": observation["observation_id"],
+                "currency": observation["currency"],
+            },
+        )
+        if payload is None:
+            continue
+        result.append({
+            "instance_id": instance_id,
+            "account_id": accounts.get(instance_id),
+            "legs": event["legs"],
+            "payload": payload,
+        })
+    return result
+
+
+
 def read_open_orders(db: Optional[Any] = None) -> list[dict[str, Any]]:
     rows = _db(db).execute(
         "SELECT payload FROM open_orders ORDER BY updated_at DESC"

@@ -1,3 +1,39 @@
+# Task: Ship execution-linked return capital v2 (2026-08-08)
+
+## Dependency graph
+
+- T1 depends_on: [] - Refresh `origin/main` and preserve the mixed source worktree.
+- T2 depends_on: [T1] - Isolate only return-capital changes in a clean branch/worktree.
+- T3 depends_on: [T2] - Run focused and full Python/web verification, typecheck, build, Playwright, and visual checks.
+- T4 depends_on: [T3] - Apply and verify production Turso migration `0037_position_return_capital.sql` (`36` was already claimed in production).
+- T5 depends_on: [T4] - Commit atomically, push the feature branch, merge to `main`, and verify CI/deployment.
+
+## Checklist
+
+- [x] T1 Refresh `origin/main` and preserve source worktree.
+- [x] T2 Isolate return-capital scope.
+- [x] T3 Complete verification.
+- [x] T4 Apply and verify migration 0037.
+- [x] T5 Commit, push, merge, and verify production.
+
+## Review
+
+- Isolated 25 return-capital code, schema, documentation, and regression files
+  from the mixed `feat/realtime-skew` checkout onto current `origin/main`.
+- Margin evidence records acquisition intervals; a sample that straddles a
+  fill cannot qualify as isolated return capital. Estimated and legacy capital
+  render `N/A` across desktop, mobile, ticker, and breakdown-modal surfaces.
+- Verification: Python 5,158 passed; CI coverage 59.09% (56% gate); cloud 725
+  passed / 4 skipped; full-config Vitest 5,387 passed with all coverage gates;
+  typecheck, lint, production build/output traces, Playwright, and visual review
+  passed.
+- Production had already claimed migration version 36 without these tables.
+  The feature migration was safely renumbered to 37, applied to Turso, and
+  verified with all six empty ledger tables plus `observed_from` and
+  `observed_through` margin-sample columns.
+
+---
+
 # Task: UW P0+P1 truncation fixes (2026-08-07)
 
 ## Summary

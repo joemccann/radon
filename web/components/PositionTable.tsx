@@ -503,7 +503,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
             className={`right ${pnlPct != null ? (pnlPct >= 0 ? "positive" : "negative") : ""}`}
             title={returnTitle}
           >
-            {pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%` : "—"}
+            {pnlPct != null ? `${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%` : "N/A"}
           </td>
         )}
         {showExpiry && columns.expiry && <td>{pos.expiry !== "N/A" ? pos.expiry : "—"}</td>}
@@ -656,7 +656,7 @@ export default function PositionTable({
                 activeKey={sort.key}
                 direction={sort.direction}
                 onToggle={toggle}
-                helpText="Return uses exact max risk, verified fill-linked opening margin when exact risk is unavailable, or debit paid when it is the full loss."
+                helpText="Return uses exact max risk, full-loss debit, or isolated broker-observed opening margin. Estimated and unlinked capital remain N/A."
                 helpAriaLabel="Explain position return basis"
               />
             )}
