@@ -23,6 +23,11 @@ if str(SCRIPTS_DIR) not in sys.path:
 
 from clients.ib_client import IBClient, POOL_ROLES, DEFAULT_HOST, DEFAULT_GATEWAY_PORT
 
+# REL-015: roles whose acquire runs an application-level liveness probe.
+# `data` stays on the cheap TCP check to avoid latency on market-data calls.
+LIVENESS_PROBE_ROLES = frozenset({"orders", "sync"})
+LIVENESS_PROBE_TIMEOUT_SECS = 3.0
+
 
 def _connect_in_thread(host: str, port: int, client_id: int, timeout: int = 5) -> IBClient:
     """Connect an IBClient in a thread with its own event loop.
@@ -270,6 +275,36 @@ class IBPool:
             for role in POOL_ROLES
         }
 
+    async def _is_live(self, role: str) -> bool:
+        """TCP check plus, for money roles, a bounded application-level probe.
+
+        `ib.isConnected()` reflects socket state only — a half-open socket or
+        wedged Java listener passes it while the borrower's next request blocks
+        forever (ib_insync has no request timeouts). For `orders`/`sync`, also
+        require `managedAccounts()` non-empty within a bounded window.
+        """
+        if not self.is_connected(role):
+            return False
+        if role not in LIVENESS_PROBE_ROLES:
+            return True
+        return await self._probe_managed_accounts(role)
+
+    async def _probe_managed_accounts(self, role: str) -> bool:
+        client = self._clients.get(role)
+        if client is None:
+            return False
+        try:
+            accounts = await asyncio.wait_for(
+                asyncio.to_thread(lambda: list(client.ib.managedAccounts() or [])),
+                timeout=LIVENESS_PROBE_TIMEOUT_SECS,
+            )
+        except Exception:
+            logger.warning("IB pool: %s liveness probe failed", role, exc_info=True)
+            return False
+        if not accounts:
+            logger.warning("IB pool: %s liveness probe returned no managed accounts", role)
+        return bool(accounts)
+
     def _managed_accounts(self, role: str) -> list[str]:
         """Return managedAccounts() for a role, or [] if unavailable.
 
@@ -298,8 +333,8 @@ class _PoolContext:
             self._pool._locks[self._role].release()
             raise ConnectionError("IB pool lifecycle transition in progress")
 
-        # Auto-reconnect if connection dropped
-        if not self._pool.is_connected(self._role):
+        # Auto-reconnect if connection dropped or liveness probe failed
+        if not await self._pool._is_live(self._role):
             reconnected = await self._pool._reconnect(self._role)
             if not reconnected:
                 self._pool._locks[self._role].release()
