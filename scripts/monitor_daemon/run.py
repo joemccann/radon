@@ -36,6 +36,7 @@ from monitor_daemon.handlers.menthorq_login_probe import MenthorQLoginProbe
 from monitor_daemon.handlers.cash_flow_sync import CashFlowSyncHandler
 from monitor_daemon.handlers.journal_reconcile import JournalReconcileHandler
 from monitor_daemon.handlers.journal_gap_sli import JournalGapSliHandler
+from monitor_daemon.handlers.position_reconcile import PositionReconcileHandler
 from monitor_daemon.handlers.replica_watchdog import ReplicaWatchdogHandler
 
 # Paths
@@ -105,6 +106,8 @@ def create_daemon() -> MonitorDaemon:
     daemon.register(JournalReconcileHandler())
 
     daemon.register(JournalGapSliHandler())
+
+    daemon.register(PositionReconcileHandler())
 
     daemon.register(ReplicaWatchdogHandler())
 

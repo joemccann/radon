@@ -248,14 +248,53 @@ def find_new_trades(executions: list, trade_log: dict) -> list:
 
     return new_trades
 
+def _normalize_expiry(expiry) -> str:
+    """Digits-only expiry so IB '20260618' matches snapshot '2026-06-18'."""
+    return "".join(ch for ch in str(expiry or "") if ch.isdigit())
+
+
+def _ib_contract_quantity_key(p: dict):
+    """Per-contract key for an IB position row."""
+    if p.get("sec_type") == "OPT":
+        right = str(p.get("right") or "")[:1].upper()
+        return (p["symbol"], "OPT", float(p.get("strike") or 0), right,
+                _normalize_expiry(p.get("expiry")))
+    return (p["symbol"], "STK", None, None, None)
+
+
+def _local_leg_quantity_keys(pos: dict):
+    """Yield (key, signed_quantity) for each leg of a snapshot position."""
+    ticker = pos.get("ticker")
+    for leg in pos.get("legs") or []:
+        contracts = leg.get("contracts") or 0
+        direction = (leg.get("direction") or pos.get("direction") or "LONG").upper()
+        signed = contracts if direction == "LONG" else -contracts
+        leg_type = str(leg.get("type") or "").upper()
+        if leg_type.startswith(("C", "P")):
+            right = leg_type[0]
+            expiry = _normalize_expiry(leg.get("expiry") or pos.get("expiry"))
+            yield (ticker, "OPT", float(leg.get("strike") or 0), right, expiry), signed
+        else:
+            yield (ticker, "STK", None, None, None), signed
+
+
 def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
-    """Find positions that differ between IB and the latest portfolio snapshot."""
+    """Find positions that differ between IB and the latest portfolio snapshot.
+
+    Three classes:
+      missing_locally   — in IB, symbol absent from the snapshot
+      missing_in_ib     — in the snapshot, symbol absent from IB (closed)
+      quantity_mismatch — symbol on BOTH sides but per-contract signed
+                          quantities differ (partial close, assignment,
+                          manual TWS trade). R-005: this list was
+                          initialized but never populated.
+    """
     discrepancies = {
         "missing_locally": [],  # In IB but not in local snapshot
         "missing_in_ib": [],    # In local snapshot but not in IB (closed)
         "quantity_mismatch": [],
     }
-    
+
     # Build lookup of local tickers (just by symbol for simplicity)
     local_tickers = set()
     local_positions = {}
@@ -267,7 +306,7 @@ def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
             if ticker not in local_positions:
                 local_positions[ticker] = []
             local_positions[ticker].append(pos)
-    
+
     # Build lookup of IB tickers
     ib_tickers = set()
     ib_positions_by_symbol = {}
@@ -277,39 +316,96 @@ def find_position_discrepancies(ib_positions: list, portfolio: dict) -> dict:
         if symbol not in ib_positions_by_symbol:
             ib_positions_by_symbol[symbol] = []
         ib_positions_by_symbol[symbol].append(p)
-    
+
     # Find positions in IB not locally (new positions)
     for symbol in ib_tickers - local_tickers:
         for p in ib_positions_by_symbol[symbol]:
             discrepancies["missing_locally"].append(p)
-    
+
     # Find positions locally not in IB (closed positions)
     for ticker in local_tickers - ib_tickers:
         for p in local_positions[ticker]:
             discrepancies["missing_in_ib"].append(p)
-    
+
+    # Per-contract signed-quantity comparison for symbols on BOTH sides.
+    for symbol in ib_tickers & local_tickers:
+        ib_qty: dict = {}
+        for p in ib_positions_by_symbol[symbol]:
+            key = _ib_contract_quantity_key(p)
+            ib_qty[key] = ib_qty.get(key, 0) + (p.get("quantity") or 0)
+        local_qty: dict = {}
+        for pos in local_positions[symbol]:
+            for key, signed in _local_leg_quantity_keys(pos):
+                local_qty[key] = local_qty.get(key, 0) + signed
+        for key in set(ib_qty) | set(local_qty):
+            ib_n = ib_qty.get(key, 0)
+            local_n = local_qty.get(key, 0)
+            if ib_n != local_n:
+                _, sec_type, strike, right, expiry = key
+                entry = {
+                    "symbol": symbol,
+                    "sec_type": sec_type,
+                    "ib_quantity": ib_n,
+                    "local_quantity": local_n,
+                }
+                if sec_type == "OPT":
+                    entry.update({"strike": strike, "right": right, "expiry": expiry})
+                discrepancies["quantity_mismatch"].append(entry)
+
     return discrepancies
 
 def generate_reconciliation_report(new_trades: list, discrepancies: dict) -> dict:
     """Generate a report of what needs to be reconciled."""
+    quantity_mismatch = discrepancies.get("quantity_mismatch", [])
     report = {
         "timestamp": datetime.now().isoformat(),
         "new_trades": new_trades,
         "positions_missing_locally": discrepancies["missing_locally"],
         "positions_closed": discrepancies["missing_in_ib"],
-        "needs_attention": len(new_trades) > 0 or len(discrepancies["missing_locally"]) > 0 or len(discrepancies["missing_in_ib"]) > 0,
+        "quantity_mismatch": quantity_mismatch,
+        "needs_attention": (
+            len(new_trades) > 0
+            or len(discrepancies["missing_locally"]) > 0
+            or len(discrepancies["missing_in_ib"]) > 0
+            or len(quantity_mismatch) > 0
+        ),
     }
     return report
+
+
+SERVICE_NAME = "position-reconcile"
+
+
+def _record_health(state: str, detail: dict) -> None:
+    """Best-effort service_health row so the watchdog sees this run."""
+    try:
+        from db.writer import record_service_health
+
+        record_service_health(SERVICE_NAME, state, error=detail or None)
+    except Exception as exc:  # noqa: BLE001 — health write must not mask the run
+        log(f"service_health write failed: {exc}", "warn")
+
+
+def _health_detail(report: dict) -> dict:
+    return {
+        "new_trades_count": len(report.get("new_trades", [])),
+        "positions_missing_locally_count": len(report.get("positions_missing_locally", [])),
+        "positions_closed_count": len(report.get("positions_closed", [])),
+        "quantity_mismatch_count": len(report.get("quantity_mismatch", [])),
+        "quantity_mismatch": report.get("quantity_mismatch", [])[:10],
+    }
 
 def main():
     """Main reconciliation routine."""
     log("Starting IB trade reconciliation...")
 
-    # Connect to IB
+    # Connect to IB. R-005: a silent skip here previously exited 0 and the
+    # /journal/reconcile route reported {"ok": true} — fail loud instead.
     client = connect_ib()
     if not client:
-        log("Cannot connect to IB Gateway - skipping reconciliation", "warn")
-        return
+        log("Cannot connect to IB Gateway - reconciliation NOT run", "error")
+        _record_health("error", {"reason": "ib_connect_failed"})
+        sys.exit(2)
 
     try:
         # Load canonical local state
@@ -337,7 +433,14 @@ def main():
         
         # Save reconciliation report
         save_reconciliation_report(report)
-        
+
+        # Heartbeat for the watchdog: error when attention is needed so the
+        # error bucket pages; ok otherwise.
+        _record_health(
+            "error" if report["needs_attention"] else "ok",
+            _health_detail(report),
+        )
+
         # Log summary
         if report["needs_attention"]:
             log(f"⚠️  Reconciliation needed:", "warn")
@@ -349,9 +452,16 @@ def main():
                 log(f"   • {len(discrepancies['missing_locally'])} positions missing locally", "warn")
             if discrepancies["missing_in_ib"]:
                 log(f"   • {len(discrepancies['missing_in_ib'])} positions may be closed", "warn")
+            if discrepancies["quantity_mismatch"]:
+                log(f"   • {len(discrepancies['quantity_mismatch'])} quantity mismatches vs IB", "warn")
+                for m in discrepancies["quantity_mismatch"]:
+                    log(
+                        f"     - {m['symbol']}: IB {m['ib_quantity']} vs local {m['local_quantity']}",
+                        "warn",
+                    )
         else:
             log("✓ Trade log and portfolio are in sync", "success")
-        
+
     finally:
         client.disconnect()
         log("Disconnected from IB")
