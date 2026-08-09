@@ -898,6 +898,60 @@ def upsert_straddle_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] 
     db.commit()
 
 
+COR_UPSERT_SQL = """
+INSERT INTO cor_history
+  (date, cor1m, cor3m, cor6m, cor1y, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?)
+ON CONFLICT(date) DO UPDATE SET
+  cor1m       = excluded.cor1m,
+  cor3m       = excluded.cor3m,
+  cor6m       = excluded.cor6m,
+  cor1y       = excluded.cor1y,
+  recorded_at = excluded.recorded_at
+"""
+
+
+def upsert_cor_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """COR indicator — one row per session across the four Cboe implied
+    correlation tenors, idempotent on date. Tenor columns are NULL where
+    that tenor is missing the date (COR3M's scattered gaps).
+
+    Chunked multi-row INSERTs (Hrana I/O bounding): a changed-source run
+    rewrites the full ~5,180-session series, which per-row would be
+    thousands of statements on one stream (the rv-ratio 2026-07-21 502
+    incident). ~13 chunked round-trips instead.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["date"],
+                    row.get("cor1m"),
+                    row.get("cor3m"),
+                    row.get("cor6m"),
+                    row.get("cor1y"),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO cor_history (date, cor1m, cor3m, cor6m, cor1y, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(date) DO UPDATE SET "
+            "cor1m = excluded.cor1m, cor3m = excluded.cor3m, "
+            "cor6m = excluded.cor6m, cor1y = excluded.cor1y, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
+
 SKEW_UPSERT_SQL = """
 INSERT INTO skew_history
   (date, expiry, dte, put_iv, call_iv, ratio, change, recorded_at)
