@@ -148,10 +148,6 @@ _INVALID_CONTRACT_CODES = frozenset({
     354,   # Requested market data is not subscribed
 })
 
-# Reconnection constants
-MAX_RECONNECT_ATTEMPTS = 5
-MAX_RECONNECT_BACKOFF = 30  # seconds
-
 logger = logging.getLogger("ib_client")
 
 
@@ -182,11 +178,9 @@ class IBClient:
         self._last_timeout: int = 10
         self._last_error: Optional[tuple] = None
 
-        # Subscription tracking for recovery after disconnect
+        # Active streaming market-data subscriptions (introspection; pruned
+        # by cancel_market_data / clear_subscriptions)
         self._subscriptions: List[Dict[str, Any]] = []
-
-        # Reconnection state
-        self._reconnecting: bool = False
 
         # Pacing violation retry tracking (reqId -> count)
         self._pacing_retries: Dict[int, int] = {}
@@ -422,75 +416,13 @@ class IBClient:
         self._last_error = (code, errorString)
         self.logger.error("IB error %d: %s", code, errorString)
 
-    # -- disconnect recovery ------------------------------------------------
-
-    def _on_disconnect(self) -> None:
-        """Handle disconnect: auto-reconnect with exponential backoff and restore subscriptions."""
-        if self._reconnecting:
-            self.logger.debug("Already reconnecting, skipping concurrent attempt")
-            return
-
-        self._reconnecting = True
-        self.logger.warning("Disconnected from IB — attempting reconnection")
-
-        try:
-            connected = False
-            for attempt in range(MAX_RECONNECT_ATTEMPTS):
-                delay = min(2 ** attempt, MAX_RECONNECT_BACKOFF)
-                try:
-                    self._ib.connect(
-                        self._last_host,
-                        self._last_port,
-                        clientId=self._last_client_id,
-                        timeout=self._last_timeout,
-                    )
-                    self.logger.info(
-                        "Reconnected to IB on attempt %d/%d",
-                        attempt + 1, MAX_RECONNECT_ATTEMPTS,
-                    )
-                    connected = True
-                    break
-                except Exception as exc:
-                    self.logger.warning(
-                        "Reconnect attempt %d/%d failed: %s — waiting %ds",
-                        attempt + 1, MAX_RECONNECT_ATTEMPTS, exc, delay,
-                    )
-                    time.sleep(delay)
-
-            if not connected:
-                self.logger.error(
-                    "Failed to reconnect after %d attempts", MAX_RECONNECT_ATTEMPTS,
-                )
-                return
-
-            # Restore tracked subscriptions
-            restored = 0
-            failed = 0
-            for sub in self._subscriptions:
-                try:
-                    self._ib.reqMktData(
-                        sub["contract"],
-                        sub["generic_ticks"],
-                        False,
-                        False,
-                    )
-                    restored += 1
-                except Exception as exc:
-                    failed += 1
-                    self.logger.warning(
-                        "Failed to restore subscription for %s: %s",
-                        sub["contract"], exc,
-                    )
-
-            self.logger.info(
-                "Subscription restoration complete: %d restored, %d failed",
-                restored, failed,
-            )
-
-        finally:
-            self._reconnecting = False
-
     # -- subscription management --------------------------------------------
+    #
+    # NOTE (REL-014): IBClient deliberately has NO auto-reconnect handler on
+    # disconnectedEvent. Recovery is owned by higher layers: FastAPI pool
+    # acquire-time reconnect, monitor-daemon per-cycle reconnects, and the
+    # relay stale-tick ladder. A backoff loop inside an ib_insync event
+    # callback would block the event loop.
 
     def clear_subscriptions(self) -> None:
         """Clear all tracked subscriptions."""
@@ -784,7 +716,7 @@ class IBClient:
         if snapshot:
             self._ib.sleep(2)
         else:
-            # Track streaming subscription for recovery after disconnect
+            # Track active streaming subscription
             self._subscriptions.append({
                 "contract": contract,
                 "generic_ticks": generic_ticks,
@@ -792,9 +724,12 @@ class IBClient:
         return ticker
 
     def cancel_market_data(self, contract: Any) -> None:
-        """Cancel streaming market data for a contract."""
+        """Cancel streaming market data for a contract and untrack it."""
         self._require_connection()
         self._ib.cancelMktData(contract)
+        self._subscriptions = [
+            sub for sub in self._subscriptions if sub["contract"] != contract
+        ]
 
     def set_market_data_type(self, data_type: int) -> None:
         """Set market data type (1=Live, 2=Frozen, 3=Delayed, 4=Delayed-frozen)."""

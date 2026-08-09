@@ -238,7 +238,6 @@ These mechanisms handle transient failures without intervention:
 | Persisted recovery ladder | `ib_watchdog.py` | Debounce, backoff, hard cap, auth-aware 2FA stand-down, then lease-gated restart |
 | Atomic push lease | `ib_2fa_lock.py` | OS-locked compare/write; all active leases reject reentry, including same holder |
 | Process cleanup | `restart-secure-ibc-service.sh` | Snapshots pre-existing PIDs, force-kills only survivors after SIGTERM |
-| `_on_disconnect()` | `IBClient` (Python) | 5 attempts, exponential backoff (2^n, cap 30s), restores subscriptions |
 | Stale tick detection | `ib_realtime_server.js` | No ticks for 45s during market hours → restart Gateway (120s cooldown) |
 | Reconnect loop | `ib_realtime_server.js` | 5s interval, client ID rotation on collision, subscription restoration |
 | `_IBSyncCoordinator` | FastAPI | Coalesces portfolio/orders subprocesses and caches only successful outcomes briefly |

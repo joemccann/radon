@@ -61,7 +61,7 @@ See `scripts/cri_scan.py:_fetch_ib` for the canonical pattern. Background in `fe
 - **Batched WS relay:** per-client last-write-wins, 100ms flush. 5000 msg/s → 10 batched/s.
 - **Stale tick detection:** 45s no-ticks → bounded recovery ladder (resubscribe / K=3 reconnects / **alert-only escalate**, never a relay-initiated Gateway restart). Pure core: `scripts/lib/staleDataMachine.js`.
 - **Vectorized:** `kelly_size_batch()` (NumPy), `portfolio_greeks_vectorized()`. Cross-validated to 10⁻¹².
-- **IBClient resilience:** disconnect recovery (5 attempts, 2ⁿs cap 30s); pacing (162/366: 10s backoff); invalid contracts (200/354: no retry, `_failed_contracts`).
+- **IBClient resilience:** NO in-client auto-reconnect (REL-014 — deleted; recovery lives at higher layers: pool acquire-time reconnect, per-cycle daemon reconnects, relay stale-tick ladder); pacing (162/366: per-reqId retry count, cap 3); invalid contracts (200/354: no retry, `_failed_contracts`).
 - **Performance page:** Phase A sequential IB+cache; Phase B ThreadPool UW/Yahoo. `PERF_FETCH_WORKERS` (default 8). Disk cache TTL 15min/24h. SWR via `POST /performance/background`.
 
 ---
