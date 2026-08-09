@@ -707,6 +707,16 @@ class IBClient:
         except Exception as exc:
             raise IBOrderError(f"Failed to modify order: {exc}") from exc
 
+    def global_cancel(self) -> None:
+        """Cancel every working order across all clients (kill switch).
+
+        ``reqGlobalCancel`` is only honored fully for the master client
+        (clientId 0) — callers must connect as master first.
+        """
+        self._require_connection()
+        self._ib.reqGlobalCancel()
+        self._ib.sleep(0.5)
+
     def get_open_orders(self) -> list:
         """Return all open orders across all clients.
 

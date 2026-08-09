@@ -2043,9 +2043,29 @@ async def orders_refresh():
 # Phase 3: IB order operations
 # ---------------------------------------------------------------------------
 
+def _refuse_if_trading_halted() -> None:
+    """Kill switch (REL-004): fast 409 before any subprocess spawn.
+
+    ib_place_order.place_order re-checks the flag (covers the workflow
+    bridge that bypasses these routes); this route-level check just fails
+    faster and cheaper.
+    """
+    from trading_halt import get_halt_state, is_trading_halted
+
+    if is_trading_halted():
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "TRADING_HALTED",
+                "reason": get_halt_state().get("reason", "manual halt"),
+            },
+        )
+
+
 @app.post("/orders/place")
 async def orders_place(request: Request):
     """Place an order via IB (on-demand connection, client_id=26)."""
+    _refuse_if_trading_halted()
     body = await request.json()
     if test_mode:
         order_id, perm_id = _next_test_order_ids()
@@ -2184,6 +2204,7 @@ async def orders_modify(request: Request):
     and reconnects as that client before modifying. Cancel can use the pool
     (master clientId=0 can cancel anything), but modify cannot.
     """
+    _refuse_if_trading_halted()
     body = await request.json()
     if test_mode:
         return {
@@ -2218,6 +2239,75 @@ async def orders_modify(request: Request):
     if result.data and result.data.get("status") == "error":
         raise HTTPException(status_code=502, detail=result.data.get("message", "Modify failed"))
     return result.data
+
+
+# ---------------------------------------------------------------------------
+# Kill switch (REL-004): halt/resume/status, mass-cancel, one-shot kill.
+# ---------------------------------------------------------------------------
+
+@app.get("/trading/status")
+async def trading_status():
+    from trading_halt import get_halt_state
+
+    return get_halt_state()
+
+
+@app.post("/trading/halt")
+async def trading_halt_route(request: Request):
+    from trading_halt import set_halt
+
+    body = await request.json() if await request.body() else {}
+    return set_halt(reason=body.get("reason", "manual halt"), actor="api")
+
+
+@app.post("/trading/resume")
+async def trading_resume():
+    from trading_halt import clear_halt
+
+    return clear_halt(actor="api")
+
+
+async def _cancel_all_working_orders():
+    """Run the master-client global cancel and surface the drain result."""
+    result = await run_script("ib_cancel_all.py", [], timeout=30)
+    if not result.ok:
+        raise HTTPException(status_code=502, detail=result.error)
+    if result.data and result.data.get("status") == "error":
+        raise HTTPException(
+            status_code=502,
+            detail=result.data.get("message", "Global cancel failed"),
+        )
+    return result.data
+
+
+@app.post("/orders/cancel-all")
+async def orders_cancel_all(request: Request):
+    """Cancel EVERY working order (master reqGlobalCancel + drain verify)."""
+    body = await request.json() if await request.body() else {}
+    if body.get("confirm") is not True:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": "CONFIRM_REQUIRED",
+                    "message": "POST {\"confirm\": true} to cancel ALL working orders"},
+        )
+    return await _cancel_all_working_orders()
+
+
+@app.post("/trading/kill")
+async def trading_kill(request: Request):
+    """The kill switch: halt new placements FIRST, then mass-cancel.
+
+    Halt-before-cancel ordering means no new order can race in between
+    the cancel sweep and the flag taking effect.
+    """
+    from trading_halt import set_halt
+
+    body = await request.json() if await request.body() else {}
+    halt_state = set_halt(
+        reason=body.get("reason", "kill switch"), actor="api-kill"
+    )
+    cancel = await _cancel_all_working_orders()
+    return {"halted": halt_state["halted"], "halt": halt_state, "cancel": cancel}
 
 
 # ---------------------------------------------------------------------------

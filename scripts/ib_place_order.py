@@ -197,6 +197,20 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     the real initMargin and return WITHOUT routing the order (no transmit, no
     permId, no confirm-poll). The finally still disconnects.
     """
+    # Kill switch (REL-004): every placement path funnels through here
+    # (/orders/place subprocess, workflow bridge) — refuse before touching
+    # IB. what_if previews are read-only and stay allowed.
+    if not what_if:
+        from trading_halt import is_trading_halted, get_halt_state
+
+        if is_trading_halted():
+            reason = get_halt_state().get("reason", "manual halt")
+            return {
+                "status": "error",
+                "message": f"TRADING HALTED — order not placed ({reason}). "
+                           f"Resume via POST /trading/resume.",
+            }
+
     order_type = params.get("type", "stock")
     symbol = params["symbol"].upper()
     action = params["action"].upper()
