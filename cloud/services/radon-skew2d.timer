@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon Skew 2D Indicator - daily two-session skew change after SKEW finalize
+
+[Timer]
+# Five minutes after parent SKEW finalize (21:45 UTC). Weekend/holiday runs
+# heartbeat even when no new parent rows appear.
+OnCalendar=*-*-* 21:50:00 UTC
+Persistent=true
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

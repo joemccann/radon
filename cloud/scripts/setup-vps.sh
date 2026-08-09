@@ -102,7 +102,10 @@ readonly SERVICE_FILES=(
   radon-straddle.timer
   radon-skew.service
   radon-skew.timer
+  radon-skew2d.service
+  radon-skew2d.timer
 )
+
 
 run_as_radon() {
   sudo -u radon bash -c "$*"
