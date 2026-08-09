@@ -90,7 +90,6 @@ export function InformedFlowPanel({ ticker }: { ticker: string }) {
 
   return (
     <section className="snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
       <header className="snapshot-card__header">
         <p className="panel-eyebrow">Informed Flow</p>
         <h3 className="panel-title">Congress &amp; Insider Activity</h3>

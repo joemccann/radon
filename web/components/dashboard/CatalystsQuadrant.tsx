@@ -56,7 +56,6 @@ export default function CatalystsQuadrant({ positionTickers }: Props) {
 
   return (
     <section className="catalyst-quadrant snapshot-card">
-      <span className="panel-edge-trace" aria-hidden />
       <header className="catalyst-quadrant__header">
         <div>
           <p className="panel-eyebrow">Catalysts / 03</p>

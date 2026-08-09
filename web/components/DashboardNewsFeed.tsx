@@ -229,7 +229,6 @@ export default function DashboardNewsFeed() {
 
   return (
     <section className="dashboard-news snapshot-card" ref={sectionRef}>
-      <span className="panel-edge-trace" aria-hidden />
       <header className="dashboard-news__header">
         <div className="dashboard-news__heading">
           <p className="panel-eyebrow">Feed / 01</p>
