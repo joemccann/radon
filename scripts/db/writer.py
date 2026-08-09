@@ -540,6 +540,17 @@ def upsert_journal_entry(trade_id: str, payload: dict[str, Any], filled_at: Opti
     )
 
 
+def delete_journal_entry(trade_id: str) -> None:
+    """Delete one journal row over bounded Hrana HTTP.
+
+    Used by journal_sync to supersede fill_monitor's provisional
+    ``fill-monitor:…`` mirror rows once the real execId rows cover the
+    mirrored fill count (REL-011). Same transport rationale as
+    ``upsert_journal_entry``.
+    """
+    _hrana_execute("DELETE FROM journal WHERE trade_id = ?", (trade_id,))
+
+
 def upsert_discover_snapshot(scan_time: str, payload: dict[str, Any]) -> None:
     db = get_db()
     db.execute(

@@ -160,7 +160,12 @@ class FillMonitorHandler(BaseHandler):
                             "newly_filled": newly_filled,
                             "total_filled": current_filled,
                             "remaining": int(status.remaining),
-                            "avg_price": status.avgFillPrice
+                            "avg_price": status.avgFillPrice,
+                            # Prior fill state so the journal write can price
+                            # this increment from the cost delta, not the
+                            # running average (REL-011 / R-010).
+                            "prev_filled": prev_filled,
+                            "prev_avg_price": self.known_orders[order_id].get("avg_fill_price"),
                         }
                         result["fills"].append(fill_info)
                         
@@ -367,10 +372,10 @@ class FillMonitorHandler(BaseHandler):
         prior_qty = self._lookup_prior_qty(contract)
         action = self._side_to_action(side_label, sec_type, prior_qty=prior_qty)
 
-        avg_price = fill_info.get("avg_price") or 0.0
         newly_filled = fill_info.get("newly_filled", 0)
+        increment_price = self._increment_price(fill_info)
         multiplier = 100 if sec_type in ("OPT", "BAG") else 1
-        total_cost = float(newly_filled) * float(avg_price) * multiplier
+        total_cost = float(newly_filled) * float(increment_price) * multiplier
         filled_at = fill_date
 
         strike = getattr(contract, "strike", None) if sec_type in ("OPT", "BAG") else None
@@ -387,7 +392,7 @@ class FillMonitorHandler(BaseHandler):
             "structure": structure,
             "decision": "FILL_MONITOR_AUTO_IMPORT",
             "action": action,
-            "fill_price": round(float(avg_price), 4),
+            "fill_price": round(float(increment_price), 4),
             "total_cost": round(total_cost, 4),
             "ib_exec_id": trade_id,
             "order_id": order_id,
@@ -413,6 +418,24 @@ class FillMonitorHandler(BaseHandler):
             upsert_journal_entry(trade_id, payload, filled_at=filled_at)
         except Exception as exc:  # noqa: BLE001 — never crash on DB write failure
             logger.warning("fill_monitor: journal upsert failed: %s", exc)
+
+    @staticmethod
+    def _increment_price(fill_info: Dict) -> float:
+        """Per-unit price of THIS increment, from the running-average delta.
+
+        IB order status only exposes the running ``avgFillPrice``; the
+        increment's true cost is ``total×avg_now − prev_total×avg_prev``.
+        Falls back to the running average when there is no prior fill or the
+        prior average was never captured (restored pre-fix state).
+        """
+        avg_price = float(fill_info.get("avg_price") or 0.0)
+        newly_filled = float(fill_info.get("newly_filled") or 0)
+        prev_filled = float(fill_info.get("prev_filled") or 0)
+        prev_avg = float(fill_info.get("prev_avg_price") or 0.0)
+        if newly_filled <= 0 or (prev_filled > 0 and prev_avg <= 0):
+            return avg_price
+        total_filled = float(fill_info.get("total_filled") or (prev_filled + newly_filled))
+        return (total_filled * avg_price - prev_filled * prev_avg) / newly_filled
 
     def _notify_fill(self, fill: Dict) -> None:
         """Send macOS notification for a fill."""

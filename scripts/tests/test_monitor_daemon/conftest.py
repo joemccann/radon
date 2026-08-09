@@ -34,6 +34,7 @@ if str(_SCRIPTS_DIR) not in sys.path:
 
 _WRITER_NAMES = (
     "upsert_journal_entry",
+    "delete_journal_entry",
     "record_service_health",
     "upsert_cash_flow",
     "prune_service_health_events",

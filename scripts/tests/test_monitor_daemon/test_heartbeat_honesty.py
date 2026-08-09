@@ -69,7 +69,7 @@ class TestJournalSyncUpsertFailureHonesty:
         ]
         written, failed = handler._dual_write(candidates)
         assert calls["n"] == 2
-        assert written == 0
+        assert written == []  # merged REL-011 contract: list of successes
         assert failed == 2
 
     def test_execute_surfaces_dual_write_failures(self, monkeypatch):
@@ -118,5 +118,5 @@ class TestJournalSyncUpsertFailureHonesty:
             {"ib_exec_id": "0001.aa"},
             {"ib_exec_id": "0001.bb"},
         ])
-        assert written == 1
+        assert [e["ib_exec_id"] for e in written] == ["0001.aa"]
         assert failed == 1
