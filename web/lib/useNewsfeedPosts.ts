@@ -43,8 +43,6 @@ export function buildPostHref(id: string) {
   return `https://themarketear.com/posts/${encodeURIComponent(id)}`;
 }
 
-export const NEWSFEED_ORIGIN_HREF = "https://themarketear.com/newsfeed";
-
 export type NewsfeedPosts = {
   posts: NormalisedPost[];
   loading: boolean;
