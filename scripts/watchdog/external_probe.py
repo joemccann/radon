@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+import os
+import re
+from datetime import datetime, timedelta, timezone
 import urllib.request
 
 from health_probe import reader
@@ -19,6 +21,20 @@ GITHUB_RUNS_URL = (
     "https://api.github.com/repos/joemccann/radon/actions/workflows/"
     "external-health-probe.yml/runs?per_page=1"
 )
+
+# Deploy artifacts written by cloud/scripts/deploy.sh on this host. The
+# transition journal exists only while a deploy owns the app tier; the green
+# marker's mtime records when the last deploy finished.
+DEPLOY_GREEN_MARKER_FILE = os.environ.get(
+    "RADON_DEPLOY_GREEN_MARKER", "/home/radon/.radon-last-green-deploy"
+)
+DEPLOY_TRANSITION_JOURNAL_FILE = os.environ.get(
+    "RADON_DEPLOY_TRANSITION_JOURNAL", "/home/radon/.radon-deploy-transition.json"
+)
+DEPLOY_WINDOW_LOOKBACK_SECONDS = 900
+DEPLOY_MARKER_GRACE_SECONDS = 60
+
+_EDGE_5XX_REASON = re.compile(r"(?:ping|status)_http_5\d\d$")
 
 
 def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
@@ -48,6 +64,25 @@ def _local_aggregate_is_healthy(timeout: float = FETCH_TIMEOUT_SECONDS) -> bool:
         and payload.get("ok") is True
         and str(payload.get("overall_state") or "").lower() == "up"
     )
+
+
+def _sampled_during_deploy_window(sample_time: datetime, now: datetime) -> bool:
+    """True when the off-box sample overlaps a deploy's service restart.
+
+    An in-flight deploy is evidenced by the transition journal; a just-finished
+    one by the green marker's mtime. Both artifacts are radon-owned on the VPS;
+    on hosts without them (laptop mode) this never suppresses.
+    """
+    lookback = timedelta(seconds=DEPLOY_WINDOW_LOOKBACK_SECONDS)
+    if os.path.exists(DEPLOY_TRANSITION_JOURNAL_FILE):
+        return now - sample_time <= lookback
+    try:
+        marker_mtime = os.stat(DEPLOY_GREEN_MARKER_FILE).st_mtime
+    except OSError:
+        return False
+    marker_time = datetime.fromtimestamp(marker_mtime, tz=timezone.utc)
+    grace = timedelta(seconds=DEPLOY_MARKER_GRACE_SECONDS)
+    return marker_time - lookback <= sample_time <= marker_time + grace
 
 
 def _latest_github_run(timeout: float = FETCH_TIMEOUT_SECONDS) -> dict | None:
@@ -108,6 +143,34 @@ def check_external_probe(*, now: datetime | None = None) -> CheckOutcome:
             consecutive_failures=0,
             now=checked_at,
         )
+
+    # A validated edge 5xx whose sample was taken while a deploy was cycling
+    # the app tier is restart collateral, not an outage (2026-08-09: the
+    # 17:43Z probe ran entirely inside the Deploy-to-VPS window and paged P1).
+    # Scope is deliberately narrow: 5xx-through-Caddy reasons only — transport
+    # failures (*_unreachable) can't be produced by a deploy, which never
+    # stops Caddy — and the local aggregate must be healthy (fail closed).
+    # The next off-box cycle still independently proves perimeter recovery.
+    if state == reader.VERDICT_DOWN:
+        down_reason = str(verdict.get("reason") or "")
+        age = verdict.get("age_seconds")
+        sample_time = checked_at - timedelta(seconds=float(age)) if age is not None else None
+        if (
+            _EDGE_5XX_REASON.fullmatch(down_reason)
+            and sample_time is not None
+            and _sampled_during_deploy_window(sample_time, checked_at)
+            and _local_aggregate_is_healthy()
+        ):
+            return CheckOutcome(
+                service=SERVICE,
+                kind="deadman",
+                status="healthy",
+                severity=None,
+                fired=False,
+                message=f"off-box {down_reason} sampled inside deploy window; local aggregate healthy",
+                consecutive_failures=0,
+                now=checked_at,
+            )
 
     if state == reader.VERDICT_HEALTHY:
         return CheckOutcome(
