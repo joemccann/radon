@@ -122,6 +122,13 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     "cor":              {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
     # skew — one-minute RTH UW snapshots plus daily 21:45 UTC finalization.
     "skew":             {"open": 5 * _MIN, "closed": 26 * _HOUR, "requires_ib": False},
+    # skew2d — radon-skew2d.timer, daily 21:50 UTC every calendar day
+    # (five minutes after parent SKEW finalize; weekend/holiday runs heartbeat
+    # with no new parent rows). Uniform 26h window mirrors margin-debt /
+    # straddle: no weekend/holiday gap to widen for. Derived from Turso
+    # skew_history only — no IB dependency.
+    "skew2d":           {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+
     # knowledge-ingest — hourly knowledge-base ingest oneshot
     # (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7).
     # Uniform 26h window (24h grace + timer jitter) mirrors
@@ -267,10 +274,14 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:20 UTC Cboe COR1M/3M/6M/1Y pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "cor",
+        # Daily 21:50 UTC SKEW 2D derive (post parent SKEW finalize) —
+        # hourly check surfaces a missed run within 1h of the 26h window.
+        "skew2d",
         # Hourly knowledge-base ingest — daily-bucket hourly check matches
         # its 26h staleness window (a failed hour never pages; a missed
         # day surfaces within 1h of the window expiring).
         "knowledge-ingest",
+
         "leap-scan",
         "garch-scan",
         "oi-changes",
