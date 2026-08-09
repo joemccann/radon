@@ -33,6 +33,15 @@ except ImportError:  # pragma: no cover - DB layer optional in unit tests
     get_db = None  # type: ignore[assignment]
 
 
+def _utc_now_iso() -> str:
+    """UTC-Z timestamp (R-029): every other journal writer stamps UTC; a
+    naive local stamp here broke lexicographic-chronological ordering
+    under ORDER BY COALESCE(filled_at, written_at)."""
+    from datetime import timezone
+
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
 class ExitOrdersHandler(BaseHandler):
     """Place pending exit orders when IB will accept them."""
 
@@ -252,7 +261,7 @@ class ExitOrdersHandler(BaseHandler):
             if order_type in exit_orders:
                 exit_orders[order_type]["status"] = "PLACED"
                 exit_orders[order_type]["order_id"] = order_id
-                exit_orders[order_type]["placed_at"] = datetime.now().isoformat()
+                exit_orders[order_type]["placed_at"] = _utc_now_iso()
             target_trade["exit_orders"] = exit_orders
 
             db.execute(
@@ -263,7 +272,7 @@ class ExitOrdersHandler(BaseHandler):
                 """,
                 (
                     json.dumps(target_trade),
-                    datetime.now().isoformat(),
+                    _utc_now_iso(),
                     target_trade_id,
                 ),
             )
