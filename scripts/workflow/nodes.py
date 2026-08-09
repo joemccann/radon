@@ -144,7 +144,19 @@ def emit_order(rows: list, params: dict) -> None:
 
     Only reached once the run is confirmed (``_order_node`` blocks otherwise),
     so this is the post-confirmation analogue of OrderRiskGate's Confirm: every
-    row becomes a live order via ``place_order_via_bridge``."""
+    row becomes a live order via ``place_order_via_bridge``.
+
+    REL-005: capped per run — a scanner returning 40 rows must never mean
+    40 live orders on one boolean. The refusal is atomic (no partial
+    placement); raise before the first order transmits."""
+    from order_limits import workflow_max_orders
+
+    cap = workflow_max_orders()
+    if len(rows) > cap:
+        raise ValueError(
+            f"workflow order emit refused: {len(rows)} rows exceeds the "
+            f"per-run cap of {cap} (RADON_WORKFLOW_MAX_ORDERS); no orders placed"
+        )
     for row in rows:
         place_order_via_bridge(row, params)
 

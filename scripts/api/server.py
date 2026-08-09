@@ -19,6 +19,7 @@ import sys
 from datetime import datetime, timedelta, timezone
 import sys
 import time
+from collections import deque
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -2043,6 +2044,40 @@ async def orders_refresh():
 # Phase 3: IB order operations
 # ---------------------------------------------------------------------------
 
+# REL-005: accepted-placement timestamps for the per-minute rate cap.
+# In-process deque is deliberate: one FastAPI process owns all placement
+# routes on a host, and a restart clearing the window is fail-open for
+# at most one minute.
+_order_rate_timestamps: deque = deque()
+
+
+def _refuse_if_order_rate_exceeded() -> None:
+    from order_limits import max_orders_per_min
+
+    now = time.monotonic()
+    while _order_rate_timestamps and now - _order_rate_timestamps[0] > 60.0:
+        _order_rate_timestamps.popleft()
+    cap = max_orders_per_min()
+    if len(_order_rate_timestamps) >= cap:
+        raise HTTPException(
+            status_code=429,
+            detail={
+                "code": "ORDER_RATE_LIMIT",
+                "message": f"more than {cap} placements accepted in the last "
+                           f"minute (RADON_MAX_ORDERS_PER_MIN) — refused",
+            },
+        )
+    _order_rate_timestamps.append(now)
+
+
+def _refuse_if_order_limits_violated(params: dict) -> None:
+    from order_limits import check_order_limits
+
+    violation = check_order_limits(params)
+    if violation:
+        raise HTTPException(status_code=422, detail=violation)
+
+
 def _refuse_if_trading_halted() -> None:
     """Kill switch (REL-004): fast 409 before any subprocess spawn.
 
@@ -2067,6 +2102,8 @@ async def orders_place(request: Request):
     """Place an order via IB (on-demand connection, client_id=26)."""
     _refuse_if_trading_halted()
     body = await request.json()
+    _refuse_if_order_limits_violated(body)
+    _refuse_if_order_rate_exceeded()
     if test_mode:
         order_id, perm_id = _next_test_order_ids()
         return {
@@ -2218,6 +2255,14 @@ async def orders_modify(request: Request):
     new_price = body.get("newPrice")
     new_quantity = body.get("newQuantity")
     outside_rth = body.get("outsideRth")
+
+    # REL-005: a working 1-lot must not be modifiable into a 10,000-lot.
+    if new_quantity is not None:
+        from order_limits import check_quantity_limit
+
+        violation = check_quantity_limit(new_quantity)
+        if violation:
+            raise HTTPException(status_code=422, detail=violation)
 
     args = ["modify"]
     if order_id:
