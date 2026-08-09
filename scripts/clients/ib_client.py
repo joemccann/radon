@@ -707,6 +707,13 @@ class IBClient:
         except Exception as exc:
             raise IBOrderError(f"Failed to modify order: {exc}") from exc
 
+    def get_managed_accounts(self) -> list:
+        """Accounts visible on this session — empty means the session is
+        connected-but-degraded (post-restart pre-auth), not "no orders".
+        """
+        self._require_connection()
+        return list(self._ib.managedAccounts() or [])
+
     def global_cancel(self) -> None:
         """Cancel every working order across all clients (kill switch).
 
