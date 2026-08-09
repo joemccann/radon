@@ -387,5 +387,51 @@ class TestHeartbeat:
             handler.execute()
 
 
+class TestSqlSchemaPins:
+    """The MagicMock db here cannot catch schema drift — production incident
+    2026-08-09: the executed_orders SELECT named a nonexistent order_ref
+    column and every sweep cycle errored with SQL_INPUT_ERROR. Pin the
+    handler's SELECT lists against the real migration DDL."""
+
+    @staticmethod
+    def _table_columns(table: str) -> set:
+        import re
+
+        for path in sorted((SCRIPTS_DIR / "db" / "migrations").glob("*.sql")):
+            match = re.search(
+                rf"CREATE TABLE IF NOT EXISTS {table} \((.*?)\);",
+                path.read_text(),
+                re.S,
+            )
+            if match:
+                columns = set()
+                for line in match.group(1).splitlines():
+                    word = line.strip().rstrip(",").split()
+                    if word and word[0].isidentifier():
+                        columns.add(word[0])
+                return columns
+        raise AssertionError(f"no CREATE TABLE for {table} in migrations")
+
+    @pytest.mark.parametrize("table", ["journal", "executed_orders"])
+    def test_selects_only_real_columns(self, table):
+        import inspect
+        import re
+
+        source = inspect.getsource(expiry_sweep)
+        selects = re.findall(
+            rf"SELECT\s+((?:(?!\bSELECT\b|\bFROM\b).)*?)\s+FROM\s+{table}\b",
+            source,
+            re.S | re.I,
+        )
+        assert selects, f"no SELECT against {table} found in expiry_sweep"
+        real = self._table_columns(table)
+        for select in selects:
+            selected = {c.strip() for c in select.split(",")}
+            assert selected <= real, (
+                f"expiry_sweep selects {sorted(selected - real)} which do not "
+                f"exist on {table} (real columns: {sorted(real)})"
+            )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
