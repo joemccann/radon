@@ -1293,7 +1293,11 @@ def replace_open_orders_for_session(
     for start in range(0, len(rows), chunk_size):
         chunk = rows[start:start + chunk_size]
         placeholders = ", ".join(["(?, ?, ?)"] * len(chunk))
-        params = [value for row in chunk for value in row]
+        # libsql_experimental's PyO3 binding accepts TUPLE positional params
+        # only — a list raises "'list' object cannot be converted to
+        # 'PyTuple'" (2026-08-09 orders-sync incident; only detonates when
+        # working orders exist, the empty path takes the bare DELETE).
+        params = tuple(value for row in chunk for value in row)
         db.execute(
             f"""
             INSERT INTO open_orders (perm_id, payload, updated_at)
@@ -1308,7 +1312,7 @@ def replace_open_orders_for_session(
     id_placeholders = ", ".join(["?"] * len(rows))
     db.execute(
         f"DELETE FROM open_orders WHERE perm_id NOT IN ({id_placeholders})",
-        [row[0] for row in rows],
+        tuple(row[0] for row in rows),
     )
     db.commit()
 
