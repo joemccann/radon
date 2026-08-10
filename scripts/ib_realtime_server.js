@@ -2681,7 +2681,7 @@ staleCheckTimer = setInterval(() => {
   // ladder is acting it owns the service_health row, so an "ok" heartbeat can
   // no longer land last and clobber the escalation's "error" row — the
   // 2026-06-18 invisibility bug where a dead relay still read state=ok.
-  const { action, heartbeat } = decideHealthWrite({
+  const { action, heartbeat, clearError } = decideHealthWrite({
     now,
     lastTickAt: lastTickTimestamp,
     ibConnected,
@@ -2694,7 +2694,16 @@ staleCheckTimer = setInterval(() => {
     lastHeartbeatAt: lastTickHeartbeatAt,
   });
 
-  if (heartbeat) {
+  // The tick edge (onTicksRecovered) can never fire with zero subscriptions,
+  // so a relay that escalated and then went idle would stay latched at "error"
+  // indefinitely. Clear it here on the writer-state edge instead.
+  if (clearError) {
+    staleReconnectCycles = 0;
+    relayHealthInError = false;
+    console.log("\x1b[32m[stale-data] data plane healthy with no outstanding demand — clearing relay error state\x1b[0m");
+  }
+
+  if (heartbeat || clearError) {
     lastTickHeartbeatAt = now;
     void writeRelayHealth("ok", {
       heartbeat: "tick",

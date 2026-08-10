@@ -77,6 +77,14 @@ export const RELAY_TICK_FRESH_SECS = 120;
  * regardless of the tick timestamp it last reported. */
 export const RELAY_HEARTBEAT_STALE_MS = 5 * 60_000;
 
+/** Dead-relay bound for the no-demand regime. Deliberately the SAME bound as a
+ * subscribed relay: the writer heartbeats every 60s whether or not anyone is
+ * subscribed, so an idle relay needs no extra slack to prove it is alive, and
+ * two other readers of this same row (serviceHealthWindows.ts "ib-realtime-relay"
+ * and scripts/watchdog/services.py) hold it to 5 minutes. Named separately only
+ * so the two regimes read as the two distinct assertions they are. */
+export const RELAY_IDLE_HEARTBEAT_STALE_MS = RELAY_HEARTBEAT_STALE_MS;
+
 /** Fills are only asserted loosely: the account trades most sessions, so a
  * journal silent past the weekend-covering window (Fri 16:00 ET -> Mon
  * 09:30 ET ~ 65h) during RTH signals a dead fill pipeline. Matches the
@@ -100,11 +108,25 @@ function parseRelayDetail(lastError: string | null): Record<string, unknown> {
   }
 }
 
+function heartbeatAgeMsFrom(row: RelayHealthRow, nowMs: number): number | null {
+  const heartbeatAt = row.updated_at ? Date.parse(row.updated_at) : NaN;
+  return Number.isNaN(heartbeatAt) ? null : nowMs - heartbeatAt;
+}
+
 /**
- * relay_tick — applicable during RTH only. Tick age comes from the relay
- * heartbeat's last_tick_at; a silent heartbeat or a latched error row is
- * not fresh. Zero active subscriptions is NOT a failure: no demand means
- * no ticks are expected, and the live heartbeat itself proves the relay.
+ * relay_tick — applicable during RTH only. The row carries two independent
+ * signals and they are asserted separately:
+ *
+ *   writer liveness — how recently the relay refreshed the row (updated_at);
+ *   tick flow       — how recently a tick arrived (detail.last_tick_at).
+ *
+ * Zero active subscriptions is NOT a failure: no demand means no reqMktData is
+ * outstanding, so no tick can arrive and tick age asserts nothing. That
+ * exemption is checked FIRST, because zero subscribers is precisely the regime
+ * in which the relay has the least to say — reading it through the tick-flow
+ * guard turned a healthy idle relay into a fake incident (2026-08-10). It is
+ * still bounded by RELAY_IDLE_HEARTBEAT_STALE_MS, so a relay process that has
+ * genuinely died with no subscribers is still caught.
  */
 export function evaluateRelayTick(
   row: RelayHealthRow | null,
@@ -120,13 +142,19 @@ export function evaluateRelayTick(
 
   if (row.state === "error") return { applicable: true, age_secs, fresh: false };
 
-  const heartbeatAt = row.updated_at ? Date.parse(row.updated_at) : NaN;
-  const heartbeatLive = !Number.isNaN(heartbeatAt) && nowMs - heartbeatAt <= RELAY_HEARTBEAT_STALE_MS;
-  if (!heartbeatLive) return { applicable: true, age_secs, fresh: false };
+  const heartbeatAgeMs = heartbeatAgeMsFrom(row, nowMs);
 
   if (detail.active_subscriptions === 0) {
-    return { applicable: true, age_secs, fresh: true };
+    return {
+      applicable: true,
+      age_secs,
+      fresh: heartbeatAgeMs !== null && heartbeatAgeMs <= RELAY_IDLE_HEARTBEAT_STALE_MS,
+    };
   }
+
+  const heartbeatLive = heartbeatAgeMs !== null && heartbeatAgeMs <= RELAY_HEARTBEAT_STALE_MS;
+  if (!heartbeatLive) return { applicable: true, age_secs, fresh: false };
+
   return {
     applicable: true,
     age_secs,
