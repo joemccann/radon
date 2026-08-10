@@ -652,7 +652,7 @@ export default function PositionTable({
               <SortTh<PositionSortKey>
                 label="Return %"
                 sortKey="pnl_pct"
-                className="right"
+                className="right position-return-header"
                 activeKey={sort.key}
                 direction={sort.direction}
                 onToggle={toggle}
