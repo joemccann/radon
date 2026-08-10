@@ -6,14 +6,16 @@ Manages multiple handlers with different intervals.
 Supports state persistence and market hours awareness.
 """
 
+import asyncio
 import concurrent.futures
+import contextlib
 import logging
 import os
 import socket
 import time
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Dict, Any, List, Optional
+from typing import Callable, Dict, Any, Iterator, List, Optional
 
 from .handlers.base import BaseHandler
 from utils.atomic_io import atomic_save, verified_load
@@ -25,6 +27,44 @@ logger = logging.getLogger(__name__)
 # handler and, because the loop is single-threaded, every handler after
 # it. Handlers may override via a class-level ``max_runtime_seconds``.
 DEFAULT_HANDLER_DEADLINE_SECONDS = 120.0
+
+
+@contextlib.contextmanager
+def _thread_event_loop() -> Iterator[None]:
+    """Guarantee the calling thread owns an asyncio event loop.
+
+    ib_insync resolves its loop lazily on every call (``util.getLoop``)
+    and CPython auto-creates one only on the main thread, so REL-008's
+    move of handlers onto worker threads killed every IB connect before
+    it reached a socket.
+
+    ``_run_handler_bounded`` spawns a private single-worker executor per
+    run, so the calling thread never already owns a loop: install one
+    unconditionally and close it on the way out, and no loop outlives the
+    cycle that created it. Probing for an existing loop first would be
+    worse than useless — ``nest_asyncio`` (a shipped ib_insync dependency)
+    patches ``get_event_loop`` to auto-create rather than raise, which
+    would turn the probe into a leak.
+
+    Teardown is best-effort: a cleanup failure must never replace the
+    handler's result or take down the daemon.
+    """
+    loop = asyncio.new_event_loop()
+    asyncio.set_event_loop(loop)
+    try:
+        yield
+    finally:
+        try:
+            asyncio.set_event_loop(None)
+            loop.close()
+        except Exception as exc:  # noqa: BLE001 — cleanup must not mask the run
+            logger.warning(f"handler event loop teardown failed: {exc}")
+
+
+def _run_with_thread_event_loop(work: Callable[[], Any]) -> Any:
+    """Run ``work`` on a thread guaranteed to own an asyncio event loop."""
+    with _thread_event_loop():
+        return work()
 
 
 def sd_notify(state: str) -> None:
@@ -208,6 +248,13 @@ class MonitorDaemon:
         watchdog pages, and the stray thread either finishes late or dies
         with its wedged socket. The alternative was the whole daemon
         wedging alive-but-dead with open positions unmanaged.
+
+        Every failure mode degrades to one errored handler. ``BaseHandler.run``
+        swallows its own exceptions, but the worker also brackets the run with
+        an event loop, and that bracketing can fail on its own — an unhandled
+        escape here would propagate past ``run_once`` into ``run_loop``, which
+        catches only KeyboardInterrupt, killing the daemon REL-008 exists to
+        keep alive.
         """
         deadline = float(getattr(handler, "max_runtime_seconds",
                                  DEFAULT_HANDLER_DEADLINE_SECONDS))
@@ -215,7 +262,7 @@ class MonitorDaemon:
             max_workers=1, thread_name_prefix=f"handler-{handler.name}"
         )
         try:
-            future = executor.submit(handler.run)
+            future = executor.submit(_run_with_thread_event_loop, handler.run)
             try:
                 return future.result(timeout=deadline)
             except concurrent.futures.TimeoutError:
@@ -227,6 +274,14 @@ class MonitorDaemon:
                     )
                 except Exception as exc:  # noqa: BLE001 — heartbeat is best-effort here
                     logger.warning(f"timeout heartbeat failed for {handler.name}: {exc}")
+                return {"status": "error", "error": error, "handler": handler.name}
+            except Exception as exc:  # noqa: BLE001 — one handler must never kill the daemon
+                error = f"handler {handler.name} raised outside its own error handling: {exc}"
+                logger.exception(error)
+                try:
+                    handler.record_cycle_health("error", error={"message": str(exc)})
+                except Exception as heartbeat_exc:  # noqa: BLE001 — best-effort
+                    logger.warning(f"crash heartbeat failed for {handler.name}: {heartbeat_exc}")
                 return {"status": "error", "error": error, "handler": handler.name}
         finally:
             executor.shutdown(wait=False, cancel_futures=True)
