@@ -203,6 +203,49 @@ class TestClassifyProbes:
         result = probe.classify_probes(_ok_probe(), _ok_probe(payload={"state": "down"}))
         assert result == {"ok": 0, "detail": "aggregate_invalid"}
 
+    def test_schema_v2_degraded_keeps_edge_ok(self):
+        # Gateway-only degradation is not an edge outage: the serving path was
+        # just verified by the 2xx gates, so the off-box row stays ok=1 and the
+        # broker dependency is left to on-box alerting (2026-08-09 page).
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(
+                payload={
+                    "schema_version": 2,
+                    "ok": False,
+                    "overall_state": "degraded",
+                }
+            ),
+        )
+        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+
+    def test_schema_v2_degraded_with_ok_true_is_contradictory(self):
+        result = probe.classify_probes(
+            _ok_probe(),
+            _ok_probe(
+                payload={
+                    "schema_version": 2,
+                    "ok": True,
+                    "overall_state": "degraded",
+                }
+            ),
+        )
+        assert result == {"ok": 0, "detail": "aggregate_invalid"}
+
+    def test_real_gateway_down_payload_keeps_edge_ok(self):
+        degraded = health_service_probes.build_status(
+            {
+                "radon-api": {"state": "up"},
+                "radon-relay": {"state": "up"},
+                "ib-gateway": {"state": "down", "detail": "ConnectionRefusedError"},
+            },
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+        result = probe.classify_probes(_ok_probe(), _ok_probe(payload=degraded))
+        assert result == {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
+
     def test_valid_schema_v2_down_is_distinct_from_invalid_payload(self):
         result = probe.classify_probes(
             _ok_probe(),

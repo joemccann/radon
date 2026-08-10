@@ -257,6 +257,46 @@ class TestStatusResponse:
         assert body["ok"] is False
         assert body["overall_state"] == "unknown"
 
+    def test_gateway_only_down_degrades_instead_of_down(self):
+        # 2026-08-09 page: IBKR's weekend session shutdown exits the gateway
+        # container cleanly; with every serving-path component up, the edge is
+        # fine — collapsing the aggregate to "down" made the off-box observer
+        # page P1 "edge unhealthy (aggregate_down)" for a broker dependency.
+        body = probes.build_status(
+            {
+                "radon-api": {
+                    "state": "up",
+                    "payload": {
+                        "status": "ok",
+                        "auth_state": "unreachable",
+                        "service_state": "unreachable",
+                        "upstream_dead": False,
+                        "port_listening": False,
+                    },
+                },
+                "radon-relay": {"state": "up"},
+                "radon-nextjs": {"state": "up"},
+                "ib-gateway": {"state": "down", "detail": "ConnectionRefusedError"},
+            },
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "degraded"
+        assert body["ok"] is False
+
+    def test_serving_path_down_stays_down_even_with_gateway_down(self):
+        body = probes.build_status(
+            {
+                "radon-relay": {"state": "down"},
+                "ib-gateway": {"state": "down"},
+            },
+            {"radon-api.service": {"state": "up"}},
+            "t",
+            units_age_secs=0,
+        )
+        assert body["overall_state"] == "down"
+
     def test_nested_down_and_unknown_states_drive_the_canonical_aggregate(self):
         down = probes.build_status(
             {"radon-api": {"state": "up"}, "radon-relay": {"state": "down"}},
@@ -299,7 +339,11 @@ class TestStatusResponse:
         )
 
         assert body["ok"] is False
-        assert body["overall_state"] == "down"
+        # The broker outage still surfaces (ok=False, never hidden behind the
+        # transport 200) but as "degraded" since 2026-08-09: a dependency
+        # outage is not an edge outage, so the off-box observer no longer
+        # pages P1 "edge unhealthy" for it.
+        assert body["overall_state"] == "degraded"
 
     def test_external_probe_is_not_folded_back_into_the_aggregate(self):
         body = probes.build_status(
