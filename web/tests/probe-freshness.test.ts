@@ -26,6 +26,7 @@ import {
   evaluateScanCheck,
   JOURNAL_FRESH_WINDOW_MS,
   RELAY_HEARTBEAT_STALE_MS,
+  RELAY_IDLE_HEARTBEAT_STALE_MS,
   RELAY_TICK_FRESH_SECS,
   type RelayHealthRow,
 } from "../lib/probeFreshness";
@@ -100,14 +101,60 @@ describe("evaluateRelayTick", () => {
   });
 
   it("fresh with zero active subscriptions — no demand means no ticks expected", () => {
+    // Writer-shaped row: the relay heartbeats on the idle path too, so the
+    // payload carries subs=0 with an HONEST hour-old tick age and a live
+    // updated_at. Pre-2026-08-10 the writer suppressed this heartbeat entirely,
+    // which is why the branch below was unreachable in production.
     const idle = relayRow({}, {
+      heartbeat: "tick",
       last_tick_at: iso(OPEN_NOW - 3_600_000),
+      tick_age_secs: 3600,
       active_subscriptions: 0,
     });
     const result = evaluateRelayTick(idle, "open", OPEN_NOW);
     expect(result.applicable).toBe(true);
     expect(result.fresh).toBe(true);
     expect(result.age_secs).toBe(3600);
+  });
+
+  it("holds idle and subscribed relays to the SAME writer-liveness bound", () => {
+    // The writer heartbeats every 60s whether or not anyone is subscribed, so an
+    // idle relay needs no extra slack to prove it is alive. Two other readers of
+    // this same row — serviceHealthWindows "ib-realtime-relay" and
+    // scripts/watchdog/services.py — hold it to 5 minutes; letting the idle bound
+    // drift wider would make three clocks disagree about one dead process.
+    expect(RELAY_IDLE_HEARTBEAT_STALE_MS).toBe(RELAY_HEARTBEAT_STALE_MS);
+
+    const freshnessAtSubs = (active_subscriptions: number) =>
+      evaluateRelayTick(
+        relayRow(
+          { updated_at: iso(OPEN_NOW - RELAY_HEARTBEAT_STALE_MS - 1_000) },
+          {
+            heartbeat: "tick",
+            last_tick_at: iso(OPEN_NOW - 10_000),
+            tick_age_secs: 10,
+            active_subscriptions,
+          },
+        ),
+        "open",
+        OPEN_NOW,
+      ).fresh;
+
+    expect(freshnessAtSubs(0)).toBe(false);
+    expect(freshnessAtSubs(12)).toBe(false);
+  });
+
+  it("idle relay silent past the idle bound is still a dead relay", () => {
+    const dead = relayRow(
+      { updated_at: iso(OPEN_NOW - RELAY_IDLE_HEARTBEAT_STALE_MS - 60_000) },
+      {
+        heartbeat: "tick",
+        last_tick_at: iso(OPEN_NOW - 3_600_000),
+        tick_age_secs: 3600,
+        active_subscriptions: 0,
+      },
+    );
+    expect(evaluateRelayTick(dead, "open", OPEN_NOW).fresh).toBe(false);
   });
 
   it("missing row or unparsable detail during RTH proves nothing — not fresh", () => {
