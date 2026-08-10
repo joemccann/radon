@@ -155,6 +155,37 @@ export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHear
 }
 
 /**
+ * True when the relay's data plane is in a state worth reporting as ok.
+ *
+ * A fresh tick is direct proof the data plane works, whatever the last farm
+ * info code said (2103 is emitted on routine farm resets and ``farmState`` is
+ * sticky), so it settles the question in either regime.
+ *
+ * Without a fresh tick the two regimes diverge, and the distinction is the
+ * whole point. With live subscriptions the relay owes ticks, so silence is an
+ * unhealthy data plane. With ZERO subscriptions no reqMktData is outstanding,
+ * so no tick can ever arrive and tick age asserts nothing about the relay —
+ * folding tick age into that regime is what silenced the heartbeat for the
+ * whole idle window and froze the row (the 2026-08-10 stale-freshness
+ * incident).
+ *
+ * Idle is NOT blind, though: IB reports farm state on the info channel
+ * independently of any subscription. A relay sitting idle on a farm IB has
+ * explicitly called down has nothing healthy to report, and blessing it would
+ * trade the old false positive for a false negative — the one regression that
+ * would matter, since the frozen row is then the only remaining signal.
+ *
+ * @param {StaleDataInput} input
+ * @returns {boolean}
+ */
+function hasHealthyDataPlane({ ibConnected, activeSubscriptions, now, lastTickAt, farmState }) {
+  if (!ibConnected) return false;
+  if (now - lastTickAt <= STALE_DATA_THRESHOLD_MS) return true;
+  if (activeSubscriptions > 0) return false;
+  return !(farmState != null && FARM_DOWN_CODES.has(farmState));
+}
+
+/**
  * Decide BOTH the recovery action and whether to write the ok tick-heartbeat
  * from a single snapshot, so the two can never race.
  *
@@ -165,23 +196,37 @@ export function shouldWriteTickHeartbeat({ now, isMarketHours, inError, lastHear
  * row whose own payload says ``tick_age_secs: 195`` (the 2026-06-18 incident).
  *
  * The fix: the ladder owns the health row whenever it is acting. Only a fully
- * healthy cycle (action ``none``), with a connected IB socket and a fresh
- * tick, may write the heartbeat. Off-hours and latched-error suppression stay
- * in {@link shouldWriteTickHeartbeat} (the latter still matters during the
+ * healthy cycle (action ``none``) with a healthy data plane may write the
+ * heartbeat. Off-hours and latched-error suppression stay in
+ * {@link shouldWriteTickHeartbeat} (the latter still matters during the
  * post-escalation cooldown, when decideStaleAction returns ``none`` but the
  * error row is still latched).
  *
+ * The row reports THIS WRITER's state, not the tick stream's
+ * (feedback_service_health_writer_state_not_event_content), so the idle path is
+ * a heartbeat path, not a skip path — the payload stays honest (real
+ * active_subscriptions, real tick_age_secs) and readers get writer liveness.
+ *
+ * ``clearError`` is the latch's second recovery edge. The first — a tick
+ * arriving — is unreachable in exactly the regime that strands it: an
+ * escalation during RTH, then the last browser client is reaped, subscriptions
+ * drain to zero, and no reqMktData remains to ever produce a tick. The row then
+ * sits latched at "error" for hours against a relay that is merely idle. So the
+ * latch also clears on the writer-state edge: the ladder has nothing to act on
+ * and the data plane is healthy, which means the escalation's own precondition
+ * (stale ticks with demand outstanding) is gone. Safe by construction — with a
+ * farm IB still reports down, {@link hasHealthyDataPlane} is false and the
+ * latch holds.
+ *
  * @param {StaleDataInput & {inError: boolean, lastHeartbeatAt: number}} input
- * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean}}
+ * @returns {{action: "none"|"resubscribe"|"reconnect"|"escalate", heartbeat: boolean, clearError: boolean}}
  */
 export function decideHealthWrite(input) {
   const action = decideStaleAction(input);
-  const hasFreshConnectedTick = input.ibConnected
-    && input.now - input.lastTickAt <= STALE_DATA_THRESHOLD_MS;
-  const heartbeat = action === "none"
-    && hasFreshConnectedTick
-    && shouldWriteTickHeartbeat(input);
-  return { action, heartbeat };
+  const isHealthyCycle = action === "none" && hasHealthyDataPlane(input);
+  const clearError = isHealthyCycle && input.inError === true;
+  const heartbeat = isHealthyCycle && shouldWriteTickHeartbeat(input);
+  return { action, heartbeat, clearError };
 }
 
 /**

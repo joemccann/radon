@@ -223,7 +223,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
   }
 
   it("healthy cycle → heartbeat ok, no recovery action", () => {
-    expect(decideHealthWrite(hw())).toEqual({ action: "none", heartbeat: true });
+    expect(decideHealthWrite(hw())).toEqual({ action: "none", heartbeat: true, clearError: false });
   });
 
   it("disconnected relay with an old tick → no misleading ok heartbeat", () => {
@@ -237,7 +237,7 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 10_000,
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false });
   });
 
   it("ESCALATION cycle → NO heartbeat (the 2026-06-18 clobber bug)", () => {
@@ -253,19 +253,19 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           lastHeartbeatAt: NOW - TICK_HEARTBEAT_INTERVAL_MS - 10_000,
         }),
       ),
-    ).toEqual({ action: "escalate", heartbeat: false });
+    ).toEqual({ action: "escalate", heartbeat: false, clearError: false });
   });
 
   it("reconnect cycle → no heartbeat (ladder owns the row)", () => {
     expect(
       decideHealthWrite(hw({ lastTickAt: STALE_TICK_AT, reconnectCycles: 0 })),
-    ).toEqual({ action: "reconnect", heartbeat: false });
+    ).toEqual({ action: "reconnect", heartbeat: false, clearError: false });
   });
 
   it("resubscribe cycle → no heartbeat", () => {
     expect(
       decideHealthWrite(hw({ lastTickAt: STALE_TICK_AT, farmState: 2104 })),
-    ).toEqual({ action: "resubscribe", heartbeat: false });
+    ).toEqual({ action: "resubscribe", heartbeat: false, clearError: false });
   });
 
   it("post-escalation cooldown (still stale, error latched) → action none but NO heartbeat", () => {
@@ -281,13 +281,83 @@ describe("decideHealthWrite (heartbeat must never clobber the escalation row)", 
           inError: true,
         }),
       ),
-    ).toEqual({ action: "none", heartbeat: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false });
+  });
+
+  it("idle relay (zero subscribers, no tick possible) → still heartbeats", () => {
+    // The row reports THIS writer's state, not the tick stream's. With no
+    // subscribers no reqMktData is outstanding, so lastTickAt can never advance;
+    // gating the heartbeat on it froze the row for the whole idle window and
+    // read downstream as a dead relay (2026-08-10 stale-freshness incident).
+    expect(
+      decideHealthWrite(
+        hw({ activeSubscriptions: 0, lastTickAt: STALE_TICK_AT }),
+      ),
+    ).toEqual({ action: "none", heartbeat: true, clearError: false });
+  });
+
+  it("idle relay with the IB socket DOWN → never looks idle-healthy", () => {
+    // Guard ORDER is load-bearing: checking "no subscribers" before "socket up"
+    // would publish ok heartbeats every 60s forever from a relay whose IB
+    // connection is gone — the frozen row is the only remaining detector.
+    expect(
+      decideHealthWrite(
+        hw({ ibConnected: false, activeSubscriptions: 0, lastTickAt: STALE_TICK_AT }),
+      ),
+    ).toEqual({ action: "none", heartbeat: false, clearError: false });
+  });
+
+  it("idle relay on a farm IB reports DOWN → no ok heartbeat", () => {
+    // Idle is not blind: farm state arrives on the info channel with or without
+    // subscriptions. Blessing this would swap the 2026-08-10 false positive for
+    // a false negative, which is strictly worse — a genuinely dead farm would
+    // read fresh for as long as nobody happens to be watching.
+    for (const farmState of [2103, 2105, 2108]) {
+      expect(
+        decideHealthWrite(
+          hw({ activeSubscriptions: 0, lastTickAt: STALE_TICK_AT, farmState }),
+        ),
+      ).toEqual({ action: "none", heartbeat: false, clearError: false });
+    }
+  });
+
+  it("escalated then went idle → clears the latch the tick edge can never reach", () => {
+    // onTicksRecovered is the only other way out of inError, and it fires only
+    // from markTick, which needs an outstanding reqMktData. Once the last client
+    // is reaped there is none, so without this edge the row stays "error" for
+    // hours against a relay that is merely idle.
+    expect(
+      decideHealthWrite(
+        hw({
+          activeSubscriptions: 0,
+          lastTickAt: STALE_TICK_AT,
+          inError: true,
+          reconnectCycles: MAX_RECONNECT_CYCLES,
+          lastEscalationAt: NOW - (ESCALATION_COOLDOWN_MS - 1),
+        }),
+      ),
+    ).toEqual({ action: "none", heartbeat: false, clearError: true });
+  });
+
+  it("escalated, went idle, but the farm is still DOWN → latch holds", () => {
+    expect(
+      decideHealthWrite(
+        hw({
+          activeSubscriptions: 0,
+          lastTickAt: STALE_TICK_AT,
+          farmState: 2103,
+          inError: true,
+          reconnectCycles: MAX_RECONNECT_CYCLES,
+          lastEscalationAt: NOW - (ESCALATION_COOLDOWN_MS - 1),
+        }),
+      ),
+    ).toEqual({ action: "none", heartbeat: false, clearError: false });
   });
 
   it("healthy but inside the heartbeat interval → no write, no action", () => {
     expect(
       decideHealthWrite(hw({ lastHeartbeatAt: NOW - 1_000 })),
-    ).toEqual({ action: "none", heartbeat: false });
+    ).toEqual({ action: "none", heartbeat: false, clearError: false });
   });
 });
 
