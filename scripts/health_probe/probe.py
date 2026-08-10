@@ -456,11 +456,16 @@ def _classify_status_payload(payload: dict) -> str:
         if type(payload.get("ok")) is not bool or not isinstance(state, str):
             return "invalid"
         normalized = state.lower()
-        if normalized not in {"up", "down", "unknown", "starting"}:
+        if normalized not in {"up", "down", "unknown", "starting", "degraded"}:
             return "invalid"
         state_healthy = normalized == "up"
         if payload["ok"] is not state_healthy:
             return "invalid"
+        if normalized == "degraded":
+            # Broker dependency down, serving path up (2026-08-09): not an
+            # edge outage — surfaced distinctly so classify_probes can keep
+            # the off-box row ok while on-box alerting owns the dependency.
+            return "degraded"
         return "healthy" if state_healthy else "down"
     if schema_version is not None:
         return "invalid"
@@ -507,6 +512,8 @@ def classify_probes(ping: dict, status: dict) -> dict:
     aggregate = _classify_status_payload(status.get("payload", {}))
     if aggregate == "down":
         return {"ok": 0, "detail": "aggregate_down"}
+    if aggregate == "degraded":
+        return {"ok": 1, "detail": "edge_ok:aggregate_degraded"}
     if aggregate != "healthy":
         return {"ok": 0, "detail": "aggregate_invalid"}
 

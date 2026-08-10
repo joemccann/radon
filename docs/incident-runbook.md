@@ -236,6 +236,21 @@ Incident: 2026-07-08, P1.
   `recover_stuck_pool` restarts radon-api only (`46ba1e1`).
 - **Pager hygiene:** tag Pushover emergencies + `cancel_by_tag` on recovery
   (`660cda91`); one page per condition-transition (`0286a396`).
+- **Weekend clean exit → false "edge unhealthy" (2026-08-09):** IBKR's weekend
+  session shutdown exits the gateway container cleanly (`Exited (0)`, "IBC
+  returned exit status 0", JTS ShutdownTask in `docker logs`); IBC auto-restart
+  is disabled by doctrine and the ib-watchdog freezes restarts off-hours, so
+  the gateway stays down until the quiet window lifts or an operator restarts
+  it. Discriminating check: `docker ps -a` Exited(0) + market closed + public
+  edge serving 2xx fast → NOT an edge outage. The health aggregate now reports
+  this as `overall_state="degraded"` (ok=false) instead of "down", and the
+  off-box prober writes `ok=1, detail=edge_ok:aggregate_degraded` — the broker
+  dependency alerts through on-box paths only. Operational recovery: the unit
+  is a RemainAfterExit oneshot, so `systemctl start` is a NO-OP while it shows
+  active(exited) — use `systemctl restart radon-ib-gateway.service` (or the
+  admin panel), then approve the 2FA push. Regression tests:
+  `test_health_service.py::TestStatusResponse::test_gateway_only_down_degrades_instead_of_down`,
+  `test_health_probe.py::TestClassifyProbes::test_schema_v2_degraded_keeps_edge_ok`.
 
 ---
 

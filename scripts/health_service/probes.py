@@ -185,16 +185,30 @@ def aggregate_state(probe_results: dict, units: dict,
     The off-box ``external_probe`` row is deliberately excluded: folding an old
     off-box verdict into the endpoint it probes would create a feedback loop.
     """
-    states = []
-    for collection in (probe_results, units):
-        for value in (collection or {}).values():
-            if isinstance(value, dict):
-                states.append(str(value.get("state", "unknown")).lower())
+    # The broker dependency is reported but must not masquerade as an edge
+    # outage: IBKR's weekend session shutdown exits the gateway cleanly while
+    # every serving-path component stays up, and collapsing the aggregate to
+    # "down" made the off-box observer page P1 "edge unhealthy
+    # (aggregate_down)" for it (2026-08-09). Gateway-only failure => the NEW
+    # "degraded" state; any serving-path failure still wins as "down". Both
+    # gateway signals count as dependency: the ib-gateway probe AND the
+    # nested FastAPI payload's broker fields (_nested_api_state).
+    _DOWNISH = {"down", "error", "failed", "unhealthy"}
+    serving_states = []
+    dependency_states = []
+    for name, value in (probe_results or {}).items():
+        if isinstance(value, dict):
+            state = str(value.get("state", "unknown")).lower()
+            (dependency_states if name == "ib-gateway" else serving_states).append(state)
+    for value in (units or {}).values():
+        if isinstance(value, dict):
+            serving_states.append(str(value.get("state", "unknown")).lower())
     nested_api_state = _nested_api_state(probe_results)
     if nested_api_state is not None:
-        states.append(nested_api_state)
+        dependency_states.append(nested_api_state)
+    states = serving_states + dependency_states
 
-    if any(state in {"down", "error", "failed", "unhealthy"} for state in states):
+    if any(state in _DOWNISH for state in serving_states):
         return "down"
     if (
         health_service != "ok"
@@ -204,6 +218,8 @@ def aggregate_state(probe_results: dict, units: dict,
         return "unknown"
     if any(state == "unknown" for state in states):
         return "unknown"
+    if any(state in _DOWNISH for state in dependency_states):
+        return "degraded"
     if any(state == "starting" for state in states):
         return "starting"
     if all(state in {"up", "ok", "healthy"} for state in states):
