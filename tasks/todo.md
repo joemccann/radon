@@ -1,3 +1,107 @@
+# Task: Improve Return % table-header legibility (2026-08-10)
+
+## Dependency graph
+
+- T1 depends_on: [] - Isolate the PositionTable header wrapping cause and add regression coverage.
+- T2 depends_on: [T1] - Keep the Return % label and tooltip legible without changing table geometry.
+- T3 depends_on: [T2] - Run focused tests and desktop/mobile visual verification.
+- T4 depends_on: [T3] - Run the full web suite and document results.
+
+## Checklist
+
+- [x] T1 Cause and regression identified.
+- [x] T2 Header legibility fix implemented.
+- [x] T3 Focused and visual verification passed.
+- [x] T4 Full suite passed and review recorded.
+
+## Review
+
+- Scoped `white-space: nowrap` to the PositionTable Return % sortable label so its text, help control, and sort indicator stay on one aligned line without changing column geometry.
+- Added CSS-contract and Playwright geometry coverage; desktop screenshot confirms the corrected header, and the dedicated mobile positions surface remains unchanged.
+- Verification: focused Vitest 20 passed; Playwright desktop 1 and mobile 5 passed; full Vitest 510 files / 5,247 tests passed; typecheck, lint, typography detector, and `git diff --check` passed.
+
+---
+
+# Task: Sortable watchlist table (2026-08-09)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect the watchlist and the app-standard sortable-table behavior; define regression coverage.
+- T2 depends_on: [T1] - Add deterministic sorting for every data column while preserving row actions and responsive layout.
+- T3 depends_on: [T2] - Run focused tests and browser verification at desktop and mobile widths.
+- T4 depends_on: [T3] - Run the full web test suite and document results.
+
+## Checklist
+
+- [x] T1 Existing pattern and coverage identified.
+- [x] T2 Sortable watchlist implemented with regression tests.
+- [x] T3 Focused and visual verification passed.
+- [x] T4 Full web suite passed and review recorded.
+
+## Review
+
+- All seven data headers now sort ascending/descending with visible chevrons, keyboard-native buttons, and `aria-sort`; invalid/missing values remain last through the shared sort hook.
+- Initial source ordering, row navigation/removal, and the compact mobile layout are preserved.
+- Verification: focused Vitest 4 passed; Playwright desktop/mobile 3 passed; full Vitest 510 files / 5,246 tests passed; typecheck, lint, detector, and `git diff --check` passed.
+
+---
+
+# Task: ThetaData support for long-history SPX skew (2026-08-09)
+
+## Summary
+
+UW greeks history floor is 2023-09-06, so SKEW / SKEW 2D only plot ~3y.
+ThetaData has multi-year OPRA SPX chains + greeks and can backfill pre-UW
+sessions for the same constant-maturity 25d put/call construction. Add a
+client + optional backfill path; keep UW as live primary (repo priority #2).
+
+## Dependency graph
+
+- T1 depends_on: [] - Account + env: ThetaData plan that includes SPX index options + historical greeks; document `THETADATA_*` keys in `.env.example` (no secrets committed).
+- T2 depends_on: [T1] - Research/probe: history depth for SPX monthly chains, auth, rate limits, EOD vs intraday endpoints; capture a small fixture under `scripts/tests/fixtures/`.
+- T3 depends_on: [T2] - `scripts/clients/thetadata_client.py` (honest UA, retry, no browser impersonation) + unit tests against the fixture.
+- T4 depends_on: [T3] - Wire into `fetch_skew.py` / `fetch_skew2d.py` (or a dedicated backfill mode): rehydrate pre-2023-09-06 ratios into `skew_history` / recompute 2d; document splice rules at the UW seam.
+- T5 depends_on: [T4] - Backfill Turso, verify SKEW + SKEW 2D series length and stats, screenshot tabs, ship.
+
+## Checklist
+
+- [ ] T1 Credentials + env contract.
+- [ ] T2 Endpoint research + fixture.
+- [ ] T3 Client + tests.
+- [ ] T4 Skew/skew2d backfill integration.
+- [ ] T5 Prod backfill + verify.
+
+## Notes
+
+- Rejected free substitutes for this construction: Cboe SKEW index, Cboe RXM (strategy P&L).
+- ORATS (2007+ summaries) remains a paid alternative if ThetaData depth or SPX coverage fails.
+
+## Review
+
+- Pending.
+
+---
+
+# Task: Repair Codex MCP startup (2026-08-09)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inspect effective Codex configuration and MCP startup diagnostics.
+- T2 depends_on: [T1] - Repair the `codex_apps` and `figma` initialization causes with minimal configuration changes.
+- T3 depends_on: [T2] - Re-run MCP startup checks and record verification.
+
+## Checklist
+
+- [x] T1 Inspect configuration and diagnostics.
+- [ ] T2 Repair affected MCP initialization.
+- [ ] T3 Verify both servers initialize.
+
+## Review
+
+- Pending.
+
+---
+
 # Task: Ship execution-linked return capital v2 (2026-08-08)
 
 ## Dependency graph
@@ -2213,3 +2317,9 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - Removed the shared ruled `.panel-edge-trace` gutter, its tone/fill variants, all rendered markup, and the compensating asymmetric padding from dashboard, scanner, alerts, flow-analysis, instrument, and loading shells. No replacement treatment was added.
 - Regression coverage rejects the class in CSS and every current source shell; desktop and mobile Playwright coverage confirms zero rendered traces, symmetric panel padding, and no repeating-gradient gutter. Visual screenshots were inspected at 2048px and 393px widths.
 - Verification: focused Vitest 11 passed; full Vitest 507 files / 5,194 tests passed; Playwright desktop 1 and mobile 1 passed; typecheck and lint passed; `git diff --check` passed. Next compile passed; the pre-existing output-trace audit remains red because `api/orders/place/route` includes 5,906 files / 9.09 GiB from `data/db_backups` and `data/journal_archive`.
+
+## Review — COR indicator (2026-08-09)
+
+- [x] COR (SPX implied correlation) shipped end to end via /indicator swarm: Cboe COR1M/3M/6M/1Y CSVs (2006->present, conditional GET), migration 0040 `cor_history`, `/api/cor`, `/regime/cor` tab (tenor chips, 6M percentile regime strip), radon-cor.timer daily 02:20 UTC.
+- Evidence: red (ModuleNotFoundError/5 vitest fails) -> per-worktree green -> merged full gates 5395 pytest + 735 cloud + 5516 vitest + typecheck -> live screenshot docs/indicators/cor-tab.png -> CI run 31340826946 green -> VPS timer installed + fired (service_health cor ok 23:07Z) -> prod browser verify.
+- Note: migration renumbered 0039->0040 mid-flight (skew2d claimed 39); lesson saved to memory.

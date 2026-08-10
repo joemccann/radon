@@ -182,7 +182,22 @@ test("portfolio renders isolated observed Return % and suppresses premium return
   await setupMocks(page);
   await page.goto("/portfolio", { waitUntil: "domcontentloaded" });
 
-  await expect(page.getByRole("columnheader", { name: /Return %/ }).first()).toBeVisible();
+  const returnHeader = page.getByRole("columnheader", { name: /Return %/ }).first();
+  await expect(returnHeader).toBeVisible();
+  const returnLabel = returnHeader.locator(".sort-label");
+  const returnLabelText = returnHeader.locator(".sort-label > span:first-child");
+  const returnHelp = returnHeader.locator("[data-sort-ignore='true']");
+  await expect(returnLabel).toHaveCSS("white-space", "nowrap");
+  const [labelBox, textBox, helpBox] = await Promise.all([
+    returnLabel.boundingBox(),
+    returnLabelText.boundingBox(),
+    returnHelp.boundingBox(),
+  ]);
+  expect(labelBox).not.toBeNull();
+  expect(textBox).not.toBeNull();
+  expect(helpBox).not.toBeNull();
+  expect(textBox!.height).toBeLessThanOrEqual(labelBox!.height);
+  expect(Math.abs((textBox!.y + textBox!.height / 2) - (helpBox!.y + helpBox!.height / 2))).toBeLessThanOrEqual(2);
 
   const spcxRow = page.locator("tr").filter({ hasText: "SPCX" });
   await expect(spcxRow).toHaveCount(1);
