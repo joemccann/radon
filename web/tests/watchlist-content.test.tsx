@@ -21,6 +21,7 @@ vi.mock("@/lib/useWatchlist", () => ({
     watchlist: [
       { id: "w1", symbol: "AAPL", sector: "Technology", added_at: "2026-07-01T12:00:00Z" },
       { id: "w2", symbol: "MSFT", sector: "Technology", added_at: "2026-07-02T12:00:00Z" },
+      { id: "w3", symbol: "NVDA", sector: "Semiconductors", added_at: "2026-06-30T12:00:00Z" },
     ],
     isLoading: false,
     isWatched: () => true,
@@ -83,5 +84,37 @@ describe("WatchlistContent", () => {
     fireEvent.click(remove);
     expect(mocks.toggleWatch).toHaveBeenCalledWith("AAPL");
     expect(mocks.push).not.toHaveBeenCalled();
+  });
+
+  it("sorts rows from every data-column header with accessible sort state", () => {
+    render(
+      <WatchlistContent
+        prices={{
+          AAPL: price(212, 210),
+          MSFT: price(498, 500),
+          NVDA: price(180, 150),
+        }}
+        portfolio={null}
+        orders={null}
+      />,
+    );
+
+    for (const label of ["Symbol", "Structure", "Mark", "Change", "Status", "Orders", "Added"]) {
+      expect(screen.getByRole("columnheader", { name: label })).toBeTruthy();
+    }
+
+    const symbols = () =>
+      screen.getAllByTestId(/watchlist-row-/).map((row) => row.getAttribute("data-testid"));
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Mark" }));
+    expect(symbols()).toEqual(["watchlist-row-NVDA", "watchlist-row-AAPL", "watchlist-row-MSFT"]);
+    expect(screen.getByRole("columnheader", { name: "Mark" }).getAttribute("aria-sort")).toBe("ascending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Mark" }));
+    expect(symbols()).toEqual(["watchlist-row-MSFT", "watchlist-row-AAPL", "watchlist-row-NVDA"]);
+    expect(screen.getByRole("columnheader", { name: "Mark" }).getAttribute("aria-sort")).toBe("descending");
+
+    fireEvent.click(screen.getByRole("button", { name: "Sort by Added" }));
+    expect(symbols()).toEqual(["watchlist-row-NVDA", "watchlist-row-AAPL", "watchlist-row-MSFT"]);
   });
 });

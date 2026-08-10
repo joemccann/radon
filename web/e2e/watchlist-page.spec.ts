@@ -169,4 +169,40 @@ test.describe("Watchlist page", () => {
     await expect(page).toHaveURL(/\/MSFT$/);
     await expect(page.locator(".cockpit-head")).toContainText("MSFT", { timeout: 10000 });
   });
+
+  test("sorts watchlist rows from column headers", async ({ page }) => {
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await stubApis(page);
+
+    await page.goto("/watchlist");
+
+    const symbolHeader = page.getByRole("columnheader", { name: "Symbol" });
+    const rows = page.locator(".watchlist-row");
+
+    await page.getByRole("button", { name: "Sort by Symbol" }).click();
+    await expect(symbolHeader).toHaveAttribute("aria-sort", "ascending");
+    expect(await rows.evaluateAll((items) => items.map((item) => item.getAttribute("data-testid")))).toEqual([
+      "watchlist-row-AAPL",
+      "watchlist-row-MSFT",
+    ]);
+
+    await page.getByRole("button", { name: "Sort by Symbol" }).click();
+    await expect(symbolHeader).toHaveAttribute("aria-sort", "descending");
+    expect(await rows.evaluateAll((items) => items.map((item) => item.getAttribute("data-testid")))).toEqual([
+      "watchlist-row-MSFT",
+      "watchlist-row-AAPL",
+    ]);
+  });
+
+  test("keeps the compact mobile watchlist layout", async ({ page }) => {
+    await page.setViewportSize({ width: 393, height: 852 });
+    await page.unrouteAll({ behavior: "ignoreErrors" });
+    await stubApis(page);
+
+    await page.goto("/watchlist");
+
+    await expect(page.locator(".watchlist-board__head")).toBeHidden();
+    await expect(page.getByTestId("watchlist-row-AAPL")).toBeVisible();
+    await expect(page.getByRole("button", { name: "Open AAPL instrument cockpit" })).toBeVisible();
+  });
 });

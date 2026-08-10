@@ -1,11 +1,13 @@
 "use client";
 
+import { ChevronDown, ChevronUp } from "lucide-react";
 import { useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { PriceData } from "@/lib/pricesProtocol";
 import type { OrdersData, PortfolioData, PortfolioPosition } from "@/lib/types";
 import { useWatchlist, type WatchlistEntry } from "@/lib/useWatchlist";
 import { fmtPrice } from "@/lib/positionUtils";
+import { useSort, type SortDirection } from "@/lib/useSort";
 import StarToggle from "@/components/StarToggle";
 
 type WatchlistContentProps = {
@@ -19,6 +21,16 @@ type WatchQuote = {
   abs: number | null;
   pct: number | null;
   tone: "positive" | "negative" | "neutral";
+};
+
+type WatchlistSortKey = "symbol" | "structure" | "mark" | "change" | "status" | "orders" | "added";
+
+type WatchlistRowData = {
+  entry: WatchlistEntry;
+  quote: WatchQuote;
+  position: PortfolioPosition | null;
+  orderCount: number;
+  label: string;
 };
 
 function quoteFor(price?: PriceData): WatchQuote {
@@ -50,23 +62,77 @@ function openOrderCount(symbol: string, orders: OrdersData | null | undefined): 
   return orders?.open_orders.filter((order) => order.contract.symbol === symbol).length ?? 0;
 }
 
+function watchlistSortValue(row: WatchlistRowData, key: WatchlistSortKey): string | number | null {
+  switch (key) {
+    case "symbol":
+      return row.entry.symbol;
+    case "structure":
+      return row.label;
+    case "mark":
+      return row.quote.last;
+    case "change":
+      return row.quote.pct;
+    case "status":
+      return row.position ? 1 : 0;
+    case "orders":
+      return row.orderCount;
+    case "added": {
+      const timestamp = Date.parse(row.entry.added_at);
+      return Number.isNaN(timestamp) ? null : timestamp;
+    }
+  }
+}
+
+function WatchlistSortHeader({
+  label,
+  sortKey,
+  activeKey,
+  direction,
+  onToggle,
+  numeric = false,
+}: {
+  label: string;
+  sortKey: WatchlistSortKey;
+  activeKey: WatchlistSortKey | null;
+  direction: SortDirection;
+  onToggle: (key: WatchlistSortKey) => void;
+  numeric?: boolean;
+}) {
+  const active = activeKey === sortKey;
+
+  return (
+    <span
+      className={`sortable-th watchlist-sort-header${numeric ? " right" : ""}${active ? " sort-active" : ""}`}
+      role="columnheader"
+      aria-label={label}
+      aria-sort={active ? (direction === "asc" ? "ascending" : "descending") : undefined}
+    >
+      <button type="button" className="watchlist-sort-button" aria-label={`Sort by ${label}`} onClick={() => onToggle(sortKey)}>
+        <span className="sort-label" aria-hidden="true">
+          <span>{label}</span>
+          <span className="sort-icon">
+            {active ? (
+              direction === "asc" ? <ChevronUp size={10} /> : <ChevronDown size={10} />
+            ) : (
+              <ChevronDown size={10} className="sort-icon-idle" />
+            )}
+          </span>
+        </span>
+      </button>
+    </span>
+  );
+}
+
 function WatchlistRow({
-  entry,
-  price,
-  position,
-  orderCount,
+  row,
   onOpen,
   onRemove,
 }: {
-  entry: WatchlistEntry;
-  price?: PriceData;
-  position: PortfolioPosition | null;
-  orderCount: number;
+  row: WatchlistRowData;
   onOpen: (symbol: string) => void;
   onRemove: (symbol: string) => void | Promise<void>;
 }) {
-  const quote = useMemo(() => quoteFor(price), [price]);
-  const label = position?.structure ?? entry.sector ?? "UNASSIGNED";
+  const { entry, quote, position, orderCount, label } = row;
 
   return (
     <li className="watchlist-row" data-testid={`watchlist-row-${entry.symbol}`}>
@@ -109,19 +175,33 @@ export default function WatchlistContent({
 }: WatchlistContentProps) {
   const router = useRouter();
   const { watchlist, isLoading, toggleWatch } = useWatchlist();
-  const priceMap = prices ?? {};
+
+  const rows = useMemo<WatchlistRowData[]>(
+    () => watchlist.map((entry) => {
+      const position = findPosition(entry.symbol, portfolio);
+      return {
+        entry,
+        quote: quoteFor(prices?.[entry.symbol]),
+        position,
+        orderCount: openOrderCount(entry.symbol, orders),
+        label: position?.structure ?? entry.sector ?? "UNASSIGNED",
+      };
+    }),
+    [orders, portfolio, prices, watchlist],
+  );
+  const { sorted, sort, toggle } = useSort<WatchlistRowData, WatchlistSortKey>(rows, watchlistSortValue);
 
   const stats = useMemo(() => {
     let held = 0;
     let openOrders = 0;
     let marked = 0;
-    for (const entry of watchlist) {
-      if (findPosition(entry.symbol, portfolio)) held += 1;
-      openOrders += openOrderCount(entry.symbol, orders);
-      if (priceMap[entry.symbol]?.last != null) marked += 1;
+    for (const row of rows) {
+      if (row.position) held += 1;
+      openOrders += row.orderCount;
+      if (row.quote.last != null) marked += 1;
     }
     return { held, openOrders, marked };
-  }, [orders, portfolio, priceMap, watchlist]);
+  }, [rows]);
 
   const handleOpen = useCallback(
     (symbol: string) => {
@@ -185,24 +265,21 @@ export default function WatchlistContent({
       </header>
 
       <div className="watchlist-board" aria-label="Watched symbols">
-        <div className="watchlist-board__head" aria-hidden="true">
-          <span>Symbol</span>
-          <span>Structure</span>
-          <span className="watchlist-board__head-num">Mark</span>
-          <span className="watchlist-board__head-num">Change</span>
-          <span>Status</span>
-          <span>Orders</span>
-          <span>Added</span>
+        <div className="watchlist-board__head" role="row">
+          <WatchlistSortHeader label="Symbol" sortKey="symbol" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <WatchlistSortHeader label="Structure" sortKey="structure" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <WatchlistSortHeader label="Mark" sortKey="mark" activeKey={sort.key} direction={sort.direction} onToggle={toggle} numeric />
+          <WatchlistSortHeader label="Change" sortKey="change" activeKey={sort.key} direction={sort.direction} onToggle={toggle} numeric />
+          <WatchlistSortHeader label="Status" sortKey="status" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <WatchlistSortHeader label="Orders" sortKey="orders" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
+          <WatchlistSortHeader label="Added" sortKey="added" activeKey={sort.key} direction={sort.direction} onToggle={toggle} />
           <span />
         </div>
         <ul className="watchlist-list">
-          {watchlist.map((entry) => (
+          {sorted.map((row) => (
             <WatchlistRow
-              key={entry.id}
-              entry={entry}
-              price={priceMap[entry.symbol]}
-              position={findPosition(entry.symbol, portfolio)}
-              orderCount={openOrderCount(entry.symbol, orders)}
+              key={row.entry.id}
+              row={row}
               onOpen={handleOpen}
               onRemove={handleRemove}
             />

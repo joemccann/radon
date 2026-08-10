@@ -1,5 +1,9 @@
 # Lessons
 
+## 2026-08-10 — Sortable metric headers must keep labels intact
+
+- A narrow numeric column can wrap `Return %` between the word and symbol while displacing its adjacent help control, even when the column is otherwise wide enough. Sortable label groups need an explicit no-wrap contract, and regression coverage must pin that contract rather than merely asserting that the header text exists.
+
 ## 2026-08-07 — Credit-position return must use risk capital, not net premium
 
 - `P&L / abs(net entry premium)` is only a premium-return statistic. For credit and undefined-risk structures it can report extreme percentages while ignoring the buying power used to carry short-option risk.

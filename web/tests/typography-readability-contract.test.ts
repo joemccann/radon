@@ -56,6 +56,10 @@ describe("typography readability contracts", () => {
     }
   });
 
+  it("keeps sortable metric labels and their help controls on one line", () => {
+    expect(ruleBlock(".position-return-header .sort-label")).toMatch(/white-space:\s*nowrap/);
+  });
+
   it("never irreversibly truncates service-health details", () => {
     expect(ruleBlock(".service-health-banner")).toMatch(/align-items:\s*flex-start/);
     expect(ruleBlock(".service-health-banner__message")).toMatch(/white-space:\s*normal/);

@@ -1580,8 +1580,36 @@ body {
   color: var(--text-muted);
 }
 
-.watchlist-board__head-num {
+.watchlist-sort-header {
+  min-width: 0;
+}
+
+.watchlist-sort-button {
+  width: 100%;
+  min-height: 32px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  text-align: inherit;
+  cursor: pointer;
+}
+
+.watchlist-sort-button:focus-visible {
+  outline: 1px solid var(--signal-core);
+  outline-offset: -2px;
+}
+
+.watchlist-sort-header.right .watchlist-sort-button {
   text-align: right;
+}
+
+.watchlist-sort-header.right .sort-label {
+  width: 100%;
+  justify-content: flex-end;
 }
 
 .watchlist-list {
@@ -6075,6 +6103,10 @@ tr.leg-row td {
 
 .sortable-th.right .sort-label {
   justify-content: flex-end;
+}
+
+.position-return-header .sort-label {
+  white-space: nowrap;
 }
 
 .sort-icon {
