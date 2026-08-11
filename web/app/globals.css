@@ -7784,6 +7784,69 @@ body[data-mobile="true"] .orders-command-strip__jump:active {
    owns the leftover height. Stretching centered its single row inside a giant
    empty border box (2026-08-04 mobile report). */
 .book-tab-only > .microstructure-strip { flex: 0 0 auto; }
+.book-tab-only > .combo-book-selector { flex: 0 0 auto; }
+
+.combo-book-selector {
+  display: flex;
+  align-self: flex-start;
+  align-items: stretch;
+  max-width: 100%;
+  margin-bottom: 8px;
+  border: 1px solid var(--line-grid);
+  border-radius: 4px;
+  background: var(--bg-panel);
+  overflow-x: auto;
+}
+
+.combo-book-selector__label {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 12px;
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  white-space: nowrap;
+}
+
+.combo-book-selector__button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 5px 12px;
+  border: 0;
+  border-left: 1px solid var(--line-grid);
+  background: var(--bg-panel);
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.combo-book-selector__button b {
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 600;
+}
+
+.combo-book-selector__button:hover,
+.combo-book-selector__button.active {
+  color: var(--signal-core-text);
+  background: color-mix(in srgb, var(--signal-core) 6%, var(--bg-panel));
+}
+
+.combo-book-selector__button.active b {
+  color: var(--text-primary);
+}
+
+.combo-book-selector__button:focus-visible {
+  outline: 1px solid var(--signal-core);
+  outline-offset: -2px;
+}
 /* OrderBook panel inside the cockpit: a single clean hairline bounded by the
    region gutter. Drops its own shadow so there is no doubled, smushed seam. */
 .book-region .book-window {
