@@ -284,14 +284,23 @@ test("mobile combo position shows STOCK|OPTION switcher", async ({ page }) => {
   await expect(stock).toHaveAttribute("aria-pressed", "false");
   await expect(option).toHaveClass(/(^|\s)on(\s|$)/);
   await expect(stock).not.toHaveClass(/(^|\s)on(\s|$)/);
-  await expect(page.locator(".ckh--mobile")).toContainText("$-0.40");
+  const legSelector = page.getByRole("group", { name: "Option leg book" });
+  await expect(legSelector).toBeVisible();
+  const callBook = page.getByRole("button", { name: "$247 Call book" });
+  const putBook = page.getByRole("button", { name: "$243 Put book" });
+  await expect(callBook).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".book-sym")).toContainText("IWM $247C");
+
+  await putBook.click();
+  await expect(putBook).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".book-sym")).toContainText("IWM $243P");
 
   await stock.click();
   await expect(stock).toHaveAttribute("aria-pressed", "true");
   await expect(option).toHaveAttribute("aria-pressed", "false");
   await expect(stock).toHaveClass(/(^|\s)on(\s|$)/);
   await expect(option).not.toHaveClass(/(^|\s)on(\s|$)/);
-  await expect(page.locator(".ckh--mobile")).toContainText("$244.65");
+  await expect(legSelector).toBeHidden();
 });
 
 test("STOCK|OPTION labels are vertically centered in their segments", async ({ page }) => {

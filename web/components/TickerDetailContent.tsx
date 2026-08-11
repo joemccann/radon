@@ -181,10 +181,21 @@ export default function TickerDetailContent({
   // key; else the ticker. Published upstream so `usePrices` opens the one scarce
   // depth ticket for exactly this subject.
   const focusedBookKey = useTickerDetailOptional()?.focusedBookKey ?? null;
+  const optionBookKeys = useMemo(
+    () => position?.legs
+      .map((leg) => legPriceKey(ticker, position.expiry, leg))
+      .filter((key): key is string => Boolean(key)) ?? [],
+    [position, ticker],
+  );
   // Viewing the underlying forces the stock subject, overriding the held
   // option's leg key (and any pinned combo leg).
-  const bookKey = viewUnderlying ? ticker : focusedBookKey ?? chartPriceKey ?? ticker;
+  const bookKey = viewUnderlying
+    ? ticker
+    : focusedBookKey ?? chartPriceKey ?? optionBookKeys[0] ?? ticker;
   const bookDepth = depths?.[bookKey] ?? null;
+  const bookPriceData = bookKey === chartPriceKey
+    ? priceData
+    : prices[bookKey] ?? null;
 
   // Prefer the depth book's NBBO for the quote bar when an entitled book is
   // streaming for this subject. The separate L1 priceData feed can deliver
@@ -218,7 +229,7 @@ export default function TickerDetailContent({
   const bookKind: "stock" | "option" | "future" = bookDepth?.kind
     ?? (isFuturesRoot(ticker) || (isIndexSymbol(ticker) && hasFuturesSupport(ticker))
       ? "future"
-      : !viewUnderlying && position && position.structure_type !== "Stock" && position.legs.length === 1
+      : !viewUnderlying && optionBookKeys.includes(bookKey)
         ? "option"
         : "stock");
 
@@ -277,6 +288,7 @@ export default function TickerDetailContent({
       tape={tape}
       bookKey={bookKey}
       bookKind={bookKind}
+      bookPriceData={bookPriceData}
       quotePriceData={quotePriceData}
       priceData={priceData}
       isSpreadNet={isSpreadNet}

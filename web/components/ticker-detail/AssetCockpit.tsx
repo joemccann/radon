@@ -31,6 +31,8 @@ export type AssetCockpitProps = {
   tape?: Record<string, Trade[]>;
   bookKey: string;
   bookKind: "stock" | "option" | "future";
+  /** L1 quote for the exact subject rendered in the Book pane. */
+  bookPriceData?: PriceData | null;
   /** Depth-NBBO-corrected quote; single source for the header scalars. */
   quotePriceData: PriceData | null;
   /** Resolved option/underlying price data threaded to the ticket + book. */
@@ -89,6 +91,7 @@ export default function AssetCockpit({
   tape,
   bookKey,
   bookKind,
+  bookPriceData,
   quotePriceData,
   priceData,
   isSpreadNet,
@@ -151,10 +154,10 @@ export default function AssetCockpit({
       <div className="book-region">
         <BookTab
           ticker={ticker}
-          position={position}
+          position={ticketPosition}
           prices={prices}
           openOrders={tickerOrders}
-          tickerPriceData={priceData}
+          tickerPriceData={bookPriceData === undefined ? priceData : bookPriceData}
           depths={depths}
           tape={tape}
           bookKey={bookKey}

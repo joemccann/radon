@@ -1,3 +1,27 @@
+# Task: Show option-spread books for focused positions (2026-08-11)
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace `posId` position focus into the cockpit depth subject and define the correct spread-book behavior.
+- T2 depends_on: [T1] - Add a failing regression for a focused multi-leg option position.
+- T3 depends_on: [T2] - Route the book surface to the focused option leg/spread subject without changing order semantics.
+- T4 depends_on: [T3] - Run focused/full tests and desktop visual verification; document results.
+
+## Checklist
+
+- [x] T1 Position-to-book selection traced.
+- [x] T2 Regression reproduces the stock-book fallback.
+- [x] T3 Option-spread book behavior implemented.
+- [x] T4 Verification passed and review recorded.
+
+## Review
+
+- Multi-leg positions previously had no single combo depth key, so the cockpit silently fell back to the underlying ticker's stock book.
+- The option view now defaults to the first tradeable leg, provides a persistent long/short leg selector, labels the exact contract, and keeps the spread quote isolated from each leg's book data; STOCK remains an explicit switch.
+- Verification: focused Vitest 38 passed; Playwright desktop 1 and mobile 2 passed; full Vitest 511 files / 5,263 tests passed; typecheck, lint, visual screenshot review, detector, and `git diff --check` passed.
+
+---
+
 # Task: Improve Return % table-header legibility (2026-08-10)
 
 ## Dependency graph
@@ -73,6 +97,7 @@ client + optional backfill path; keep UW as live primary (repo priority #2).
 
 ## Notes
 
+- **Purchase (thetadata.net/purchase, annual):** Options **Standard** + Indices **Value**; Stocks and Interest Rates off. FAQ: Options does not include index underlyings (SPX cash needs Indices). Pro tiers are live-trading overkill for daily backfill.
 - Rejected free substitutes for this construction: Cboe SKEW index, Cboe RXM (strategy P&L).
 - ORATS (2007+ summaries) remains a paid alternative if ThetaData depth or SPX coverage fails.
 
