@@ -339,6 +339,23 @@ describe("AssetCockpit — held combo fixture", () => {
   });
 });
 
+describe("AssetCockpit — Equibles reference decks", () => {
+  it.each([
+    ["h", "13F"],
+    ["f", "File"],
+  ])("the %s glyph is on the rail and opens its deck", (key, label) => {
+    const { container, onDeckChange } = renderCockpit({ activeDeck: null });
+    const rail = container.querySelector(".glyph-rail")!;
+    const glyph = [...rail.querySelectorAll(".glyph")].find(
+      (g) => g.querySelector(".glyph-k")?.textContent === key,
+    ) as HTMLElement;
+    expect(glyph).toBeTruthy();
+    expect(glyph.querySelector(".glyph-l")?.textContent).toBe(label);
+    fireEvent.click(glyph);
+    expect(onDeckChange).toHaveBeenCalledWith(key);
+  });
+});
+
 describe("instrument switch (held option ⟷ underlying stock)", () => {
   it("shows the static kind chip and no switcher when not switchable", () => {
     const { container } = renderCockpit({ canSwitchInstrument: false, bookKind: "option" });

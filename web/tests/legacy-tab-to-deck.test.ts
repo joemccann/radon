@@ -81,6 +81,11 @@ describe("VALID_DECKS membership", () => {
     }
   });
 
+  it("contains the Equibles reference decks so ?deck=h / ?deck=f survive a reload", () => {
+    expect(isValidDeck("h")).toBe(true);
+    expect(isValidDeck("f")).toBe(true);
+  });
+
   it("rejects non-deck strings", () => {
     expect(isValidDeck("book")).toBe(false);
     expect(isValidDeck("company")).toBe(false);

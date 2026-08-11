@@ -11,6 +11,8 @@ import NewsTab from "./NewsTab";
 import RatingsTab from "./RatingsTab";
 import SeasonalityTab from "./SeasonalityTab";
 import CompanyTab from "./CompanyTab";
+import SmartMoney13FPanel from "@/components/equibles/SmartMoney13FPanel";
+import FilingForensicsDossier from "@/components/equibles/FilingForensicsDossier";
 
 const DECK_TITLE: Record<DeckKey, string> = {
   c: "Chain",
@@ -19,12 +21,14 @@ const DECK_TITLE: Record<DeckKey, string> = {
   r: "Ratings",
   s: "Seasonal",
   i: "Info / Company",
+  h: "13F Smart Money",
+  f: "Filing Forensics",
   ":": "Command Palette",
   o: "Order Ticket",
 };
 
 /** Keys that open a deck via single-keystroke. */
-const OPEN_KEYS = new Set<string>(["c", "p", "n", "r", "s", "i", ":"]);
+const OPEN_KEYS = new Set<string>(["c", "p", "n", "r", "s", "i", "h", "f", ":"]);
 
 /**
  * Decks whose content is too wide for the 36% act column and so fly out across
@@ -143,6 +147,8 @@ export default function AssetDeck({
           />
         )}
         {activeDeck === "s" && <SeasonalityTab ticker={ticker} active={open} />}
+        {activeDeck === "h" && <SmartMoney13FPanel ticker={ticker} />}
+        {activeDeck === "f" && <FilingForensicsDossier ticker={ticker} active={open} />}
         {activeDeck === "i" && (
           <CompanyTab
             ticker={ticker}

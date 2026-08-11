@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "name": "Berkshire Hathaway Inc",
+      "cik": "1067983",
+      "shares": 300000000,
+      "value": 62400000000,
+      "percentOfTotal": 5.12,
+      "listedTicker": "AAPL",
+      "positionType": "SH"
+    }
+  ],
+  "meta": {
+    "reportDate": "2026-06-30",
+    "isCombinedQuarter": false,
+    "totalInstitutions": 4821,
+    "totalShares": 5862000000,
+    "totalValue": 1219000000000,
+    "limit": 500,
+    "offset": 0,
+    "count": 1,
+    "hasMore": false
+  }
+}
