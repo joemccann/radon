@@ -541,3 +541,40 @@ describe("GET /api/risk-free-rate", () => {
     expect(body.stale).toBe(true);
   });
 });
+
+describe("GET /api/preferences (FastAPI passthrough)", () => {
+  // Clerk is mocked per-test (doMock + doUnmock) so the shared module registry
+  // used by every other block in this file stays untouched.
+  it("returns 200 with the preferences payload for a signed-in user", async () => {
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn(async () => ({ userId: "user_smoke" })),
+    }));
+    mockRadonFetch.mockResolvedValueOnce({
+      preferences: [],
+      groups: ["Order Limits"],
+      store: { available: true, error: null, checked_at: "2026-08-11T17:02:11Z" },
+      generated_at: "2026-08-11T17:02:11Z",
+    });
+    const { GET } = await import("../app/api/preferences/route");
+    const res = await GET();
+    expectJsonResponse(res);
+    expect(res.status).toBe(200);
+    const body = (await jsonOf(res)) as Record<string, unknown>;
+    expect(Array.isArray(body.preferences)).toBe(true);
+    vi.doUnmock("@clerk/nextjs/server");
+  });
+
+  it("returns a 502 error envelope when FastAPI is unreachable", async () => {
+    vi.doMock("@clerk/nextjs/server", () => ({
+      auth: vi.fn(async () => ({ userId: "user_smoke" })),
+    }));
+    mockRadonFetch.mockRejectedValueOnce(new Error("connect ECONNREFUSED"));
+    const { GET } = await import("../app/api/preferences/route");
+    const res = await GET();
+    expectJsonResponse(res);
+    expect(res.status).toBe(502);
+    const body = (await jsonOf(res)) as Record<string, unknown>;
+    expect(body.code).toBe("UPSTREAM_ERROR");
+    vi.doUnmock("@clerk/nextjs/server");
+  });
+});

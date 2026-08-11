@@ -552,7 +552,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
             />
           ) : null}
 
-          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
+          {activeSection !== "dashboard" && activeSection !== "ticker-detail" && activeSection !== "watchlist" && activeSection !== "admin" && activeSection !== "preferences" && activeSection !== "profile" && activeSection !== "alerts" && activeSection !== "workflow" && !isOptionsWorkspace ? <div className={isStale ? "metric-cards--stale" : undefined}><MetricCards portfolio={portfolio} prices={prices} realizedPnl={todayRealizedPnl} executedOrders={executedOrders} section={activeSection} /></div> : null}
 
           {activeSection !== "dashboard" ? (
             <WorkspaceSections

@@ -221,6 +221,21 @@ export function ProfileGlyph(p: GlyphProps) {
   );
 }
 
+/* Preferences — three calibration slider tracks, each with a handle at a
+   different detent. Reads as a tuning bench rather than a generic gear. */
+export function PreferencesGlyph(p: GlyphProps) {
+  return (
+    <Glyph {...p}>
+      <path d="M3 6 L21 6" />
+      <path d="M3 12 L21 12" />
+      <path d="M3 18 L21 18" />
+      <rect x="6" y="4" width="3" height="4" />
+      <rect x="14" y="10" width="3" height="4" />
+      <rect x="9" y="16" width="3" height="4" />
+    </Glyph>
+  );
+}
+
 /* Performance — spectral bars stacked vertically. Kept available for
    when the Performance route is unhidden in lib/data.ts. */
 export function PerformanceGlyph(p: GlyphProps) {

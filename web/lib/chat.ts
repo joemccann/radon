@@ -375,6 +375,10 @@ export function resolveSectionFromPath(pathname: string | null, fallback: Worksp
     return "admin";
   }
 
+  if (pathname.startsWith("/preferences")) {
+    return "preferences";
+  }
+
   if (pathname.startsWith("/profile")) {
     return "profile";
   }
