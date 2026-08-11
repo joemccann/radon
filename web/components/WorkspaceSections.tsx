@@ -116,6 +116,7 @@ import type { ModifyOrderRequest } from "@/lib/orderModify";
 import RegimePanel from "./RegimePanel";
 import CtaPage from "./CtaPage";
 import AdminWorkspace from "./admin/AdminWorkspace";
+import PreferencesSection from "./PreferencesSection";
 import ProfileContent from "./profile/ProfileContent";
 import WatchlistContent from "./watchlist/WatchlistContent";
 import PerformancePanel from "./PerformancePanel";
@@ -4111,6 +4112,8 @@ function WorkspaceSections({ section, portfolio, portfolioLastSync, orders, pric
       return <WorkflowComposer />;
     case "admin":
       return <AdminWorkspace />;
+    case "preferences":
+      return <PreferencesSection />;
     case "profile":
       return <ProfileContent prices={prices} />;
     case "watchlist":
