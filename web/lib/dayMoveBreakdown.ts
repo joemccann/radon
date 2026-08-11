@@ -97,9 +97,10 @@ function quoteLabelsForPosition(
  * Precedence (must match operator expectation vs TWS):
  *   1. `pos.ib_daily_pnl` — IB reqPnLSingle, no quotes required. Handles
  *      same-day opens and intraday adds correctly.
- *   2. Same-day options — entry-cost baseline via getTodayPnlDollars (prior
- *      close is meaningless when the position did not exist yesterday).
- *   3. Stock close-based with SHORT sign awareness + last/mid.
+ *   2. Same-day positions (stocks AND options) — entry-cost baseline via
+ *      getTodayPnlDollars (prior close is meaningless when the position did
+ *      not exist yesterday).
+ *   3. Overnight stock — close-based with SHORT sign awareness + last/mid.
  *   4. Overnight options — last/mid vs prior close.
  */
 export function computeDayMoveBreakdown(
@@ -128,8 +129,11 @@ export function computeDayMoveBreakdown(
       continue;
     }
 
-    // 2. Same-day options: entry baseline (shared with position-table Today P&L).
-    if (pos.structure_type !== "Stock" && isSameDay(pos)) {
+    // 2. Same-day positions: entry baseline (shared with position-table Today
+    //    P&L). Equities included — a stock opened today has no prior close of
+    //    its own either, and a stock-only exception here made the Day P&L card
+    //    disagree with the Today P&L column it summarises.
+    if (isSameDay(pos)) {
       const todayPnl = getTodayPnlDollars(pos, prices);
       if (todayPnl == null) continue;
       total += todayPnl;
