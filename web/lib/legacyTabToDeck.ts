@@ -4,9 +4,10 @@
  * The cockpit replaces the old 8-tab ticker view. The hot path (book, ticket,
  * position) is always docked, so it has no deck key. Reference surfaces open a
  * deck over the Act column:
- *   c = chain, p = position (expand), n = news, r = ratings, s = seasonality, i = info
+ *   c = chain, p = position (expand), n = news, r = ratings, s = seasonality,
+ *   i = info, h = 13F holders, f = filing forensics
  */
-export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i";
+export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f";
 
 export const VALID_DECKS: ReadonlySet<DeckKey> = new Set<DeckKey>([
   "c",
@@ -15,6 +16,8 @@ export const VALID_DECKS: ReadonlySet<DeckKey> = new Set<DeckKey>([
   "r",
   "s",
   "i",
+  "h",
+  "f",
 ]);
 
 /**
