@@ -30,7 +30,7 @@ export type AssetCockpitProps = {
   depths?: Record<string, DepthBook>;
   tape?: Record<string, Trade[]>;
   bookKey: string;
-  bookKind: "stock" | "option" | "future";
+  bookKind: "stock" | "option" | "future" | "combo";
   /** L1 quote for the exact subject rendered in the Book pane. */
   bookPriceData?: PriceData | null;
   /** Depth-NBBO-corrected quote; single source for the header scalars. */

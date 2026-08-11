@@ -134,7 +134,7 @@ export type DepthNbbo = {
 
 export type DepthBook = {
   symbol: string; // same keyspace as PriceData.symbol (ticker | optionKey | future)
-  kind: "stock" | "option" | "future";
+  kind: "stock" | "option" | "future" | "combo";
   bid: DepthLevel[]; // index 0 = inside/best
   ask: DepthLevel[]; // index 0 = inside/best
   isSmartDepth: boolean; // true equities/options, false futures

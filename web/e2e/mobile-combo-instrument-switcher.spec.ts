@@ -202,7 +202,32 @@ async function installMockWebSocket(page: Page) {
           action?: string;
           symbols?: string[];
           contracts?: Array<{ symbol: string; expiry: string; strike: number; right: "C" | "P" }>;
+          symbol?: string;
+          expiry?: string;
+          strike?: number;
+          right?: "C" | "P";
         };
+        if (message.action === "subscribe-depth" && message.symbol && message.expiry && message.strike != null && message.right) {
+          const key = `${message.symbol.toUpperCase()}_${message.expiry.replace(/-/g, "")}_${message.strike}_${message.right}`;
+          const quote = priceFixtures[key] as { bid?: number; ask?: number } | undefined;
+          if (quote?.bid != null && quote.ask != null) {
+            this.emit({
+              type: "depth",
+              symbol: key,
+              data: {
+                symbol: key,
+                kind: "option",
+                bid: [{ price: quote.bid, size: 10, marketMaker: null, exchange: "CBOE", nbbo: true }],
+                ask: [{ price: quote.ask, size: 10, marketMaker: null, exchange: "BOX", nbbo: true }],
+                isSmartDepth: true,
+                feed: "OPRA BBO",
+                entitled: true,
+                timestamp: new Date().toISOString(),
+              },
+            });
+          }
+          return;
+        }
         if (message.action !== "subscribe") return;
 
         const updates: Record<string, unknown> = {};
@@ -256,6 +281,9 @@ async function stubApis(page: Page) {
   await page.route("**/api/ib-status", (route) =>
     route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ connected: true }) }),
   );
+  await page.route("**/api/ib/ws-ticket", (route) =>
+    route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ticket: "test" }) }),
+  );
   await page.route("**/api/blotter", (route) =>
     route.fulfill({
       status: 200,
@@ -268,12 +296,13 @@ async function stubApis(page: Page) {
   );
 }
 
-test("mobile combo position shows STOCK|OPTION switcher", async ({ page }) => {
+test("mobile combo position shows STOCK|OPTION switcher", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await installMockWebSocket(page);
   await stubApis(page);
 
   await page.goto("/IWM?posId=12");
-  await expect(page.locator(".cockpit--mobile")).toBeVisible();
+  await expect(page.locator(".cockpit--mobile")).toBeVisible({ timeout: 30_000 });
 
   const switcher = page.getByRole("group", { name: "Instrument view" });
   await expect(switcher).toBeVisible();
@@ -284,12 +313,22 @@ test("mobile combo position shows STOCK|OPTION switcher", async ({ page }) => {
   await expect(stock).toHaveAttribute("aria-pressed", "false");
   await expect(option).toHaveClass(/(^|\s)on(\s|$)/);
   await expect(stock).not.toHaveClass(/(^|\s)on(\s|$)/);
-  const legSelector = page.getByRole("group", { name: "Option leg book" });
+  const legSelector = page.getByRole("group", { name: "Spread and option leg book" });
   await expect(legSelector).toBeVisible();
+  const spreadBook = page.getByRole("button", { name: "Implied spread book" });
   const callBook = page.getByRole("button", { name: "$247 Call book" });
   const putBook = page.getByRole("button", { name: "$243 Put book" });
-  await expect(callBook).toHaveAttribute("aria-pressed", "true");
-  await expect(page.locator(".book-sym")).toContainText("IWM $247C");
+  await expect(spreadBook).toHaveAttribute("aria-pressed", "true");
+  await expect(page.locator(".book-sym")).toContainText("IWM $247C/$243P");
+  await expect(page.locator(".book-kind")).toHaveText("IMPLIED SPREAD");
+  await expect(page.locator(".book-window")).toContainText("-0.46");
+  await expect(page.locator(".book-window")).toContainText("-0.34");
+  const screenshotPath = testInfo.outputPath("implied-spread-book-mobile.png");
+  await page.screenshot({ path: screenshotPath, fullPage: true });
+  await testInfo.attach("implied-spread-book-mobile", {
+    path: screenshotPath,
+    contentType: "image/png",
+  });
 
   await putBook.click();
   await expect(putBook).toHaveAttribute("aria-pressed", "true");
@@ -304,6 +343,7 @@ test("mobile combo position shows STOCK|OPTION switcher", async ({ page }) => {
 });
 
 test("STOCK|OPTION labels are vertically centered in their segments", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 });
   await installMockWebSocket(page);
   await stubApis(page);
 

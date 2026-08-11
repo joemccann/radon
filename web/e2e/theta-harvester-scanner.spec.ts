@@ -150,7 +150,7 @@ async function stubApis(page: Page, scanBodies: unknown[] = []) {
 }
 
 test.describe("theta harvester scanner", () => {
-  test("desktop renders the theta mode table and scan action", async ({ page }) => {
+  test("desktop renders the theta mode table and scan action", async ({ page }, testInfo) => {
     const scanBodies: unknown[] = [];
     await stubApis(page, scanBodies);
 
@@ -159,20 +159,38 @@ test.describe("theta harvester scanner", () => {
     const section = page.getByTestId("theta-harvester-section");
     await expect(section).toBeVisible();
     await expect(section).toContainText("Theta Harvester");
-    await expect(section.locator("table")).toBeVisible();
+    await expect(section.getByTestId("theta-grid")).toBeVisible();
     await expect(section).toContainText("AAPL");
     await expect(section).toContainText("SHORT 95P / 105C");
     await expect(section).toContainText("TRUE THETA");
-    await expect(section).toContainText("+23.0 pt / 2.92x");
+    await expect(section).toContainText("+23.0 pt");
+    await expect(section).toContainText("2.92×");
+
+    const headerGeometry = await section.locator(".instrument-section__header").evaluate((header) => {
+      const heading = header.querySelector<HTMLElement>(".instrument-section__heading");
+      const controls = header.querySelector<HTMLElement>(".instrument-section__controls");
+      if (!heading || !controls) throw new Error("Theta scanner header regions are missing");
+      const headerRect = header.getBoundingClientRect();
+      const headingRect = heading.getBoundingClientRect();
+      const controlsRect = controls.getBoundingClientRect();
+      return {
+        headingShare: headingRect.width / headerRect.width,
+        controlsRightGap: headerRect.right - controlsRect.right,
+      };
+    });
+    expect(headerGeometry.headingShare).toBeLessThan(0.25);
+    expect(headerGeometry.controlsRightGap).toBeLessThanOrEqual(17);
 
     await page.getByRole("button", { name: /scan ndx/i }).click();
     await expect.poll(() => scanBodies.length).toBe(1);
-    expect(scanBodies[0]).toEqual({ preset: "ndx100" });
+    expect(scanBodies[0]).toEqual({ preset: "ndx100", min_dte: 7, max_dte: 45, min_credit: 0 });
 
     await page.getByLabel("Ticker symbol").fill("mu");
     await page.getByRole("button", { name: /^scan$/i }).click();
     await expect.poll(() => scanBodies.length).toBe(2);
     expect(scanBodies[1]).toEqual({ ticker: "MU" });
+
+    await page.screenshot({ path: testInfo.outputPath("theta-harvester-aligned.png"), fullPage: true });
   });
 
   test("mobile renders theta cards without horizontal overflow", async ({ page }) => {

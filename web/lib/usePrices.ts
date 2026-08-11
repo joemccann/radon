@@ -27,6 +27,9 @@ export type PriceUpdate = {
   receivedAt: Date;
 };
 
+/** Mirrors the relay's MAX_CONCURRENT_DEPTH guard. */
+export const MAX_FOCUSED_DEPTH_SUBJECTS = 3;
+
 export type UsePricesOptions = {
   /** Symbols to subscribe to (stock tickers) */
   symbols: string[];
@@ -44,6 +47,9 @@ export type UsePricesOptions = {
    * already part of `symbols`/`contracts`.
    */
   depthSymbol?: string | null;
+  /** Multiple simultaneous depth subjects. Used by two-leg implied spread books.
+   * Takes precedence over `depthSymbol`; bounded by the relay's ticket cap. */
+  depthSymbols?: string[];
   /**
    * For a futures/index depth subject, the order-ticket selected contract's
    * expiry (YYYYMMDD or YYYYMM). The depth KEY stays `depthSymbol`; this expiry
@@ -114,6 +120,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     indexes = [],
     enabled = true,
     depthSymbol = null,
+    depthSymbols = [],
     depthExpiry = null,
     onPriceUpdate,
     onConnectionChange,
@@ -158,9 +165,9 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   // optional selected future expiry separately, but dedupe/diff on the PAIR
   // (symbol + "|" + expiry) so changing ONLY the expiry still re-fires
   // subscribe-depth (the relay swaps the resolved contract under the same key).
-  const desiredDepthRef = useRef<string | null>(null);
+  const desiredDepthRef = useRef<string[]>([]);
   const desiredDepthExpiryRef = useRef<string | null>(null);
-  const lastSentDepthKeyRef = useRef<string | null>(null);
+  const lastSentDepthKeysRef = useRef<string[]>([]);
 
   // Callback refs (avoid stale closures in WS handlers)
   const onPriceUpdateRef = useRef(onPriceUpdate);
@@ -196,6 +203,17 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
 
   const normalizedDepthSymbol =
     depthSymbol && depthSymbol.trim().length > 0 ? depthSymbol.trim() : null;
+  const depthSymbolsHash = depthSymbols.map((symbol) => symbol.trim()).filter(Boolean).sort().join(",");
+  const normalizedDepthSymbols = useMemo(() => {
+    const requested = depthSymbols.length > 0
+      ? depthSymbols
+      : normalizedDepthSymbol
+        ? [normalizedDepthSymbol]
+        : [];
+    return [...new Set(requested.map((symbol) => symbol.trim()).filter(Boolean))]
+      .sort()
+      .slice(0, MAX_FOCUSED_DEPTH_SUBJECTS);
+  }, [depthSymbolsHash, normalizedDepthSymbol]); // eslint-disable-line react-hooks/exhaustive-deps -- content hash stabilizes caller arrays
   const normalizedDepthExpiry =
     depthExpiry && depthExpiry.trim().length > 0 ? depthExpiry.trim() : null;
 
@@ -207,7 +225,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
   };
   enabledRef.current = enabled;
   hasSubscriptionsRef.current = hasSubscriptions;
-  desiredDepthRef.current = normalizedDepthSymbol;
+  desiredDepthRef.current = normalizedDepthSymbols;
   desiredDepthExpiryRef.current = normalizedDepthExpiry;
   onPriceUpdateRef.current = onPriceUpdate;
   onConnectionChangeRef.current = onConnectionChange;
@@ -359,50 +377,43 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
     [buildHash],
   );
 
-  /**
-   * Send subscribe-depth / unsubscribe-depth for the single focused symbol.
-   * Mirrors `syncSubscriptions` diff discipline but for the scarce depth
-   * ticket: on a focus change the old key is unsubscribed and evicted from
-   * `depths` before the new key subscribes.
-   */
+  /** Diff the bounded set of focused depth subjects. A normal book has one;
+   * an implied two-leg spread has two. Unchanged books remain resident. */
   const syncDepth = useCallback((ws: WebSocket) => {
     if (ws.readyState !== WebSocket.OPEN) return;
 
     const desired = desiredDepthRef.current;
     const desiredExpiry = desiredDepthExpiryRef.current;
-    // Diff on the PAIR so changing ONLY the expiry (same index symbol) still
-    // re-sends subscribe-depth and the relay swaps the resolved future.
-    const desiredKey = desired ? `${desired}|${desiredExpiry ?? ""}` : null;
-    const previousKey = lastSentDepthKeyRef.current;
-    if (desiredKey === previousKey) return; // No change
+    const desiredKeys = desired.map((symbol) =>
+      `${symbol}|${desired.length === 1 ? desiredExpiry ?? "" : ""}`,
+    );
+    const previousKeys = lastSentDepthKeysRef.current;
+    if (desiredKeys.join(",") === previousKeys.join(",")) return;
 
-    // The depths/tape maps are keyed by the bare symbol, not the pair. When the
-    // expiry changes for the SAME symbol the relay re-uses that key (swap in
-    // place), so only evict the previous book when the SYMBOL itself changed.
-    const previousSymbol = previousKey ? previousKey.split("|")[0] : null;
-    const symbolChanged = previousSymbol !== desired;
+    const desiredKeySet = new Set(desiredKeys);
+    const previousKeySet = new Set(previousKeys);
+    const removedKeys = previousKeys.filter((key) => !desiredKeySet.has(key));
+    const addedKeys = desiredKeys.filter((key) => !previousKeySet.has(key));
+    const desiredSymbols = new Set(desired);
+    const removedSymbols = [...new Set(removedKeys.map((key) => key.split("|")[0]))]
+      .filter((symbol) => !desiredSymbols.has(symbol));
 
-    if (previousSymbol && symbolChanged) {
+    for (const previousSymbol of removedSymbols) {
       ws.send(
         JSON.stringify({ action: "unsubscribe-depth", symbol: previousSymbol }),
       );
-      setDepths((prev) => {
-        if (!(previousSymbol in prev)) return prev;
-        const next = { ...prev };
-        delete next[previousSymbol];
-        return next;
-      });
-      // The tape rides the same focused depth symbol — evict it together so a
-      // focus switch never leaves a stale tape behind.
-      setTape((prev) => {
-        if (!(previousSymbol in prev)) return prev;
-        const next = { ...prev };
-        delete next[previousSymbol];
-        return next;
-      });
+    }
+    if (removedSymbols.length > 0) {
+      setDepths((prev) => Object.fromEntries(
+        Object.entries(prev).filter(([symbol]) => !removedSymbols.includes(symbol)),
+      ));
+      setTape((prev) => Object.fromEntries(
+        Object.entries(prev).filter(([symbol]) => !removedSymbols.includes(symbol)),
+      ));
     }
 
-    if (desired) {
+    for (const desiredKey of addedKeys) {
+      const [desiredSymbol, expiry = ""] = desiredKey.split("|");
       // A focused single-leg OPTION subject is keyed by its composite option
       // key (SYMBOL_YYYYMMDD_STRIKE_RIGHT). The relay's option-depth branch
       // needs the STRUCTURED contract fields (expiry/strike/right) to build the
@@ -410,7 +421,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       // bogus stock contract and emits depth-unavailable, so the panel degrades
       // to the L1 fallback. Decompose the key here so the relay re-derives the
       // SAME key via its own optionKey() and echoes the book under it.
-      const optionContract = parseOptionKey(desired);
+      const optionContract = parseOptionKey(desiredSymbol);
       let payload: Record<string, unknown>;
       if (optionContract) {
         payload = {
@@ -420,22 +431,22 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
           strike: optionContract.strike,
           right: optionContract.right,
         };
-      } else if (desiredExpiry) {
+      } else if (expiry) {
         // Futures/index subject with a selected expiry: tell the relay to
         // resolve THIS listed future (not the front month) under the same key.
         payload = {
           action: "subscribe-depth",
-          symbol: desired,
+          symbol: desiredSymbol,
           instrument: "future",
-          expiry: desiredExpiry,
+          expiry,
         };
       } else {
-        payload = { action: "subscribe-depth", symbol: desired };
+        payload = { action: "subscribe-depth", symbol: desiredSymbol };
       }
       ws.send(JSON.stringify(payload));
     }
 
-    lastSentDepthKeyRef.current = desiredKey;
+    lastSentDepthKeysRef.current = desiredKeys;
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -519,7 +530,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       lastSentHashRef.current = "";
       syncSubscriptions(ws);
       // Depth resubscribes from scratch on every fresh socket.
-      lastSentDepthKeyRef.current = null;
+      lastSentDepthKeysRef.current = [];
       syncDepth(ws);
       wsLog("open", { gen });
 
@@ -663,7 +674,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       setIbStatusMessage(null);
       onConnectionChangeRef.current?.(false);
       lastSentHashRef.current = ""; // Next connect must full-sync
-      lastSentDepthKeyRef.current = null; // Depth re-subscribes on reconnect
+      lastSentDepthKeysRef.current = []; // Depth re-subscribes on reconnect
       wsLog("close", { gen });
       scheduleReconnectRef.current();
     };
@@ -821,7 +832,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       }
       connStateRef.current = "idle";
       lastSentHashRef.current = "";
-      lastSentDepthKeyRef.current = null;
+      lastSentDepthKeysRef.current = [];
       setConnected(false);
       onConnectionChangeRef.current?.(false);
     }
@@ -840,7 +851,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       }
       connStateRef.current = "idle";
       lastSentHashRef.current = "";
-      lastSentDepthKeyRef.current = null;
+      lastSentDepthKeysRef.current = [];
     };
   }, [enabled, hasSubscriptions, connect, clearReconnectTimer, clearStalenessTimer, clearOpenTimer]);
 
@@ -866,7 +877,7 @@ export function usePrices(options: UsePricesOptions): UsePricesReturn {
       syncDepth(ws);
     }
     // If still connecting, onopen will flush via syncDepth
-  }, [normalizedDepthSymbol, normalizedDepthExpiry, syncDepth]);
+  }, [depthSymbolsHash, normalizedDepthSymbol, normalizedDepthExpiry, syncDepth]);
 
   return {
     prices,

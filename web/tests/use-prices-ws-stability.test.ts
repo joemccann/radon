@@ -76,6 +76,65 @@ beforeEach(() => {
 afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); });
 
 describe("Connection stability", () => {
+  it("caps simultaneous depth subjects at the relay's three-ticket budget", async () => {
+    renderHook(() => usePrices({
+      symbols: ["SLV"],
+      depthSymbols: [
+        "SLV_20261016_50_C",
+        "SLV_20261016_55_C",
+        "SLV_20261016_60_C",
+        "SLV_20261016_65_C",
+      ],
+      enabled: true,
+    }));
+    await flush();
+    const ws = latestWs();
+    act(() => ws.simulateOpen());
+    expect(sentMessages(ws).filter((message) => message.action === "subscribe-depth")).toHaveLength(3);
+  });
+
+  it("diffs simultaneous option depth subjects without recycling retained books", async () => {
+    const longKey = "SLV_20261016_60_C";
+    const shortKey = "SLV_20261016_70_C";
+    const nextKey = "SLV_20261016_75_C";
+    const { rerender } = renderHook(
+      (props: { depthSymbols: string[] }) => usePrices({
+        symbols: ["SLV"],
+        contracts: [
+          { symbol: "SLV", expiry: "20261016", strike: 60, right: "C" },
+          { symbol: "SLV", expiry: "20261016", strike: 70, right: "C" },
+          { symbol: "SLV", expiry: "20261016", strike: 75, right: "C" },
+        ],
+        depthSymbols: props.depthSymbols,
+        enabled: true,
+      }),
+      { initialProps: { depthSymbols: [longKey, shortKey] } },
+    );
+    await flush();
+    const ws = latestWs();
+    act(() => ws.simulateOpen());
+
+    const initialDepth = sentMessages(ws).filter((message) => message.action === "subscribe-depth");
+    expect(initialDepth).toEqual(expect.arrayContaining([
+      expect.objectContaining({ symbol: "SLV", expiry: "20261016", strike: 60, right: "C" }),
+      expect.objectContaining({ symbol: "SLV", expiry: "20261016", strike: 70, right: "C" }),
+    ]));
+
+    const beforeNoop = ws.sent.length;
+    rerender({ depthSymbols: [shortKey, longKey] });
+    await flush();
+    expect(ws.sent).toHaveLength(beforeNoop);
+
+    rerender({ depthSymbols: [longKey, nextKey] });
+    await flush();
+    const delta = sentMessages(ws).slice(beforeNoop);
+    expect(delta).toContainEqual({ action: "unsubscribe-depth", symbol: shortKey });
+    expect(delta).toContainEqual(expect.objectContaining({
+      action: "subscribe-depth", symbol: "SLV", expiry: "20261016", strike: 75, right: "C",
+    }));
+    expect(delta).not.toContainEqual({ action: "unsubscribe-depth", symbol: longKey });
+  });
+
   it("does not recreate WS when symbols change", async () => {
     const { rerender } = renderHook(
       (props: { symbols: string[] }) => usePrices({ symbols: props.symbols, enabled: true }),

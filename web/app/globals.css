@@ -12421,6 +12421,17 @@ tr {
   min-width: 0;
 }
 
+/* Theta's dense control rail should own the flexible header space. Letting
+   both regions grow equally made the compact title read as a half-width
+   module while its controls appeared detached on the opposite side. */
+.theta-harvester .instrument-section__heading {
+  flex: 0 1 auto;
+}
+
+.theta-harvester .instrument-section__controls {
+  flex: 1 1 auto;
+}
+
 /* ─── Journal date range + P&L strip ──────────────────── */
 
 .journal-range-bar {

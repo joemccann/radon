@@ -7,7 +7,7 @@ import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions, useOrderActionsOptional } from "@/lib/OrderActionsContext";
-import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveEntryCost, resolveNaturalSpreadQuote } from "@/lib/positionUtils";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
@@ -648,6 +648,18 @@ function ComboOrderForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
+  const tickerDetail = useTickerDetailOptional();
+  const prefillNonce = tickerDetail?.orderPrefill?.nonce;
+
+  useEffect(() => {
+    const prefill = tickerDetail?.orderPrefill;
+    if (!prefill) return;
+    setLimitPrice(prefill.price.toFixed(2));
+    if (prefill.action) setAction(prefill.action);
+    setConfirmStep(false);
+    // A repeated click at the same price must still reapply after manual edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillNonce]);
 
   // Combo leg actions define the SPREAD STRUCTURE, not the trade direction.
   // IB reverses all leg actions when Order.action = SELL.
@@ -671,26 +683,8 @@ function ComboOrderForm({
   // long adds, short subtracts. Credit spreads are negative, debit spreads
   // are positive. Same math as `resolveSpreadPriceData`.
   const netPrices = useMemo(() => {
-    let netBid = 0;
-    let netAsk = 0;
-    let allAvailable = true;
-
-    for (const leg of position.legs) {
-      const key = legPriceKey(ticker, position.expiry, leg);
-      if (!key) { allAvailable = false; break; }
-      const lp = prices[key];
-      if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
-
-      const sign = leg.direction === "LONG" ? 1 : -1;
-      netBid += sign * lp.bid;
-      netAsk += sign * lp.ask;
-    }
-
-    if (!allAvailable) return { bid: null, ask: null, mid: null };
-    const bid = Math.min(netBid, netAsk);
-    const ask = Math.max(netBid, netAsk);
-    const mid = (bid + ask) / 2;
-    return { bid, ask, mid };
+    return resolveNaturalSpreadQuote(ticker, position, prices)
+      ?? { bid: null, ask: null, mid: null };
   }, [position, prices, ticker]);
 
   const parsedQty = parseInt(quantity, 10);

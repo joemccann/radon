@@ -24,7 +24,7 @@ export default function TickerWorkspace({ ticker, theme }: TickerWorkspaceProps)
     orders,
     getDepths,
     getTape,
-    setDepthSymbol,
+    setDepthSymbols,
   } = useTickerDetail();
 
   const prices = getPrices();
@@ -89,7 +89,7 @@ export default function TickerWorkspace({ ticker, theme }: TickerWorkspaceProps)
         orders={orders}
         depths={depths}
         tape={tape}
-        onDepthSymbolChange={setDepthSymbol}
+        onDepthSymbolsChange={setDepthSymbols}
         theme={theme}
       />
     </div>
