@@ -11,6 +11,7 @@ import { isDeckKey } from "@/lib/legacyTabToDeck";
 import AssetCockpit, { type DeckKey } from "./ticker-detail/AssetCockpit";
 import { useStockState } from "@/lib/useStockState";
 import { useTickerDetailOptional } from "@/lib/TickerDetailContext";
+import { MAX_FOCUSED_DEPTH_SUBJECTS } from "@/lib/usePrices";
 
 /**
  * Resolve the best price data for the shared ticker quote telemetry wrapper.
@@ -121,9 +122,9 @@ export type TickerDetailContentProps = {
   depths?: Record<string, DepthBook>;
   /** Time & Sales tape keyed by symbol, from the same `usePrices` call. */
   tape?: Record<string, Trade[]>;
-  /** Publish the resolved focused book key upstream so `usePrices` subscribes
-   *  L2 depth for exactly the open subject (null releases the ticket). */
-  onDepthSymbolChange?: (key: string | null) => void;
+  /** Publish the bounded focused depth set. Implied two-leg books subscribe to
+   * both option subjects; direct stock/leg/future books subscribe to one. */
+  onDepthSymbolsChange?: (keys: string[]) => void;
   theme: "dark" | "light";
 };
 
@@ -138,7 +139,7 @@ export default function TickerDetailContent({
   orders,
   depths,
   tape,
-  onDepthSymbolChange,
+  onDepthSymbolsChange,
   theme,
 }: TickerDetailContentProps) {
   const position: PortfolioPosition | null = useMemo(() => {
@@ -181,19 +182,27 @@ export default function TickerDetailContent({
   // key; else the ticker. Published upstream so `usePrices` opens the one scarce
   // depth ticket for exactly this subject.
   const focusedBookKey = useTickerDetailOptional()?.focusedBookKey ?? null;
-  const optionBookKeys = useMemo(
-    () => position?.legs
-      .map((leg) => legPriceKey(ticker, position.expiry, leg))
-      .filter((key): key is string => Boolean(key)) ?? [],
+  const comboBookKeys = useMemo(
+    () => [...new Set(position?.legs
+      .map((leg) => leg.type === "Stock" ? ticker : legPriceKey(ticker, position.expiry, leg))
+      .filter((key): key is string => Boolean(key)) ?? [])],
     [position, ticker],
   );
+  const comboBookKey = position && position.legs.length >= 2 && comboBookKeys.length >= 2
+    ? comboBookKeys.join("+")
+    : null;
+  const applicableFocusedBookKey = focusedBookKey && comboBookKeys.includes(focusedBookKey)
+    ? focusedBookKey
+    : null;
   // Viewing the underlying forces the stock subject, overriding the held
   // option's leg key (and any pinned combo leg).
   const bookKey = viewUnderlying
     ? ticker
-    : focusedBookKey ?? chartPriceKey ?? optionBookKeys[0] ?? ticker;
+    : applicableFocusedBookKey ?? comboBookKey ?? chartPriceKey ?? comboBookKeys[0] ?? ticker;
   const bookDepth = depths?.[bookKey] ?? null;
-  const bookPriceData = bookKey === chartPriceKey
+  const bookPriceData = bookKey === comboBookKey
+    ? priceData
+    : bookKey === chartPriceKey
     ? priceData
     : prices[bookKey] ?? null;
 
@@ -226,17 +235,24 @@ export default function TickerDetailContent({
   // position is an option; else a stock. The static futures-root list is the
   // pre-depth hint so the page subscribes depth and routes to the ladder before
   // any DepthBook has arrived; once it does, depth.kind is authoritative.
-  const bookKind: "stock" | "option" | "future" = bookDepth?.kind
+  const bookKind: "stock" | "option" | "future" | "combo" = bookDepth?.kind
     ?? (isFuturesRoot(ticker) || (isIndexSymbol(ticker) && hasFuturesSupport(ticker))
       ? "future"
-      : !viewUnderlying && optionBookKeys.includes(bookKey)
+      : bookKey === comboBookKey
+        ? "combo"
+      : !viewUnderlying && comboBookKeys.includes(bookKey) && bookKey !== ticker
         ? "option"
         : "stock");
 
   useEffect(() => {
-    onDepthSymbolChange?.(bookKey);
-    return () => onDepthSymbolChange?.(null);
-  }, [bookKey, onDepthSymbolChange]);
+    // The relay permits three concurrent depth tickets. Wider structures use
+    // live L1 BBO anchors for remaining legs and are labeled HYBRID in the book.
+    const subjects = bookKey === comboBookKey
+      ? comboBookKeys.slice(0, MAX_FOCUSED_DEPTH_SUBJECTS)
+      : [bookKey];
+    onDepthSymbolsChange?.(subjects);
+    return () => onDepthSymbolsChange?.([]);
+  }, [bookKey, comboBookKey, comboBookKeys, onDepthSymbolsChange]);
 
   // After-hours fallback for the quote bar: when the box shows the UNDERLYING
   // (no position, or a stock position) and the live WS feed is dark, source

@@ -364,19 +364,61 @@ export function getLastPriceIsCalculated(pos: PortfolioPosition): boolean {
 export function legPriceKey(
   ticker: string,
   expiry: string,
-  leg: { type: string; strike: number | null },
+  leg: { type: string; strike: number | null; expiry?: string | null },
 ): string | null {
   if (leg.type === "Stock") return null;
   if (leg.strike == null || leg.strike === 0) return null;
-  if (!expiry || expiry === "N/A") return null;
+  const effectiveExpiry = leg.expiry ?? expiry;
+  if (!effectiveExpiry || effectiveExpiry === "N/A") return null;
   const right = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
   if (!right) return null;
-  const expiryClean = expiry.replace(/-/g, "");
+  const expiryClean = effectiveExpiry.replace(/-/g, "");
   if (expiryClean.length !== 8) return null;
   return optionKey({ symbol: ticker.toUpperCase(), expiry: expiryClean, strike: leg.strike, right });
 }
 
 /* ─── Spread net price resolution ─────────────────────────── */
+
+function integerGcd(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+
+/** Natural executable spread market from cross-sided leg quotes. */
+export function resolveNaturalSpreadQuote(
+  ticker: string,
+  position: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): { bid: number; ask: number; mid: number } | null {
+  if (position.legs.length < 2) return null;
+  const signedByKey = new Map<string, number>();
+  for (const leg of position.legs) {
+    if (!Number.isInteger(leg.contracts) || leg.contracts <= 0) return null;
+    const key = leg.type === "Stock" ? ticker : legPriceKey(ticker, position.expiry, leg);
+    if (!key) return null;
+    const signed = leg.contracts * (leg.direction === "LONG" ? 1 : -1);
+    signedByKey.set(key, (signedByKey.get(key) ?? 0) + signed);
+  }
+  const netLegs = [...signedByKey.entries()].filter(([, signed]) => signed !== 0);
+  if (netLegs.length < 2) return null;
+  const divisor = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
+  let bid = 0;
+  let ask = 0;
+  for (const [key, signed] of netLegs) {
+    const quote = prices[key];
+    if (!quote || quote.bid == null || quote.ask == null) return null;
+    const ratio = Math.abs(signed) / divisor;
+    if (signed > 0) {
+      bid += ratio * quote.bid;
+      ask += ratio * quote.ask;
+    } else {
+      bid -= ratio * quote.ask;
+      ask -= ratio * quote.bid;
+    }
+  }
+  if (bid > ask) return null;
+  return { bid, ask, mid: (bid + ask) / 2 };
+}
 
 /**
  * Compute synthetic PriceData for a multi-leg spread from per-leg WS prices.
@@ -390,20 +432,10 @@ export function resolveSpreadPriceData(
   if (position.structure_type === "Stock") return null;
   if (position.legs.length < 2) return null;
 
-  let netBid = 0;
-  let netAsk = 0;
-  for (const leg of position.legs) {
-    const key = legPriceKey(ticker, position.expiry, leg);
-    if (!key) return null;
-    const lp = prices[key];
-    if (!lp || lp.bid == null || lp.ask == null) return null;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    netBid += sign * lp.bid;
-    netAsk += sign * lp.ask;
-  }
-
-  const lo = Math.round(Math.min(netBid, netAsk) * 100) / 100;
-  const hi = Math.round(Math.max(netBid, netAsk) * 100) / 100;
+  const natural = resolveNaturalSpreadQuote(ticker, position, prices);
+  if (!natural) return null;
+  const lo = Math.round(natural.bid * 100) / 100;
+  const hi = Math.round(natural.ask * 100) / 100;
   const mid = Number((((lo + hi) / 2)).toFixed(2));
 
   return {
