@@ -250,6 +250,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     // options, else the ticker); null releases the ticket. Never forces a
     // connection on its own — the subject already streams L1.
     depthSymbol: tickerDetail.depthSymbol,
+    depthSymbols: tickerDetail.depthSymbols,
     // For a futures-backed depth subject (VIX), the order-ticket selected
     // expiry decides which listed future the relay resolves under that key.
     // Null → relay falls back to front-month.
