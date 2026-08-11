@@ -17,6 +17,9 @@ import CorPanel from "./CorPanel";
 import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
 import YieldCurvePanel from "./YieldCurvePanel";
+import EquiblesCotPanel from "./equibles-cot/EquiblesCotPanel";
+import AtsVenueSharePanel from "./equibles-ats-venue-share/AtsVenueSharePanel";
+import EquiblesShortCrowdingPanel from "./equibles/EquiblesShortCrowdingPanel";
 import GammaRotationPanel from "./GammaRotationPanel";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
 import BacktestPanel from "./BacktestPanel";
@@ -34,15 +37,15 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
-type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "skew2d" | "curve" | "llm" | "backtest";
+type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "skew2d" | "curve" | "cot" | "ats" | "short" | "llm" | "backtest";
 
-const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "llm", "backtest"] as const;
+const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as const;
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // skew2d before skew so /regime/skew2d is not truncated to skew
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew2d|skew|curve|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew2d|skew|curve|cot|ats|short|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -296,7 +299,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "cot", "ats", "short", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -323,6 +326,9 @@ export default function RegimePanel({
       <button className={`ticker-tab ${activeTab === "skew" ? "active" : ""}`} onClick={() => goToTab("skew")}>SKEW</button>
       <button className={`ticker-tab ${activeTab === "skew2d" ? "active" : ""}`} onClick={() => goToTab("skew2d")}>SKEW 2D</button>
       <button className={`ticker-tab ${activeTab === "curve" ? "active" : ""}`} onClick={() => goToTab("curve")}>CURVE</button>
+      <button className={`ticker-tab ${activeTab === "cot" ? "active" : ""}`} onClick={() => goToTab("cot")}>COT</button>
+      <button className={`ticker-tab ${activeTab === "ats" ? "active" : ""}`} onClick={() => goToTab("ats")}>ATS</button>
+      <button className={`ticker-tab ${activeTab === "short" ? "active" : ""}`} onClick={() => goToTab("short")}>SHORT</button>
       <button className={`ticker-tab ${activeTab === "llm" ? "active" : ""}`} onClick={() => goToTab("llm")}>LLM</button>
       <button className={`ticker-tab ${activeTab === "backtest" ? "active" : ""}`} onClick={() => goToTab("backtest")}>BACKTEST</button>
     </div>
@@ -432,6 +438,33 @@ export default function RegimePanel({
       <div className="regime-panel">
         {tabBar}
         <YieldCurvePanel />
+      </div>
+    );
+  }
+
+  if (activeTab === "cot") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <EquiblesCotPanel />
+      </div>
+    );
+  }
+
+  if (activeTab === "ats") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <AtsVenueSharePanel />
+      </div>
+    );
+  }
+
+  if (activeTab === "short") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <EquiblesShortCrowdingPanel />
       </div>
     );
   }

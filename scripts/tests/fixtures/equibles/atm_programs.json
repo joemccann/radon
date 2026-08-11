@@ -1,0 +1,20 @@
+{
+  "data": [
+    {
+      "announcedDate": "2026-02-14",
+      "lastAmendedDate": "2026-06-02",
+      "capacity": {"currency": "USD", "amount": 500000000, "shares": null},
+      "soldAmount": {"currency": "USD", "amount": 180000000, "shares": 4100000},
+      "remainingAmount": {"currency": "USD", "amount": 320000000, "shares": null},
+      "isFullyUtilized": false,
+      "isExpired": false,
+      "latestForm": "424B5",
+      "latestFilingUrl": "https://www.sec.gov/Archives/edgar/data/000/example.htm"
+    }
+  ],
+  "meta": {
+    "limit": 100,
+    "offset": 0,
+    "hasMore": false
+  }
+}
