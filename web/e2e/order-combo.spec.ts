@@ -205,6 +205,26 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     );
   });
 
+  test("combo cockpit defaults to an option-leg book and exposes both legs", async ({ page }, testInfo) => {
+    await openSpxuOrderTicket(page);
+
+    const selector = page.getByRole("group", { name: "Option leg book" });
+    await expect(selector).toBeVisible();
+    const longLeg = page.getByRole("button", { name: "$53 Call book" });
+    const shortLeg = page.getByRole("button", { name: "$60 Call book" });
+    await expect(longLeg).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".book-sym")).toContainText("SPXU $53C");
+    await expect(page.locator(".book-kind")).toHaveText("OPTION");
+
+    await shortLeg.click();
+    await expect(shortLeg).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".book-sym")).toContainText("SPXU $60C");
+
+    const screenshotPath = testInfo.outputPath("combo-leg-books.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("combo-leg-books", { path: screenshotPath, contentType: "image/png" });
+  });
+
   test("RED: IB silent cancellation shows error instead of success", async ({ page }) => {
     // Mock placement — IB returns ok=true but initialStatus=Cancelled
     await page.route("**/api/orders/place", (route) =>

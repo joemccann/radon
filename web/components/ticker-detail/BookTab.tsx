@@ -3,8 +3,8 @@
 import { useMemo, useState } from "react";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
-import type { OrderPrefill } from "@/lib/TickerDetailContext";
-import { fmtPrice } from "@/lib/positionUtils";
+import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailContext";
+import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 import { useViewport } from "@/lib/useViewport";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "@/components/SingleLegOrderTicket";
 import { OrderRiskGate, resolvePlacementTarget, type LinearOrderRiskInput } from "@/lib/order";
@@ -464,8 +464,29 @@ export default function BookTab({
 }: BookTabProps) {
   const { isMobile, hasMounted } = useViewport();
   const mobile = isMobile && hasMounted;
+  const tickerDetail = useTickerDetailOptional();
 
-  const priceData = tickerPriceData ?? prices[ticker] ?? null;
+  const optionLegBooks = useMemo(() => {
+    if (!position || position.legs.length < 2) return [];
+    return position.legs.flatMap((leg) => {
+      const key = legPriceKey(ticker, position.expiry, leg);
+      if (!key || leg.strike == null || (leg.type !== "Call" && leg.type !== "Put")) return [];
+      return [{
+        key,
+        strike: leg.strike,
+        type: leg.type,
+        direction: leg.direction,
+      }];
+    });
+  }, [position, ticker]);
+
+  // A focused option key must never fall back to the underlying stock quote:
+  // that recreates a stock book under an OPTION label while the option feed is
+  // pending or unavailable. Only the underlying subject may use ticker L1.
+  const resolvedBookKey = bookKey ?? ticker;
+  const priceData = resolvedBookKey === ticker
+    ? tickerPriceData ?? prices[ticker] ?? null
+    : tickerPriceData;
   const bid = priceData?.bid ?? null;
   const ask = priceData?.ask ?? null;
   const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
@@ -474,7 +495,7 @@ export default function BookTab({
   const lastLabel = priceData?.lastIsCalculated ? "MARK" : "LAST";
   const isIndex = isIndexSymbol(ticker);
 
-  const resolvedBookKey = bookKey ?? ticker;
+  const selectedOptionLeg = optionLegBooks.find((leg) => leg.key === resolvedBookKey) ?? null;
   const depth = depths?.[resolvedBookKey] ?? null;
   // depth.kind wins; else the kind resolved by the parent; else stock.
   const kind = depth?.kind ?? bookKind ?? "stock";
@@ -506,8 +527,28 @@ export default function BookTab({
 
   const orderBook = (
     <>
+      {optionLegBooks.length > 1 && tickerDetail && (
+        <div className="combo-book-selector" role="group" aria-label="Option leg book">
+          <span className="combo-book-selector__label">LEG BOOK</span>
+          {optionLegBooks.map((leg) => (
+            <button
+              key={leg.key}
+              type="button"
+              className={`combo-book-selector__button${leg.key === resolvedBookKey ? " active" : ""}`}
+              aria-label={`$${leg.strike} ${leg.type} book`}
+              aria-pressed={leg.key === resolvedBookKey}
+              onClick={() => tickerDetail.setFocusedBookKey(leg.key)}
+            >
+              <span>{leg.direction}</span>
+              <b>${leg.strike} {leg.type.toUpperCase()}</b>
+            </button>
+          ))}
+        </div>
+      )}
       <OrderBook
-        symbolLabel={ticker}
+        symbolLabel={selectedOptionLeg
+          ? `${ticker} $${selectedOptionLeg.strike}${selectedOptionLeg.type === "Call" ? "C" : "P"}`
+          : ticker}
         kind={kind}
         depth={depth}
         trades={trades}
