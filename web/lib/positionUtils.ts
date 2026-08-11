@@ -501,6 +501,15 @@ export function isSameDay(pos: PortfolioPosition): boolean {
   return entryDate != null && entryDate === todayInET();
 }
 
+/** Compute real-time market value from WS prices for a stock position.
+ *  Sign-aware: `pos.contracts` is a positive magnitude, so a SHORT's market
+ *  value must read negative for `mv − entry_cost` to be a signed P&L. */
+function computeStockRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
+  const last = prices?.[pos.ticker]?.last;
+  if (last == null || last <= 0) return null;
+  return positionDirectionSign(pos) * last * Math.abs(pos.contracts);
+}
+
 /** Compute real-time market value from WS prices for option positions. */
 function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock" || !prices) return null;
@@ -558,6 +567,32 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
   return (effectivePnl / Math.abs(closeValue)) * 100;
 }
 
+/* ─── Stock daily change ──────────────────────────────────── */
+
+/**
+ * Day Chg % for an equity position.
+ *
+ * Overnight: the instrument's own move off yesterday's close.
+ * Same-day: yesterday's close is meaningless (the position didn't exist), so
+ * the entry cost is the baseline and the reading becomes the position's return
+ * since entry — matching the same-day rule already applied to options.
+ */
+export function getStockDailyChg(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
+  if (pos.structure_type !== "Stock") return null;
+
+  if (isSameDay(pos)) {
+    const entryCost = resolveEntryCost(pos);
+    if (entryCost === 0) return null;
+    const todayPnl = getTodayPnlDollars(pos, prices);
+    if (todayPnl == null) return null;
+    return (todayPnl / Math.abs(entryCost)) * 100;
+  }
+
+  const p = prices?.[pos.ticker];
+  if (!p || p.last == null || p.last <= 0 || p.close == null || p.close <= 0) return null;
+  return ((p.last - p.close) / p.close) * 100;
+}
+
 /** Direction sign for a position: +1 long, -1 short. A stock's direction lives
  *  on the position/leg, NOT in `pos.contracts` (which is a positive magnitude),
  *  so any `price × contracts` value MUST be multiplied by this to be
@@ -573,6 +608,12 @@ export function positionDirectionSign(pos: PortfolioPosition): number {
 
 export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock") {
+    // Same-day position: Today's P&L = Total P&L (the shares didn't exist
+    // yesterday, so the pre-entry move belongs to the market, not the operator).
+    if (isSameDay(pos)) {
+      const mv = computeStockRtMv(pos, prices) ?? resolveMarketValue(pos);
+      return getPnlDollars(pos, mv);
+    }
     const p = prices?.[pos.ticker];
     if (!p || p.last == null || p.last <= 0 || p.close == null || p.close <= 0) return null;
     // Sign-aware: a SHORT loses when price rises. `pos.contracts` is a positive

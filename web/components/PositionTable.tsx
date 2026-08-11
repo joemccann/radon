@@ -27,6 +27,7 @@ import {
   getLastPriceIsCalculated,
   legPriceKey,
   getOptionDailyChg,
+  getStockDailyChg,
   getTodayPnlDollars,
   resolveRealtimePrice,
 } from "@/lib/positionUtils";
@@ -65,13 +66,6 @@ function useDensity(tableId: string): [DensityMode, () => void] {
 }
 
 /* ─── Helpers ──────────────────────────────────────────── */
-
-function getDailyChange(realtimePrice?: PriceData | null): number | null {
-  if (!realtimePrice) return null;
-  const { last, close } = realtimePrice;
-  if (last == null || last <= 0 || close == null || close <= 0) return null;
-  return ((last - close) / close) * 100;
-}
 
 function getLegMultiplier(leg: { type: string }): number {
   return leg.type === "Stock" ? 1 : 100;
@@ -194,7 +188,7 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
         if (isStock || !prices) return null;
         return computePositionImpliedValue(pos, prices, { riskFreeRate }).netNotional;
       }
-      case "daily_chg": return isStock ? getDailyChange(prices?.[pos.ticker]) : getOptionDailyChg(pos, prices);
+      case "daily_chg": return isStock ? getStockDailyChg(pos, prices) : getOptionDailyChg(pos, prices);
       case "today_pnl": return getTodayPnlDollars(pos, prices);
       // Initial Value follows the Avg Entry sign convention: combo net sign,
       // single-leg short option is a CREDIT (negative), stock/long-option are
@@ -386,7 +380,7 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
   // Same-day positions opened today: yesterday's close is meaningless.
   // Use entry-cost-based P&L instead (Today's P&L = Total P&L).
   const dailyChg = isStock
-    ? getDailyChange(realtimePrice)
+    ? getStockDailyChg(pos, prices)
     : getOptionDailyChg(pos, prices);
 
   // Black-Scholes implied per-share, signed-summed across legs. null for stocks
@@ -403,13 +397,10 @@ function PositionRow({ pos, showExpiry = true, showUnderlying = false, showImpli
     return computePositionImpliedValue(pos, prices, { riskFreeRate }).netNotional;
   }, [isStock, pos, prices, riskFreeRate]);
 
-  // Today's P&L in dollars
-  const todayPnl = isStock
-    ? (realtimePrice?.last != null && realtimePrice.last > 0 && realtimePrice?.close != null && realtimePrice.close > 0
-        // Sign-aware: a SHORT loses on an up day; pos.contracts is a magnitude.
-        ? positionDirectionSign(pos) * (realtimePrice.last - realtimePrice.close) * Math.abs(pos.contracts)
-        : null)
-    : getTodayPnlDollars(pos, prices);
+  // Today's P&L in dollars. Stocks and options share one implementation so the
+  // same-day entry baseline can't drift between them (a stock-only inline copy
+  // is exactly how same-day equities kept reporting a close-based figure).
+  const todayPnl = getTodayPnlDollars(pos, prices);
 
   // Structure already includes strike from ib_sync format_structure_description()
   const structureDisplay = pos.structure;

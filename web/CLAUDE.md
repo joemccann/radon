@@ -91,6 +91,8 @@ Per-leg: `sign × (last - close) × contracts × 100`. Impl: `getOptionDailyChg(
 
 **Same-day exception:** `entry_date == today (ET)` → yesterday's close meaningless. Day Chg + Today P&L use entry-cost baseline → Today P&L = Total P&L = `MV − EC`. `ib_daily_pnl` ignored same-day.
 
+**The exception covers STOCKS as well as options** (2026-08-11). It shipped options-only, so equities opened today kept the close baseline and reported a Today P&L that contradicted their own P&L (QQQ 666 sh @ $717.83, last $718.46: P&L +$421, Today P&L −$1,605). Impls: `getStockDailyChg()` + the stock branch of `getTodayPnlDollars()`, and the `isSameDay` branch in `computeDayMoveBreakdown` (which feeds the Day P&L card — a stock-only carve-out there makes the card disagree with the column it summarises). IB's own `reqPnLSingle` daily P&L for a same-day equity equals `MV − EC` to the cent, so the broker is the tiebreaker. Never reintroduce a stock-only inline copy of Today P&L in `PositionTable` / `MobilePositionList`; both must call `getTodayPnlDollars`. Tests: `same-day-stock-pnl.test.ts`, `e2e/portfolio-same-day-equity-pnl.spec.ts`.
+
 ### Entry-Date Resolution (`ib_sync.py`)
 
 Strict ordered fallback, MOST → LEAST specific:
