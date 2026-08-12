@@ -58,6 +58,7 @@ describe.each([
   ["skew", "app/regime/skew/page.tsx"],
   ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
+  ["vol-cone", "app/regime/vol-cone/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -115,6 +116,9 @@ vi.mock("../components/Skew2dPanel", () => ({
 }));
 vi.mock("../components/YieldCurvePanel", () => ({
   default: () => <div data-testid="curve-panel-stub" />,
+}));
+vi.mock("../components/VolConePanel", () => ({
+  default: () => <div data-testid="vol-cone-panel-stub" />,
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
