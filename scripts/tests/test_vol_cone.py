@@ -35,7 +35,7 @@ NVDA_CURRENT = json.loads((FIXTURES / "vol_cone_nvda_greeks_current.json").read_
 NVDA_HIST = json.loads((FIXTURES / "vol_cone_nvda_greeks_hist.json").read_text())
 SMH_CURRENT = json.loads((FIXTURES / "vol_cone_smh_greeks_current.json").read_text())
 WEEKLY = json.loads((FIXTURES / "vol_cone_nvda_weekly_series.json").read_text())
-MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0041_vol_cone.sql"
+MIGRATION = Path(__file__).parents[1] / "db" / "migrations" / "0047_vol_cone.sql"
 
 NVDA_SPOT = 223.95
 NVDA_HIST_SPOT = 212.45
@@ -345,7 +345,7 @@ class TestVolConeStorage:
 
     def test_migration_applies_and_registers_version(self):
         db = self._db()
-        assert db.execute("SELECT version FROM schema_migrations").fetchone()[0] == 41
+        assert db.execute("SELECT version FROM schema_migrations").fetchone()[0] == 47
         cols = {r[1] for r in db.execute("PRAGMA table_info(vol_cone_history)")}
         assert {
             "ticker",
