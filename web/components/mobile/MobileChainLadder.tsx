@@ -369,14 +369,17 @@ export default function MobileChainLadder({
   const pendingIsCredit = pendingSignedNet != null ? pendingSignedNet < 0 : null;
 
   // P5: (strike,right) -> BUY/SELL for the active order legs, so the ladder can
-  // tint the cells that are already in the pending order.
+  // tint the cells that are already in the pending order. Scoped to the visible
+  // expiry — the builder survives an expiry change, so a leg from another
+  // expiry must not tint (and appear tappable-off on) this ladder.
   const legActionByKey = useMemo(() => {
     const map = new Map<string, "BUY" | "SELL">();
     for (const leg of orderLegs) {
+      if (leg.expiry !== selectedExpiry) continue;
       map.set(`${leg.strike}_${leg.right}`, leg.action);
     }
     return map;
-  }, [orderLegs]);
+  }, [orderLegs, selectedExpiry]);
 
   const expiryChips = useMemo(() => expirations.slice(0, 24), [expirations]);
   const showCalls = sideFilter !== "puts";
