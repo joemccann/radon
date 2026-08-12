@@ -20,16 +20,20 @@ NOW = datetime(2026, 8, 4, 3, 0, 0, tzinfo=timezone.utc)
 
 
 def write_incident(directory: Path, incident_id: str, status: str,
-                   detected_at: str | None = None) -> Path:
+                   detected_at: str | None = None,
+                   title: str | None = None) -> Path:
     path = directory / f"incident-{incident_id}.json"
-    path.write_text(json.dumps({
+    payload = {
         "schema": "radon.incident/1",
         "incident_id": incident_id,
         "case_id": "service-health-degraded",
         "severity": "P2",
         "status": status,
         "detected_at": detected_at or (NOW - timedelta(hours=1)).isoformat(),
-    }))
+    }
+    if title is not None:
+        payload["title"] = title
+    path.write_text(json.dumps(payload))
     return path
 
 
@@ -179,6 +183,32 @@ class TestCycleRetry:
         written = [p.name for p in mirror.glob("*.diagnosis.md")]
         assert written and all(name.startswith("unverified-") for name in written)
 
+    def test_cycle_notifies_with_incident_description_and_card(
+            self, tmp_path: Path, monkeypatch):
+        monkeypatch.setenv("INCIDENT_RESPONDER_LOCAL_DIR", "data/incidents_remote")
+        mirror = tmp_path / "data" / "incidents_remote"
+        mirror.mkdir(parents=True, exist_ok=True)
+        write_incident(
+            mirror, "20260804T020000Z-alpha", "open",
+            title="2 service_health row(s) degraded: uw-sweeps, cri-scan",
+        )
+        notes = []
+
+        def capture(note, **_kwargs):
+            notes.append(note)
+
+        with patch("incident_responder.subprocess.run",
+                   side_effect=_fake_runner(0)), \
+             patch("incident_responder.notify", side_effect=capture):
+            run_cycle(tmp_path)
+        assert notes, "cycle must fire at least one notification"
+        diagnosed = [n for n in notes if n.title == "Radon incident diagnosed"]
+        assert diagnosed
+        assert "uw-sweeps" in diagnosed[-1].body
+        assert diagnosed[-1].open_path is not None
+        assert diagnosed[-1].open_path.name.endswith(".incident.html")
+        assert (mirror / diagnosed[-1].open_path.name).exists()
+
 
 class TestCommands:
     def test_sync_command_mirrors_remote_dir(self):
@@ -196,6 +226,7 @@ class TestCommands:
         assert "--exclude=.responder-state.json" in cmd
         assert "--exclude=.responder.lock" in cmd
         assert "--exclude=*.diagnosis.md" in cmd
+        assert "--exclude=*.incident.html" in cmd
         assert "--delete-excluded" not in cmd
 
     def test_analyze_command_is_analyze_only(self):

@@ -6,10 +6,13 @@ incident directory, pick open incidents not yet analyzed, and run the
 never sees the mirrored incident itself: it is handed a whitelisted projection
 written to data/cache/incident_projections/, with Bash/Edit/Write/Agent/
 WebFetch denied and the mirror itself unreadable. The diagnosis lands in the
-mirror as <incident_id>.diagnosis.md and a macOS notification fires. Shipping
-a fix stays a human decision — this never pushes code.
+mirror as <incident_id>.diagnosis.md and <incident_id>.incident.html. A macOS
+notification carries the incident description; click opens the HTML card
+(not Script Editor). Shipping a fix stays a human decision — this never
+pushes code.
 
-Stdlib only. State in data/incidents_remote/.responder-state.json; a pid
+Stdlib only (notify backends are optional host binaries). State in
+data/incidents_remote/.responder-state.json; a pid
 lockfile prevents overlapping cycles (an analysis can outlive the 10-min
 interval).
 """
@@ -25,6 +28,13 @@ import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import NamedTuple
+
+from incident_notify import (
+    IncidentNotification,
+    build_incident_notification,
+    write_incident_card,
+)
+from incident_notify import notify as dispatch_notification
 
 DEFAULT_REMOTE = "radon@ib-gateway"
 DEFAULT_REMOTE_DIR = "/home/radon/radon/data/incidents"
@@ -197,6 +207,7 @@ def build_sync_command(remote: str, remote_dir: str, local_dir: Path) -> list[st
         "--exclude=.responder-state.json",
         "--exclude=.responder.lock",
         "--exclude=*.diagnosis.md",
+        "--exclude=*.incident.html",
         "--exclude=*.projection.json",
         f"{remote}:{remote_dir}/",
         f"{local_dir}/",
@@ -337,9 +348,12 @@ def build_analyze_command(projection_path: Path,
     ]
 
 
-def notify(title: str, message: str) -> None:
-    script = f'display notification "{message}" with title "{title}"'
-    subprocess.run(["osascript", "-e", script], capture_output=True, timeout=10)
+def notify(note: IncidentNotification, *, cache_dir: Path | None = None) -> str:
+    """Human-facing banner. Never raise: a notify miss must not skip diagnosis."""
+    try:
+        return dispatch_notification(note, cache_dir=cache_dir)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return "failed"
 
 
 def acquire_lock(lock_path: Path, now: datetime) -> bool:
@@ -408,23 +422,29 @@ def run_cycle(repo_root: Path) -> int:
 
         for path in incidents:
             payload = json.loads(path.read_text())
-            projection = build_incident_projection(payload)
-            label = f"{projection['severity'] or 'P?'} {projection['case_id'] or 'unknown-case'}"
             stem = safe_incident_stem(payload.get("incident_id"), path)
-            notify("Radon incident", f"Analyzing {label}")
+            cache_dir = repo_root / "data" / "cache"
+            card = write_incident_card(mirror, payload, stem=stem)
+            notify(
+                build_incident_notification("analyzing", payload, card_path=card),
+                cache_dir=cache_dir,
+            )
 
             result = analyze(path, repo_root, mirror_dir=mirror)
             diagnosis_name = f"{stem}.diagnosis.md"
             (mirror / diagnosis_name).write_text(result.text)
+            card = write_incident_card(
+                mirror, payload, result.text, stem=stem)
             finished = datetime.now(timezone.utc)
             if result.recorded:
                 mark_analyzed(state_path, state, stem, finished)
             else:
                 record_failed_attempt(state_path, state, stem, finished)
+            kind = "diagnosed" if result.recorded else "failed"
             notify(
-                "Radon incident diagnosed" if result.recorded
-                else "Radon incident analysis failed",
-                f"{label}: see {diagnosis_name}",
+                build_incident_notification(
+                    kind, payload, card_path=card, diagnosis_text=result.text),
+                cache_dir=cache_dir,
             )
             print(json.dumps({
                 "at": now.isoformat(),
