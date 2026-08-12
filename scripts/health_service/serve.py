@@ -8,10 +8,13 @@ probes every service from the OUTSIDE and never imports the trading stack.
 Routes:
   GET /healthz  -> zero-I/O static 200 (the never-502 liveness pin)
   GET /status   -> isolated live probes + cached systemctl unit states; ALWAYS
-                   200, degraded sources are body fields
+                   200, degraded sources are body fields. Detail is trust-split:
+                   proxied (public-edge) callers get the aggregate verdict only
+                   unless they carry the shared bearer token.
 """
 from __future__ import annotations
 
+import hmac
 import json
 import os
 import subprocess
@@ -43,6 +46,22 @@ UNITS = os.environ.get(
 UNIT_REFRESH_SECS = float(os.environ.get("RADON_HEALTH_UNIT_REFRESH", "5"))
 SERVICE_HEALTH_TTL = float(os.environ.get("RADON_HEALTH_SH_TTL", "5"))
 SERVICE_HEALTH_TIMEOUT = float(os.environ.get("RADON_HEALTH_SH_TIMEOUT", "2.5"))
+
+# --- /status detail gate ---
+# Caddy reverse_proxies app.radon.run/edge-health/status here with no auth of its
+# own, so the full body (IB auth_state incl. awaiting_2fa, the radon-* unit
+# inventory, service_health last_error text carrying tickers / IB order ids) was
+# readable by any anonymous internet client — the same data the FastAPI perimeter
+# denies to untrusted callers, and a live "a 2FA push is pending right now"
+# signal for a phishing operator.
+STATUS_TOKEN = os.environ.get("RADON_HEALTH_STATUS_TOKEN", "").strip()
+PUBLIC_STATUS_FIELDS = ("schema_version", "ok", "overall_state", "generated_at",
+                        "health_service")
+# A proxy can only ADD these to a request; a client cannot strip what Caddy
+# stamps. Treating their presence as untrusted therefore fails safe, and the
+# daemon stays protected even if the Caddy marker has not been rolled out yet.
+PROXY_MARKER_HEADERS = ("X-Radon-Public-Edge", "X-Forwarded-For", "X-Forwarded-Host",
+                        "X-Forwarded-Proto", "X-Real-Ip", "Forwarded")
 
 
 def _now_iso() -> str:
@@ -154,6 +173,35 @@ def status_response(run_probes_fn, unit_cache, now_fn=_now_iso, service_health_c
                                     service_health=sh, external_probe=ep)
 
 
+def public_status_payload(payload: dict) -> dict:
+    """The unauthenticated view: exactly the aggregate the off-box prober
+    validates, plus the two cheap context fields. No unit names, no
+    service_health error text, no nested broker state."""
+    return {key: payload[key] for key in PUBLIC_STATUS_FIELDS if key in payload}
+
+
+def is_proxied_request(headers) -> bool:
+    return any(headers.get(name) for name in PROXY_MARKER_HEADERS)
+
+
+def bearer_token_matches(authorization, expected: str) -> bool:
+    if not expected:
+        return False
+    scheme, _, token = (authorization or "").strip().partition(" ")
+    if scheme.lower() != "bearer":
+        return False
+    return hmac.compare_digest(token.strip(), expected)
+
+
+def status_detail_authorized(headers, token: str) -> bool:
+    """On-box callers (watchdogs, deploy gates, CI curl 127.0.0.1:8330 with no
+    proxy headers) keep the full body; everything arriving through the public
+    edge needs the shared token."""
+    if bearer_token_matches(headers.get("Authorization"), token):
+        return True
+    return not is_proxied_request(headers)
+
+
 class _Handler(BaseHTTPRequestHandler):
     def _write(self, status, payload):
         body = json.dumps(payload).encode("utf-8")
@@ -171,12 +219,17 @@ class _Handler(BaseHTTPRequestHandler):
             self._write(*healthz_response())
         elif path == "/status":
             try:
-                self._write(*status_response(
+                status, body = status_response(
                     run_probes,
                     self.server.unit_cache,
                     service_health_cache=getattr(self.server, "service_health_cache", None),
                     external_probe_cache=getattr(self.server, "external_probe_cache", None),
-                ))
+                )
+                # Redaction, never a 401: an unauthenticated caller must still get
+                # a fast, valid 200 or the never-502 edge floor trips.
+                if not status_detail_authorized(self.headers, STATUS_TOKEN):
+                    body = public_status_payload(body)
+                self._write(status, body)
             except Exception:
                 self._write(200, {"health_service": "degraded", "error": "status_render_failed"})
         else:

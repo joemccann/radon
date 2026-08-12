@@ -31,6 +31,9 @@ ARTIFACTS = (
     Artifact("scripts/deploy-root-helper.sh", "/usr/local/sbin/radon-deploy-root", 0o755),
     Artifact("scripts/ib-gateway-control.sh", "/usr/local/bin/radon-ib-gateway-control", 0o755),
     Artifact("scripts/operator-radon.sh", "/usr/local/bin/radon", 0o755),
+    # Root runs the audit, so its payload cannot live in the radon-writable
+    # checkout. It is data for a root-owned interpreter, hence 0644 not 0755.
+    Artifact("scripts/drift_audit.py", "/usr/local/lib/radon/drift_audit.py", 0o644),
     Artifact("config/sudoers.d/radon-deploy", "/etc/sudoers.d/radon-deploy", 0o440),
     Artifact("config/sudoers.d/radon-monitor", "/etc/sudoers.d/radon-monitor", 0o440),
     Artifact("config/sudoers.d/radon-ops", "/etc/sudoers.d/radon-ops", 0o440),

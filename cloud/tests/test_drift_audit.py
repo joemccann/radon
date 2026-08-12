@@ -125,6 +125,99 @@ def test_git_repo_is_parent_of_cloud_root():
     assert da.GIT_REPO == da.REPO.parent
 
 
+class TestCloudRootInput:
+    """The entrypoint is installed root-owned outside the checkout it audits.
+
+    Deriving the compared tree from __file__ would make the relocated copy
+    compare /usr/local against nothing, so the checkout root is an explicit
+    input: argument first, then environment, then the canonical host path.
+    """
+
+    def test_argument_wins(self, tmp_path):
+        assert da.resolve_cloud_root(
+            ["drift_audit.py", str(tmp_path)],
+            {"RADON_CLOUD_ROOT": "/somewhere/else"},
+        ) == tmp_path
+
+    def test_environment_is_the_fallback(self, tmp_path):
+        assert da.resolve_cloud_root(
+            ["drift_audit.py"], {"RADON_CLOUD_ROOT": str(tmp_path)}
+        ) == tmp_path
+
+    def test_default_is_the_canonical_checkout(self):
+        assert da.resolve_cloud_root(["drift_audit.py"], {}) == da.DEFAULT_CLOUD_ROOT
+
+    def test_a_nonexistent_root_is_refused(self, tmp_path):
+        import pytest
+
+        with pytest.raises(RuntimeError):
+            da.resolve_cloud_root(["drift_audit.py", str(tmp_path / "missing")], {})
+
+    def test_setting_the_root_moves_the_compared_tree(self, tmp_path):
+        original = da.REPO
+        try:
+            da.set_cloud_root(tmp_path)
+            assert da.REPO == tmp_path
+            assert da.GIT_REPO == tmp_path.parent
+        finally:
+            da.set_cloud_root(original)
+
+
+class TestEnvKeysAreReadAsData:
+    """Root reads two keys out of the radon-owned env file; it never inherits it.
+
+    systemd would merge every line of an EnvironmentFile into root's
+    environment, so an appended LD_PRELOAD or PATH line in a 0600 radon:radon
+    file would be root code execution on the next timer tick.
+    """
+
+    def _env_file(self, tmp_path, body):
+        path = tmp_path / ".env"
+        path.write_text(body, encoding="utf-8")
+        return path
+
+    def test_only_allowlisted_keys_are_returned(self, tmp_path):
+        path = self._env_file(
+            tmp_path,
+            "TURSO_DB_URL=libsql://db.example\n"
+            "LD_PRELOAD=/home/radon/evil.so\n"
+            "PATH=/home/radon/bin\n"
+            "TURSO_AUTH_TOKEN=secret-token\n",
+        )
+        values = da.load_env_keys(path, da.DB_CREDENTIAL_KEYS)
+        assert values == {
+            "TURSO_DB_URL": "libsql://db.example",
+            "TURSO_AUTH_TOKEN": "secret-token",
+        }
+        assert "LD_PRELOAD" not in values and "PATH" not in values
+
+    def test_comments_blank_lines_and_quotes_are_handled(self, tmp_path):
+        path = self._env_file(
+            tmp_path,
+            "# comment\n\nTURSO_AUTH_TOKEN='tok$en-with-dollar'\n",
+        )
+        values = da.load_env_keys(path, da.DB_CREDENTIAL_KEYS)
+        assert values["TURSO_AUTH_TOKEN"] == "tok$en-with-dollar"
+
+    def test_a_missing_file_is_not_fatal(self, tmp_path):
+        assert da.load_env_keys(tmp_path / "absent", da.DB_CREDENTIAL_KEYS) == {}
+
+    def test_process_environment_wins_over_the_file(self, tmp_path):
+        path = self._env_file(
+            tmp_path, "TURSO_DB_URL=libsql://file\nTURSO_AUTH_TOKEN=file-token\n"
+        )
+        resolved = da.resolve_db_credentials(
+            {"TURSO_DB_URL": "libsql://exported", "RADON_ENV_FILE": str(path)}
+        )
+        assert resolved["TURSO_DB_URL"] == "libsql://exported"
+        assert resolved["TURSO_AUTH_TOKEN"] == "file-token"
+
+    def test_no_env_file_configured_falls_back_to_the_environment_alone(self):
+        assert da.resolve_db_credentials({"TURSO_AUTH_TOKEN": "tok"}) == {
+            "TURSO_AUTH_TOKEN": "tok"
+        }
+
+
 def test_gather_does_not_mix_general_git_dirtiness_into_config(monkeypatch):
     monkeypatch.setattr(da, "_check_repo_dirty", lambda _drifts: (_ for _ in ()).throw(
         AssertionError("general worktree state is not deployed config drift")

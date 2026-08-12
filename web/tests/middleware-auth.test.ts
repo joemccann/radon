@@ -88,10 +88,15 @@ describe("isPublicRoute — explicit allowlist", () => {
     expect(isPublicRoute(reqFor("/api/share/pnl?ticker=AAPL&pnl=420"))).toBe(true);
   });
 
-  it("exempts /api/<scope>/share and /api/<scope>/share/content", () => {
+  // Contract (tightened 2026-08-11): the read-only card CONTENT routes are
+  // public for link-preview bots; the GENERATOR POSTs are not. A generator POST
+  // runs generate_*_share.py on the trading host through a loopback call
+  // FastAPI trusts as server-to-server, so an anonymous caller had a 120s
+  // script execution behind nothing but an in-memory rate limit.
+  it("exempts /api/<scope>/share/content but NOT the /api/<scope>/share generator", () => {
     const scopes = ["menthorq/cta", "vcg", "internals", "regime", "gex"];
     for (const scope of scopes) {
-      expect(isPublicRoute(reqFor(`/api/${scope}/share`))).toBe(true);
+      expect(isPublicRoute(reqFor(`/api/${scope}/share`))).toBe(false);
       expect(isPublicRoute(reqFor(`/api/${scope}/share/content`))).toBe(true);
       expect(isPublicRoute(reqFor(`/api/${scope}/share/content?id=42`))).toBe(true);
     }

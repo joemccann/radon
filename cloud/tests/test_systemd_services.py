@@ -104,9 +104,11 @@ STATIC_SERVICES = {
     "radon-drift-audit.service",
     "radon-ib-gateway-preheld-restart.service",
 }
+# The drift audit must read 0440 root sudoers and run `docker inspect`, so it
+# stays root -- but it executes a root-owned control-plane copy of the audit,
+# never the radon-writable checkout (cloud/tests/test_root_execution_paths.py).
 ROOT_REQUIRED_SERVICES = {
     "radon-drift-audit.service",
-    "radon-nextjs-db-watchdog.service",
 }
 
 

@@ -7,3 +7,10 @@ history/_transactions.jsonl
 # SQLite databases (if used as backend)
 *.sqlite3
 *.sqlite3-journal
+
+# Live account state. The memory constructor derives these from ib-sync runs, so
+# they carry real net liq, open strikes and expiries; the GitHub repo is public.
+# The runtime keeps writing them locally, they just never get tracked again.
+# Guarded by tests/test_no_tracked_account_figures.py.
+memory/fact/portfolio-*.json
+!memory/fact/portfolio-source-of-truth.json
