@@ -1229,10 +1229,7 @@ export default function OptionsChainTab({
         ticker={ticker}
         expirations={expirations}
         selectedExpiry={selectedExpiry}
-        onSelectExpiry={(expiry) => {
-          setSelectedExpiry(expiry);
-          setOrderLegs([]);
-        }}
+        onSelectExpiry={(expiry) => setSelectedExpiry(expiry)}
         visibleStrikes={visibleStrikes}
         atmStrike={atmStrike}
         prices={prices}
@@ -1271,10 +1268,10 @@ export default function OptionsChainTab({
         <select
           className="chain-expiry-select"
           value={selectedExpiry ?? ""}
-          onChange={(e) => {
-            setSelectedExpiry(e.target.value || null);
-            setOrderLegs([]);
-          }}
+          // Browsing expiries must NOT wipe the builder — legs carry their own
+          // expiry through to the combo payload (calendars are legitimate).
+          // CLEAR is the only thing that empties it.
+          onChange={(e) => setSelectedExpiry(e.target.value || null)}
         >
           {expirations.map((exp) => (
             <option key={exp} value={exp}>
