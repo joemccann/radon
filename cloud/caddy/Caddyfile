@@ -1,3 +1,14 @@
+# Global options. Must be the first block in the file.
+{
+    # Caddy's default grace period is infinite: on reload it holds the OLD
+    # servers open until every connection closes. `handle /ws*` below proxies
+    # the WebSocket relay, so a single open browser socket keeps them alive
+    # forever, the Type=notify unit never re-signals READY, systemd sits in
+    # `reloading`, and the admin endpoint times out shutting down. A bounded
+    # grace period makes `systemctl reload caddy` actually finish.
+    grace_period 10s
+}
+
 {$DOMAIN:app.radon.run} {
     encode zstd gzip
 
