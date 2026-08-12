@@ -13,7 +13,7 @@ bottom decile of the same window.
   `service_health`, systemd units)
 - **Name**: `VolCone` (`VolConePanel`, `useVolCone`)
 - **Tab label**: `VOL CONE`
-- **Migration**: `0041_vol_cone.sql` (version 41)
+- **Migration**: `0047_vol_cone.sql` (version 47; Turso already has 41/42/45/46)
 
 ## Signal definition
 
@@ -208,7 +208,7 @@ Missing contract (HTTP 200):
 
 ## Storage
 
-`scripts/db/migrations/0041_vol_cone.sql`:
+`scripts/db/migrations/0047_vol_cone.sql`:
 
 ```sql
 CREATE TABLE IF NOT EXISTS vol_cone_history (
@@ -227,7 +227,7 @@ CREATE TABLE IF NOT EXISTS vol_cone_history (
 );
 CREATE INDEX IF NOT EXISTS idx_vol_cone_history_ticker_date
   ON vol_cone_history (ticker, date DESC);
-INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (41, datetime('now'));
+INSERT OR IGNORE INTO schema_migrations (version, applied_at) VALUES (47, datetime('now'));
 ```
 
 Writer: chunked `INSERT ... ON CONFLICT(ticker, date, expiry) DO UPDATE`.
@@ -287,7 +287,7 @@ the alternation), desktop button `VOL CONE`, mobile chip (map
 
 ## File checklist
 
-Create: `scripts/fetch_vol_cone.py`, `scripts/db/migrations/0041_vol_cone.sql`,
+Create: `scripts/fetch_vol_cone.py`, `scripts/db/migrations/0047_vol_cone.sql`,
 `scripts/tests/test_vol_cone.py`, fixtures listed above,
 `web/app/api/vol-cone/route.ts`, `web/lib/volCone.ts`, `web/lib/useVolCone.ts`,
 `web/components/VolConePanel.tsx`, `web/components/VolConeChart.tsx`,
