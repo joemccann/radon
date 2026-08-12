@@ -11,6 +11,8 @@ const SECONDARY_GLYPHS: GlyphDef[] = [
   { key: "r", label: "Rate" },
   { key: "s", label: "Seas" },
   { key: "i", label: "Info" },
+  { key: "h", label: "13F" },
+  { key: "f", label: "File" },
 ];
 
 const ORDER_GLYPH: GlyphDef = { key: "o", label: "Trade" };

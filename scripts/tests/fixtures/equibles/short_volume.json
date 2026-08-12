@@ -1,0 +1,24 @@
+{
+  "data": [
+    {
+      "date": "2026-08-07",
+      "shortVolume": 4213551,
+      "shortExemptVolume": 18422,
+      "totalVolume": 99612044,
+      "shortVolumePercent": 4.23
+    },
+    {
+      "date": "2026-08-06",
+      "shortVolume": 3911002,
+      "shortExemptVolume": 15110,
+      "totalVolume": 92440188,
+      "shortVolumePercent": 4.23
+    }
+  ],
+  "meta": {
+    "limit": 2,
+    "offset": 0,
+    "count": 2,
+    "hasMore": true
+  }
+}

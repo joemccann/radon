@@ -19,7 +19,7 @@ import AssetDeck from "./AssetDeck";
  *  `:` (command palette) and `o` (order ticket) are local-only — not in
  *  VALID_DECKS, so they never reach the URL. `o` is the mobile entry to the
  *  order ticket, which on desktop lives in the always-visible act column. */
-export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | ":" | "o";
+export type DeckKey = "c" | "p" | "n" | "r" | "s" | "i" | "h" | "f" | ":" | "o";
 
 export type AssetCockpitProps = {
   ticker: string;
