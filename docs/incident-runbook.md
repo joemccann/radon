@@ -320,7 +320,9 @@ fires macOS notifications. Analyze-only by design — shipping a fix is human-ga
 
 macOS banners are easy to miss, so `.claude/hooks/pending_diagnoses.py` closes
 the loop at the next Claude Code session start in this repo (SessionStart hook,
-registered in `.claude/settings.local.json` — per-machine, not committed). It
+registered on Claude Code `SessionStart` (`startup|resume|clear`) in
+`~/.claude/settings.json` and on Grok `SessionStart` in
+`~/.grok/hooks/pending-diagnoses.json`). It
 scans `data/incidents_remote/*.diagnosis.md`, pairs each with its
 `incident-<id>.json`, and surfaces any whose incident is not `resolved` (open or
 missing) as a session-start banner plus model context, so the session opens
