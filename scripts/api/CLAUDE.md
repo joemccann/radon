@@ -77,6 +77,7 @@ CLAUDE.md project-wide rule: **No `spawn()` from Next.js.** All Python subproces
 | `radon-portfolio-sync.timer` | Mon–Fri 13–21 UTC */60s | `POST /portfolio/sync` |
 | `radon-cta-sync.timer` | Mon–Fri 18:15, 19:00, 21:30 UTC | `POST /menthorq/cta` |
 | `radon-leap.timer` | Mon–Fri 14:00 UTC | `POST /leap/scan` |
+| `radon-signals-refresh.timer` | Mon–Fri 13–21 UTC */15min | `POST /theta-harvester/scan` + `POST /strength-confirmation/scan` |
 | `radon-llm-index.timer` | Daily 06:30 UTC | direct `scripts/llm_token_index.py --record` |
 | `radon-watchdog-{intraday,continuous,daily,error}.timer` | see `scripts/watchdog/CLAUDE.md` | reads `service_health` |
 

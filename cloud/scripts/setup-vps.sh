@@ -106,6 +106,8 @@ readonly SERVICE_FILES=(
   radon-skew.timer
   radon-skew2d.service
   radon-skew2d.timer
+  radon-signals-refresh.service
+  radon-signals-refresh.timer
 )
 
 

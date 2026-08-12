@@ -80,6 +80,8 @@ EXPECTED_SERVICE_FILES = [
     "radon-skew.timer",
     "radon-skew2d.service",
     "radon-skew2d.timer",
+    "radon-signals-refresh.service",
+    "radon-signals-refresh.timer",
 ]
 
 LONG_RUNNING_SERVICES = [
@@ -312,6 +314,33 @@ class TestOiChanges:
         assert "14:00:00 UTC" in raw
         assert "17:00:00 UTC" in raw
         assert "20:00:00 UTC" in raw
+
+
+class TestSignalsRefresh:
+    """The dashboard's "Top candidates" scans need an RTH cadence of their own.
+
+    Both scans shipped with a FastAPI endpoint and no caller, so the panel
+    served whatever snapshot a human had last triggered by hand.
+    """
+
+    def test_oneshot_with_timeout(self, unit):
+        svc = unit("radon-signals-refresh.service")["Service"]
+        assert svc["type"] == "oneshot"
+        assert svc["environmentfile"] == ENV_FILE_PATH
+        assert svc["workingdirectory"] == "/home/radon/radon"
+        assert "run_signals_refresh.sh" in svc["execstart"]
+        # Both scans run ~8s each; the budget must still release the unit
+        # well before the next slot.
+        assert int(svc["timeoutstartsec"]) <= 600
+
+    def test_timer_covers_et_trading_hours_only(self, unit, services_dir):
+        timer = unit("radon-signals-refresh.timer")["Timer"]
+        raw = (services_dir / "radon-signals-refresh.timer").read_text()
+        assert "Mon..Fri" in timer.get("oncalendar", "")
+        # 13..21 UTC spans RTH across both DST shoulders, as the VCG and
+        # data-refresh timers already do.
+        assert "13..21" in raw
+        assert timer.get("persistent") == "false"
 
 
 class TestSkew:
