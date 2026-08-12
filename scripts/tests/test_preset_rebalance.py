@@ -306,7 +306,10 @@ class TestFailClosedExecution:
         assert after == before
 
 
-def test_atomic_json_write_preserves_target_on_serialization_failure(tmp_path: Path):
+def test_atomic_json_write_preserves_target_on_serialization_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(pr, "PRESETS_DIR", tmp_path)
     target = tmp_path / "preset.json"
     target.write_text('{"source":"canonical"}\n')
 
@@ -317,7 +320,10 @@ def test_atomic_json_write_preserves_target_on_serialization_failure(tmp_path: P
     assert list(tmp_path.glob(".preset.json.*.tmp")) == []
 
 
-def test_atomic_json_write_preserves_target_permissions(tmp_path: Path):
+def test_atomic_json_write_preserves_target_permissions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(pr, "PRESETS_DIR", tmp_path)
     target = tmp_path / "preset.json"
     target.write_text('{"source":"canonical"}\n')
     target.chmod(0o640)
@@ -694,6 +700,7 @@ class TestUpdateNdx100Presets:
 class TestLogChanges:
     @pytest.fixture
     def changelog_dir(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+        monkeypatch.setattr(pr, "PRESETS_DIR", tmp_path)
         monkeypatch.setattr(pr, "CHANGELOG_PATH", tmp_path / "changelog.json")
         return tmp_path
 

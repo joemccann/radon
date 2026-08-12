@@ -15,6 +15,7 @@ readonly -a CONTROL_PLANE_SOURCES=(
   scripts/deploy-root-helper.sh
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
+  scripts/drift_audit.py
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -37,6 +38,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /usr/local/sbin/radon-deploy-root
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
+  /usr/local/lib/radon/drift_audit.py
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -56,7 +58,7 @@ readonly -a CONTROL_PLANE_TARGETS=(
   /etc/systemd/system/radon-nextjs-db-watchdog.service
 )
 readonly -a CONTROL_PLANE_MODES=(
-  755 755 755
+  755 755 755 644
   440 440 440 440
   644
   644 644 644 644 644 644 644 644 644 644 644 644
@@ -78,6 +80,10 @@ if [[ "${RADON_DEPLOY_HELPER_TEST_MODE:-0}" == "1" ]]; then
   readonly ROOT_KILL_AFTER="${RADON_TEST_ROOT_KILL_AFTER:-5}"
   readonly ROOT_LOCK_WAIT="${RADON_TEST_ROOT_LOCK_WAIT:-190}"
   readonly SESSION_PYTHON="${RADON_TEST_SESSION_PYTHON:-$(command -v python3)}"
+  readonly INSTALL="${RADON_TEST_INSTALL:-$(command -v install)}"
+  readonly CADDY_SOURCE="${RADON_TEST_CADDY_SOURCE:-}"
+  readonly CADDY_CONFIG="${RADON_TEST_CADDY_CONFIG:-}"
+  readonly CADDY_BIN="${RADON_TEST_CADDY_BIN:-}"
   readonly TEST_SYSTEMCTL_TIMEOUT="${RADON_TEST_SYSTEMCTL_TIMEOUT:-1}"
   readonly STATE_WAIT_SECONDS="${RADON_TEST_STATE_WAIT_SECONDS:-0}"
   readonly PREHELD_WAIT_SECONDS="${RADON_TEST_PREHELD_WAIT_SECONDS:-0}"
@@ -117,6 +123,9 @@ else
   readonly ROOT_KILL_AFTER=5
   readonly ROOT_LOCK_WAIT=190
   readonly SESSION_PYTHON=/usr/bin/python3.13
+  readonly CADDY_SOURCE=/home/radon/radon/cloud/caddy/Caddyfile
+  readonly CADDY_CONFIG=/etc/caddy/Caddyfile
+  readonly CADDY_BIN=/usr/bin/caddy
   readonly REPLICA_FILES=(
     /home/radon/radon/data/replica.db
     /home/radon/radon/data/replica.db-wal
@@ -143,7 +152,7 @@ prepare_state_dir() {
 }
 
 if (( $# != 1 )); then
-  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition}" >&2
+  echo "usage: radon-deploy-root {stop-clean|restart-managed|recover|verify-restored|verify-control-plane|commit-transition|publish-caddy}" >&2
   exit 64
 fi
 
@@ -485,6 +494,99 @@ commit_transition() {
   "$SYNC" -f "$(dirname "$ACTIVE_STATE_FILE")"
 }
 
+# Sized above the Caddyfile's grace_period (10s), which is what bounds how long
+# the old servers take to drain. 15s left no headroom: the reload was still in
+# flight when the timeout fired, the publish read that as a failure, and the
+# rollback's second reload hit the same wall and left the admin endpoint wedged
+# (2026-08-11). The ceiling still exists so a genuinely hung reload cannot stall
+# the deploy lock forever.
+reload_caddy() {
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$SYSTEMCTL" reload caddy
+  else
+    "$TIMEOUT" --signal=TERM --kill-after=2s 45s "$SYSTEMCTL" reload caddy
+  fi
+}
+
+# Staged 0600, never 0644. radon owns the source directory, so it can race the
+# regular-file check below by flipping the source to `ln -sf /etc/shadow`
+# between the test and this copy: install dereferences the symlink, and a
+# world-readable candidate inside the radon-traversable /etc/caddy would then be
+# readable during the validate window. 0600 makes the race unprofitable even
+# when it is won.
+stage_caddy_candidate() {
+  local candidate="$1"
+  if (( HELPER_TEST_MODE == 1 )); then
+    "$INSTALL" -m 0600 "$CADDY_SOURCE" "$candidate"
+  else
+    "$INSTALL" -m 0600 -o root -g root "$CADDY_SOURCE" "$candidate"
+  fi
+}
+
+# radon publishes Caddy config only through this fixed action. The retired
+# `cp <checkout Caddyfile> /etc/caddy/Caddyfile` sudoers rule followed a
+# symlinked source, so radon could read any root-only file out of the 0644
+# destination, and it installed edge config that no validator ever saw.
+publish_caddy() {
+  local candidate rollback=""
+
+  [[ -n "$CADDY_SOURCE" && -n "$CADDY_CONFIG" && -n "$CADDY_BIN" ]] || {
+    echo "caddy publish paths are not configured" >&2
+    return 78
+  }
+  [[ -f "$CADDY_SOURCE" && ! -L "$CADDY_SOURCE" ]] || {
+    echo "caddy source is missing or is not a regular file: ${CADDY_SOURCE}" >&2
+    return 66
+  }
+  if [[ -e "$CADDY_CONFIG" || -L "$CADDY_CONFIG" ]] && \
+     [[ ! -f "$CADDY_CONFIG" || -L "$CADDY_CONFIG" ]]; then
+    echo "live caddy configuration is not a regular file: ${CADDY_CONFIG}" >&2
+    return 74
+  fi
+
+  candidate="$(mktemp "${CADDY_CONFIG}.candidate.XXXXXX")"
+  if ! stage_caddy_candidate "$candidate"; then
+    "$RM" -f "$candidate"
+    echo "could not stage the caddy candidate" >&2
+    return 73
+  fi
+  # Both streams are discarded on purpose. The caller is unprivileged and the
+  # candidate is radon-writable, so a caddyfile adapter error -- which quotes
+  # the offending token -- would relay the contents of anything the candidate
+  # imported (`import /etc/shadow`) back to radon. The verdict is the output.
+  if ! "$CADDY_BIN" validate --config "$candidate" --adapter caddyfile >/dev/null 2>&1; then
+    "$RM" -f "$candidate"
+    echo "caddy candidate validation failed; live configuration is unchanged" >&2
+    return 65
+  fi
+
+  if [[ -f "$CADDY_CONFIG" ]]; then
+    rollback="$(mktemp "${CADDY_CONFIG}.rollback.XXXXXX")"
+    cp -a -- "$CADDY_CONFIG" "$rollback"
+    "$SYNC" -f "$rollback"
+  fi
+  # Widened to the live config's own mode only now, after validation: caddy runs
+  # unprivileged and must read this file. Content that failed validate never
+  # reaches this line, so a symlinked-source race cannot publish /etc/shadow.
+  chmod 0644 "$candidate"
+  mv -f -- "$candidate" "$CADDY_CONFIG"
+  "$SYNC" -f "$CADDY_CONFIG"
+
+  if reload_caddy; then
+    [[ -z "$rollback" ]] || "$RM" -f "$rollback"
+    return 0
+  fi
+  if [[ -n "$rollback" ]]; then
+    mv -f -- "$rollback" "$CADDY_CONFIG"
+    "$SYNC" -f "$CADDY_CONFIG"
+    reload_caddy || echo "known-good caddy reload reconciliation also failed" >&2
+  else
+    "$RM" -f "$CADDY_CONFIG"
+  fi
+  echo "caddy candidate reload failed; restored the known-good configuration" >&2
+  return 75
+}
+
 cancel_radon_jobs() {
   local jobs id unit
   local job_ids=()
@@ -543,6 +645,23 @@ terminate_root_action_group() {
   ROOT_ACTION_PGID=""
 }
 
+# Only the release-lifecycle actions queue systemd jobs for radon-* units, so
+# only their failures leave torn jobs worth cancelling. publish-caddy touches
+# one non-radon unit (caddy) and is reachable by the unprivileged account, so
+# cancelling on its non-zero exit -- a rejected Caddyfile exits 65 -- would let
+# radon tear down an unrelated deploy's in-flight restarts.
+action_queues_radon_jobs() {
+  case "${1:-}" in
+    stop-clean|restart-managed|recover) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cancel_radon_jobs_for_action() {
+  action_queues_radon_jobs "${ROOT_ACTION_NAME:-}" || return 0
+  cancel_radon_jobs || true
+}
+
 handle_root_supervisor_signal() {
   local signal_name="$1"
   local exit_code=143
@@ -550,13 +669,18 @@ handle_root_supervisor_signal() {
   [[ "$signal_name" == HUP ]] && exit_code=129
   trap '' TERM INT HUP
   terminate_root_action_group
-  cancel_radon_jobs || true
+  cancel_radon_jobs_for_action
   exit "$exit_code"
 }
 
 root_action_timeout() {
   case "$1" in
     stop-clean|restart-managed|recover)
+      printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
+      ;;
+    publish-caddy)
+      # Bounded like a mutation (it stages, validates, installs, reloads) but
+      # deliberately outside the release-lifecycle job-cancel class above.
       printf '%s\n' "$ROOT_MUTATION_ACTION_TIMEOUT"
       ;;
     verify-restored|verify-control-plane)
@@ -580,6 +704,7 @@ supervise_root_action() {
 
   ROOT_ACTION_PID=""
   ROOT_ACTION_PGID=""
+  ROOT_ACTION_NAME="$1"
   trap 'handle_root_supervisor_signal TERM' TERM
   trap 'handle_root_supervisor_signal INT' INT
   trap 'handle_root_supervisor_signal HUP' HUP
@@ -595,7 +720,7 @@ os.execv(sys.argv[2], sys.argv[2:])
   while kill -0 "$ROOT_ACTION_PID" 2>/dev/null; do
     if (( SECONDS >= deadline )); then
       terminate_root_action_group
-      cancel_radon_jobs || true
+      cancel_radon_jobs_for_action
       trap - TERM INT HUP
       return 124
     fi
@@ -604,7 +729,7 @@ os.execv(sys.argv[2], sys.argv[2:])
   if wait "$ROOT_ACTION_PID"; then exit_code=0; else exit_code=$?; fi
   ROOT_ACTION_PID=""
   ROOT_ACTION_PGID=""
-  if (( exit_code != 0 )); then cancel_radon_jobs || true; fi
+  if (( exit_code != 0 )); then cancel_radon_jobs_for_action; fi
   trap - TERM INT HUP
   return "$exit_code"
 }
@@ -650,6 +775,9 @@ case "$1" in
     ;;
   commit-transition)
     commit_transition
+    ;;
+  publish-caddy)
+    publish_caddy
     ;;
   *)
     echo "unknown deploy-root action" >&2

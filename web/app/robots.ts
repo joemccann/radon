@@ -6,9 +6,11 @@ import { PUBLIC_SHARE_API_ROUTES } from "@/lib/publicShareRoutes";
 // Paired with the X-Robots-Tag: noindex header in next.config.mjs, which also
 // covers URLs Google already indexed (robots.txt alone doesn't de-index).
 //
-// The share-card routes are carved out with Allow: link-preview bots
+// The read-only share-card routes are carved out with Allow: link-preview bots
 // (Twitterbot, Slackbot) honor robots.txt, and a blanket Disallow: / would
-// stop shared tweet cards from unfurling. Longest-match precedence means the
+// stop shared tweet cards from unfurling. The card GENERATOR POSTs are
+// deliberately NOT carved out (a bot never POSTs, and they now require a Clerk
+// session). Longest-match precedence means the
 // Allow rules win over Disallow: / for those paths. The global noindex header
 // still keeps them out of search results — noindex governs indexing, not
 // preview fetching.

@@ -1,3 +1,14 @@
+# Global options. Must be the first block in the file.
+{
+    # Caddy's default grace period is infinite: on reload it holds the OLD
+    # servers open until every connection closes. `handle /ws*` below proxies
+    # the WebSocket relay, so a single open browser socket keeps them alive
+    # forever, the Type=notify unit never re-signals READY, systemd sits in
+    # `reloading`, and the admin endpoint times out shutting down. A bounded
+    # grace period makes `systemctl reload caddy` actually finish.
+    grace_period 10s
+}
+
 {$DOMAIN:app.radon.run} {
     encode zstd gzip
 
@@ -37,6 +48,11 @@
     handle @edge_health_status {
         rewrite * /status
         reverse_proxy 127.0.0.1:8330 {
+            # This path is anonymous internet traffic. The marker (set, so a
+            # client-supplied value is overwritten) tells the daemon to answer
+            # with the aggregate verdict only — no unit inventory, no
+            # service_health error text, no IB auth_state.
+            header_up X-Radon-Public-Edge "1"
             @down status 502 503 504
             handle_response @down {
                 header Content-Type application/json
@@ -128,6 +144,7 @@ beta.radon.run {
     handle @edge_health_status {
         rewrite * /status
         reverse_proxy 127.0.0.1:8331 {
+            header_up X-Radon-Public-Edge "1"
             @down status 502 503 504
             handle_response @down {
                 header Content-Type application/json

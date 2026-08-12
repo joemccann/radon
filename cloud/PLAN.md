@@ -331,8 +331,10 @@ curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo 
 sudo apt-get update && sudo apt-get install -y caddy
 
 # Caddy config
-sudo cp /home/radon/radon-cloud/caddy/Caddyfile /etc/caddy/Caddyfile
-sudo systemctl reload caddy
+# Publishing validates the candidate, installs it atomically, and reloads.
+# The raw `sudo cp` capability was retired: cp follows a symlinked source, so
+# it doubled as an arbitrary root read into a 0644 destination.
+sudo -n /usr/local/sbin/radon-deploy-root publish-caddy
 
 # IB Gateway docker-compose.yml + .env + secrets already in /home/radon/radon-cloud/
 # (migrated from the existing /home/radon/ib-gateway/ setup)

@@ -3,17 +3,25 @@
 import { useMemo, useState } from "react";
 import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { DepthBook, PriceData, Trade } from "@/lib/pricesProtocol";
-import type { OrderPrefill } from "@/lib/TickerDetailContext";
-import { fmtPrice } from "@/lib/positionUtils";
+import { useTickerDetailOptional, type OrderPrefill } from "@/lib/TickerDetailContext";
+import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 import { useViewport } from "@/lib/useViewport";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "@/components/SingleLegOrderTicket";
 import { OrderRiskGate, resolvePlacementTarget, type LinearOrderRiskInput } from "@/lib/order";
+import {
+  type IbOrderType,
+  ibPlaceFields,
+  paperPlaceFields,
+  pricesValidForOrderType,
+  riskPriceForOrderType,
+} from "@/lib/order/stopOrder";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
 import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/indexSymbols";
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
 import { IndexOptionOrderForm } from "@/components/ticker-detail/IndexOptionOrderForm";
 import { OrderBook } from "@/components/ticker-detail/OrderBook";
 import { MicrostructureStrip } from "@/components/ticker-detail/MicrostructureStrip";
+import { buildSyntheticComboDepth } from "@/lib/book/syntheticComboDepth";
 
 /* ─── Types ─── */
 
@@ -33,7 +41,7 @@ type BookTabProps = {
    *  single-leg option, else the ticker). */
   bookKey?: string;
   /** Resolved instrument kind for the depth panel; depth.kind wins when present. */
-  bookKind?: "stock" | "option" | "future";
+  bookKind?: "stock" | "option" | "future" | "combo";
   /** Threaded to `StockOrderForm` so SELL stock against held shares
    *  short-circuits to a close-out branch, and SELL with held=0
    *  surfaces UNBOUNDED via the linear risk branch. */
@@ -325,15 +333,17 @@ function StockOrderForm({
     return "";
   });
   const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<IbOrderType>("LMT");
+  const [stopPrice, setStopPrice] = useState("");
   const [paperMode, setPaperMode] = useState(false);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
+  const parsedStop = parseFloat(stopPrice);
   const isValid =
     !isNaN(parsedQty) &&
     parsedQty > 0 &&
-    !isNaN(parsedPrice) &&
-    parsedPrice > 0;
+    pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
 
   // Stock orders route through the linear branch of `<OrderRiskGate>`.
   // Held LONG / SHORT shares are looked up from the portfolio so a SELL
@@ -347,7 +357,8 @@ function StockOrderForm({
 
   const riskInput: LinearOrderRiskInput | null = useMemo(() => {
     if (!isValid) return null;
-    const description = `${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}`;
+    const riskPrice = riskPriceForOrderType(orderType, parsedPrice, parsedStop);
+    const description = `${action} ${parsedQty} ${ticker} @ ${fmtPrice(riskPrice)}`;
     // Close-out branch: SELL against held LONG ≥ qty, OR BUY against held
     // SHORT ≥ qty. Provides basis so the summary reports realised P&L.
     const isClosingLong = action === "SELL" && heldLong >= parsedQty;
@@ -359,7 +370,7 @@ function StockOrderForm({
         instrument: "stock",
         action,
         quantity: parsedQty,
-        limitPrice: parsedPrice,
+        limitPrice: riskPrice,
         multiplier: 1,
         heldQuantity: heldLong,
         heldShortQuantity: heldShort,
@@ -373,13 +384,13 @@ function StockOrderForm({
       instrument: "stock",
       action,
       quantity: parsedQty,
-      limitPrice: parsedPrice,
+      limitPrice: riskPrice,
       multiplier: 1,
       heldQuantity: heldLong,
       heldShortQuantity: heldShort,
       description,
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, heldLong, heldShort, avgCost]);
+  }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, heldLong, heldShort, avgCost]);
 
   return (
     <SingleLegOrderTicket
@@ -395,6 +406,10 @@ function StockOrderForm({
       isValid={isValid}
       limitPrice={limitPrice}
       onLimitPriceChange={setLimitPrice}
+      orderType={orderType}
+      onOrderTypeChange={setOrderType}
+      stopPrice={stopPrice}
+      onStopPriceChange={setStopPrice}
       onActionChange={setAction}
       style={{ marginTop: "16px" }}
       header={<div className="book-section-header">STOCK ORDER</div>}
@@ -417,24 +432,23 @@ function StockOrderForm({
           onPaperModeChange={setPaperMode}
         />
       }
-      buildPayload={({ action, quantity, limitPrice, tif }) =>
+      buildPayload={({ action, quantity, limitPrice, tif, orderType, stopPrice }) =>
         resolvePlacementTarget(paperMode) === "paper-shadow"
           ? {
               ticker,
               side: action,
-              order_type: "LIMIT",
               quantity,
-              limit_price: limitPrice,
               bid,
               ask,
+              ...paperPlaceFields(orderType, limitPrice, stopPrice),
             }
           : {
               type: "stock",
               symbol: ticker,
               action,
               quantity,
-              limitPrice,
               tif,
+              ...ibPlaceFields(orderType, limitPrice, stopPrice),
             }
       }
       buildSuccessMessage={({ action, quantity, limitPrice }) =>
@@ -464,8 +478,41 @@ export default function BookTab({
 }: BookTabProps) {
   const { isMobile, hasMounted } = useViewport();
   const mobile = isMobile && hasMounted;
+  const tickerDetail = useTickerDetailOptional();
 
-  const priceData = tickerPriceData ?? prices[ticker] ?? null;
+  const comboLegBooks = useMemo(() => {
+    if (!position || position.legs.length < 2) return [];
+    const byKey = new Map<string, {
+      key: string;
+      strike: number | null;
+      type: "Call" | "Put" | "Stock";
+      signedContracts: number;
+    }>();
+    for (const leg of position.legs) {
+      const key = leg.type === "Stock" ? ticker : legPriceKey(ticker, position.expiry, leg);
+      if (!key) continue;
+      const signed = leg.contracts * (leg.direction === "LONG" ? 1 : -1);
+      const current = byKey.get(key);
+      if (current) current.signedContracts += signed;
+      else byKey.set(key, { key, strike: leg.strike, type: leg.type, signedContracts: signed });
+    }
+    return [...byKey.values()].flatMap((leg) => leg.signedContracts === 0 ? [] : [{
+      key: leg.key,
+      strike: leg.strike,
+      type: leg.type,
+      direction: leg.signedContracts > 0 ? "LONG" as const : "SHORT" as const,
+      contracts: Math.abs(leg.signedContracts),
+    }]);
+  }, [position, ticker]);
+  const optionLegBooks = comboLegBooks.filter((leg) => leg.type !== "Stock");
+
+  // A focused option key must never fall back to the underlying stock quote:
+  // that recreates a stock book under an OPTION label while the option feed is
+  // pending or unavailable. Only the underlying subject may use ticker L1.
+  const resolvedBookKey = bookKey ?? ticker;
+  const priceData = resolvedBookKey === ticker
+    ? tickerPriceData ?? prices[ticker] ?? null
+    : tickerPriceData;
   const bid = priceData?.bid ?? null;
   const ask = priceData?.ask ?? null;
   const mid = bid != null && ask != null ? (bid + ask) / 2 : null;
@@ -474,14 +521,50 @@ export default function BookTab({
   const lastLabel = priceData?.lastIsCalculated ? "MARK" : "LAST";
   const isIndex = isIndexSymbol(ticker);
 
-  const resolvedBookKey = bookKey ?? ticker;
-  const depth = depths?.[resolvedBookKey] ?? null;
+  const selectedOptionLeg = optionLegBooks.find((leg) => leg.key === resolvedBookKey) ?? null;
+  const isComboBook = bookKind === "combo" && comboLegBooks.length >= 2;
+  const depth = useMemo(() => {
+    if (!isComboBook) return depths?.[resolvedBookKey] ?? null;
+    let depthCount = 0;
+    let bboCount = 0;
+    const legs = comboLegBooks.map((leg) => {
+      const liveDepth = depths?.[leg.key];
+      if (liveDepth?.entitled) {
+        depthCount += 1;
+        return { direction: leg.direction, contracts: leg.contracts, book: liveDepth };
+      }
+      const quote = prices[leg.key];
+      const fallback = quote?.bid != null && quote.ask != null
+        && quote.bidSize != null && quote.askSize != null
+        ? {
+            symbol: leg.key,
+            kind: leg.type === "Stock" ? "stock" as const : "option" as const,
+            bid: [{ price: quote.bid, size: quote.bidSize, marketMaker: null, exchange: null }],
+            ask: [{ price: quote.ask, size: quote.askSize, marketMaker: null, exchange: null }],
+            isSmartDepth: false,
+            feed: "L1 BBO",
+            entitled: true,
+            timestamp: quote.timestamp,
+          }
+        : null;
+      if (fallback) bboCount += 1;
+      return { direction: leg.direction, contracts: leg.contracts, book: fallback };
+    });
+    const synthetic = buildSyntheticComboDepth(resolvedBookKey, legs);
+    if (!synthetic) return null;
+    return {
+      ...synthetic,
+      feed: bboCount > 0
+        ? `HYBRID IMPLIED · ${depthCount} DEPTH + ${bboCount} BBO`
+        : "IMPLIED LEG BBO",
+    };
+  }, [comboLegBooks, depths, isComboBook, prices, resolvedBookKey]);
   // depth.kind wins; else the kind resolved by the parent; else stock.
   const kind = depth?.kind ?? bookKind ?? "stock";
   // Time & Sales rides the same focused book key as depth. Newest-first from
   // the relay; empty until prints arrive (off-hours / unentitled), which the
   // TimeAndSales header-only empty state handles.
-  const trades: Trade[] = tape?.[resolvedBookKey] ?? [];
+  const trades: Trade[] = isComboBook ? [] : tape?.[resolvedBookKey] ?? [];
 
   const l1Fallback = mobile ? (
     <MobileQuoteRow
@@ -506,8 +589,42 @@ export default function BookTab({
 
   const orderBook = (
     <>
+      {comboLegBooks.length > 1 && tickerDetail && (
+        <div className="combo-book-selector" role="group" aria-label="Spread and option leg book">
+          <span className="combo-book-selector__label">BOOK</span>
+          <button
+            type="button"
+            className={`combo-book-selector__button${isComboBook ? " active" : ""}`}
+            aria-label="Implied spread book"
+            aria-pressed={isComboBook}
+            onClick={() => tickerDetail.setFocusedBookKey(null)}
+          >
+            <span>IMPLIED</span>
+            <b>SPREAD</b>
+          </button>
+          {optionLegBooks.map((leg) => (
+            <button
+              key={leg.key}
+              type="button"
+              className={`combo-book-selector__button${leg.key === resolvedBookKey ? " active" : ""}`}
+              aria-label={`$${leg.strike} ${leg.type} book`}
+              aria-pressed={leg.key === resolvedBookKey}
+              onClick={() => tickerDetail.setFocusedBookKey(leg.key)}
+            >
+              <span>{leg.direction}</span>
+              <b>${leg.strike} {leg.type.toUpperCase()}</b>
+            </button>
+          ))}
+        </div>
+      )}
       <OrderBook
-        symbolLabel={ticker}
+        symbolLabel={isComboBook
+          ? `${ticker} ${comboLegBooks.map((leg) => leg.type === "Stock"
+            ? "STK"
+            : `$${leg.strike}${leg.type === "Call" ? "C" : "P"}`).join("/")}`
+          : selectedOptionLeg
+          ? `${ticker} $${selectedOptionLeg.strike}${selectedOptionLeg.type === "Call" ? "C" : "P"}`
+          : ticker}
         kind={kind}
         depth={depth}
         trades={trades}
@@ -520,7 +637,7 @@ export default function BookTab({
       />
       {/* Microstructure imbalance / microprice (F10). Renders only when an
           entitled depth book is present; null off-hours / unentitled. */}
-      <MicrostructureStrip depth={depth} />
+      {!isComboBook && <MicrostructureStrip depth={depth} />}
     </>
   );
 

@@ -205,6 +205,27 @@ test.describe("SPXU combo order — rejection surfaces as error (RED → GREEN)"
     );
   });
 
+  test("combo cockpit defaults to the implied spread book and exposes both legs", async ({ page }, testInfo) => {
+    await openSpxuOrderTicket(page);
+
+    const selector = page.getByRole("group", { name: "Spread and option leg book" });
+    await expect(selector).toBeVisible();
+    const spread = page.getByRole("button", { name: "Implied spread book" });
+    const longLeg = page.getByRole("button", { name: "$53 Call book" });
+    const shortLeg = page.getByRole("button", { name: "$60 Call book" });
+    await expect(spread).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".book-sym")).toContainText("SPXU $53C/$60C");
+    await expect(page.locator(".book-kind")).toHaveText("IMPLIED SPREAD");
+
+    const screenshotPath = testInfo.outputPath("combo-leg-books.png");
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+    await testInfo.attach("combo-leg-books", { path: screenshotPath, contentType: "image/png" });
+
+    await shortLeg.click();
+    await expect(shortLeg).toHaveAttribute("aria-pressed", "true");
+    await expect(page.locator(".book-sym")).toContainText("SPXU $60C");
+  });
+
   test("RED: IB silent cancellation shows error instead of success", async ({ page }) => {
     // Mock placement — IB returns ok=true but initialStatus=Cancelled
     await page.route("**/api/orders/place", (route) =>

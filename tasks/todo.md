@@ -1,3 +1,77 @@
+# Task: Signed implied books for every tested option structure (2026-08-11)
+
+## Dependency graph
+
+- T1 depends_on: [] - Inventory the canonical option-structure catalog and define signed natural-market semantics for each leg topology.
+- T2 depends_on: [T1] - Add a parameterized red regression matrix covering every supported structure, including negative credit values and ratios.
+- T3 depends_on: [T2] - Generalize implied depth construction and subscription/render behavior beyond two-leg long/short pairs.
+- T4 depends_on: [T3] - Run focused/full tests and desktop/mobile visual verification; document results.
+
+## Checklist
+
+- [x] T1 Structure catalog and signed semantics defined.
+- [x] T2 Complete structure regression matrix added.
+- [x] T3 Generalized implied books implemented.
+- [x] T4 Verification passed and review recorded.
+
+## Review
+
+- The implied-book engine now covers all 52 multi-leg entries in the canonical 58-structure catalog; the remaining six single-leg structures continue to use their direct instrument books.
+- Signed executable pricing is preserved for debit, credit, all-long, all-short, ratio, zero-crossing, stock-option, and calendar/diagonal structures. Duplicate contracts are netted before GCD ratio normalization, and negative book clicks remain negative in the combo ticket.
+- Arbitrary N-leg marginal depth matching uses synchronized cross-sided markets. Four-leg structures are explicitly labeled `HYBRID IMPLIED · 3 DEPTH + 1 BBO` because the relay permits three simultaneous depth subjects; no native complex-book liquidity is claimed.
+- Verification: focused Vitest 7 files / 112 tests passed; Playwright desktop/mobile 9 passed; full Vitest 514 files / 5,328 tests passed; typecheck, layout detector, visual screenshot review, and `git diff --check` passed.
+
+---
+
+# Task: Interpolated call-spread order book (2026-08-11)
+
+## Dependency graph
+
+- T1 depends_on: [] - Define synthetic spread bid/ask and ladder semantics from both option-leg books.
+- T2 depends_on: [T1] - Add failing unit and browser regressions for the interpolated spread book.
+- T3 depends_on: [T2] - Render a clearly labeled spread book while preserving direct per-leg books and order pricing.
+- T4 depends_on: [T3] - Run focused/full verification and visually inspect desktop/mobile output.
+
+## Checklist
+
+- [x] T1 Synthetic spread-book semantics defined.
+- [x] T2 Regressions reproduce the missing spread book.
+- [x] T3 Interpolated spread book implemented.
+- [x] T4 Verification passed and review recorded.
+
+## Review
+
+- Two-leg option positions now default to an implied spread book built from both live leg BBO montages; natural BID/ASK uses cross-sided executable math, normalizes leg ratios, and preserves signed credit prices.
+- The selector exposes SPREAD plus both direct leg books, labels the result `IMPLIED SPREAD` / `IMPLIED LEG BBO`, identifies paired leg venues, suppresses synthetic tape, and warns that the view estimates legging liquidity rather than native complex-book execution.
+- Depth subscriptions now diff a bounded subject set, allowing both legs to stream without recycling retained books; stock, future, and single-option paths remain compatible.
+- Verification: focused Vitest 52 passed; Playwright desktop 5 and mobile 2 passed; full Vitest 512 files / 5,267 tests passed; typecheck, lint (0 errors), detector, mobile screenshot review, and `git diff --check` passed.
+
+---
+
+# Task: Show option-spread books for focused positions (2026-08-11)
+
+## Dependency graph
+
+- T1 depends_on: [] - Trace `posId` position focus into the cockpit depth subject and define the correct spread-book behavior.
+- T2 depends_on: [T1] - Add a failing regression for a focused multi-leg option position.
+- T3 depends_on: [T2] - Route the book surface to the focused option leg/spread subject without changing order semantics.
+- T4 depends_on: [T3] - Run focused/full tests and desktop visual verification; document results.
+
+## Checklist
+
+- [x] T1 Position-to-book selection traced.
+- [x] T2 Regression reproduces the stock-book fallback.
+- [x] T3 Option-spread book behavior implemented.
+- [x] T4 Verification passed and review recorded.
+
+## Review
+
+- Multi-leg positions previously had no single combo depth key, so the cockpit silently fell back to the underlying ticker's stock book.
+- The option view now defaults to the first tradeable leg, provides a persistent long/short leg selector, labels the exact contract, and keeps the spread quote isolated from each leg's book data; STOCK remains an explicit switch.
+- Verification: focused Vitest 38 passed; Playwright desktop 1 and mobile 2 passed; full Vitest 511 files / 5,263 tests passed; typecheck, lint, visual screenshot review, detector, and `git diff --check` passed.
+
+---
+
 # Task: Improve Return % table-header legibility (2026-08-10)
 
 ## Dependency graph
@@ -73,6 +147,7 @@ client + optional backfill path; keep UW as live primary (repo priority #2).
 
 ## Notes
 
+- **Purchase (thetadata.net/purchase, annual):** Options **Standard** + Indices **Value**; Stocks and Interest Rates off. FAQ: Options does not include index underlyings (SPX cash needs Indices). Pro tiers are live-trading overkill for daily backfill.
 - Rejected free substitutes for this construction: Cboe SKEW index, Cboe RXM (strategy P&L).
 - ORATS (2007+ summaries) remains a paid alternative if ThetaData depth or SPX coverage fails.
 
@@ -2323,3 +2398,25 @@ Per /indicator swarm (spec: docs/indicators/skew.md). Slug/service `skew`, tab S
 - [x] COR (SPX implied correlation) shipped end to end via /indicator swarm: Cboe COR1M/3M/6M/1Y CSVs (2006->present, conditional GET), migration 0040 `cor_history`, `/api/cor`, `/regime/cor` tab (tenor chips, 6M percentile regime strip), radon-cor.timer daily 02:20 UTC.
 - Evidence: red (ModuleNotFoundError/5 vitest fails) -> per-worktree green -> merged full gates 5395 pytest + 735 cloud + 5516 vitest + typecheck -> live screenshot docs/indicators/cor-tab.png -> CI run 31340826946 green -> VPS timer installed + fired (service_health cor ok 23:07Z) -> prod browser verify.
 - Note: migration renumbered 0039->0040 mid-flight (skew2d claimed 39); lesson saved to memory.
+
+# Task: Align Theta Harvester scanner header (2026-08-11)
+
+## Dependency graph
+
+- T1 depends_on: [] - Reproduce the desktop loading-state alignment and identify the flex sizing that makes the title region consume half the scanner header.
+- T2 depends_on: [T1] - Add a Playwright geometry regression for the title and controls regions.
+- T3 depends_on: [T2] - Give the Theta title intrinsic width while its control rail owns the remaining header space.
+- T4 depends_on: [T3] - Run focused tests and visually inspect desktop and mobile scanner states.
+
+## Checklist
+
+- [x] T1 Reproduce and trace the alignment defect.
+- [x] T2 Add the failing geometry regression.
+- [x] T3 Implement the scoped layout correction.
+- [x] T4 Verify tests and rendered output.
+
+## Review
+
+- Root cause: the shared scanner header assigned both the compact Theta heading and its dense controls flexible growth, so the heading occupied roughly half the row and made the controls read as a detached region.
+- Scoped the correction to Theta Harvester: the title now keeps intrinsic width and the control rail owns the remaining flexible space. Other scanner layouts are unchanged, and the existing mobile reflow still applies.
+- Verification: full Vitest 514 files / 5,326 tests passed; Theta Playwright desktop and mobile 2 passed; typecheck, diff check, layout detector, and visual screenshot inspection passed.

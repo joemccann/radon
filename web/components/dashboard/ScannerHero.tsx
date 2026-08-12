@@ -5,19 +5,18 @@ import Link from "next/link";
 
 import { useThetaHarvester } from "@/lib/useThetaHarvester";
 import { useStrengthConfirmation } from "@/lib/useStrengthConfirmation";
-import { gateCells, scoreTone, strengthBadge, thetaStructLabel } from "@/lib/scannerHero";
+import {
+  formatScanSample,
+  gateCells,
+  scoreTone,
+  strengthBadge,
+  thetaStructLabel,
+} from "@/lib/scannerHero";
 import { fmtMoney } from "@/lib/format/money";
 
 const TOP_N = 4;
 
 type Tab = "theta" | "strength";
-
-function formatSampleTime(iso?: string | null): string {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "—";
-  return d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
-}
 
 function rank(i: number): string {
   return String(i + 1).padStart(2, "0");
@@ -194,7 +193,7 @@ export default function ScannerHero() {
         </div>
         <div className="panel-meta-rail-item">
           <span className="k">sample</span>
-          <span className="v">{formatSampleTime(scanTime)}</span>
+          <span className="v">{formatScanSample(scanTime)}</span>
         </div>
         <Link className="panel-meta-rail-item signals-hero__open-scanner" href="/scanner">
           OPEN SCANNER →

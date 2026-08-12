@@ -45,6 +45,15 @@ class TestCheckOrderLimits:
         assert violation is not None
         assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
 
+    def test_stp_notional_uses_stop_price(self, monkeypatch):
+        monkeypatch.setenv("RADON_MAX_ORDER_NOTIONAL", "1000")
+        violation = order_limits.check_order_limits({
+            "type": "stock", "symbol": "AAPL", "action": "SELL",
+            "quantity": 100, "orderType": "STP", "stopPrice": 20.0,
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
+
     def test_stock_notional_uses_multiplier_one(self):
         """1000 shares × $200 = $200k — under the default cap; the option
         multiplier must not apply to stock."""

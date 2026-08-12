@@ -26,6 +26,7 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
     1,
   );
   const isOption = book.kind === "option";
+  const isCombo = book.kind === "combo";
 
   const row = (level: MontageLevel, side: "bid" | "ask", index: number) => {
     const fill = Math.round(montageFill(level, maxSize) * 55);
@@ -89,10 +90,16 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
           depth. NBBO marks the venues setting the inside bid and ask.
         </p>
       )}
+      {isCombo && (
+        <p className="book-montage-note">
+          Implied spread book from synchronized leg markets. Prices estimate legging liquidity,
+          not a native complex-order-book quote or guaranteed simultaneous fill.
+        </p>
+      )}
       <div className="book-sides">
         <div className="book-side bid">
           <div className="book-colhead">
-            <span>{isOption ? "Exchange" : "Market"}</span>
+            <span>{isOption ? "Exchange" : isCombo ? "Leg venues" : "Market"}</span>
             <span className="r">{isOption ? "Size" : "Shares"}</span>
             <span className="r">Bid</span>
           </div>
@@ -102,7 +109,7 @@ export function DepthMontage({ book, onPriceClick }: { book: DepthBook; onPriceC
           <div className="book-colhead">
             <span>Ask</span>
             <span className="r">{isOption ? "Size" : "Shares"}</span>
-            <span className="r">{isOption ? "Exchange" : "Market"}</span>
+            <span className="r">{isOption ? "Exchange" : isCombo ? "Leg venues" : "Market"}</span>
           </div>
           {asks.map((level, i) => row(level, "ask", i))}
         </div>

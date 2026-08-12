@@ -58,6 +58,7 @@ describe.each([
   ["skew", "app/regime/skew/page.tsx"],
   ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
+  ["vol-cone", "app/regime/vol-cone/page.tsx"],
   ["cot", "app/regime/cot/page.tsx"],
   ["ats", "app/regime/ats/page.tsx"],
   ["short", "app/regime/short/page.tsx"],
@@ -119,6 +120,9 @@ vi.mock("../components/Skew2dPanel", () => ({
 vi.mock("../components/YieldCurvePanel", () => ({
   default: () => <div data-testid="curve-panel-stub" />,
 }));
+vi.mock("../components/VolConePanel", () => ({
+  default: () => <div data-testid="vol-cone-panel-stub" />,
+}));
 vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
   default: () => <div data-testid="cot-panel-stub" />,
 }));
@@ -126,7 +130,7 @@ vi.mock("../components/equibles-ats-venue-share/AtsVenueSharePanel", () => ({
   default: () => <div data-testid="ats-panel-stub" />,
 }));
 vi.mock("../components/equibles/EquiblesShortCrowdingPanel", () => ({
-  default: () => <div data-testid="short-panel-stub" />,
+  default: () => <div data-testid="short-panel-stub" />
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));

@@ -44,6 +44,17 @@ export default function MarkdownRenderer({ content }: MarkdownRendererProps) {
               {children}
             </a>
           ),
+          // Assistant answers can quote untrusted retrieved text (scraped
+          // newsfeed bodies), and the same tool loop reads portfolio, P&L and
+          // journal state. A markdown image is an outbound GET fired on render
+          // with an attacker-chosen query string, so it is an exfiltration
+          // channel for whatever figures the answer carries. Nothing in the
+          // chat surface needs an image: render the alt text instead of loading.
+          img: ({ alt }) => (
+            <span className="chat-markdown-image-blocked">
+              {alt ? `[image not loaded: ${alt}]` : "[image not loaded]"}
+            </span>
+          ),
           em: ({ children }) => <em className="chat-markdown-emphasis">{children}</em>,
           strong: ({ children }) => <strong className="chat-markdown-strong">{children}</strong>,
           h1: ({ children }) => <h1 className="chat-markdown-heading chat-markdown-heading-1">{children}</h1>,
