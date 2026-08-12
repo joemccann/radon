@@ -37,6 +37,11 @@
     handle @edge_health_status {
         rewrite * /status
         reverse_proxy 127.0.0.1:8330 {
+            # This path is anonymous internet traffic. The marker (set, so a
+            # client-supplied value is overwritten) tells the daemon to answer
+            # with the aggregate verdict only — no unit inventory, no
+            # service_health error text, no IB auth_state.
+            header_up X-Radon-Public-Edge "1"
             @down status 502 503 504
             handle_response @down {
                 header Content-Type application/json
@@ -128,6 +133,7 @@ beta.radon.run {
     handle @edge_health_status {
         rewrite * /status
         reverse_proxy 127.0.0.1:8331 {
+            header_up X-Radon-Public-Edge "1"
             @down status 502 503 504
             handle_response @down {
                 header Content-Type application/json

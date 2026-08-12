@@ -20,7 +20,11 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 
 import robots from "../app/robots";
-import { isPublicRoute, PUBLIC_SHARE_API_ROUTES } from "../middleware";
+import {
+  AUTHENTICATED_SHARE_GENERATOR_ROUTES,
+  isPublicRoute,
+  PUBLIC_SHARE_API_ROUTES,
+} from "../middleware";
 
 describe("app/robots.ts — disallow all crawlers except share cards", () => {
   it("disallows every path for every user agent, with no sitemap", () => {
@@ -38,6 +42,16 @@ describe("app/robots.ts — disallow all crawlers except share cards", () => {
     const rules = output.rules as { allow: string[] };
     for (const route of PUBLIC_SHARE_API_ROUTES) {
       expect(rules.allow).toContain(route);
+    }
+  });
+
+  // Preview bots only ever GET a rendered card. The generator POSTs run a
+  // report script on the trading host and now require a Clerk session, so
+  // advertising them to crawlers would only publish a path that 401s.
+  it("does not advertise the authenticated generator POST routes", () => {
+    const rules = robots().rules as { allow: string[] };
+    for (const route of AUTHENTICATED_SHARE_GENERATOR_ROUTES) {
+      expect(rules.allow, route).not.toContain(route);
     }
   });
 });

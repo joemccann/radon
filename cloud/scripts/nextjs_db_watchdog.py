@@ -18,6 +18,13 @@ Restart policy (mirrors scripts/ib_watchdog.py's ladder):
     cannot flap the frontend.
   - radon-nextjs has no PartOf/BindsTo — a solo restart does not cascade.
 
+Runs as `radon`, not root. Everything here except the restart is unprivileged,
+and the probe both execs the radon-owned venv interpreter and imports the
+radon-writable checkout, so a root unit would have handed the radon account a
+root shell. The one privileged step goes through the root-owned,
+argument-validating operator, which config/sudoers.d/radon-ops already grants
+for radon-*.service.
+
 Writes a `nextjs-db-read` service_health row (error on restart, ok on
 recovery) so the existing watchdog/footer surfaces see the incident.
 """
@@ -37,6 +44,12 @@ RESTART_COOLDOWN_S = 600
 VENV_PYTHON = "/home/radon/radon/.venv/bin/python"
 APP_ROOT = "/home/radon/radon"
 HEALTH_ROW_SERVICE = "nextjs-db-read"
+OPERATOR = "/usr/local/bin/radon"
+NEXTJS_UNIT = "radon-nextjs.service"
+# The operator bounds its own systemctl call at 40s and takes the deploy lock
+# first; stay above that so this wrapper reports the operator's verdict rather
+# than pre-empting it.
+RESTART_TIMEOUT_S = 45
 
 sys.path.insert(0, APP_ROOT)
 
@@ -111,9 +124,10 @@ def save_state(state: dict) -> None:
 
 
 def restart_nextjs() -> None:
+    """The only privileged step, via the fixed operator sudo rule."""
     subprocess.run(
-        ["systemctl", "restart", "radon-nextjs.service"],
-        timeout=30,
+        ["sudo", "-n", OPERATOR, "unit", "restart", NEXTJS_UNIT],
+        timeout=RESTART_TIMEOUT_S,
         check=True,
     )
 

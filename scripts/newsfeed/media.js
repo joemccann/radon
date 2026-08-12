@@ -1,6 +1,8 @@
 import path from "path";
 import fs from "fs-extra";
 import https from "node:https";
+import dns from "node:dns";
+import net from "node:net";
 import axios from "axios";
 
 const BASE_URL = new URL("https://themarketear.com");
@@ -24,10 +26,82 @@ export function absolutizeMediaUrl(src) {
   return src;
 }
 
+// post.rawImages comes verbatim from third-party article markup (extract.js
+// reads every <img> src/data-src). The scraper runs on the production VPS and
+// everything it downloads is rsync'd to the public media host, so an unfiltered
+// fetch turns a planted <img src="http://127.0.0.1:8321/health"> into a proxy
+// for the trusted loopback perimeter with the response republished worldwide.
+// Only these origins may be fetched; everything else is refused before a socket
+// opens. themarketear.com serves /images/<hash>.png, which 301s to its
+// digitaloceanspaces CDN.
+const ALLOWED_IMAGE_DOMAINS = ["themarketear.com", "digitaloceanspaces.com"];
+
+// The operator's authenticated themarketear.com session cookie must never ride
+// along to any other host: an attacker whose <img> lands in a feed article
+// would read the premium session out of their own access log and replay it.
+const COOKIE_SCOPED_DOMAINS = ["themarketear.com"];
+
+function matchesDomain(hostname, domain) {
+  return hostname === domain || hostname.endsWith(`.${domain}`);
+}
+
+export function isAllowedImageUrl(url) {
+  if (url.protocol !== "https:") return false;
+  return ALLOWED_IMAGE_DOMAINS.some((domain) => matchesDomain(url.hostname, domain));
+}
+
+export function isCookieScopedHost(hostname) {
+  return COOKIE_SCOPED_DOMAINS.some((domain) => matchesDomain(hostname, domain));
+}
+
+function isPrivateIpv4(address) {
+  const [a, b] = address.split(".").map(Number);
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
+  if (a === 198 && (b === 18 || b === 19)) return true;
+  return a >= 224;
+}
+
+export function isPublicAddress(address) {
+  const version = net.isIP(address);
+  if (version === 4) return !isPrivateIpv4(address);
+  if (version !== 6) return false;
+
+  const normalised = address.toLowerCase().split("%")[0];
+  const mapped = normalised.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+  if (mapped) return !isPrivateIpv4(mapped[1]);
+  if (normalised === "::1" || normalised === "::") return false;
+  if (/^f[cd]/.test(normalised)) return false;
+  if (/^fe[89ab]/.test(normalised)) return false;
+  return true;
+}
+
+// A hostname allowlist alone does not stop a DNS answer that points at a
+// private address (rebinding, or a CDN record poisoned to 127.0.0.1). Checking
+// at connect time also covers every redirect hop, which URL-level checks miss.
+export function createGuardedLookup(baseLookup = dns.lookup) {
+  return function guardedLookup(hostname, options, callback) {
+    const done = typeof options === "function" ? options : callback;
+    const lookupOptions = typeof options === "function" ? {} : options;
+    baseLookup(hostname, lookupOptions, (err, address, family) => {
+      if (err) return done(err);
+      const resolved = Array.isArray(address) ? address : [{ address, family }];
+      const blocked = resolved.find((entry) => !isPublicAddress(entry.address));
+      if (blocked) {
+        return done(new Error(`${hostname} resolved to non-public address ${blocked.address}`));
+      }
+      return done(null, address, family);
+    });
+  };
+}
+
 // Force IPv4 — themarketear.com's CDN advertises AAAA but those routes are
 // frequently unreachable from residential IPv6, causing EHOSTUNREACH timeouts
 // while curl-style IPv4 succeeds.
-const ipv4Agent = new https.Agent({ family: 4, keepAlive: true });
+const ipv4Agent = new https.Agent({ family: 4, keepAlive: true, lookup: createGuardedLookup() });
 
 const defaultClient = axios.create({
   timeout: 20000,
@@ -35,6 +109,43 @@ const defaultClient = axios.create({
   maxRedirects: 5,
   httpsAgent: ipv4Agent,
 });
+
+const IMAGE_MAGIC_BYTES = [
+  [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], // PNG
+  [0xff, 0xd8, 0xff], // JPEG
+  [0x47, 0x49, 0x46, 0x38], // GIF
+  [0x42, 0x4d], // BMP
+];
+
+// Bytes that land here are served unauthenticated from media.radon.run with
+// Access-Control-Allow-Origin *, so only real raster images may be written —
+// never an HTML/JSON body from a misrouted fetch, never an SVG (scriptable).
+export function looksLikeImage(data) {
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data ?? []);
+  if (bytes.length < 12) return false;
+  if (bytes.slice(0, 4).toString("latin1") === "RIFF" && bytes.slice(8, 12).toString("latin1") === "WEBP") {
+    return true;
+  }
+  return IMAGE_MAGIC_BYTES.some((signature) =>
+    signature.every((byte, offset) => bytes[offset] === byte),
+  );
+}
+
+function readContentType(headers) {
+  if (!headers || typeof headers !== "object") return "";
+  const raw = headers["content-type"] ?? headers["Content-Type"];
+  return typeof raw === "string" ? raw.toLowerCase() : "";
+}
+
+function assertImagePayload(response) {
+  const contentType = readContentType(response?.headers);
+  if (contentType && !contentType.startsWith("image/")) {
+    throw new Error(`unexpected content-type ${contentType}`);
+  }
+  if (!looksLikeImage(response?.data)) {
+    throw new Error("response body is not an image");
+  }
+}
 
 function slugify(value) {
   return (
@@ -66,13 +177,22 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
     if (!Array.isArray(urls) || urls.length === 0) return [];
 
     const cookieHeader = await resolveCookieHeader();
-    const requestOptions = cookieHeader ? { headers: { Cookie: cookieHeader } } : undefined;
 
     const tasks = urls.map(async (remoteUrl, index) => {
-      const absoluteUrl = new URL(remoteUrl, BASE_URL).toString();
+      const urlObj = new URL(remoteUrl, BASE_URL);
+      const absoluteUrl = urlObj.toString();
       if (cache.has(absoluteUrl)) return cache.get(absoluteUrl);
 
-      const urlObj = new URL(absoluteUrl);
+      if (!isAllowedImageUrl(urlObj)) {
+        console.warn(`[newsfeed] refusing image from untrusted origin: ${absoluteUrl}`);
+        return null;
+      }
+
+      const requestOptions =
+        cookieHeader && isCookieScopedHost(urlObj.hostname)
+          ? { headers: { Cookie: cookieHeader } }
+          : undefined;
+
       const rawName = path.basename(urlObj.pathname) || `${slugify(postId)}-${index}`;
       const [, maybeExt] = rawName.split(/(?=\.[^.]+$)/);
       const ext = maybeExt && maybeExt.length <= 6 ? maybeExt : ".png";
@@ -85,6 +205,7 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
       if (!(await fs.pathExists(destPath))) {
         try {
           const response = await client.get(absoluteUrl, requestOptions);
+          assertImagePayload(response);
           await fs.writeFile(destPath, response.data);
         } catch (err) {
           console.warn(`[newsfeed] image download failed ${absoluteUrl}: ${err.message}`);

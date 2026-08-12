@@ -1,1 +1,9 @@
-radon ALL=(ALL) NOPASSWD: /bin/systemctl reload caddy, /bin/cp /home/radon/radon/cloud/caddy/Caddyfile /etc/caddy/Caddyfile
+# The raw `cp /home/radon/radon/cloud/caddy/Caddyfile /etc/caddy/Caddyfile`
+# capability was removed: cp follows a symlinked source, so radon could publish
+# any root-only file (ln -sf /etc/shadow <source>) into the 0644 destination and
+# read it back, and could install an unvalidated edge config that strips the
+# X-Forwarded-* headers scripts/api/auth.py:is_trusted_local_request trusts.
+# Publishing is one fixed root-owned action that stages, validates, installs
+# atomically, and reloads under a bound.
+radon ALL=(root) NOPASSWD: /usr/local/sbin/radon-deploy-root publish-caddy
+radon ALL=(root) NOPASSWD: /bin/systemctl reload caddy

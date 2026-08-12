@@ -13,8 +13,25 @@ Type=oneshot
 # `docker inspect` to resolve the live compose file.
 User=root
 WorkingDirectory=/home/radon/radon/cloud
-EnvironmentFile=/home/radon/radon-cloud/.env
-ExecStart=/usr/bin/python3 /home/radon/radon/cloud/scripts/drift_audit.py
+# This unit deliberately declares NO environment-file directive. The stable
+# secret file is 0600 radon:radon by design, and systemd merges every KEY=VALUE
+# line of such a file into the process environment unfiltered: one LD_PRELOAD
+# line appended to it would load
+# radon-authored code into root on the next tick, and PATH= would redirect the
+# bare `docker` / `systemctl` calls below to radon-owned binaries. The audit
+# instead READS the two keys it needs out of that file as data
+# (drift_audit.py:load_env_keys), which grants radon no control over root's
+# execution environment.
+Environment=RADON_ENV_FILE=/home/radon/radon-cloud/.env
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+# Root runs the control-plane copy of the audit, installed root-owned by
+# cloud/scripts/bootstrap-control-plane.sh. The checkout is the ARGUMENT it
+# audits, never the code it executes: a radon-writable payload would make every
+# timer tick a root shell for the unprivileged account.
+# -I (isolated): CPython otherwise prepends the script's own directory to
+# sys.path, so a module dropped beside the audit (difflib.py) would be imported
+# by root.
+ExecStart=/usr/bin/python3 -I /usr/local/lib/radon/drift_audit.py /home/radon/radon/cloud
 # A oneshot with no runtime ceiling can hang forever and freeze its timer
 # (the ib-watchdog self-hang, 2026-06-10) -- bound the whole run.
 TimeoutStartSec=180

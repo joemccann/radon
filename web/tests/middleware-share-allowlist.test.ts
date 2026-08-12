@@ -5,13 +5,21 @@
  * `/api/<anything>/share*` path the moment its route file landed — a new
  * scope shipping a share route would be world-callable with zero review.
  *
- * Three pins:
- *   1. Every enumerated share route IS public (link-preview bots have no
- *      Clerk session).
+ * The allowlist is split by METHOD: link-preview bots only ever GET a rendered
+ * card, while the generator POSTs run generate_*_share.py on the trading host
+ * over a loopback call FastAPI trusts as server-to-server. Publishing the
+ * generators let an anonymous caller execute that script with a 120s budget.
+ * Contract: content GETs public, generator POSTs authenticated.
+ *
+ * Four pins:
+ *   1. Every enumerated PUBLIC share route IS public (link-preview bots have
+ *      no Clerk session).
  *   2. Unknown share-shaped scopes are NOT public (default-deny).
- *   3. The allowlist matches the filesystem exactly — adding a share
- *      route.* under web/app/api without updating PUBLIC_SHARE_API_ROUTES
- *      fails this test, forcing a deliberate perimeter decision.
+ *   3. The generator POST routes are NOT public — they require a Clerk session.
+ *   4. The two lists together match the filesystem exactly — adding a share
+ *      route.* under web/app/api without classifying it as public-preview or
+ *      authenticated-generator fails this test, forcing a deliberate perimeter
+ *      decision.
  *
  * The same default-deny discipline applies to the DUR-16 probe scope:
  * `/api/probe/*` routes are bearer-gated (not Clerk-public, not anonymous),
@@ -28,6 +36,7 @@ import { describe, expect, it } from "vitest";
 import { NextRequest } from "next/server";
 
 import {
+  AUTHENTICATED_SHARE_GENERATOR_ROUTES,
   isProbeBearerRoute,
   isPublicRoute,
   PROBE_BEARER_API_ROUTES,
@@ -93,9 +102,20 @@ describe("PUBLIC_SHARE_API_ROUTES — explicit share allowlist", () => {
     }
   });
 
-  it("allowlist matches the share route files on disk exactly", () => {
+  it("the share-card GENERATOR POSTs are not public", () => {
+    for (const route of AUTHENTICATED_SHARE_GENERATOR_ROUTES) {
+      expect(isPublicRoute(reqFor(route)), route).toBe(false);
+      expect((PUBLIC_SHARE_API_ROUTES as readonly string[]).includes(route), route).toBe(false);
+    }
+  });
+
+  it("both allowlists together match the share route files on disk exactly", () => {
     const onDisk = collectShareRoutesFromFilesystem();
-    expect([...PUBLIC_SHARE_API_ROUTES].sort()).toEqual(onDisk);
+    const classified = [
+      ...PUBLIC_SHARE_API_ROUTES,
+      ...AUTHENTICATED_SHARE_GENERATOR_ROUTES,
+    ].sort();
+    expect(classified).toEqual(onDisk);
   });
 });
 

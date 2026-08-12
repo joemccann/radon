@@ -15,7 +15,13 @@ The whole point is zero shared fate: a bug here, or any trading-stack dependency
 ## Routes
 
 - `GET /healthz` — zero-I/O static `200`. The liveness pin; cannot block.
-- `GET /status` — **ALWAYS `200`**. Degraded sources are body fields, never error codes (`feedback_http_status_for_real_errors.md`). Sources, each isolated (own timeout + try/except so one failure can't fail the response):
+- `GET /status` — **ALWAYS `200`**, and **trust-split**. Degraded sources are body fields, never error codes (`feedback_http_status_for_real_errors.md`).
+
+  **Detail gate.** Caddy proxies `app.radon.run/edge-health/status` here with no auth of its own, so the full body was readable by any anonymous internet client: IB `auth_state` (a live "a 2FA push is pending right now" signal), the `radon-*` unit inventory, and `service_health` `last_error` text carrying tickers and IB order ids — the same data the FastAPI perimeter denies untrusted callers. A caller now gets the full body only when it is **unproxied** (no `X-Radon-Public-Edge` / `X-Forwarded-*` / `Forwarded` / `X-Real-Ip` header) **or** presents `Authorization: Bearer $RADON_HEALTH_STATUS_TOKEN`. Everything else gets `public_status_payload()`: `schema_version`, `ok`, `overall_state`, `generated_at`, `health_service` — no `probes`, `units`, `service_health` or `external_probe`. Redaction is never a `401`; the never-502 edge floor requires a fast valid `200`. Proxy markers are treated as untrusted because a proxy can only ADD them, so the gate fails safe even before the Caddy marker rolls out.
+
+  **Consumers.** The watchdogs, the deploy health-gate, CI and the Next.js admin proxy (`web/app/api/admin/edge-health/route.ts`) all read `127.0.0.1:8330/status` directly and keep the full body — do NOT point any of them at the public edge, or the admin unit inventory and `WriterFreshnessTable` silently render empty (and empty reads as green). The browser IB chip (`web/lib/IBStatusContext.tsx`) is unavoidably a public-edge caller, so it consumes the redacted aggregate: `overall_state == "up"` settles "connected", anything else is reported as unhealthy and the rich `/api/admin/health` proxy is asked to attribute the fault. `RADON_HEALTH_STATUS_TOKEN` is optional (documented in the root `.env.example`); unset just means the edge stays redacted.
+
+  Sources, each isolated (own timeout + try/except so one failure can't fail the response):
   - **live probes** (`run_probes`, concurrent): `radon-api` via `http://127.0.0.1:8321/health/lite`, relay `:8765` / Next.js `:3000` / IB-gateway `:4001` TCP.
   - **unit states** (`UnitStateCache`): `systemctl show` on a **5s background thread** — NEVER fork on the request hot path (an OOM/disk-full incident is exactly when you can't).
   - **`service_health`** (`turso_http.ServiceHealthCache`): the Turso table over stdlib HTTP, bounded (≤2.5s) + ~5s TTL + lock-serialized; any outage/missing-creds degrades to `state:"unknown"`.
