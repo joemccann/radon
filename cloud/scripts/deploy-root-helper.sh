@@ -494,11 +494,17 @@ commit_transition() {
   "$SYNC" -f "$(dirname "$ACTIVE_STATE_FILE")"
 }
 
+# Sized above the Caddyfile's grace_period (10s), which is what bounds how long
+# the old servers take to drain. 15s left no headroom: the reload was still in
+# flight when the timeout fired, the publish read that as a failure, and the
+# rollback's second reload hit the same wall and left the admin endpoint wedged
+# (2026-08-11). The ceiling still exists so a genuinely hung reload cannot stall
+# the deploy lock forever.
 reload_caddy() {
   if (( HELPER_TEST_MODE == 1 )); then
     "$SYSTEMCTL" reload caddy
   else
-    "$TIMEOUT" --signal=TERM --kill-after=2s 15s "$SYSTEMCTL" reload caddy
+    "$TIMEOUT" --signal=TERM --kill-after=2s 45s "$SYSTEMCTL" reload caddy
   fi
 }
 
