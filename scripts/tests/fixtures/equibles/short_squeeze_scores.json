@@ -1,0 +1,29 @@
+{
+  "settlementDate": "2026-07-31",
+  "scoredCount": 2418,
+  "total": 2418,
+  "data": [
+    {
+      "ticker": "GME",
+      "rank": 3,
+      "score": 91.4,
+      "baseScore": 82.1,
+      "catalystBoost": 9.3,
+      "shortInterestPercentOfShares": 0.2211,
+      "daysToCover": 4.8,
+      "shortVolumeShareTrend": 0.1603,
+      "shortInterestChangePercent": -0.0327,
+      "failsToDeliverPercentOfShares": 0.0028,
+      "priceAboveVwap": 0.0642,
+      "hasPriceSpikeCatalyst": true,
+      "hasVolumeSurgeCatalyst": true,
+      "hasEarningsProximityCatalyst": false,
+      "marketCapitalization": 9120000000,
+      "averageDailyDollarVolume": 411000000,
+      "shortInterestPercentile": 98.82,
+      "daysToCoverPercentile": 85.53,
+      "shortVolumeTrendPercentile": 87.47,
+      "shortInterestChangePercentile": 36.33
+    }
+  ]
+}

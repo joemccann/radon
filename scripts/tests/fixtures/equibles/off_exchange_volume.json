@@ -1,0 +1,17 @@
+{
+  "data": [
+    {
+      "weekStartDate": "2026-08-03",
+      "atsVolume": 51200311,
+      "atsTradeCount": 412033,
+      "nonAtsOtcVolume": 88410022,
+      "nonAtsOtcTradeCount": 901244,
+      "totalOffExchangeVolume": 139610333
+    }
+  ],
+  "meta": {
+    "limit": 500,
+    "offset": 0,
+    "hasMore": false
+  }
+}
