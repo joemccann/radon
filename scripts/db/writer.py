@@ -1066,6 +1066,68 @@ def upsert_skew2d_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = 
     db.commit()
 
 
+VOL_CONE_UPSERT_SQL = """
+INSERT INTO vol_cone_history
+  (ticker, date, expiry, dte, spot, atm_iv, call_10_iv, put_10_iv,
+   call_10_strike, put_10_strike, recorded_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+ON CONFLICT(ticker, date, expiry) DO UPDATE SET
+  dte            = excluded.dte,
+  spot           = excluded.spot,
+  atm_iv         = excluded.atm_iv,
+  call_10_iv     = excluded.call_10_iv,
+  put_10_iv      = excluded.put_10_iv,
+  call_10_strike = excluded.call_10_strike,
+  put_10_strike  = excluded.put_10_strike,
+  recorded_at    = excluded.recorded_at
+"""
+
+
+def upsert_vol_cone_rows(rows: list[dict[str, Any]], recorded_at: Optional[str] = None) -> None:
+    """VOL CONE indicator — one row per (ticker, date, expiry), idempotent
+    on that triple. Chunked multi-row INSERTs (same Hrana I/O bounding as
+    upsert_skew_rows): first-run backfill is ~80 sessions x ~25 names.
+    """
+    if not rows:
+        return
+    stamp = recorded_at or _now_iso()
+    db = get_db()
+    for start in range(0, len(rows), _PRICE_HISTORY_INSERT_CHUNK_ROWS):
+        chunk = rows[start:start + _PRICE_HISTORY_INSERT_CHUNK_ROWS]
+        placeholders = ", ".join("(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)" for _ in chunk)
+        params: list[Any] = []
+        for row in chunk:
+            params.extend(
+                (
+                    row["ticker"],
+                    row["date"],
+                    row["expiry"],
+                    int(row["dte"]),
+                    float(row["spot"]),
+                    float(row["atm_iv"]),
+                    float(row["call_10_iv"]),
+                    float(row["put_10_iv"]),
+                    row.get("call_10_strike"),
+                    row.get("put_10_strike"),
+                    stamp,
+                )
+            )
+        db.execute(
+            "INSERT INTO vol_cone_history "
+            "(ticker, date, expiry, dte, spot, atm_iv, call_10_iv, put_10_iv, "
+            "call_10_strike, put_10_strike, recorded_at) "
+            f"VALUES {placeholders} "
+            "ON CONFLICT(ticker, date, expiry) DO UPDATE SET "
+            "dte = excluded.dte, spot = excluded.spot, "
+            "atm_iv = excluded.atm_iv, call_10_iv = excluded.call_10_iv, "
+            "put_10_iv = excluded.put_10_iv, "
+            "call_10_strike = excluded.call_10_strike, "
+            "put_10_strike = excluded.put_10_strike, "
+            "recorded_at = excluded.recorded_at",
+            tuple(params),
+        )
+    db.commit()
+
 
 def upsert_option_close(
     symbol: str,

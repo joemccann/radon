@@ -467,6 +467,17 @@ describe("unregistered-writer regression — informed-flow and portfolio-archive
     }
     expect(requiresIb("skew2d")).toBe(false);
   });
+
+  // ``vol-cone`` — radon-vol-cone.timer fires daily 20:45 UTC Mon-Fri
+  // (16:45 ET after the close grace). UW greeks only — no IB.
+  it("vol-cone is scheduled, 26h open, 3d closed/extended, requires_ib false", () => {
+    expect(SERVICE_FRESHNESS_WINDOWS["vol-cone"]).toBeDefined();
+    expect(getServiceCategory("vol-cone")).toBe("scheduled");
+    expect(getFreshnessWindowMs("vol-cone", "open")).toBe(26 * HOUR);
+    expect(getFreshnessWindowMs("vol-cone", "extended")).toBe(3 * DAY);
+    expect(getFreshnessWindowMs("vol-cone", "closed")).toBe(3 * DAY);
+    expect(requiresIb("vol-cone")).toBe(false);
+  });
 });
 
 describe("getServiceCategory", () => {
