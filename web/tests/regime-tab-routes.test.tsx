@@ -59,6 +59,9 @@ describe.each([
   ["skew2d", "app/regime/skew2d/page.tsx"],
   ["curve", "app/regime/curve/page.tsx"],
   ["vol-cone", "app/regime/vol-cone/page.tsx"],
+  ["cot", "app/regime/cot/page.tsx"],
+  ["ats", "app/regime/ats/page.tsx"],
+  ["short", "app/regime/short/page.tsx"],
 ])("app/regime/%s/page.tsx exists and mounts WorkspaceShell", (_tab, rel) => {
   it(`file ${rel} exists`, () => {
     expect(existsSync(join(ROOT, rel))).toBe(true);
@@ -119,6 +122,15 @@ vi.mock("../components/YieldCurvePanel", () => ({
 }));
 vi.mock("../components/VolConePanel", () => ({
   default: () => <div data-testid="vol-cone-panel-stub" />,
+}));
+vi.mock("../components/equibles-cot/EquiblesCotPanel", () => ({
+  default: () => <div data-testid="cot-panel-stub" />,
+}));
+vi.mock("../components/equibles-ats-venue-share/AtsVenueSharePanel", () => ({
+  default: () => <div data-testid="ats-panel-stub" />,
+}));
+vi.mock("../components/equibles/EquiblesShortCrowdingPanel", () => ({
+  default: () => <div data-testid="short-panel-stub" />
 }));
 vi.mock("../components/CriHistoryChart", () => ({ default: () => null }));
 vi.mock("../components/RegimeRelationshipView", () => ({ default: () => null }));
@@ -308,6 +320,48 @@ describe("RegimePanel — tab is URL-driven", () => {
     const { container } = render(<RegimePanel prices={{}} />);
     within(container).getByRole("button", { name: /^CURVE$/ }).click();
     expect(pushSpy).toHaveBeenCalledWith("/regime/curve");
+  });
+
+  it("renders the COT panel when pathname is /regime/cot", () => {
+    mockedPathname = "/regime/cot";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("cot-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("curve-panel-stub")).toBeNull();
+  });
+
+  it("clicking COT tab pushes /regime/cot", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^COT$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/cot");
+  });
+
+  it("renders the ATS venue-share panel when pathname is /regime/ats", () => {
+    mockedPathname = "/regime/ats";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("ats-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("cot-panel-stub")).toBeNull();
+  });
+
+  it("clicking ATS tab pushes /regime/ats", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^ATS$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/ats");
+  });
+
+  it("renders the short-crowding panel when pathname is /regime/short", () => {
+    mockedPathname = "/regime/short";
+    const { container } = render(<RegimePanel prices={{}} />);
+    expect(within(container).getByTestId("short-panel-stub")).toBeTruthy();
+    expect(within(container).queryByTestId("ats-panel-stub")).toBeNull();
+  });
+
+  it("clicking SHORT tab pushes /regime/short", () => {
+    mockedPathname = "/regime/cri";
+    const { container } = render(<RegimePanel prices={{}} />);
+    within(container).getByRole("button", { name: /^SHORT$/ }).click();
+    expect(pushSpy).toHaveBeenCalledWith("/regime/short");
   });
 
   it("clicking CRI from VCG pushes /regime/cri", () => {

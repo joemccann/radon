@@ -1,9 +1,12 @@
 """API client modules for external data sources."""
 
-__all__ = ["FinraClient", "IBClient", "MenthorQClient", "UWClient"]
+__all__ = ["EquiblesClient", "FinraClient", "IBClient", "MenthorQClient", "UWClient"]
 
 
 def __getattr__(name):
+    if name == "EquiblesClient":
+        from clients.equibles_client import EquiblesClient
+        return EquiblesClient
     if name == "FinraClient":
         from clients.finra_client import FinraClient
         return FinraClient

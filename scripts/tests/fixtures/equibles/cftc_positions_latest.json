@@ -1,0 +1,19 @@
+{
+  "data": [
+    {
+      "marketCode": "088691",
+      "contractName": "GOLD - COMMODITY EXCHANGE INC.",
+      "alias": "GC",
+      "category": "Metals",
+      "reportDate": "2026-08-05",
+      "openInterest": 512044,
+      "netCommercial": -218411,
+      "netNonCommercial": 201338
+    }
+  ],
+  "meta": {
+    "limit": 100,
+    "offset": 0,
+    "hasMore": false
+  }
+}
