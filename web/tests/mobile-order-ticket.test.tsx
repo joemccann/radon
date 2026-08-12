@@ -379,6 +379,39 @@ describe("MobileOrderTicket — IB error rendering", () => {
   });
 });
 
+describe("MobileOrderTicket — stop types", () => {
+  it("single-leg STP posts orderType and stopPrice", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ ok: true, orderId: 1 }),
+    });
+    global.fetch = fetchMock;
+
+    const { getByTestId } = renderTicket({ legs: [makeLeg()] });
+    fireEvent.click(getByTestId("order-type-stp"));
+    const stopInput = getByTestId("order-stop-price") as HTMLInputElement;
+    fireEvent.change(stopInput, { target: { value: "2.50" } });
+    fireEvent.click(getByTestId("mobile-order-ticket-review"));
+    fireEvent.click(getByTestId("mobile-order-ticket-submit"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+    const body = JSON.parse(fetchMock.mock.calls[0][1].body as string);
+    expect(body.orderType).toBe("STP");
+    expect(body.stopPrice).toBe(2.5);
+    expect(body.type).toBe("option");
+  });
+
+  it("hides stop types on combo tickets", () => {
+    const { queryByTestId } = renderTicket({
+      legs: [
+        makeLeg(),
+        makeLeg({ id: "AAPL_20260320_210_C", strike: 210, action: "SELL" }),
+      ],
+    });
+    expect(queryByTestId("order-type-stp")).toBeNull();
+  });
+});
+
 describe("MobileOrderTicket — quote chips", () => {
   it("fills the limit input from the Bid chip", () => {
     const { getByTestId } = renderTicket({ legs: [makeLeg()] });

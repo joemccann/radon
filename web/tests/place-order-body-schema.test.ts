@@ -85,6 +85,33 @@ describe("placeOrderBodySchema", () => {
     ).toBeNull();
   });
 
+  it("accepts STP stock body without limitPrice", () => {
+    expect(
+      firstPlaceOrderSchemaErrorMessage({
+        symbol: "AAPL",
+        action: "SELL",
+        quantity: 100,
+        orderType: "STP",
+        stopPrice: 170,
+        tif: "GTC",
+      }),
+    ).toBeNull();
+  });
+
+  it("accepts STP LMT with stop and limit", () => {
+    expect(
+      firstPlaceOrderSchemaErrorMessage({
+        symbol: "AAPL",
+        action: "SELL",
+        quantity: 100,
+        orderType: "STP LMT",
+        stopPrice: 170,
+        limitPrice: 168,
+        tif: "GTC",
+      }),
+    ).toBeNull();
+  });
+
   it("normalizeOptionRight maps CALL/PUT to C/P", () => {
     expect(normalizeOptionRight("CALL")).toBe("C");
     expect(normalizeOptionRight("PUT")).toBe("P");
