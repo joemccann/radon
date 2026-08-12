@@ -2426,7 +2426,26 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   display: flex;
   align-items: center;
   gap: 8px;
-  min-height: 24px;
+  min-height: 28px;
+  width: 100%;
+  padding: 0;
+  background: none;
+  border: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+.catalyst-group__head:hover .catalyst-group__label,
+.catalyst-group__head:hover .catalyst-group__caret {
+  color: var(--text-primary);
+}
+
+.catalyst-group__caret {
+  font-size: 9px;
+  line-height: 1;
+  width: 8px;
+  flex: none;
+  color: var(--text-muted);
 }
 
 .catalyst-group__label {
@@ -2438,6 +2457,15 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
 }
 
 .catalyst-group__label--warn { color: var(--warn); }
+
+.catalyst-group__held-count {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--signal-core);
+  flex: none;
+}
 
 .catalyst-group__rule {
   flex: 1;
@@ -2451,6 +2479,17 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   color: var(--text-muted);
 }
 
+.catalyst-group__rows {
+  display: flex;
+  flex-direction: column;
+}
+
+/* A fully expanded category scrolls inside the panel instead of stretching it. */
+.catalyst-group__rows--scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+
 .catalyst-group__row {
   display: flex;
   align-items: center;
@@ -2459,7 +2498,7 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   border-bottom: 1px solid var(--line-grid);
 }
 
-.catalyst-group__kind {
+.catalyst-group__flag {
   font-family: var(--font-mono);
   font-size: 9px;
   letter-spacing: 0.1em;
@@ -2467,6 +2506,24 @@ a.signals-hero__row:hover { background: var(--bg-panel-raised); }
   width: 34px;
   flex: none;
 }
+
+.catalyst-group__flag--held { color: var(--signal-core); }
+
+.catalyst-group__more {
+  align-self: flex-start;
+  margin-top: 6px;
+  padding: 0;
+  background: none;
+  border: 0;
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.catalyst-group__more:hover { color: var(--signal-core); }
 
 .catalyst-group__name {
   font-size: 12px;
