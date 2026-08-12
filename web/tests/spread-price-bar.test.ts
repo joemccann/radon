@@ -59,8 +59,8 @@ describe("resolveSpreadPriceData", () => {
 
     const result = resolveSpreadPriceData("IWM", riskReversal, prices);
     expect(result).not.toBeNull();
-    expect(result!.bid).toBeCloseTo(0.25, 2);
-    expect(result!.ask).toBeCloseTo(0.26, 2);
+    expect(result!.bid).toBeCloseTo(0.23, 2);
+    expect(result!.ask).toBeCloseTo(0.28, 2);
     expect(result!.last).toBeCloseTo(0.26, 2);
     expect(result!.lastIsCalculated).toBe(true);
   });
@@ -73,12 +73,10 @@ describe("resolveSpreadPriceData", () => {
 
     const result = resolveSpreadPriceData("GOOG", bullCallSpread, prices);
     expect(result).not.toBeNull();
-    // Net bid = Σ(sign × leg.bid) = 8.50 - 4.00 = 4.50
-    // Net ask = Σ(sign × leg.ask) = 8.80 - 4.20 = 4.60
-    // lo = min(4.50, 4.60) = 4.50, hi = max(4.50, 4.60) = 4.60
-    // Net last = long last - short last = 8.65 - 4.10 = 4.55
-    expect(result!.bid).toBeCloseTo(4.50, 2);
-    expect(result!.ask).toBeCloseTo(4.60, 2);
+    // Natural bid sells the long at 8.50 and buys back the short at 4.20.
+    // Natural ask buys the long at 8.80 and sells the short at 4.00.
+    expect(result!.bid).toBeCloseTo(4.30, 2);
+    expect(result!.ask).toBeCloseTo(4.80, 2);
     expect(result!.last).toBeCloseTo(4.55, 2);
     expect(result!.symbol).toBe("GOOG");
   });
@@ -173,5 +171,24 @@ describe("resolveSpreadPriceData", () => {
     // Net last = 18.25 - 6.15 = 12.10
     expect(result!.last).toBeCloseTo(12.10, 2);
     expect(result!.bid).toBeLessThanOrEqual(result!.ask!);
+  });
+
+  it("prices calendars from each leg's expiry instead of collapsing both contracts", () => {
+    const calendar: PortfolioPosition = {
+      ...bullCallSpread,
+      structure: "Calendar Call Spread",
+      structure_type: "Calendar Call Spread",
+      legs: [
+        { ...bullCallSpread.legs[0], strike: 320, expiry: "2026-06-19", direction: "LONG" },
+        { ...bullCallSpread.legs[1], strike: 320, expiry: "2026-03-20", direction: "SHORT" },
+      ],
+    };
+    const prices: Record<string, PriceData> = {
+      "GOOG_20260619_320_C": makePriceData({ symbol: "GOOG_20260619_320_C", bid: 8, ask: 8.2 }),
+      "GOOG_20260320_320_C": makePriceData({ symbol: "GOOG_20260320_320_C", bid: 3, ask: 3.1 }),
+    };
+    const result = resolveSpreadPriceData("GOOG", calendar, prices);
+    expect(result?.bid).toBeCloseTo(4.9, 2);
+    expect(result?.ask).toBeCloseTo(5.2, 2);
   });
 });

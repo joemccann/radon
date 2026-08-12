@@ -145,7 +145,29 @@ const STOCK_DEPTH: DepthBook = {
   ask: [{ price: 194.12, size: 25, marketMaker: "IBEOS", exchange: "SMART" }],
 };
 
-function renderMobileCombo() {
+const PUT_DEPTH: DepthBook = {
+  symbol: "EWY_20260620_180_P",
+  kind: "option",
+  isSmartDepth: true,
+  feed: "OPRA BBO",
+  entitled: true,
+  timestamp: now,
+  bid: [{ price: 10, size: 12, marketMaker: "CBOE", exchange: "CBOE" }],
+  ask: [{ price: 11, size: 8, marketMaker: "BOX", exchange: "BOX" }],
+};
+
+const CALL_DEPTH: DepthBook = {
+  symbol: "EWY_20260620_215_C",
+  kind: "option",
+  isSmartDepth: true,
+  feed: "OPRA BBO",
+  entitled: true,
+  timestamp: now,
+  bid: [{ price: 1, size: 60, marketMaker: "ISE", exchange: "ISE" }],
+  ask: [{ price: 1.2, size: 60, marketMaker: "AMEX", exchange: "AMEX" }],
+};
+
+function renderMobileCombo(onDepthSymbolsChange = vi.fn()) {
   const fetchMock = vi.fn<typeof fetch>().mockImplementation((input) => {
     const url =
       typeof input === "string"
@@ -181,8 +203,13 @@ function renderMobileCombo() {
           fundamentals={{}}
           portfolio={PORTFOLIO}
           orders={ORDERS}
-          depths={{ EWY: STOCK_DEPTH }}
+          depths={{
+            EWY: STOCK_DEPTH,
+            EWY_20260620_180_P: PUT_DEPTH,
+            EWY_20260620_215_C: CALL_DEPTH,
+          }}
           tape={{}}
+          onDepthSymbolsChange={onDepthSymbolsChange}
           theme="dark"
         />
       </TickerDetailProvider>
@@ -202,7 +229,8 @@ afterEach(() => {
 
 describe("TickerDetailContent mobile — combo instrument switcher", () => {
   it("shows STOCK|OPTION for a ratio risk reversal and keeps OPTION on the spread quote", async () => {
-    renderMobileCombo();
+    const onDepthSymbolsChange = vi.fn();
+    renderMobileCombo(onDepthSymbolsChange);
 
     const group = await screen.findByRole("group", { name: "Instrument view" });
     const stock = screen.getByRole("button", { name: "STOCK" });
@@ -215,13 +243,41 @@ describe("TickerDetailContent mobile — combo instrument switcher", () => {
     expect(stock.classList.contains("on")).toBe(false);
 
     const header = document.querySelector(".ckh--mobile") as HTMLElement;
-    expect(header.textContent ?? "").toContain("9.40");
+    expect(header.textContent ?? "").toContain("3.90");
     expect(header.textContent ?? "").not.toContain("194.11");
+
+    await waitFor(() => {
+      expect(onDepthSymbolsChange).toHaveBeenCalledWith([
+        "EWY_20260620_180_P",
+        "EWY_20260620_215_C",
+      ]);
+    });
+    expect(screen.getByRole("group", { name: "Spread and option leg book" })).toBeTruthy();
+    const spreadBook = screen.getByRole("button", { name: "Implied spread book" });
+    const putBook = screen.getByRole("button", { name: "$180 Put book" });
+    const callBook = screen.getByRole("button", { name: "$215 Call book" });
+    expect(spreadBook.getAttribute("aria-pressed")).toBe("true");
+    expect(document.querySelector(".book-sym")?.textContent ?? "").toContain("EWY $180P/$215C");
+    expect(document.querySelector(".book-window")?.textContent ?? "").toContain("IMPLIED LEG BBO");
+    expect(document.querySelector(".book-window")?.textContent ?? "").toContain("2.80");
+    expect(document.querySelector(".book-window")?.textContent ?? "").toContain("5.00");
+    expect(document.querySelector(".book-window")?.textContent ?? "").not.toContain("IBEOS");
+
+    fireEvent.click(callBook);
+    await waitFor(() => {
+      expect(onDepthSymbolsChange).toHaveBeenCalledWith(["EWY_20260620_215_C"]);
+    });
+    expect(callBook.getAttribute("aria-pressed")).toBe("true");
 
     fireEvent.click(stock);
     await waitFor(() => expect(stock.getAttribute("aria-pressed")).toBe("true"));
+    await waitFor(() => expect(onDepthSymbolsChange).toHaveBeenCalledWith(["EWY"]));
     expect(option.getAttribute("aria-pressed")).toBe("false");
     expect(stock.classList.contains("on")).toBe(true);
     expect(option.classList.contains("on")).toBe(false);
+
+    fireEvent.click(option);
+    await waitFor(() => expect(onDepthSymbolsChange).toHaveBeenCalledWith(["EWY_20260620_215_C"]));
+    expect(callBook.getAttribute("aria-pressed")).toBe("true");
   });
 });

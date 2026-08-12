@@ -63,10 +63,11 @@ readonly VISUDO_BIN="${RADON_BOOTSTRAP_VISUDO_BIN:-visudo}"
 readonly NODE_BIN="${RADON_BOOTSTRAP_NODE_BIN:-node}"
 readonly SYSTEMD_ANALYZE_BIN="${RADON_BOOTSTRAP_SYSTEMD_ANALYZE_BIN:-systemd-analyze}"
 readonly SYSTEMCTL_BIN="${RADON_BOOTSTRAP_SYSTEMCTL_BIN:-systemctl}"
+readonly PYTHON_BIN="${RADON_BOOTSTRAP_PYTHON_BIN:-python3}"
 
 for required_command in \
   "$FLOCK_BIN" "$VISUDO_BIN" "$NODE_BIN" \
-  "$SYSTEMD_ANALYZE_BIN" "$SYSTEMCTL_BIN"; do
+  "$SYSTEMD_ANALYZE_BIN" "$SYSTEMCTL_BIN" "$PYTHON_BIN"; do
   command -v "$required_command" >/dev/null 2>&1 || \
     die "required validator is unavailable: $required_command"
 done
@@ -110,6 +111,7 @@ readonly -a SOURCES=(
   scripts/deploy-root-helper.sh
   scripts/ib-gateway-control.sh
   scripts/operator-radon.sh
+  scripts/drift_audit.py
   config/sudoers.d/radon-deploy
   config/sudoers.d/radon-monitor
   config/sudoers.d/radon-ops
@@ -132,6 +134,7 @@ readonly -a LOGICAL_TARGETS=(
   /usr/local/sbin/radon-deploy-root
   /usr/local/bin/radon-ib-gateway-control
   /usr/local/bin/radon
+  /usr/local/lib/radon/drift_audit.py
   /etc/sudoers.d/radon-deploy
   /etc/sudoers.d/radon-monitor
   /etc/sudoers.d/radon-ops
@@ -151,13 +154,13 @@ readonly -a LOGICAL_TARGETS=(
   /etc/systemd/system/radon-nextjs-db-watchdog.service
 )
 readonly -a MODES=(
-  0755 0755 0755
+  0755 0755 0755 0644
   0440 0440 0440 0440
   0644
   0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644 0644
 )
 readonly -a KINDS=(
-  shell shell shell
+  shell shell shell python
   sudoers sudoers sudoers sudoers
   polkit
   systemd systemd systemd systemd systemd systemd systemd systemd systemd
@@ -283,6 +286,12 @@ for index in "${!SOURCES[@]}"; do
     polkit)
       "$NODE_BIN" --check < "$staged_path" || \
         die "polkit syntax validation failed: $relative_source"
+      ;;
+    python)
+      # Parse only. Importing or compiling to disk would execute or cache
+      # candidate code during a privileged transaction.
+      "$PYTHON_BIN" -c 'import ast, sys; ast.parse(open(sys.argv[1], encoding="utf-8").read(), sys.argv[1])' \
+        "$staged_path" || die "python syntax validation failed: $relative_source"
       ;;
     systemd)
       SYSTEMD_CANDIDATES+=("$staged_path")

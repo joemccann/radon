@@ -13,6 +13,13 @@ async function tempDir() {
   return mkdtemp(path.join(tmpdir(), "radon-newsfeed-img-"));
 }
 
+// The downloader refuses anything that is not a real raster image before it
+// writes into the publicly served media dir, so fixtures must carry PNG magic
+// bytes. See scripts/newsfeed/media.js:looksLikeImage.
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+]);
+
 describe("media.js — absolutizeMediaUrl", () => {
   it("rewrites /media/<file> to https://media.radon.run/<file>", async () => {
     const { absolutizeMediaUrl, MEDIA_ORIGIN } = await import(
@@ -54,7 +61,7 @@ describe("media.js — createImageDownloader produces absolute URLs", () => {
     );
 
     const fakeClient = {
-      get: async () => ({ status: 200, data: Buffer.from("PNG") }),
+      get: async () => ({ status: 200, headers: { "content-type": "image/png" }, data: PNG_BYTES }),
     };
 
     const downloader = createImageDownloader({ mediaDir, client: fakeClient });

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { dbExecute, describeDbError } from "@/lib/dbExecute";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { ALLOWED_IMAGE_HOSTS, isAllowedImageUrl } from "@/lib/imageHosts";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -31,8 +32,14 @@ function validateAvatarUrl(raw: unknown): { value: string | null } | { error: st
   const trimmed = raw.trim();
   if (trimmed.length === 0) return { value: null };
   if (trimmed.length > MAX_AVATAR_LENGTH) return { error: "avatar_url exceeds size limit" };
-  if (!/^data:/.test(trimmed) && !/^https:\/\//.test(trimmed)) {
-    return { error: "avatar_url must be a data: URL or https URL" };
+  // Must match CSP img-src (lib/imageHosts.ts). Accepting a host the browser
+  // will refuse to load stores an avatar that renders as a broken image, and
+  // widening img-src instead would restore the wildcard that let an injected
+  // markdown image in an assistant answer beacon account figures out.
+  if (!isAllowedImageUrl(trimmed)) {
+    return {
+      error: `avatar_url must be a data:image URL or an https URL on ${ALLOWED_IMAGE_HOSTS.join(", ")}`,
+    };
   }
   return { value: trimmed };
 }
@@ -47,7 +54,12 @@ async function readProfile(userId: string): Promise<ProfileRow> {
   );
   if (result.rows.length === 0) return { username: null, avatar_url: null };
   const row = result.rows[0] as unknown as ProfileRow;
-  return { username: row.username ?? null, avatar_url: row.avatar_url ?? null };
+  const stored = row.avatar_url ?? null;
+  // Avatars stored before the host allowlist existed may point somewhere CSP
+  // now blocks. Dropping them here degrades to the default avatar instead of a
+  // broken image the user cannot explain or clear.
+  const avatar_url = stored && isAllowedImageUrl(stored) ? stored : null;
+  return { username: row.username ?? null, avatar_url };
 }
 
 export async function GET(): Promise<Response> {

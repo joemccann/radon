@@ -11,7 +11,7 @@ import { deriveBookHeader } from "@/lib/book/depthDerivations";
 
 const TAPE_STORAGE_KEY = "radon:book:tape";
 
-type InstrumentKind = "stock" | "option" | "future";
+type InstrumentKind = "stock" | "option" | "future" | "combo";
 
 export type OrderBookProps = {
   /** Display symbol in the window head, e.g. "RKLB" or "ES ESM6". */
@@ -80,7 +80,14 @@ export function OrderBook({
   };
 
   const hasDepth = depth?.entitled === true;
-  const kindLabel = kind === "future" ? "FUTURE" : kind === "option" ? "OPTION" : "STOCK";
+  const kindLabel = kind === "future"
+    ? "FUTURE"
+    : kind === "option"
+      ? "OPTION"
+      : kind === "combo"
+        ? "IMPLIED SPREAD"
+        : "STOCK";
+  const tapeAvailable = kind !== "combo";
 
   // The window head reads from the DEPTH BOOK when one is entitled — it is the
   // authoritative source on this tab (the separate L1 feed can deliver corrupt
@@ -117,7 +124,7 @@ export function OrderBook({
         </span>
         <span className="book-head-spacer" />
         {depth?.feed && <span className="book-feed-pill">{depth.feed}</span>}
-        <button
+        {tapeAvailable && <button
           type="button"
           className="book-toggle"
           role="switch"
@@ -131,12 +138,12 @@ export function OrderBook({
           <span className="book-toggle-text">
             {tapeVisible ? "Tape Shown" : "Tape Hidden"}
           </span>
-        </button>
+        </button>}
       </div>
-      <div className={`book-body-grid${tapeVisible ? "" : " tape-hidden"}`}>
+      <div className={`book-body-grid${tapeVisible && tapeAvailable ? "" : " tape-hidden"}`}>
         <div className="book-montage">{left}</div>
         <div className="book-tape-cell">
-          <TimeAndSales trades={trades} visible={tapeVisible} onPriceClick={onPriceClick} />
+          <TimeAndSales trades={trades} visible={tapeVisible && tapeAvailable} onPriceClick={onPriceClick} />
         </div>
       </div>
     </div>

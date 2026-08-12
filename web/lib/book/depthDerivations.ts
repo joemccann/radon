@@ -178,9 +178,9 @@ export function classifyTicks(
 export function isBestLevel(
   level: DepthLevel,
   index: number,
-  kind: "stock" | "option" | "future",
+  kind: "stock" | "option" | "future" | "combo",
 ): boolean {
-  if (kind === "option") return level.nbbo === true;
+  if (kind === "option" || kind === "combo") return level.nbbo === true;
   return index === 0;
 }
 
@@ -235,7 +235,7 @@ export function deriveBookHeader(
   if (depth.kind === "future") {
     bid = depth.bid[0]?.price ?? null;
     ask = depth.ask[0]?.price ?? null;
-  } else if (depth.kind === "option" && depth.nbbo) {
+  } else if ((depth.kind === "option" || depth.kind === "combo") && depth.nbbo) {
     bid = depth.nbbo.bestBid ?? bestBidPrice(depth.bid);
     ask = depth.nbbo.bestAsk ?? bestAskPrice(depth.ask);
   } else {
@@ -244,7 +244,7 @@ export function deriveBookHeader(
   }
 
   const mid =
-    depth.kind === "option" && depth.nbbo?.mid != null
+    (depth.kind === "option" || depth.kind === "combo") && depth.nbbo?.mid != null
       ? depth.nbbo.mid
       : bid != null && ask != null
         ? (bid + ask) / 2

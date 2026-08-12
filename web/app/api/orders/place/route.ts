@@ -55,7 +55,9 @@ type PlaceBody = {
   symbol: string;
   action: "BUY" | "SELL";
   quantity: number;
-  limitPrice: number;
+  limitPrice?: number;
+  orderType?: "LMT" | "STP" | "STP LMT";
+  stopPrice?: number;
   tif?: "DAY" | "GTC";
   /** Allow the order to fill OUTSIDE regular trading hours. Omitted → the route
    *  auto-enables it when the market is not in RTH so after-hours orders work. */
@@ -204,7 +206,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!body.symbol?.trim() || !body.action) {
       return setNoStoreResponseHeaders(
         jsonApiError({
-          message: "Required: symbol, action, quantity, limitPrice",
+          message: "Required: symbol, action, quantity",
           status: 400,
           code: "BAD_REQUEST",
           requestId,
@@ -228,10 +230,38 @@ export async function POST(request: Request): Promise<Response> {
 
     // Signed combo prices are valid: IB combo pricing preserves credit/debit sign.
     // Single-leg stock/option orders must remain strictly positive.
+    // STP uses stopPrice only; STP LMT needs both. Combo + STP LMT is not an IB product.
+    const orderType = body.orderType ?? "LMT";
     const comboSignedPrice = body.type === "combo";
-    const limitPriceInvalid = comboSignedPrice
+    if (orderType === "STP LMT" && comboSignedPrice) {
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message: "STP LMT is not supported on combo orders",
+          status: 400,
+          code: "BAD_REQUEST",
+          requestId,
+        }),
+        requestId,
+      );
+    }
+    const stopInvalid =
+      (orderType === "STP" || orderType === "STP LMT")
+      && (body.stopPrice == null || body.stopPrice <= 0 || !Number.isFinite(body.stopPrice));
+    if (stopInvalid) {
+      return setNoStoreResponseHeaders(
+        jsonApiError({
+          message: "stopPrice must be a positive number",
+          status: 400,
+          code: "BAD_REQUEST",
+          requestId,
+        }),
+        requestId,
+      );
+    }
+    const limitRequired = orderType !== "STP";
+    const limitPriceInvalid = limitRequired && (comboSignedPrice
       ? body.limitPrice == null || body.limitPrice === 0 || !Number.isFinite(body.limitPrice)
-      : body.limitPrice == null || body.limitPrice <= 0 || !Number.isFinite(body.limitPrice);
+      : body.limitPrice == null || body.limitPrice <= 0 || !Number.isFinite(body.limitPrice));
     if (limitPriceInvalid) {
       return setNoStoreResponseHeaders(
         jsonApiError({
@@ -275,7 +305,9 @@ export async function POST(request: Request): Promise<Response> {
       symbol: body.symbol.toUpperCase(),
       action: body.action,
       quantity: body.quantity,
-      limitPrice: body.limitPrice,
+      ...(orderType !== "LMT" ? { orderType } : {}),
+      ...(body.stopPrice != null ? { stopPrice: body.stopPrice } : {}),
+      ...(body.limitPrice != null ? { limitPrice: body.limitPrice } : {}),
       tif: body.tif || "DAY",
       // Auto-enable extended-hours (outsideRth) when the market is NOT in RTH so
       // after-hours orders actually work instead of IB holding them to the next

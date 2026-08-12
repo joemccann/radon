@@ -486,3 +486,6 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 - Vitest fails CI on UNHANDLED REJECTIONS even with every test green, and the failure is timing-dependent (local runs can pass). Any harness that dispatches async handlers (service-worker fetch events, message handlers) must configure its mocks AND settle every dispatched promise before the test returns.
 - Coverage/augmentation passes must consider ORDER-INTERNAL structure before reaching into the portfolio: a self-contained spread needs no external cover, and injecting held legs on top of an order's own cover manufactures phantom risk (SPCX bull-call-spread UNBOUNDED repro).
 - Workflow implementer agents can stall mid-run leaving partial work in the tree. The tree state, not the agent's report, is the source of truth: run the verify phase manually, and check for the classic gap — a component written and tested but never mounted.
+## 2026-08-11 - Synthetic combo market views
+
+- When a user asks for a spread order book, distinguish an interpolated two-leg market from broker-published BAG depth, but do not substitute a single-leg book. If both leg books exist, offer the synthetic spread ladder with explicit implied/non-executable labeling and keep direct leg books available.

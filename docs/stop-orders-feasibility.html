@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Radon — Stop Orders Feasibility</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e8eef4;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent: #05AD98;
+      --accent-dim: color-mix(in srgb, #05AD98 22%, transparent);
+      --warn: #e08a4a;
+      --danger: #f07178;
+      --ok: #3dcf9a;
+      --code-bg: #121a21;
+      --font: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+      --mono: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+      --radius: 4px;
+      --max: 880px;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      font-size: 15px;
+      line-height: 1.5;
+      color: var(--text);
+      background: var(--canvas);
+      -webkit-font-smoothing: antialiased;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    main { max-width: var(--max); margin: 0 auto; padding: 28px 20px 72px; }
+    .hero, section {
+      border: 1px solid var(--grid);
+      background: var(--panel);
+      border-radius: var(--radius);
+      padding: 22px 24px;
+      margin-bottom: 12px;
+    }
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      margin: 0 0 8px;
+    }
+    h1 {
+      font-size: 1.7rem;
+      font-weight: 650;
+      letter-spacing: -0.02em;
+      line-height: 1.15;
+      margin: 0 0 10px;
+    }
+    h2 {
+      margin: 0 0 12px;
+      font-size: 1.02rem;
+      font-weight: 650;
+      letter-spacing: -0.01em;
+    }
+    h2 .num {
+      font-family: var(--mono);
+      font-size: 11px;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      margin-right: 8px;
+    }
+    p { margin: 0 0 10px; color: var(--text-muted); }
+    p:last-child { margin-bottom: 0; }
+    ul, ol { margin: 0; padding-left: 1.15rem; color: var(--text-muted); }
+    li { margin: 4px 0; }
+    code, .mono {
+      font-family: var(--mono);
+      font-size: 12.5px;
+    }
+    code {
+      background: var(--code-bg);
+      border: 1px solid var(--grid);
+      padding: 1px 5px;
+      border-radius: 3px;
+    }
+    .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .chip {
+      font-family: var(--mono);
+      font-size: 11px;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 4px 8px;
+      border-radius: 999px;
+      border: 1px solid var(--grid);
+      background: var(--raised);
+      color: var(--text-muted);
+    }
+    .chip.ok {
+      border-color: color-mix(in srgb, var(--ok) 45%, var(--grid));
+      color: var(--ok);
+    }
+    .chip.warn {
+      border-color: color-mix(in srgb, var(--warn) 40%, var(--grid));
+      color: var(--warn);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13.5px;
+    }
+    th, td {
+      text-align: left;
+      padding: 7px 8px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-family: var(--mono);
+      font-size: 10.5px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--text-dim);
+      font-weight: 600;
+    }
+    td { color: var(--text-muted); }
+    td:first-child, td.k { color: var(--text); font-family: var(--mono); font-size: 12.5px; }
+    .status { color: var(--ok); font-weight: 650; }
+    .block { color: var(--warn); }
+    pre {
+      margin: 10px 0 0;
+      padding: 12px 14px;
+      background: var(--code-bg);
+      border: 1px solid var(--grid);
+      border-radius: var(--radius);
+      overflow-x: auto;
+      font-family: var(--mono);
+      font-size: 12px;
+      line-height: 1.45;
+      color: var(--text);
+    }
+    .note {
+      margin-top: 12px;
+      padding: 10px 12px;
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: var(--radius);
+      color: var(--text-muted);
+      font-size: 13.5px;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header class="hero">
+      <p class="eyebrow">IBKR TWS API · ib_insync 0.9.86 · 2026-08-12</p>
+      <h1>Stop market and stop limit on positions</h1>
+      <p>Feasible on the existing TWS API path. No new broker SDK. Placement is hardcoded to limit; the SDK already knows both stop types.</p>
+      <div class="chips">
+        <span class="chip ok">Verdict: ship</span>
+        <span class="chip">API: STP + STP LMT</span>
+        <span class="chip">SDK: StopOrder / StopLimitOrder</span>
+        <span class="chip warn">UI + place funnel only</span>
+      </div>
+    </header>
+
+    <section>
+      <h2><span class="num">01</span>Verdict</h2>
+      <ul>
+        <li>IBKR supports both types on the Gateway/TWS socket Radon already uses.</li>
+        <li>Do not switch to Client Portal REST. Campus documents the same fields there; Radon does not use that API.</li>
+        <li>Work is schema, constructor, and ticket UI. Contract qualify, permId poll, halt, idempotency, and open-order display already exist.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="num">02</span>IBKR contract</h2>
+      <table>
+        <thead>
+          <tr><th>User term</th><th>IB orderType</th><th>Fields</th><th>Products</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Stop market</td>
+            <td>STP</td>
+            <td><code>auxPrice</code> = trigger. No limit.</td>
+            <td>STK, OPT, FUT, FOP, BAG, CASH, CFD, WAR</td>
+          </tr>
+          <tr>
+            <td>Stop limit</td>
+            <td>STP LMT</td>
+            <td><code>auxPrice</code> = trigger, <code>lmtPrice</code> = cap after trigger</td>
+            <td>STK, OPT, FUT, FOP, CASH, CFD, WAR. Not BAG.</td>
+          </tr>
+        </tbody>
+      </table>
+      <ul style="margin-top:12px">
+        <li>Sell stop must sit below last. Buy stop must sit above last. Else IB error 110.</li>
+        <li>Long: SELL stop. Short: BUY stop. Qty should not exceed the position.</li>
+        <li>STP guarantees a send, not a price. STP LMT can miss if the print gaps through the limit.</li>
+        <li>GTC is the right TIF for a resting protective stop.</li>
+        <li><code>outsideRth</code> is off by default. Stops do not fire after hours unless set.</li>
+        <li><code>triggerMethod</code> default 0 (Last). Leave default in v1.</li>
+        <li>Existing position: standalone order, <code>parentId=0</code>. Bracket <code>parentId</code> only applies to a still-live parent.</li>
+        <li>Sources: IBKR Campus Stop / Stop Limit; TWS basic_orders; Radon <code>docs/ib_tws_api.md</code>.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="num">03</span>SDK already in use</h2>
+      <p>Python 3.13, <code>ib_insync==0.9.86</code>, Gateway port 4001 via <code>IBClient</code>. Verified constructors:</p>
+<pre>StopOrder(action, qty, stopPrice)           # orderType='STP',     auxPrice=stop
+StopLimitOrder(action, qty, lmt, stopPrice) # orderType='STP LMT', lmtPrice + auxPrice
+IBClient.place_order(contract, order)       # accepts any Order
+IBClient.place_bracket_order(...)           # unused by the web ticket</pre>
+      <ul>
+        <li>Open-order sync already returns <code>orderType</code> and <code>auxPrice</code> (<code>scripts/ib_orders.py</code>).</li>
+        <li>Modify already allows <code>LMT</code> and <code>STP LMT</code> limit price. STP trigger (<code>auxPrice</code>) is not wired in the modify route.</li>
+        <li>Paper matcher already fills <code>STOP</code> vs last. Demo path needs the same body fields.</li>
+      </ul>
+    </section>
+
+    <section>
+      <h2><span class="num">04</span>What blocks the operator today</h2>
+      <table>
+        <thead>
+          <tr><th>Layer</th><th>State</th><th>Block</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Ticket UI</td>
+            <td class="block">Limit only</td>
+            <td>PositionTab / OrderTab / SingleLeg / Book / futures forms. Type selector missing.</td>
+          </tr>
+          <tr>
+            <td>Next schema</td>
+            <td class="block">limitPrice required</td>
+            <td><code>placeOrderBodySchema.ts</code> has no <code>orderType</code> or <code>stopPrice</code>.</td>
+          </tr>
+          <tr>
+            <td>Next place route</td>
+            <td class="block">Rejects STP</td>
+            <td>Requires <code>limitPrice &gt; 0</code>. STP has none.</td>
+          </tr>
+          <tr>
+            <td>FastAPI /orders/place</td>
+            <td>Pass-through</td>
+            <td>Forwards JSON. Fine once the script understands new fields.</td>
+          </tr>
+          <tr>
+            <td>ib_place_order.py</td>
+            <td class="block">LimitOrder only</td>
+            <td>Always builds <code>LimitOrder</code>. Requires <code>limitPrice &gt; 0</code>.</td>
+          </tr>
+          <tr>
+            <td>ib_execute.py</td>
+            <td class="block">Limit only</td>
+            <td>CLI <code>--limit</code> required.</td>
+          </tr>
+          <tr>
+            <td>exit_orders daemon</td>
+            <td class="block">GTC LMT</td>
+            <td>Journal <code>stop</code> section is placed as a limit, not STP / STP LMT.</td>
+          </tr>
+          <tr>
+            <td>PositionTab Stop</td>
+            <td>Display only</td>
+            <td>Thesis number from portfolio JSON. Not a live IB order.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2><span class="num">05</span>How to add it</h2>
+      <ol>
+        <li>Extend place body: <code>orderType: LMT | STP | STP LMT</code>, <code>stopPrice</code> required for both stops, <code>limitPrice</code> required only for LMT and STP LMT.</li>
+        <li>In <code>ib_place_order.py</code> branch the constructor. Keep qualify, halt, fat-finger, permId poll, and combo NonGuaranteed unchanged.</li>
+        <li><code>order_limits</code>: notional from <code>limitPrice</code> if set, else <code>stopPrice</code>. STP still needs a dollar cap.</li>
+        <li>UI on the position ticket: type STP / STP LMT, stop field, optional limit offset, default qty = |position|, side inferred from long/short.</li>
+        <li>Modify: allow <code>auxPrice</code> on STP and STP LMT. Today only <code>lmtPrice</code> moves.</li>
+        <li>Paper: map <code>STP</code> to existing <code>STOP</code>. Add stop-limit as trigger then limit match.</li>
+        <li>Tests first: red on STP without limitPrice, green through script + route + ticket payload. Playwright on the position ticket.</li>
+      </ol>
+<pre># long 100 AAPL, stop market 170
+{"type":"stock","symbol":"AAPL","action":"SELL","quantity":100,
+ "orderType":"STP","stopPrice":170,"tif":"GTC"}
+
+# same, stop limit 170 / 168
+{"type":"stock","symbol":"AAPL","action":"SELL","quantity":100,
+ "orderType":"STP LMT","stopPrice":170,"limitPrice":168,"tif":"GTC"}</pre>
+      <p class="note">Reuse <code>POST /orders/place</code>. Do not add a second placement script. What-if already takes any Order object.</p>
+    </section>
+
+    <section>
+      <h2><span class="num">06</span>Scope for v1</h2>
+      <table>
+        <thead>
+          <tr><th>In</th><th>Out</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Single-leg stock, option, future positions</td>
+            <td>Combo / BAG stop-limit (IB does not list STP LMT on BAG)</td>
+          </tr>
+          <tr>
+            <td>Standalone GTC protective stop</td>
+            <td>Bracket attach to a new entry (SDK has it; not the ask)</td>
+          </tr>
+          <tr>
+            <td>STP and STP LMT</td>
+            <td>TRAIL, TRAIL LIMIT, STP PRT, MIT / LIT</td>
+          </tr>
+          <tr>
+            <td>RTH default, optional outsideRth</td>
+            <td>Custom triggerMethod</td>
+          </tr>
+          <tr>
+            <td>Working-order list already shows type + aux</td>
+            <td>Rewriting exit_orders daemon (still GTC LMT; separate job)</td>
+          </tr>
+        </tbody>
+      </table>
+      <p class="note">Combo stop-market is IB-legal (STP on BAG). Defer until single-leg is live. Pairing a target LMT with a stop needs an OCA group so one fill cancels the other.</p>
+    </section>
+
+    <section>
+      <h2><span class="num">07</span>Risk notes</h2>
+      <ul>
+        <li>Option STP in a fast tape can print far through the trigger. Prefer STP LMT on options unless the operator wants a guaranteed send.</li>
+        <li>A stop is not reduce-only at IB. Oversized qty opens a reverse position. Cap qty at |position| server-side.</li>
+        <li>Two overlapping sells on the same long is the exit_orders double-place class of bug. Scan open orders for same conId + SELL before place.</li>
+        <li>The 40% far-from-market reject is a limit rule used by the exit daemon. Stops use trigger-vs-last, not that band.</li>
+        <li>Do not treat journal or portfolio <code>stop</code> as working protection. If it is not in IB open orders, it is not live.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>
