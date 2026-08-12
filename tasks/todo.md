@@ -12,7 +12,7 @@ Find names like NVDA / SMH where the near monthly (and especially 10% OTM wings)
 - [x] T2 Spec + red tests
 - [x] T3 Worktrees green (24 pytest / 110 api / 70 ui)
 - [x] T4 Merge suite + live tab
-- [x] T5 Turso 400 history rows + 0047 applied
+- [x] T5 Turso 400 history rows + 0047 applied; timer enabled on VPS
 
 ## Review
 
