@@ -179,6 +179,9 @@ export const SERVICE_FRESHNESS_WINDOWS: Record<string, Window> = {
   // Turso skew_history transform only — no IB.
   "skew2d": { open: 26 * HOUR, extended: 26 * HOUR, closed: 26 * HOUR, category: "scheduled", requires_ib: false },
 
+  // ``vol-cone`` — daily 20:45 UTC timer, UW-only, 26h open / 3d closed.
+  "vol-cone": { open: 26 * HOUR, extended: 3 * DAY, closed: 3 * DAY, category: "scheduled", requires_ib: false },
+
   // ``knowledge-ingest`` — hourly knowledge-base ingest oneshot
   // (scripts/knowledge/ingest.py via radon-knowledge.timer, 24/7; no
   // market-hours gate — connectors read Turso + repo files). Heartbeats
