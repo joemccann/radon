@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   GATE_CODES,
+  formatScanSample,
   gateCells,
   scoreTone,
   strengthBadge,
@@ -136,5 +137,34 @@ describe("scoreTone", () => {
     expect(scoreTone(85)).toBe("strong");
     expect(scoreTone(57)).toBe("warn");
     expect(scoreTone(43)).toBe("fault");
+  });
+});
+
+describe("formatScanSample", () => {
+  // A bare HH:MM let a day-old scan read as the current sample: the panel
+  // showed "SAMPLE 11:11" while the newest snapshot was from the previous
+  // session. Anything not from today must carry its date.
+  const now = new Date("2026-08-12T17:40:00Z");
+  const hhmm = (d: Date) =>
+    d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hour12: false });
+
+  it("shows time only for a sample taken today", () => {
+    const today = new Date("2026-08-12T15:11:00Z");
+    expect(formatScanSample(today.toISOString(), now)).toBe(hhmm(today));
+  });
+
+  it("qualifies a sample from an earlier day with its date", () => {
+    const earlier = new Date("2026-08-11T18:11:00Z");
+    const formatted = formatScanSample(earlier.toISOString(), now);
+    expect(formatted).toContain(
+      earlier.toLocaleDateString([], { month: "short", day: "numeric" }),
+    );
+    expect(formatted).toContain(hhmm(earlier));
+  });
+
+  it("renders a placeholder for missing or unparseable timestamps", () => {
+    expect(formatScanSample(null, now)).toBe("—");
+    expect(formatScanSample("", now)).toBe("—");
+    expect(formatScanSample("not-a-date", now)).toBe("—");
   });
 });

@@ -1,0 +1,16 @@
+[Unit]
+Description=Radon dashboard signals refresh - every 15 minutes during ET trading hours
+
+[Timer]
+# Fires every 15 minutes Mon-Fri 13:00-21:45 UTC.
+# Covers ET trading hours 09:30-16:00 across both DST shoulders
+# (winter 14:30-21:00 UTC, summer 13:30-20:00 UTC) plus the post-close slot
+# so the panel's last sample of the day is the closing one. The cadence sits
+# above the 600s FastAPI scan cooldown, so no slot is ever cooldown-suppressed.
+# run_signals_refresh.sh re-checks the trading calendar at runtime and exits 0
+# on US holidays before doing any work.
+OnCalendar=Mon..Fri *-*-* 13..21:00,15,30,45
+Persistent=false
+
+[Install]
+WantedBy=timers.target
