@@ -120,6 +120,10 @@ SCHEDULED_SERVICES: dict[str, FreshnessWindow] = {
     # are 304 heartbeats). Uniform 26h window mirrors straddle: no
     # weekend/holiday gap to widen for. Cboe CDN only — no IB dependency.
     "cor":              {"open": 26 * _HOUR, "closed": 26 * _HOUR, "requires_ib": False},
+    # vol-cone — radon-vol-cone.timer, Mon-Fri 20:45 UTC after the 16:45 ET
+    # close grace. UW greeks only — no IB. 26h open catches a missed weekday;
+    # 3d closed covers Fri 20:45 UTC → Mon 20:45 UTC.
+    "vol-cone":         {"open": 26 * _HOUR, "closed": 3 * _DAY, "requires_ib": False},
     # skew — one-minute RTH UW snapshots plus daily 21:45 UTC finalization.
     "skew":             {"open": 5 * _MIN, "closed": 26 * _HOUR, "requires_ib": False},
     # skew2d — radon-skew2d.timer, daily 21:50 UTC every calendar day
@@ -274,6 +278,9 @@ BUCKETS: dict[str, list[str]] = {
         # Daily 02:20 UTC Cboe COR1M/3M/6M/1Y pull — hourly check surfaces
         # a missed run within 1h of the 26h window expiring.
         "cor",
+        # Daily Mon-Fri 20:45 UTC UW vol-cone pull — hourly check surfaces a
+        # missed run within 1h of the 26h window expiring.
+        "vol-cone",
         # Daily 21:50 UTC SKEW 2D derive (post parent SKEW finalize) —
         # hourly check surfaces a missed run within 1h of the 26h window.
         "skew2d",
