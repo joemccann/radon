@@ -144,7 +144,22 @@ type IbHealthFields = {
 // probe; the rich /api/admin/health proxy returns it flat under ib_gateway.
 type EdgeHealthPayload = {
   probes?: Record<string, { state?: string; payload?: HealthPayload["ib_gateway"] }>;
+  schema_version?: number;
+  overall_state?: string;
 };
+
+// The daemon trust-splits /status: a public-edge caller (which the browser
+// unavoidably is — the shared bearer would have to ship in the client bundle)
+// keeps the aggregate verdict and loses `probes` / `units` / `service_health`.
+// The aggregate is still worth reading: it is non-healthy whenever the nested
+// FastAPI payload reports awaiting_2fa, upstream_dead or an unhealthy service
+// state, so it proves health even though it cannot attribute a fault.
+export function isAggregateOnlyHealthPayload(
+  payload: (HealthPayload & EdgeHealthPayload) | null | undefined,
+): boolean {
+  if (!payload) return false;
+  return typeof payload.schema_version === "number" && payload.probes === undefined;
+}
 
 function readGatewayFields(gw: NonNullable<HealthPayload["ib_gateway"]>): IbHealthFields {
   return {
@@ -172,6 +187,14 @@ export function parseIbHealth(
     return null; // indeterminate ("unknown") — let the caller fall back
   }
   if (payload.ib_gateway) return readGatewayFields(payload.ib_gateway);
+  if (isAggregateOnlyHealthPayload(payload)) {
+    // Healthy aggregate is definitive; anything else is a real fault whose
+    // cause the redaction removed, so report it as unhealthy rather than
+    // guessing a broker state (or going blank, which reads as fine).
+    return payload.overall_state === "up"
+      ? { authState: "authenticated", serviceState: "healthy", upstreamDead: false }
+      : { authState: null, serviceState: "unhealthy", upstreamDead: null };
+  }
   return null;
 }
 
@@ -432,23 +455,27 @@ function IBStatusCoreProvider({
   //
   // In production we read the ISOLATED edge surface: /edge-health/status is
   // served Caddy -> standalone health daemon, so the chip keeps reporting even
-  // when radon-api / Next.js are down. Dev has no Caddy, so we use the rich
-  // /api/admin/health proxy, which is also the prod safety-net fallback. Both
-  // reads are side-effect-free now; the 2FA pool-recovery heartbeat runs
-  // server-side in FastAPI, not on this poll.
+  // when radon-api / Next.js are down. That body is redacted for public-edge
+  // callers (the browser is one), which still settles "healthy or not" — the
+  // rich /api/admin/health proxy is consulted only to attribute a fault, and
+  // is the primary in dev where there is no Caddy. Both reads are
+  // side-effect-free; the 2FA pool-recovery heartbeat runs server-side in
+  // FastAPI, not on this poll.
   useEffect(() => {
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | null = null;
     let lastSuccessfulHealthAt = Date.now();
 
-    const fetchParsed = async (url: string): Promise<IbHealthFields | null> => {
+    const fetchPayload = async (
+      url: string,
+    ): Promise<(HealthPayload & EdgeHealthPayload) | null> => {
       try {
         const res = await fetch(url, {
           cache: "no-store",
           signal: AbortSignal.timeout(REALTIME_HEALTH_TIMEOUT_MS),
         });
         if (!res.ok) return null;
-        return parseIbHealth((await res.json()) as HealthPayload & EdgeHealthPayload);
+        return (await res.json()) as HealthPayload & EdgeHealthPayload;
       } catch {
         return null;
       }
@@ -459,8 +486,18 @@ function IBStatusCoreProvider({
       const primary = isLocal ? "/api/admin/health" : "/edge-health/status";
       const fallback = "/api/admin/health";
 
-      let parsed = await fetchParsed(primary);
-      if (!parsed && primary !== fallback) parsed = await fetchParsed(fallback);
+      const primaryPayload = await fetchPayload(primary);
+      let parsed = parseIbHealth(primaryPayload);
+      // A redacted aggregate can prove health but not attribute a fault, so ask
+      // the rich proxy WHY only when something is actually wrong. If that proxy
+      // is down too — the outage the edge surface exists for — the coarse
+      // verdict stands instead of the chip going blank.
+      const needsAttribution =
+        isAggregateOnlyHealthPayload(primaryPayload) && primaryPayload?.overall_state !== "up";
+      if ((!parsed || needsAttribution) && primary !== fallback) {
+        const detailed = parseIbHealth(await fetchPayload(fallback));
+        if (detailed) parsed = detailed;
+      }
 
       // Keep previous cached state on a total failure — a transient blip
       // shouldn't flip the chip; the next poll resolves it.

@@ -7,10 +7,19 @@ container state. Drift caused/prolonged the 2026-06-09/10 gateway incidents
 (autoheal sidecar absent, watchdog missing env). This audit turns drift into
 a daily, banner-visible signal instead of an incident post-mortem.
 
+This audit runs as root, so its own entrypoint may not live in the deploy
+checkout that root would then execute. The canonical copy is installed
+root-owned at /usr/local/lib/radon/drift_audit.py by the control-plane
+bootstrap, and the checkout it compares against arrives as an explicit
+argument (or RADON_CLOUD_ROOT), never derived from __file__.
+
 Live file -> repo source of truth (install command, for when live is stale):
 
   /etc/caddy/Caddyfile <- caddy/Caddyfile
-      sudo cp caddy/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+      sudo -n /usr/local/sbin/radon-deploy-root publish-caddy
+      (validates the candidate, installs it atomically, then reloads caddy;
+      the old raw `sudo cp` capability was retired -- cp follows a symlinked
+      source and published unvalidated edge config)
   /usr/local/bin/radon <- scripts/operator-radon.sh
       sudo install -m 0755 scripts/operator-radon.sh /usr/local/bin/radon
   /usr/local/bin/radon-ib-gateway-control <- scripts/ib-gateway-control.sh
@@ -73,7 +82,8 @@ from collections import Counter
 from datetime import datetime, timezone
 from pathlib import Path
 
-REPO = Path(__file__).resolve().parent.parent
+DEFAULT_CLOUD_ROOT = Path("/home/radon/radon/cloud")
+REPO = DEFAULT_CLOUD_ROOT
 GIT_REPO = REPO.parent
 SYSTEMD_DIR = Path("/etc/systemd/system")
 SUDOERS_DIR = Path("/etc/sudoers.d")
@@ -128,6 +138,56 @@ _UPSERT_SQL = (
 # ---------------------------------------------------------------------------
 # Pure helpers (unit-tested in tests/test_drift_audit.py)
 # ---------------------------------------------------------------------------
+
+
+def resolve_cloud_root(argv: list[str], environ) -> Path:
+    """The cloud checkout this run compares the live system against.
+
+    Kept separate from __file__ so the entrypoint can be installed root-owned
+    outside the radon-writable checkout it audits.
+    """
+    candidate = argv[1] if len(argv) > 1 else environ.get("RADON_CLOUD_ROOT")
+    root = Path(candidate) if candidate else DEFAULT_CLOUD_ROOT
+    if candidate and not root.is_dir():
+        raise RuntimeError(f"cloud root is not a directory: {root}")
+    return root
+
+
+def set_cloud_root(root: Path) -> None:
+    global REPO, GIT_REPO
+    REPO = root
+    GIT_REPO = root.parent
+
+
+def load_env_keys(path: Path, keys: tuple[str, ...]) -> dict[str, str]:
+    """Read an allowlisted set of keys out of an env file, as DATA.
+
+    This process runs as root while the file is 0600 radon:radon, so the file's
+    contents are attacker-influenced from root's point of view. Only the named
+    keys are returned, and nothing here touches os.environ -- an appended
+    LD_PRELOAD or PATH line is read past, not applied. Literal parsing (no
+    shell) also keeps a `$VAR` in a secret from being expanded.
+    """
+    values: dict[str, str] = {}
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return values
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        key, sep, value = stripped.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        if key not in keys:
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+            value = value[1:-1]
+        values[key] = value
+    return values
 
 
 def is_env_path(path: str) -> bool:
@@ -493,6 +553,26 @@ def http_url_from_libsql(url: str) -> str:
     return url
 
 
+DB_CREDENTIAL_KEYS = ("TURSO_DB_URL", "TURSO_AUTH_TOKEN")
+
+
+def resolve_db_credentials(environ) -> dict[str, str]:
+    """Turso credentials, preferring the process environment, then RADON_ENV_FILE.
+
+    Under systemd this unit deliberately has no EnvironmentFile, so the keys
+    arrive through the file read. A local operator run with the variables
+    already exported keeps working unchanged.
+    """
+    resolved = {
+        key: environ.get(key, "") for key in DB_CREDENTIAL_KEYS if environ.get(key)
+    }
+    missing = [key for key in DB_CREDENTIAL_KEYS if key not in resolved]
+    env_file = environ.get("RADON_ENV_FILE")
+    if missing and env_file:
+        resolved.update(load_env_keys(Path(env_file), tuple(missing)))
+    return resolved
+
+
 def _hrana_arg(value: str | None) -> dict:
     return {"type": "null"} if value is None else {"type": "text", "value": value}
 
@@ -500,9 +580,9 @@ def _hrana_arg(value: str | None) -> dict:
 def write_service_health(
     state: str, last_error: dict | None, started_at: str
 ) -> None:
-    db_url = os.environ.get("TURSO_DB_URL", "")
-    token = os.environ.get("TURSO_AUTH_TOKEN", "")
-    origin = http_url_from_libsql(db_url)
+    credentials = resolve_db_credentials(os.environ)
+    origin = http_url_from_libsql(credentials.get("TURSO_DB_URL", ""))
+    token = credentials.get("TURSO_AUTH_TOKEN", "")
     if not origin or not token:
         raise RuntimeError("TURSO_DB_URL / TURSO_AUTH_TOKEN missing from environment")
     now = datetime.now(timezone.utc).isoformat()
@@ -568,6 +648,7 @@ def write_service_health_with_retry(
 def main() -> int:
     started_at = datetime.now(timezone.utc).isoformat()
     try:
+        set_cloud_root(resolve_cloud_root(sys.argv, os.environ))
         drifts, allowed, known_untracked = gather()
     except Exception as exc:  # noqa: BLE001 - audit crash must still heartbeat
         crash = {"summary": f"audit crashed: {exc.__class__.__name__}: {exc}"[:SUMMARY_CAP]}

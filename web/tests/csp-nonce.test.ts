@@ -67,7 +67,12 @@ describe("buildCspWithNonce — enforced, nonce'd, Clerk-host-allowlisted", () =
     const csp = buildCspWithNonce("ABC123");
     expect(csp).toMatch(/default-src\s+'self'/);
     expect(csp).toMatch(/style-src[^;]*'unsafe-inline'/);
-    expect(csp).toMatch(/img-src\s+'self'\s+https:/);
+    // img-src deliberately does NOT carry the bare `https:` wildcard any more
+    // (F9). Assert the real contract — origin + the media CDN — rather than a
+    // prefix match that "https://media.radon.run" would satisfy by accident.
+    // Full host allowlist is pinned in csp-img-src-allowlist.test.ts.
+    expect(csp).toMatch(/img-src\s+'self'\s+https:\/\/media\.radon\.run/);
+    expect(csp).not.toMatch(/img-src[^;]*\shttps:(\s|;|$)/);
     expect(csp).toMatch(/connect-src[^;]*wss:/);
     expect(csp).toMatch(/connect-src[^;]*https:/);
     expect(csp).toMatch(/frame-ancestors\s+'none'/);
