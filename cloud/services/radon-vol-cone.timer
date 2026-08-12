@@ -1,0 +1,12 @@
+[Unit]
+Description=Radon VOL CONE Indicator - weekday EOD UW greeks cone
+
+[Timer]
+# 20:45 UTC is 16:45 ET during EDT (after the 16:00 close + 45m grace).
+# Weekend/holiday slots do not fire; Persistent=true catches a missed weekday.
+OnCalendar=Mon..Fri *-*-* 20:45:00 UTC
+Persistent=true
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target
