@@ -11,6 +11,7 @@ import hmac
 import ipaddress
 import os
 import logging
+from urllib.parse import urlsplit
 
 from fastapi import Request, HTTPException, Depends
 
@@ -52,21 +53,67 @@ def _arrived_via_proxy(request) -> bool:
     return any(name in present for name in _FORWARDING_HEADERS)
 
 
+def _header(request, name: str) -> str:
+    """Case-insensitive header read that also works on a plain dict."""
+    headers = getattr(request, "headers", None) or {}
+    for key, value in headers.items():
+        if key.lower() == name:
+            return value or ""
+    return ""
+
+
+# `Sec-Fetch-Site` values that a page CANNOT forge into a cross-site attack:
+# `none` is only set for user-initiated navigation (typing the URL, a bookmark),
+# and `same-origin` only for a document this API itself served (Swagger UI at
+# /docs calling /openapi.json).
+_FIRST_PARTY_FETCH_SITES = frozenset({"same-origin", "none"})
+
+
+def _is_first_party_origin(request, origin: str) -> bool:
+    """True when Origin names the exact host:port this request was addressed to."""
+    host = _header(request, "host").strip().lower()
+    if not host:
+        return False
+    return urlsplit(origin).netloc.strip().lower() == host
+
+
+def _is_browser_page_request(request) -> bool:
+    """True when the request carries the fetch metadata of a page-issued call.
+
+    The absence of forwarding headers is NOT proof of a server-to-server caller:
+    a page in the operator's browser POSTing to http://127.0.0.1:8321 sends no
+    X-Forwarded-For either, and a CORS *simple* request (Content-Type:
+    text/plain) is never preflighted, so it reaches the handler. Browsers do
+    always attach `Sec-Fetch-Site` to every fetch and `Origin` to every
+    cross-origin or non-GET request; the Next.js node-fetch client, the WS relay,
+    the watchdog/health daemon (urllib) and curl attach neither. Requiring that
+    positive evidence is what separates the two.
+    """
+    fetch_site = _header(request, "sec-fetch-site").strip().lower()
+    if fetch_site and fetch_site not in _FIRST_PARTY_FETCH_SITES:
+        return True
+    origin = _header(request, "origin").strip()
+    return bool(origin) and not _is_first_party_origin(request, origin)
+
+
 def is_trusted_local_request(request) -> bool:
     """True only for genuine server-to-server calls.
 
-    The peer must be loopback/tailnet AND the request must NOT have entered
-    through the public reverse proxy. Caddy's `handle_path /api/ib/*` proxies
-    app.radon.run into FastAPI from loopback, so trusting `client.host` alone
-    would expose the entire admin/order/exec surface to the internet — a remote
-    caller's request reaches FastAPI with `client.host == 127.0.0.1`. Forwarded
-    requests always carry forwarding headers, so we deny the bypass for them and
-    require a real Clerk JWT.
+    The peer must be loopback/tailnet, the request must NOT have entered through
+    the public reverse proxy, and it must NOT look like it was issued by a page
+    in a browser. Caddy's `handle_path /api/ib/*` proxies app.radon.run into
+    FastAPI from loopback, so trusting `client.host` alone would expose the
+    entire admin/order/exec surface to the internet — a remote caller's request
+    reaches FastAPI with `client.host == 127.0.0.1`. Forwarded requests always
+    carry forwarding headers, so we deny the bypass for them and require a real
+    Clerk JWT. See `_is_browser_page_request` for the same-machine browser case.
     """
     client_host = request.client.host if getattr(request, "client", None) else None
     if not is_local_or_tailnet(client_host):
         return False
-    return not _arrived_via_proxy(request)
+    if _arrived_via_proxy(request):
+        return False
+    return not _is_browser_page_request(request)
 
 
 def is_trusted_service_request(request) -> bool:

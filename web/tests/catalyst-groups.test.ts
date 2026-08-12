@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groupCatalysts, catalystKindLabel, catalystWhenLabel } from "../lib/catalystGroups";
+import {
+  groupCatalystsByCategory,
+  catalystKindLabel,
+  catalystWhenLabel,
+} from "../lib/catalystGroups";
 import type { CatalystRow } from "../lib/useCatalysts";
 
 // Tuesday 2026-08-04 10:00 ET — a regular trading day, well before the
@@ -18,53 +22,57 @@ function row(overrides: Partial<CatalystRow>): CatalystRow {
   };
 }
 
-describe("groupCatalysts", () => {
-  it("splits rows into today / this week / positions", () => {
+describe("groupCatalystsByCategory", () => {
+  it("orders categories economic, earnings, fda, then the remainder", () => {
     const rows = [
-      row({ title: "NFIB optimism index", date: "2026-08-04" }),
-      row({ title: "Core CPI", date: "2026-08-07" }),
-      row({ ticker: "MCHP", type: "earnings", title: "MCHP earnings", date: "2026-08-04" }),
+      row({ type: "fda", ticker: "ABOS", title: "PDUFA date", date: "2026-08-06" }),
+      row({ type: "earnings", ticker: "TSLA", title: "TSLA earnings", date: "2026-08-05" }),
+      row({ type: "economic", title: "Core CPI", date: "2026-08-07" }),
+      row({ type: "split" as CatalystRow["type"], ticker: "NVDA", title: "NVDA split", date: "2026-08-05" }),
     ];
-    const groups = groupCatalysts(rows, new Set(["MCHP"]), NOW);
-    expect(groups.today.map((r) => r.title)).toEqual(["NFIB optimism index"]);
-    expect(groups.thisWeek.map((r) => r.title)).toEqual(["Core CPI"]);
-    expect(groups.positions.map((r) => r.title)).toEqual(["MCHP earnings"]);
+    const groups = groupCatalystsByCategory(rows, new Set(), NOW);
+    expect(groups.map((g) => g.key)).toEqual(["economic", "earnings", "fda", "split"]);
+    expect(groups.map((g) => g.label)).toEqual(["ECONOMIC DATA", "EARNINGS", "FDA", "SPLIT"]);
   });
 
-  it("drops past events and rows beyond the 5-session window", () => {
+  it("omits categories with no upcoming rows", () => {
+    const groups = groupCatalystsByCategory([row({ title: "Core CPI", date: "2026-08-07" })], new Set(), NOW);
+    expect(groups.map((g) => g.key)).toEqual(["economic"]);
+  });
+
+  it("drops past events and non-held rows beyond the 5-session window", () => {
     const rows = [
       row({ title: "Old print", date: "2026-08-03" }),
       row({ title: "Distant print", date: "2026-08-20" }),
-      row({ title: "Edge of window", date: "2026-08-10" }), // +6 days but Monday = 4 sessions? days_until=6 > 5 → dropped
     ];
-    const groups = groupCatalysts(rows, new Set(), NOW);
-    expect(groups.today).toHaveLength(0);
-    expect(groups.thisWeek).toHaveLength(0);
-    expect(groups.positions).toHaveLength(0);
+    expect(groupCatalystsByCategory(rows, new Set(), NOW)).toEqual([]);
   });
 
-  it("keeps position-linked rows out of today/thisWeek and in positions regardless of distance", () => {
+  it("keeps held-ticker rows at any distance and sorts them to the top of their category", () => {
     const rows = [
-      row({ ticker: "AAPL", type: "earnings", title: "AAPL earnings", date: "2026-08-06" }),
-      row({ ticker: "AAPL", type: "earnings", title: "AAPL far earnings", date: "2026-08-24" }),
+      row({ type: "earnings", ticker: "TSLA", title: "TSLA earnings", date: "2026-08-05" }),
+      row({ type: "earnings", ticker: "AAPL", title: "AAPL far earnings", date: "2026-08-24" }),
     ];
-    const groups = groupCatalysts(rows, new Set(["AAPL"]), NOW);
-    expect(groups.thisWeek).toHaveLength(0);
-    expect(groups.positions.map((r) => r.title)).toEqual(["AAPL earnings", "AAPL far earnings"]);
+    const [earnings] = groupCatalystsByCategory(rows, new Set(["AAPL"]), NOW);
+    expect(earnings.rows.map((r) => r.title)).toEqual(["AAPL far earnings", "TSLA earnings"]);
+    expect(earnings.rows.map((r) => r.isHeld)).toEqual([true, false]);
+    expect(earnings.heldCount).toBe(1);
   });
 
-  it("treats tickers not held as ordinary rows", () => {
-    const rows = [row({ ticker: "TSLA", type: "earnings", title: "TSLA earnings", date: "2026-08-05" })];
-    const groups = groupCatalysts(rows, new Set(["AAPL"]), NOW);
-    expect(groups.positions).toHaveLength(0);
-    expect(groups.thisWeek.map((r) => r.title)).toEqual(["TSLA earnings"]);
+  it("sorts non-held rows nearest-first inside a category", () => {
+    const rows = [
+      row({ title: "Core CPI", date: "2026-08-07" }),
+      row({ title: "NFIB optimism index", date: "2026-08-04" }),
+    ];
+    const [economic] = groupCatalystsByCategory(rows, new Set(), NOW);
+    expect(economic.rows.map((r) => r.title)).toEqual(["NFIB optimism index", "Core CPI"]);
   });
 
   it("recomputes days_until at read time", () => {
     // Stored days_until is a fossil; the group must use the recomputed value.
     const rows = [row({ title: "CPI", date: "2026-08-05", days_until: 99 })];
-    const groups = groupCatalysts(rows, new Set(), NOW);
-    expect(groups.thisWeek[0]?.days_until).toBe(1);
+    const [economic] = groupCatalystsByCategory(rows, new Set(), NOW);
+    expect(economic.rows[0]?.days_until).toBe(1);
   });
 });
 

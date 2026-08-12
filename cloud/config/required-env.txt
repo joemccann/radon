@@ -30,6 +30,15 @@ CLERK_JWKS_URL
 NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY
 ALLOWED_USER_IDS
 RADON_PROBE_FRESHNESS_TOKEN
+# RADON_HEALTH_STATUS_TOKEN — shared bearer that buys full /status detail from
+# the health daemon THROUGH the public edge. Deliberately NOT a required key:
+# every production consumer (watchdogs, deploy health-gate, the Next.js admin
+# proxy) reads 127.0.0.1:8330 unproxied and already gets the full body, so a
+# missing token degrades the edge to the redacted aggregate rather than breaking
+# anything. Listing it here would fail the deploy preflight on a value nothing
+# needs. Set it in /home/radon/radon-cloud/.env (loaded by radon-health.service
+# and radon-nextjs.service) when an off-box consumer needs detail; documented in
+# the root .env.example.
 IB_GATEWAY_MODE
 IB_GATEWAY_HOST
 IB_GATEWAY_PORT

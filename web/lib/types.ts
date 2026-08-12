@@ -81,6 +81,8 @@ export type WorkspaceNavItem = {
 
 export type PortfolioLeg = {
   con_id?: number | null;
+  /** Per-leg expiry for calendars/diagonals. Falls back to position expiry. */
+  expiry?: string | null;
   direction: "LONG" | "SHORT";
   contracts: number;
   type: "Call" | "Put" | "Stock";

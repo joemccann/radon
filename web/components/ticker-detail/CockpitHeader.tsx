@@ -12,7 +12,7 @@ import type { DeckKey } from "./AssetCockpit";
 
 type CockpitHeaderProps = {
   ticker: string;
-  kind: "stock" | "option" | "future";
+  kind: "stock" | "option" | "future" | "combo";
   /** SINGLE source of truth for last / netΔ / spread. Book owns bid×ask depth. */
   quotePriceData: PriceData | null;
   /** Net-spread flag — combos show a signed net, not a percent move. */
@@ -31,6 +31,7 @@ const KIND_LABEL: Record<CockpitHeaderProps["kind"], string> = {
   stock: "STOCK",
   option: "OPTION",
   future: "FUTURE",
+  combo: "SPREAD",
 };
 
 export default function CockpitHeader({

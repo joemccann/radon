@@ -44,6 +44,17 @@ export type {
   CoveringPortfolioLeg,
 } from "./risk";
 
+export type { IbOrderType } from "./stopOrder";
+export {
+  parseIbOrderType,
+  isStopOrderType,
+  pricesValidForOrderType,
+  riskPriceForOrderType,
+  ibPlaceFields,
+  paperPlaceFields,
+  orderTypeLabel,
+} from "./stopOrder";
+
 // Hooks
 export { useOrderPrices } from "./hooks/useOrderPrices";
 export { useOrderValidation } from "./hooks/useOrderValidation";

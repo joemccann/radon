@@ -7,7 +7,7 @@ import type { OpenOrder, PortfolioData, PortfolioPosition } from "@/lib/types";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { optionKey } from "@/lib/pricesProtocol";
 import { useOrderActions, useOrderActionsOptional } from "@/lib/OrderActionsContext";
-import { fmtPrice, legPriceKey, resolveEntryCost } from "@/lib/positionUtils";
+import { fmtPrice, legPriceKey, resolveEntryCost, resolveNaturalSpreadQuote } from "@/lib/positionUtils";
 import { computeLegImpliedValue } from "@/lib/impliedValue";
 import { useRiskFreeRate } from "@/lib/useRiskFreeRate";
 import ModifyOrderModal from "@/components/ModifyOrderModal";
@@ -15,6 +15,14 @@ import OrderErrorBanner from "@/components/OrderErrorBanner";
 import type { ModifyOrderRequest } from "@/lib/orderModify";
 import { checkNakedShortRisk, type NakedShortPortfolio, type OrderPayload } from "@/lib/nakedShortGuard";
 import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
+import {
+  type IbOrderType,
+  ibPlaceFields,
+  isStopOrderType,
+  pricesValidForOrderType,
+  riskPriceForOrderType,
+} from "@/lib/order/stopOrder";
+import OrderTypeToggle from "@/components/OrderTypeToggle";
 import { fmtSignedPrice, toneClass } from "@/lib/format";
 import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/indexSymbols";
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
@@ -217,8 +225,11 @@ export function buildSingleLegOrderPayload(params: {
   limitPrice: number;
   tif: "DAY" | "GTC";
   position: PortfolioPosition | null;
+  orderType?: IbOrderType;
+  stopPrice?: number;
 }): Record<string, unknown> {
-  const { ticker, action, quantity, limitPrice, tif, position } = params;
+  const { ticker, action, quantity, limitPrice, tif, position, orderType = "LMT", stopPrice } = params;
+  const priceFields = ibPlaceFields(orderType, limitPrice, stopPrice ?? NaN);
 
   // Detect single-leg option: non-stock, exactly one leg, has a strike
   const isSingleLegOption =
@@ -237,11 +248,11 @@ export function buildSingleLegOrderPayload(params: {
       symbol: ticker,
       action,
       quantity,
-      limitPrice,
       tif,
       expiry,
       strike: leg.strike,
       right,
+      ...priceFields,
     };
   }
 
@@ -250,8 +261,8 @@ export function buildSingleLegOrderPayload(params: {
     symbol: ticker,
     action,
     quantity,
-    limitPrice,
     tif,
+    ...priceFields,
   };
 }
 
@@ -283,6 +294,8 @@ function NewOrderForm({
     return "";
   });
   const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<IbOrderType>("LMT");
+  const [stopPrice, setStopPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -311,7 +324,11 @@ function NewOrderForm({
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
-  const isValid = !isNaN(parsedQty) && parsedQty > 0 && !isNaN(parsedPrice) && parsedPrice > 0;
+  const parsedStop = parseFloat(stopPrice);
+  const isValid =
+    !isNaN(parsedQty)
+    && parsedQty > 0
+    && pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
 
   // Build the chokepoint input. All single-leg risk math + close-out
   // detection now lives in `useOrderRisk` (via `<OrderRiskGate>` below).
@@ -333,9 +350,10 @@ function NewOrderForm({
       position.legs[0].strike != null &&
       (position.legs[0].type === "Call" || position.legs[0].type === "Put");
     const multiplier = isOption ? 100 : 1;
-    const totalCost = parsedQty * parsedPrice * multiplier;
+    const riskPrice = riskPriceForOrderType(orderType, parsedPrice, parsedStop);
+    const totalCost = parsedQty * riskPrice * multiplier;
     const typeLabel = isOption ? position?.structure ?? "Option" : "Stock";
-    const description = `${action} ${parsedQty}${isOption ? "x" : ""} ${ticker} ${typeLabel} @ ${fmtPrice(parsedPrice)}`;
+    const description = `${action} ${parsedQty}${isOption ? "x" : ""} ${ticker} ${typeLabel} @ ${fmtPrice(riskPrice)}`;
 
     // Stock (linear) path. A close against the held stock must surface realised
     // P&L, mirroring the option close-out branches below — previously every
@@ -351,19 +369,19 @@ function NewOrderForm({
         const isClosingShort = action === "BUY" && position.direction === "SHORT" && held >= parsedQty;
         if (isClosingLong) {
           // Sell-to-close: proceeds − basis.
-          return { ticker, chainLegs: [], netPremium: -parsedPrice, description, totalCost, totalLabel: "Proceeds:", closeOut: { entryCostDollars: basis } };
+          return { ticker, chainLegs: [], netPremium: -riskPrice, description, totalCost, totalLabel: "Proceeds:", closeOut: { entryCostDollars: basis } };
         }
         if (isClosingShort) {
           // Buy-to-close-short: pnl = proceeds(−closeDebit) − basis(−credit) =
           // credit − debit (cover below entry → gain).
-          return { ticker, chainLegs: [], netPremium: parsedPrice, description, totalCost: -totalCost, totalLabel: "Close Debit:", closeOut: { entryCostDollars: -basis } };
+          return { ticker, chainLegs: [], netPremium: riskPrice, description, totalCost: -totalCost, totalLabel: "Close Debit:", closeOut: { entryCostDollars: -basis } };
         }
       }
       // Fresh stock open (or adding on the same side beyond the holding).
       return {
         ticker,
         chainLegs: [],
-        netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
+        netPremium: action === "SELL" ? -riskPrice : riskPrice,
         description,
         totalCost: action === "SELL" ? -totalCost : totalCost,
       };
@@ -372,7 +390,7 @@ function NewOrderForm({
       return {
         ticker,
         chainLegs: [],
-        netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
+        netPremium: action === "SELL" ? -riskPrice : riskPrice,
         description,
         totalCost: action === "SELL" ? -totalCost : totalCost,
         underlyingSpot: tickerPriceData?.last ?? null,
@@ -396,12 +414,12 @@ function NewOrderForm({
       // Pure close (or partial close) of a held LONG. The gate's `closeOut`
       // branch surfaces proceeds + realized P&L. avg_cost is per-contract
       // for options, per-share for stocks (see comment above).
-      const proceeds = parsedQty * parsedPrice * multiplier;
+      const proceeds = parsedQty * riskPrice * multiplier;
       const entryCostDollars = parsedQty * onlyLeg.avg_cost;
       return {
         ticker,
         chainLegs: [],
-        netPremium: -parsedPrice,
+        netPremium: -riskPrice,
         description,
         totalCost: proceeds,
         totalLabel: "Proceeds:",
@@ -417,12 +435,12 @@ function NewOrderForm({
       //   original entry credit), so pnl = (−debit) − (−credit) = credit − debit.
       // avg_cost is per-contract for options, per-share for stocks; use it
       // directly (NEVER × multiplier — the d420c16 double-count bug).
-      const closeDebit = parsedQty * parsedPrice * multiplier;
+      const closeDebit = parsedQty * riskPrice * multiplier;
       const basisMagnitude = parsedQty * Math.abs(onlyLeg.avg_cost);
       return {
         ticker,
         chainLegs: [],
-        netPremium: parsedPrice,
+        netPremium: riskPrice,
         description,
         totalCost: -closeDebit,
         totalLabel: "Close Debit:",
@@ -445,7 +463,7 @@ function NewOrderForm({
           quantity: parsedQty,
         },
       ],
-      netPremium: legAction === "SELL" ? -parsedPrice : parsedPrice,
+      netPremium: legAction === "SELL" ? -riskPrice : riskPrice,
       description,
       totalCost: action === "SELL" ? -totalCost : totalCost,
       // FU7: thread the single-leg live quote so net-of-cost renders. Off-hours
@@ -454,7 +472,7 @@ function NewOrderForm({
       // Phase-1 margin: underlying spot for the naked-short Reg-T estimate.
       underlyingSpot: tickerPriceData?.last ?? null,
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, position, bid, ask, tickerPriceData?.last]);
+  }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, position, bid, ask, tickerPriceData?.last]);
 
   // Naked short guard — reactive warning when action is SELL
   const nakedShortWarning = useMemo(() => {
@@ -490,6 +508,8 @@ function NewOrderForm({
         limitPrice: parsedPrice,
         tif,
         position,
+        orderType,
+        stopPrice: parsedStop,
       });
 
       // Final naked short guard check before submission
@@ -519,7 +539,7 @@ function NewOrderForm({
     } finally {
       setLoading(false);
     }
-  }, [confirmStep, ticker, action, parsedQty, parsedPrice, tif, position, portfolio, onOrderPlaced]);
+  }, [confirmStep, ticker, action, parsedQty, parsedPrice, parsedStop, orderType, tif, position, portfolio, onOrderPlaced, orderActions]);
 
   return (
     <div className="order-form">
@@ -541,6 +561,15 @@ function NewOrderForm({
         </div>
       </div>
 
+      <OrderTypeToggle
+        value={orderType}
+        onChange={(next) => {
+          setOrderType(next);
+          if (isStopOrderType(next)) setTif("GTC");
+          setConfirmStep(false);
+        }}
+      />
+
       <div className="order-field">
         <label className="order-label">Quantity</label>
         <input
@@ -554,6 +583,31 @@ function NewOrderForm({
         />
       </div>
 
+      {isStopOrderType(orderType) && (
+        <div className="order-field">
+          <label className="order-label">Stop Price</label>
+          <div className="modify-price-input-row">
+            <span className="modify-price-prefix">$</span>
+            <input
+              className="modify-price-input"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={stopPrice}
+              onChange={(e) => { setStopPrice(e.target.value); setConfirmStep(false); }}
+              placeholder="0.00"
+              data-testid="order-stop-price"
+            />
+          </div>
+          <div className="modify-quick-buttons">
+            <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setStopPrice(bid.toFixed(2)); setConfirmStep(false); } }}>BID</button>
+            <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setStopPrice(mid.toFixed(2)); setConfirmStep(false); } }}>MID</button>
+            <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setStopPrice(ask.toFixed(2)); setConfirmStep(false); } }}>ASK</button>
+          </div>
+        </div>
+      )}
+
+      {orderType !== "STP" && (
       <div className="order-field">
         <label className="order-label">Limit Price</label>
         <div className="modify-price-input-row">
@@ -574,6 +628,7 @@ function NewOrderForm({
           <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); setConfirmStep(false); } }}>ASK</button>
         </div>
       </div>
+      )}
 
       <div className="order-field">
         <label className="order-label">Time in Force</label>
@@ -648,6 +703,18 @@ function ComboOrderForm({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const orderActions = useOrderActionsOptional();
+  const tickerDetail = useTickerDetailOptional();
+  const prefillNonce = tickerDetail?.orderPrefill?.nonce;
+
+  useEffect(() => {
+    const prefill = tickerDetail?.orderPrefill;
+    if (!prefill) return;
+    setLimitPrice(prefill.price.toFixed(2));
+    if (prefill.action) setAction(prefill.action);
+    setConfirmStep(false);
+    // A repeated click at the same price must still reapply after manual edits.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prefillNonce]);
 
   // Combo leg actions define the SPREAD STRUCTURE, not the trade direction.
   // IB reverses all leg actions when Order.action = SELL.
@@ -671,26 +738,8 @@ function ComboOrderForm({
   // long adds, short subtracts. Credit spreads are negative, debit spreads
   // are positive. Same math as `resolveSpreadPriceData`.
   const netPrices = useMemo(() => {
-    let netBid = 0;
-    let netAsk = 0;
-    let allAvailable = true;
-
-    for (const leg of position.legs) {
-      const key = legPriceKey(ticker, position.expiry, leg);
-      if (!key) { allAvailable = false; break; }
-      const lp = prices[key];
-      if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
-
-      const sign = leg.direction === "LONG" ? 1 : -1;
-      netBid += sign * lp.bid;
-      netAsk += sign * lp.ask;
-    }
-
-    if (!allAvailable) return { bid: null, ask: null, mid: null };
-    const bid = Math.min(netBid, netAsk);
-    const ask = Math.max(netBid, netAsk);
-    const mid = (bid + ask) / 2;
-    return { bid, ask, mid };
+    return resolveNaturalSpreadQuote(ticker, position, prices)
+      ?? { bid: null, ask: null, mid: null };
   }, [position, prices, ticker]);
 
   const parsedQty = parseInt(quantity, 10);

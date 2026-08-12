@@ -40,7 +40,13 @@ type ActionTarget = {
   isCombo: boolean;
 };
 
-function limitLabel(limitPrice: number | null, orderType: string): string {
+function limitLabel(limitPrice: number | null, orderType: string, auxPrice?: number | null): string {
+  if (orderType === "STP") return auxPrice != null ? fmtPrice(auxPrice) : "STP";
+  if (orderType === "STP LMT") {
+    const stop = auxPrice != null ? fmtPrice(auxPrice) : "--";
+    const limit = limitPrice != null ? fmtPrice(limitPrice) : "--";
+    return `${stop} / ${limit}`;
+  }
   if (limitPrice != null) return fmtPrice(limitPrice);
   if (orderType === "MKT") return "MKT";
   return "--";
@@ -143,7 +149,7 @@ function rowSummary(
   return {
     title: `${o.contract.symbol} · ${o.action}`,
     subtitle: `${qty}x ${o.orderType}${o.tif ? ` · ${o.tif}` : ""}`,
-    price: limitLabel(o.limitPrice, o.orderType),
+    price: limitLabel(o.limitPrice, o.orderType, o.auxPrice),
     status: status.label,
     statusTone: status.tone,
   };
@@ -278,7 +284,7 @@ function OrderSheetSummary({
       </div>
       <div className="mobile-card__metrics">
         <Metric label="Qty" value={formatFillQuantity(o)} />
-        <Metric label="Limit" value={limitLabel(o.limitPrice, o.orderType)} />
+        <Metric label="Limit" value={limitLabel(o.limitPrice, o.orderType, o.auxPrice)} />
         <Metric label="Status" value={status} />
         <Metric label="TIF" value={o.tif || "--"} />
       </div>

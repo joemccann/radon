@@ -9,6 +9,7 @@ import { TickerDetailProvider, useTickerDetail } from "../lib/TickerDetailContex
 import { OrderActionsProvider } from "../lib/OrderActionsContext";
 import OrderTab from "../components/ticker-detail/OrderTab";
 import type { PriceData } from "@/lib/pricesProtocol";
+import type { PortfolioPosition } from "@/lib/types";
 
 afterEach(() => cleanup());
 
@@ -102,5 +103,33 @@ describe("OrderTab consumes click-to-fill prefill", () => {
     setPrefill({ price: 49.68, source: "tape" });
     expect(limitInput().value).toBe("49.68");
     expect(screen.getByRole("button", { name: "BUY" }).className).toContain("order-action-buy");
+  });
+
+  it("preserves a negative implied combo price and side", () => {
+    const combo: PortfolioPosition = {
+      id: 9, ticker: "SMCI", structure: "Short Strangle", structure_type: "Short Strangle",
+      risk_profile: "undefined", expiry: "2026-09-18", contracts: 1, direction: "COMBO",
+      entry_cost: -300, max_risk: null, market_value: -280,
+      kelly_optimal: null, target: null, stop: null, entry_date: "2026-08-01",
+      legs: [
+        { direction: "SHORT", contracts: 1, type: "Call", strike: 60, entry_cost: 200, avg_cost: 200, market_price: 2, market_value: 200 },
+        { direction: "SHORT", contracts: 1, type: "Put", strike: 40, entry_cost: 100, avg_cost: 100, market_price: 1, market_value: 100 },
+      ],
+    };
+    let publish!: ReturnType<typeof useTickerDetail>["setOrderPrefill"];
+    function ComboHarness() {
+      const ctx = useTickerDetail();
+      publish = ctx.setOrderPrefill;
+      return <OrderTab ticker="SMCI" position={combo} portfolio={null} prices={{}} openOrders={[]} />;
+    }
+    render(
+      <OrderActionsProvider>
+        <TickerDetailProvider><ComboHarness /></TickerDetailProvider>
+      </OrderActionsProvider>,
+    );
+
+    act(() => publish({ price: -3.2, action: "SELL", source: "montage" }));
+    expect((document.querySelector(".modify-price-input") as HTMLInputElement).value).toBe("-3.20");
+    expect(screen.getByRole("button", { name: "SELL" }).className).toContain("active");
   });
 });

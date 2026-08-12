@@ -52,6 +52,9 @@ type TickerDetailContextValue = {
   /** Book key the detail view wants L2 depth for. Drives `usePrices` upstream. */
   depthSymbol: string | null;
   setDepthSymbol: (key: string | null) => void;
+  /** Bounded focused depth set. Two-leg spreads request both option books. */
+  depthSymbols: string[];
+  setDepthSymbols: (keys: string[]) => void;
   /** For a futures-backed depth subject (e.g. VIX), the order-ticket selected
    *  contract's expiry. The depth KEY stays the index symbol; this expiry tells
    *  the relay WHICH listed future to resolve under that key. Null = front-month. */
@@ -74,6 +77,7 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
   const [activePositionId, setActivePositionIdState] = useState<number | null>(null);
   const [chainContracts, setChainContractsState] = useState<OptionContract[]>([]);
   const [depthSymbol, setDepthSymbolState] = useState<string | null>(null);
+  const [depthSymbols, setDepthSymbolsState] = useState<string[]>([]);
   const [depthFutureExpiry, setDepthFutureExpiryState] = useState<string | null>(null);
   const [focusedBookKey, setFocusedBookKeyState] = useState<string | null>(null);
   const [orderPrefill, setOrderPrefillState] = useState<OrderPrefill | null>(null);
@@ -96,6 +100,7 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
       if (next !== prev) {
         setFocusedBookKeyState(null);
         setDepthFutureExpiryState(null);
+        setDepthSymbolsState([]);
       }
       return next;
     });
@@ -103,6 +108,7 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
       setActivePositionIdState(null);
       setChainContractsState([]);
       setDepthSymbolState(null);
+      setDepthSymbolsState([]);
       setDepthFutureExpiryState(null);
     }
   }, []);
@@ -121,6 +127,13 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
 
   const setDepthSymbol = useCallback((key: string | null) => {
     setDepthSymbolState((prev) => (prev === key ? prev : key));
+  }, []);
+
+  const setDepthSymbols = useCallback((keys: string[]) => {
+    const next = [...new Set(keys)].sort();
+    setDepthSymbolsState((prev) =>
+      prev.length === next.length && prev.every((key, index) => key === next[index]) ? prev : next,
+    );
   }, []);
 
   const setDepthFutureExpiry = useCallback((expiry: string | null) => {
@@ -190,6 +203,8 @@ export function TickerDetailProvider({ children }: { children: ReactNode }) {
         setChainContracts,
         depthSymbol,
         setDepthSymbol,
+        depthSymbols,
+        setDepthSymbols,
         depthFutureExpiry,
         setDepthFutureExpiry,
         focusedBookKey,

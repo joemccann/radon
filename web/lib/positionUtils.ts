@@ -364,19 +364,61 @@ export function getLastPriceIsCalculated(pos: PortfolioPosition): boolean {
 export function legPriceKey(
   ticker: string,
   expiry: string,
-  leg: { type: string; strike: number | null },
+  leg: { type: string; strike: number | null; expiry?: string | null },
 ): string | null {
   if (leg.type === "Stock") return null;
   if (leg.strike == null || leg.strike === 0) return null;
-  if (!expiry || expiry === "N/A") return null;
+  const effectiveExpiry = leg.expiry ?? expiry;
+  if (!effectiveExpiry || effectiveExpiry === "N/A") return null;
   const right = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
   if (!right) return null;
-  const expiryClean = expiry.replace(/-/g, "");
+  const expiryClean = effectiveExpiry.replace(/-/g, "");
   if (expiryClean.length !== 8) return null;
   return optionKey({ symbol: ticker.toUpperCase(), expiry: expiryClean, strike: leg.strike, right });
 }
 
 /* ─── Spread net price resolution ─────────────────────────── */
+
+function integerGcd(a: number, b: number): number {
+  while (b !== 0) [a, b] = [b, a % b];
+  return a;
+}
+
+/** Natural executable spread market from cross-sided leg quotes. */
+export function resolveNaturalSpreadQuote(
+  ticker: string,
+  position: PortfolioPosition,
+  prices: Record<string, PriceData>,
+): { bid: number; ask: number; mid: number } | null {
+  if (position.legs.length < 2) return null;
+  const signedByKey = new Map<string, number>();
+  for (const leg of position.legs) {
+    if (!Number.isInteger(leg.contracts) || leg.contracts <= 0) return null;
+    const key = leg.type === "Stock" ? ticker : legPriceKey(ticker, position.expiry, leg);
+    if (!key) return null;
+    const signed = leg.contracts * (leg.direction === "LONG" ? 1 : -1);
+    signedByKey.set(key, (signedByKey.get(key) ?? 0) + signed);
+  }
+  const netLegs = [...signedByKey.entries()].filter(([, signed]) => signed !== 0);
+  if (netLegs.length < 2) return null;
+  const divisor = netLegs.map(([, signed]) => Math.abs(signed)).reduce(integerGcd);
+  let bid = 0;
+  let ask = 0;
+  for (const [key, signed] of netLegs) {
+    const quote = prices[key];
+    if (!quote || quote.bid == null || quote.ask == null) return null;
+    const ratio = Math.abs(signed) / divisor;
+    if (signed > 0) {
+      bid += ratio * quote.bid;
+      ask += ratio * quote.ask;
+    } else {
+      bid -= ratio * quote.ask;
+      ask -= ratio * quote.bid;
+    }
+  }
+  if (bid > ask) return null;
+  return { bid, ask, mid: (bid + ask) / 2 };
+}
 
 /**
  * Compute synthetic PriceData for a multi-leg spread from per-leg WS prices.
@@ -390,20 +432,10 @@ export function resolveSpreadPriceData(
   if (position.structure_type === "Stock") return null;
   if (position.legs.length < 2) return null;
 
-  let netBid = 0;
-  let netAsk = 0;
-  for (const leg of position.legs) {
-    const key = legPriceKey(ticker, position.expiry, leg);
-    if (!key) return null;
-    const lp = prices[key];
-    if (!lp || lp.bid == null || lp.ask == null) return null;
-    const sign = leg.direction === "LONG" ? 1 : -1;
-    netBid += sign * lp.bid;
-    netAsk += sign * lp.ask;
-  }
-
-  const lo = Math.round(Math.min(netBid, netAsk) * 100) / 100;
-  const hi = Math.round(Math.max(netBid, netAsk) * 100) / 100;
+  const natural = resolveNaturalSpreadQuote(ticker, position, prices);
+  if (!natural) return null;
+  const lo = Math.round(natural.bid * 100) / 100;
+  const hi = Math.round(natural.ask * 100) / 100;
   const mid = Number((((lo + hi) / 2)).toFixed(2));
 
   return {
@@ -469,6 +501,15 @@ export function isSameDay(pos: PortfolioPosition): boolean {
   return entryDate != null && entryDate === todayInET();
 }
 
+/** Compute real-time market value from WS prices for a stock position.
+ *  Sign-aware: `pos.contracts` is a positive magnitude, so a SHORT's market
+ *  value must read negative for `mv − entry_cost` to be a signed P&L. */
+function computeStockRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
+  const last = prices?.[pos.ticker]?.last;
+  if (last == null || last <= 0) return null;
+  return positionDirectionSign(pos) * last * Math.abs(pos.contracts);
+}
+
 /** Compute real-time market value from WS prices for option positions. */
 function computeRtMv(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock" || !prices) return null;
@@ -526,6 +567,32 @@ export function getOptionDailyChg(pos: PortfolioPosition, prices?: Record<string
   return (effectivePnl / Math.abs(closeValue)) * 100;
 }
 
+/* ─── Stock daily change ──────────────────────────────────── */
+
+/**
+ * Day Chg % for an equity position.
+ *
+ * Overnight: the instrument's own move off yesterday's close.
+ * Same-day: yesterday's close is meaningless (the position didn't exist), so
+ * the entry cost is the baseline and the reading becomes the position's return
+ * since entry — matching the same-day rule already applied to options.
+ */
+export function getStockDailyChg(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
+  if (pos.structure_type !== "Stock") return null;
+
+  if (isSameDay(pos)) {
+    const entryCost = resolveEntryCost(pos);
+    if (entryCost === 0) return null;
+    const todayPnl = getTodayPnlDollars(pos, prices);
+    if (todayPnl == null) return null;
+    return (todayPnl / Math.abs(entryCost)) * 100;
+  }
+
+  const p = prices?.[pos.ticker];
+  if (!p || p.last == null || p.last <= 0 || p.close == null || p.close <= 0) return null;
+  return ((p.last - p.close) / p.close) * 100;
+}
+
 /** Direction sign for a position: +1 long, -1 short. A stock's direction lives
  *  on the position/leg, NOT in `pos.contracts` (which is a positive magnitude),
  *  so any `price × contracts` value MUST be multiplied by this to be
@@ -541,6 +608,12 @@ export function positionDirectionSign(pos: PortfolioPosition): number {
 
 export function getTodayPnlDollars(pos: PortfolioPosition, prices?: Record<string, PriceData>): number | null {
   if (pos.structure_type === "Stock") {
+    // Same-day position: Today's P&L = Total P&L (the shares didn't exist
+    // yesterday, so the pre-entry move belongs to the market, not the operator).
+    if (isSameDay(pos)) {
+      const mv = computeStockRtMv(pos, prices) ?? resolveMarketValue(pos);
+      return getPnlDollars(pos, mv);
+    }
     const p = prices?.[pos.ticker];
     if (!p || p.last == null || p.last <= 0 || p.close == null || p.close <= 0) return null;
     // Sign-aware: a SHORT loses when price rises. `pos.contracts` is a positive

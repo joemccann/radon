@@ -316,6 +316,13 @@ describe("formatCookieHeader", () => {
   });
 });
 
+// The downloader refuses anything that is not a real raster image before it
+// writes into the publicly served media dir, so fixtures must carry PNG magic
+// bytes. See scripts/newsfeed/media.js:looksLikeImage.
+const PNG_BYTES = Buffer.from([
+  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
+]);
+
 describe("createImageDownloader (auth-gated upstream)", () => {
   it("sends Cookie header from getCookieHeader so cookie-gated images succeed", async () => {
     const root = await createTempRoot();
@@ -334,7 +341,7 @@ describe("createImageDownloader (auth-gated upstream)", () => {
           err.response = { status: 404 };
           throw err;
         }
-        return { status: 200, data: Buffer.from("PNG-bytes") };
+        return { status: 200, headers: { "content-type": "image/png" }, data: PNG_BYTES };
       },
     };
 
@@ -358,7 +365,7 @@ describe("createImageDownloader (auth-gated upstream)", () => {
     expect(requests[0].cookie).toBe("P=session-token; U=user-token");
 
     const onDisk = await readFile(path.join(mediaDir, "cmjrk4n79d-01.png"));
-    expect(onDisk.toString()).toBe("PNG-bytes");
+    expect(onDisk.equals(PNG_BYTES)).toBe(true);
   });
 
   it("falls back to no-cookie request when getCookieHeader is omitted (legacy behavior)", async () => {
@@ -372,7 +379,7 @@ describe("createImageDownloader (auth-gated upstream)", () => {
     const fakeClient = {
       get: async (url: string, options: { headers?: Record<string, string> } = {}) => {
         requests.push({ url, cookie: options.headers?.Cookie });
-        return { status: 200, data: Buffer.from("ok") };
+        return { status: 200, headers: { "content-type": "image/png" }, data: PNG_BYTES };
       },
     };
 

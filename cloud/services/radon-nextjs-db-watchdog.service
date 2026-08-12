@@ -11,18 +11,32 @@ StartLimitBurst=10
 
 [Service]
 Type=oneshot
-# root: the restart action is systemctl restart radon-nextjs.service.
-# The probe itself is read-only against localhost:3000.
-User=root
+# NOT root. The probe execs the radon-owned venv interpreter and imports the
+# radon-writable checkout, so a root unit would run whatever the unprivileged
+# account last wrote there. The one privileged step (restarting radon-nextjs)
+# goes through the argument-validating operator granted by
+# config/sudoers.d/radon-ops.
+User=radon
+Group=radon
 WorkingDirectory=/home/radon/radon
+# The state file (consecutive_wedges, last_restart_epoch) was created root:root
+# while this unit still ran as root, so the first run after the demotion would
+# hit PermissionError in save_state and fail EVERY tick -- including the healthy
+# path, which would also stop the K=3 wedge ladder from ever accumulating. The
+# "+" prefix runs this one step as root regardless of User=, so the handover is
+# self-healing on the live host and needs no manual chown.
+ExecStartPre=+/bin/mkdir -p /home/radon/radon-cloud/state
+ExecStartPre=+/bin/chown -R radon:radon /home/radon/radon-cloud/state
 EnvironmentFile=/home/radon/radon-cloud/.env
 # Direct-to-cloud only; never resurrect the retired embedded replica.
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/nextjs_db_watchdog.py
+# -I (isolated): drops the script's own directory from sys.path, so a module
+# dropped beside the probe cannot shadow a stdlib import.
+ExecStart=/home/radon/radon/.venv/bin/python -I /home/radon/radon/cloud/scripts/nextjs_db_watchdog.py
 # Type=oneshot has NO start timeout by default — a hung probe would stall
 # the every-minute timer forever. The in-script bounds (10s probe, 8s
-# canary, 30s restart) all fit under 60s.
-TimeoutStartSec=60
+# canary, 45s operator restart) all fit under 90s.
+TimeoutStartSec=90
 StandardOutput=journal
 StandardError=journal
 

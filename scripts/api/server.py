@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import ipaddress
 import json
 import logging
 import os
@@ -29,7 +30,9 @@ from typing import Any, Awaitable, Callable, Iterable, List, Optional, Tuple
 from fastapi import FastAPI, BackgroundTasks, Depends, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.datastructures import MutableHeaders
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 # Ensure scripts/ is on sys.path for client imports
 SCRIPTS_DIR = Path(__file__).parent.parent
@@ -623,6 +626,151 @@ async def auth_middleware(request: Request, call_next):
         )
 
     return await call_next(request)
+
+
+# DNS-rebinding guard, added LAST so it runs OUTSIDE auth — an attacker page at
+# http://rebind.attacker.example re-resolved to 127.0.0.1 becomes same-origin
+# with this API in the operator's browser, which would let it READ every
+# loopback-trusted response (/health account ids, /portfolio/sync, /cash-flows).
+# Pinning the Host header to the names we actually serve removes that: a rebound
+# request carries the attacker's hostname and is refused before it reaches a
+# route. Every real caller is covered — Caddy preserves the public hostname
+# (app/beta/demo.radon.run), loopback callers (Next.js, WS relay, watchdog,
+# health daemon, deploy health-gate) send localhost/127.0.0.1, and the
+# cloud-thin laptop sends either the tailnet name from scripts/cloud.sh or the
+# tailnet IP literal (see _CanonicalHostForPin below). Extend with
+# RADON_ALLOWED_HOSTS (comma-separated) rather than widening this list.
+def parse_allowed_hosts_env(raw: str) -> List[str]:
+    """Split RADON_ALLOWED_HOSTS, dropping the bare wildcard.
+
+    Starlette treats `"*"` anywhere in allowed_hosts as "serve every Host",
+    which turns the pin off completely. An env var is the wrong place to be
+    able to do that: it is set on a host we do not review in code, and the
+    failure is silent. Extending the pin is allowed; deleting it is not.
+    """
+    return [host.strip() for host in (raw or "").split(",") if host.strip() and host.strip() != "*"]
+
+
+_ALLOWED_HOSTS = [
+    "localhost",
+    "127.0.0.1",
+    "0.0.0.0",
+    "app.radon.run",
+    "beta.radon.run",
+    "demo.radon.run",
+    "ib-gateway",
+    "*.ts.net",
+] + parse_allowed_hosts_env(os.environ.get("RADON_ALLOWED_HOSTS", ""))
+if "pytest" in sys.modules:
+    # In-process test clients address the app by a made-up single-label name:
+    # starlette's TestClient uses "testserver", httpx.ASGITransport fixtures here
+    # use "test". A single-label name has no public DNS, so it cannot carry a
+    # rebinding attack in production — but keep it test-only anyway.
+    _ALLOWED_HOSTS.extend(["testserver", "test"])
+
+# Tailscale hands every node an address out of the CGNAT block. The cloud-thin
+# laptop reaches this API at the IP literal (radon-api.service documents
+# `--host 0.0.0.0 ... 100.112.32.16:8321`), which TrustedHostMiddleware cannot
+# express: it matches whole names or one leading "*." only, never a CIDR.
+_TAILNET_CGNAT = ipaddress.ip_network("100.64.0.0/10")
+
+
+def split_host_header(raw_host: str) -> Tuple[str, str]:
+    """Return (hostname, port) from a Host header value, lowercased.
+
+    Host names are case-insensitive and an IPv6 literal arrives bracketed
+    (`[::1]:8321`); TrustedHostMiddleware does neither, so it has to be told
+    the canonical form.
+    """
+    value = (raw_host or "").strip().lower().rstrip(".")
+    if value.startswith("["):
+        closing = value.find("]")
+        if closing == -1:
+            return "", ""
+        return value[1:closing], value[closing + 1:].lstrip(":")
+    head, _, tail = value.partition(":")
+    if ":" in tail:  # unbracketed IPv6 literal, no port
+        return value, ""
+    return head, tail
+
+
+def is_pinned_ip_literal(hostname: str) -> bool:
+    """True for the IP literals this API legitimately answers on.
+
+    Loopback (the Next.js / relay / watchdog hop) and the Tailscale CGNAT range
+    (the cloud-thin laptop). Allowing IP literals does not reopen DNS rebinding:
+    a rebind needs a NAME whose resolution the attacker controls, and a literal
+    resolves only to itself. Any other literal — a public address, a routable
+    IPv6 — is not a caller we serve and falls through to the name pin.
+    """
+    try:
+        address = ipaddress.ip_address(hostname)
+    except ValueError:
+        return False
+    return address.is_loopback or address.is_unspecified or address in _TAILNET_CGNAT
+
+
+# Carried on the per-request ASGI scope (never on scope["state"], which some
+# servers share across requests from the lifespan state).
+_ORIGINAL_HOST_KEY = "radon_original_host"
+
+
+class _RestoreOriginalHost:
+    """Put the caller's Host header back once the pin has matched.
+
+    Runs directly beneath the pin, so routes, redirects and logs see exactly the
+    header the client sent — canonicalization is scoped to the matching step and
+    changes nothing downstream.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        original = scope.get(_ORIGINAL_HOST_KEY)
+        if original is not None:
+            MutableHeaders(scope=scope)["host"] = original
+        await self.app(scope, receive, send)
+
+
+class _CanonicalHostForPin:
+    """Rewrite Host into the one form TrustedHostMiddleware can match.
+
+    Starlette lowercases nothing and reads the hostname as `host.split(":")[0]`,
+    so `LOCALHOST:8321` misses every entry and `[::1]:8321` reads as `[`. This
+    normalizes case and unwraps the literal forms before the pin sees them; an
+    IP literal we serve is presented as `localhost` because a CIDR has no name
+    pattern. Everything else is passed through so the name pin still decides.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        # TrustedHostMiddleware pins websocket handshakes too, so canonicalize
+        # both scope types or the pin would disagree with itself.
+        if scope["type"] not in ("http", "websocket"):
+            await self.app(scope, receive, send)
+            return
+        headers = MutableHeaders(scope=scope)
+        raw_host = headers.get("host", "")
+        hostname, port = split_host_header(raw_host)
+        if hostname:
+            matchable = "localhost" if is_pinned_ip_literal(hostname) else hostname
+            canonical = f"{matchable}:{port}" if port else matchable
+            if canonical != raw_host:
+                scope[_ORIGINAL_HOST_KEY] = raw_host
+                headers["host"] = canonical
+        await self.app(scope, receive, send)
+
+
+# add_middleware prepends, so the last one added runs first: canonicalize ->
+# pin -> restore -> auth -> routes.
+app.add_middleware(_RestoreOriginalHost)
+app.add_middleware(
+    TrustedHostMiddleware, allowed_hosts=_ALLOWED_HOSTS, www_redirect=False
+)
+app.add_middleware(_CanonicalHostForPin)
 
 
 # ---------------------------------------------------------------------------

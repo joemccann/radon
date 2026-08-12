@@ -241,6 +241,22 @@ describe("buildSingleLegOrderPayload — stock position", () => {
     expect(payload.strike).toBeUndefined();
     expect(payload.right).toBeUndefined();
   });
+
+  it("passes orderType and stopPrice for a stock stop", () => {
+    const payload = buildSingleLegOrderPayload({
+      ticker: "AAPL",
+      action: "SELL",
+      quantity: 100,
+      limitPrice: 168,
+      tif: "GTC",
+      position: makeStockPosition(),
+      orderType: "STP",
+      stopPrice: 170,
+    });
+    expect(payload.orderType).toBe("STP");
+    expect(payload.stopPrice).toBe(170);
+    expect(payload.limitPrice).toBeUndefined();
+  });
 });
 
 // ---------------------------------------------------------------------------

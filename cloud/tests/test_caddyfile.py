@@ -106,3 +106,39 @@ class TestReverseProxyTargets:
             assert target.startswith(("localhost:", "127.0.0.1:")), (
                 f"reverse_proxy target '{target}' must use loopback, not a public bind"
             )
+
+
+class TestReloadCompletes:
+    """A reload that never finishes wedges the edge's control plane.
+
+    Caddy's default grace period is infinite: on reload it keeps the OLD
+    servers alive until every connection closes. This Caddyfile proxies the
+    WebSocket relay (`handle /ws*`), so one open browser socket is enough to
+    keep them alive forever. Under Type=notify the unit therefore never
+    re-signals READY, systemd sits in `reloading`, and the admin endpoint on
+    :2019 times out shutting down -- observed 2026-08-11 while publishing edge
+    config, which then looked like a failed reload and triggered a rollback.
+    """
+
+    def test_global_options_block_is_first(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        active = [
+            line for line in content.splitlines()
+            if line.strip() and not line.lstrip().startswith("#")
+        ]
+        assert active and active[0].strip() == "{", (
+            "the global options block must be the first block in a Caddyfile; "
+            f"found: {active[0] if active else '<empty>'}"
+        )
+
+    def test_grace_period_is_bounded(self, caddy_dir):
+        content = read_caddyfile(caddy_dir)
+        match = re.search(r"^\s*grace_period\s+(\d+)s\s*$", content, re.MULTILINE)
+        assert match, (
+            "no bounded grace_period: reload will hang forever while any "
+            "long-lived connection (the /ws* relay proxy) stays open"
+        )
+        assert 1 <= int(match.group(1)) <= 30, (
+            f"grace_period {match.group(1)}s is outside the bound the publish "
+            "action's reload timeout is sized for"
+        )
