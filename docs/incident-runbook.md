@@ -315,8 +315,27 @@ or `/incident` can act on.
 `scripts/incident_responder.py` (launchd `com.radon.incident-responder`, 10 min)
 mirrors the VPS incident dir to `data/incidents_remote/`, runs
 `/incident <file> --analyze-only` via headless Claude Code on open incidents
-older than 12 min, writes `<incident_id>.diagnosis.md` beside the mirror, and
-fires macOS notifications. Analyze-only by design — shipping a fix is human-gated.
+older than 12 min, writes `<incident_id>.diagnosis.md` and
+`<incident_id>.incident.html` beside the mirror, and fires a macOS
+notification whose body is the incident title (failing services, not a
+filename). Click opens the HTML card. Analyze-only by design — shipping a
+fix is human-gated.
+
+Do not post via `osascript -e 'display notification'`. That banner is owned
+by Script Editor, so a click opens an empty Untitled document. Delivery
+order in `scripts/incident_notify.py`: `terminal-notifier -open file://card`
+(already on the operator laptop), else a compiled `RadonIncidentNotify.app`
+applet (`scripts/macos/RadonIncidentNotify.applescript`), else osascript
+with subtitle (banner still has the description; click stays broken).
+
+A persistent Native SDK or Tauri app is the wrong runtime for a 10-minute
+launchd job. Native SDK (`vercel-labs/native`) notifications are
+`Cmd.showNotification` inside a running Zig/TS desktop app; there is no
+documented click-to-open path for a fire-and-forget helper. Tauri's
+notification plugin can post a body, but desktop actions are not supported
+(actions are mobile-only) and a click only focuses a running Tauri window.
+Either would add a signed always-on tray app to solve a sender-identity
+bug. Revisit only if Radon grows a real operator desktop shell.
 
 macOS banners are easy to miss, so `.claude/hooks/pending_diagnoses.py` closes
 the loop at the next Claude Code session start in this repo (SessionStart hook,

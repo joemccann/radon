@@ -1,3 +1,26 @@
+# Task: Incident notification description + click target (2026-08-12)
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests for banner description, HTML card, click-open backend, rsync exclude
+- T2 depends_on: [T1] - Notify module + responder wiring; reject Native SDK / Tauri for this job
+- T3 depends_on: [T2] - Focused tests green + live notify smoke + runbook
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 Implementation
+- [x] T3 Verification
+
+## Review
+
+- Clicking an osascript banner opened empty Script Editor. Banners now go through terminal-notifier (click opens the HTML card) with a compiled Radon applet fallback.
+- Card and banner body use the watchdog title / failing services. Agent projection still withholds `title`.
+- Native SDK and Tauri rejected: they need a running desktop app; Tauri desktop actions are mobile-only.
+- Verification: 43 focused tests passed; live notify backend=terminal-notifier; card `20260812T184000Z-service-health-degraded.incident.html`.
+
+---
+
 # Task: VOL CONE cheap-wing scanner (2026-08-12)
 
 Find names like NVDA / SMH where the near monthly (and especially 10% OTM wings) sit at the low end of the 90/10 vol cone.
