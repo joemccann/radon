@@ -3,6 +3,12 @@
 import { useCallback, useState } from "react";
 import type { ReactNode } from "react";
 import OrderErrorBanner from "./OrderErrorBanner";
+import OrderTypeToggle from "./OrderTypeToggle";
+import {
+  type IbOrderType,
+  isStopOrderType,
+  pricesValidForOrderType,
+} from "@/lib/order/stopOrder";
 
 export type SingleLegOrderAction = "BUY" | "SELL";
 export type SingleLegOrderTif = "DAY" | "GTC";
@@ -42,6 +48,11 @@ export type SingleLegOrderTicketProps = {
   /** Controlled limit-price value mirror — caller reads it to build risk + payload. */
   limitPrice: string;
   onLimitPriceChange: (value: string) => void;
+  /** Optional controlled stop ticket. Omitted → the ticket owns type + stop. */
+  orderType?: IbOrderType;
+  onOrderTypeChange?: (value: IbOrderType) => void;
+  stopPrice?: string;
+  onStopPriceChange?: (value: string) => void;
   /**
    * The caller's `<OrderRiskGate>` (or null). Only rendered in the confirm
    * step. Built by the caller from current action/qty/price.
@@ -61,12 +72,16 @@ export type SingleLegOrderTicketProps = {
     quantity: number;
     limitPrice: number;
     tif: SingleLegOrderTif;
+    orderType: IbOrderType;
+    stopPrice: number;
   }) => Record<string, unknown>;
   /** Human-readable success line, also surfaced to the optional toast sink. */
   buildSuccessMessage: (state: {
     action: SingleLegOrderAction;
     quantity: number;
     limitPrice: number;
+    orderType: IbOrderType;
+    stopPrice: number;
   }) => string;
   /** Notified of the live action so callers can build the right risk input. */
   onActionChange?: (action: SingleLegOrderAction) => void;
@@ -99,6 +114,10 @@ export default function SingleLegOrderTicket({
   isValid,
   limitPrice,
   onLimitPriceChange,
+  orderType: orderTypeProp,
+  onOrderTypeChange,
+  stopPrice: stopPriceProp,
+  onStopPriceChange,
   riskGate,
   header,
   placeUrl = "/api/orders/place",
@@ -113,6 +132,18 @@ export default function SingleLegOrderTicket({
 }: SingleLegOrderTicketProps) {
   const [action, setAction] = useState<SingleLegOrderAction>(defaultAction);
   const [tif, setTif] = useState<SingleLegOrderTif>(defaultTif);
+  const [innerOrderType, setInnerOrderType] = useState<IbOrderType>("LMT");
+  const [innerStopPrice, setInnerStopPrice] = useState("");
+  const orderType = orderTypeProp ?? innerOrderType;
+  const stopPrice = stopPriceProp ?? innerStopPrice;
+  const setOrderType = (next: IbOrderType) => {
+    setInnerOrderType(next);
+    onOrderTypeChange?.(next);
+  };
+  const setStopPrice = (next: string) => {
+    setInnerStopPrice(next);
+    onStopPriceChange?.(next);
+  };
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -138,14 +169,34 @@ export default function SingleLegOrderTicket({
   const setQuickPrice = useCallback(
     (value: number | null) => {
       if (value == null) return;
-      onLimitPriceChange(value.toFixed(2));
+      if (isStopOrderType(orderType)) {
+        setStopPrice(value.toFixed(2));
+      } else {
+        onLimitPriceChange(value.toFixed(2));
+      }
       setConfirmStep(false);
     },
-    [onLimitPriceChange],
+    [onLimitPriceChange, orderType],
   );
+
+  const selectOrderType = (next: IbOrderType) => {
+    setOrderType(next);
+    if (isStopOrderType(next)) {
+      setTif("GTC");
+      onTifChange?.("GTC");
+    }
+    setConfirmStep(false);
+  };
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
+  const parsedStop = parseFloat(stopPrice);
+  const typePriceValid = pricesValidForOrderType({
+    orderType,
+    limitPrice: parsedPrice,
+    stopPrice: parsedStop,
+  });
+  const canSubmit = isValid && typePriceValid && !isNaN(parsedQty) && parsedQty > 0;
 
   const handlePlace = useCallback(async () => {
     if (!confirmStep) {
@@ -162,7 +213,14 @@ export default function SingleLegOrderTicket({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          buildPayload({ action, quantity: parsedQty, limitPrice: parsedPrice, tif }),
+          buildPayload({
+            action,
+            quantity: parsedQty,
+            limitPrice: parsedPrice,
+            tif,
+            orderType,
+            stopPrice: parsedStop,
+          }),
         ),
       });
       const json = await res.json();
@@ -173,6 +231,8 @@ export default function SingleLegOrderTicket({
           action,
           quantity: parsedQty,
           limitPrice: parsedPrice,
+          orderType,
+          stopPrice: parsedStop,
         });
         if (onSuccessToast) onSuccessToast(message);
         if (!suppressInlineSuccess) setSuccess(message);
@@ -188,7 +248,9 @@ export default function SingleLegOrderTicket({
     action,
     parsedQty,
     parsedPrice,
+    parsedStop,
     tif,
+    orderType,
     placeUrl,
     buildPayload,
     buildSuccessMessage,
@@ -221,6 +283,8 @@ export default function SingleLegOrderTicket({
         </div>
       </div>
 
+      <OrderTypeToggle value={orderType} onChange={selectOrderType} />
+
       <div className="order-field">
         <label className="order-label">Quantity</label>
         <input
@@ -237,35 +301,72 @@ export default function SingleLegOrderTicket({
         />
       </div>
 
-      <div className="order-field">
-        <label className="order-label">Limit Price</label>
-        <div className="modify-price-input-row">
-          <span className="modify-price-prefix">$</span>
-          <input
-            className="modify-price-input"
-            type="number"
-            step="0.01"
-            min="0.01"
-            value={limitPrice}
-            onChange={(e) => {
-              onLimitPriceChange(e.target.value);
-              setConfirmStep(false);
-            }}
-            placeholder="0.00"
-          />
+      {isStopOrderType(orderType) && (
+        <div className="order-field">
+          <label className="order-label">Stop Price</label>
+          <div className="modify-price-input-row">
+            <span className="modify-price-prefix">$</span>
+            <input
+              className="modify-price-input"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={stopPrice}
+              onChange={(e) => {
+                setStopPrice(e.target.value);
+                setConfirmStep(false);
+              }}
+              placeholder="0.00"
+              data-testid="order-stop-price"
+            />
+          </div>
+          <div className="modify-quick-buttons">
+            <button className="btn-quick" disabled={bid == null} onClick={() => setQuickPrice(bid)}>
+              {quickLabel("BID", bid)}
+            </button>
+            <button className="btn-quick" disabled={mid == null} onClick={() => setQuickPrice(mid)}>
+              {quickLabel("MID", mid)}
+            </button>
+            <button className="btn-quick" disabled={ask == null} onClick={() => setQuickPrice(ask)}>
+              {quickLabel("ASK", ask)}
+            </button>
+          </div>
         </div>
-        <div className="modify-quick-buttons">
-          <button className="btn-quick" disabled={bid == null} onClick={() => setQuickPrice(bid)}>
-            {quickLabel("BID", bid)}
-          </button>
-          <button className="btn-quick" disabled={mid == null} onClick={() => setQuickPrice(mid)}>
-            {quickLabel("MID", mid)}
-          </button>
-          <button className="btn-quick" disabled={ask == null} onClick={() => setQuickPrice(ask)}>
-            {quickLabel("ASK", ask)}
-          </button>
+      )}
+
+      {orderType !== "STP" && (
+        <div className="order-field">
+          <label className="order-label">{orderType === "STP LMT" ? "Limit Price" : "Limit Price"}</label>
+          <div className="modify-price-input-row">
+            <span className="modify-price-prefix">$</span>
+            <input
+              className="modify-price-input"
+              type="number"
+              step="0.01"
+              min="0.01"
+              value={limitPrice}
+              onChange={(e) => {
+                onLimitPriceChange(e.target.value);
+                setConfirmStep(false);
+              }}
+              placeholder="0.00"
+            />
+          </div>
+          {orderType === "LMT" && (
+            <div className="modify-quick-buttons">
+              <button className="btn-quick" disabled={bid == null} onClick={() => setQuickPrice(bid)}>
+                {quickLabel("BID", bid)}
+              </button>
+              <button className="btn-quick" disabled={mid == null} onClick={() => setQuickPrice(mid)}>
+                {quickLabel("MID", mid)}
+              </button>
+              <button className="btn-quick" disabled={ask == null} onClick={() => setQuickPrice(ask)}>
+                {quickLabel("ASK", ask)}
+              </button>
+            </div>
+          )}
         </div>
-      </div>
+      )}
 
       <div className="order-field">
         <label className="order-label">Time in Force</label>
@@ -300,7 +401,7 @@ export default function SingleLegOrderTicket({
             <button
               className={`btn-primary ${action === "SELL" ? "btn-danger" : ""}`}
               onClick={handlePlace}
-              disabled={!isValid || loading}
+              disabled={!canSubmit || loading}
             >
               {loading ? "Placing..." : "Confirm Order"}
             </button>
@@ -309,7 +410,7 @@ export default function SingleLegOrderTicket({
           <button
             className="btn-primary"
             onClick={handlePlace}
-            disabled={!isValid || loading}
+            disabled={!canSubmit || loading}
             style={{ width: "100%" }}
           >
             Place Order

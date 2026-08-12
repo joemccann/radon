@@ -25,6 +25,14 @@ import BuySellRow from "./BuySellRow";
 import BottomSheet from "./BottomSheet";
 import ComboSkewPanel from "@/components/ComboSkewPanel";
 import OrderErrorBanner from "@/components/OrderErrorBanner";
+import {
+  type IbOrderType,
+  IB_ORDER_TYPES,
+  ibPlaceFields,
+  isStopOrderType,
+  orderTypeLabel,
+  pricesValidForOrderType,
+} from "@/lib/order/stopOrder";
 
 type MobileOrderTicketProps = {
   open: boolean;
@@ -148,6 +156,8 @@ export default function MobileOrderTicket({
   onClearLegs,
 }: MobileOrderTicketProps) {
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
+  const [orderType, setOrderType] = useState<IbOrderType>("LMT");
+  const [stopPriceText, setStopPriceText] = useState<string>("");
   const [limitPriceText, setLimitPriceText] = useState<string>("");
   const [priceManuallySet, setPriceManuallySet] = useState(false);
   const [confirmStep, setConfirmStep] = useState(false);
@@ -212,7 +222,10 @@ export default function MobileOrderTicket({
   const resetConfirm = () => setConfirmStep(false);
 
   const parsedPrice = parseFloat(limitPriceText);
-  const isValidPrice = !isNaN(parsedPrice) && (isCombo ? parsedPrice !== 0 : parsedPrice > 0);
+  const parsedStop = parseFloat(stopPriceText);
+  const isValidPrice = isCombo
+    ? !isNaN(parsedPrice) && parsedPrice !== 0
+    : pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
   const isValid = isValidPrice && legs.length > 0;
   const signedLimitPrice = Number.isFinite(parsedPrice)
     ? isDebit === null
@@ -331,7 +344,12 @@ export default function MobileOrderTicket({
   // stepper), marks the price manual, and drops back to the build view.
   const setPriceFromQuote = (value: number | null) => {
     if (value == null) return;
-    setLimitPriceText(Math.abs(value).toFixed(2));
+    const next = Math.abs(value).toFixed(2);
+    if (!isCombo && isStopOrderType(orderType)) {
+      setStopPriceText(next);
+    } else {
+      setLimitPriceText(next);
+    }
     setPriceManuallySet(true);
     resetConfirm();
   };
@@ -370,11 +388,11 @@ export default function MobileOrderTicket({
             symbol: ticker,
             action: legs[0].action,
             quantity: legs[0].quantity,
-            limitPrice: parsedPrice,
             tif,
             expiry: normalizeOptionExpiry(legs[0].expiry) ?? legs[0].expiry,
             strike: legs[0].strike,
             right: legs[0].right === "C" ? "CALL" : "PUT",
+            ...ibPlaceFields(orderType, parsedPrice, parsedStop),
           };
 
       const res = await fetch("/api/orders/place", {
@@ -710,6 +728,48 @@ export default function MobileOrderTicket({
               compact
             />
 
+            {!isCombo && (
+              <div className="mobile-ticket__tif" role="radiogroup" aria-label="Order type">
+                {IB_ORDER_TYPES.map((type) => (
+                  <button
+                    key={type}
+                    type="button"
+                    role="radio"
+                    aria-checked={orderType === type}
+                    className={`mobile-ticket__tif-chip${orderType === type ? " mobile-ticket__tif-chip--active" : ""}`}
+                    onClick={() => {
+                      setOrderType(type);
+                      if (isStopOrderType(type)) setTif("GTC");
+                      resetConfirm();
+                    }}
+                    data-testid={`order-type-${type === "STP LMT" ? "stp-lmt" : type.toLowerCase()}`}
+                  >
+                    {orderTypeLabel(type)}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {!isCombo && isStopOrderType(orderType) && (
+              <div className="mobile-ticket__price-row">
+                <span className="mobile-ticket__price-label">Stop</span>
+                <input
+                  className="mobile-ticket__price-input"
+                  type="text"
+                  inputMode="decimal"
+                  value={stopPriceText}
+                  onChange={(event) => {
+                    setStopPriceText(event.target.value);
+                    setPriceManuallySet(true);
+                    resetConfirm();
+                  }}
+                  data-testid="order-stop-price"
+                  aria-label="Stop price"
+                />
+              </div>
+            )}
+
+            {(!isStopOrderType(orderType) || orderType === "STP LMT" || isCombo) && (
             <div className="mobile-ticket__price-row">
               <span className="mobile-ticket__price-label">Limit</span>
               <button
@@ -744,6 +804,7 @@ export default function MobileOrderTicket({
                 <Plus size={18} aria-hidden />
               </button>
             </div>
+            )}
           </div>
 
           {/* 3. TIF — after price stepper */}

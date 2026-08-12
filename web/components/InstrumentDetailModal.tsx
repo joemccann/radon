@@ -8,6 +8,12 @@ import Modal from "./Modal";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "./SingleLegOrderTicket";
 import { InstrumentOrderQuoteTelemetry } from "./QuoteTelemetry";
 import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
+import {
+  type IbOrderType,
+  ibPlaceFields,
+  pricesValidForOrderType,
+  riskPriceForOrderType,
+} from "@/lib/order/stopOrder";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
 import type { PortfolioData } from "@/lib/types";
 
@@ -137,10 +143,16 @@ function LegOrderForm({
   const defaultAction: SingleLegOrderAction = leg.direction === "LONG" ? "SELL" : "BUY";
   const [action, setAction] = useState<SingleLegOrderAction>(defaultAction);
   const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<IbOrderType>("LMT");
+  const [stopPrice, setStopPrice] = useState("");
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
-  const isValid = !isNaN(parsedQty) && parsedQty > 0 && !isNaN(parsedPrice) && parsedPrice > 0;
+  const parsedStop = parseFloat(stopPrice);
+  const isValid =
+    !isNaN(parsedQty)
+    && parsedQty > 0
+    && pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
 
   const strikeStr = !isStock && leg.strike != null ? `$${leg.strike} ` : "";
   const right: "C" | "P" | null = leg.type === "Call" ? "C" : leg.type === "Put" ? "P" : null;
@@ -158,10 +170,11 @@ function LegOrderForm({
   const riskInput: OrderRiskInput | null = useMemo(() => {
     if (!isValid) return null;
     const multiplier = isStock ? 1 : 100;
-    const totalCost = parsedQty * parsedPrice * multiplier;
+    const riskPrice = riskPriceForOrderType(orderType, parsedPrice, parsedStop);
+    const totalCost = parsedQty * riskPrice * multiplier;
     const description = isStock
-      ? `${action} ${parsedQty} ${ticker} Stock @ ${fmtPrice(parsedPrice)}`
-      : `${action} ${parsedQty}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(parsedPrice)}`;
+      ? `${action} ${parsedQty} ${ticker} Stock @ ${fmtPrice(riskPrice)}`
+      : `${action} ${parsedQty}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(riskPrice)}`;
 
     if (isStock) {
       const closingLong = leg.direction === "LONG" && action === "SELL" && parsedQty <= leg.contracts;
@@ -172,7 +185,7 @@ function LegOrderForm({
         instrument: "stock",
         action,
         quantity: parsedQty,
-        limitPrice: parsedPrice,
+        limitPrice: riskPrice,
         multiplier: 1,
         heldQuantity: leg.direction === "LONG" ? leg.contracts : 0,
         heldShortQuantity: leg.direction === "SHORT" ? leg.contracts : 0,
@@ -202,7 +215,7 @@ function LegOrderForm({
       return {
         ticker,
         chainLegs: [],
-        netPremium: action === "SELL" ? -parsedPrice : parsedPrice,
+        netPremium: action === "SELL" ? -riskPrice : riskPrice,
         description,
         totalCost: proceeds,
         closeOut: { entryCostDollars },
@@ -219,7 +232,7 @@ function LegOrderForm({
       // FU7: thread the single-leg live quote for net-of-cost risk.
       quote: { bid, ask },
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, strikeStr, right, isStock, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);
+  }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, strikeStr, right, isStock, leg.strike, leg.direction, leg.contracts, leg.avg_cost, expiry, bid, ask]);
 
   return (
     <SingleLegOrderTicket
@@ -235,6 +248,10 @@ function LegOrderForm({
       isValid={isValid}
       limitPrice={limitPrice}
       onLimitPriceChange={setLimitPrice}
+      orderType={orderType}
+      onOrderTypeChange={setOrderType}
+      stopPrice={stopPrice}
+      onStopPriceChange={setStopPrice}
       onActionChange={setAction}
       riskGate={
         <OrderRiskGate
@@ -244,26 +261,26 @@ function LegOrderForm({
           variant="info"
         />
       }
-      buildPayload={({ action, quantity, limitPrice, tif }) =>
+      buildPayload={({ action, quantity, limitPrice, tif, orderType, stopPrice }) =>
         isStock
           ? {
               type: "stock",
               symbol: ticker,
               action,
               quantity,
-              limitPrice,
               tif,
+              ...ibPlaceFields(orderType, limitPrice, stopPrice),
             }
           : {
               type: "option",
               symbol: ticker,
               action,
               quantity,
-              limitPrice,
               tif,
               expiry: expiryClean,
               strike: leg.strike,
               right,
+              ...ibPlaceFields(orderType, limitPrice, stopPrice),
             }
       }
       buildSuccessMessage={({ action, quantity, limitPrice }) =>
