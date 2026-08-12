@@ -179,16 +179,32 @@ class TestOrdersPlaceUnreachableFromBrowser:
             "from the operator's browser."
         )
 
-    def test_server_to_server_post_still_reaches_the_handler(self, monkeypatch):
+    def test_server_to_server_post_still_reaches_the_handler(
+        self, monkeypatch, tmp_path
+    ):
         """The legitimate Next.js hop must NOT be affected: it gets past the
-        perimeter (the handler then rejects the payload on its own terms)."""
+        perimeter.
+
+        The assertion is about the PERIMETER, so the handler is put in test
+        mode and the 2FA lease is pointed at a tmp path. Otherwise this drives
+        the real order path into check_ib_gateway -> the 2FA lock, which mkdirs
+        /var/lib/radon: writable on a Hetzner host, resolved under ~/Library on
+        macOS, and permission-denied on a Linux CI runner.
+        """
         monkeypatch.setenv("CLERK_JWKS_URL", "https://example.test/jwks.json")
+        monkeypatch.setenv("IB_2FA_LOCK_PATH", str(tmp_path / "2fa-lock.json"))
+        from scripts.api import server as api_server
+
+        monkeypatch.setattr(api_server, "test_mode", True)
 
         res = _loopback_client().post("/orders/place", json={})
         assert res.status_code not in (401, 403), (
             f"loopback server-to-server POST was denied ({res.status_code}) — "
             "the legitimate Next.js -> FastAPI hop is broken."
         )
+        # 200 from the test-mode branch proves the request reached the handler
+        # body rather than stopping at the perimeter for some other reason.
+        assert res.status_code == 200, res.text
 
 
 # --- 4. DNS-rebinding read path ----------------------------------------------
