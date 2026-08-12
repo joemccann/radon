@@ -18,7 +18,7 @@ import uuid
 from pathlib import Path
 
 try:
-    from ib_insync import Stock, Option, Future, Contract, ComboLeg, LimitOrder, MarketOrder, TagValue, util
+    from ib_insync import Stock, Option, Future, Contract, ComboLeg, LimitOrder, MarketOrder, StopOrder, StopLimitOrder, TagValue, util
 except ImportError:
     print(json.dumps({"status": "error", "message": "ib_insync not installed"}))
     sys.exit(1)
@@ -234,9 +234,35 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
     if quantity <= 0:
         return {"status": "error", "message": f"quantity must be > 0, got {quantity}"}
 
-    limit_price = float(params["limitPrice"])
-    if limit_price <= 0:
-        return {"status": "error", "message": f"limitPrice must be > 0, got {limit_price}"}
+    raw_order_type = str(params.get("orderType") or "LMT").strip().upper().replace("_", " ").replace("-", " ")
+    if raw_order_type in ("STOP", "STOP MARKET"):
+        ib_order_type = "STP"
+    elif raw_order_type in ("STOP LIMIT", "STPLMT", "STOP LMT"):
+        ib_order_type = "STP LMT"
+    elif raw_order_type in ("LMT", "LIMIT", "STP", "STP LMT"):
+        ib_order_type = "LMT" if raw_order_type in ("LMT", "LIMIT") else raw_order_type
+    else:
+        return {"status": "error", "message": f"unsupported orderType {params.get('orderType')}"}
+
+    if order_type == "combo" and ib_order_type == "STP LMT":
+        return {"status": "error", "message": "STP LMT is not supported on combo/BAG orders"}
+
+    stop_price = None
+    if ib_order_type in ("STP", "STP LMT"):
+        raw_stop = params.get("stopPrice")
+        if raw_stop is None or raw_stop == "":
+            return {"status": "error", "message": "stopPrice is required for stop orders"}
+        stop_price = float(raw_stop)
+        if stop_price <= 0:
+            return {"status": "error", "message": f"stopPrice must be > 0, got {stop_price}"}
+
+    limit_price = None
+    if ib_order_type in ("LMT", "STP LMT"):
+        if params.get("limitPrice") is None or params.get("limitPrice") == "":
+            return {"status": "error", "message": "limitPrice is required"}
+        limit_price = float(params["limitPrice"])
+        if limit_price <= 0:
+            return {"status": "error", "message": f"limitPrice must be > 0, got {limit_price}"}
 
     tif = params.get("tif", "DAY").upper()
     # Allow the order to fill OUTSIDE regular trading hours (extended/after-hours
@@ -378,13 +404,31 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         client._ib.errorEvent += _on_error
 
         # Build order
-        order = LimitOrder(
-            action=action,
-            totalQuantity=quantity,
-            lmtPrice=limit_price,
-            tif=tif,
-            outsideRth=outside_rth,
-        )
+        if ib_order_type == "STP":
+            order = StopOrder(
+                action=action,
+                totalQuantity=quantity,
+                stopPrice=stop_price,
+                tif=tif,
+                outsideRth=outside_rth,
+            )
+        elif ib_order_type == "STP LMT":
+            order = StopLimitOrder(
+                action=action,
+                totalQuantity=quantity,
+                lmtPrice=limit_price,
+                stopPrice=stop_price,
+                tif=tif,
+                outsideRth=outside_rth,
+            )
+        else:
+            order = LimitOrder(
+                action=action,
+                totalQuantity=quantity,
+                lmtPrice=limit_price,
+                tif=tif,
+                outsideRth=outside_rth,
+            )
         # Durable execution linkage only; this does not write capital, call
         # what-if, or wait for reconciliation on the placement path.
         order_ref = str(params.get("orderRef") or f"radon-{uuid.uuid4().hex[:20]}")[:32]
@@ -543,7 +587,13 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
             "permId": perm_id,
             "orderRef": order_ref,
             "initialStatus": status,
-            "message": f"{action} {quantity} {symbol} @ ${limit_price:.2f} — {status}",
+            "message": (
+                f"{action} {quantity} {symbol} stop ${stop_price:.2f} - {status}"
+                if ib_order_type == "STP"
+                else f"{action} {quantity} {symbol} stop ${stop_price:.2f} limit ${limit_price:.2f} - {status}"
+                if ib_order_type == "STP LMT"
+                else f"{action} {quantity} {symbol} @ ${limit_price:.2f} — {status}"
+            ),
         }
         # A resting order is usually filled=0 at acknowledgement time; only
         # surface fill fields once IB actually reports a nonzero fill so the

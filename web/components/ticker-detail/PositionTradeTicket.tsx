@@ -17,6 +17,13 @@ import {
   type TradeAction,
   type TradeTarget,
 } from "@/lib/order/positionTrade";
+import {
+  type IbOrderType,
+  ibPlaceFields,
+  isStopOrderType,
+  pricesValidForOrderType,
+} from "@/lib/order/stopOrder";
+import OrderTypeToggle from "@/components/OrderTypeToggle";
 
 function toNakedShortPortfolio(portfolio: PortfolioData | null | undefined): NakedShortPortfolio {
   if (!portfolio) return { positions: [] };
@@ -94,6 +101,8 @@ export default function PositionTradeTicket({
   const [action, setAction] = useState<TradeAction>(() => closingActionFor(position, target));
   const [quantity, setQuantity] = useState(String(heldQty));
   const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<IbOrderType>("LMT");
+  const [stopPrice, setStopPrice] = useState("");
   const [tif, setTif] = useState<"DAY" | "GTC">("DAY");
   const [confirmStep, setConfirmStep] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -106,12 +115,11 @@ export default function PositionTradeTicket({
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
-  // Combo net limits are SIGNED (negative = credit), so a combo only requires a
-  // non-zero price; single option legs are always a positive premium.
+  const parsedStop = parseFloat(stopPrice);
   const priceValid =
     target.kind === "combo"
       ? Number.isFinite(parsedPrice) && parsedPrice !== 0
-      : Number.isFinite(parsedPrice) && parsedPrice > 0;
+      : pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
   const isValid = !isNaN(parsedQty) && parsedQty > 0 && priceValid;
 
   const underlyingSpot = prices[position.ticker]?.last ?? null;
@@ -150,10 +158,13 @@ export default function PositionTradeTicket({
         setLoading(false);
         return;
       }
+      const extra = target.kind === "leg" ? ibPlaceFields(orderType, parsedPrice, parsedStop) : {};
+      const payload = { ...built.payload, ...extra };
+      if (orderType === "STP") delete payload.limitPrice;
       const res = await fetch("/api/orders/place", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(built.payload),
+        body: JSON.stringify(payload),
       });
       const json = await res.json();
       if (!res.ok) {
@@ -212,6 +223,17 @@ export default function PositionTradeTicket({
         {closingHint && <span className="position-trade-hint">{closingHint}</span>}
       </div>
 
+      {target.kind === "leg" && (
+        <OrderTypeToggle
+          value={orderType}
+          onChange={(next) => {
+            setOrderType(next);
+            if (isStopOrderType(next)) setTif("GTC");
+            reset();
+          }}
+        />
+      )}
+
       <div className="order-field">
         <label className="order-label">Quantity{target.kind === "leg" ? " (contracts)" : " (combos)"}</label>
         <input
@@ -227,6 +249,30 @@ export default function PositionTradeTicket({
         <span className="position-trade-hint">Held: {heldQty}</span>
       </div>
 
+      {target.kind === "leg" && isStopOrderType(orderType) && (
+        <div className="order-field">
+          <label className="order-label">Stop Price</label>
+          <div className="modify-price-input-row">
+            <span className="modify-price-prefix">$</span>
+            <input
+              className="modify-price-input"
+              type="number"
+              step="0.01"
+              value={stopPrice}
+              onChange={(e) => { setStopPrice(e.target.value); reset(); }}
+              placeholder="0.00"
+              data-testid="order-stop-price"
+            />
+          </div>
+          <div className="modify-quick-buttons">
+            <button className="btn-quick" disabled={bid == null} onClick={() => { if (bid != null) { setStopPrice(bid.toFixed(2)); reset(); } }}>BID {bid != null ? fmtPrice(bid) : "--"}</button>
+            <button className="btn-quick" disabled={mid == null} onClick={() => { if (mid != null) { setStopPrice(mid.toFixed(2)); reset(); } }}>MID {mid != null ? fmtPrice(mid) : "--"}</button>
+            <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setStopPrice(ask.toFixed(2)); reset(); } }}>ASK {ask != null ? fmtPrice(ask) : "--"}</button>
+          </div>
+        </div>
+      )}
+
+      {(target.kind === "combo" || orderType !== "STP") && (
       <div className="order-field">
         <label className="order-label">{target.kind === "combo" ? "Net Limit" : "Limit Price"}</label>
         <div className="modify-price-input-row">
@@ -247,6 +293,7 @@ export default function PositionTradeTicket({
           <button className="btn-quick" disabled={ask == null} onClick={() => { if (ask != null) { setLimitPrice(ask.toFixed(2)); reset(); } }}>ASK {ask != null ? fmtPrice(ask) : "--"}</button>
         </div>
       </div>
+      )}
 
       <div className="order-field">
         <label className="order-label">Time in Force</label>

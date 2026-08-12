@@ -62,6 +62,8 @@ def order_notional(params: dict) -> Optional[float]:
     try:
         quantity = abs(float(params.get("quantity") or 0))
         price = abs(float(params.get("limitPrice") or 0))
+        if not price:
+            price = abs(float(params.get("stopPrice") or 0))
     except (TypeError, ValueError):
         return None
     if not quantity or not price:

@@ -8,6 +8,13 @@ import { fmtPrice, legPriceKey } from "@/lib/positionUtils";
 import { useViewport } from "@/lib/useViewport";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "@/components/SingleLegOrderTicket";
 import { OrderRiskGate, resolvePlacementTarget, type LinearOrderRiskInput } from "@/lib/order";
+import {
+  type IbOrderType,
+  ibPlaceFields,
+  paperPlaceFields,
+  pricesValidForOrderType,
+  riskPriceForOrderType,
+} from "@/lib/order/stopOrder";
 import { useOrderActionsOptional } from "@/lib/OrderActionsContext";
 import { isIndexSymbol, hasFuturesSupport, hasIndexOptionsSupport } from "@/lib/indexSymbols";
 import { FuturesOrderForm } from "@/components/ticker-detail/FuturesOrderForm";
@@ -326,15 +333,17 @@ function StockOrderForm({
     return "";
   });
   const [limitPrice, setLimitPrice] = useState("");
+  const [orderType, setOrderType] = useState<IbOrderType>("LMT");
+  const [stopPrice, setStopPrice] = useState("");
   const [paperMode, setPaperMode] = useState(false);
 
   const parsedQty = parseInt(quantity, 10);
   const parsedPrice = parseFloat(limitPrice);
+  const parsedStop = parseFloat(stopPrice);
   const isValid =
     !isNaN(parsedQty) &&
     parsedQty > 0 &&
-    !isNaN(parsedPrice) &&
-    parsedPrice > 0;
+    pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
 
   // Stock orders route through the linear branch of `<OrderRiskGate>`.
   // Held LONG / SHORT shares are looked up from the portfolio so a SELL
@@ -348,7 +357,8 @@ function StockOrderForm({
 
   const riskInput: LinearOrderRiskInput | null = useMemo(() => {
     if (!isValid) return null;
-    const description = `${action} ${parsedQty} ${ticker} @ ${fmtPrice(parsedPrice)}`;
+    const riskPrice = riskPriceForOrderType(orderType, parsedPrice, parsedStop);
+    const description = `${action} ${parsedQty} ${ticker} @ ${fmtPrice(riskPrice)}`;
     // Close-out branch: SELL against held LONG ≥ qty, OR BUY against held
     // SHORT ≥ qty. Provides basis so the summary reports realised P&L.
     const isClosingLong = action === "SELL" && heldLong >= parsedQty;
@@ -360,7 +370,7 @@ function StockOrderForm({
         instrument: "stock",
         action,
         quantity: parsedQty,
-        limitPrice: parsedPrice,
+        limitPrice: riskPrice,
         multiplier: 1,
         heldQuantity: heldLong,
         heldShortQuantity: heldShort,
@@ -374,13 +384,13 @@ function StockOrderForm({
       instrument: "stock",
       action,
       quantity: parsedQty,
-      limitPrice: parsedPrice,
+      limitPrice: riskPrice,
       multiplier: 1,
       heldQuantity: heldLong,
       heldShortQuantity: heldShort,
       description,
     };
-  }, [isValid, parsedQty, parsedPrice, action, ticker, heldLong, heldShort, avgCost]);
+  }, [isValid, parsedQty, parsedPrice, parsedStop, orderType, action, ticker, heldLong, heldShort, avgCost]);
 
   return (
     <SingleLegOrderTicket
@@ -396,6 +406,10 @@ function StockOrderForm({
       isValid={isValid}
       limitPrice={limitPrice}
       onLimitPriceChange={setLimitPrice}
+      orderType={orderType}
+      onOrderTypeChange={setOrderType}
+      stopPrice={stopPrice}
+      onStopPriceChange={setStopPrice}
       onActionChange={setAction}
       style={{ marginTop: "16px" }}
       header={<div className="book-section-header">STOCK ORDER</div>}
@@ -418,24 +432,23 @@ function StockOrderForm({
           onPaperModeChange={setPaperMode}
         />
       }
-      buildPayload={({ action, quantity, limitPrice, tif }) =>
+      buildPayload={({ action, quantity, limitPrice, tif, orderType, stopPrice }) =>
         resolvePlacementTarget(paperMode) === "paper-shadow"
           ? {
               ticker,
               side: action,
-              order_type: "LIMIT",
               quantity,
-              limit_price: limitPrice,
               bid,
               ask,
+              ...paperPlaceFields(orderType, limitPrice, stopPrice),
             }
           : {
               type: "stock",
               symbol: ticker,
               action,
               quantity,
-              limitPrice,
               tif,
+              ...ibPlaceFields(orderType, limitPrice, stopPrice),
             }
       }
       buildSuccessMessage={({ action, quantity, limitPrice }) =>
