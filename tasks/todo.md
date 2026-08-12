@@ -1,3 +1,28 @@
+# Task: VOL CONE cheap-wing scanner (2026-08-12)
+
+Find names like NVDA / SMH where the near monthly (and especially 10% OTM wings) sit at the low end of the 90/10 vol cone.
+
+## Identifiers
+
+- slug `vol-cone` · service `vol-cone` · Name `VolCone` · tab `VOL CONE` · migration `0047`
+
+## Checklist
+
+- [x] T1 Source + fixture locked (UW greeks + date=)
+- [x] T2 Spec + red tests
+- [x] T3 Worktrees green (24 pytest / 110 api / 70 ui)
+- [x] T4 Merge suite + live tab
+- [x] T5 Turso 400 history rows + 0047 applied
+
+## Review
+
+- Scanner ranks names where ATM IV percentile <= 15 and both 10% OTM wings <= 20 on that monthly's 90/10 cone.
+- Live 2026-08-12 Sep 18: NVDA, SMH, AMD, AVGO, AAPL all `CHEAP_WINGS` (80-session cones).
+- Tab: `/regime/vol-cone`. Timer `radon-vol-cone.timer` Mon-Fri 20:45 UTC; enable on the VPS (deploys do not install units).
+- Verification: pytest 5546 + cloud 779 + vitest 5698 + typecheck; Playwright 3/3; live screenshot `docs/indicators/vol-cone-tab.png`.
+
+---
+
 # Task: Signed implied books for every tested option structure (2026-08-11)
 
 ## Dependency graph
