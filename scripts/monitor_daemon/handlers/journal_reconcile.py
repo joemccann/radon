@@ -36,6 +36,11 @@ from typing import Any
 
 from .base import BaseHandler
 
+# Single source of truth for the two ticker conventions the journal is written
+# under: the Flex rehydrate writer stores the OCC local symbol
+# ("MU    260828C00875000"), the real-time daemon stores the bare root.
+from .expiry_sweep import _normalize_ticker
+
 try:
     # JRN-03 heal-on-recovery writes the journal-reconcile row back to ok the
     # moment its flagged gaps are journaled. Optional so libsql-less unit hosts
@@ -146,7 +151,7 @@ def _build_journal_coverage(
 
         # Build the per-contract-date fallback key.  Normalise expiry to
         # YYYYMMDD (compact IB form stored in journal rows).
-        ticker = str(payload.get("ticker") or payload.get("symbol") or "").upper()
+        ticker = _normalize_ticker(str(payload.get("ticker") or payload.get("symbol") or "").upper())
         strike = str(payload.get("strike") or "")
         right = str(payload.get("right") or "")
         expiry = str(payload.get("expiry") or "")
@@ -195,7 +200,10 @@ def _executed_orders_in_window(db: Any, since_ts: str) -> list[dict[str, Any]]:
 def _extract_contract_key(payload: dict[str, Any]) -> tuple[str, str, str, str]:
     """Return (ticker, strike_str, right, expiry) from an executed_orders payload."""
     contract = payload.get("contract") or {}
-    ticker = str(payload.get("symbol") or contract.get("symbol") or "").upper()
+    # payload["symbol"] is a DISPLAY string ("MU C875", from format_contract);
+    # the underlying survives only in payload["contract"]["symbol"]. Reading the
+    # display string first made every option leg uncoverable by the fallback.
+    ticker = _normalize_ticker(str(contract.get("symbol") or payload.get("symbol") or "").upper())
     strike = str(contract.get("strike") or payload.get("strike") or "")
     right = str(contract.get("right") or payload.get("right") or "")
     # expiry may be ISO or compact — normalise to compact YYYYMMDD for comparison
