@@ -17,6 +17,7 @@ import CorPanel from "./CorPanel";
 import SkewPanel from "./SkewPanel";
 import Skew2dPanel from "./Skew2dPanel";
 import YieldCurvePanel from "./YieldCurvePanel";
+import VolConePanel from "./VolConePanel";
 import GammaRotationPanel from "./GammaRotationPanel";
 import LlmTokenIndexCard from "./LlmTokenIndexCard";
 import BacktestPanel from "./BacktestPanel";
@@ -34,15 +35,20 @@ import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
 import { MarketState } from "@/lib/useMarketHours";
 
-type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "skew2d" | "curve" | "llm" | "backtest";
+type RegimeTab = "cri" | "vcg" | "gex" | "grg" | "breadth" | "bpi" | "margin" | "straddle" | "cor" | "skew" | "skew2d" | "curve" | "vol-cone" | "llm" | "backtest";
 
-const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "llm", "backtest"] as const;
+const REGIME_TAB_VALUES: readonly RegimeTab[] = ["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "vol-cone", "llm", "backtest"] as const;
+
+const MOBILE_TAB_LABEL: Partial<Record<RegimeTab, string>> = {
+  skew2d: "SKEW 2D",
+  "vol-cone": "VOL CONE",
+};
 
 /** Extract the tab segment from /regime/<tab>; defaults to "cri". */
 function tabFromPathname(pathname: string | null): RegimeTab {
   if (!pathname) return "cri";
   // skew2d before skew so /regime/skew2d is not truncated to skew
-  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew2d|skew|curve|llm|backtest)(?:\/|$)/);
+  const match = pathname.match(/^\/regime\/(cri|vcg|gex|grg|breadth|bpi|margin|straddle|cor|skew2d|skew|curve|vol-cone|llm|backtest)(?:\/|$)/);
   if (match && (REGIME_TAB_VALUES as readonly string[]).includes(match[1])) {
     return match[1] as RegimeTab;
   }
@@ -296,7 +302,7 @@ export default function RegimePanel({
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
-      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "llm", "backtest"] as RegimeTab[]).map((t) => (
+      {(["cri", "vcg", "gex", "grg", "breadth", "bpi", "margin", "straddle", "cor", "skew", "skew2d", "curve", "vol-cone", "llm", "backtest"] as RegimeTab[]).map((t) => (
         <button
           key={t}
           type="button"
@@ -305,7 +311,7 @@ export default function RegimePanel({
           className={`m-chip${activeTab === t ? " m-chip--active" : ""}`}
           onClick={() => goToTab(t)}
         >
-          {t === "skew2d" ? "SKEW 2D" : t.toUpperCase()}
+          {MOBILE_TAB_LABEL[t] ?? t.toUpperCase()}
         </button>
       ))}
     </div>
@@ -323,6 +329,7 @@ export default function RegimePanel({
       <button className={`ticker-tab ${activeTab === "skew" ? "active" : ""}`} onClick={() => goToTab("skew")}>SKEW</button>
       <button className={`ticker-tab ${activeTab === "skew2d" ? "active" : ""}`} onClick={() => goToTab("skew2d")}>SKEW 2D</button>
       <button className={`ticker-tab ${activeTab === "curve" ? "active" : ""}`} onClick={() => goToTab("curve")}>CURVE</button>
+      <button className={`ticker-tab ${activeTab === "vol-cone" ? "active" : ""}`} onClick={() => goToTab("vol-cone")}>VOL CONE</button>
       <button className={`ticker-tab ${activeTab === "llm" ? "active" : ""}`} onClick={() => goToTab("llm")}>LLM</button>
       <button className={`ticker-tab ${activeTab === "backtest" ? "active" : ""}`} onClick={() => goToTab("backtest")}>BACKTEST</button>
     </div>
@@ -432,6 +439,15 @@ export default function RegimePanel({
       <div className="regime-panel">
         {tabBar}
         <YieldCurvePanel />
+      </div>
+    );
+  }
+
+  if (activeTab === "vol-cone") {
+    return (
+      <div className="regime-panel">
+        {tabBar}
+        <VolConePanel />
       </div>
     );
   }
