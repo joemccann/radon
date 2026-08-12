@@ -65,9 +65,9 @@ export async function readThetaHarvesterCache(): Promise<Record<string, unknown>
   return JSON.parse(raw) as Record<string, unknown>;
 }
 
-/** Latest Turso snapshot — shared across hosts, so a scan that ran on the
- *  FastAPI host is visible to the Next.js host (the disk file is host-local
- *  and there is no theta auto-scan timer). */
+/** Latest Turso snapshot — shared across hosts, so the scan that
+ *  radon-signals-refresh.timer runs on the FastAPI host is visible to the
+ *  Next.js host (the disk file is host-local). */
 async function readThetaFromDb(): Promise<TimestampedRead<Record<string, unknown>> | null> {
   const db = getDb();
   const result = await db.execute({

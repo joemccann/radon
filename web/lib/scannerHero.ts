@@ -60,3 +60,29 @@ export function scoreTone(score: number): "strong" | "warn" | "fault" {
   if (score >= 50) return "warn";
   return "fault";
 }
+
+function isSameLocalDay(a: Date, b: Date): boolean {
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+/** Scan sample label for the panel's calibration rail.
+ *
+ *  A sample from an earlier day carries its date: a bare HH:MM made a
+ *  previous session's snapshot read as the current one. */
+export function formatScanSample(iso: string | null | undefined, now: Date = new Date()): string {
+  if (!iso) return "—";
+  const sampledAt = new Date(iso);
+  if (Number.isNaN(sampledAt.getTime())) return "—";
+  const time = sampledAt.toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  if (isSameLocalDay(sampledAt, now)) return time;
+  const date = sampledAt.toLocaleDateString([], { month: "short", day: "numeric" });
+  return `${date} ${time}`;
+}
