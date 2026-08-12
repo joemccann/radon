@@ -107,6 +107,8 @@ Every IB-placing subprocess MUST follow these rules. Disregarding any one of the
 
 5. **IB Gateway will auto-restart under heavy subprocess load.** Hammering `place_order` / `qualify_contracts` from many fresh clients in rapid succession can trigger an IB Gateway 2FA-renewal cycle (~30s downtime + pool clients reset). Each probe should reuse a single `IBClient` connection across all test cases rather than connect-disconnect per case.
 
+6. **A combo `limitPrice` is a SIGNED net price — negative = net credit.** Only single-leg orders are bounded to `> 0`; a BAG's limit carries the credit/debit sign (IB's own convention, and what the chain builder sends as `signedLimitPrice`). Zero is the only invalid combo price. A blanket `limitPrice <= 0` refusal at this funnel made every net-credit combo unplaceable even though `/api/orders/place` already allowed the sign (NVDA calendar spread, 2026-08-12). Tests: `test_ib_place_order_input_bounds.py::TestComboSignedLimitPrice`.
+
 FastAPI timeouts now match the script deadlines: `/orders/place` is 25s subprocess + 30s `radonFetch`.
 
 ---

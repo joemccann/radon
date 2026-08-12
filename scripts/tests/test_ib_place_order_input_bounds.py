@@ -25,6 +25,8 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import eventkit
+
 _SCRIPTS = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
@@ -100,6 +102,95 @@ class TestQuantityBounds:
             f"a whole-number float quantity must not be refused as non-integral: {result}"
         )
         ib_client_cls.assert_called_once()
+
+
+_COMBO_PARAMS = {
+    "type": "combo",
+    "symbol": "NVDA",
+    "action": "BUY",
+    "quantity": 20,
+    "limitPrice": -1.20,
+    "tif": "DAY",
+    "legs": [
+        {"expiry": "20260828", "strike": 145.0, "right": "CALL", "action": "BUY", "ratio": 4},
+        {"expiry": "20260821", "strike": 135.0, "right": "CALL", "action": "SELL", "ratio": 3},
+    ],
+}
+
+
+def _invoke_combo_place_order(params: dict):
+    """Call place_order() for a BAG order with IB + the contract resolver
+    patched. Returns (result, limit_order_cls) so callers can assert the
+    signed net price reached LimitOrder verbatim."""
+    trade = MagicMock()
+    trade.order = MagicMock(orderId=99, permId=12345)
+    trade.orderStatus = MagicMock(status="Submitted", whyHeld="")
+    trade.log = []
+
+    client = MagicMock()
+    client._ib = MagicMock(errorEvent=eventkit.Event("errorEvent"))
+    client.place_order = MagicMock(return_value=trade)
+    client.qualify_contracts = MagicMock(
+        return_value=[MagicMock(conId=1), MagicMock(conId=2)]
+    )
+
+    with patch("ib_place_order.IBClient", return_value=client) as ib_client_cls, \
+         patch("clients.contract_resolver.resolve_option_contract", return_value=MagicMock()), \
+         patch("ib_place_order.LimitOrder", return_value=MagicMock()) as limit_order_cls:
+        import ib_place_order
+        result = ib_place_order.place_order(params)
+        return result, limit_order_cls, ib_client_cls
+
+
+class TestComboSignedLimitPrice:
+    """A combo's limit price is a NET price: negative = net credit.
+
+    Production repro 2026-08-12 (NVDA calendar spread — SELL the 08-21 $135
+    calls held long, BUY the 08-28 $145 calls): the chain builder sends the
+    signed net (`signedLimitPrice`), `/api/orders/place` already allows any
+    non-zero combo price, and the placement funnel then refused it with
+    "limitPrice must be > 0, got -1.2". Every net-credit combo was unplaceable.
+    """
+
+    def test_negative_combo_limit_price_accepted(self):
+        result, limit_order_cls, _ = _invoke_combo_place_order(dict(_COMBO_PARAMS))
+
+        assert result.get("status") == "ok", f"net-credit combo refused: {result}"
+        assert limit_order_cls.call_args.kwargs["lmtPrice"] == -1.20, (
+            f"signed net price not passed verbatim: {limit_order_cls.call_args}"
+        )
+
+    def test_zero_combo_limit_price_refused(self):
+        params = dict(_COMBO_PARAMS, limitPrice=0)
+
+        result, _, ib_client_cls = _invoke_combo_place_order(params)
+
+        assert result["status"] == "error", f"expected error, got: {result}"
+        assert "limit price" in result["message"].lower() or "limitprice" in result["message"].lower(), \
+            f"message not operator-readable: {result}"
+        ib_client_cls.assert_not_called()
+
+    def test_negative_single_leg_option_price_still_refused(self):
+        """Sign-carrying prices are a combo-only concept — a single option
+        leg is always a positive premium."""
+        params = {
+            "type": "option",
+            "symbol": "NVDA",
+            "action": "SELL",
+            "quantity": 60,
+            "limitPrice": -12.75,
+            "tif": "DAY",
+            "expiry": "20260821",
+            "strike": 135.0,
+            "right": "CALL",
+        }
+
+        result, ib_client_cls = _invoke_place_order(params)
+
+        assert result["status"] == "error", f"expected error, got: {result}"
+        assert "limit price" in result["message"].lower() or "limitprice" in result["message"].lower(), \
+            f"message not operator-readable: {result}"
+        ib_client_cls.assert_not_called()
 
 
 class TestLimitPriceBounds:
