@@ -261,7 +261,14 @@ def place_order(params: dict, _clock=time.time, what_if: bool = False) -> dict:
         if params.get("limitPrice") is None or params.get("limitPrice") == "":
             return {"status": "error", "message": "limitPrice is required"}
         limit_price = float(params["limitPrice"])
-        if limit_price <= 0:
+        # A combo's limit price is a NET price and carries the credit/debit
+        # sign (negative = net credit received) — IB's own BAG convention, and
+        # what the chain builder submits via `signedLimitPrice`. Only zero is
+        # meaningless. Single-leg orders stay a strictly positive premium.
+        if order_type == "combo":
+            if limit_price == 0:
+                return {"status": "error", "message": "combo limitPrice must be non-zero, got 0.0"}
+        elif limit_price <= 0:
             return {"status": "error", "message": f"limitPrice must be > 0, got {limit_price}"}
 
     tif = params.get("tif", "DAY").upper()
