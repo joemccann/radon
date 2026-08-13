@@ -1182,6 +1182,55 @@ def upsert_open_order(perm_id: int, payload: dict[str, Any]) -> None:
     db.commit()
 
 
+# The execution-identity contract: exactly these normalized fields define a
+# fill's lifecycle identity, and the stored payload_sha256 is computed over
+# them. This is PINNED on purpose (test_position_return_capital.py asserts the
+# tuple) — it must never be derived from "whatever normalize_execution returns".
+#
+# 2026-08-13: it was `{k: v for k, v in item.items() if k != "commission"}`,
+# so when commit 4eaaf5e9 added `revision` and `source_exec_id` to
+# normalize_execution for reversal splitting, every one of the 76 stored facts
+# silently hashed differently and orders-sync aborted with "execution fact
+# conflict" on the first pre-existing exec_id it re-synced, freezing
+# executed_orders / open_orders.
+#
+# `commission` is excluded because commission/realized-P&L reports arrive
+# after execDetails; late enrichment is not an execution correction.
+# `revision` is excluded because it is already part of the row's primary key,
+# and `source_exec_id` because it merely defaults back to exec_id.
+_LIFECYCLE_HASH_FIELDS: tuple[str, ...] = (
+    "account_id",
+    "con_id",
+    "currency",
+    "exec_id",
+    "filled_at",
+    "multiplier",
+    "order_ref",
+    "perm_id",
+    "price",
+    "quantity",
+    "sec_type",
+    "side",
+    "signed_quantity",
+    "symbol",
+)
+
+
+def _execution_identity_hash(item: dict[str, Any]) -> str:
+    """Hash the pinned lifecycle identity of a normalized execution.
+
+    Only the fields in ``_LIFECYCLE_HASH_FIELDS`` participate. A missing field
+    is a hard error rather than a silently different hash, so renaming one in
+    normalize_execution fails loudly instead of invalidating stored history.
+    """
+    import hashlib
+
+    lifecycle_payload = {key: item[key] for key in _LIFECYCLE_HASH_FIELDS}
+    return hashlib.sha256(
+        json.dumps(lifecycle_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
 def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -> bool:
     """Persist a lossless IB execution fact without overwriting its identity.
 
@@ -1189,8 +1238,6 @@ def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -
     different canonical payload is a hard conflict rather than a silent
     replacement, because lifecycle history must not be rewritten in place.
     """
-    import hashlib
-
     try:
         from ..position_return_capital import normalize_execution
     except ImportError:  # pragma: no cover - flat scripts/ import mode
@@ -1199,13 +1246,7 @@ def upsert_position_execution_fact(payload: dict[str, Any], *, db: Any = None) -
     item = normalize_execution(payload)
     revision = int(payload.get("revision") or 1)
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=str)
-    # Commission/realized-P&L reports can arrive after execDetails. They do
-    # not change lifecycle identity, so late enrichment must not manufacture
-    # an execution correction or conflict.
-    lifecycle_payload = {key: value for key, value in item.items() if key != "commission"}
-    payload_hash = hashlib.sha256(
-        json.dumps(lifecycle_payload, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
+    payload_hash = _execution_identity_hash(item)
     target = db or get_db()
     row = target.execute(
         """SELECT payload_sha256 FROM position_execution_facts
