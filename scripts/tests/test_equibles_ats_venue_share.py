@@ -13,6 +13,8 @@ import pytest
 
 from fetch_equibles_ats_venue_share import (
     ACCUMULATION_Z,
+    CONSOLIDATED_FROM_PRICES,
+    MIN_CONSOLIDATED_DAYS,
     MIN_HISTORY_WEEKS,
     MIN_SHORT_VOLUME_DAYS,
     Z_WINDOW_WEEKS,
@@ -23,6 +25,7 @@ from fetch_equibles_ats_venue_share import (
     derive_week_metrics,
     payload_has_data,
     week_start,
+    weekly_consolidated_volume,
     weekly_short_volume,
 )
 
@@ -57,6 +60,19 @@ def short_volume_week(week: str, *, daily_total=5_000_000.0, daily_short=2_000_0
             "shortVolume": daily_short,
             "shortExemptVolume": 0.0,
             "totalVolume": daily_total,
+        }
+        for offset in range(days)
+    ]
+
+
+def price_week(week: str, *, daily_volume=25_000_000.0, days=5) -> list[dict]:
+    """Daily /prices rows - the CONSOLIDATED tape, unlike short-volume totals."""
+    start = date.fromisoformat(week)
+    return [
+        {
+            "date": (start + timedelta(days=offset)).isoformat(),
+            "close": 100.0,
+            "volume": daily_volume,
         }
         for offset in range(days)
     ]
@@ -108,6 +124,76 @@ class TestWeeklyShortVolume:
 
 
 # ── per-week derived metrics ──────────────────────────────────────
+
+
+class TestWeeklyConsolidatedVolume:
+    """The /prices daily bars ARE the consolidated tape (verified live
+    2026-08-13: AAPL off-exchange/consolidated = 39.9%, NVDA = 48.2%, both
+    inside the plausible band; against short-volume totalVolume the same
+    figures give 127% and 116%, which is impossible)."""
+
+    def test_daily_bars_fold_into_a_weekly_total(self):
+        week = mondays(1)[0]
+        weekly = weekly_consolidated_volume(price_week(week, daily_volume=20_000_000.0))
+        assert weekly[week]["consolidated_volume"] == 100_000_000.0
+        assert weekly[week]["days"] == 5
+
+    def test_undercovered_week_withholds_the_total(self):
+        """A partial week understates the denominator, which would inflate the
+        share - withhold rather than publish a wrong number."""
+        week = mondays(1)[0]
+        weekly = weekly_consolidated_volume(
+            price_week(week, days=MIN_CONSOLIDATED_DAYS - 1)
+        )
+        assert weekly[week]["consolidated_volume"] is None
+        assert weekly[week]["days"] == MIN_CONSOLIDATED_DAYS - 1
+
+    def test_rows_without_a_usable_date_are_ignored(self):
+        assert weekly_consolidated_volume([{"date": "nope", "volume": 1}, {"volume": 2}]) == {}
+
+    def test_missing_volume_does_not_crash(self):
+        week = mondays(1)[0]
+        rows = price_week(week)
+        rows[0].pop("volume")
+        weekly = weekly_consolidated_volume(rows)
+        assert weekly[week]["days"] == 5
+
+
+class TestOffExchangeShare:
+    def test_share_is_computed_against_the_consolidated_tape(self):
+        week = mondays(1)[0]
+        # 10M off-exchange against 100M consolidated -> 10%
+        consolidated = weekly_consolidated_volume(price_week(week, daily_volume=20_000_000.0))[week]
+        metrics = derive_week_metrics(
+            off_exchange_row(week, ats_volume=4_000_000.0, non_ats_volume=6_000_000.0),
+            None,
+            consolidated,
+        )
+        assert metrics["off_exchange_share_pct"] == pytest.approx(10.0)
+        assert metrics["consolidated_volume"] == 100_000_000.0
+        assert metrics["consolidated_volume_source"] == CONSOLIDATED_FROM_PRICES
+
+    def test_share_stays_null_without_a_consolidated_week(self):
+        week = mondays(1)[0]
+        metrics = derive_week_metrics(off_exchange_row(week), None, None)
+        assert metrics["off_exchange_share_pct"] is None
+        assert metrics["consolidated_volume_source"] is None
+
+    def test_undercovered_consolidated_week_yields_no_share(self):
+        week = mondays(1)[0]
+        consolidated = weekly_consolidated_volume(
+            price_week(week, days=MIN_CONSOLIDATED_DAYS - 1)
+        )[week]
+        metrics = derive_week_metrics(off_exchange_row(week), None, consolidated)
+        assert metrics["off_exchange_share_pct"] is None
+
+    def test_short_volume_total_is_never_used_as_the_denominator(self):
+        """Regression: short-volume totalVolume is itself off-exchange, so
+        substituting it reports a share above 100%."""
+        week = mondays(1)[0]
+        short_week = weekly_short_volume(short_volume_week(week, daily_total=1_000_000.0))[week]
+        metrics = derive_week_metrics(off_exchange_row(week), short_week, None)
+        assert metrics["off_exchange_share_pct"] is None
 
 
 class TestDeriveWeekMetrics:

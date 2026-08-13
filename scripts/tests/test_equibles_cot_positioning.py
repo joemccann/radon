@@ -28,6 +28,7 @@ from fetch_equibles_cot_positioning import (
     EXTREME_PERCENTILE_HIGH,
     EXTREME_PERCENTILE_LOW,
     FOCUS_ALIASES,
+    FOCUS_CONTRACTS,
     MIN_STATS_WEEKS,
     CotIngestError,
     build_contract_positioning,
@@ -75,6 +76,32 @@ def raw_position(report_date: str, *, nc_long: float, nc_short: float, oi: float
 
 
 class TestNormalizePositionRow:
+    def test_the_real_wire_shape_normalises(self):
+        """Captured live 2026-08-13 from /cftc/contracts/13874A/positions.
+
+        The API abbreviates: commLong / nonCommLong / nonCommSpreads. An earlier
+        candidate list only knew the spelled-out forms, so every contract
+        resolved and every value came back null.
+        """
+        raw = {
+            "reportDate": "2026-08-04",
+            "openInterest": 2116079,
+            "commLong": 1526082,
+            "commShort": 1610458,
+            "nonCommLong": 282551,
+            "nonCommShort": 309809,
+            "nonCommSpreads": 41958,
+        }
+        row = normalize_position_row(raw)
+        assert row["report_date"] == "2026-08-04"
+        assert row["open_interest"] == 2_116_079.0
+        assert row["noncommercial_long"] == 282_551.0
+        assert row["noncommercial_short"] == 309_809.0
+        assert row["noncommercial_spread"] == 41_958.0
+        # net spec is derived, and this contract is genuinely net short
+        assert row["net_noncommercial"] == pytest.approx(-27_258.0)
+        assert row["net_commercial"] == pytest.approx(-84_376.0)
+
     def test_canonical_camel_case_row(self):
         row = normalize_position_row(raw_position("2026-08-04", nc_long=250_000, nc_short=100_000))
         assert row["report_date"] == "2026-08-04"
@@ -232,23 +259,48 @@ class TestBuildContractPositioning:
 
 
 class TestResolveMarketCode:
+    """The REAL /cftc/contracts shape, captured live 2026-08-13.
+
+    The endpoint returns only marketCode / marketName / category - there is no
+    alias, symbol or name field. An earlier fixture invented those, which is why
+    every focus contract resolved in tests and none resolved in production.
+    """
+
     ROSTER = [
-        {"marketCode": "13874P", "alias": "ES", "name": "E-MINI S&P 500", "category": "EquityIndices"},
-        {"marketCode": "088691", "symbol": "GC", "name": "GOLD", "category": "Metals"},
-        {"marketCode": "067651", "name": "CRUDE OIL, LIGHT SWEET (WTI)", "category": "Energy"},
+        {"marketCode": "13874A", "marketName": "E-mini S&P 500 (CME)", "category": "EquityIndices"},
+        {"marketCode": "209742", "marketName": "E-mini Nasdaq-100 (CME)", "category": "EquityIndices"},
+        {"marketCode": "239742", "marketName": "E-mini Russell 2000 (CME)", "category": "EquityIndices"},
+        {"marketCode": "1170E1", "marketName": "VIX Futures (CBOE)", "category": "EquityIndices"},
+        {"marketCode": "088691", "marketName": "Gold (COMEX)", "category": "Metals"},
+        {"marketCode": "067651", "marketName": "Crude Oil, Light Sweet (NYMEX)", "category": "Energy"},
+        {"marketCode": "043602", "marketName": "10-Year T-Notes (CBOT)", "category": "InterestRates"},
     ]
 
-    def test_alias_field_match(self):
-        assert resolve_market_code(self.ROSTER, "ES")["market_code"] == "13874P"
+    def test_resolves_every_focus_contract_against_the_live_roster_shape(self):
+        """Regression: this is the check that would have caught the outage."""
+        for alias in FOCUS_ALIASES:
+            resolved = resolve_market_code(self.ROSTER, alias)
+            assert resolved is not None, f"{alias} did not resolve"
+            assert resolved["market_code"] == FOCUS_CONTRACTS[alias]
 
-    def test_symbol_field_match_is_case_insensitive(self):
-        assert resolve_market_code(self.ROSTER, "gc")["market_code"] == "088691"
+    def test_market_code_match_is_exact(self):
+        assert resolve_market_code(self.ROSTER, "ES")["market_code"] == "13874A"
 
-    def test_falls_back_to_a_name_token_match(self):
-        assert resolve_market_code(self.ROSTER, "WTI")["market_code"] == "067651"
+    def test_gold_resolves_by_its_cftc_code(self):
+        assert resolve_market_code(self.ROSTER, "GC")["market_code"] == "088691"
+
+    def test_vix_is_in_the_basket(self):
+        """VIX futures positioning is the most Radon-relevant COT series."""
+        assert "VIX" in FOCUS_ALIASES
+        assert resolve_market_code(self.ROSTER, "VIX")["market_code"] == "1170E1"
 
     def test_unknown_alias_resolves_to_nothing(self):
         assert resolve_market_code(self.ROSTER, "ZZZ") is None
+
+    def test_absent_contract_resolves_to_nothing(self):
+        """No dollar-index contract exists in the CFTC roster, so a basket that
+        asks for one must degrade rather than resolve something wrong."""
+        assert resolve_market_code(self.ROSTER, "DX") is None
 
 
 # ── payload ───────────────────────────────────────────────────────

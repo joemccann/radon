@@ -59,8 +59,22 @@ except Exception:
 SERVICE = "equibles-cot-positioning"
 COT_JSON = _PROJECT_DIR / "data" / "equibles_cot_positioning.json"
 
-# Cross-asset basket: equity indices, rates, dollar, gold, crude.
-FOCUS_ALIASES: tuple[str, ...] = ("ES", "NQ", "TY", "DX", "GC", "WTI")
+# Cross-asset basket, keyed to the CFTC market codes observed live 2026-08-13
+# on /cftc/contracts. The endpoint returns ONLY marketCode / marketName /
+# category, so an alias is not resolvable from the payload alone - the mapping
+# has to be explicit. There is no dollar-index contract in the roster, so DX is
+# deliberately absent rather than silently mismatched.
+FOCUS_CONTRACTS: dict[str, str] = {
+    "ES": "13874A",   # E-mini S&P 500 (CME)
+    "NQ": "209742",   # E-mini Nasdaq-100 (CME)
+    "RTY": "239742",  # E-mini Russell 2000 (CME)
+    "VIX": "1170E1",  # VIX Futures (CBOE)
+    "TY": "043602",   # 10-Year T-Notes (CBOT)
+    "GC": "088691",   # Gold (COMEX)
+    "WTI": "067651",  # Crude Oil, Light Sweet (NYMEX)
+}
+
+FOCUS_ALIASES: tuple[str, ...] = tuple(FOCUS_CONTRACTS)
 
 HISTORY_LOOKBACK_DAYS = 365 * 3
 HISTORY_PAGE_LIMIT = 500
@@ -134,16 +148,24 @@ class CotIngestError(RuntimeError):
 _FIELD_CANDIDATES: dict[str, tuple[str, ...]] = {
     "report_date": ("reportdate", "date", "asofdate", "weekdate", "reportweek"),
     "open_interest": ("openinterest", "openinterestall", "totalopeninterest"),
-    "commercial_long": ("commerciallong", "commerciallongpositions", "commerciallongall"),
-    "commercial_short": ("commercialshort", "commercialshortpositions", "commercialshortall"),
+    # The wire uses the abbreviated forms (commLong / nonCommLong /
+    # nonCommSpreads), verified live 2026-08-13; the spelled-out variants stay
+    # as fallbacks.
+    "commercial_long": (
+        "commlong", "commerciallong", "commerciallongpositions", "commerciallongall",
+    ),
+    "commercial_short": (
+        "commshort", "commercialshort", "commercialshortpositions", "commercialshortall",
+    ),
     "noncommercial_long": (
-        "noncommerciallong", "noncommerciallongpositions", "speculativelong",
+        "noncommlong", "noncommerciallong", "noncommerciallongpositions", "speculativelong",
     ),
     "noncommercial_short": (
-        "noncommercialshort", "noncommercialshortpositions", "speculativeshort",
+        "noncommshort", "noncommercialshort", "noncommercialshortpositions", "speculativeshort",
     ),
     "noncommercial_spread": (
-        "noncommercialspread", "noncommercialspreading", "spreadpositions",
+        "noncommspreads", "noncommspread", "noncommercialspread",
+        "noncommercialspreading", "spreadpositions",
     ),
     "net_commercial": ("netcommercial", "commercialnet", "netcommercialpositions"),
     "net_noncommercial": (
@@ -367,9 +389,22 @@ def build_payload(
 def resolve_market_code(
     roster: Iterable[dict[str, Any]], alias: str
 ) -> Optional[dict[str, Any]]:
-    """Find the roster entry for an alias by alias field, then by name token."""
+    """Find the roster entry for an alias.
+
+    Resolution order: the explicit CFTC market code from FOCUS_CONTRACTS, then a
+    declared alias field, then a name token. Only the first works against the
+    live payload, which carries no alias or symbol; the other two are kept so a
+    future roster that does declare one still resolves.
+    """
     wanted = alias.strip().upper()
     rows = [(_flat_keys(row), row) for row in roster]
+
+    target_code = FOCUS_CONTRACTS.get(wanted)
+    if target_code is not None:
+        for flat, row in rows:
+            code = _field(flat, "market_code")
+            if code is not None and str(code).strip().upper() == target_code.upper():
+                return _contract_identity(flat)
 
     for flat, row in rows:
         declared = _field(flat, "alias")
