@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DOCS REWRITE — 30-day plan</title>
+  <style>
+    :root {
+      --canvas: #0a0f14;
+      --panel: #0f1519;
+      --raised: #151c22;
+      --grid: #1e293b;
+      --text: #e2e8f0;
+      --muted: #758192;
+      --secondary: #94a3b8;
+      --signal: #05AD98;
+      --warn: #F5A623;
+      --fault: #E85D6C;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+      padding: 24px 16px 64px;
+    }
+    .wrap { max-width: 960px; margin: 0 auto; }
+    .kicker {
+      font-size: 12px;
+      letter-spacing: 0.14em;
+      font-weight: 600;
+      color: var(--muted);
+      margin: 0 0 8px;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 560;
+      letter-spacing: -0.02em;
+      margin: 0 0 8px;
+    }
+    h1 span { color: var(--signal); }
+    .lede {
+      color: var(--secondary);
+      font-size: 15px;
+      line-height: 1.45;
+      margin: 0 0 24px;
+      max-width: 62ch;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    .label {
+      font-size: 11px;
+      letter-spacing: 0.12em;
+      color: var(--muted);
+      margin: 0 0 12px;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 8px;
+    }
+    .stat {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .stat .n {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 22px;
+      color: var(--signal);
+    }
+    .stat .t { font-size: 11px; color: var(--muted); margin-top: 4px; letter-spacing: 0.06em; }
+    .themes {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+    .theme {
+      background: var(--raised);
+      border: 1px solid var(--grid);
+      border-radius: 4px;
+      padding: 12px;
+    }
+    .theme h3 {
+      margin: 0 0 6px;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+    }
+    .theme p { margin: 0; font-size: 13px; color: var(--secondary); line-height: 1.4; }
+    .theme .miss { color: var(--warn); font-size: 12px; margin-top: 8px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 13px;
+    }
+    th, td {
+      text-align: left;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--grid);
+      vertical-align: top;
+    }
+    th {
+      font-size: 11px;
+      letter-spacing: 0.1em;
+      color: var(--muted);
+      font-weight: 600;
+    }
+    td.path, code {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+    }
+    .keep { color: var(--signal); }
+    .cut { color: var(--fault); }
+    .patch { color: var(--warn); }
+    .tree {
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
+      font-size: 12px;
+      line-height: 1.55;
+      color: var(--secondary);
+      margin: 0;
+      white-space: pre;
+      overflow-x: auto;
+    }
+    .tree .own { color: var(--signal); }
+    .tree .log { color: var(--muted); }
+    .rule {
+      border-left: 2px solid var(--signal);
+      padding: 4px 0 4px 12px;
+      margin: 0 0 8px;
+      font-size: 14px;
+    }
+    .steps { margin: 0; padding-left: 18px; }
+    .steps li { margin: 0 0 8px; font-size: 14px; line-height: 1.4; }
+    .steps code { color: var(--signal); }
+    .note { color: var(--muted); font-size: 12px; margin: 12px 0 0; }
+    @media (max-width: 720px) {
+      .stats, .themes { grid-template-columns: 1fr 1fr; }
+      h1 { font-size: 22px; }
+    }
+    @media (max-width: 480px) {
+      .stats, .themes { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <p class="kicker">PLAN / NOT IMPLEMENTED</p>
+    <h1>Rewrite the docs by <span>cutting</span>, not adding.</h1>
+    <p class="lede">
+      296 commits in 30 days. The README still advertises May 20. The fix is
+      a thinner index plus one owner per fact. No changelog. No new essays.
+    </p>
+
+    <div class="panel">
+      <p class="label">30 DAYS ON MAIN</p>
+      <div class="stats">
+        <div class="stat"><div class="n">296</div><div class="t">COMMITS</div></div>
+        <div class="stat"><div class="n">33</div><div class="t">MERGES</div></div>
+        <div class="stat"><div class="n">49</div><div class="t">DOCS/*.MD</div></div>
+        <div class="stat"><div class="n">599</div><div class="t">CLOUD-SERVICES LINES</div></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="label">WHAT SHIPPED VS WHAT THE INDEX KNOWS</p>
+      <div class="themes">
+        <div class="theme">
+          <h3>Regime indicators</h3>
+          <p>vol-cone, skew, skew2d, straddle, COR, curve, BPI. Specs already live under docs/indicators/.</p>
+          <p class="miss">Missing: an indicators index. README does not mention them.</p>
+        </div>
+        <div class="theme">
+          <h3>Incidents and health</h3>
+          <p>Watchdog, laptop responder, 401-as-unknown, Equibles windows, deploy-marker CI blindness.</p>
+          <p class="miss">incident-runbook is current. README / operations / scripts-reference are not.</p>
+        </div>
+        <div class="theme">
+          <h3>Trading surface</h3>
+          <p>STP / STP LMT, execution identity hash, journal expiry sweep, CMD+J tools, agent-ui primitives.</p>
+          <p class="miss">options-structures and scripts-reference omit stops. Assistant has no pointer.</p>
+        </div>
+        <div class="theme">
+          <h3>Data and ops</h3>
+          <p>Equibles five feeds, radon-kb MCP, LEAP/GARCH indexes default, security perimeter, auto-deploy.</p>
+          <p class="miss">equibles-api.md exists. Knowledge and assistant live only in task files.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <p class="label">CURRENT SHAPE (BLOAT)</p>
+<pre class="tree">README.md                 # May-20 "Recent additions" (14 items, all stale)
+CLAUDE.md / AGENTS.md     # operator contract (keep; do not essay)
+docs/cloud-services.md    # 599 lines: arch + newsfeed + replica postmortem
+docs/operations.md        # env + IB + watchdog (ok, needs 4 inserts)
+docs/incident-runbook.md  # case catalog (correct owner; do not copy out)
+docs/status.md            # Apr-23 eval dump. Contradicts AGENTS.md
+docs/indicators/*.md      # good specs, no index
+docs/scripts-reference.md # CLI table missing indexes / stops / kb
+RELIABILITY_*.md          <span class="log"># logs, not docs</span>
+tasks/todo.md             <span class="log"># session scratch, not docs</span></pre>
+    </div>
+
+    <div class="panel">
+      <p class="label">TARGET SHAPE (ONE OWNER PER FACT)</p>
+<pre class="tree">README.md                 <span class="own"># index only. 4 durable facts. no dated changelog</span>
+docs/indicators/README.md <span class="own"># NEW: one table of regime + scanner tabs</span>
+docs/scripts-reference.md <span class="own"># CLI truth. add 3 rows, fix test runner line</span>
+docs/operations.md        <span class="own"># env + health + deploy. 4 surgical inserts</span>
+docs/cloud-services.md    <span class="own"># architecture owner. replica story stays here only</span>
+docs/incident-runbook.md  <span class="own"># failure cases only. already current</span>
+docs/equibles-api.md      <span class="own"># Equibles owner. link from index</span>
+CLAUDE.md                 <span class="own"># one pointer line if a rule changed. no recap</span>
+docs/status.md            <span class="own"># retire: stub that points at evaluate / journal</span></pre>
+    </div>
+
+    <div class="panel">
+      <p class="label">RULES</p>
+      <div class="rule">Do not add a 30-day changelog. Dated bullets go stale in a week.</div>
+      <div class="rule">State what is true now. Link the owner file for how and why.</div>
+      <div class="rule">One fact, one home. Replica, 2FA, and Equibles each have a single paragraph.</div>
+      <div class="rule">Agent files stay contracts. Logs stay logs. Do not merge them into README.</div>
+    </div>
+
+    <div class="panel">
+      <p class="label">README DIFF (THE ONLY USER-FACING CUT)</p>
+<pre class="tree"> ## Architecture at a glance
+   Turso direct-to-cloud. Four processes. Auto-deploy on main.
+- ## Recent additions          (14 May-20 bullets)
++ ## Now true                  (4 facts, no dates)
++   - Indicators live under /regime and /scanner?mode=vol-cone
++   - CMD+J can quote, chain, evaluate
++   - STP / STP LMT on tickets
++   - Incidents: /incident + docs/incident-runbook.md
+ ## What's where
+   existing rows
++  docs/indicators/README.md
++  docs/incident-runbook.md
++  docs/equibles-api.md
+ ## Project layout
++  scripts/knowledge/          # radon-kb MCP
++  docs/indicators/</pre>
+    </div>
+
+    <div class="panel">
+      <p class="label">MUST DO NOW (~90 MIN)</p>
+      <ol class="steps">
+        <li>Rewrite <code>README.md</code>: delete Recent additions, add Now true (4 facts), add 3 What's-where rows, add 2 layout lines.</li>
+        <li>Add <code>docs/indicators/README.md</code>: table of vol-cone / skew / skew2d / straddle / COR / curve with route + owner spec. No new prose.</li>
+        <li>Patch <code>docs/scripts-reference.md</code>: indexes default on leap/garch, stop-order note, bunx vitest not <code>npm test</code>.</li>
+        <li>Patch <code>docs/operations.md</code> and <code>docs/cloud-services.md</code>: incident responder, probe bearer on service-health, Equibles timers, host-metrics. Insert into existing tables only.</li>
+        <li>Replace <code>docs/status.md</code> with a 10-line stub: evaluations live in Turso / radon-kb; this file is not a log.</li>
+      </ol>
+    </div>
+
+    <div class="panel">
+      <p class="label">FILE ACTIONS</p>
+      <table>
+        <thead>
+          <tr><th>File</th><th>Action</th><th>Why</th></tr>
+        </thead>
+        <tbody>
+          <tr><td class="path">README.md</td><td class="cut">CUT + PATCH</td><td>May-20 list is the staleness engine</td></tr>
+          <tr><td class="path">docs/indicators/README.md</td><td class="keep">ADD</td><td>Only new file. Index, not a spec</td></tr>
+          <tr><td class="path">docs/scripts-reference.md</td><td class="patch">PATCH</td><td>CLI still claims npm test</td></tr>
+          <tr><td class="path">docs/operations.md</td><td class="patch">PATCH</td><td>Health/env owner</td></tr>
+          <tr><td class="path">docs/cloud-services.md</td><td class="patch">PATCH</td><td>Do not grow past current length</td></tr>
+          <tr><td class="path">docs/status.md</td><td class="cut">RETIRE</td><td>Apr-23 eval dump</td></tr>
+          <tr><td class="path">docs/incident-runbook.md</td><td class="keep">KEEP</td><td>Already the case owner</td></tr>
+          <tr><td class="path">CLAUDE.md / AGENTS.md</td><td class="keep">SKIP unless a rule is false</td><td>Contracts, not recaps</td></tr>
+          <tr><td class="path">RELIABILITY_*.md, TEST_AUDIT.md</td><td class="keep">LEAVE</td><td>Logs. Link, do not merge</td></tr>
+        </tbody>
+      </table>
+      <p class="note">Later, not now: split newsfeed out of cloud-services; drop duplicate replica paragraphs from operations and CLAUDE to a one-liner + link.</p>
+    </div>
+  </div>
+</body>
+</html>

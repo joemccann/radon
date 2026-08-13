@@ -19,7 +19,7 @@ Flow signal or nothing. No narrative trades, no chart-pattern trades.
 - [Quick start](#quick-start)
 - [External services](#external-services)
 - [Architecture at a glance](#architecture-at-a-glance)
-- [Recent additions](#recent-additions)
+- [Now true](#now-true)
 - [What's where](#whats-where)
 - [Project layout](#project-layout)
 - [Data source priority](#data-source-priority)
@@ -156,24 +156,14 @@ Production `.env` lives on the VPS at `/home/radon/radon-cloud/.env` (`0600`): t
 
 Full architecture and the Phase 0-6 migration history live in [`docs/cloud-services.md`](docs/cloud-services.md). The developer runbook is [`CLAUDE.md`](CLAUDE.md).
 
-## Recent additions
+## Now true
 
-Things that shipped in the last few weeks and are worth knowing about:
+Durable facts. History and mechanism live in the owner file, not here.
 
-- **No-replica DB architecture (2026-05-20).** Every Radon process now goes direct-to-cloud — the code default since DUR-07, with the replica opt-in only via `RADON_DB_USE_REPLICA=1` and `RADON_DB_NO_REPLICA=1` kept as a fleet-wide systemd kill switch. The libsql embedded-replica model (`data/replica.db`) was retired after two same-day incidents: multi-writer WAL contention then single-writer frame conflicts. Reads cost +30–60 ms cloud round-trip, absorbed by SWR caching.
-- **Stuck-awaiting-2FA self-heal (2026-05-20).** `ib_watchdog.is_stuck_awaiting_2fa()` fires a fresh IBKR Mobile push after 3 cycles of `auth_state=awaiting_2fa` with no push lock holder. Eliminates the human-in-the-loop dependency where the system used to sit stuck overnight.
-- **Authoritative footer IB status (2026-05-20).** Sidebar + MobileAppBar derive a single `displayStatus` (`CONNECTED` / `AWAITING 2FA` / `DEGRADED` / `UNREACHABLE` / `OFFLINE` / `RELAY OFFLINE`) from FastAPI `/health` rather than the WS-relay's stale `ib_connected` flag. Footer and banner can no longer contradict each other.
-- **monitor_daemon handlers on `client_id="auto"` (2026-05-20).** `fill_monitor`, `exit_orders`, `journal_sync` rotate across `SUBPROCESS_ID_RANGE` instead of hardcoded 70/71/72 — eliminates the half-open-socket "client id already in use" failure mode.
-- **Closing-trade exception in risk model (2026-05-20).** `OrderRiskLeg.coveringLongContracts` lets the risk panel recognise a SELL of a held LONG as a close (or partial close) instead of flagging it UNBOUNDED. Symmetric for puts. SELL beyond held quantity flags only the excess.
-- **Autonomous Hetzner timers** for `vcg-scan`, `portfolio-sync`, and `cta-sync` replaced the previous browser-driven refresh model. Data stays fresh even when no tab is open.
-- **Service-health watchdog** with four buckets (`intraday`, `continuous`, `daily`, `error`), Pushover routing (P1 only), cooldown, hysteresis, and `python -m scripts.watchdog ack <service>` to silence noise.
-- **Banner categories.** `scheduled` services flip red on stale; `on-demand` services show an amber dormant chip and are excluded from alerting.
-- **`/usr/local/bin/radon`** operator CLI auto-enumerates every loaded `radon-*` unit, so new timers don't require script edits. It is installed from the canonical [`cloud/`](cloud/) control plane.
-- **Cash flow throttle backoff.** IBKR Flex codes 1001 / 1018 / 1019 trip an exponential circuit breaker (24h to 168h cap) so the script doesn't perpetuate a sliding-window throttle.
-- **CRI history zoom.** The CRI spread chart now carries ~251 trading days of history with a brush-driven zoom UI and preset range chips.
-- **Banner humanization.** `service_health.last_error` JSON is rewritten into operator-friendly copy before render.
-- **`parseScanTime`** normalises naive Python ISO timestamps on the JS side so date-day drift can't surface in the UI.
-- **2FA-aware IB Gateway restart** with exponential backoff, cross-process push lock, and `auth_state` reporting. `POST /ib/reset-backoff` is the operator escape hatch.
+- **Indicators.** Regime tabs at `/regime/{skew,skew2d,straddle,cor,curve}`. Cheap-wing scanner at `/scanner?mode=vol-cone`. Specs: [`docs/indicators/`](docs/indicators/README.md).
+- **CMD+J.** Quotes, priced UW chains, and `evaluate.py` run from the in-app assistant. KB miss is not a dead end.
+- **Stop orders.** Desktop and mobile tickets place `STP` and `STP LMT` through `/api/orders/place`.
+- **Incidents.** Watchdog artifacts under `data/incidents/`. Triage with `/incident <path>`. Cases: [`docs/incident-runbook.md`](docs/incident-runbook.md).
 
 ## What's where
 
@@ -183,6 +173,9 @@ Things that shipped in the last few weeks and are worth knowing about:
 | Authoring toolchain map (agents, session tooling, verification, creative stack) | [`DEVELOPMENT.md`](DEVELOPMENT.md) |
 | Cloud architecture, two-mode deploy, Turso DB | [`docs/cloud-services.md`](docs/cloud-services.md) |
 | Background services, watchdogs, deploy flow, env vars | [`docs/operations.md`](docs/operations.md) |
+| Incident cases and `/incident` playbook | [`docs/incident-runbook.md`](docs/incident-runbook.md) |
+| Regime and scanner indicator specs | [`docs/indicators/README.md`](docs/indicators/README.md) |
+| Equibles market-structure API | [`docs/equibles-api.md`](docs/equibles-api.md) |
 | CLI commands and test runners | [`docs/scripts-reference.md`](docs/scripts-reference.md) |
 | Strategy specs (Dark Pool, LEAP, GARCH, VCG-R, CRI, Risk Reversal) | [`docs/strategies.md`](docs/strategies.md) |
 | VCG-R research notes | [`docs/cross_asset_volatility_credit_gap_spec_(VCG).md`](docs/cross_asset_volatility_credit_gap_spec_(VCG).md) |
@@ -204,11 +197,13 @@ radon/
 │  ├─ clients/           Broker and data-provider adapters
 │  ├─ monitor_daemon/    Background fill/exit/rebalance daemon
 │  ├─ db/                Turso writers + migrations
+│  ├─ knowledge/         radon-kb MCP (journal, evals, incidents)
 │  └─ watchdog/          Service-health alerting
 ├─ web/                  Next.js 16 terminal + FastAPI server scripts
 ├─ site/                 Standalone marketing site (separate Vercel project)
 ├─ cloud/                Production infrastructure, services, and deploy tooling
 ├─ docs/                 Topic-scoped documentation
+│  └─ indicators/        Regime and scanner specs
 ├─ data/                 Runtime artifacts (gitignored except taxonomy + presets)
 ├─ config/               launchd plists and service configuration
 ├─ brand/                Design system and tokens
