@@ -17,9 +17,10 @@ bottom decile of the same window.
 
 ## Signal definition
 
-Per ticker, pick one **fixed monthly expiry** (third Friday) with DTE in
-`[21, 90]` closest to 45 DTE. As of 2026-08-12 that is 2026-09-18 (37 DTE).
-A single rolling weekly is wrong: the cone is an expiry-local distribution.
+Per ticker, scan **every standard monthly expiry** (third Friday only; never
+weeklies or dailies) with DTE in `[21, 180]`. As of 2026-08-12 that is
+Sep 18, Oct 16, Nov 20, Dec 18, Jan 15. Each `(ticker, expiry)` is its own
+cone. NVDA Sep is not NVDA Oct.
 
 For each session `t` with spot `S_t` and that expiry's UW greeks chain:
 

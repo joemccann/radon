@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """VOL CONE — cheap 10% OTM wing IV scanner.
 
-Per ticker, pick one fixed monthly expiry (third Friday) with DTE in [21, 90]
-closest to 45. For each session, interpolate UW greeks to ATM (mean of call
-and put at K/S = 1.00) and the 10% OTM wings (1.10 call, 0.90 put). The cone
-is the expiry-local distribution of those three series.
+Per ticker, scan every standard monthly expiry (third Friday only, never
+weeklies or dailies) with DTE in [21, 180]. For each session, interpolate UW
+greeks to ATM (mean of call and put at K/S = 1.00) and the 10% OTM wings
+(1.10 call, 0.90 put). The cone is expiry-local: NVDA Sep is not NVDA Oct.
 
 Source: Unusual Whales /api/stock/{ticker}/greeks (Bearer UW_TOKEN).
 Spec: docs/indicators/vol-cone.md.
@@ -52,9 +52,9 @@ DEFAULT_UNIVERSE = [
     "AVGO", "QQQ", "SPY", "IWM", "NFLX", "MU", "ARM", "TSM", "ASML", "INTC",
     "QCOM", "AMAT", "LRCX", "KLAC", "TLT", "GLD",
 ]
-_TARGET_DTE = 45
 _MIN_DTE = 21
-_MAX_DTE = 90
+_MAX_DTE = 180
+_MONTHLY_LOOKAHEAD = 8
 _MAX_LOOKBACK = 80
 _UNIVERSE_CAP = 40
 _THROTTLE_S = 0.3
@@ -151,11 +151,15 @@ def third_friday(year: int, month: int) -> date:
     return date(year, month, 1 + first_friday_offset + 14)
 
 
-def select_target_expiry(as_of: date) -> date:
-    """Monthly expiry with DTE in [21, 90] closest to 45 DTE."""
+def select_target_expiries(as_of: date) -> list[date]:
+    """Every third-Friday monthly with DTE in [21, 180], ascending.
+
+    Weeklies and the front monthly inside 21 DTE are excluded. As of
+    2026-08-12 that is Sep 18, Oct 16, Nov 20, Dec 18, Jan 15.
+    """
     candidates: list[date] = []
     year, month = as_of.year, as_of.month
-    for _ in range(6):
+    for _ in range(_MONTHLY_LOOKAHEAD):
         expiry = third_friday(year, month)
         dte = (expiry - as_of).days
         if _MIN_DTE <= dte <= _MAX_DTE:
@@ -165,7 +169,7 @@ def select_target_expiry(as_of: date) -> date:
             month, year = 1, year + 1
     if not candidates:
         raise ValueError(f"no monthly expiry in [{_MIN_DTE}, {_MAX_DTE}] DTE as of {as_of}")
-    return min(candidates, key=lambda expiry: abs((expiry - as_of).days - _TARGET_DTE))
+    return candidates
 
 
 # ── cone stats + regime ───────────────────────────────────────────
@@ -217,6 +221,7 @@ def compute_name(ticker: str, expiry: str, series: list[dict[str, Any]]) -> dict
         "ticker": ticker,
         "spot": latest["spot"],
         "expiry": expiry,
+        "month": expiry_date.strftime("%b").upper(),
         "dte": (expiry_date - last_date).days,
         "atm_iv": latest["atm_iv"],
         "call_10_iv": latest["call_10_iv"],
@@ -543,9 +548,9 @@ def run(
 ) -> dict[str, Any]:
     """Incremental cone: fetch missing sessions for the target monthly, or heartbeat.
 
-    If every ticker already has the last completed session for the chosen
-    expiry, skip UW greeks, rebuild from stored history, and refresh
-    scan_time only (rows_changed=False).
+    If every ticker already has the last completed session for every
+    standard monthly in the window, skip UW greeks, rebuild from stored
+    history, and refresh scan_time only (rows_changed=False).
     """
     now = now or datetime.now(timezone.utc)
     if now.tzinfo is None:
@@ -554,8 +559,7 @@ def run(
         client = _DefaultClient()
 
     last_completed = last_completed_session_date(now)
-    expiry = select_target_expiry(date.fromisoformat(last_completed))
-    expiry_s = expiry.isoformat()
+    expiries = select_target_expiries(date.fromisoformat(last_completed))
     scan_time = _scan_time_iso(now)
 
     if tickers is None:
@@ -569,30 +573,34 @@ def run(
     }
     rows_changed = False
     for ticker in universe:
-        stored = {
-            row["date"]
-            for row in by_key.values()
-            if row["ticker"] == ticker and row["expiry"] == expiry_s
-        }
-        if last_completed in stored:
-            continue
-        for row in _backfill_ticker(client, ticker, expiry, last_completed, stored):
-            by_key[(row["ticker"], row["date"], row["expiry"])] = row
-            rows_changed = True
+        for expiry in expiries:
+            expiry_s = expiry.isoformat()
+            stored = {
+                row["date"]
+                for row in by_key.values()
+                if row["ticker"] == ticker and row["expiry"] == expiry_s
+            }
+            if last_completed in stored:
+                continue
+            for row in _backfill_ticker(client, ticker, expiry, last_completed, stored):
+                by_key[(row["ticker"], row["date"], row["expiry"])] = row
+                rows_changed = True
 
     if not rows_changed:
         print("[vol-cone] no missing sessions; refreshing snapshot only", file=sys.stderr)
 
     names: list[dict[str, Any]] = []
     for ticker in universe:
-        series = [
-            _series_point(row)
-            for row in by_key.values()
-            if row["ticker"] == ticker and row["expiry"] == expiry_s
-        ]
-        series.sort(key=lambda row: row["date"])
-        if series:
-            names.append(compute_name(ticker, expiry_s, series))
+        for expiry in expiries:
+            expiry_s = expiry.isoformat()
+            series = [
+                _series_point(row)
+                for row in by_key.values()
+                if row["ticker"] == ticker and row["expiry"] == expiry_s
+            ]
+            series.sort(key=lambda row: row["date"])
+            if series:
+                names.append(compute_name(ticker, expiry_s, series))
 
     if not any(name.get("series") for name in names):
         raise ValueError("vol-cone produced zero series")

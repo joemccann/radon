@@ -1,5 +1,10 @@
 # Lessons
 
+## 2026-08-13 — Vol cone scans every standard monthly, not one 45-DTE pick
+
+- The NVDA/SMH setup is a named third-Friday monthly (Sep 18), not "whatever expiry is nearest 45 DTE". A single-expiry picker collapses Oct/Nov cones and reads like a rolling tenor.
+- Scan all standard monthlies (third Friday only, never weeklies/dailies) with DTE in `[21, 180]`. Each `(ticker, expiry)` is its own cone and table row.
+
 ## 2026-08-10 — Sortable metric headers must keep labels intact
 
 - A narrow numeric column can wrap `Return %` between the word and symbol while displacing its adjacent help control, even when the column is otherwise wide enough. Sortable label groups need an explicit no-wrap contract, and regression coverage must pin that contract rather than merely asserting that the header text exists.
