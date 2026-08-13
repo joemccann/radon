@@ -10,6 +10,7 @@ from incident_notify import (
     _stamp_applet_identity,
     build_incident_notification,
     build_notify_command,
+    render_diagnosis_html,
     resolve_backend,
     sanitize_banner_text,
     write_incident_card,
@@ -84,6 +85,39 @@ class TestNotificationPayload:
         assert note.body.isascii()
 
 
+class TestDiagnosisHtml:
+    def test_headings_and_paragraphs_are_structured(self):
+        html = render_diagnosis_html("## Root cause\n\nOrphan rows plus a timeout.")
+        assert "<h2>Root cause</h2>" in html
+        assert "<p>Orphan rows plus a timeout.</p>" in html
+        assert "## Root cause" not in html
+
+    def test_lists_tables_and_fences_render(self):
+        html = render_diagnosis_html(
+            "- first item\n- second `token`\n\n"
+            "| Command | Outcome |\n|---|---|\n| curl | ok |\n\n"
+            "```\npytest foo\n```\n"
+        )
+        assert "<ul>" in html and "<li>first item</li>" in html
+        assert "<table>" in html and "<th>Command</th>" in html
+        assert "<td>ok</td>" in html
+        assert "<pre><code>pytest foo</code></pre>" in html
+        assert "```" not in html
+
+    def test_inline_code_and_bold_without_identifier_italics(self):
+        html = render_diagnosis_html(
+            "See `next_attempt_at` and **empty** exception."
+        )
+        assert "<code>next_attempt_at</code>" in html
+        assert "<strong>empty</strong>" in html
+        assert "<em>" not in html
+
+    def test_html_in_diagnosis_stays_escaped(self):
+        html = render_diagnosis_html('<script>alert("x")</script>')
+        assert "<script>" not in html
+        assert "&lt;script&gt;" in html
+
+
 class TestIncidentCard:
     def test_card_renders_title_and_escaped_diagnosis(self, tmp_path: Path):
         path = write_incident_card(
@@ -97,6 +131,21 @@ class TestIncidentCard:
         assert "<script>" not in html
         assert "&lt;script&gt;" in html
         assert "Orphan rows." in html
+
+    def test_card_does_not_dump_markdown_in_a_pre_or_repeat_the_title(
+            self, tmp_path: Path):
+        path = write_incident_card(
+            tmp_path, PAYLOAD,
+            diagnosis_text="## Root cause\n\nOrphan equibles rows.",
+        )
+        html = path.read_text()
+        assert html.count("4 service_health row(s) degraded") == 1
+        assert "<h2>Root cause</h2>" in html
+        assert "<pre>#" not in html
+        assert 'class="chip"' in html
+        assert "<section><h2>Description</h2>" not in html
+        assert "2026-08-12 18:40 UTC" in html
+        assert "18:40:00+00:00" not in html
 
     def test_card_filename_never_echoes_a_hostile_id(self, tmp_path: Path):
         payload = dict(PAYLOAD)
