@@ -188,6 +188,44 @@ class TestBuildJsonPayload:
         payload = build_json_payload([], 15.0, "preset:mag7", ["AAPL"])
         assert payload["universe"] == "preset:mag7"
 
+    def test_indexes_universe_stamp(self):
+        payload = build_json_payload([], 10.0, "preset:indexes", ["NVDA", "AAPL"])
+        assert payload["universe"] == "preset:indexes"
+
+
+class TestResolveScanInputs:
+    def test_indexes_uses_file_preset_and_stamps_universe(self):
+        import leap_scanner_uw as leap
+        from utils.presets import load_preset
+
+        tickers, universe = leap.resolve_scan_inputs(explicit_tickers=[], preset="indexes")
+        assert universe == "preset:indexes"
+        assert "indexes" not in leap.PRESETS
+        assert tickers == load_preset("indexes").tickers
+        assert "NVDA" in tickers
+        assert "AAPL" in tickers
+
+    def test_explicit_tickers_win_over_preset(self):
+        import leap_scanner_uw as leap
+
+        tickers, universe = leap.resolve_scan_inputs(
+            explicit_tickers=["nvda"], preset="indexes"
+        )
+        assert universe == "explicit"
+        assert tickers == ["NVDA"]
+
+    def test_workers_arg_defaults_to_16(self):
+        import inspect
+        import re
+
+        import leap_scanner_uw as leap
+
+        source = inspect.getsource(leap)
+        assert re.search(
+            r'add_argument\(\s*["\']--workers["\'][\s\S]*?default\s*=\s*16',
+            source,
+        )
+
 
 # ── find_strikes_by_delta ───────────────────────────────────────────
 
