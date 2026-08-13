@@ -256,6 +256,7 @@ describe("orders command strip", () => {
       symbol: "AMD",
       limitPrice: 2,
       totalQuantity: 1,
+      orderRef: "combo-test",
       filled: 0,
       remaining: 1,
       contract: {
@@ -274,6 +275,7 @@ describe("orders command strip", () => {
       symbol: "AMD",
       limitPrice: 1,
       totalQuantity: 1,
+      orderRef: "combo-test",
       filled: 0,
       remaining: 1,
       contract: {

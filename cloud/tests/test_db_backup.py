@@ -5,6 +5,8 @@ import io
 import pathlib
 import sqlite3
 
+import pytest
+
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
@@ -36,6 +38,13 @@ class _FakeDb:
 
     def execute(self, sql, params=()):
         return _FakeResult(self._conn.execute(sql, params).fetchall())
+
+
+class _LatePageFailureDb(_FakeDb):
+    def execute(self, sql, params=()):
+        if "rowid >" in sql and "LIMIT 1" in sql:
+            raise RuntimeError("late page failure")
+        return super().execute(sql, params)
 
 
 class TestSqlLiteral:
@@ -193,3 +202,47 @@ class TestDumpRoundTrip:
         text = out.getvalue()
         assert "CREATE TABLE sqlite_sequence" not in text
         assert 'INSERT INTO "sqlite_sequence"' not in text
+
+    def test_production_fts_dump_round_trips_without_shadow_collisions(self):
+        src = sqlite3.connect(":memory:")
+        src.executescript(
+            """
+            CREATE TABLE knowledge (title TEXT, summary TEXT, content TEXT);
+            CREATE VIRTUAL TABLE knowledge_fts USING fts5(title, summary, content);
+            INSERT INTO knowledge VALUES ('A', 'B', 'market structure');
+            INSERT INTO knowledge_fts(rowid, title, summary, content)
+              SELECT rowid, title, summary, content FROM knowledge;
+            """
+        )
+        src.commit()
+        out = io.StringIO()
+        db_backup.dump_database(src, out)
+        text = out.getvalue()
+        assert "CREATE TABLE 'knowledge_fts_data'" not in text
+        assert "CREATE TABLE 'knowledge_fts_idx'" not in text
+
+        restored = sqlite3.connect(":memory:")
+        restored.executescript(text)
+        assert restored.execute(
+            "SELECT COUNT(*) FROM knowledge_fts WHERE knowledge_fts MATCH 'market'"
+        ).fetchone()[0] == 1
+
+    def test_late_page_failure_aborts_without_replaying_rows(self):
+        src = _make_source_db()
+        out = io.StringIO()
+        with pytest.raises(RuntimeError, match="late page failure"):
+            db_backup.dump_database(_LatePageFailureDb(src), out, batch_size=1)
+        assert out.getvalue().count('INSERT INTO "journal"') == 1
+
+    def test_dump_uses_source_transaction(self):
+        src = _make_source_db()
+        statements: list[str] = []
+
+        class TrackingDb(_FakeDb):
+            def execute(self, sql, params=()):
+                statements.append(sql)
+                return super().execute(sql, params)
+
+        db_backup.dump_database(TrackingDb(src), io.StringIO(), batch_size=1)
+        assert statements[0] == "BEGIN TRANSACTION"
+        assert statements[-1] == "ROLLBACK"

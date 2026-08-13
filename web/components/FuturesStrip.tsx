@@ -5,6 +5,7 @@ export type FuturesQuote = {
   last: number | null;
   /** Prior-session settlement (IB tick 9). % change is measured from this. */
   close: number | null;
+  delayed?: boolean;
 };
 
 /**
@@ -35,6 +36,9 @@ export default function FuturesStrip({
         return (
           <div className="futures-cell" key={q.label} data-testid={`futures-${q.label}`}>
             <span className="futures-label">{q.label}</span>
+            {(q.delayed || delayed) ? (
+              <span className="futures-delayed" title="Index futures delayed ~15 min">Delayed</span>
+            ) : null}
             <span className="futures-last">{hasLast ? (q.last as number).toFixed(2) : "---"}</span>
             {pct != null ? (
               <span
@@ -48,11 +52,6 @@ export default function FuturesStrip({
           </div>
         );
       })}
-      {delayed ? (
-        <span className="futures-delayed" title="Index futures delayed ~15 min">
-          Delayed
-        </span>
-      ) : null}
     </div>
   );
 }

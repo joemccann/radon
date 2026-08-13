@@ -14,9 +14,12 @@ Usage:
 """
 
 import argparse
+import fcntl
 import json
+import math
 import os
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Tuple
@@ -80,6 +83,18 @@ def connect_ib(host: str, port: int, client_id="auto") -> IBClient:
         print("  3. Check 'Enable ActiveX and Socket Clients'")
         print("  4. Verify port matches (TWS Paper=7497, TWS Live=7496, Gateway=4001)")
         sys.exit(1)
+
+
+def _select_managed_account(accounts: list[str], requested: str = "") -> str:
+    """Select one IB account so positions, margin, basis, and PnL share scope."""
+    managed = list(dict.fromkeys(account for account in accounts if account))
+    if requested:
+        if requested not in managed:
+            raise ValueError(f"requested account {requested!r} is not managed by this session")
+        return requested
+    if len(managed) > 1:
+        raise ValueError("multiple managed accounts are visible; pass --account explicitly")
+    return managed[0] if managed else ""
 
 
 ACCOUNT_TAGS = [
@@ -624,11 +639,13 @@ def _normalize_market_price(raw_price) -> Optional[float]:
     """Return a valid market price or None when IB provides unusable values."""
     if raw_price is None:
         return None
-    if util.isNan(raw_price):
+    try:
+        price = float(raw_price)
+    except (TypeError, ValueError):
         return None
-    if raw_price < 0:
+    if not math.isfinite(price) or price <= 0 or price >= 1e307:
         return None
-    return float(raw_price)
+    return price
 
 
 def _resolve_market_price(market_price: Optional[float], bid: Optional[float], ask: Optional[float], close: Optional[float] = None) -> Tuple[Optional[float], bool]:
@@ -1288,7 +1305,21 @@ def convert_to_portfolio_format(account: dict, collapsed_positions: list, pnl_da
         "account_summary": build_account_summary(account, pnl_data or {}),
     }
 
+    attach_correlation_risk_report(result)
     return result
+
+
+def attach_correlation_risk_report(portfolio: dict) -> dict:
+    """Attach the existing Gate-3 report to the canonical live snapshot."""
+    try:
+        import portfolio_risk
+
+        series = portfolio_risk.load_price_series_for_portfolio(portfolio)
+        portfolio["risk_budget"] = portfolio_risk.build_risk_budget_report(portfolio, series)
+    except Exception as exc:  # noqa: BLE001 - measurement failure stays explicit in payload
+        portfolio["risk_budget"] = None
+        print(f"  correlation risk measurement unavailable: {type(exc).__name__}", file=sys.stderr)
+    return portfolio
 
 
 NAV_HISTORY_PATH = DATA_DIR / "nav_history.jsonl"
@@ -1304,29 +1335,47 @@ def _append_nav_snapshot(net_liq: float, daily_pnl=None) -> None:
     if daily_pnl is not None:
         entry["daily_pnl"] = round(float(daily_pnl), 2)
 
-    # Read existing, update-or-append for today
-    existing = []
-    if NAV_HISTORY_PATH.exists():
-        for line in NAV_HISTORY_PATH.read_text().strip().splitlines():
+    NAV_HISTORY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = NAV_HISTORY_PATH.with_suffix(NAV_HISTORY_PATH.suffix + ".lock")
+    with lock_path.open("a", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        existing = []
+        if NAV_HISTORY_PATH.exists():
+            for line in NAV_HISTORY_PATH.read_text().strip().splitlines():
+                try:
+                    existing.append(json.loads(line))
+                except (json.JSONDecodeError, ValueError):
+                    continue
+
+        found = False
+        for e in existing:
+            if e.get("date") == today:
+                e["nav"] = entry["nav"]
+                if "daily_pnl" in entry:
+                    e["daily_pnl"] = entry["daily_pnl"]
+                found = True
+                break
+        if not found:
+            existing.append(entry)
+
+        fd, temp_name = tempfile.mkstemp(
+            dir=NAV_HISTORY_PATH.parent,
+            prefix=f".{NAV_HISTORY_PATH.name}.",
+        )
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as output:
+                for e in sorted(existing, key=lambda x: x.get("date", "")):
+                    output.write(json.dumps(e) + "\n")
+                output.flush()
+                os.fsync(output.fileno())
+            os.replace(temp_name, NAV_HISTORY_PATH)
+        finally:
             try:
-                existing.append(json.loads(line))
-            except (json.JSONDecodeError, ValueError):
-                continue
-
-    found = False
-    for e in existing:
-        if e.get("date") == today:
-            e["nav"] = entry["nav"]
-            if "daily_pnl" in entry:
-                e["daily_pnl"] = entry["daily_pnl"]
-            found = True
-            break
-    if not found:
-        existing.append(entry)
-
-    with open(NAV_HISTORY_PATH, "w") as f:
-        for e in sorted(existing, key=lambda x: x.get("date", "")):
-            f.write(json.dumps(e) + "\n")
+                os.unlink(temp_name)
+            except FileNotFoundError:
+                pass
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
     print(f"✓ NAV snapshot: {today} → ${net_liq:,.2f}")
 
 
@@ -1423,6 +1472,7 @@ def main():
     parser.add_argument("--port", type=int, default=DEFAULT_PORT, 
                         help="TWS/Gateway port (7497=paper, 7496=live, 4001=gateway)")
     parser.add_argument("--client-id", type=int, default=None, help="Client ID (omit for auto-allocation)")
+    parser.add_argument("--account", default="", help="Explicit managed IB account ID")
     parser.add_argument("--sync", action="store_true", help="Sync to Turso portfolio_snapshots")
     parser.add_argument("--json-output", action="store_true", help="Print final portfolio JSON to stdout")
     parser.add_argument(
@@ -1447,7 +1497,10 @@ def main():
         # ── Phase 1: Account summary (fast, no sleep needed) ──
         print("Fetching account summary...")
         accounts = client.ib.managedAccounts()
-        ib_account = accounts[0] if accounts else ""
+        try:
+            ib_account = _select_managed_account(accounts, args.account)
+        except ValueError as exc:
+            parser.error(str(exc))
         margin_observed_from = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
         account = get_account_summary(client, ib_account)
 
@@ -1463,7 +1516,11 @@ def main():
 
         # Fetch positions while PnL streams
         journal_basis_lookup = build_journal_basis_lookup(client)
-        positions = fetch_positions(client, journal_basis_lookup=journal_basis_lookup)
+        positions = [
+            position
+            for position in fetch_positions(client, journal_basis_lookup=journal_basis_lookup)
+            if not position.get("account_id") or position.get("account_id") == ib_account
+        ]
         margin_observed_through = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
         if not args.no_prices and positions:

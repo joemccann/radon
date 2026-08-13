@@ -32,6 +32,24 @@ function latestPositive(values: unknown): number | null {
   return null;
 }
 
+function firstPositive(values: unknown): number | null {
+  if (!Array.isArray(values)) return null;
+  for (const value of values) {
+    const n = finitePositive(value);
+    if (n != null) return n;
+  }
+  return null;
+}
+
+function aggregatePositive(values: unknown, mode: "max" | "min" | "sum"): number | null {
+  if (!Array.isArray(values)) return null;
+  const valid = values.map(finitePositive).filter((value): value is number => value != null);
+  if (valid.length === 0) return null;
+  if (mode === "max") return Math.max(...valid);
+  if (mode === "min") return Math.min(...valid);
+  return valid.reduce((sum, value) => sum + value, 0);
+}
+
 function latestTimestamp(timestamps: unknown): string {
   if (!Array.isArray(timestamps)) return new Date().toISOString();
   for (let i = timestamps.length - 1; i >= 0; i--) {
@@ -68,10 +86,10 @@ export function yahooResultToPrice(symbol: string, payload: YahooChartPayload): 
     ask: null,
     bidSize: null,
     askSize: null,
-    volume: finitePositive(meta.regularMarketVolume) ?? latestPositive(quote.volume),
-    high: finitePositive(meta.regularMarketDayHigh) ?? latestPositive(quote.high),
-    low: finitePositive(meta.regularMarketDayLow) ?? latestPositive(quote.low),
-    open: finitePositive(meta.regularMarketOpen) ?? latestPositive(quote.open),
+    volume: finitePositive(meta.regularMarketVolume) ?? aggregatePositive(quote.volume, "sum"),
+    high: finitePositive(meta.regularMarketDayHigh) ?? aggregatePositive(quote.high, "max"),
+    low: finitePositive(meta.regularMarketDayLow) ?? aggregatePositive(quote.low, "min"),
+    open: finitePositive(meta.regularMarketOpen) ?? firstPositive(quote.open),
     close: previousClose,
     week52High: finitePositive(meta.fiftyTwoWeekHigh),
     week52Low: finitePositive(meta.fiftyTwoWeekLow),

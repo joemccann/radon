@@ -9,6 +9,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const execute = vi.fn();
 const resetDb = vi.fn();
 
+vi.mock("@clerk/nextjs/server", () => ({
+  auth: vi.fn(async () => ({ userId: "user_test" })),
+}));
+
 vi.mock("@/lib/db", () => ({
   getDb: () => ({ execute }),
   resetDb,
@@ -18,6 +22,7 @@ beforeEach(() => {
   vi.resetModules();
   execute.mockReset();
   resetDb.mockReset();
+  process.env.ALLOWED_USER_IDS = "user_test";
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
@@ -33,6 +38,8 @@ describe("GET /api/admin/reliability", () => {
 
     const { GET } = await import("../app/api/admin/reliability/route");
     const responsePromise = GET();
+    // Handler-local auth resolves before the bounded DB timer is scheduled.
+    await vi.advanceTimersByTimeAsync(0);
     await vi.advanceTimersByTimeAsync(3_000);
 
     const response = await responsePromise;
@@ -41,7 +48,7 @@ describe("GET /api/admin/reliability", () => {
       events: [],
       baseline: {},
       missing: true,
-      error: "admin-reliability-events read timed out after 3000ms",
+      error: "Reliability history unavailable",
     });
     expect(resetDb).toHaveBeenCalledTimes(1);
   });

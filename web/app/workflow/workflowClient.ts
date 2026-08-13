@@ -26,6 +26,34 @@ export type SavedWorkflow = {
   last_run_ok?: number | null;
 };
 
+export type WorkflowPaletteEntry = {
+  type: string;
+  label: string;
+  params: Record<string, unknown>;
+};
+
+/** Order execution stays unavailable until the composer owns a complete,
+ * risk-reviewed contract editor. A structure-only live-order node is unsafe. */
+export const WORKFLOW_PALETTE: WorkflowPaletteEntry[] = [
+  { type: "data-source", label: "Scanner", params: { source: "scanner" } },
+  { type: "filter", label: "Filter: score >= 60", params: { expression: "score >= 60" } },
+  { type: "gate", label: "Gate: Convexity", params: { gate: "convexity", max_gain: "max_gain", max_loss: "max_loss" } },
+  { type: "gate", label: "Gate: Kelly", params: { gate: "kelly", prob_win: "prob_win", odds: "odds" } },
+  { type: "notify", label: "Notify", params: { channel: "service_health" } },
+];
+
+export function allocateWorkflowNodeId(
+  existingIds: Iterable<string>,
+  uuid: () => string = () => crypto.randomUUID(),
+): string {
+  const existing = new Set(existingIds);
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    const candidate = `n-${uuid()}`;
+    if (!existing.has(candidate)) return candidate;
+  }
+  throw new Error("Unable to allocate a unique workflow node ID");
+}
+
 export type RunStep = {
   node_id: string;
   node_type: string;
@@ -85,6 +113,17 @@ export async function runWorkflow(
     throw new Error(`run failed: HTTP ${res.status} ${detail}`);
   }
   return (await res.json()) as RunReport;
+}
+
+export async function runWorkflowAfterConfirmation(
+  graph: WorkflowGraph,
+  confirm: (message: string) => boolean,
+  runner: typeof runWorkflow = runWorkflow,
+): Promise<RunReport | null> {
+  if (graphRequiresConfirmation(graph) && !confirm(
+    "This pipeline contains an order-emitting node. Confirm OrderRiskGate to allow it to fire?",
+  )) return null;
+  return runner(graph, graphRequiresConfirmation(graph));
 }
 
 // A graph that has an order node requires the operator to confirm before the

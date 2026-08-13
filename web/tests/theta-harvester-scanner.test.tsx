@@ -29,6 +29,10 @@ vi.mock("@/lib/useTickerNav", () => ({
   }),
 }));
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 afterEach(() => {
   cleanup();
   pushMock.mockReset();

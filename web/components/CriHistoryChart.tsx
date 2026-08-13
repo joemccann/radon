@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useEffect, useState } from "react";
+import { useRef, useEffect, useMemo, useState } from "react";
 import * as d3 from "d3";
 import ChartPanel from "./charts/ChartPanel";
 
@@ -112,7 +112,7 @@ export default function CriHistoryChart<T extends { date: string }>({
   }, []);
 
   // Merge live values into the last data point
-  const chartData: T[] = (() => {
+  const chartData = useMemo<T[]>(() => {
     if (!history || history.length === 0) return [];
     if (!liveValues || Object.keys(liveValues).length === 0) return history;
     const result = [...history];
@@ -124,7 +124,7 @@ export default function CriHistoryChart<T extends { date: string }>({
     }
     result[result.length - 1] = last;
     return result;
-  })();
+  }, [history, liveValues]);
 
   const [leftSeries, rightSeries] = series;
 
@@ -363,7 +363,7 @@ export default function CriHistoryChart<T extends { date: string }>({
       .on("touchend touchcancel", function () {
         setTooltip({ visible: false, x: 0, y: 0, d: null });
       });
-  }, [chartData, width, series, liveValues, leftSeries, rightSeries, xTickFormat]);
+  }, [chartData, width, series, leftSeries, rightSeries, xTickFormat]);
 
   const showEmpty = !chartData || chartData.length < 2;
   const tooltipSideStyle =

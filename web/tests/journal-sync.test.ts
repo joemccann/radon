@@ -94,15 +94,10 @@ describe("syncNewTrades", () => {
   it("imports option trades with 100x multiplier", () => {
     const result = syncNewTrades(MOCK_EXISTING, [OPTION_TRADE]);
 
-    expect(result.imported).toBe(1);
-    const t = result.trades[0];
-    expect(t.ticker).toBe("BKD");
-    expect(t.structure).toContain("Option");
-    expect(t.structure).toContain("OPT");
-    // OPT with qty=0 (closed): |0| * 0.725 * 100 + 124.92 = 124.92
-    expect(t.total_cost).toBeCloseTo(124.92, 2);
-    expect(t.realized_pnl).toBe(2296.80);
-    expect(t.contracts).toBe(0);
+    expect(result.imported).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(result.needs_rehydration).toBe(true);
+    expect(result.trades).toEqual([]);
   });
 
   it("imports BAG/spread trades with 100x multiplier", () => {
@@ -128,8 +123,8 @@ describe("syncNewTrades", () => {
     expect(t.structure).toContain("Closed");
     expect(t.realized_pnl).toBe(-6835.27);
     expect(t.shares).toBe(2000); // absolute value
-    // STK: |-2000| * 33.77 * 1 + 10.39
-    expect(t.total_cost).toBeCloseTo(2000 * 33.77 + 10.39, 2);
+    // A stock sale records net proceeds: gross less commission.
+    expect(t.total_cost).toBeCloseTo(2000 * 33.77 - 10.39, 2);
   });
 
   it("imports multiple trades with sequential IDs", () => {
@@ -214,10 +209,8 @@ describe("syncNewTrades", () => {
 
   it("falls back to generic structure without contract details", () => {
     const result = syncNewTrades(MOCK_EXISTING, [OPTION_TRADE]);
-    expect(result.imported).toBe(1);
-    // OPTION_TRADE has no strike/expiry/right
-    expect(result.trades[0].structure).toContain("Option");
-    expect(result.trades[0].structure).toContain("OPT");
+    expect(result.imported).toBe(0);
+    expect(result.needs_rehydration).toBe(true);
   });
 
   it("mixed new and duplicate trades", () => {
@@ -270,6 +263,23 @@ describe("syncNewTrades", () => {
       const r2 = syncNewTrades(r1.trades, [partial]);
       expect(r2.imported).toBe(0);
       expect(r2.skipped).toBe(1);
+    });
+
+    it("normalizes correction roots and supersedes the stable row identity", () => {
+      const first = syncNewTrades([], [{ ...BUY_STOCK, ib_exec_id: "ORDER.01" }]);
+      const corrected = syncNewTrades(first.trades, [{ ...BUY_STOCK, avg_price: 56.5, ib_exec_id: "ORDER.02" }]);
+      expect(corrected.imported).toBe(1);
+      expect(corrected.trades[0].id).toBe(first.trades[0].id);
+      expect(corrected.trades[0].ib_exec_id).toBe("ORDER.01");
+      expect(corrected.trades[0].ib_exec_id_corrected).toBe("ORDER.02");
+    });
+
+    it("refuses partial composite overlap and requires authoritative rehydration", () => {
+      const first = syncNewTrades([], [{ ...BUY_STOCK, ib_exec_id: "FILL-A" }]);
+      const partial = syncNewTrades(first.trades, [{ ...BUY_STOCK, ib_exec_id: "FILL-A+FILL-B" }]);
+      expect(partial.imported).toBe(0);
+      expect(partial.skipped).toBe(1);
+      expect(partial.needs_rehydration).toBe(true);
     });
 
     it("falls back to legacy fingerprint when neither side has exec_id", () => {

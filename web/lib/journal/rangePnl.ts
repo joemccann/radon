@@ -73,7 +73,9 @@ export function journalCloseDate(trade: TradeEntry): string | null {
 }
 
 export function isClosedTrade(trade: TradeEntry): boolean {
-  if (typeof trade.realized_pnl === "number" && Number.isFinite(trade.realized_pnl)) {
+  if (typeof trade.realized_pnl === "number"
+      && Number.isFinite(trade.realized_pnl)
+      && trade.realized_pnl !== 0) {
     return true;
   }
   const action = (trade.action ?? "").toUpperCase();

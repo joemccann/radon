@@ -13,6 +13,7 @@ type OptionLegCandidate = {
   strike: number;
   expiry: string;
   index: number;
+  correlation: string | null;
 };
 
 export type OpenOrderSingleRow = {
@@ -339,7 +340,19 @@ function makeComboLeg(order: OpenOrder, index: number): OptionLegCandidate | nul
     strike: order.contract.strike,
     expiry,
     index,
+    correlation: explicitComboCorrelation(order),
   };
+}
+
+function explicitComboCorrelation(order: OpenOrder): string | null {
+  const orderRef = order.orderRef?.trim();
+  if (orderRef) return `ref:${orderRef}`;
+  const ocaGroup = order.ocaGroup?.trim();
+  if (ocaGroup) return `oca:${ocaGroup}`;
+  if (order.parentId != null && Number.isInteger(order.parentId) && order.parentId > 0) {
+    return `parent:${order.parentId}`;
+  }
+  return null;
 }
 
 function buildComboGroupKey(candidates: OptionLegCandidate[]): string {
@@ -347,11 +360,14 @@ function buildComboGroupKey(candidates: OptionLegCandidate[]): string {
   const qty = Math.abs(first.order.totalQuantity);
   const symbol = first.order.contract.symbol.toUpperCase();
   const firstOrder = first.order;
-  return `${symbol}|${first.expiry}|${firstOrder.orderType}|${firstOrder.tif}|${qty}`;
+  const correlation = first.correlation ?? `uncorrelated:${first.index}`;
+  return `${symbol}|${first.expiry}|${firstOrder.orderType}|${firstOrder.tif}|${qty}|${correlation}`;
 }
 
 function isLikelyCombo(candidates: OptionLegCandidate[]): boolean {
   if (candidates.length < 2) return false;
+  const correlation = candidates[0].correlation;
+  if (!correlation || candidates.some((candidate) => candidate.correlation !== correlation)) return false;
 
   const rights = new Set(candidates.map((leg) => leg.right));
   const actions = new Set(candidates.map((leg) => leg.action));

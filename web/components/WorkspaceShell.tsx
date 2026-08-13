@@ -17,7 +17,7 @@ import { hasUsableIndexPrice, mergeIndexFallbackPrices, useIndexQuoteFallback } 
 import { useFuturesQuoteFallback } from "@/lib/useFuturesQuoteFallback";
 import { computeRealizedPnlFromFills } from "@/lib/realized-pnl";
 import { usePreviousClose } from "@/lib/usePreviousClose";
-import { useGlobexOpen, HEADER_FUTURES } from "@/lib/futuresSession";
+import { useGlobexOpen, isGlobexQuoteFresh, HEADER_FUTURES } from "@/lib/futuresSession";
 import FuturesStrip, { type FuturesQuote } from "@/components/FuturesStrip";
 import { type OptionContract, type IndexContract, optionKey, portfolioLegToContract, uniqueOptionContracts } from "@/lib/pricesProtocol";
 import { isIndexSymbol, indexExchangeFor } from "@/lib/indexSymbols";
@@ -309,15 +309,15 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
     if (!globexOpen) return [];
     return HEADER_FUTURES.map((f) => {
       const p = prices[f.symbol];
-      return { label: f.label, last: p?.last ?? null, close: p?.close ?? null };
+      const fresh = isGlobexQuoteFresh(p?.timestamp);
+      return {
+        label: f.label,
+        last: fresh ? p?.last ?? null : null,
+        close: p?.close ?? null,
+        delayed: missingFuturesFallbackSymbols.includes(f.symbol),
+      };
     });
-  }, [globexOpen, prices]);
-
-  // The strip is "delayed" when every root is filled by the Yahoo fallback
-  // (always on the demo; relay-down in prod). A live relay quote => not delayed.
-  const futuresDelayed =
-    futuresQuotes.length > 0 &&
-    missingFuturesFallbackSymbols.length === HEADER_FUTURES.length;
+  }, [globexOpen, missingFuturesFallbackSymbols, prices]);
 
   // Realized P&L derived from today's session fills (executed_orders), not IB account summary.
   // IB's reqPnL().realizedPnL can include non-trade events and diverges from fill-level data.
@@ -511,7 +511,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
           onToggleFullscreen={toggleFullscreen}
           onToggleTheme={toggleTheme}
           theme={resolvedTheme}
-          futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} delayed={futuresDelayed} /> : null}
+          futuresStrip={futuresQuotes.length > 0 ? <FuturesStrip quotes={futuresQuotes} /> : null}
           onSearchUnavailable={handleSearchUnavailable}
           lastSync={lastSync}
           onOpenPalette={() => setPaletteOpen(true)}
@@ -573,7 +573,7 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       </main>
 
       <ToastContainer toasts={toasts} exitingIds={exitingIds} onDismiss={dismissToast} />
-      <ChatLauncher activeSection={activeSection} />
+      <ChatLauncher activeSection={activeSection} portfolio={portfolio} />
       <DemoWelcomeModal />
       <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
     </div>

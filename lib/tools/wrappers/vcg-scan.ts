@@ -1,10 +1,17 @@
 import { runScript, type ScriptResult } from "../runner";
+import { Type, type Static } from "@sinclair/typebox";
 
-export interface VCGInput {
-  proxy?: string;
-  backtest?: boolean;
-  days?: number;
-}
+export const VCGInputSchema = Type.Object({
+  proxy: Type.Optional(Type.Union([
+    Type.Literal("HYG"),
+    Type.Literal("JNK"),
+    Type.Literal("LQD"),
+  ])),
+  backtest: Type.Optional(Type.Boolean()),
+  days: Type.Optional(Type.Integer({ minimum: 1, maximum: 2_520 })),
+});
+
+export type VCGInput = Static<typeof VCGInputSchema>;
 
 export interface VCGSignal {
   vcg: number | null;
@@ -59,12 +66,19 @@ export async function vcgScan(
 ): Promise<ScriptResult<VCGOutput>> {
   const args: string[] = ["--json"];
 
+  if (input.proxy != null && !(["HYG", "JNK", "LQD"] as const).includes(input.proxy)) {
+    throw new RangeError("proxy must be HYG, JNK, or LQD");
+  }
+  if (input.days != null && (!Number.isInteger(input.days) || input.days < 1 || input.days > 2_520)) {
+    throw new RangeError("days must be an integer between 1 and 2520");
+  }
+
   if (input.proxy) {
     args.push("--proxy", input.proxy);
   }
   if (input.backtest) {
     args.push("--backtest");
-    if (input.days) {
+    if (input.days != null) {
       args.push("--days", String(input.days));
     }
   }

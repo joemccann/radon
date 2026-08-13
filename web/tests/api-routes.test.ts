@@ -494,40 +494,40 @@ describe("POST /api/previous-close", () => {
     });
   });
 
-  it("returns { closes: {} } for empty symbols array", async () => {
+  it("rejects an empty symbols array", async () => {
     const req = makeRequest("http://localhost/api/previous-close", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbols: [] }),
     });
     const res = await POST(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body).toEqual({ closes: {} });
+    expect(body).toEqual({ error: "symbols must contain 1 to 30 valid unique tickers" });
   });
 
-  it("returns { closes: {} } when symbols is not an array", async () => {
+  it("rejects a non-array symbols value", async () => {
     const req = makeRequest("http://localhost/api/previous-close", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ symbols: "AAPL" }),
     });
     const res = await POST(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body).toEqual({ closes: {} });
+    expect(body).toEqual({ error: "symbols must contain 1 to 30 valid unique tickers" });
   });
 
-  it("returns { closes: {} } when symbols field is missing", async () => {
+  it("rejects a missing symbols field", async () => {
     const req = makeRequest("http://localhost/api/previous-close", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({}),
     });
     const res = await POST(req);
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body).toEqual({ closes: {} });
+    expect(body).toEqual({ error: "symbols must contain 1 to 30 valid unique tickers" });
   });
 });
 

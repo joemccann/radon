@@ -69,8 +69,12 @@ def _load_executions(db: Any) -> list[dict[str, Any]]:
             revision = 0
         sort_key = (revision, exec_id)
         identity = (account_id, correction_root)
+        canonical_payload = dict(payload)
+        canonical_payload["source_exec_id"] = exec_id
+        canonical_payload["exec_id"] = correction_root
+        canonical_payload["revision"] = revision
         if identity not in latest or sort_key > latest[identity][0]:
-            latest[identity] = (sort_key, payload)
+            latest[identity] = (sort_key, canonical_payload)
     return [item[1] for item in sorted(latest.values(), key=lambda item: item[0][1])]
 
 
@@ -215,74 +219,116 @@ def build_reconciliation_plan(db: Any, *, max_window_seconds: int = 120) -> dict
 
 
 def apply_reconciliation_plan(db: Any, plan: dict[str, Any]) -> dict[str, int]:
-    """Append a deterministic plan; replaying the same plan is a no-op."""
+    """Atomically project the canonical execution revisions into the ledger."""
     stamp = _now_iso()
-    for instance in plan["instances"]:
-        opening_event = next(
-            event for event in plan["events"]
-            if event["instance_id"] == instance["instance_id"] and event["kind"] == "OPEN"
-        )
-        db.execute(
-            """INSERT OR IGNORE INTO position_instances
-               (instance_id, account_id, strategy_key, episode, opened_at,
-                opening_exec_id, created_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (
-                instance["instance_id"], instance["account_id"], instance["strategy_key"],
-                instance["episode"], instance["opened_at"],
-                opening_event["executions"][0]["exec_id"], stamp,
-            ),
-        )
-    for event in plan["events"]:
-        event_payload = {
-            "event_id": event["event_id"],
-            "before_legs": event["before_legs"],
-            "after_legs": event["after_legs"],
-            "exec_ids": [item["exec_id"] for item in event["executions"]],
-        }
-        db.execute(
-            """INSERT OR IGNORE INTO position_instance_events
-               (event_id, instance_id, kind, transaction_key, effective_at,
-                before_legs, after_legs, exec_ids, source_digest, recorded_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                event["event_id"], event["instance_id"], event["kind"],
-                event["transaction_key"], event["effective_at"],
-                _canonical(event["before_legs"]), _canonical(event["after_legs"]),
-                _canonical([item["exec_id"] for item in event["executions"]]),
-                _sha(event_payload), stamp,
-            ),
-        )
-        for item in event["executions"]:
+    try:
+        db.execute("BEGIN")
+        for instance in plan["instances"]:
+            opening_event = next(
+                event for event in plan["events"]
+                if event["instance_id"] == instance["instance_id"] and event["kind"] == "OPEN"
+            )
             db.execute(
-                """INSERT OR IGNORE INTO position_event_executions
-                   (event_id, account_id, exec_id, revision, con_id, perm_id,
-                    order_ref, signed_quantity, price, multiplier, currency, filled_at)
-                   VALUES (?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT OR IGNORE INTO position_instances
+                   (instance_id, account_id, strategy_key, episode, opened_at,
+                    opening_exec_id, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (
-                    event["event_id"], item["account_id"], item["exec_id"],
-                    item["con_id"], item["perm_id"], item["order_ref"] or None,
-                    item["signed_quantity"], item["price"], item["multiplier"],
-                    item["currency"], item["filled_at"],
+                    instance["instance_id"], instance["account_id"], instance["strategy_key"],
+                    instance["episode"], instance["opened_at"],
+                    opening_event["executions"][0]["exec_id"], stamp,
                 ),
             )
-    for observation in plan["observations"]:
-        db.execute(
-            """INSERT OR IGNORE INTO position_capital_observations
-               (observation_id, instance_id, through_event_id, status, method,
-                quality, amount, delta_amount, before_sample_id, after_sample_id,
-                currency, source, evidence, idempotency_key, recorded_at)
-               VALUES (?, ?, ?, 'VALID', 'OBSERVED_INIT_MARGIN_DELTA',
-                       'observed', ?, ?, ?, ?, ?, 'ib-account-values', ?, ?, ?)""",
-            (
-                observation["observation_id"], observation["instance_id"],
-                observation["through_event_id"], observation["amount"],
-                observation["delta_amount"], observation["before_sample_id"],
-                observation["after_sample_id"], observation["currency"],
-                _canonical(observation["evidence"]), observation["idempotency_key"], stamp,
-            ),
-        )
-    db.commit()
+        for event in plan["events"]:
+            event_payload = {
+                "event_id": event["event_id"],
+                "before_legs": event["before_legs"],
+                "after_legs": event["after_legs"],
+                "executions": [
+                    {
+                        "exec_id": item["exec_id"],
+                        "revision": item.get("revision", 0),
+                        "quantity": item["signed_quantity"],
+                        "price": item["price"],
+                    }
+                    for item in event["executions"]
+                ],
+            }
+            db.execute(
+                """INSERT INTO position_instance_events
+                   (event_id, instance_id, kind, transaction_key, effective_at,
+                    before_legs, after_legs, exec_ids, source_digest, recorded_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(event_id) DO UPDATE SET
+                     effective_at=excluded.effective_at,
+                     before_legs=excluded.before_legs,
+                     after_legs=excluded.after_legs,
+                     exec_ids=excluded.exec_ids,
+                     source_digest=excluded.source_digest,
+                     recorded_at=excluded.recorded_at""",
+                (
+                    event["event_id"], event["instance_id"], event["kind"],
+                    event["transaction_key"], event["effective_at"],
+                    _canonical(event["before_legs"]), _canonical(event["after_legs"]),
+                    _canonical([item["exec_id"] for item in event["executions"]]),
+                    _sha(event_payload), stamp,
+                ),
+            )
+            for item in event["executions"]:
+                revision = int(item.get("revision") or 0)
+                prior = db.execute(
+                    """SELECT revision, price FROM position_event_executions
+                       WHERE event_id=? AND account_id=? AND exec_id=?""",
+                    (event["event_id"], item["account_id"], item["exec_id"]),
+                ).fetchall()
+                if any(
+                    int(_row_value(row, 0, "revision") or 0) != revision
+                    or float(_row_value(row, 1, "price") or 0) != float(item["price"])
+                    for row in prior or []
+                ):
+                    db.execute(
+                        """UPDATE position_capital_observations
+                           SET status='VOID', amount=NULL
+                           WHERE through_event_id=? AND status='VALID'""",
+                        (event["event_id"],),
+                    )
+                db.execute(
+                    """DELETE FROM position_event_executions
+                       WHERE event_id=? AND account_id=? AND exec_id=?""",
+                    (event["event_id"], item["account_id"], item["exec_id"]),
+                )
+                db.execute(
+                    """INSERT INTO position_event_executions
+                       (event_id, account_id, exec_id, revision, con_id, perm_id,
+                        order_ref, signed_quantity, price, multiplier, currency, filled_at)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        event["event_id"], item["account_id"], item["exec_id"], revision,
+                        item["con_id"], item["perm_id"], item["order_ref"] or None,
+                        item["signed_quantity"], item["price"], item["multiplier"],
+                        item["currency"], item["filled_at"],
+                    ),
+                )
+        for observation in plan["observations"]:
+            db.execute(
+                """INSERT OR IGNORE INTO position_capital_observations
+                   (observation_id, instance_id, through_event_id, status, method,
+                    quality, amount, delta_amount, before_sample_id, after_sample_id,
+                    currency, source, evidence, idempotency_key, recorded_at)
+                   VALUES (?, ?, ?, 'VALID', 'OBSERVED_INIT_MARGIN_DELTA',
+                           'observed', ?, ?, ?, ?, ?, 'ib-account-values', ?, ?, ?)""",
+                (
+                    observation["observation_id"], observation["instance_id"],
+                    observation["through_event_id"], observation["amount"],
+                    observation["delta_amount"], observation["before_sample_id"],
+                    observation["after_sample_id"], observation["currency"],
+                    _canonical(observation["evidence"]), observation["idempotency_key"], stamp,
+                ),
+            )
+        db.commit()
+    except BaseException:
+        db.rollback()
+        raise
     return {
         "instances": len(plan["instances"]),
         "events": len(plan["events"]),

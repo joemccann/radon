@@ -9,7 +9,7 @@ Description=Radon dashboard signals refresh - every 15 minutes during ET trading
 # above the 600s FastAPI scan cooldown, so no slot is ever cooldown-suppressed.
 # run_signals_refresh.sh re-checks the trading calendar at runtime and exits 0
 # on US holidays before doing any work.
-OnCalendar=Mon..Fri *-*-* 13..21:00,15,30,45
+OnCalendar=Mon..Fri *-*-* 09..16:00,15,30,45 America/New_York
 Persistent=false
 
 [Install]

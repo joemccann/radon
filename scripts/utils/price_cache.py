@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import time
 from datetime import datetime
@@ -64,6 +65,17 @@ def _cache_path(subdir: Path, key: str) -> Path:
     return subdir / _filename(key)
 
 
+def _quarantine_invalid(path: Path) -> None:
+    """Move an invalid cache entry aside so every read remains a cheap miss."""
+    try:
+        path.replace(path.with_name(f"{path.name}.invalid-{time.time_ns()}"))
+    except OSError:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+
+
 def read_cache(cache_dir: Path, key: str) -> Optional[Dict[str, float]]:
     """Read cached price history. Returns data dict or None on miss/expired/corrupt."""
     subdir = STOCKS_DIR if cache_dir == STOCKS_DIR else OPTIONS_DIR
@@ -72,21 +84,37 @@ def read_cache(cache_dir: Path, key: str) -> Optional[Dict[str, float]]:
         return None
     try:
         data = verified_load(str(path))
-    except (ValueError, json.JSONDecodeError, FileNotFoundError):
-        # Corrupted or partial — treat as miss
+        if not isinstance(data, dict):
+            raise TypeError("cache envelope must be an object")
+        fetched_at = data.get("fetched_at")
+        ttl = data.get("ttl_seconds")
+        prices = data.get("data")
+        if not isinstance(fetched_at, str) or not fetched_at:
+            raise TypeError("cache fetched_at must be a timestamp string")
+        if isinstance(ttl, bool) or not isinstance(ttl, int) or ttl <= 0:
+            raise TypeError("cache ttl_seconds must be a positive integer")
+        if not isinstance(prices, dict) or not all(
+            isinstance(day, str)
+            and day
+            and not isinstance(price, bool)
+            and isinstance(price, (int, float))
+            and math.isfinite(float(price))
+            for day, price in prices.items()
+        ):
+            raise TypeError("cache data must be a finite numeric price mapping")
+    except (TypeError, ValueError, json.JSONDecodeError, FileNotFoundError):
+        _quarantine_invalid(path)
         return None
 
-    fetched_at = data.get("fetched_at", "")
-    ttl = data.get("ttl_seconds", 0)
-    if fetched_at and ttl:
-        try:
-            fetched_ts = datetime.fromisoformat(fetched_at).timestamp()
-            if time.time() - fetched_ts > ttl:
-                return None  # Expired
-        except (ValueError, TypeError):
-            return None
+    try:
+        fetched_ts = datetime.fromisoformat(fetched_at).timestamp()
+        if time.time() - fetched_ts > ttl:
+            return None  # Expired
+    except (ValueError, TypeError):
+        _quarantine_invalid(path)
+        return None
 
-    return data.get("data")
+    return prices
 
 
 def write_cache(cache_dir: Path, key: str, data: Dict[str, float], source: str, ttl: int) -> None:

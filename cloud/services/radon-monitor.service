@@ -22,6 +22,7 @@ StartLimitBurst=5
 Type=notify
 WatchdogSec=900
 User=radon
+UMask=0077
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 Environment=PYTHONPATH=/home/radon/radon/scripts

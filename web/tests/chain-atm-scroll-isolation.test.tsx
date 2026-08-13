@@ -12,6 +12,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace: vi.fn(), push: vi.fn(), prefetch: vi.fn(), back: vi.fn(), forward: vi.fn(), refresh: vi.fn() }),
 }));
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 import TickerDetailContent from "../components/TickerDetailContent";
 import { TickerDetailProvider } from "../lib/TickerDetailContext";
 import { OrderActionsProvider } from "../lib/OrderActionsContext";

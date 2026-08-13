@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 
-test.use({ viewport: { width: 393, height: 852 } });
+test.use({ viewport: { width: 393, height: 852 }, serviceWorkers: "block" });
 
 async function stubChainApis(page: Page) {
   await page.unrouteAll({ behavior: "ignoreErrors" });

@@ -22,6 +22,7 @@ export type JournalEntryRow = {
   action?: string | null;
   contracts?: number | null;
   date?: string | null;
+  ib_exec_id?: string | null;
 };
 
 /**
@@ -76,6 +77,14 @@ function dateOnly(value: string | null | undefined): string | null {
 
 type WalkableFill = { date: string; qty: number };
 
+function executionRoots(value: string | null | undefined): string[] {
+  if (typeof value !== "string" || value.trim() === "") return [];
+  return value
+    .split("+")
+    .map((part) => part.trim().replace(/\.\d+$/, ""))
+    .filter(Boolean);
+}
+
 /**
  * Map of `SYMBOL|EXPIRY|RIGHT|STRIKE` -> the date the current open episode
  * began. Rows missing a key, a date, a signable action, or a positive contract
@@ -83,6 +92,7 @@ type WalkableFill = { date: string; qty: number };
  */
 export function buildContractEntryDates(rows: readonly JournalEntryRow[]): Record<string, string> {
   const byContract = new Map<string, WalkableFill[]>();
+  const seenExecutions = new Map<string, Set<string>>();
 
   for (const row of rows) {
     const key = contractEntryKey(row.ticker, row.expiry, row.right, row.strike);
@@ -91,6 +101,14 @@ export function buildContractEntryDates(rows: readonly JournalEntryRow[]): Recor
     if (!date) continue;
     const qty = signedQuantity(row.action, row.contracts);
     if (qty == null) continue;
+
+    const execRoots = executionRoots(row.ib_exec_id);
+    if (execRoots.length > 0) {
+      const seen = seenExecutions.get(key) ?? new Set<string>();
+      if (execRoots.some((execRoot) => seen.has(execRoot))) continue;
+      execRoots.forEach((execRoot) => seen.add(execRoot));
+      seenExecutions.set(key, seen);
+    }
 
     const fills = byContract.get(key);
     if (fills) fills.push({ date, qty });

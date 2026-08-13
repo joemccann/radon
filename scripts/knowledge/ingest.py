@@ -76,6 +76,25 @@ _EMPTY_UPSERT_COUNTS = {"inserted": 0, "updated": 0, "skipped": 0, "pruned": 0}
 _INGEST_BATCH_DOCS = 200
 
 
+def _document_batches(
+    docs: list[KnowledgeDoc], max_chunks: int
+) -> list[list[KnowledgeDoc]]:
+    """Bound writes without ever splitting one authoritative document."""
+    groups: dict[tuple[str, str], list[KnowledgeDoc]] = {}
+    for doc in docs:
+        groups.setdefault((doc.source, doc.doc_key), []).append(doc)
+    batches: list[list[KnowledgeDoc]] = []
+    current: list[KnowledgeDoc] = []
+    for group in groups.values():
+        if current and len(current) + len(group) > max_chunks:
+            batches.append(current)
+            current = []
+        current.extend(group)
+    if current:
+        batches.append(current)
+    return batches
+
+
 def ingest_source(
     db,
     module,
@@ -102,8 +121,7 @@ def ingest_source(
 
     distilled = distill_failed = embedded = 0
     counts = dict(_EMPTY_UPSERT_COUNTS)
-    for start in range(0, len(to_process), _INGEST_BATCH_DOCS):
-        batch = to_process[start:start + _INGEST_BATCH_DOCS]
+    for batch in _document_batches(to_process, _INGEST_BATCH_DOCS):
         if distill_enabled:
             batch_distilled, batch_failed = _distill_docs(batch)
             distilled += batch_distilled

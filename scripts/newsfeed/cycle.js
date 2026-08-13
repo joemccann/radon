@@ -47,6 +47,8 @@ export async function runScrapeCycle(deps) {
     buildVisionTagger,
     onNewTags,
     requestReauth,
+    loadDeliveryState,
+    saveDeliveryState,
     paths,
   } = deps;
 
@@ -86,6 +88,16 @@ export async function runScrapeCycle(deps) {
     }
   }
 
+  let deliveryState = typeof loadDeliveryState === "function"
+    ? await loadDeliveryState()
+    : { dbDirty: false, mediaDirty: false };
+  const persistDeliveryState = async (updates) => {
+    deliveryState = { ...deliveryState, ...updates };
+    if (typeof saveDeliveryState === "function") {
+      await saveDeliveryState(deliveryState);
+    }
+  };
+
   if (items.length === 0) {
     // Heartbeat even on truly-empty cycles. Without this, a stale `error`
     // row in service_health (e.g. yesterday's WalConflict) latches the
@@ -97,7 +109,34 @@ export async function runScrapeCycle(deps) {
     // wrote a service_health `error` row above. Overwriting it with `ok`
     // here would hide the regression from the banner — let the error
     // stand until the next successful cycle resolves it.
-    if (!paywallDetected) {
+    if (deliveryState.dbDirty || deliveryState.mediaDirty) {
+      const retained = await loadExistingPosts(paths.postsFile);
+      if (deliveryState.dbDirty) {
+        try {
+          await upsertPosts(retained);
+          await persistDeliveryState({ dbDirty: false });
+        } catch (err) {
+          try {
+            await recordServiceHealth("newsfeed-scraper", "error", {
+              startedAt: cycleStartIso,
+              finishedAt: new Date().toISOString(),
+              error: { message: err.message },
+            });
+          } catch {
+            // Delivery state remains the durable failure signal.
+          }
+        }
+      }
+      if (deliveryState.mediaDirty) {
+        try {
+          const pushed = await pushMedia({ local: `${paths.mediaDir}/` });
+          if (pushed?.ok) await persistDeliveryState({ mediaDirty: false });
+        } catch {
+          // The dirty marker remains durable for the next bounded cycle.
+        }
+      }
+    }
+    if (!paywallDetected && !deliveryState.dbDirty && !deliveryState.mediaDirty) {
       try {
         await recordServiceHealth("newsfeed-scraper", "ok", {
           startedAt: cycleStartIso,
@@ -132,15 +171,22 @@ export async function runScrapeCycle(deps) {
   // the dashboard waits behind the tagger.
   if (changed || imagesUpdated) {
     await persistPosts(merged, persistDirs);
+    await persistDeliveryState({
+      dbDirty: true,
+      mediaDirty: deliveryState.mediaDirty || imagesUpdated,
+    });
+  }
 
+  if (changed || imagesUpdated || deliveryState.dbDirty || deliveryState.mediaDirty) {
     // upsertPosts (DB) and pushMedia (rsync over Tailscale) are
     // independent of each other. Run them in parallel so a degraded
     // Tailscale link can't delay the DB write — routes preferring DB
     // would otherwise see stale data for up to 30s while rsync timed out.
-    const upsertTask = (async () => {
+    const upsertTask = deliveryState.dbDirty ? (async () => {
       try {
         await upsertPosts(merged);
         dbWrites += 1;
+        await persistDeliveryState({ dbDirty: false });
         // Preserve the paywall `error` row written upstream — overwriting
         // it with `ok` here would hide a partial-paywall regression from
         // the banner. The next clean cycle resolves it back to ok.
@@ -162,13 +208,14 @@ export async function runScrapeCycle(deps) {
           /* health write best-effort */
         }
       }
-    })();
+    })() : Promise.resolve();
 
-    const pushTask = imagesUpdated
+    const pushTask = deliveryState.mediaDirty
       ? (async () => {
           const pushResult = await pushMedia({ local: `${paths.mediaDir}/` });
           if (pushResult?.ok) {
             pushedToHetzner = pushResult.transferred ?? 0;
+            await persistDeliveryState({ mediaDirty: false });
           } else {
             console.warn(`[newsfeed] media push non-fatal: ${pushResult?.reason ?? "unknown"}`);
           }
@@ -203,9 +250,11 @@ export async function runScrapeCycle(deps) {
   // ran but nothing was updated.
   if (tagsUpdated) {
     await persistPosts(merged, persistDirs);
+    await persistDeliveryState({ dbDirty: true });
     try {
       await upsertPosts(merged);
       dbWrites += 1;
+      await persistDeliveryState({ dbDirty: false });
     } catch (err) {
       console.warn(`[newsfeed] db re-write after tagging non-fatal: ${err.message}`);
     }
@@ -216,7 +265,7 @@ export async function runScrapeCycle(deps) {
   // cycle already wrote an `error` row for a paywall detection — we don't
   // want the heartbeat to mask the regression.
   if (!changed && !imagesUpdated && !tagsUpdated) {
-    if (!paywallDetected) {
+    if (!paywallDetected && !deliveryState.dbDirty && !deliveryState.mediaDirty) {
       try {
         await recordServiceHealth("newsfeed-scraper", "ok", {
           startedAt: cycleStartIso,

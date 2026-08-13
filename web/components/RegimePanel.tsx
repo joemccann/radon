@@ -31,7 +31,7 @@ import type { ChartSeries, CriHistoryEntry } from "./CriHistoryChart";
 import InfoTooltip from "./InfoTooltip";
 import type { PriceData } from "@/lib/pricesProtocol";
 import { chartSeriesColor } from "@/lib/chartSystem";
-import { resolveRegimeStripLiveState } from "@/lib/regimeLiveStrip";
+import { resolveCrashTriggerState, resolveRegimeStripLiveState } from "@/lib/regimeLiveStrip";
 import { useRegime } from "@/lib/useRegime";
 import { SECTION_TOOLTIPS } from "@/lib/sectionTooltips";
 import { computeCri, type CriLevel, type CriResult } from "@/lib/criCalc";
@@ -267,8 +267,6 @@ export default function RegimePanel({
 
   const activeCorrChange = corr5dChange ?? 0;
   const safeActiveCorr = activeCorr ?? 0;
-  const correlationTriggerMet =
-    data?.crash_trigger?.conditions.cor1m_gt_60 ?? safeActiveCorr > 60;
 
   // Merge live + cached into CRI inputs. If any live values are present,
   // recompute CRI from them to avoid waiting for the scan loop.
@@ -300,6 +298,14 @@ export default function RegimePanel({
   const spxBelowMa = ma && spyVal != null
     ? spyVal < ma
     : data?.crash_trigger?.conditions.spx_below_100d_ma ?? false;
+  const realizedVolTriggerMet = data?.crash_trigger?.conditions.realized_vol_gt_25 ?? false;
+  const crashTrigger = resolveCrashTriggerState({
+    liveCorrelation: effectiveHasLiveCor1m,
+    correlation: activeCorr,
+    cachedCorrelationMet: data?.crash_trigger?.conditions.cor1m_gt_60 ?? false,
+    spxBelowMa: Boolean(spxBelowMa),
+    realizedVolMet: realizedVolTriggerMet,
+  });
 
   const tabBar = compact ? (
     <div className="m-regime-tabs" role="tablist" aria-label="Regime tabs">
@@ -774,8 +780,8 @@ export default function RegimePanel({
                 CRASH TRIGGER CONDITIONS
                 <InfoTooltip text={SECTION_TOOLTIPS["CRASH TRIGGER CONDITIONS"]} />
               </div>
-              <div className={`regime-trigger-status ${data?.crash_trigger?.triggered ? "regime-triggered" : ""}`}>
-                {data?.crash_trigger?.triggered ? "TRIGGERED" : "INACTIVE"}
+              <div className={`regime-trigger-status ${crashTrigger.triggered ? "regime-triggered" : ""}`}>
+                {crashTrigger.triggered ? "TRIGGERED" : "INACTIVE"}
               </div>
               <TriggerRow
                 label="SPX < 100d MA"
@@ -785,13 +791,13 @@ export default function RegimePanel({
               />
               <TriggerRow
                 label="Realized Vol > 25%"
-                met={data?.crash_trigger?.conditions.realized_vol_gt_25 ?? false}
+                met={realizedVolTriggerMet}
                 value={data?.realized_vol != null ? `${fmt(data.realized_vol)}%` : "---"}
                 live={false}
               />
               <TriggerRow
                 label="COR1M > 60"
-                met={correlationTriggerMet}
+                met={crashTrigger.correlationMet}
                 value={fmt(activeCorr, 2)}
                 live={effectiveHasLiveCor1m}
               />

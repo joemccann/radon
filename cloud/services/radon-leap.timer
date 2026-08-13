@@ -1,5 +1,5 @@
 [Unit]
-Description=Radon LEAP scan — once per US trading day at 14:00 UTC (~10:00 ET / 09:00 EDT)
+Description=Radon LEAP scan — once per US trading day at 10:00 ET
 
 [Timer]
 # Fires once daily at 14:00 UTC — early enough in the US session that
@@ -7,7 +7,7 @@ Description=Radon LEAP scan — once per US trading day at 14:00 UTC (~10:00 ET 
 # enough that the morning open chop has settled. The run_leap_refresh.sh
 # wrapper re-checks the trading calendar at runtime and exits 0 on US
 # holidays before doing any work.
-OnCalendar=Mon..Fri *-*-* 14:00:00 UTC
+OnCalendar=Mon..Fri *-*-* 10:00:00 America/New_York
 Persistent=true
 RandomizedDelaySec=120
 

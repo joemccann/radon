@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { dbExecute } from "@/lib/dbExecute";
-import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
+import { isAuthorizedProbeRequest } from "@/lib/probeAuth";
 import {
   buildFreshnessPayload,
   type ProbeFreshnessInputs,
@@ -8,9 +9,9 @@ import {
 } from "@/lib/probeFreshness";
 
 // GET /api/probe/freshness (DUR-16) — the synthetic data-plane freshness
-// surface for the Tier-3 off-box prober. AUTH IS THE MIDDLEWARE'S JOB: the
-// bearer gate in web/middleware.ts (RADON_PROBE_FRESHNESS_TOKEN, timing-safe)
-// is the perimeter, exactly as Clerk is for every other API route.
+// surface for the Tier-3 off-box prober. Middleware and this handler both
+// validate the dedicated bearer so rewrites/direct handler invocation cannot
+// turn the route into an unauthenticated database reader.
 //
 // House rules: always 200. Quiet-market applicability remains data, while
 // database collection failures are explicit in database_ok/database_failures.
@@ -73,8 +74,17 @@ async function gatherInputs(): Promise<ProbeFreshnessInputs> {
   };
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const requestId = getRequestId();
+  if (!await isAuthorizedProbeRequest(
+    request.headers.get("authorization"),
+    process.env.RADON_PROBE_FRESHNESS_TOKEN,
+  )) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({ status: 401, code: "UNAUTHORIZED", message: "Unauthorized", requestId }),
+      requestId,
+    );
+  }
   const inputs = await gatherInputs();
   const payload = buildFreshnessPayload(inputs, new Date());
   return setNoStoreResponseHeaders(NextResponse.json(payload), requestId);

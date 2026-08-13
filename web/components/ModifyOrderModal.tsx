@@ -19,9 +19,10 @@ import {
   type OrderLeg as UnifiedOrderLeg,
   type OrderRiskInput,
   type ChainOrderLeg,
+  useOrderRisk,
 } from "@/lib/order";
 
-type EditableComboLeg = {
+export type EditableComboLeg = {
   action: "BUY" | "SELL";
   expiry: string;
   strike: string;
@@ -54,6 +55,12 @@ function normalizeExpiry(expiry?: string | null): string {
     return `${clean.slice(0, 4)}-${clean.slice(4, 6)}-${clean.slice(6, 8)}`;
   }
   return expiry;
+}
+
+function parsePositiveInteger(value: string): number | null {
+  if (!/^[1-9]\d*$/.test(value)) return null;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) ? parsed : null;
 }
 
 function resolveClosingOptionLeg(
@@ -109,12 +116,12 @@ function comboUnderlyingSymbol(order: OpenOrder): string {
   return order.symbol.replace(/\s+spread$/i, "").trim().toUpperCase();
 }
 
-function normalizeComboLegs(legs: EditableComboLeg[]): ModifyComboLeg[] | null {
+export function normalizeComboLegs(legs: EditableComboLeg[]): ModifyComboLeg[] | null {
   const normalized = legs.map((leg) => {
     const strike = Number.parseFloat(leg.strike);
-    const ratio = Number.parseInt(leg.ratio, 10);
+    const ratio = parsePositiveInteger(leg.ratio);
     const expiry = leg.expiry.replace(/-/g, "");
-    if (!Number.isFinite(strike) || strike <= 0 || !Number.isFinite(ratio) || ratio <= 0 || expiry.length !== 8) {
+    if (!Number.isFinite(strike) || strike <= 0 || ratio == null || expiry.length !== 8) {
       return null;
     }
     return {
@@ -129,10 +136,19 @@ function normalizeComboLegs(legs: EditableComboLeg[]): ModifyComboLeg[] | null {
   return normalized.every((leg): leg is ModifyComboLeg => leg != null) ? normalized : null;
 }
 
-function resolveOrderPriceData(
+export function effectiveComboLegAction(
+  structuralAction: "BUY" | "SELL",
+  envelopeAction: "BUY" | "SELL",
+): "BUY" | "SELL" {
+  if (envelopeAction === "BUY") return structuralAction;
+  return structuralAction === "BUY" ? "SELL" : "BUY";
+}
+
+export function resolveOrderPriceData(
   order: OpenOrder,
   prices?: Record<string, PriceData>,
   portfolio?: PortfolioData | null,
+  editedLegs?: EditableComboLeg[],
 ): PriceData | null {
   if (!prices) return null;
   const c = order.contract;
@@ -167,9 +183,12 @@ function resolveOrderPriceData(
     let resolved = false;
 
     // Primary: use combo legs from the order itself (resolved during sync)
-    if (c.comboLegs?.length) {
+    const quoteLegs = editedLegs?.length
+      ? editedLegs.map((leg) => ({ ...leg, symbol: comboUnderlyingSymbol(order), ratio: Number(leg.ratio) }))
+      : c.comboLegs;
+    if (quoteLegs?.length) {
       let allAvailable = true;
-      for (const cl of c.comboLegs) {
+      for (const cl of quoteLegs) {
         if (!cl.symbol || cl.strike == null || !cl.right || !cl.expiry) {
           allAvailable = false;
           break;
@@ -183,22 +202,24 @@ function resolveOrderPriceData(
         const key = optionKey({
           symbol: cl.symbol.toUpperCase(),
           expiry: expiryClean,
-          strike: cl.strike,
+          strike: Number(cl.strike),
           right,
         });
         const lp = prices[key];
         if (!lp || lp.bid == null || lp.ask == null) { allAvailable = false; break; }
         
         // Natural market: BUY leg = pay ask / receive bid, SELL leg = receive bid / pay ask
+        const ratio = Number.isInteger(Number(cl.ratio)) && Number(cl.ratio) > 0 ? Number(cl.ratio) : 0;
+        if (ratio === 0) { allAvailable = false; break; }
         if (cl.action === "BUY") {
-          netAsk += lp.ask;  // To BUY combo: pay ask on BUY legs
-          netBid += lp.bid;  // To SELL combo: receive bid on BUY legs
+          netAsk += lp.ask * ratio;  // To BUY combo: pay ask on BUY legs
+          netBid += lp.bid * ratio;  // To SELL combo: receive bid on BUY legs
         } else {
-          netAsk -= lp.bid;  // To BUY combo: receive bid on SELL legs
-          netBid -= lp.ask;  // To SELL combo: pay ask on SELL legs
+          netAsk -= lp.bid * ratio;  // To BUY combo: receive bid on SELL legs
+          netBid -= lp.ask * ratio;  // To SELL combo: pay ask on SELL legs
         }
         const sign = cl.action === "BUY" ? 1 : -1;
-        netLast += sign * (lp.last ?? (lp.bid + lp.ask) / 2);
+        netLast += sign * ratio * (lp.last ?? (lp.bid + lp.ask) / 2);
       }
       resolved = allAvailable;
     }
@@ -292,8 +313,8 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
   }, [orderPermId]);
 
   const marketPriceData = useMemo(
-    () => (order ? resolveOrderPriceData(order, prices, portfolio) : null),
-    [order, prices, portfolio],
+    () => (order ? resolveOrderPriceData(order, prices, portfolio, editableLegs) : null),
+    [order, prices, portfolio, editableLegs],
   );
 
   const priceData = useMemo(
@@ -319,8 +340,8 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
   const riskInput: OrderRiskInput | null = useMemo(() => {
     if (!order) return null;
     const parsedNewLocal = parseFloat(newPrice);
-    const parsedQtyLocal = Number.parseInt(newQuantity, 10);
-    if (!(Number.isInteger(parsedQtyLocal) && parsedQtyLocal > 0)) return null;
+    const parsedQtyLocal = parsePositiveInteger(newQuantity);
+    if (parsedQtyLocal == null) return null;
     const symbol = order.contract.symbol;
     const action: "BUY" | "SELL" = order.action === "SELL" ? "SELL" : "BUY";
     const isComboLocal = order.contract.secType === "BAG" && editableLegs.length >= 2;
@@ -333,12 +354,12 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
       const chainLegs: ChainOrderLeg[] = [];
       for (const leg of editableLegs) {
         const strikeNum = Number.parseFloat(leg.strike);
-        const ratio = Number.parseInt(leg.ratio, 10);
+        const ratio = parsePositiveInteger(leg.ratio);
         if (!Number.isFinite(strikeNum) || strikeNum <= 0) return null;
-        if (!Number.isInteger(ratio) || ratio <= 0) return null;
+        if (ratio == null) return null;
         if (!leg.expiry) return null;
         chainLegs.push({
-          action: leg.action,
+          action: effectiveComboLegAction(leg.action, action),
           right: leg.right,
           strike: strikeNum,
           expiry: leg.expiry,
@@ -349,14 +370,46 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
       return {
         ticker: symbol,
         chainLegs,
-        netPremium: parsedNewLocal,
+        netPremium: action === "SELL" ? -parsedNewLocal : parsedNewLocal,
         description: `${action} ${parsedQtyLocal}x ${symbol} combo @ ${fmtPrice(parsedNewLocal)}`,
-        totalCost,
+        totalCost: action === "SELL" ? -totalCost : totalCost,
         // FU7: net combo quote for net-of-cost risk on the post-modify shape.
         quote: priceData ? { bid: priceData.bid, ask: priceData.ask } : null,
       };
     }
 
+    if (order.contract.secType === "STK") {
+      const stockLegs = portfolio?.positions
+        .filter((position) => position.ticker.toUpperCase() === symbol.toUpperCase())
+        .flatMap((position) => position.legs)
+        .filter((leg) => leg.type === "Stock") ?? [];
+      const heldLong = stockLegs
+        .filter((leg) => leg.direction === "LONG")
+        .reduce((sum, leg) => sum + Math.abs(leg.contracts), 0);
+      const heldShort = stockLegs
+        .filter((leg) => leg.direction === "SHORT")
+        .reduce((sum, leg) => sum + Math.abs(leg.contracts), 0);
+      const basisPerShare = stockLegs[0]?.avg_cost ?? 0;
+      const closingLong = action === "SELL" && heldLong >= parsedQtyLocal;
+      const closingShort = action === "BUY" && heldShort >= parsedQtyLocal;
+      return {
+        type: "linear",
+        ticker: symbol,
+        instrument: "stock",
+        action,
+        quantity: parsedQtyLocal,
+        limitPrice: parsedNewLocal,
+        multiplier: 1,
+        heldQuantity: heldLong,
+        heldShortQuantity: heldShort,
+        description: `${action} ${parsedQtyLocal} ${symbol} @ ${fmtPrice(parsedNewLocal)}`,
+        closeOut: closingLong
+          ? { entryCostDollars: parsedQtyLocal * Math.abs(basisPerShare) }
+          : closingShort
+            ? { entryCostDollars: -parsedQtyLocal * Math.abs(basisPerShare) }
+            : undefined,
+      };
+    }
     if (order.contract.secType !== "OPT") return null;
     const strikeNum = order.contract.strike;
     const right: "C" | "P" = order.contract.right === "P" || order.contract.right === "PUT" ? "P" : "C";
@@ -369,7 +422,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
       const closingLong = closingLeg.direction === "LONG";
       return {
         ticker: symbol,
-        chainLegs: [],
+        chainLegs: [{ action, right, strike: strikeNum, expiry, quantity: parsedQtyLocal }],
         netPremium: action === "SELL" ? -parsedNewLocal : parsedNewLocal,
         description: `${action} ${parsedQtyLocal}x ${symbol} ${right} @ ${fmtPrice(parsedNewLocal)}`,
         totalCost: closingLong ? totalCost : -totalCost,
@@ -390,24 +443,26 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
     };
   }, [order, editableLegs, newPrice, newQuantity, priceData, portfolio]);
 
+  const riskState = useOrderRisk(riskInput, portfolio);
+
   if (!order) return null;
 
   const currentPrice = order.limitPrice ?? 0;
   const currentQuantity = order.totalQuantity;
   const parsedNew = parseFloat(newPrice);
-  const parsedQuantity = Number.parseInt(newQuantity, 10);
+  const parsedQuantity = parsePositiveInteger(newQuantity);
   const isComboOrder = order.contract.secType === "BAG" && editableLegs.length >= 2;
   const isValidPrice = isComboOrder
     ? Number.isFinite(parsedNew) && parsedNew !== 0
     : Number.isFinite(parsedNew) && parsedNew > 0;
-  const isValidQuantity = Number.isInteger(parsedQuantity) && parsedQuantity > 0;
+  const isValidQuantity = parsedQuantity != null;
   const normalizedLegs = normalizeComboLegs(editableLegs);
   const originalLegsSnapshot = JSON.stringify(buildEditableComboLegs(order));
   const currentLegsSnapshot = JSON.stringify(editableLegs);
   const priceChanged = isValidPrice && Math.abs(parsedNew - currentPrice) >= 0.005;
   const quantityChanged = isValidQuantity && parsedQuantity !== currentQuantity;
   const legsChanged = isComboOrder && currentLegsSnapshot !== originalLegsSnapshot;
-  const canSubmit = !loading && (
+  const canSubmit = !loading && riskState?.okToSubmit === true && (
     isComboOrder
       ? Boolean(isValidPrice && isValidQuantity && normalizedLegs && (priceChanged || quantityChanged || legsChanged))
       : Boolean((priceChanged || quantityChanged || outsideRth) && isValidPrice && isValidQuantity)
@@ -442,7 +497,9 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
           { riskFreeRate },
         );
         if (result.perContract == null) return null;
-        net += (leg.action === "BUY" ? 1 : -1) * result.perContract;
+        const ratio = Number(leg.ratio);
+        if (!Number.isInteger(ratio) || ratio <= 0) return null;
+        net += (leg.action === "BUY" ? 1 : -1) * ratio * result.perContract;
       }
       return Math.round(net * 100) / 100;
     }
@@ -466,10 +523,11 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
   })();
   const handleLegChange = (index: number, patch: Partial<EditableComboLeg>) => {
     setEditableLegs((prev) => prev.map((leg, legIndex) => (legIndex === index ? { ...leg, ...patch } : leg)));
+    setNewPrice("");
   };
 
   const submitModify = () => {
-    if (!canSubmit) return;
+    if (!canSubmit || riskState?.okToSubmit !== true) return;
 
     if (isComboOrder && normalizedLegs) {
       onConfirm({
@@ -477,7 +535,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
           type: "combo",
           symbol: comboUnderlyingSymbol(order),
           action: order.action === "BUY" ? "BUY" : "SELL",
-          quantity: parsedQuantity,
+          quantity: parsedQuantity!,
           limitPrice: parsedNew,
           tif: order.tif === "GTC" ? "GTC" : "DAY",
           legs: normalizedLegs,
@@ -488,7 +546,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
 
     const request: ModifyOrderRequest = {};
     if (priceChanged) request.newPrice = parsedNew;
-    if (quantityChanged) request.newQuantity = parsedQuantity;
+    if (quantityChanged) request.newQuantity = parsedQuantity!;
     if (outsideRth) request.outsideRth = true;
     onConfirm(request);
   };
@@ -640,7 +698,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
                   strike: Number.parseFloat(leg.strike) || 0,
                   type: leg.right === "C" ? "Call" : "Put" as const,
                   expiry: leg.expiry,
-                  quantity: Number.parseInt(leg.ratio, 10) || 1,
+                  quantity: Number.isInteger(Number(leg.ratio)) ? Number(leg.ratio) : 0,
                 }));
                 return (
                   <div style={{ marginBottom: "12px" }}>
@@ -744,7 +802,7 @@ export default function ModifyOrderModal({ order, loading, prices, portfolio, on
             into a naked short. Closes the audit gap (commit ac6c886). */}
         <OrderRiskGate
           input={riskInput}
-          portfolio={portfolio ?? null}
+          portfolio={portfolio}
           surface="modify-order-modal"
           variant="info"
         />

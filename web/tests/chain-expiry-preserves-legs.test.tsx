@@ -30,6 +30,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 vi.mock("../components/PriceChart", () => ({
   default: () => React.createElement("div", { "data-testid": "price-chart" }),
 }));

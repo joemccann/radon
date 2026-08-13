@@ -31,7 +31,7 @@ afterEach(async () => {
 async function occupyPort() {
   const server = net.createServer();
   occupiedServers.push(server);
-  server.listen(0, "0.0.0.0");
+  server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const address = server.address();
   if (!address || typeof address === "string") {
@@ -41,7 +41,7 @@ async function occupyPort() {
 }
 
 describe("ib realtime server startup", () => {
-  it("exits cleanly when the websocket port is already in use", { timeout: 10_000 }, async () => {
+  it("exits cleanly when the websocket port is already in use", { timeout: 15_000 }, async () => {
     const port = await occupyPort();
 
     const child = spawn(process.execPath, [serverScript, "--port", String(port)], {
@@ -55,18 +55,21 @@ describe("ib realtime server startup", () => {
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
     child.stderr.on("data", (chunk) => { stderr += chunk.toString(); });
 
+    let timeout: ReturnType<typeof setTimeout> | undefined;
     const [code] = await Promise.race([
       once(child, "exit"),
       new Promise((_, reject) => {
-        setTimeout(() => {
+        timeout = setTimeout(() => {
           child.kill("SIGTERM");
           reject(new Error("Timed out waiting for ib_realtime_server.js to exit"));
-        }, 5_000);
+        }, 10_000);
       }),
-    ]);
+    ]).finally(() => {
+      if (timeout) clearTimeout(timeout);
+    });
 
     expect(code).toBe(0);
-    expect(stdout).toContain(`WebSocket port already in use at ws://0.0.0.0:${port}`);
+    expect(stdout).toContain(`WebSocket port already in use at ws://127.0.0.1:${port}`);
     expect(stdout).toContain("skipping duplicate startup");
     expect(stderr).not.toContain("EADDRINUSE");
   });

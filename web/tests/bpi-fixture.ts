@@ -69,6 +69,16 @@ export function buildBpiPayloadFixture(options: BpiFixtureOptions = {}): BpiPayl
   } = options;
 
   let end = options.endDate ?? mostRecentSessionDate();
+  // The BPI timer publishes at 21:30 UTC. Before that boundary, today's
+  // session label would produce a future taken_at and the production reader
+  // correctly rejects it. Keep the default fixture anchored to the latest
+  // scan that could actually have completed.
+  if (
+    options.endDate === undefined
+    && Date.parse(`${end}T21:30:00Z`) > Date.now() + 60_000
+  ) {
+    end = previousWeekday(end);
+  }
   for (let i = 0; i < endSessionsAgo; i += 1) end = previousWeekday(end);
   const dates = sessionDatesEndingAt(sessions, end);
   const values = dates.map((_date, index) => bpiFixtureValue(index));

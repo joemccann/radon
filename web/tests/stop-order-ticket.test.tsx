@@ -5,6 +5,9 @@ import React from "react";
 import { describe, expect, it, vi } from "vitest";
 import { fireEvent, render, waitFor } from "@testing-library/react";
 import SingleLegOrderTicket from "../components/SingleLegOrderTicket";
+import type { PortfolioData } from "@/lib/types";
+
+const emptyPortfolio = { positions: [], account_summary: null } as unknown as PortfolioData;
 
 function renderTicket(overrides: Partial<React.ComponentProps<typeof SingleLegOrderTicket>> = {}) {
   const props: React.ComponentProps<typeof SingleLegOrderTicket> = {
@@ -19,7 +22,20 @@ function renderTicket(overrides: Partial<React.ComponentProps<typeof SingleLegOr
     isValid: true,
     limitPrice: "171.00",
     onLimitPriceChange: () => {},
-    riskGate: null,
+    riskInput: {
+      type: "linear",
+      ticker: "AAPL",
+      instrument: "stock",
+      action: "SELL",
+      quantity: 100,
+      limitPrice: 170,
+      multiplier: 1,
+      heldQuantity: 100,
+      closeOut: { entryCostDollars: 17_000 },
+      description: "SELL 100 AAPL",
+    },
+    portfolio: emptyPortfolio,
+    riskSurface: "stop-order-test",
     buildPayload: ({ action, quantity, limitPrice, tif, orderType, stopPrice }) => ({
       type: "stock",
       symbol: "AAPL",

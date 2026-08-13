@@ -72,6 +72,24 @@ class TestCheckOrderLimits:
         assert violation is not None
         assert violation["code"] == "ORDER_NOTIONAL_LIMIT"
 
+    @pytest.mark.parametrize("ratio", [0, -1, 1.5, 101])
+    def test_combo_ratio_must_be_bounded_positive_integer(self, ratio):
+        violation = order_limits.check_order_limits({
+            "type": "combo", "quantity": 1, "limitPrice": 1,
+            "legs": [{"ratio": ratio}, {"ratio": 1}],
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_COMBO_RATIO"
+
+    def test_combo_effective_contracts_are_capped(self, monkeypatch):
+        monkeypatch.setenv("RADON_MAX_ORDER_QTY", "100")
+        violation = order_limits.check_order_limits({
+            "type": "combo", "quantity": 51, "limitPrice": 1,
+            "legs": [{"ratio": 2}, {"ratio": 1}],
+        })
+        assert violation is not None
+        assert violation["code"] == "ORDER_EFFECTIVE_QTY_LIMIT"
+
 
 class TestPlacementFunnelEnforcement:
     def test_place_order_refuses_oversized_before_ib(self, monkeypatch, tmp_path):

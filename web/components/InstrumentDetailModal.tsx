@@ -7,7 +7,7 @@ import { fmtPrice, fmtUsd, legPriceKey } from "@/lib/positionUtils";
 import Modal from "./Modal";
 import SingleLegOrderTicket, { type SingleLegOrderAction } from "./SingleLegOrderTicket";
 import { InstrumentOrderQuoteTelemetry } from "./QuoteTelemetry";
-import { OrderRiskGate, type OrderRiskInput } from "@/lib/order";
+import { type OrderRiskInput } from "@/lib/order";
 import {
   type IbOrderType,
   ibPlaceFields,
@@ -33,7 +33,7 @@ export type InstrumentDetailProps = {
   portfolio?: PortfolioData | null;
 };
 
-export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onClose, portfolio = null }: InstrumentDetailProps) {
+export default function InstrumentDetailModal({ leg, ticker, expiry, prices, onClose, portfolio }: InstrumentDetailProps) {
   const [quantity, setQuantity] = useState(() => String(leg?.contracts ?? ""));
 
   useEffect(() => {
@@ -132,7 +132,7 @@ function LegOrderForm({
   priceData: PriceData | null;
   quantity: string;
   onQuantityChange: (value: string) => void;
-  portfolio: PortfolioData | null;
+  portfolio: PortfolioData | null | undefined;
 }) {
   const orderActions = useOrderActionsOptional();
   const bid = priceData?.bid ?? null;
@@ -214,7 +214,7 @@ function LegOrderForm({
       const entryCostDollars = leg.direction === "SHORT" ? -basisMagnitude : basisMagnitude;
       return {
         ticker,
-        chainLegs: [],
+        chainLegs: [{ action, right, strike: leg.strike, expiry, quantity: parsedQty }],
         netPremium: action === "SELL" ? -riskPrice : riskPrice,
         description,
         totalCost: proceeds,
@@ -253,14 +253,9 @@ function LegOrderForm({
       stopPrice={stopPrice}
       onStopPriceChange={setStopPrice}
       onActionChange={setAction}
-      riskGate={
-        <OrderRiskGate
-          input={riskInput}
-          portfolio={portfolio}
-          surface="instrument-modal"
-          variant="info"
-        />
-      }
+      riskInput={riskInput}
+      portfolio={portfolio}
+      riskSurface="instrument-modal"
       buildPayload={({ action, quantity, limitPrice, tif, orderType, stopPrice }) =>
         isStock
           ? {
@@ -283,11 +278,12 @@ function LegOrderForm({
               ...ibPlaceFields(orderType, limitPrice, stopPrice),
             }
       }
-      buildSuccessMessage={({ action, quantity, limitPrice }) =>
-        isStock
-          ? `Order placed: ${action} ${quantity} ${ticker} Stock @ ${fmtPrice(limitPrice)}`
-          : `Order placed: ${action} ${quantity}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(limitPrice)}`
-      }
+      buildSuccessMessage={({ action, quantity, limitPrice, orderType, stopPrice }) => {
+        const executionPrice = riskPriceForOrderType(orderType, limitPrice, stopPrice);
+        return isStock
+          ? `Order placed: ${action} ${quantity} ${ticker} Stock @ ${fmtPrice(executionPrice)}`
+          : `Order placed: ${action} ${quantity}x ${ticker} ${strikeStr}${right} @ ${fmtPrice(executionPrice)}`;
+      }}
       onSuccessToast={(message) => orderActions?.pushNotification({ type: "success", message })}
       suppressInlineSuccess
     />

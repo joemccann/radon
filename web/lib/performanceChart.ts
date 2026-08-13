@@ -157,16 +157,37 @@ function buildIndexTicks(length: number, desiredTickCount: number): number[] {
   return [...indices].sort((a, b) => a - b);
 }
 
+export function resolvePerformanceStartingEquity(data: PerformanceData): number {
+  const summaryValue = data.summary.starting_equity;
+  if (summaryValue != null && Number.isFinite(summaryValue)) return summaryValue;
+  const firstPoint = data.series.find((point) => Number.isFinite(point.equity));
+  return firstPoint?.equity ?? 0;
+}
+
 export function buildPerformanceChartModel(
   data: PerformanceData,
   width = DEFAULT_PERFORMANCE_CHART_WIDTH,
   height = DEFAULT_PERFORMANCE_CHART_HEIGHT,
   margins: ChartMargins = DEFAULT_PERFORMANCE_CHART_MARGINS,
 ): PerformanceChartModel {
-  const startEquity = data.summary.starting_equity;
-  const startBenchmark = data.series[0]?.benchmark_close ?? 1;
-  const equityValues = data.series.map((point) => point.equity);
-  const rebasedBenchmarkValues = data.series.map((point) => (point.benchmark_close / startBenchmark) * startEquity);
+  const series = data.series.filter((point) => Number.isFinite(point.equity));
+  const equityValues = series.map((point) => point.equity);
+  const startEquity = resolvePerformanceStartingEquity(data);
+  const benchmarkCloses = series.map((point) => point.benchmark_close);
+  const hasCompleteBenchmarkCloses = benchmarkCloses.length > 0
+    && benchmarkCloses.every((value) => value != null && Number.isFinite(value))
+    && Number(benchmarkCloses[0]) !== 0;
+  const hasCompleteBenchmarkReturns = series.length > 0
+    && series.every((point) => point.benchmark_return != null && Number.isFinite(point.benchmark_return));
+  const rebasedBenchmarkValues = hasCompleteBenchmarkCloses
+    ? benchmarkCloses.map((value) => (Number(value) / Number(benchmarkCloses[0])) * startEquity)
+    : hasCompleteBenchmarkReturns
+      ? series.reduce<number[]>((values, point, index) => {
+          const previous = index === 0 ? startEquity : values[index - 1];
+          values.push(previous * (1 + Number(point.benchmark_return)));
+          return values;
+        }, [])
+      : [];
   const { domainMin, domainMax, ticks } = buildNiceTicks([...equityValues, ...rebasedBenchmarkValues], 4);
   const plotBottom = height - margins.bottom;
   const plotLeft = margins.left;
@@ -177,10 +198,10 @@ export function buildPerformanceChartModel(
     label: formatAxisUsd(tick),
     y: plotBottom - ((tick - domainMin) / span) * (plotBottom - margins.top),
   }));
-  const xAxisTicks = buildIndexTicks(data.series.length, 4).map((index) => ({
+  const xAxisTicks = buildIndexTicks(series.length, 4).map((index) => ({
     index,
-    label: formatAxisDate(data.series[index]?.date ?? ""),
-    x: plotLeft + (index / Math.max(data.series.length - 1, 1)) * (plotRight - plotLeft),
+    label: formatAxisDate(series[index]?.date ?? ""),
+    x: plotLeft + (index / Math.max(series.length - 1, 1)) * (plotRight - plotLeft),
   }));
 
   return {

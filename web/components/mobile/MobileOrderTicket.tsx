@@ -32,6 +32,7 @@ import {
   isStopOrderType,
   orderTypeLabel,
   pricesValidForOrderType,
+  riskPriceForOrderType,
 } from "@/lib/order/stopOrder";
 
 type MobileOrderTicketProps = {
@@ -183,8 +184,7 @@ export default function MobileOrderTicket({
   const signedNet = (value: number | null): number | null => {
     if (value == null) return null;
     if (!isCombo) return Math.abs(value);
-    if (isDebit === null) return value;
-    return isDebit ? Math.abs(value) : -Math.abs(value);
+    return value;
   };
 
   const signedQuote = useMemo(
@@ -193,7 +193,7 @@ export default function MobileOrderTicket({
       mid: signedNet(netQuote.mid),
       ask: signedNet(netQuote.ask),
     }),
-    [netQuote.bid, netQuote.mid, netQuote.ask, isCombo, isDebit],
+    [netQuote.bid, netQuote.mid, netQuote.ask, isCombo],
   );
 
   // Auto-populate to mid on first availability + on structure changes.
@@ -224,9 +224,12 @@ export default function MobileOrderTicket({
   const parsedPrice = parseFloat(limitPriceText);
   const parsedStop = parseFloat(stopPriceText);
   const isValidPrice = isCombo
-    ? !isNaN(parsedPrice) && parsedPrice !== 0
+    ? !isNaN(parsedPrice) && parsedPrice !== 0 && isDebit !== null
     : pricesValidForOrderType({ orderType, limitPrice: parsedPrice, stopPrice: parsedStop });
   const isValid = isValidPrice && legs.length > 0;
+  const reviewPrice = isCombo
+    ? parsedPrice
+    : riskPriceForOrderType(orderType, parsedPrice, parsedStop);
   const signedLimitPrice = Number.isFinite(parsedPrice)
     ? isDebit === null
       ? parsedPrice
@@ -262,8 +265,8 @@ export default function MobileOrderTicket({
   // regardless of whether live WS bid/ask have populated.
   const riskInput: OrderRiskInput | null = useMemo(() => {
     if (!isValidPrice || legs.length === 0) return null;
-    const totalCost = parsedPrice * totalQty * 100;
-    const description = `${structure || "Option"} @ ${fmtPrice(parsedPrice)}`;
+    const totalCost = reviewPrice * totalQty * 100;
+    const description = `${structure || "Option"} @ ${fmtPrice(reviewPrice)}`;
 
     // Close-out branch (single-leg only). Mirrors OrderTab: the gate's
     // `closeOut` short-circuit surfaces proceeds + realized P&L. `avgCost` is
@@ -271,12 +274,18 @@ export default function MobileOrderTicket({
     // bug that read −$635,055 on a $19,389.45 winner).
     if (singleLeg && closeKind && heldContract) {
       const qty = Math.max(1, Math.trunc(singleLeg.quantity));
-      const gross = parsedPrice * qty * 100;
+      const gross = reviewPrice * qty * 100;
       if (closeKind === "sell-to-close") {
         return {
           ticker,
-          chainLegs: [],
-          netPremium: -parsedPrice,
+          chainLegs: [{
+            action: "SELL",
+            right: singleLeg.right,
+            strike: singleLeg.strike,
+            expiry: singleLeg.expiry,
+            quantity: qty,
+          }],
+          netPremium: -reviewPrice,
           description,
           totalCost: gross,
           totalLabel: "Proceeds:",
@@ -287,8 +296,14 @@ export default function MobileOrderTicket({
       // credit − debit.
       return {
         ticker,
-        chainLegs: [],
-        netPremium: parsedPrice,
+        chainLegs: [{
+          action: "BUY",
+          right: singleLeg.right,
+          strike: singleLeg.strike,
+          expiry: singleLeg.expiry,
+          quantity: qty,
+        }],
+        netPremium: reviewPrice,
         description,
         totalCost: -gross,
         totalLabel: "Close Debit:",
@@ -299,7 +314,7 @@ export default function MobileOrderTicket({
     const isCredit = isCombo
       ? isDebit === false
       : legs[0]?.action === "SELL";
-    const netPremium = isCredit ? -Math.abs(parsedPrice) : parsedPrice;
+    const netPremium = isCredit ? -Math.abs(reviewPrice) : reviewPrice;
     const chainLegs = (normalizedOrder?.legs ?? legs).map((l) => ({
       action: l.action,
       right: l.right,
@@ -315,20 +330,19 @@ export default function MobileOrderTicket({
       netPremium,
       description,
       totalCost: isCredit ? -totalCost : totalCost,
-      // FU7: net entry quote for net-of-cost risk. `netQuote` is the unsigned
-      // per-unit combo quote; null bid/ask falls back to the F1 estimate.
+      // FU7: signed per-unit combo quote for net-of-cost risk.
       quote: { bid: netQuote.bid, ask: netQuote.ask },
       // Phase-1 margin: underlying spot for the naked-short Reg-T estimate.
       underlyingSpot: spot ?? null,
     };
-  }, [isValidPrice, parsedPrice, totalQty, structure, isDebit, isCombo, legs, normalizedOrder, ticker, netQuote.bid, netQuote.ask, spot, singleLeg, closeKind, heldContract]);
+  }, [isValidPrice, reviewPrice, totalQty, structure, isDebit, isCombo, legs, normalizedOrder, ticker, netQuote.bid, netQuote.ask, spot, singleLeg, closeKind, heldContract]);
 
   // Build-view teaser: a lightweight read of the same risk math the confirm
   // gate renders in full. The gate stays the single chokepoint; this is a
   // read-only preview so the operator sees max loss / max gain before Review.
   const teaserState = useOrderRisk(riskInput, portfolio);
 
-  const okToSubmit = riskState?.okToSubmit !== false; // null (pre-confirm) allowed
+  const okToSubmit = riskState?.okToSubmit === true;
 
   // P2: step by an adaptive tick derived from the current price magnitude.
   const adjustPrice = (direction: 1 | -1) => {
@@ -358,7 +372,7 @@ export default function MobileOrderTicket({
     // First tap only advances to confirm (mirror PositionTradeTicket): the
     // Review button sets confirmStep; handleSubmit never places until then.
     if (!confirmStep) return;
-    if (!isValid) return;
+    if (!isValid || !okToSubmit) return;
     setSubmitting(true);
     setError(null);
     setSuccess(null);
@@ -404,7 +418,7 @@ export default function MobileOrderTicket({
       if (!res.ok) {
         setError(json.error || "Order placement failed");
       } else {
-        setSuccess(`Placed ${structure || "Order"} on ${ticker}`);
+        setSuccess(`Placed ${structure || "Order"} on ${ticker} @ ${fmtPrice(reviewPrice)}`);
         setConfirmStep(false);
         // Keep success message visible while the user reads it; clear legs +
         // close the sheet together after a brief delay so the parent doesn't
@@ -443,7 +457,7 @@ export default function MobileOrderTicket({
 
   // Teasers (build view). Notional = |limit| × totalQty × 100. The verb tracks
   // the cash direction: a debit is paid, a credit is received.
-  const notionalDollars = isValidPrice ? Math.abs(parsedPrice) * totalQty * 100 : null;
+  const notionalDollars = isValidPrice ? Math.abs(reviewPrice) * totalQty * 100 : null;
   const notionalVerb = netIsCredit ? "receive" : "pay";
   const riskTeaser = (() => {
     if (!teaserState) return null;
@@ -559,7 +573,7 @@ export default function MobileOrderTicket({
             <div className="mobile-ticket__confirm-row">
               <span className="mobile-ticket__confirm-label">{netIsCredit ? "Net credit" : "Net debit"}</span>
               <span className="mobile-ticket__confirm-value">
-                {Number.isFinite(parsedPrice) ? fmtPrice(Math.abs(parsedPrice)) : "—"}
+                {Number.isFinite(reviewPrice) ? fmtPrice(Math.abs(reviewPrice)) : "—"}
               </span>
             </div>
             {notionalDollars != null ? (

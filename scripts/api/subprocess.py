@@ -8,12 +8,35 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Union
 
 logger = logging.getLogger("radon.subprocess")
+
+# One FastAPI process owns all Python subprocess delegation. Reject above this
+# hard cap instead of building an unbounded coroutine/process queue that can
+# exhaust file descriptors, IB client IDs, memory, and upstream quotas.
+MAX_CONCURRENT_SUBPROCESSES = max(
+    1, min(int(os.environ.get("RADON_MAX_CONCURRENT_SUBPROCESSES", "4")), 16)
+)
+_active_subprocesses = 0
+
+
+def _claim_subprocess_slot() -> bool:
+    global _active_subprocesses
+    # No await between the check and increment: atomic within one event loop.
+    if _active_subprocesses >= MAX_CONCURRENT_SUBPROCESSES:
+        return False
+    _active_subprocesses += 1
+    return True
+
+
+def _release_subprocess_slot() -> None:
+    global _active_subprocesses
+    _active_subprocesses = max(0, _active_subprocesses - 1)
 
 SCRIPTS_DIR = Path(__file__).parent.parent
 PROJECT_ROOT = SCRIPTS_DIR.parent
@@ -173,9 +196,12 @@ async def run_script(
     script_path = SCRIPTS_DIR / script
     if not script_path.exists():
         return ScriptResult(ok=False, error=f"Script not found: {script}")
+    if not _claim_subprocess_slot():
+        return ScriptResult(ok=False, error="Subprocess capacity exhausted")
 
     cmd = [sys.executable, str(script_path)] + (args or [])
     work_dir = cwd or str(SCRIPTS_DIR)
+    proc: Optional[asyncio.subprocess.Process] = None
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -221,6 +247,12 @@ async def run_script(
             pass
         return ScriptResult(ok=False, error=f"Script timed out after {timeout}s")
 
+    except asyncio.CancelledError:
+        if proc is not None and proc.returncode is None:
+            proc.kill()
+            await proc.wait()
+        raise
+
     except json.JSONDecodeError as e:
         logger.error("Script %s returned invalid JSON: %s", script, e)
         return ScriptResult(ok=False, error=f"Invalid JSON output: {e}")
@@ -228,6 +260,8 @@ async def run_script(
     except Exception as e:
         logger.error("Script %s error: %s", script, e)
         return ScriptResult(ok=False, error=str(e))
+    finally:
+        _release_subprocess_slot()
 
 
 async def run_script_raw(
@@ -246,6 +280,10 @@ async def run_script_raw(
     if not script_path.exists():
         return RawScriptResult(
             ok=False, stderr=f"Script not found: {script}", exit_code=None
+        )
+    if not _claim_subprocess_slot():
+        return RawScriptResult(
+            ok=False, stderr="Subprocess capacity exhausted", exit_code=None
         )
 
     cmd = [sys.executable, str(script_path)] + (args or [])
@@ -283,6 +321,8 @@ async def run_script_raw(
         )
     except Exception as e:
         return RawScriptResult(ok=False, stderr=str(e), exit_code=None)
+    finally:
+        _release_subprocess_slot()
 
 
 async def run_module(
@@ -295,6 +335,8 @@ async def run_module(
     For scripts invoked as `python3 -m trade_blotter.flex_query --json`.
     """
     cmd = [sys.executable, "-m", module] + (args or [])
+    if not _claim_subprocess_slot():
+        return ScriptResult(ok=False, error="Subprocess capacity exhausted")
 
     try:
         proc = await asyncio.create_subprocess_exec(
@@ -337,3 +379,5 @@ async def run_module(
 
     except Exception as e:
         return ScriptResult(ok=False, error=str(e))
+    finally:
+        _release_subprocess_slot()

@@ -109,7 +109,7 @@ describe("/api/newsfeed/posts", () => {
 
     expect(response.status).toBe(503);
     const data = await response.json();
-    expect(data.error).toContain("newsfeed read failed");
+    expect(data.error).toBe("Newsfeed temporarily unavailable");
   });
 
   it("safely handles malformed JSON in array columns", async () => {

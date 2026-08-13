@@ -23,19 +23,30 @@ const LEVEL_TOKEN: Record<string, string> = {
 
 export default function CorrelationRiskBanner({
   report,
+  showUnavailable = false,
 }: {
   report: RiskBudgetReport | null | undefined;
+  showUnavailable?: boolean;
 }) {
   const banner = correlationRiskBanner(report);
-  if (!banner || banner.level === "none") return null;
+  const measurementUnavailable =
+    showUnavailable && (!banner || (banner.level === "none" && banner.insufficientData.length > 0));
+  if ((!banner || banner.level === "none") && !measurementUnavailable) return null;
 
-  const accent = LEVEL_TOKEN[banner.level] ?? "var(--signal-core)";
+  const level = measurementUnavailable ? "info" : banner!.level;
+  const accent = LEVEL_TOKEN[level] ?? "var(--signal-core)";
+  const headline = measurementUnavailable ? "Gate 3: correlation measurement unavailable" : banner!.headline;
+  const detail = measurementUnavailable
+    ? "Current portfolio price history is insufficient for a correlation risk-budget verdict."
+    : banner!.detail;
+  const breachedClusters = measurementUnavailable ? [] : banner!.breachedClusters;
+  const insufficientData = banner?.insufficientData ?? [];
 
   return (
     <div
       className="sx"
       data-testid="correlation-risk-banner"
-      data-level={banner.level}
+      data-level={level}
       style={{
         borderRadius: 4,
         borderLeft: `3px solid ${accent}`,
@@ -54,18 +65,18 @@ export default function CorrelationRiskBanner({
             background: `color-mix(in srgb, ${accent} 14%, transparent)`,
           }}
         >
-          GATE {banner.gate}
+          GATE 3
         </span>
       </div>
       <div className="s-bd">
         <div className="crb-headline" style={{ color: accent, fontWeight: 600 }}>
-          {banner.headline}
+          {headline}
         </div>
-        <div className="crb-detail pe">{banner.detail}</div>
+        <div className="crb-detail pe">{detail}</div>
 
-        {banner.breachedClusters.length > 0 && (
+        {breachedClusters.length > 0 && (
           <div className="crb-clusters" data-testid="crb-clusters">
-            {banner.breachedClusters.map((cluster) => (
+            {breachedClusters.map((cluster) => (
               <div key={cluster.tickers.join("-")} className="crb-cluster-row">
                 <span className="fm">{cluster.tickers.join(" + ")}</span>
                 <span className="fm" style={{ color: accent }}>
@@ -77,9 +88,9 @@ export default function CorrelationRiskBanner({
           </div>
         )}
 
-        {banner.insufficientData.length > 0 && (
+        {insufficientData.length > 0 && (
           <div className="crb-thin pe" data-testid="crb-insufficient-data">
-            Insufficient price history for: {banner.insufficientData.join(", ")}
+            Insufficient price history for: {insufficientData.join(", ")}
           </div>
         )}
       </div>

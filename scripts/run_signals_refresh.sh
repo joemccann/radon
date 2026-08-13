@@ -85,20 +85,19 @@ if [ -z "$PYTHON_BIN" ]; then
     exit 1
 fi
 
-IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "yes"
+IS_TRADING=$("$PYTHON_BIN" - <<'PY' 2>/dev/null || echo "no"
 import sys
 try:
     sys.path.insert(0, 'scripts')
-    from utils.market_calendar import _is_trading_day
-    from datetime import datetime
-    print('yes' if _is_trading_day(datetime.now()) else 'no')
+    from utils.market_calendar import market_state
+    print('yes' if market_state().get('is_open') else 'no')
 except Exception:
-    print('yes')
+    print('no')
 PY
 )
 
 if [ "$IS_TRADING" = "no" ]; then
-    echo "$(date): Market holiday or weekend — skipping signals refresh"
+    echo "$(date): Market closed — skipping signals refresh"
     exit 0
 fi
 
@@ -117,13 +116,21 @@ refresh_scan() {
     local url="http://${FASTAPI_HOST}:${FASTAPI_PORT}${endpoint}?preset=${PRESET}"
 
     echo "$(date): POST ${url}"
-    if curl -fsS -X POST -m "$SCAN_TIMEOUT" -o /dev/null "$url"; then
+    HTTP_CODE=$(curl -sS -X POST -m "$SCAN_TIMEOUT" -o /dev/null -w "%{http_code}" "$url")
+    CURL_EXIT=$?
+    if [ "$CURL_EXIT" -eq 0 ] && [[ "$HTTP_CODE" == 2* ]]; then
         echo "$(date): ${label} refresh via FastAPI complete (OK)"
         return 0
     fi
 
-    # FastAPI unreachable or non-2xx. service_health and Turso won't update on
-    # this path; the systemd watchdog surfaces radon-api.service separately.
+    # A timeout or HTTP response means FastAPI may have accepted the scan.
+    # Starting a direct fallback then can duplicate the provider/IB job.
+    if [ "$CURL_EXIT" -ne 7 ]; then
+        echo "$(date): ${label} FastAPI outcome indeterminate (curl=${CURL_EXIT}, http=${HTTP_CODE}); not launching duplicate" >&2
+        return 1
+    fi
+
+    # Connection refused: the request was not accepted, so direct fallback is safe.
     echo "$(date): ${label} — FastAPI unavailable, fallback to direct ${script}"
     if "$PYTHON_BIN" "scripts/${script}" --preset "$PRESET" --json \
         >/dev/null 2>>"logs/signals_refresh.err.log"; then

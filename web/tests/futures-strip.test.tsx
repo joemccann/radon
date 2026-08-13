@@ -51,4 +51,13 @@ describe("FuturesStrip", () => {
     expect(text).toContain("5250.00");
     expect(text).not.toContain("%");
   });
+
+  it("labels each delayed fallback cell during a partial live outage", () => {
+    const { container } = render(<FuturesStrip quotes={[
+      { label: "ES", last: 5250, close: 5200, delayed: false },
+      { label: "NQ", last: 19000, close: 18900, delayed: true },
+    ]} />);
+    expect(cellText(container, "ES")).not.toContain("Delayed");
+    expect(cellText(container, "NQ")).toContain("Delayed");
+  });
 });

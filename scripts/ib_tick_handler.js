@@ -95,10 +95,12 @@ export function updatePriceFromTickPrice(data, tickType, value) {
   switch (tickType) {
     // ── Live tick types ───────────────────────────────────────────────────
     case TICK_TYPE.BID:
+      if (data.lastIsCalculated) data.last = null;
       data.bid = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.ASK:
+      if (data.lastIsCalculated) data.last = null;
       data.ask = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
@@ -138,10 +140,12 @@ export function updatePriceFromTickPrice(data, tickType, value) {
     // absent. VIX/VVIX always receive delayed ticks because they require a
     // separate CBOE index subscription.
     case TICK_TYPE.DELAYED_BID:         // 66
+      if (data.lastIsCalculated) data.last = null;
       data.bid = normalizePrice(value);
       data.lastIsCalculated = false;
       break;
     case TICK_TYPE.DELAYED_ASK:         // 67
+      if (data.lastIsCalculated) data.last = null;
       data.ask = normalizePrice(value);
       data.lastIsCalculated = false;
       break;

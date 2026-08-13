@@ -103,7 +103,7 @@ describe("/api/skew2d", () => {
   });
 
   it("returns Turso snapshot when present", async () => {
-    const payload = buildPayload({ scan_time: "2026-08-09T21:50:00.000Z" });
+    const payload = buildPayload({ scan_time: new Date(Date.now() - 60_000).toISOString() });
     await insertSnapshot("skew2d", payload);
     const { GET } = await import("@/app/api/skew2d/route");
     const res = await GET();
@@ -119,7 +119,7 @@ describe("/api/skew2d", () => {
   });
 
   it("falls back to disk when Turso has no row", async () => {
-    const payload = buildPayload({ scan_time: "2026-08-08T21:50:00.000Z", count: 700 });
+    const payload = buildPayload({ scan_time: new Date(Date.now() - 120_000).toISOString(), count: 700 });
     mockReadFile.mockResolvedValue(JSON.stringify(payload));
     const { GET } = await import("@/app/api/skew2d/route");
     const res = await GET();
@@ -129,8 +129,8 @@ describe("/api/skew2d", () => {
   });
 
   it("prefers fresher Turso over older disk", async () => {
-    const older = buildPayload({ scan_time: "2026-08-07T21:50:00.000Z", count: 700 });
-    const newer = buildPayload({ scan_time: "2026-08-09T21:50:00.000Z", count: 733 });
+    const older = buildPayload({ scan_time: new Date(Date.now() - 120_000).toISOString(), count: 700 });
+    const newer = buildPayload({ scan_time: new Date(Date.now() - 60_000).toISOString(), count: 733 });
     mockReadFile.mockResolvedValue(JSON.stringify(older));
     await insertSnapshot("skew2d", newer);
     const { GET } = await import("@/app/api/skew2d/route");
@@ -157,5 +157,12 @@ describe("/api/skew2d", () => {
     const { GET } = await import("@/app/api/skew2d/route");
     const body = await jsonOf(await GET());
     expect(body).toMatchObject({ missing: true, count: 0 });
+  });
+
+  it("expired snapshots are not returned as current", async () => {
+    const old = buildPayload({ scan_time: "2026-01-01T21:50:00.000Z" });
+    await insertSnapshot("skew2d", old);
+    const { GET } = await import("@/app/api/skew2d/route");
+    expect(await jsonOf(await GET())).toMatchObject({ missing: true, count: 0 });
   });
 });

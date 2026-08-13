@@ -230,9 +230,10 @@ class TestGateNode:
 
 
 class TestOrderNode:
-    def test_order_node_requires_confirmation(self, monkeypatch):
+    @pytest.mark.parametrize("confirmed", [False, True])
+    def test_order_node_is_rejected_before_execution(self, monkeypatch, confirmed):
         import workflow.nodes as nodes_mod
-        from workflow.executor import execute_graph
+        from workflow.executor import WorkflowError, execute_graph
 
         monkeypatch.setattr(
             nodes_mod,
@@ -254,37 +255,6 @@ class TestOrderNode:
             edges=[{"from": "n1", "to": "n2"}],
         )
 
-        # No confirmation token → order must NOT fire, graph reports blocked.
-        report = execute_graph(graph)
-        assert report.ok is False
-        assert report.blocked_by == "n2"
-        assert report.requires_confirmation is True
+        with pytest.raises(WorkflowError, match="order execution is disabled"):
+            execute_graph(graph, confirm_order=confirmed)
         assert placed == []
-
-    def test_order_node_fires_with_confirmation(self, monkeypatch):
-        import workflow.nodes as nodes_mod
-        from workflow.executor import execute_graph
-
-        monkeypatch.setattr(
-            nodes_mod,
-            "run_data_source",
-            lambda source, params: [{"ticker": "AAA", "score": 80}],
-        )
-        placed = []
-        monkeypatch.setattr(
-            nodes_mod,
-            "emit_order",
-            lambda rows, params: placed.append(list(rows)),
-        )
-
-        graph = _graph(
-            nodes=[
-                {"id": "n1", "type": "data-source", "params": {"source": "scanner"}},
-                {"id": "n2", "type": "order", "params": {"structure": "long_call"}},
-            ],
-            edges=[{"from": "n1", "to": "n2"}],
-        )
-
-        report = execute_graph(graph, confirm_order=True)
-        assert report.ok is True
-        assert placed == [[{"ticker": "AAA", "score": 80}]]

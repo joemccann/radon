@@ -20,7 +20,13 @@ export async function DELETE(
   }
 
   const { post_id } = await params;
-  const postId = decodeURIComponent(post_id).trim();
+  const postId = post_id.trim();
+  if (!postId || postId.length > 512) {
+    return setNoStoreResponseHeaders(
+      jsonApiError({ status: 400, code: "BAD_REQUEST", message: "Invalid bookmark id", requestId }),
+      requestId,
+    );
+  }
 
   try {
     await dbExecute(

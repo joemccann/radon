@@ -73,7 +73,7 @@ describe("GET /api/options/exposure", () => {
     expect(mocks.radonFetch).not.toHaveBeenCalled();
   });
 
-  it("preserves sanitized FastAPI authentication failures", async () => {
+  it("preserves status without exposing FastAPI authentication diagnostics", async () => {
     const { RadonApiError } = await import("@/lib/radonApi");
     mocks.radonFetch.mockRejectedValue(
       new RadonApiError(503, "Options exposure authentication is unavailable"),
@@ -85,11 +85,13 @@ describe("GET /api/options/exposure", () => {
     );
 
     expect(response.status).toBe(503);
-    expect(await response.json()).toMatchObject({
+    const body = await response.json();
+    expect(body).toMatchObject({
       error: "Options exposure unavailable",
-      detail: "Options exposure authentication is unavailable",
+      detail: "Options service unavailable",
       code: "UPSTREAM_ERROR",
     });
+    expect(JSON.stringify(body)).not.toContain("authentication");
   });
 
   it("maps local proxy timeouts to 504", async () => {

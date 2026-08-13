@@ -7,7 +7,7 @@ Description=Radon VCG refresh - every 5 minutes during ET trading hours
 # (winter 14:30-21:00 UTC, summer 13:30-20:00 UTC). The
 # run_vcg_refresh.sh wrapper re-checks the trading calendar at
 # runtime and exits 0 on US trading holidays before doing any work.
-OnCalendar=Mon..Fri *-*-* 13..21:00,05,10,15,20,25,30,35,40,45,50,55
+OnCalendar=Mon..Fri *-*-* 09..16:00,05,10,15,20,25,30,35,40,45,50,55 America/New_York
 Persistent=false
 
 [Install]

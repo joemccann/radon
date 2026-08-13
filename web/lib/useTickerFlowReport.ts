@@ -121,6 +121,7 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
       inflightRef.current = ctrl;
       const { signal } = ctrl;
 
+      setData(null);
       setStatus("loading");
       setError(null);
 
@@ -134,6 +135,9 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
 
         if (res.ok) {
           const payload = (await res.json()) as FlowReportData;
+          if (payload.ticker?.trim().toUpperCase() !== sym.trim().toUpperCase()) {
+            throw new Error("Flow report response did not match ticker");
+          }
           // Missing cache → don't pollute state with an empty payload, just scan.
           if (payload?.missing) {
             setData(null);
@@ -155,6 +159,7 @@ export function useTickerFlowReport(ticker: string | null): UseTickerFlowReportR
         if (signal.aborted) return;
         const message = err instanceof Error ? err.message : "Failed to load report";
         setError(message);
+        setData(null);
         setStatus("error");
       }
     },

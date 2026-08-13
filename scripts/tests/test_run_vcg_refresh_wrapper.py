@@ -204,7 +204,7 @@ def test_wrapper_falls_back_to_direct_invocation_when_fastapi_down(tmp_path: Pat
     assert "direct-path" in vcg_json.read_text(encoding="utf-8")
 
 
-def test_wrapper_skips_on_market_holiday(tmp_path: Path) -> None:
+def test_vcg_skips_premarket_postclose_and_early_close(tmp_path: Path) -> None:
     """When the trading-day probe says ``no``, the wrapper exits 0 without
     touching vcg_scan.py or hitting FastAPI."""
     repo_dir = tmp_path / "repo"
@@ -245,4 +245,14 @@ def test_wrapper_skips_on_market_holiday(tmp_path: Path) -> None:
     assert result.returncode == 0, result.stderr or result.stdout
     assert stub.calls == [], "must not POST to FastAPI on holidays"
     combined = (result.stdout + result.stderr).lower()
-    assert "holiday" in combined or "skip" in combined
+    assert "closed" in combined or "skip" in combined
+
+
+def test_failing_fallback_produces_nonzero_exit(tmp_path: Path) -> None:
+    repo_dir = tmp_path / "repo"
+    repo_dir.mkdir()
+    _stage_wrapper(repo_dir)
+    python_bin = _stage_python_with_market_open(tmp_path / "bin")
+    # No vcg_scan.py: the direct fallback must fail and propagate its status.
+    result = _run(repo_dir, python_bin, _free_port())
+    assert result.returncode != 0

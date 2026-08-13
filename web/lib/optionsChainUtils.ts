@@ -278,13 +278,8 @@ export function computeNetOptionQuote(
     }
   }
 
-  // For debit spreads: netAsk > 0 (pay), netBid > 0 (receive)
-  // For credit spreads: netAsk < 0 (receive credit), netBid < 0 (pay credit)
-  // Normalize: bid < ask (bid is always the worse price for the order placer)
-  const absBid = Math.abs(netBid);
-  const absAsk = Math.abs(netAsk);
-  const bid = Math.min(absBid, absAsk);
-  const ask = Math.max(absBid, absAsk);
+  const bid = Math.min(netBid, netAsk);
+  const ask = Math.max(netBid, netAsk);
   const mid = (bid + ask) / 2;
 
   return { bid, ask, mid };

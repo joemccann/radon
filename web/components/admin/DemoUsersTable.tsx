@@ -22,6 +22,7 @@ export default function DemoUsersTable() {
   const [available, setAvailable] = useState(true);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -47,13 +48,21 @@ export default function DemoUsersTable() {
   const act = useCallback(
     async (userId: string, action: "revoke" | "extend") => {
       setBusyId(userId);
+      setActionError(null);
       try {
-        await fetch("/api/admin/demo-users", {
+        const response = await fetch("/api/admin/demo-users", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ action, userId, ...(action === "extend" ? { tradingDays: 3 } : {}) }),
         });
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({})) as { error?: string };
+          setActionError(body.error ?? `Action failed (${response.status})`);
+          return;
+        }
         await load();
+      } catch {
+        setActionError("Action failed. Access state was not changed.");
       } finally {
         setBusyId(null);
       }
@@ -72,6 +81,7 @@ export default function DemoUsersTable() {
       <p className="admin-card-subhead">
         demo.radon.run trials (3 trading days). Today&apos;s AI burn shown; revoke or extend below.
       </p>
+      {actionError ? <p className="admin-card-empty" role="alert">{actionError}</p> : null}
 
       {loading ? (
         <p className="admin-card-empty">Loading demo users…</p>

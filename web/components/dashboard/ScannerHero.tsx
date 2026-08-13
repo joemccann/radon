@@ -71,6 +71,8 @@ export default function ScannerHero() {
       {tab === "theta" ? (
         theta.loading && !theta.data ? (
           <div className="news-feed-empty">Loading theta harvester…</div>
+        ) : theta.error ? (
+          <div className="news-feed-error" role="alert">{theta.error}</div>
         ) : !theta.data?.results?.length ? (
           <div className="news-feed-empty">No theta candidates in the last scan.</div>
         ) : (
@@ -117,6 +119,8 @@ export default function ScannerHero() {
         )
       ) : strength.loading && !strength.data ? (
         <div className="news-feed-empty">Loading strength confirmation…</div>
+      ) : strength.error ? (
+        <div className="news-feed-error" role="alert">{strength.error}</div>
       ) : !strength.data?.results?.length ? (
         <div className="news-feed-empty">No strength candidates in the last scan.</div>
       ) : (
