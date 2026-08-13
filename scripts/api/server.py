@@ -67,6 +67,7 @@ from api.auth import verify_clerk_jwt, verify_api_key, is_trusted_local_request
 from api.ws_ticket import create_ticket, validate_ticket
 from api.routes.historical import router as historical_router
 from api.routes.preferences import router as preferences_router
+from api.routes.assistant_market import router as assistant_market_router
 
 import app_preferences
 from clients.menthorq_dashboard_client import (
@@ -556,6 +557,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="Radon API", version="1.0.0", lifespan=lifespan)
 app.include_router(historical_router)
 app.include_router(preferences_router)
+app.include_router(assistant_market_router)
 
 # Explicit origin allowlist (was a `https://.*\.radon\.run` wildcard regex). The
 # wildcard matched ANY *.radon.run subdomain, so a subdomain takeover of a stale

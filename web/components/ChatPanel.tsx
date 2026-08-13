@@ -69,10 +69,20 @@ function proposalRiskInput(proposal: AssistantOrderProposal | null): OrderRiskIn
     };
   }
   const signedPremium = input.action === "BUY" ? input.limit_price : -input.limit_price;
+  const chainLegs =
+    input.type === "combo"
+      ? input.legs.map((leg) => ({
+          action: leg.action,
+          right: leg.right,
+          strike: leg.strike,
+          expiry: leg.expiry,
+          quantity: input.quantity * leg.ratio,
+        }))
+      : [{ action: input.action, right: input.right, strike: input.strike, expiry: input.expiry, quantity: input.quantity }];
   return {
     type: "options", ticker: input.ticker, netPremium: signedPremium,
     description: proposal.summary, totalCost: signedPremium * input.quantity * 100,
-    chainLegs: [{ action: input.action, right: input.right, strike: input.strike, expiry: input.expiry, quantity: input.quantity }],
+    chainLegs,
   };
 }
 

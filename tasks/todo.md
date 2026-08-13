@@ -1,3 +1,29 @@
+# Task: Assistant full-backend tools (2026-08-13)
+
+CMD+J chat failed the ADBE bull-call-spread ask: no live spot, no priced chain, no spread math, KB miss treated as a dead end. Give the in-app assistant the same operator data surface as a terminal session (READ-only FastAPI + evaluate), then exact strikes from live mids.
+
+## Dependency graph
+
+- T1 depends_on: [] - Red tests: tool registry, spread math, fetch_backend allowlist, FastAPI quote/uw-chain, system prompt, combo place_order
+- T2 depends_on: [T1] - FastAPI `GET /quote/{ticker}` + `GET /options/uw-chain`
+- T3 depends_on: [T2] - Assistant tools + MAX_ROUNDS=8 + prompt + combo proposal mapping
+- T4 depends_on: [T3] - Focused tests green
+
+## Checklist
+
+- [x] T1 Red tests
+- [x] T2 FastAPI market routes
+- [x] T3 Assistant tools / loop / prompt / placeProposedOrder
+- [x] T4 Verify
+
+## Review
+
+- CMD+J can now quote, pull a priced UW chain, rank verticals, run evaluate.py, and call allowlisted FastAPI READ surfaces. KB miss no longer blocks live data.
+- `GET /quote/{ticker}` and `GET /options/uw-chain` sit on FastAPI. Mutating paths stay off `fetch_backend`. `place_order` combo proposals map to `/api/orders/place` type=combo.
+- Verify: vitest 57 focused + journal/untrusted; pytest `test_assistant_market_routes` + authz matrix 91.
+
+---
+
 # Task: DeepSec security remediation (2026-08-13)
 
 Source: `/Users/joemccann/dev/apps/finance/radon/.deepsec/data/radon/reports/report.md`
