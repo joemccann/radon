@@ -16,7 +16,9 @@ describe("ChatLauncher", () => {
 
     fireEvent.keyDown(document, { key: "j", ctrlKey: true });
 
-    const composer = await screen.findByLabelText("Message Grok assistant");
+    // Autofocus now comes from AskComposer's `focusKey` (fed the launcher's
+    // open flag), not ChatPanel's removed composerRef effect.
+    const composer = await screen.findByLabelText("Ask Radon");
     await waitFor(() => expect(document.activeElement).toBe(composer));
 
     fireEvent.keyDown(document, { key: "Escape" });
