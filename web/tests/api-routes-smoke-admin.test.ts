@@ -27,20 +27,37 @@ vi.mock("@/lib/radonApi", () => ({
   },
 }));
 
-// The high-impact ops admin routes (stack/ib restart, service control) are
-// operator-gated fail-closed via requireDemoAdmin(). Default to authorized so
-// the proxy-contract tests below exercise the happy/sad paths; the dedicated
-// fail-closed block flips it to null.
+// Demo-user management stays on requireDemoAdmin (DEMO_ADMIN_USER_IDS).
 const mockRequireDemoAdmin = vi.fn();
 vi.mock("@/lib/demo/adminAuth", () => ({
   requireDemoAdmin: mockRequireDemoAdmin,
 }));
+
+// Operator control-plane routes use requireRouteAccess({ operatorOnly: true }).
+const mockRequireRouteAccess = vi.fn();
+vi.mock("@/lib/routeAccess", () => ({
+  requireRouteAccess: mockRequireRouteAccess,
+}));
+
+function denyOperator(): { ok: false; response: Response } {
+  return {
+    ok: false,
+    response: new Response(JSON.stringify({ error: { message: "Forbidden", status: 403 } }), {
+      status: 403,
+    }),
+  };
+}
 
 beforeEach(() => {
   vi.resetModules();
   mockRadonFetch.mockReset();
   mockRequireDemoAdmin.mockReset();
   mockRequireDemoAdmin.mockResolvedValue("operator-user-id");
+  mockRequireRouteAccess.mockReset();
+  mockRequireRouteAccess.mockResolvedValue({
+    ok: true,
+    principal: { userId: "operator-user-id", kind: "operator" },
+  });
 });
 
 afterEach(() => {
@@ -123,7 +140,7 @@ describe("GET /api/admin/services", () => {
   });
 
   it("returns 403 and never reaches FastAPI when the operator gate denies", async () => {
-    mockRequireDemoAdmin.mockResolvedValueOnce(null);
+    mockRequireRouteAccess.mockResolvedValueOnce(denyOperator());
     const { GET } = await import("../app/api/admin/services/route");
     const res = await GET();
     expect(res.status).toBe(403);
@@ -217,14 +234,13 @@ describe("POST /api/admin/stack/restart", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Fail-closed operator gate (2026-06-29 audit): when requireDemoAdmin() denies
-// (e.g. ALLOWED_USER_IDS unset, or caller not the operator), the high-impact
-// ops routes must 403 and NEVER reach the FastAPI proxy. Regression guard for
-// the middleware isAuthorizedUser fail-open default.
+// Fail-closed operator gate: when requireRouteAccess({ operatorOnly }) denies
+// (ALLOWED_USER_IDS unset, or caller not the operator), the high-impact
+// ops routes must 403 and NEVER reach the FastAPI proxy.
 // ---------------------------------------------------------------------------
 describe("admin ops routes fail closed when unauthorized", () => {
   beforeEach(() => {
-    mockRequireDemoAdmin.mockResolvedValue(null); // deny
+    mockRequireRouteAccess.mockResolvedValue(denyOperator());
   });
 
   it("POST /api/admin/stack/restart → 403, no proxy call", async () => {

@@ -36,10 +36,11 @@ describe("security report route-local authorization matrix", () => {
     }
   });
 
-  it("guards the admin page with the fail-closed operator role helper", () => {
+  it("guards the admin page with the fail-closed operator allowlist", () => {
     const text = source("app/admin/page.tsx");
-    expect(text).toContain("requireDemoAdmin");
-    expect(text).toContain("notFound()");
+    expect(text).toContain("requireRouteAccess");
+    expect(text).toContain("operatorOnly: true");
+    expect(text).not.toContain("requireDemoAdmin");
   });
 
   it("guards every share generator independently of middleware", () => {
