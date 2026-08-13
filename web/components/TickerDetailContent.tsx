@@ -128,6 +128,19 @@ export type TickerDetailContentProps = {
   theme: "dark" | "light";
 };
 
+export function resolveTickerPosition(
+  portfolio: PortfolioData | null,
+  ticker: string,
+  positionId?: number | null,
+): PortfolioPosition | null {
+  if (!portfolio) return null;
+  if (positionId != null) {
+    const candidate = portfolio.positions.find((position) => position.id === positionId) ?? null;
+    return candidate?.ticker.toUpperCase() === ticker.toUpperCase() ? candidate : null;
+  }
+  return portfolio.positions.find((position) => position.ticker.toUpperCase() === ticker.toUpperCase()) ?? null;
+}
+
 export default function TickerDetailContent({
   ticker,
   positionId,
@@ -143,11 +156,7 @@ export default function TickerDetailContent({
   theme,
 }: TickerDetailContentProps) {
   const position: PortfolioPosition | null = useMemo(() => {
-    if (!portfolio) return null;
-    if (positionId != null) {
-      return portfolio.positions.find((p) => p.id === positionId) ?? null;
-    }
-    return portfolio.positions.find((p) => p.ticker === ticker) ?? null;
+    return resolveTickerPosition(portfolio, ticker, positionId);
   }, [ticker, positionId, portfolio]);
 
   // Instrument switch: an equity option position otherwise locks the header /

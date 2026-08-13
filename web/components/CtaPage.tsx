@@ -62,7 +62,7 @@ function pctile(value: number | null | undefined): number | null {
 /* ─── CtaPage ────────────────────────────────────────── */
 
 export default function CtaPage() {
-  const { data } = useRegime(true);
+  const { data } = useRegime(false);
   const { data: ctaData, loading, error } = useMenthorqCta();
 
   const cta = data?.cta ?? null;

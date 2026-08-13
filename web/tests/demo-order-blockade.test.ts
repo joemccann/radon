@@ -10,15 +10,24 @@ const FUTURE = "2026-06-29T16:00:00-04:00";
 const PAST = "2026-06-24T16:00:00-04:00";
 
 const auth = (metadata: unknown) =>
-  vi.fn().mockResolvedValue({ sessionClaims: { metadata } });
+  vi.fn().mockResolvedValue({ userId: "user_demo", sessionClaims: { metadata } });
 
 const throwingAuth = () =>
   vi.fn().mockRejectedValue(new Error("clerkMiddleware() was not run"));
 
 describe("resolveDemoOrderDecision", () => {
-  it("non-demo user → allow (real IB path)", async () => {
-    const d = await resolveDemoOrderDecision({ authFn: auth(null), now: NOW });
+  it("affirmatively allowlisted non-demo operator → allow (real IB path)", async () => {
+    const d = await resolveDemoOrderDecision({
+      authFn: vi.fn().mockResolvedValue({ userId: "user_operator", sessionClaims: { metadata: null } }),
+      allowedRaw: "user_operator",
+      now: NOW,
+    });
     expect(d.action).toBe("allow");
+  });
+
+  it("untagged non-operator identity never receives live order authority", async () => {
+    const d = await resolveDemoOrderDecision({ authFn: auth(null), now: NOW, allowedRaw: "user_operator" });
+    expect(d.action).toBe("auth-unavailable");
   });
 
   it("active demo user → paper", async () => {

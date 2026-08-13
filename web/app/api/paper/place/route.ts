@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import { getRequestId, jsonApiError, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -14,6 +16,8 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "paper/place:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   let body: unknown;
   try {

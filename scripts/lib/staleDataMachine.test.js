@@ -12,6 +12,7 @@ import {
   TICK_HEARTBEAT_INTERVAL_MS,
   decideHealthWrite,
   shouldRequestGatewayRestart,
+  summarizeSubscriptionFreshness,
 } from "./staleDataMachine.js";
 
 const NOW = 1_700_000_000_000;
@@ -56,6 +57,21 @@ describe("staleDataMachine constants", () => {
 });
 
 describe("decideStaleAction", () => {
+  it("per-subscription staleness cannot be masked or escalate unentitled subjects", () => {
+    const summary = summarizeSubscriptionFreshness([
+      { active: true, lastTickAt: NOW },
+      { active: true, lastTickAt: STALE_TICK_AT },
+      { active: false, lastTickAt: 0 },
+    ], NOW);
+
+    expect(summary).toEqual({ activeSubscriptions: 2, lastTickAt: STALE_TICK_AT });
+    expect(decideStaleAction(input(summary))).toBe("reconnect");
+
+    expect(summarizeSubscriptionFreshness([
+      { active: false, lastTickAt: STALE_TICK_AT },
+    ], NOW)).toEqual({ activeSubscriptions: 0, lastTickAt: NOW });
+  });
+
   it("healthy ticks → none", () => {
     expect(decideStaleAction(input())).toBe("none");
   });

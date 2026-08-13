@@ -43,7 +43,7 @@ function formatExpiry(date: string): string {
  * Submits to /api/orders/place with type=option + conId + exchange so
  * IB doesn't pick up VIXW weeklies or other related roots by accident.
  */
-export function IndexOptionOrderForm({ ticker, portfolio = null }: IndexOptionOrderFormProps) {
+export function IndexOptionOrderForm({ ticker, portfolio }: IndexOptionOrderFormProps) {
   const symbol = ticker.toUpperCase();
 
   // Step 1: expiries (no expiry scope)
@@ -53,20 +53,35 @@ export function IndexOptionOrderForm({ ticker, portfolio = null }: IndexOptionOr
   const [right, setRight] = useState<OptionRight>("C");
   const [selectedConId, setSelectedConId] = useState<number | null>(null);
 
+  useEffect(() => {
+    setSelectedExpiry(null);
+    setSelectedConId(null);
+    setRight("C");
+  }, [symbol]);
+
   // Default to nearest expiry on load.
   useEffect(() => {
-    if (initial.data?.expirations.length && selectedExpiry == null) {
+    if (
+      initial.data?.symbol.toUpperCase() === symbol &&
+      initial.data.expirations.length &&
+      selectedExpiry == null
+    ) {
       setSelectedExpiry(initial.data.expirations[0]);
     }
-  }, [initial.data, selectedExpiry]);
+  }, [initial.data, selectedExpiry, symbol]);
 
   // Step 2: contracts scoped to the chosen expiry
   const scoped = useIndexOptionsChain(symbol, selectedExpiry);
 
   const expiryContracts = useMemo(() => {
-    if (!scoped.data) return [];
-    return scoped.data.contracts.filter((c) => c.right === right);
-  }, [scoped.data, right]);
+    if (!scoped.data || scoped.data.symbol.toUpperCase() !== symbol) return [];
+    return scoped.data.contracts.filter(
+      (c) =>
+        c.right === right &&
+        c.symbol.toUpperCase() === symbol &&
+        c.lastTradeDateOrContractMonth === selectedExpiry,
+    );
+  }, [scoped.data, right, selectedExpiry, symbol]);
 
   // Reset selected strike when expiry or right changes
   useEffect(() => {
@@ -116,7 +131,11 @@ export function IndexOptionOrderForm({ ticker, portfolio = null }: IndexOptionOr
   );
 
   const buildSubmit = ({ action, quantity, limitPrice, tif }: ListedOrderFormValues) => {
-    if (!selectedContract) {
+    if (
+      !selectedContract ||
+      selectedContract.symbol.toUpperCase() !== symbol ||
+      selectedContract.lastTradeDateOrContractMonth !== selectedExpiry
+    ) {
       return { error: "Pick a strike" };
     }
     const qty = parseInt(quantity, 10);
@@ -227,7 +246,7 @@ export function IndexOptionOrderForm({ ticker, portfolio = null }: IndexOptionOr
       surface="index-option-form"
       buildSubmit={buildSubmit}
       submitLabel={(action) => `${action} ${selectedContract?.localSymbol ?? symbol}`}
-      submitDisabled={selectedConId == null}
+      submitDisabled={selectedContract == null}
     />
   );
 }

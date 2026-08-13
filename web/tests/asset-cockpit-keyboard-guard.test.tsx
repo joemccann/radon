@@ -31,6 +31,10 @@ vi.mock("next/navigation", () => ({
   }),
 }));
 
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
+
 const PRICES = {
   MU: { ticker: "MU", last: 142.18, bid: 142.18, ask: 142.2, close: 140.9 },
 } as unknown as AssetCockpitProps["prices"];

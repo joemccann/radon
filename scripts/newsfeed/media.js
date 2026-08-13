@@ -1,9 +1,11 @@
 import path from "path";
+import crypto from "node:crypto";
 import fs from "fs-extra";
 import https from "node:https";
 import dns from "node:dns";
 import net from "node:net";
 import axios from "axios";
+import sharp from "sharp";
 
 const BASE_URL = new URL("https://themarketear.com");
 
@@ -106,29 +108,38 @@ const ipv4Agent = new https.Agent({ family: 4, keepAlive: true, lookup: createGu
 const defaultClient = axios.create({
   timeout: 20000,
   responseType: "arraybuffer",
-  maxRedirects: 5,
+  // Redirects are followed manually so every hop receives the same URL,
+  // hostname, DNS, and cookie-scope checks as the initial request.
+  maxRedirects: 0,
   httpsAgent: ipv4Agent,
 });
 
-const IMAGE_MAGIC_BYTES = [
-  [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], // PNG
-  [0xff, 0xd8, 0xff], // JPEG
-  [0x47, 0x49, 0x46, 0x38], // GIF
-  [0x42, 0x4d], // BMP
+const RASTER_FORMATS = [
+  { format: "png", ext: ".png", mime: "image/png", signature: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+  { format: "jpeg", ext: ".jpg", mime: "image/jpeg", signature: [0xff, 0xd8, 0xff] },
+  { format: "gif", ext: ".gif", mime: "image/gif", signature: [0x47, 0x49, 0x46, 0x38] },
+  { format: "bmp", ext: ".bmp", mime: "image/bmp", signature: [0x42, 0x4d] },
 ];
+const MAX_IMAGE_BYTES = 20 * 1024 * 1024;
+const MAX_IMAGE_PIXELS = 16_000_000;
+const SAFE_OUTPUT = { format: "png", ext: ".png", mime: "image/png" };
 
 // Bytes that land here are served unauthenticated from media.radon.run with
 // Access-Control-Allow-Origin *, so only real raster images may be written —
 // never an HTML/JSON body from a misrouted fetch, never an SVG (scriptable).
 export function looksLikeImage(data) {
+  return detectRasterFormat(data) !== null;
+}
+
+export function detectRasterFormat(data) {
   const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data ?? []);
-  if (bytes.length < 12) return false;
+  if (bytes.length < 12) return null;
   if (bytes.slice(0, 4).toString("latin1") === "RIFF" && bytes.slice(8, 12).toString("latin1") === "WEBP") {
-    return true;
+    return { format: "webp", ext: ".webp", mime: "image/webp" };
   }
-  return IMAGE_MAGIC_BYTES.some((signature) =>
+  return RASTER_FORMATS.find(({ signature }) =>
     signature.every((byte, offset) => bytes[offset] === byte),
-  );
+  ) ?? null;
 }
 
 function readContentType(headers) {
@@ -137,14 +148,70 @@ function readContentType(headers) {
   return typeof raw === "string" ? raw.toLowerCase() : "";
 }
 
-function assertImagePayload(response) {
-  const contentType = readContentType(response?.headers);
-  if (contentType && !contentType.startsWith("image/")) {
+async function sanitizeImagePayload(response) {
+  const encoded = Buffer.isBuffer(response?.data) ? response.data : Buffer.from(response?.data ?? []);
+  if (encoded.length === 0 || encoded.length > MAX_IMAGE_BYTES) {
+    throw new Error("response body exceeds raster input bounds");
+  }
+  const detected = detectRasterFormat(encoded);
+  if (!detected) {
+    throw new Error("response body is not a supported raster image");
+  }
+  const contentType = readContentType(response?.headers).split(";", 1)[0].trim();
+  if (contentType && contentType !== detected.mime) {
     throw new Error(`unexpected content-type ${contentType}`);
   }
-  if (!looksLikeImage(response?.data)) {
-    throw new Error("response body is not an image");
+
+  const image = sharp(encoded, {
+    failOn: "error",
+    limitInputPixels: MAX_IMAGE_PIXELS,
+    sequentialRead: true,
+  });
+  const metadata = await image.metadata();
+  if (metadata.format !== detected.format || !metadata.width || !metadata.height) {
+    throw new Error("raster decoder format mismatch");
   }
+  if (metadata.width * metadata.height > MAX_IMAGE_PIXELS) {
+    throw new Error("decoded raster exceeds pixel bounds");
+  }
+
+  // Decode and publish a newly encoded, single-frame PNG. This strips trailing
+  // polyglot content, metadata, profiles, and any source-format active payload.
+  const data = await image
+    .rotate()
+    .png({ compressionLevel: 9, palette: false })
+    .toBuffer();
+  return { ...SAFE_OUTPUT, data };
+}
+
+const MAX_IMAGE_REDIRECTS = 5;
+
+async function fetchAllowedImage(client, initialUrl, cookieHeader) {
+  let current = new URL(initialUrl);
+  for (let redirects = 0; redirects <= MAX_IMAGE_REDIRECTS; redirects += 1) {
+    if (!isAllowedImageUrl(current)) {
+      throw new Error(`redirected to untrusted origin ${current.toString()}`);
+    }
+    const headers = cookieHeader && isCookieScopedHost(current.hostname)
+      ? { Cookie: cookieHeader }
+      : undefined;
+    const response = await client.get(current.toString(), {
+      ...(headers ? { headers } : {}),
+      maxRedirects: 0,
+      validateStatus: (status) => status >= 200 && status < 400,
+    });
+    const status = Number(response?.status ?? 200);
+    if (status >= 300 && status < 400) {
+      if (redirects === MAX_IMAGE_REDIRECTS) throw new Error("too many image redirects");
+      const location = response?.headers?.location ?? response?.headers?.Location;
+      if (typeof location !== "string" || !location) throw new Error("image redirect missing location");
+      current = new URL(location, current);
+      continue;
+    }
+    if (status < 200 || status >= 300) throw new Error(`unexpected image status ${status}`);
+    return response;
+  }
+  throw new Error("too many image redirects");
 }
 
 function slugify(value) {
@@ -188,33 +255,25 @@ export function createImageDownloader({ mediaDir, client = defaultClient, getCoo
         return null;
       }
 
-      const requestOptions =
-        cookieHeader && isCookieScopedHost(urlObj.hostname)
-          ? { headers: { Cookie: cookieHeader } }
-          : undefined;
+      try {
+        const response = await fetchAllowedImage(client, absoluteUrl, cookieHeader);
+        const format = await sanitizeImagePayload(response);
+        const contentDigest = crypto.createHash("sha256").update(format.data).digest("hex").slice(0, 12);
+        const filename = `${slugify(postId)}-${String(index + 1).padStart(2, "0")}-${contentDigest}${format.ext}`;
+        const destPath = path.join(mediaDir, filename);
+        // Absolute URL — see MEDIA_ORIGIN above. The dashboard never gets a
+        // chance to optimise `/media/<f>` because that path 404s on Hetzner.
+        const publicPath = `${MEDIA_ORIGIN}/${filename}`;
 
-      const rawName = path.basename(urlObj.pathname) || `${slugify(postId)}-${index}`;
-      const [, maybeExt] = rawName.split(/(?=\.[^.]+$)/);
-      const ext = maybeExt && maybeExt.length <= 6 ? maybeExt : ".png";
-      const filename = `${slugify(postId)}-${String(index + 1).padStart(2, "0")}${ext}`;
-      const destPath = path.join(mediaDir, filename);
-      // Absolute URL — see MEDIA_ORIGIN above. The dashboard never gets a
-      // chance to optimise `/media/<f>` because that path 404s on Hetzner.
-      const publicPath = `${MEDIA_ORIGIN}/${filename}`;
-
-      if (!(await fs.pathExists(destPath))) {
-        try {
-          const response = await client.get(absoluteUrl, requestOptions);
-          assertImagePayload(response);
-          await fs.writeFile(destPath, response.data);
-        } catch (err) {
-          console.warn(`[newsfeed] image download failed ${absoluteUrl}: ${err.message}`);
-          return null;
-        }
+        // Always replace a legacy file after validation so an older raw or
+        // extension-derived publication cannot survive the hardened ingest.
+        await fs.writeFile(destPath, format.data);
+        cache.set(absoluteUrl, publicPath);
+        return publicPath;
+      } catch (err) {
+        console.warn(`[newsfeed] image download failed ${absoluteUrl}: ${err.message}`);
+        return null;
       }
-
-      cache.set(absoluteUrl, publicPath);
-      return publicPath;
     });
 
     const results = await Promise.all(tasks);

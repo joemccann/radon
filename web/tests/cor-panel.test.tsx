@@ -12,7 +12,7 @@
  * Spec: docs/indicators/cor.md.
  */
 import React from "react";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
@@ -270,6 +270,24 @@ describe("CorPanel — gating", () => {
     );
     expect(screen.getByTestId("section-empty-state")).toBeTruthy();
     expect(screen.getByText("No implied correlation data yet")).toBeTruthy();
+  });
+});
+
+describe("CorPanel — minimap gaps", () => {
+  it("preserves a missing tenor observation as a path break", () => {
+    const data = buildData({
+      series: [
+        entry({ date: "2026-08-05", cor3m: 20 }),
+        entry({ date: "2026-08-06", cor3m: null }),
+        entry({ date: "2026-08-07", cor3m: 22 }),
+      ],
+    });
+    renderPanel(hookState({ data }));
+    fireEvent.click(screen.getByRole("button", { name: "3M" }));
+
+    const path = document.querySelector(".brush-minimap-line")?.getAttribute("d") ?? "";
+    expect(path.match(/M/g)).toHaveLength(2);
+    expect(path).not.toContain("NaN");
   });
 });
 

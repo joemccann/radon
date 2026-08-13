@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { join } from "path";
@@ -60,6 +62,8 @@ async function readCachedBreadth(): Promise<Record<string, unknown> | null> {
 }
 
 export async function GET(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const cached = await readCachedBreadth();
   const response = NextResponse.json(cached ?? MISSING_BREADTH);
@@ -73,6 +77,8 @@ export async function GET(): Promise<Response> {
 }
 
 export async function POST(): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "breadth:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   try {
     const data = await radonFetch<Record<string, unknown>>("/breadth/scan", {
       method: "POST",

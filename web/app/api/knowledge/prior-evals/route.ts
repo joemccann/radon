@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import { getRequestId, setNoStoreResponseHeaders } from "@/lib/apiContracts";
@@ -17,6 +19,8 @@ function normalizeTicker(raw: string | null): string | null {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess();
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const url = new URL(request.url);
 

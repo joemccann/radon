@@ -15,6 +15,7 @@ import {
 } from "@/lib/serviceHealthWindows";
 import { formatServiceHealthError } from "@/lib/serviceHealthError";
 import { filterApplicableServiceHealthRows } from "@/lib/serviceHealthApplicability";
+import { requireRouteAccess } from "@/lib/routeAccess";
 
 // Disable Next.js static caching: this handler reads live DB state.
 export const dynamic = "force-dynamic";
@@ -108,7 +109,9 @@ function applyStalenessGate(row: ServiceHealthRow, nowMs: number): ServiceHealth
   return { ...row, state: coerced };
 }
 
-export async function GET(): Promise<Response> {
+export async function GET(request?: Request): Promise<Response> {
+  const access = await requireRouteAccess(request);
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     const cachedRows = await cachedRead(
@@ -124,9 +127,8 @@ export async function GET(): Promise<Response> {
     const rows: ServiceHealthRow[] = [];
     for (const row of applicableRows) {
       const r = row as unknown as Record<string, unknown>;
-      // This endpoint is PUBLIC (no Clerk session). Scrub any secret-shaped
-      // substrings (Turso/libsql URLs, auth tokens, JWTs, IB account ids) out of
-      // writer-supplied error strings before they reach an anonymous caller.
+      // Scrub secret-shaped substrings from writer-supplied diagnostics before
+      // they reach an authenticated operational client.
       const lastErrorRawUnscrubbed = (r.last_error ?? null) as string | null;
       const lastErrorRaw = lastErrorRawUnscrubbed == null ? null : scrubSecrets(lastErrorRawUnscrubbed);
       const service = String(r.service ?? "");
@@ -176,14 +178,15 @@ export async function GET(): Promise<Response> {
     );
     console.warn(`[service-health] ${message}`);
     const updatedAt = new Date().toISOString();
+    const publicMessage = "Service health store unavailable";
     const dbRow: ServiceHealthRow = {
       service: "turso-db",
       state: "error",
       category: "scheduled",
       last_attempt_started_at: null,
       last_attempt_finished_at: null,
-      last_error: JSON.stringify({ message }),
-      error_summary: formatServiceHealthError(message),
+      last_error: JSON.stringify({ message: publicMessage }),
+      error_summary: publicMessage,
       updated_at: updatedAt,
     };
     const response = NextResponse.json({
@@ -192,7 +195,7 @@ export async function GET(): Promise<Response> {
       degraded_count: 1,
       dormant_count: 0,
       summary: { total: 1, failing_count: 1 },
-      warning: message,
+      warning: publicMessage,
     });
     return setNoStoreResponseHeaders(response, requestId);
   }

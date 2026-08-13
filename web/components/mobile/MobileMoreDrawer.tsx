@@ -22,21 +22,6 @@ type MobileMoreDrawerProps = {
 };
 
 export default function MobileMoreDrawer({ open, onClose, ibConnected = true, lastSync }: MobileMoreDrawerProps) {
-  if (
-    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
-    process.env.RADON_AUTHLESS_TEST === "1"
-  ) {
-    return (
-      <MobileMoreDrawerView
-        open={open}
-        onClose={onClose}
-        ibConnected={ibConnected}
-        lastSync={lastSync}
-        userEmail="test@radon.local"
-        onSignOut={() => undefined}
-      />
-    );
-  }
   return (
     <AuthenticatedMobileMoreDrawer
       open={open}

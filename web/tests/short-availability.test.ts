@@ -6,6 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { resolveLocateChipEnabled } from "@/lib/order/risk/OrderRiskGate";
+import type { PortfolioData } from "@/lib/types";
+import type { OrderRiskState } from "@/lib/order/risk";
 
 // ---------------------------------------------------------------------------
 // Mock radonFetch for Next.js route tests
@@ -214,27 +217,39 @@ describe("Short availability status contract", () => {
 // observable behaviour through the chip logic contracts.
 
 describe("Locate chip enablement logic", () => {
-  it("SELL leg with no portfolio position enables the chip", () => {
-    // Portfolio with a different ticker
-    const portfolio = {
-      positions: [{ ticker: "AAPL" }],
-    };
-    const ticker = "SPY";
-    const hasPosition = portfolio.positions.some(
-      (p) => p.ticker.toUpperCase() === ticker.toUpperCase(),
-    );
-    expect(hasPosition).toBe(false);
+  const sellCall = {
+    ticker: "SPY",
+    chainLegs: [{ action: "SELL" as const, right: "C" as const, strike: 500, expiry: "20261219", quantity: 1 }],
+    netPremium: -1,
+    description: "Short Call",
+    totalCost: -100,
+  };
+  const portfolio = { positions: [{ ticker: "SPY", legs: [{ type: "Put" }] }] } as unknown as PortfolioData;
+
+  function state(undefinedRiskReason: string | null): OrderRiskState {
+    return {
+      coverageStatus: "resolved",
+      okToSubmit: true,
+      coveringLegs: [],
+      summary: { undefinedRiskReason },
+    } as unknown as OrderRiskState;
+  }
+
+  it("an unrelated same-ticker option does not suppress a naked-short locate", () => {
+    expect(resolveLocateChipEnabled(
+      sellCall,
+      portfolio,
+      state("Uncovered short call"),
+    )).toBe(true);
   });
 
-  it("SELL leg with held position does not enable the chip", () => {
-    const portfolio = {
-      positions: [{ ticker: "SPY" }],
-    };
-    const ticker = "SPY";
-    const hasPosition = portfolio.positions.some(
-      (p) => p.ticker.toUpperCase() === ticker.toUpperCase(),
-    );
-    expect(hasPosition).toBe(true);
+  it("resolved structural coverage suppresses the locate", () => {
+    expect(resolveLocateChipEnabled(sellCall, portfolio, state(null))).toBe(false);
+  });
+
+  it("pending or missing portfolio coverage cannot claim a resolved locate state", () => {
+    expect(resolveLocateChipEnabled(sellCall, undefined, null)).toBe(false);
+    expect(resolveLocateChipEnabled(sellCall, null, null)).toBe(false);
   });
 
   it("BUY leg never enables the chip", () => {

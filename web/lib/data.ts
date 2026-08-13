@@ -9,6 +9,7 @@ import {
   OrdersGlyph,
   PerformanceGlyph,
   PortfolioGlyph,
+  PreferencesGlyph,
   RegimeGlyph,
   ScannerGlyph,
   WatchlistGlyph,
@@ -54,6 +55,7 @@ export const navItems: WorkspaceNavItem[] = [
   { label: "Alerts", route: "alerts", href: "/alerts", icon: ScannerGlyph, group: "operations" },
   { label: "Workflow", route: "workflow", href: "/workflow", icon: OperatorGlyph, group: "operations" },
   { label: "Operator", route: "admin", href: "/admin", icon: OperatorGlyph, group: "operations" },
+  { label: "Preferences", route: "preferences", href: "/preferences", icon: PreferencesGlyph, group: "operations" },
   // Profile is reached via the dedicated user card above the sidebar footer,
   // not the main nav list — hidden keeps it out of the primary loop while
   // still exposing the route/label/icon to consumers that resolve by route.
@@ -76,6 +78,7 @@ export const quickPromptsBySection: Record<WorkspaceSection, string[]> = {
   alerts: ["scan --top 12", "portfolio", "help"],
   workflow: ["scan --top 12", "portfolio", "help"],
   admin: ["help"],
+  preferences: ["help"],
   profile: ["portfolio", "scan --top 12", "help"],
   "ticker-detail": ["portfolio", "scan --top 12", "help"],
 };
@@ -96,6 +99,7 @@ export const sectionDescription: Record<WorkspaceSection, string> = {
   alerts: "Signal alert rules evaluated against incoming scan rows.",
   workflow: "Visual flow-pipeline composer for chaining scans and signals.",
   admin: "Operator controls for IB Gateway 2FA and Radon services.",
+  preferences: "Operator tunable runtime limits, scanner concurrency and feature flags.",
   profile: "Your account, saved articles and symbol watchlist.",
   "ticker-detail": "Instrument research surface — company, book, chain, position, orders, news, ratings, seasonality.",
 };

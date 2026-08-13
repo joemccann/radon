@@ -21,14 +21,14 @@ ExecCondition=/usr/bin/test -f /home/radon/radon/scripts/archive_portfolio_snaps
 # Off-box upload required: RADON_ARCHIVE_S3_* (Backblaze B2) in EnvironmentFile.
 # Local partitions still written under RADON_ARCHIVE_DIR; job fails closed if
 # S3 is unset (no --allow-delete-without-upload).
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py
+ExecStart=/usr/bin/flock -w 7500 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/scripts/archive_portfolio_snapshots.py
 StandardOutput=journal
 StandardError=journal
 # Healthy steady-state prune is minutes; a first catch-up of a fat backlog
 # needs room for paged archive + single-key delete fallback. 2h is the
 # scheduling contract with db-retention (08:10 UTC) — do not raise without
 # also moving that timer later.
-TimeoutStartSec=7200
+TimeoutStartSec=8000
 
 [Install]
 WantedBy=multi-user.target

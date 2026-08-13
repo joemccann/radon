@@ -8,6 +8,9 @@ export async function scanner(
   const args: string[] = [];
 
   if (input.top != null) {
+    if (!Number.isInteger(input.top) || input.top < 1 || input.top > 500) {
+      throw new RangeError("top must be an integer between 1 and 500");
+    }
     args.push("--top", String(input.top));
   }
   if (input.minScore != null) {

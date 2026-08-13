@@ -33,6 +33,7 @@ const ORDERS_RISK_REVERSAL = {
     {
       orderId: 1001,
       permId: 9001,
+      orderRef: "radon-risk-reversal-aapl-1",
       symbol: "AAPL",
       contract: {
         conId: 12001,
@@ -56,6 +57,7 @@ const ORDERS_RISK_REVERSAL = {
     {
       orderId: 1002,
       permId: 9002,
+      orderRef: "radon-risk-reversal-aapl-1",
       symbol: "AAPL",
       contract: {
         conId: 12002,
@@ -143,7 +145,7 @@ async function stubApis(page: import("@playwright/test").Page) {
 test.describe("Orders open-order combo rendering", () => {
   test("combines short put and long call as a risk reversal row and opens combo modify", async ({ page }) => {
     await stubApis(page);
-    await page.goto("http://127.0.0.1:3000/orders");
+    await page.goto("/orders");
 
     const riskReversalRow = page
       .locator("tbody tr")
@@ -162,7 +164,7 @@ test.describe("Orders open-order combo rendering", () => {
 
     const modal = page.locator(".modify-dialog");
     await expect(modal).toBeVisible();
-    await expect(modal).toContainText("Combo Legs");
+    await expect(modal).toContainText("Edit Legs");
     await expect(modal.locator("#modify-quantity-input")).toHaveValue("10");
     await expect(modal.locator("#modify-leg-0-strike")).toHaveValue("150");
     await expect(modal.locator("#modify-leg-1-strike")).toHaveValue("165");

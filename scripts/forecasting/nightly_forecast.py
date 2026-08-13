@@ -143,7 +143,14 @@ def main(argv: Optional[list] = None) -> int:
     )
 
     print(json.dumps(out))
-    return 0
+    required_failed = (
+        isinstance(out.get("backfill"), dict)
+        and "err" in out["backfill"]
+    ) or out.get("surprise_count") is None or (
+        isinstance(out.get("calibration"), dict)
+        and "err" in out["calibration"]
+    )
+    return 1 if required_failed else 0
 
 
 if __name__ == "__main__":

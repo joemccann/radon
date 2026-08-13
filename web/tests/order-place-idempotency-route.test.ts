@@ -54,6 +54,23 @@ beforeEach(() => {
 });
 
 describe("POST /api/orders/place idempotency", () => {
+  it("accepted_order_retry_after_four_seconds_returns_original_result_once", async () => {
+    vi.useFakeTimers();
+    try {
+      const { POST } = await import("../app/api/orders/place/route");
+      const first = await POST(placeReq(STOCK));
+      vi.advanceTimersByTime(5_000);
+      const retry = await POST(placeReq(STOCK));
+
+      expect(first.status).toBe(200);
+      expect(retry.status).toBe(200);
+      expect(placeCallCount()).toBe(1);
+      expect((await retry.json()).deduplicated).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("dedups an immediate identical resubmit — places once, flags the duplicate", async () => {
     const { POST } = await import("../app/api/orders/place/route");
 

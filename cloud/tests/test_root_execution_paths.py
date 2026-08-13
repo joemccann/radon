@@ -318,30 +318,14 @@ def test_nextjs_db_watchdog_does_not_run_as_root():
     )
 
 
-def test_nextjs_db_watchdog_takes_ownership_of_its_state_directory():
-    """The demotion from root has to carry its state file with it.
-
-    /home/radon/radon-cloud/state was created root:root by this unit's own
-    os.makedirs while it still ran as root, and nothing else in the repo
-    provisions it. Without a privileged handover step, save_state raises
-    PermissionError on the first radon run and every tick fails -- including
-    the healthy path, so the K=3 wedge ladder could never accumulate.
-    """
+def test_nextjs_db_watchdog_uses_systemd_owned_private_state_directory():
+    """State provisioning must not recursively chown a writable tree."""
     text = (SERVICES_DIR / "radon-nextjs-db-watchdog.service").read_text(
         encoding="utf-8"
     )
-    pre_steps = [
-        line.split("=", 1)[1]
-        for line in text.splitlines()
-        if line.strip().startswith("ExecStartPre=")
-    ]
-    assert any(
-        step.startswith("+") and "chown" in step and "state" in step
-        for step in pre_steps
-    ), (
-        "no privileged ExecStartPre hands the state directory to radon, so the "
-        f"demotion breaks save_state on the live host. Steps: {pre_steps}"
-    )
+    assert "StateDirectory=radon-nextjs-db-watchdog" in text
+    assert "StateDirectoryMode=0700" in text
+    assert "chown" not in text
 
 
 def test_nextjs_db_watchdog_restarts_through_the_validating_operator():

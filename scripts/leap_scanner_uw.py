@@ -525,7 +525,10 @@ def scan_ticker(
 
 
 def scan_universe(
-    tickers: List[str], min_gap: float, workers: int = 16
+    tickers: List[str],
+    min_gap: float,
+    workers: int = 16,
+    failed_tickers: Optional[List[str]] = None,
 ) -> List[ScanResult]:
     """Scan tickers in parallel with one shared UWClient."""
     workers = max(1, workers)
@@ -543,12 +546,18 @@ def scan_universe(
                     result = future.result()
                 except UWRateLimitError:
                     print(f"  ✗ {ticker}: rate limited, skip")
+                    if failed_tickers is not None:
+                        failed_tickers.append(ticker)
                     continue
                 except Exception as exc:
                     print(f"  ✗ Error scanning {ticker}: {exc}")
+                    if failed_tickers is not None:
+                        failed_tickers.append(ticker)
                     continue
                 if result:
                     results.append(result)
+                elif failed_tickers is not None:
+                    failed_tickers.append(ticker)
     return results
 
 
@@ -806,7 +815,13 @@ def main():
     print(f"Workers: {max(1, args.workers)}")
     print(f"Data: Unusual Whales (HV, IV) · Yahoo Finance (LAST RESORT fallback)")
     
-    results = scan_universe(tickers, args.min_gap, workers=args.workers)
+    failed_tickers = []
+    results = scan_universe(
+        tickers,
+        args.min_gap,
+        workers=args.workers,
+        failed_tickers=failed_tickers,
+    )
     
     # Summary
     print(f"\n{'='*60}")
@@ -830,10 +845,16 @@ def main():
         output_path.write_text(report)
         print(f"\n✓ Report saved to {output_path}")
 
-    # JSON cache is written even for an empty scan so a custom ticker scan
-    # with zero results still replaces the dashboard cache (theta precedent).
+    if not results:
+        print(
+            "✗ No ticker produced a valid provider result; preserving the last good cache",
+            file=sys.stderr,
+        )
+        return 1
+
     if args.json:
         json_data = build_json_payload(results, args.min_gap, universe, tickers)
+        json_data["failed_tickers"] = failed_tickers
         json_path = output_path.with_suffix(".json")
         json_path.parent.mkdir(parents=True, exist_ok=True)
         json_path.write_text(json.dumps(json_data, indent=2))
@@ -851,6 +872,8 @@ def main():
         # service_health row lets the banner spot a stale scheduled scan.
         mirror_scan_snapshot("leap-scan", json_data)
 
+    return 1 if failed_tickers else 0
+
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -104,6 +104,21 @@ const METRIC_CELL_KEY: Exclude<OptionsExposureMetric, "open_interest">[] = [
   "abs_dex",
 ];
 
+const EXPOSURE_LEVEL_KEYS = new Set<OptionsExposureLevelKey>(
+  EXPOSURE_LEVEL_OPTIONS.map((option) => option.key),
+);
+
+const EXPOSURE_CELL_KEYS = [
+  "net_gex",
+  "abs_gex",
+  "net_dex",
+  "abs_dex",
+  "oi_call",
+  "oi_put",
+  "strike_idx",
+  "expiration_idx",
+] as const satisfies ReadonlyArray<keyof OptionsExposureCells>;
+
 function finite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value);
 }
@@ -193,18 +208,46 @@ export function isOptionsExposurePayload(value: unknown): value is OptionsExposu
   if (!value || typeof value !== "object") return false;
   const payload = value as Partial<OptionsExposurePayload>;
   const cells = payload.cells;
-  return (
+  if (!(
     finite(payload.schema_version)
+    && Number.isInteger(payload.schema_version)
+    && payload.schema_version > 0
     && typeof payload.symbol === "string"
+    && payload.symbol.length > 0
     && typeof payload.source === "string"
+    && payload.source.length > 0
     && typeof payload.source_time === "string"
+    && Number.isFinite(Date.parse(payload.source_time))
     && typeof payload.fetched_at === "string"
+    && Number.isFinite(Date.parse(payload.fetched_at))
     && (payload.frequency === "eod" || payload.frequency === "intraday")
     && finite(payload.spot)
+    && payload.spot > 0
     && Array.isArray(payload.strikes)
     && payload.strikes.every(finite)
     && Array.isArray(payload.expirations)
+    && payload.expirations.every((expiration) => (
+      Boolean(expiration)
+      && typeof expiration === "object"
+      && typeof expiration.expiration_date === "string"
+      && /^\d{4}-\d{2}-\d{2}$/.test(expiration.expiration_date)
+      && Number.isFinite(Date.parse(`${expiration.expiration_date}T00:00:00Z`))
+      && finite(expiration.dte)
+      && expiration.dte >= 0
+    ))
     && Array.isArray(payload.levels)
+    && payload.levels.every((level) => (
+      Boolean(level)
+      && typeof level === "object"
+      && EXPOSURE_LEVEL_KEYS.has(level.key)
+      && typeof level.label === "string"
+      && level.label.length > 0
+      && (level.value === null || finite(level.value))
+    ))
+    && Boolean(payload.units)
+    && typeof payload.units === "object"
+    && !Array.isArray(payload.units)
+    && Object.values(payload.units).every((unit) => typeof unit === "string")
     && typeof payload.complete === "boolean"
     && Boolean(cells)
     && Array.isArray(cells?.net_gex)
@@ -215,5 +258,16 @@ export function isOptionsExposurePayload(value: unknown): value is OptionsExposu
     && Array.isArray(cells?.oi_put)
     && Array.isArray(cells?.strike_idx)
     && Array.isArray(cells?.expiration_idx)
-  );
+  )) return false;
+
+  const cellCount = cells!.strike_idx.length;
+  if (!EXPOSURE_CELL_KEYS.every((key) => cells![key].length === cellCount)) return false;
+  if (!EXPOSURE_CELL_KEYS.every((key) => cells![key].every(finite))) return false;
+  if (!cells!.strike_idx.every((index) => Number.isInteger(index) && index >= 0 && index < payload.strikes!.length)) {
+    return false;
+  }
+  if (!cells!.expiration_idx.every((index) => (
+    Number.isInteger(index) && index >= 0 && index < payload.expirations!.length
+  ))) return false;
+  return true;
 }

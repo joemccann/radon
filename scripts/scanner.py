@@ -80,7 +80,7 @@ def fetch_flow_data(
         return fetch_flow_module(
             ticker,
             lookback_days=days,
-            skip_options_flow=True,
+            skip_options_flow=False,
             fetch_missing_history=fetch_missing_history,
             retry_transient=retry_transient,
         )
@@ -148,10 +148,10 @@ def analyze_signal(flow_data: dict) -> dict:
     options_conflict = False
     options_flow = flow_data.get("options_flow", {})
     if options_flow:
-        combined_bias = options_flow.get("combined_bias", "NO_DATA")
+        combined_bias = options_flow.get("bias", "NO_DATA")
         bias_map = {
-            "BULLISH": "ACCUMULATION", "LEAN_BULLISH": "ACCUMULATION",
-            "BEARISH": "DISTRIBUTION", "LEAN_BEARISH": "DISTRIBUTION",
+            "BULLISH": "ACCUMULATION", "STRONGLY_BULLISH": "ACCUMULATION",
+            "BEARISH": "DISTRIBUTION", "STRONGLY_BEARISH": "DISTRIBUTION",
         }
         expected_dp = bias_map.get(combined_bias)
         if expected_dp and expected_dp != direction:

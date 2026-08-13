@@ -5,7 +5,7 @@
 // deployment would include trial users themselves). Mirrors the FastAPI
 // ALLOWED_USER_IDS gate (scripts/api/auth.py) on the Next.js side.
 //
-// Default-deny: if ALLOWED_USER_IDS is unset, NOBODY is an admin.
+// Default-deny: if DEMO_ADMIN_USER_IDS is unset, NOBODY is a demo admin.
 
 import { parseAllowedUserIds } from "./provisionTrial";
 
@@ -30,6 +30,6 @@ export async function requireDemoAdmin(
 ): Promise<string | null> {
   const { userId } = await (opts.authFn ?? defaultAuth)();
   if (!userId) return null;
-  const allowed = parseAllowedUserIds(opts.allowedRaw ?? process.env.ALLOWED_USER_IDS);
+  const allowed = parseAllowedUserIds(opts.allowedRaw ?? process.env.DEMO_ADMIN_USER_IDS);
   return allowed.has(userId) ? userId : null;
 }

@@ -16,9 +16,10 @@ async function tempDir() {
 // The downloader refuses anything that is not a real raster image before it
 // writes into the publicly served media dir, so fixtures must carry PNG magic
 // bytes. See scripts/newsfeed/media.js:looksLikeImage.
-const PNG_BYTES = Buffer.from([
-  0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d,
-]);
+const PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVR4nGNgYGD4DwABBAEAX+XDSwAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 describe("media.js — absolutizeMediaUrl", () => {
   it("rewrites /media/<file> to https://media.radon.run/<file>", async () => {
@@ -51,7 +52,7 @@ describe("media.js — absolutizeMediaUrl", () => {
 });
 
 describe("media.js — createImageDownloader produces absolute URLs", () => {
-  it("returns https://media.radon.run/<slug>-NN.<ext> for a freshly downloaded image", async () => {
+  it("returns a content-addressed absolute media URL for a freshly downloaded image", async () => {
     const root = await tempDir();
     const mediaDir = path.join(root, "media");
     await mkdir(mediaDir, { recursive: true });
@@ -69,11 +70,12 @@ describe("media.js — createImageDownloader produces absolute URLs", () => {
       "https://themarketear.com/images/cdcdxbktba.png",
     ]);
 
-    expect(result).toEqual([`${MEDIA_ORIGIN}/cdcdxbktba-01.png`]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(new RegExp(`^${MEDIA_ORIGIN}/cdcdxbktba-01-[a-f0-9]{12}\\.png$`));
     expect(result[0].startsWith("https://media.radon.run/")).toBe(true);
   });
 
-  it("returns absolute URLs even when the file already exists on disk (cache hit)", async () => {
+  it("revalidates remote bytes before reusing an existing public filename", async () => {
     const root = await tempDir();
     const mediaDir = path.join(root, "media");
     await mkdir(mediaDir, { recursive: true });
@@ -88,7 +90,7 @@ describe("media.js — createImageDownloader produces absolute URLs", () => {
     const fakeClient = {
       get: async () => {
         getCalls += 1;
-        return { status: 200, data: Buffer.from("PNG") };
+        return { status: 200, headers: { "content-type": "image/png" }, data: PNG_BYTES };
       },
     };
 
@@ -97,8 +99,9 @@ describe("media.js — createImageDownloader produces absolute URLs", () => {
       "https://themarketear.com/images/abc.png",
     ]);
 
-    expect(getCalls).toBe(0);
-    expect(result).toEqual([`${MEDIA_ORIGIN}/abc-01.png`]);
+    expect(getCalls).toBe(1);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatch(new RegExp(`^${MEDIA_ORIGIN}/abc-01-[a-f0-9]{12}\\.png$`));
   });
 });
 

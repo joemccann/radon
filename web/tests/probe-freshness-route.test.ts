@@ -1,8 +1,8 @@
 /**
  * DUR-16: /api/probe/freshness route wiring — Turso reads + pinned clock.
  *
- * The route trusts the middleware bearer gate for auth (the perimeter); its
- * own job is honest data: per-source queries individually guarded so a
+ * The route revalidates the middleware bearer gate before any read; its data
+ * path uses per-source queries individually guarded so a
  * missing table or dead DB degrades to "can't prove fresh" during RTH
  * (fresh=false) and "expected quiet" off-hours — always 200, never 4xx/5xx
  * for legitimately-quiet states. Cache contract: no-store headers.
@@ -61,22 +61,40 @@ async function getRoute() {
   return GET;
 }
 
+async function callRoute(token = "probe-test-token"): Promise<Response> {
+  const GET = await getRoute();
+  return GET(new Request("https://app.radon.run/api/probe/freshness", {
+    headers: { authorization: `Bearer ${token}` },
+  }));
+}
+
 describe("/api/probe/freshness", () => {
   beforeEach(() => {
     vi.resetModules();
     mockGetDb.mockReset();
     vi.useFakeTimers();
+    process.env.RADON_PROBE_FRESHNESS_TOKEN = "probe-test-token";
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    delete process.env.RADON_PROBE_FRESHNESS_TOKEN;
+  });
+
+  it("rejects a missing or incorrect bearer before any database read", async () => {
+    mockGetDb.mockReturnValue(dbStub(FRESH_DB));
+    const GET = await getRoute();
+
+    expect((await GET(new Request("https://app.radon.run/api/probe/freshness"))).status).toBe(401);
+    expect((await callRoute("wrong-token")).status).toBe(401);
+    expect(mockGetDb).not.toHaveBeenCalled();
   });
 
   it("RTH all-fresh: 200, contract shape, all_fresh=true, no-store", async () => {
     vi.setSystemTime(OPEN_NOW);
     mockGetDb.mockReturnValue(dbStub(FRESH_DB));
 
-    const res = await (await getRoute())();
+    const res = await callRoute();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -96,7 +114,7 @@ describe("/api/probe/freshness", () => {
     vi.setSystemTime(OPEN_NOW);
     mockGetDb.mockReturnValue(dbStub({ ...FRESH_DB, vcg: iso(OPEN_NOW - 60 * 60_000) }));
 
-    const res = await (await getRoute())();
+    const res = await callRoute();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -108,7 +126,7 @@ describe("/api/probe/freshness", () => {
     vi.setSystemTime(CLOSED_NOW);
     mockGetDb.mockReturnValue(dbStub(FRESH_DB));
 
-    const res = await (await getRoute())();
+    const res = await callRoute();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -129,7 +147,7 @@ describe("/api/probe/freshness", () => {
     });
     mockGetDb.mockReturnValue(stub);
 
-    const res = await (await getRoute())();
+    const res = await callRoute();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -146,7 +164,7 @@ describe("/api/probe/freshness", () => {
       throw new Error("getDb: TURSO_DB_URL is not set");
     });
 
-    const res = await (await getRoute())();
+    const res = await callRoute();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -161,7 +179,7 @@ describe("/api/probe/freshness", () => {
       throw new Error("database unavailable");
     });
 
-    const res = await (await getRoute())();
+    const res = await callRoute();
     const body = await res.json();
 
     expect(res.status).toBe(200);
@@ -176,20 +194,17 @@ describe("/api/probe/freshness", () => {
     ]);
   });
 
-  it("bounds every Turso read when the client never settles", async () => {
-    vi.setSystemTime(OPEN_NOW);
+  it("bounds every Turso read when the client never settles", { timeout: 15_000 }, async () => {
+    // Use the real deadline here. Web Crypto authorization completes on its
+    // own task queue, so advancing a fake clock can race ahead of the point
+    // where dbExecute arms its timers under a loaded coverage run.
+    vi.useRealTimers();
     mockGetDb.mockReturnValue({
       execute: vi.fn(() => new Promise<never>(() => {})),
     });
 
-    let response: Response | undefined;
-    void (await getRoute())().then((value) => {
-      response = value;
-    });
-    await vi.advanceTimersByTimeAsync(3_100);
-
-    expect(response).toBeDefined();
-    const body = await response!.json();
+    const response = await callRoute();
+    const body = await response.json();
     expect(body.database_ok).toBe(false);
     expect(body.database_failures).toHaveLength(4);
   });

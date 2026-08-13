@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { readFile } from "fs/promises";
 import { join } from "path";
 
@@ -75,6 +77,8 @@ function withSessionStaleness(payload: SnapshotPayload): SnapshotPayload {
 }
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const parsed = parseSymbol(request);
   if (parsed.response) return parsed.response;
   const { symbol } = parsed;
@@ -90,6 +94,8 @@ export async function GET(request: Request): Promise<Response> {
 }
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "options/rv-ratio:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const parsed = parseSymbol(request);
   if (parsed.response) return parsed.response;
   const { symbol } = parsed;

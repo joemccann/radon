@@ -21,6 +21,7 @@ import { cleanup, render, renderHook } from "@testing-library/react";
 import type { PortfolioData } from "@/lib/types";
 import { OrderRiskGate, useOrderRisk } from "@/lib/order/risk";
 import { isAugmentedOrderSummary } from "@/lib/order/types";
+import { singleLegSubmitPermitted } from "@/components/SingleLegOrderTicket";
 
 afterEach(cleanup);
 
@@ -127,6 +128,25 @@ describe("useOrderRisk — linear branch (futures)", () => {
 });
 
 describe("useOrderRisk — linear branch (stock)", () => {
+  it("stock order uses stock risk variant not empty option legs", () => {
+    const input = {
+      type: "linear" as const,
+      ticker: "WULF",
+      instrument: "stock" as const,
+      action: "BUY" as const,
+      quantity: 100,
+      limitPrice: 22.82,
+      multiplier: 1,
+      description: "BUY 100 WULF @ $22.82",
+    };
+    const { result } = renderHook(() => useOrderRisk(input, emptyPortfolio));
+
+    expect(input.type).toBe("linear");
+    expect("chainLegs" in input).toBe(false);
+    expect(result.current!.summary.maxLoss).toBeCloseTo(2_282, 0);
+    expect(result.current!.summary.maxGainUnbounded).toBe(true);
+  });
+
   it("SHORT stock with no held shares → UNBOUNDED", () => {
     const input = {
       type: "linear" as const,
@@ -270,6 +290,29 @@ describe("useOrderRisk — linear branch (stock)", () => {
 });
 
 describe("OrderRiskGate — linear inputs render branded summary", () => {
+  it("single leg ticket cannot submit when gate blocks", () => {
+    expect(singleLegSubmitPermitted(true, null)).toBe(false);
+    expect(singleLegSubmitPermitted(true, { okToSubmit: false } as ReturnType<typeof useOrderRisk>)).toBe(false);
+    expect(singleLegSubmitPermitted(true, { okToSubmit: true } as ReturnType<typeof useOrderRisk>)).toBe(true);
+  });
+
+  it("instrument modal blocks pending and null coverage", () => {
+    const input = {
+      type: "linear" as const,
+      ticker: "WULF",
+      instrument: "stock" as const,
+      action: "BUY" as const,
+      quantity: 1,
+      limitPrice: 20,
+      multiplier: 1,
+      description: "BUY WULF",
+    };
+    const pending = renderHook(() => useOrderRisk(input, undefined));
+    const absent = renderHook(() => useOrderRisk(input, null));
+    expect(singleLegSubmitPermitted(true, pending.result.current)).toBe(false);
+    expect(singleLegSubmitPermitted(true, absent.result.current)).toBe(false);
+  });
+
   it("renders UNBOUNDED + warning when SHORT futures hands to the gate", () => {
     const { container } = render(
       <OrderRiskGate

@@ -21,7 +21,7 @@ export type ExposureBreakdownRow = {
   delta: number;
   dollarDelta: number;
   marketValue: number;
-  deltaSource: "ib" | "approx";
+  deltaSource: "ib" | "approx" | "mixed";
   legs: ExposureBreakdownLeg[];
 };
 
@@ -65,7 +65,7 @@ function normalizeProviderOptionDelta(rawDelta: number, type: "Call" | "Put"): n
 function positionDeltaDetailed(
   pos: PortfolioPosition,
   prices: Record<string, PriceData>,
-): { delta: number; deltaSource: "ib" | "approx"; legs: ExposureBreakdownLeg[] } {
+): { delta: number; deltaSource: "ib" | "approx" | "mixed"; legs: ExposureBreakdownLeg[] } {
   let totalDelta = 0;
   let usedIb = false;
   let usedApprox = false;
@@ -142,7 +142,7 @@ function positionDeltaDetailed(
 
   return {
     delta: totalDelta,
-    deltaSource: usedIb ? "ib" : "approx",
+    deltaSource: usedIb && usedApprox ? "mixed" : usedIb ? "ib" : "approx",
     legs,
   };
 }

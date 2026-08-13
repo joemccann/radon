@@ -184,6 +184,10 @@ export default function RegimeRelationshipView({
   // Re-clamp the range when the upstream history shrinks/grows.
   useEffect(() => {
     if (entries.length === 0) return;
+    if (activeRange !== "custom") {
+      setRange(presetRange(activeRange, entries.length));
+      return;
+    }
     setRange(([start, end]) => {
       const maxIdx = entries.length - 1;
       const clampedEnd = Math.min(end, maxIdx);
@@ -191,7 +195,7 @@ export default function RegimeRelationshipView({
       if (clampedStart === start && clampedEnd === end) return [start, end];
       return [clampedStart, clampedEnd];
     });
-  }, [entries.length]);
+  }, [activeRange, entries.length]);
 
   // Global pointer move/up listeners while a brush drag is in flight.
   // Listeners read the latest `range` via a closure-captured ref so the math

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mockReadFile = vi.fn();
 const mockStat = vi.fn();
@@ -56,6 +56,10 @@ describe("/api/performance route", () => {
     mockRadonFetch.mockReset();
     mockGetDb.mockReset();
     mockDbSnapshots();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
   });
 
   it("GET returns cached performance data when cache is fresh and aligned with portfolio", async () => {
@@ -281,7 +285,8 @@ describe("/api/performance route", () => {
     const body = await res.json();
 
     expect(res.status).toBe(502);
-    expect(body.error).toContain("FastAPI down");
+    expect(body.error).toBe("Performance metrics temporarily unavailable");
+    expect(JSON.stringify(body)).not.toContain("FastAPI down");
   });
 
   it("GET SWR: background trigger failure is swallowed — stale cache still returned", async () => {

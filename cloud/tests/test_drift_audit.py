@@ -153,6 +153,16 @@ class TestCloudRootInput:
         with pytest.raises(RuntimeError):
             da.resolve_cloud_root(["drift_audit.py", str(tmp_path / "missing")], {})
 
+    def test_symlinked_checkout_root_is_refused(self, tmp_path):
+        import pytest
+
+        target = tmp_path / "target"
+        target.mkdir()
+        link = tmp_path / "cloud"
+        link.symlink_to(target, target_is_directory=True)
+        with pytest.raises(RuntimeError, match="symlink"):
+            da.resolve_cloud_root(["drift_audit.py", str(link)], {})
+
     def test_setting_the_root_moves_the_compared_tree(self, tmp_path):
         original = da.REPO
         try:
@@ -247,6 +257,24 @@ def test_symlinked_unit_is_not_a_canonical_regular_artifact(tmp_path, monkeypatc
     assert drifts[0]["id"] == "symlink-unit:radon-x.timer"
 
 
+def test_repo_artifact_reader_rejects_final_and_nested_symlinks(tmp_path, monkeypatch):
+    repo = tmp_path / "cloud"
+    repo.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    secret = outside / "secret"
+    secret.write_text("root-only-secret")
+    (repo / "safe").write_text("canonical")
+    (repo / "linked-file").symlink_to(secret)
+    (repo / "linked-dir").symlink_to(outside, target_is_directory=True)
+    monkeypatch.setattr(da, "REPO", repo)
+
+    assert da._read_repo("safe") == "canonical"
+    assert da._read_repo("linked-file") is None
+    assert da._read_repo("linked-dir/secret") is None
+    assert da._read_repo("../outside/secret") is None
+
+
 class TestEnvFileGuard:
     def test_audit_never_touches_env_files(self):
         assert da.is_env_path("/home/radon/radon-cloud/.env")
@@ -296,3 +324,12 @@ def test_health_write_retries_transport_failures(monkeypatch):
     monkeypatch.setattr(da, "write_service_health", flaky)
     da.write_service_health_with_retry("ok", None, "start")
     assert len(calls) == 3
+
+
+def test_clean_audit_fails_when_health_result_cannot_publish(monkeypatch):
+    monkeypatch.setattr(da, "resolve_cloud_root", lambda *_args: da.REPO)
+    monkeypatch.setattr(da, "gather", lambda: ([], {}, []))
+    monkeypatch.setattr(
+        da, "write_service_health_with_retry", lambda *_args: (_ for _ in ()).throw(TimeoutError("offline"))
+    )
+    assert da.main() == 1

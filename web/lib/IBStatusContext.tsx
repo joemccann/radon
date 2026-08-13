@@ -224,27 +224,6 @@ export function IBStatusProvider({ children }: { children: ReactNode }) {
       </IBStatusContext.Provider>
     );
   }
-  if (
-    process.env.NEXT_PUBLIC_RADON_AUTHLESS_TEST === "1" ||
-    process.env.RADON_AUTHLESS_TEST === "1"
-  ) {
-    return (
-      <IBStatusContext.Provider
-        value={{
-          wsConnected: true,
-          ibConnected: true,
-          disconnectedSince: null,
-          connectionState: "connected",
-          authState: "authenticated",
-          serviceState: "healthy",
-          upstreamDead: false,
-          displayStatus: "connected",
-        }}
-      >
-        {children}
-      </IBStatusContext.Provider>
-    );
-  }
   return <AuthenticatedIBStatusProvider>{children}</AuthenticatedIBStatusProvider>;
 }
 

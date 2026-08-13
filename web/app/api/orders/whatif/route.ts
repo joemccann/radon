@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { RadonApiError, radonFetch } from "@/lib/radonApi";
 import {
@@ -53,6 +55,12 @@ type WhatIfBody = {
 const UNAVAILABLE = { initMargin: null, maintMargin: null, source: "unavailable" as const };
 
 export async function POST(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    operatorOnly: true,
+    rate: { key: "orders/whatif:route", limit: 10, windowMs: 60_000 },
+    durableRateTier: "C",
+  });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   try {
     let parsed: unknown;

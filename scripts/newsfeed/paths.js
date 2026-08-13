@@ -1,6 +1,7 @@
 import path from "path";
 import { fileURLToPath } from "url";
 import fs from "fs-extra";
+import { atomicWriteJson } from "./atomic.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,16 +52,17 @@ export async function seedPostsFileIfMissing(overrides = {}) {
   const { dataDir, postsFile } = resolveScraperPaths(overrides);
   await fs.ensureDir(dataDir);
 
-  const exists = await fs.pathExists(postsFile);
-  if (exists) {
-    const contents = await fs.readFile(postsFile, "utf8").catch(() => "");
+  try {
+    const contents = await fs.readFile(postsFile, "utf8");
     if (contents.trim().length === 0) {
-      await fs.writeFile(postsFile, JSON.stringify([], null, 2));
+      await atomicWriteJson(postsFile, []);
       return true;
     }
     return false;
+  } catch (error) {
+    if (error.code !== "ENOENT") throw error;
   }
 
-  await fs.writeFile(postsFile, JSON.stringify([], null, 2));
+  await atomicWriteJson(postsFile, []);
   return true;
 }

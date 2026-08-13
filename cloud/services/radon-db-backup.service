@@ -11,17 +11,18 @@ StartLimitBurst=5
 [Service]
 Type=oneshot
 User=radon
+UMask=0077
 WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 Environment=RADON_DB_NO_REPLICA=1
-ExecStart=/home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/db_backup.py
+ExecStart=/usr/bin/flock -w 7500 /run/lock/radon-db-maintenance.lock /home/radon/radon/.venv/bin/python /home/radon/radon/cloud/scripts/db_backup.py
 StandardOutput=journal
 StandardError=journal
 # libsql_experimental exposes NO client-side timeouts (DUR-09); this
 # process-level bound is the only real one for a wedged cloud connection.
 # The DB is ~1.4 GB and direct-to-cloud reads run ~1 MB/s, so a healthy
 # full dump takes ~20-25 min; 1h is ~2.5x normal.
-TimeoutStartSec=3600
+TimeoutStartSec=12000
 
 [Install]
 WantedBy=multi-user.target

@@ -23,6 +23,7 @@ import { appendTagsToTaxonomy, loadTaxonomy } from "./taxonomy.js";
 import { createBrowser, NEWSFEED_DEFAULT_STORAGE_PATH } from "./browser.js";
 import { ensureAuthenticated } from "./auth.js";
 import { runScrapeCycle } from "./cycle.js";
+import { createDeliveryState } from "./deliveryState.js";
 
 // Concurrently spawns this process without env inheritance from `next dev`,
 // so neither CEREBRAS_API_KEY nor ANTHROPIC_API_KEY are present. Load web/.env
@@ -67,6 +68,7 @@ export function createScraper(overrides = {}) {
   let browserHandle = null;
   let lastAuthAt = 0;
   let lastStoragePersistAt = 0;
+  const deliveryState = createDeliveryState(path.join(paths.dataDir, ".delivery-state.json"));
 
   async function getBrowser() {
     if (!browserHandle) {
@@ -144,7 +146,7 @@ export function createScraper(overrides = {}) {
 
   const downloader = createImageDownloader({ mediaDir: paths.mediaDir, getCookieHeader });
 
-  async function scrapeOnce() {
+  async function scrapeOnceAttempt() {
     const cycleStart = Date.now();
     const cycleStartIso = new Date(cycleStart).toISOString();
 
@@ -201,8 +203,26 @@ export function createScraper(overrides = {}) {
         return additions;
       },
       requestReauth,
+      loadDeliveryState: deliveryState.load,
+      saveDeliveryState: deliveryState.save,
       paths,
     });
+  }
+
+  function isBrowserFailure(error) {
+    if (browserHandle?.browser?.isConnected?.() === false) return true;
+    const message = error instanceof Error ? error.message : String(error);
+    return /browser.*(?:closed|crashed|disconnected)|target.*closed|page.*closed/i.test(message);
+  }
+
+  async function scrapeOnce() {
+    try {
+      return await scrapeOnceAttempt();
+    } catch (error) {
+      if (!isBrowserFailure(error)) throw error;
+      await closeBrowser();
+      return scrapeOnceAttempt();
+    }
   }
 
   return { paths, scrapeOnce, closeBrowser, authenticateIfNeeded, requestReauth };

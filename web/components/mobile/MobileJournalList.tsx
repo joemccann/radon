@@ -67,7 +67,7 @@ function sortTrades(trades: TradeEntry[], key: SortKey): TradeEntry[] {
       return (a.ticker ?? "").localeCompare(b.ticker ?? "");
     }
     if (key === "cost") {
-      return (b.entry_cost ?? -Infinity) - (a.entry_cost ?? -Infinity);
+      return (b.total_cost ?? b.entry_cost ?? -Infinity) - (a.total_cost ?? a.entry_cost ?? -Infinity);
     }
     if (key === "risk") {
       return (b.max_risk ?? -Infinity) - (a.max_risk ?? -Infinity);
@@ -112,6 +112,7 @@ export default function MobileJournalList({ trades }: MobileJournalListProps) {
           const label = pillLabel(t.decision);
           const qty = t.contracts ?? t.shares ?? t.quantity ?? null;
           const ror = t.return_on_risk != null ? t.return_on_risk * 100 : null;
+          const entryCost = t.total_cost ?? t.entry_cost;
           const dateRange = t.close_date ? `${t.date} – ${t.close_date}` : t.date;
 
           return (
@@ -143,7 +144,7 @@ export default function MobileJournalList({ trades }: MobileJournalListProps) {
                 {/* 2x2 MetricCell grid */}
                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "8px 12px", marginBottom: 6 }}>
                   <MetricCell label="Qty" value={qty != null ? String(qty) : "—"} />
-                  <MetricCell label="Entry" value={t.entry_cost != null ? fmtPrice(Math.abs(t.entry_cost)) : "—"} />
+                  <MetricCell label="Entry" value={entryCost != null ? fmtPrice(Math.abs(entryCost)) : "—"} />
                   <MetricCell label="Risk" value={t.max_risk != null ? fmtPrice(Math.abs(t.max_risk)) : "—"} />
                   <MetricCell
                     label="RoR"

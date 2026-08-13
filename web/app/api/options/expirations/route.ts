@@ -1,16 +1,21 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { radonFetch } from "@/lib/radonApi";
 import {
   OPTIONS_PROXY_TIMEOUT_MS,
   optionsErrorResponse,
   optionsJson,
 } from "../_shared";
+import { boundedTicker } from "@/lib/requestBounds";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 export async function GET(request: Request): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "options/expirations:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const { searchParams } = new URL(request.url);
-  const symbol = searchParams.get("symbol")?.toUpperCase();
+  const symbol = boundedTicker(searchParams.get("symbol"));
 
   if (!symbol) {
     return optionsJson({ error: "Required: symbol", code: "BAD_REQUEST" }, 400);
@@ -18,7 +23,7 @@ export async function GET(request: Request): Promise<Response> {
 
   try {
     const data = await radonFetch<Record<string, unknown>>(
-      `/options/expirations?symbol=${symbol}`,
+      `/options/expirations?symbol=${encodeURIComponent(symbol)}`,
       { timeout: OPTIONS_PROXY_TIMEOUT_MS },
     );
 

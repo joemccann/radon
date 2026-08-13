@@ -89,9 +89,9 @@ describe("livenessSummary", () => {
 });
 
 describe("freshnessSummary", () => {
-  const now = Date.parse("2026-05-30T12:00:00Z");
-  const fresh: ServiceHealthRow = { service: "vcg-scan", state: "ok", updated_at: "2026-05-30T11:59:30Z" };
-  const ancient: ServiceHealthRow = { service: "vcg-scan", state: "ok", updated_at: "2026-05-29T00:00:00Z" };
+  const now = Date.parse("2026-05-29T16:00:00Z");
+  const fresh: ServiceHealthRow = { service: "vcg-scan", state: "ok", updated_at: "2026-05-29T15:59:30Z" };
+  const ancient: ServiceHealthRow = { service: "vcg-scan", state: "ok", updated_at: "2026-05-28T00:00:00Z" };
   it("flags rows past their window", () => {
     const s = freshnessSummary([fresh, ancient], "open", now);
     expect(s.total).toBe(2);

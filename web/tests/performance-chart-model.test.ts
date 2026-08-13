@@ -106,3 +106,22 @@ test("performance chart model uses one shared domain for portfolio and rebased b
   expect(model.equityPath.startsWith("M ")).toBe(true);
   expect(model.benchmarkPath.startsWith("M ")).toBe(true);
 });
+
+test("actual normalized TWR payload without legacy equity or benchmark fields stays finite", () => {
+  const actualTwrPayload = {
+    summary: { total_return: 0.03, trading_days: 3 },
+    series: [
+      { date: "2026-08-10", nav: 1_000_000, return: 0, cum_return: 0, equity: 100 },
+      { date: "2026-08-11", nav: 1_020_000, return: 0.02, cum_return: 0.02, equity: 102 },
+      { date: "2026-08-12", nav: 1_030_000, return: 0.0098, cum_return: 0.03, equity: 103 },
+    ],
+    benchmark: "SPY",
+    warnings: [],
+  } as unknown as PerformanceData;
+
+  const model = buildPerformanceChartModel(actualTwrPayload);
+  expect(model.equityPath).not.toContain("NaN");
+  expect(model.areaPath).not.toContain("NaN");
+  expect(model.benchmarkPath).toBe("");
+  expect(model.yAxisTicks.every((tick) => Number.isFinite(tick.y) && Number.isFinite(tick.value))).toBe(true);
+});

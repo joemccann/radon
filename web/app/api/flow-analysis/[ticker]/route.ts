@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextResponse } from "next/server";
 import { readFile } from "fs/promises";
 import { statSync } from "fs";
@@ -54,6 +56,8 @@ function cachePathFor(ticker: string): string {
 type Params = { params: Promise<{ ticker: string }> };
 
 export async function GET(_req: Request, ctx: Params): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;
   const ticker = normalizeTicker(raw);
@@ -86,6 +90,8 @@ export async function GET(_req: Request, ctx: Params): Promise<Response> {
 }
 
 export async function POST(_req: Request, ctx: Params): Promise<Response> {
+  const access = await requireRouteAccess(undefined, { rate: { key: "flow-analysis/[ticker]:route", limit: 20, windowMs: 60_000 } });
+  if (!access.ok) return access.response;
   const requestId = getRequestId();
   const { ticker: raw } = await ctx.params;
   const ticker = normalizeTicker(raw);

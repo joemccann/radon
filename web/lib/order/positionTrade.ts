@@ -85,6 +85,24 @@ export function heldComboUnits(position: PortfolioPosition): number {
   return contracts.reduce(greatestCommonDivisor);
 }
 
+/** True only when a combo SELL stays within the held BAG units. */
+export function isPureComboClose(
+  action: TradeAction,
+  quantity: number,
+  heldUnits: number,
+): boolean {
+  return action === "SELL" && quantity > 0 && quantity <= heldUnits;
+}
+
+/** Defense for close-only tickets: a SELL must never exceed held BAG units. */
+export function overClosesHeldCombo(
+  action: TradeAction,
+  quantity: number,
+  heldUnits: number,
+): boolean {
+  return action === "SELL" && quantity > heldUnits;
+}
+
 /** The action that CLOSES the target (so the UI can default to it). */
 export function closingActionFor(position: PortfolioPosition, target: TradeTarget): TradeAction {
   if (target.kind === "combo") return "SELL"; // SELL envelope flattens the combo
@@ -132,7 +150,7 @@ export function buildPositionTradeOrder(params: {
     // `quantity × ratio_i` is the contracts traded on leg i.
     const comboUnits = heldComboUnits(position);
     const legs = optionLegs.map((l) => ({
-      expiry: cleanExpiry(position.expiry),
+      expiry: cleanExpiry(l.expiry ?? position.expiry),
       strike: l.strike as number,
       right: rightOf(l),
       // ComboLeg.action = STRUCTURE (never derived from debit/credit).
@@ -155,18 +173,48 @@ export function buildPositionTradeOrder(params: {
     const totalCost = quantity * limitPrice * OPT_MULTIPLIER;
     const description = `${action} ${quantity}x ${position.structure} @ ${fmtSignedPrice(limitPrice)}`;
 
-    // SELL = close/flatten the held combo → close-out branch (proceeds + P&L).
-    if (action === "SELL") {
+    // SELL closes only up to the held BAG units. Partial closes carry the
+    // proportional signed basis; an over-close must enter normal risk math.
+    if (isPureComboClose(action, quantity, comboUnits)) {
       return {
         isClosing: true,
         payload,
         riskInput: {
           ticker,
-          chainLegs: [],
+          chainLegs: legs.map((leg) => ({
+            action: leg.action === "BUY" ? "SELL" : "BUY",
+            right: leg.right,
+            strike: leg.strike,
+            expiry: leg.expiry,
+            quantity: quantity * leg.ratio,
+          })),
           netPremium: limitPrice,
           description,
           totalCost,
-          closeOut: { entryCostDollars: resolveEntryCost(position) },
+          closeOut: {
+            entryCostDollars: resolveEntryCost(position) * (quantity / comboUnits),
+          },
+        },
+      };
+    }
+
+    if (action === "SELL") {
+      return {
+        isClosing: false,
+        payload,
+        riskInput: {
+          ticker,
+          chainLegs: legs.map((leg) => ({
+            action: leg.action === "BUY" ? "SELL" : "BUY",
+            right: leg.right,
+            strike: leg.strike,
+            expiry: leg.expiry,
+            quantity: quantity * leg.ratio,
+          })),
+          netPremium: -limitPrice,
+          description,
+          totalCost,
+          quote: quote ?? null,
         },
       };
     }
@@ -202,7 +250,7 @@ export function buildPositionTradeOrder(params: {
 
   const right = rightOf(leg);
   const strike = leg.strike;
-  const expiryClean = cleanExpiry(position.expiry);
+  const expiryClean = cleanExpiry(leg.expiry ?? position.expiry);
   const grossCash = quantity * limitPrice * OPT_MULTIPLIER;
   const legLabel = `${leg.type} $${strike}`;
   const description = `${action} ${quantity}x ${ticker} ${legLabel} @ ${fmtSignedPrice(limitPrice)}`;
@@ -240,7 +288,7 @@ export function buildPositionTradeOrder(params: {
       payload,
       riskInput: {
         ticker,
-        chainLegs: [],
+        chainLegs: [{ action: "SELL", right, strike, expiry: expiryClean, quantity }],
         netPremium: -limitPrice,
         description,
         totalCost: grossCash, // positive: proceeds received
@@ -258,7 +306,7 @@ export function buildPositionTradeOrder(params: {
       payload,
       riskInput: {
         ticker,
-        chainLegs: [],
+        chainLegs: [{ action: "BUY", right, strike, expiry: expiryClean, quantity }],
         netPremium: limitPrice,
         description,
         totalCost: -grossCash, // negative: debit paid
@@ -282,7 +330,7 @@ export function buildPositionTradeOrder(params: {
           action,
           right,
           strike,
-          expiry: position.expiry,
+          expiry: leg.expiry ?? position.expiry,
           quantity,
         },
       ],

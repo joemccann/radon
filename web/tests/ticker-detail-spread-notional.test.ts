@@ -1,8 +1,12 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import CockpitHeader from "../components/ticker-detail/CockpitHeader";
 import type { PriceData } from "@/lib/pricesProtocol";
+
+vi.mock("@/lib/useWatchlist", () => ({
+  useWatchlist: () => ({ isWatched: () => false, toggleWatch: vi.fn() }),
+}));
 
 // The cockpit header is the single source for the spread scalar (the legacy
 // shared price bar was retired with the cockpit cutover). This pins the spread

@@ -25,6 +25,8 @@ WorkingDirectory=/home/radon/radon
 EnvironmentFile=/home/radon/radon-cloud/.env
 Environment=RADON_HEALTH_PORT=8330
 Environment=RADON_HEALTH_BIND=127.0.0.1
+TasksMax=64
+MemoryMax=512M
 ExecStart=/home/radon/radon/.venv/bin/python -m scripts.health_service.serve
 Restart=always
 RestartSec=2

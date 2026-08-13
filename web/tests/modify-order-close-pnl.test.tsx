@@ -118,6 +118,42 @@ function renderModifiedOrder(order: OpenOrder, portfolio: PortfolioData, price: 
 }
 
 describe("ModifyOrderModal close-out P&L", () => {
+  it("modify is disabled until canonical risk permits", () => {
+    render(
+      <ModifyOrderModal
+        order={optionOrder("SELL", 4, 100)}
+        loading={false}
+        portfolio={undefined}
+        onConfirm={vi.fn()}
+        onClose={() => {}}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText(/New Limit Price/i), { target: { value: "95" } });
+    expect((screen.getByRole("button", { name: /Modify Order/i }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("rejects fractional and exponent quantities instead of truncating them", () => {
+    const onConfirm = vi.fn();
+    render(
+      <ModifyOrderModal
+        order={optionOrder("SELL", 4, 100)}
+        loading={false}
+        portfolio={portfolioWithLeg("LONG", 4, 9_366.25)}
+        onConfirm={onConfirm}
+        onClose={() => {}}
+      />,
+    );
+
+    const quantity = screen.getByLabelText(/New Quantity/i);
+    const modify = screen.getByRole("button", { name: /Modify Order/i }) as HTMLButtonElement;
+    for (const invalid of ["1.9", "1e2"]) {
+      fireEvent.change(quantity, { target: { value: invalid } });
+      expect(modify.disabled).toBe(true);
+      fireEvent.click(modify);
+    }
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
   it("shows estimated realized P&L when modifying a sell-to-close long option", () => {
     const summary = renderModifiedOrder(
       optionOrder("SELL", 4, 100),

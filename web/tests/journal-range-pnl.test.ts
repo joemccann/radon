@@ -35,9 +35,9 @@ describe("toEtDay", () => {
 });
 
 describe("isClosedTrade / journalCloseDate", () => {
-  it("treats finite realized_pnl as closed", () => {
+  it("treats non-zero finite realized_pnl as closed without misclassifying open zero rows", () => {
     expect(isClosedTrade(trade({ realized_pnl: 100 }))).toBe(true);
-    expect(isClosedTrade(trade({ realized_pnl: 0 }))).toBe(true);
+    expect(isClosedTrade(trade({ realized_pnl: 0 }))).toBe(false);
   });
 
   it("treats BUY_TO_CLOSE / CLOSED action as closed without pnl", () => {

@@ -1,3 +1,5 @@
+import { requireRouteAccess } from "@/lib/routeAccess";
+
 import { NextRequest, NextResponse } from "next/server";
 
 import { runAssistantLoop, type AssistantTurn, type ToolEvent } from "@/lib/assistant/loop";
@@ -84,12 +86,6 @@ function lastUserContent(messages: ChatMessage[]): string {
   return [...messages].reverse().find((message) => message.role === "user")?.content ?? "";
 }
 
-function bearerToken(request: NextRequest): string | undefined {
-  const header = request.headers.get("authorization") ?? "";
-  const match = header.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1] : undefined;
-}
-
 function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] {
   return toolEvents.map((event) => ({
     name: event.name,
@@ -100,6 +96,11 @@ function toTelemetryToolCalls(toolEvents: ToolEvent[]): AssistantTurnToolCall[] 
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
+  const access = await requireRouteAccess(request, {
+    rate: { key: "assistant:route", limit: 10, windowMs: 60_000 },
+    durableRateTier: "D",
+  });
+  if (!access.ok) return access.response;
   const mock = isMockMode();
 
   let body: AssistantPayload | null = null;
@@ -128,7 +129,7 @@ export async function POST(request: NextRequest): Promise<Response> {
   const t0 = Date.now();
   try {
     const system = `${SYSTEM_PROMPT} Today is ${etCalendarDateString(new Date())} (America/New_York).`;
-    const result = await runAssistantLoop(toTurns(messages), system, bearerToken(request));
+    const result = await runAssistantLoop(toTurns(messages), system, access.principal);
 
     const content =
       mock && !result.proposal && isProviderMockContent(result.content)

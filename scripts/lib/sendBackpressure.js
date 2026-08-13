@@ -68,3 +68,18 @@ export function decideSend(bufferedAmountBytes, kind) {
   if (buffered >= SOFT_HIGH_WATER_BYTES && isCoalescableKind(kind)) return "drop";
   return "send";
 }
+
+/**
+ * Clear only an incremental snapshot that was actually admitted, and only
+ * entries that were not replaced by a newer tick while delivery ran.
+ *
+ * @param {Map<string, unknown>} dirty latest unsent values
+ * @param {Record<string, unknown>} snapshot values offered to the socket
+ * @param {"send" | "drop" | "close" | undefined} decision admission result
+ */
+export function settleIncrementalBatch(dirty, snapshot, decision) {
+  if (decision !== "send") return;
+  for (const [key, sentValue] of Object.entries(snapshot)) {
+    if (dirty.get(key) === sentValue) dirty.delete(key);
+  }
+}

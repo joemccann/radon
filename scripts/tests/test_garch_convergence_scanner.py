@@ -37,7 +37,7 @@ def _consecutive_pairs(tickers):
     return [[tickers[i], tickers[i + 1]] for i in range(0, len(tickers) - 1, 2)]
 
 
-def test_resolve_inputs_indexes_uses_curated_pairs_not_consecutive():
+def test_resolve_inputs_indexes_uses_curated_pairs_not_consecutive(index_preset_dir):
     from utils.presets import load_preset
 
     tickers, pairs, description, _driver = garch.resolve_inputs(None, "indexes")
@@ -54,7 +54,7 @@ def test_resolve_inputs_indexes_uses_curated_pairs_not_consecutive():
     assert any(token in desc for token in ("russell", "r2k", "russell 2000"))
 
 
-def test_resolve_inputs_indexes_passes_vol_driver_gate():
+def test_resolve_inputs_indexes_passes_vol_driver_gate(index_preset_dir):
     """Master index files store vol_driver on groups, not the top-level
     preset. Curated pairs must still clear gate_vol_driver or every
     indexes row lands as NONE."""

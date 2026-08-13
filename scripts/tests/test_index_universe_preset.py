@@ -7,7 +7,10 @@ from __future__ import annotations
 
 import pytest
 
-from utils.presets import PRESETS_DIR, load_preset
+import utils.presets as presets
+from utils.presets import load_preset
+
+pytestmark = pytest.mark.usefixtures("index_preset_dir")
 
 INDEX_SLUGS = ("ndx100", "sp500", "r2k")
 FLOORS = {
@@ -44,14 +47,14 @@ class TestFileBackedIndexPresets:
     def test_slugs_stay_file_backed_and_meet_floors(self):
         for slug, (ticker_floor, pair_floor) in FLOORS.items():
             preset = load_preset(slug)
-            assert (PRESETS_DIR / f"{slug}.json").is_file()
+            assert (presets.PRESETS_DIR / f"{slug}.json").is_file()
             assert preset.ticker_count >= ticker_floor
             assert preset.pair_count >= pair_floor
 
 
 class TestIndexesVirtualPreset:
     def test_no_committed_indexes_json(self):
-        assert not (PRESETS_DIR / "indexes.json").exists()
+        assert not (presets.PRESETS_DIR / "indexes.json").exists()
 
     def test_load_preset_indexes_unions_three_files(self):
         ndx = load_preset("ndx100")

@@ -6,6 +6,11 @@
  */
 
 import * as assert from "node:assert";
+import { execFileSync } from "node:child_process";
+import { mkdtempSync, mkdirSync, readFileSync, realpathSync, writeFileSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { marketStateAt } from "../extensions/startup-protocol.ts";
 
 // Mock UI that captures all notifications
 class MockUI {
@@ -38,6 +43,37 @@ function test(name: string, fn: () => void | Promise<void>) {
 }
 
 const tests: Array<{ name: string; fn: () => void | Promise<void> }> = [];
+
+test("market state honors holidays and early closes", () => {
+  assert.deepStrictEqual(
+    marketStateAt(new Date("2026-12-25T16:00:00Z")),
+    { isOpen: false, status: "CLOSED (holiday)" },
+  );
+  assert.deepStrictEqual(
+    marketStateAt(new Date("2026-11-27T19:00:00Z")),
+    { isOpen: false, status: "after hours" },
+  );
+  assert.deepStrictEqual(
+    marketStateAt(new Date("2026-11-27T17:00:00Z")).isOpen,
+    true,
+  );
+});
+
+test("startup jobs use timeout, bounded output, spawn-error, and process-group termination", () => {
+  const source = execFileSync("git", ["show", "HEAD:.pi/extensions/startup-protocol.ts"], {
+    cwd: join(import.meta.dirname, "../.."),
+    encoding: "utf8",
+  });
+  const current = readFileSync(
+    join(import.meta.dirname, "../extensions/startup-protocol.ts"),
+    "utf8",
+  );
+  assert.ok(!source.includes("runBoundedStartupJob"));
+  assert.ok(current.includes("STARTUP_JOB_OUTPUT_BYTES"));
+  assert.ok(current.includes('proc.once("error"'));
+  assert.ok(current.includes('process.kill(-proc.pid, "SIGTERM")'));
+  assert.strictEqual((current.match(/runBoundedStartupJob\("python3\.13"/g) ?? []).length, 4);
+});
 
 // ============================================================
 // STARTUP PROCESS VISIBILITY TESTS
@@ -347,6 +383,67 @@ test("summarizeFreeTradeError should fall back to first useful stderr line", asy
   ].join("\n"));
 
   assert.strictEqual(message, "custom free trade analyzer failure");
+});
+
+test("workspace startup scripts require an explicit canonical root and revision", async () => {
+  const { createWorkspaceTrust } = await import("../extensions/startup-protocol.ts");
+  const root = mkdtempSync(join(tmpdir(), "radon-startup-trust-"));
+  mkdirSync(join(root, "scripts"));
+  writeFileSync(join(root, "scripts", "helper.py"), "print('trusted')\n");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "scripts/helper.py"], { cwd: root });
+  execFileSync(
+    "git",
+    ["-c", "user.name=Radon Test", "-c", "user.email=test@radon.invalid", "commit", "-qm", "fixture"],
+    { cwd: root },
+  );
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+
+  assert.strictEqual(createWorkspaceTrust(root, {}), null);
+  assert.strictEqual(
+    createWorkspaceTrust(root, {
+      RADON_PI_TRUSTED_WORKSPACE: join(root, "elsewhere"),
+      RADON_PI_TRUSTED_REVISION: revision,
+    }),
+    null,
+  );
+  assert.ok(createWorkspaceTrust(root, {
+    RADON_PI_TRUSTED_WORKSPACE: root,
+    RADON_PI_TRUSTED_REVISION: revision,
+  }));
+});
+
+test("trusted startup scripts must match the pinned Git revision and stay beneath the workspace", async () => {
+  const {
+    createWorkspaceTrust,
+    resolveTrustedWorkspaceScript,
+  } = await import("../extensions/startup-protocol.ts");
+  const root = mkdtempSync(join(tmpdir(), "radon-startup-script-"));
+  mkdirSync(join(root, "scripts"));
+  const helper = join(root, "scripts", "helper.py");
+  writeFileSync(helper, "print('trusted')\n");
+  execFileSync("git", ["init", "-q"], { cwd: root });
+  execFileSync("git", ["add", "scripts/helper.py"], { cwd: root });
+  execFileSync(
+    "git",
+    ["-c", "user.name=Radon Test", "-c", "user.email=test@radon.invalid", "commit", "-qm", "fixture"],
+    { cwd: root },
+  );
+  const revision = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim();
+  const trust = createWorkspaceTrust(root, {
+    RADON_PI_TRUSTED_WORKSPACE: root,
+    RADON_PI_TRUSTED_REVISION: revision,
+  });
+  assert.ok(trust);
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), realpathSync(helper));
+
+  writeFileSync(helper, "print('modified')\n");
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/helper.py"), null);
+
+  const outside = join(tmpdir(), `radon-outside-${Date.now()}.py`);
+  writeFileSync(outside, "print('outside')\n");
+  symlinkSync(outside, join(root, "scripts", "outside.py"));
+  assert.strictEqual(resolveTrustedWorkspaceScript(trust!, "scripts/outside.py"), null);
 });
 
 // ============================================================

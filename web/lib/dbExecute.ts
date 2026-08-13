@@ -13,6 +13,7 @@
 // See `feedback_libsql_http_transport_no_wss_singleton`.
 
 import type { InStatement, ResultSet } from "@libsql/client";
+import { scrubSecrets } from "./apiContracts";
 import { getDb, resetDb, getPoolStats } from "./db";
 import { withTimeout } from "./asyncTimeout";
 import {
@@ -53,7 +54,7 @@ export async function dbExecute(
       ),
     );
   } catch (err) {
-    console.warn(`[dbExecute:${label}] ${describeDbError(err)}${poolStatsSuffix()}`);
+    console.warn(scrubSecrets(`[dbExecute:${label}] ${describeDbError(err)}${poolStatsSuffix()}`));
     resetDb(identity);
     throw err;
   }

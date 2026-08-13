@@ -15,7 +15,7 @@
 
 import React from "react";
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 
 import MetricCards from "../components/MetricCards";
 
@@ -173,6 +173,11 @@ describe("Day P&L card — pre-market fallback to client-computed aggregate", ()
     expect(cardText).toContain("Day P&L");
     expect(cardText).toContain("+$1,000");
     expect(cardText).toContain("ESTIMATED (PRE-MARKET)");
+    fireEvent.click(Array.from(container.querySelectorAll(".metric-label"))
+      .find((label) => label.textContent?.trim() === "Day P&L")!.parentElement!);
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByText("+$1,000.00")).toBeTruthy();
+    expect(within(dialog).getByText(/Current prices versus prior-session closes/)).toBeTruthy();
   });
 
   it('labels the fallback "ESTIMATED (AFTER HOURS)" during the after-hours session', () => {

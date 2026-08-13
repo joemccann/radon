@@ -96,7 +96,8 @@ describe("/api/orders", () => {
     const body = await res.json();
 
     expect(res.status).toBe(503);
-    expect(body.error).toContain("database unavailable");
+    expect(body.error).toBe("Orders temporarily unavailable");
+    expect(JSON.stringify(body)).not.toContain("database unavailable");
   });
 
   it("POST refreshes through FastAPI and returns the Turso snapshot", async () => {
@@ -149,7 +150,8 @@ describe("/api/orders", () => {
     const body = await res.json();
 
     expect(res.status).toBe(502);
-    expect(body.error).toContain("database unavailable");
+    expect(body.error).toBe("Order sync failed");
+    expect(JSON.stringify(body)).not.toContain("database unavailable");
   });
 
   it("exports dynamic = force-dynamic (cache contract)", async () => {

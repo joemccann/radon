@@ -134,7 +134,7 @@ export default function ExposureBreakdownModal({ metric, exposure, bankroll, net
           dollarDelta={exposure.dollarDelta}
           netLiquidation={netLiquidation as number}
           leverage={leverage}
-          hasApprox={exposure.rows.some((r) => r.deltaSource === "approx")}
+          hasApprox={exposure.rows.some((r) => r.deltaSource !== "ib")}
         />
       ) : undefined}
       formula={config.formula}

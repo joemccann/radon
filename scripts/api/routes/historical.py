@@ -15,11 +15,13 @@ from datetime import date, datetime
 from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger("radon.historical")
 
 router = APIRouter()
+IB_OPERATION_TIMEOUT_SECS = 15.0
+MAX_QUALIFY_CONTRACTS = 50
 
 
 # ---------------------------------------------------------------------------
@@ -35,7 +37,9 @@ class ContractSpec(BaseModel):
 
 
 class QualifyRequest(BaseModel):
-    contracts: List[ContractSpec]
+    contracts: List[ContractSpec] = Field(
+        min_length=1, max_length=MAX_QUALIFY_CONTRACTS
+    )
 
 
 class HeadTimestampRequest(BaseModel):
@@ -72,6 +76,30 @@ def _get_pool(request: Request):
     if pool is None:
         raise HTTPException(status_code=503, detail="IB pool not initialized")
     return pool
+
+
+async def _dispose_after_operation(task: asyncio.Task, client) -> None:
+    try:
+        await asyncio.shield(task)
+    except BaseException:
+        pass
+    try:
+        await asyncio.to_thread(client.disconnect)
+    except Exception:
+        logger.warning("failed to disconnect retired IB data client", exc_info=True)
+
+
+async def _bounded_pool_call(
+    pool, role: str, client, operation, *args, timeout: float = IB_OPERATION_TIMEOUT_SECS, **kwargs
+):
+    """Bound a sync IB call and quarantine its client if its worker outlives us."""
+    pending = asyncio.create_task(asyncio.to_thread(operation, *args, **kwargs))
+    try:
+        return await asyncio.wait_for(asyncio.shield(pending), timeout=timeout)
+    except asyncio.TimeoutError as exc:
+        await pool.retire(role, client)
+        asyncio.create_task(_dispose_after_operation(pending, client))
+        raise HTTPException(status_code=504, detail="IB operation timed out") from exc
 
 
 def make_ib_contract(spec: ContractSpec):
@@ -140,8 +168,8 @@ async def qualify_contracts(req: QualifyRequest, request: Request):
 
     try:
         async with pool.acquire("data") as client:
-            qualified = await asyncio.to_thread(
-                client.qualify_contracts, *contracts
+            qualified = await _bounded_pool_call(
+                pool, "data", client, client.qualify_contracts, *contracts
             )
     except ConnectionError as e:
         raise HTTPException(status_code=503, detail=str(e))
@@ -157,9 +185,11 @@ async def head_timestamp(req: HeadTimestampRequest, request: Request):
 
     try:
         async with pool.acquire("data") as client:
-            await asyncio.to_thread(client.qualify_contracts, contract)
-            ts = await asyncio.to_thread(
-                client.get_head_timestamp,
+            await _bounded_pool_call(
+                pool, "data", client, client.qualify_contracts, contract
+            )
+            ts = await _bounded_pool_call(
+                pool, "data", client, client.get_head_timestamp,
                 contract,
                 what_to_show=req.what_to_show,
                 use_rth=req.use_rth,
@@ -181,9 +211,11 @@ async def historical_bars(req: HistoricalBarsRequest, request: Request):
 
     try:
         async with pool.acquire("data") as client:
-            await asyncio.to_thread(client.qualify_contracts, contract)
-            bars = await asyncio.to_thread(
-                client.get_historical_data,
+            await _bounded_pool_call(
+                pool, "data", client, client.qualify_contracts, contract
+            )
+            bars = await _bounded_pool_call(
+                pool, "data", client, client.get_historical_data,
                 contract,
                 end_date=req.end_date_time,
                 duration=req.duration,

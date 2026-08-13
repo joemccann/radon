@@ -52,6 +52,21 @@ _EGRESS_SCRUB_PATTERNS = (
     (re.compile(r"sk-ant-[A-Za-z0-9_-]{6,}"), "[redacted-key]"),
     (re.compile(r"\bsk_(?:live|test)_[A-Za-z0-9]{6,}\b"), "[redacted-key]"),
     (re.compile(r"\bU\d{6,}\b"), "[redacted-account]"),
+    (
+        re.compile(
+            r"(\bauthorization\s*[:=]\s*(?:bearer\s+)?)[^\s,;]+",
+            re.IGNORECASE,
+        ),
+        r"\1[redacted-secret]",
+    ),
+    (
+        re.compile(
+            r"([\"']?(?:api[_-]?key|access[_-]?token|client[_-]?secret|password|secret|token)"
+            r"[\"']?\s*[:=]\s*[\"']?)[^\"'\s,;&]+",
+            re.IGNORECASE,
+        ),
+        r"\1[redacted-secret]",
+    ),
 )
 
 

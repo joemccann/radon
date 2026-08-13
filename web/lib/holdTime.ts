@@ -9,7 +9,11 @@ const DATE_ONLY_RE = /^(\d{4})-(\d{2})-(\d{2})$/;
 function parseLocal(input: string | null | undefined): Date | null {
   if (!input) return null;
   const m = DATE_ONLY_RE.exec(input);
-  const d = m ? new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3])) : new Date(input);
+  const year = m ? Number(m[1]) : null;
+  const month = m ? Number(m[2]) : null;
+  const day = m ? Number(m[3]) : null;
+  const d = m ? new Date(year!, month! - 1, day!) : new Date(input);
+  if (m && (d.getFullYear() !== year || d.getMonth() !== month! - 1 || d.getDate() !== day)) return null;
   return Number.isNaN(d.getTime()) ? null : d;
 }
 

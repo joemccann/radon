@@ -288,6 +288,15 @@ describe("portfolioLegToContract", () => {
     expect(result).not.toBeNull();
     expect(result!.expiry).toBe("20260320");
   });
+
+  it("prefers a calendar leg's own expiry over the position expiry", () => {
+    const result = portfolioLegToContract("AAPL", "2026-03-20", {
+      type: "Call",
+      strike: 200,
+      expiry: "2026-06-19",
+    });
+    expect(result?.expiry).toBe("20260619");
+  });
 });
 
 // =============================================================================

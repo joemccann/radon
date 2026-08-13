@@ -1,5 +1,8 @@
 """Tests for leap_iv_scanner.py and leap_scanner_uw.py — HV calculation, mispricing, delta."""
 import math
+import json
+import sys
+from contextlib import nullcontext
 import pytest
 
 from leap_iv_scanner import (
@@ -16,6 +19,7 @@ from leap_scanner_uw import (
     get_leap_options,
     resolve_explicit_tickers,
 )
+import leap_scanner_uw
 
 
 # ── calculate_historical_volatility (IB scanner) ────────────────────
@@ -194,7 +198,7 @@ class TestBuildJsonPayload:
 
 
 class TestResolveScanInputs:
-    def test_indexes_uses_file_preset_and_stamps_universe(self):
+    def test_indexes_uses_file_preset_and_stamps_universe(self, index_preset_dir):
         import leap_scanner_uw as leap
         from utils.presets import load_preset
 
@@ -225,6 +229,23 @@ class TestResolveScanInputs:
             r'add_argument\(\s*["\']--workers["\'][\s\S]*?default\s*=\s*16',
             source,
         )
+
+
+def test_all_provider_failures_preserve_cache_and_fail_health(tmp_path, monkeypatch):
+    cache = tmp_path / "leap.json"
+    previous = {"scan_time": "old", "results": [{"ticker": "SPY"}]}
+    cache.write_text(json.dumps(previous))
+    monkeypatch.setattr(leap_scanner_uw, "DASHBOARD_CACHE_PATH", cache)
+    monkeypatch.setattr(leap_scanner_uw, "UWClient", lambda: nullcontext(object()))
+    monkeypatch.setattr(leap_scanner_uw, "scan_ticker", lambda *_args: None)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["leap_scanner_uw.py", "SPY", "QQQ", "--json", "--output", str(tmp_path / "report.html")],
+    )
+
+    assert leap_scanner_uw.main() == 1
+    assert json.loads(cache.read_text()) == previous
 
 
 # ── find_strikes_by_delta ───────────────────────────────────────────

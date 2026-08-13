@@ -31,6 +31,9 @@ function makeOrder(overrides: Partial<OpenOrder> & { symbol?: string; right?: st
     remaining: overrides.remaining ?? totalQuantity,
     avgFillPrice: overrides.avgFillPrice ?? null,
     tif: overrides.tif ?? "DAY",
+    orderRef: overrides.orderRef === undefined ? "combo-test" : overrides.orderRef,
+    ocaGroup: overrides.ocaGroup,
+    parentId: overrides.parentId,
   };
 }
 
@@ -249,6 +252,16 @@ describe("buildOpenOrderDisplayRows", () => {
     // Short put financing a bull call spread — named since 2026-07-21
     // (was the generic "3-Leg Combo").
     expect(row.structure).toBe("Risk Reversal Call Spread");
+  });
+
+  it("keeps same-shape orders as non-actionable singles without explicit broker correlation", () => {
+    const rows = buildOpenOrderDisplayRows([
+      makeOrder({ orderId: 41, action: "SELL", right: "P", strike: 150, orderRef: null }),
+      makeOrder({ orderId: 42, action: "BUY", right: "C", strike: 165, orderRef: null }),
+    ]);
+
+    expect(rows).toHaveLength(2);
+    expect(rows.every((row) => row.kind === "single")).toBe(true);
   });
 });
 

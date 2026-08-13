@@ -150,4 +150,30 @@ describe("BottomSheet", () => {
     Object.defineProperty(window, "visualViewport", { value: undefined, configurable: true });
     cleanup();
   });
+
+  it("captures the drag handle and releases it after dismissing", () => {
+    const onClose = vi.fn();
+    render(
+      <BottomSheet open onClose={onClose} title="t" testId="sheet">
+        <p>body</p>
+      </BottomSheet>,
+    );
+    const handle = screen.getByRole("separator", { name: "Drag to dismiss" }) as HTMLDivElement & {
+      setPointerCapture: ReturnType<typeof vi.fn>;
+      releasePointerCapture: ReturnType<typeof vi.fn>;
+      hasPointerCapture: ReturnType<typeof vi.fn>;
+    };
+    handle.setPointerCapture = vi.fn();
+    handle.releasePointerCapture = vi.fn();
+    handle.hasPointerCapture = vi.fn(() => true);
+
+    fireEvent.pointerDown(handle, { pointerId: 7, clientY: 0 });
+    fireEvent.pointerMove(handle, { pointerId: 7, clientY: 160 });
+    fireEvent.pointerUp(handle, { pointerId: 7, clientY: 160 });
+
+    expect(handle.setPointerCapture).toHaveBeenCalledWith(7);
+    expect(handle.releasePointerCapture).toHaveBeenCalledWith(7);
+    expect(onClose).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
 });

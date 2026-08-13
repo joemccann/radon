@@ -205,6 +205,25 @@ function makePositionExtract(prices?: Record<string, PriceData>, riskFreeRate = 
   };
 }
 
+export type ActiveInstrumentIdentity = {
+  positionId: number;
+  conId: number | null;
+  legIndex: number;
+};
+
+export function resolveActiveInstrument(
+  positions: PortfolioPosition[],
+  identity: ActiveInstrumentIdentity | null,
+): { leg: PortfolioLeg; ticker: string; expiry: string } | null {
+  if (!identity) return null;
+  const position = positions.find((candidate) => candidate.id === identity.positionId);
+  if (!position) return null;
+  const leg = identity.conId != null
+    ? position.legs.find((candidate) => candidate.con_id === identity.conId)
+    : position.legs[identity.legIndex];
+  return leg ? { leg, ticker: position.ticker, expiry: position.expiry } : null;
+}
+
 /* ─── Leg row ──────────────────────────────────────────── */
 
 function LegRow({
@@ -588,11 +607,24 @@ export default function PositionTable({
   const [density, toggleDensity] = useDensity(tableId);
 
   // Instrument detail modal state
-  const [activeInstrument, setActiveInstrument] = useState<{ leg: PortfolioLeg; ticker: string; expiry: string } | null>(null);
+  const [activeInstrument, setActiveInstrument] = useState<ActiveInstrumentIdentity | null>(null);
 
   const handleLegClick = useCallback((leg: PortfolioLeg, pos: PortfolioPosition) => {
-    setActiveInstrument({ leg, ticker: pos.ticker, expiry: pos.expiry });
+    setActiveInstrument({
+      positionId: pos.id,
+      conId: leg.con_id ?? null,
+      legIndex: pos.legs.indexOf(leg),
+    });
   }, []);
+
+  const resolvedInstrument = useMemo(
+    () => resolveActiveInstrument(positions, activeInstrument),
+    [activeInstrument, positions],
+  );
+
+  useEffect(() => {
+    if (activeInstrument && !resolvedInstrument) setActiveInstrument(null);
+  }, [activeInstrument, resolvedInstrument]);
 
   if (isMobile && hasMounted) {
     return <MobilePositionList positions={sorted} prices={prices} showExpiry={showExpiry} portfolio={portfolio} />;
@@ -662,11 +694,11 @@ export default function PositionTable({
       </table>
       </div>
 
-      {activeInstrument && prices && (
+      {resolvedInstrument && prices && (
         <InstrumentDetailModal
-          leg={activeInstrument.leg}
-          ticker={activeInstrument.ticker}
-          expiry={activeInstrument.expiry}
+          leg={resolvedInstrument.leg}
+          ticker={resolvedInstrument.ticker}
+          expiry={resolvedInstrument.expiry}
           prices={prices}
           portfolio={portfolio}
           onClose={() => setActiveInstrument(null)}

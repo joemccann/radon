@@ -74,6 +74,7 @@ import difflib
 import json
 import os
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -148,6 +149,8 @@ def resolve_cloud_root(argv: list[str], environ) -> Path:
     """
     candidate = argv[1] if len(argv) > 1 else environ.get("RADON_CLOUD_ROOT")
     root = Path(candidate) if candidate else DEFAULT_CLOUD_ROOT
+    if root.is_symlink():
+        raise RuntimeError(f"cloud root must not be a symlink: {root}")
     if candidate and not root.is_dir():
         raise RuntimeError(f"cloud root is not a directory: {root}")
     return root
@@ -315,6 +318,41 @@ def _read(path: Path) -> str | None:
         return None
 
 
+def _read_repo(relative: str | Path) -> str | None:
+    """Read a canonical checkout artifact without following any symlink.
+
+    The audit runs as root against a radon-writable checkout. Descriptor-
+    relative O_NOFOLLOW traversal closes both final-component and nested
+    directory symlink escapes, including swaps between validation and read.
+    """
+    parts = Path(relative).parts
+    if not parts or Path(relative).is_absolute() or any(part in ("", ".", "..") for part in parts):
+        return None
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+    directory_flags = flags | getattr(os, "O_DIRECTORY", 0)
+    descriptors: list[int] = []
+    try:
+        current = os.open(REPO, directory_flags)
+        descriptors.append(current)
+        for component in parts[:-1]:
+            current = os.open(component, directory_flags, dir_fd=current)
+            descriptors.append(current)
+        final = os.open(parts[-1], flags, dir_fd=current)
+        descriptors.append(final)
+        if not stat.S_ISREG(os.fstat(final).st_mode):
+            return None
+        with os.fdopen(os.dup(final), "r", encoding="utf-8", errors="replace") as handle:
+            return handle.read()
+    except OSError:
+        return None
+    finally:
+        for descriptor in reversed(descriptors):
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+
+
 def _line_delta(repo_text: str, live_text: str) -> str:
     delta = list(
         difflib.unified_diff(
@@ -328,7 +366,7 @@ def _line_delta(repo_text: str, live_text: str) -> str:
 
 def _compare_file_pair(live_path: str, repo_rel: str, label: str) -> dict | None:
     live = _read(Path(live_path))
-    repo = _read(REPO / repo_rel)
+    repo = _read_repo(repo_rel)
     if live is None and repo is None:
         return {"id": f"both-missing:{label}", "detail": f"{live_path} and {repo_rel}"}
     if live is None:
@@ -372,7 +410,7 @@ def _check_compose(drifts: list[dict]) -> None:
         drifts.append({"id": "compose:unresolvable", "detail": "no config_files label"})
         return
     repo_compose = REPO / "docker-compose.yml"
-    repo_text = _read(repo_compose)
+    repo_text = _read_repo("docker-compose.yml")
     for live_path in live_paths:
         live_text = _read(Path(live_path))
         if live_text is None:
@@ -425,7 +463,8 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
             )
             continue
         detail = unit_counter_diff(
-            _live_unit_counter(live_path), merge_unit_counters([_read(repo_path) or ""])
+            _live_unit_counter(live_path),
+            merge_unit_counters([_read_repo(repo_path.relative_to(REPO)) or ""]),
         )
         if detail:
             drifts.append({"id": f"unit-mismatch:{name}", "detail": detail})
@@ -434,7 +473,7 @@ def _check_units(drifts: list[dict], known_untracked: list[str]) -> None:
         repo_dropin = repo_path.with_name(repo_path.name + ".d")
         for conf in sorted(live_dropin.glob("*.conf")) if live_dropin.is_dir() else []:
             counterpart = repo_dropin / conf.name
-            if not counterpart.is_file():
+            if _read_repo(counterpart.relative_to(REPO)) is None:
                 drifts.append(
                     {
                         "id": f"stale-dropin:{name}:{conf.name}",
@@ -529,7 +568,7 @@ def gather() -> tuple[list[dict], dict[str, str], list[str]]:
     # drift. Managed runtime artifacts above are compared byte-for-byte or by
     # normalized unit directives, which is both narrower and actionable.
 
-    allowlist = parse_allowlist(_read(REPO / "config" / "drift-allowlist.conf") or "")
+    allowlist = parse_allowlist(_read_repo("config/drift-allowlist.conf") or "")
     drifts, allowed = [], {}
     for drift in raw_drifts:
         reason = allowlist.get(drift["id"])
@@ -677,7 +716,7 @@ def main() -> int:
         # The audit result is authoritative and was printed above. Telemetry
         # transport has its own watchdog/dead-man path; do not turn a clean
         # configuration into a failed systemd unit and recursive alert storm.
-        return 1 if drifts else 0
+        return 1
     print("service_health row written: config-drift =", state)
     return 0
 

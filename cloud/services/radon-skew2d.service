@@ -1,6 +1,7 @@
 [Unit]
 Description=Radon Skew 2D Indicator (two-session SPX 1M put/call skew change)
-After=network.target
+Requires=radon-skew.service
+After=network.target radon-skew.service
 
 StartLimitIntervalSec=300
 StartLimitBurst=5

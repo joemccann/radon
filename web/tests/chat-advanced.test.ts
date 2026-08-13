@@ -86,7 +86,7 @@ describe("requestAssistantReply", () => {
     const result = await requestAssistantReply([], "portfolio");
 
     // fallbackReply for "portfolio" returns a portfolio-related string
-    expect(result).toContain("Portfolio");
+    expect(result).toMatch(/portfolio/i);
   });
 
   it("returns fallback reply when content is whitespace-only", async () => {

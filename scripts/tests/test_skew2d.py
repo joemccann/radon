@@ -207,6 +207,15 @@ class TestMigration:
 
 
 class TestRunHeartbeat:
+    def test_stale_parent_session_cannot_emit_fresh_ok_child(self, monkeypatch):
+        _, _, _, run = _import_fetch()
+        import fetch_skew2d as mod
+
+        monkeypatch.setattr(mod, "load_ratio_rows", lambda: HAND_RATIOS)
+        monkeypatch.setattr(mod, "persist_json", lambda _payload: pytest.fail("stale payload persisted"))
+        with pytest.raises(ValueError, match="stale parent session"):
+            run(now=datetime(2026, 8, 10, 22, 0, tzinfo=timezone.utc))
+
     def test_unchanged_source_refreshes_snapshot_without_row_upserts(
         self, monkeypatch: pytest.MonkeyPatch
     ):

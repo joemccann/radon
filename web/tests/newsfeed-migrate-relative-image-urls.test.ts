@@ -143,6 +143,8 @@ describe("runMigration — file IO", () => {
       "https://media.radon.run/foo.png",
       "https://media.radon.run/bar.png",
     ]);
+    const backup = JSON.parse(await readFile(`${postsFile}.bak`, "utf8"));
+    expect(backup[0].images).toEqual(["/media/foo.png", "/media/bar.png"]);
 
     // Idempotent — second pass is a no-op.
     const second = await runMigration({
