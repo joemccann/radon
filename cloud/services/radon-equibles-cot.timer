@@ -1,0 +1,14 @@
+[Unit]
+Description=Radon Equibles CFTC COT - weekly positioning pull after the Friday release
+
+[Timer]
+# CFTC reports TUESDAY positions and publishes Friday ~15:30 ET (19:30/20:30
+# UTC depending on DST), so the freshest possible row is structurally ~3 days
+# old on arrival. Saturday 01:00 UTC clears the release with hours of slack in
+# either DST offset. All freshness copy derives from reportDate, not this.
+OnCalendar=Sat *-*-* 01:00:00 UTC
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
