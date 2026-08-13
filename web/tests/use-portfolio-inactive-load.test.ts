@@ -63,21 +63,8 @@ describe("usePortfolio inactive initial load", () => {
     );
   });
 
-  it("triggers the first cached read when a previously inactive portfolio hook becomes active", async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce(jsonResponse(PORTFOLIO_PAYLOAD))
-      .mockResolvedValueOnce(jsonResponse({
-        ...PORTFOLIO_PAYLOAD,
-        bankroll: 120_000,
-        last_sync: "2026-03-22T09:01:00Z",
-        account_summary: {
-          ...PORTFOLIO_PAYLOAD.account_summary!,
-          net_liquidation: 120_000,
-          settled_cash: 120_000,
-          buying_power: 120_000,
-          excess_liquidity: 120_000,
-        },
-      }));
+  it("does not duplicate a fresh cached read when market state becomes active", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse(PORTFOLIO_PAYLOAD));
     vi.stubGlobal("fetch", fetchMock);
 
     const { result, rerender } = renderHook(
@@ -90,12 +77,7 @@ describe("usePortfolio inactive initial load", () => {
 
     rerender({ active: true });
 
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
-    expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
-      "/api/portfolio",
-      expect.objectContaining({ cache: "no-store" }),
-    );
-    expect((fetchMock.mock.calls[1][1] as RequestInit).method).toBeUndefined();
+    await waitFor(() => expect(result.current.data?.bankroll).toBe(100_000));
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

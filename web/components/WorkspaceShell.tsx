@@ -575,7 +575,11 @@ export default function WorkspaceShell({ section, tickerParam }: WorkspaceShellP
       <ToastContainer toasts={toasts} exitingIds={exitingIds} onDismiss={dismissToast} />
       <ChatLauncher activeSection={activeSection} portfolio={portfolio} />
       <DemoWelcomeModal />
-      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
+      <CommandPalette
+        open={paletteOpen}
+        onClose={() => setPaletteOpen(false)}
+        portfolioSymbols={portfolioSymbols}
+      />
     </div>
   );
 }

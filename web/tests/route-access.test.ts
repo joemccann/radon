@@ -1,10 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { requireRouteAccess } from "@/lib/routeAccess";
+import { __resetRateLimitForTests } from "@/lib/demo/rateLimit";
 
 const request = new Request("https://app.radon.run/api/portfolio");
 
 describe("requireRouteAccess", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    __resetRateLimitForTests();
+  });
   it("rejects a missing identity before route work", async () => {
     const result = await requireRouteAccess(request, {}, {
       authFn: async () => ({ userId: null }),
@@ -77,8 +82,67 @@ describe("requireRouteAccess", () => {
     }
   });
 
-  it("enforces the durable principal budget in production", async () => {
-    const durableRateLimitFn = async () => ({ success: false, limit: 10, remaining: 0, reset: 0 });
+  it("does not apply a demo durable tier to an allowlisted operator by default", async () => {
+    const durableRateLimitFn = vi.fn(async () => ({
+      success: false,
+      limit: 10,
+      remaining: 0,
+      reset: 0,
+    }));
+
+    const result = await requireRouteAccess(request, {
+      rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
+    }, {
+      authFn: async () => ({ userId: "operator" }),
+      env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
+      rateLimitFn: () => ({ ok: true, retryAfterSec: 0 }),
+      durableRateLimitFn,
+    });
+
+    expect(result.ok).toBe(true);
+    expect(durableRateLimitFn).not.toHaveBeenCalled();
+  });
+
+  it("keeps active demo traffic inside the default durable tier", async () => {
+    const now = Date.parse("2026-08-13T12:00:00Z");
+    const durableRateLimitFn = vi.fn(async () => ({
+      success: false,
+      limit: 10,
+      remaining: 0,
+      reset: now + 9_000,
+    }));
+
+    const result = await requireRouteAccess(request, {
+      rate: { key: "portfolio:route", limit: 20, windowMs: 60_000 },
+    }, {
+      authFn: async () => ({
+        userId: "demo-user",
+        sessionClaims: {
+          metadata: {
+            demoRole: "trial",
+            demoTrialExpiresAt: "2026-08-14T12:00:00Z",
+          },
+        },
+      }),
+      env: { NEXT_PUBLIC_RADON_DEMO: "1" },
+      now,
+      rateLimitFn: () => ({ ok: true, retryAfterSec: 0 }),
+      durableRateLimitFn,
+    });
+
+    expect(result.ok).toBe(false);
+    expect(durableRateLimitFn).toHaveBeenCalledWith(
+      "B",
+      "route:portfolio:route:demo-user",
+    );
+    if (!result.ok) {
+      expect(result.response.status).toBe(429);
+      expect(result.response.headers.get("Retry-After")).toBe("9");
+    }
+  });
+
+  it("does not apply an explicit demo tier to an allowlisted operator", async () => {
+    const durableRateLimitFn = vi.fn(async () => ({ success: false, limit: 10, remaining: 0, reset: 0 }));
     const result = await requireRouteAccess(request, {
       rate: { key: "scan", limit: 10, windowMs: 60_000 },
       durableRateTier: "B",
@@ -87,16 +151,21 @@ describe("requireRouteAccess", () => {
       env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
       durableRateLimitFn,
     });
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.response.status).toBe(429);
+    expect(result.ok).toBe(true);
+    expect(durableRateLimitFn).not.toHaveBeenCalled();
   });
 
-  it("fails closed when the production durable limiter errors", async () => {
+  it("fails closed when the demo durable limiter errors", async () => {
+    const future = new Date(Date.now() + 86_400_000).toISOString();
     const result = await requireRouteAccess(request, {
       rate: { key: "scan", limit: 10, windowMs: 60_000 },
+      durableRateTier: "B",
     }, {
-      authFn: async () => ({ userId: "operator" }),
-      env: { NODE_ENV: "production", ALLOWED_USER_IDS: "operator" },
+      authFn: async () => ({
+        userId: "demo-user",
+        sessionClaims: { metadata: { demoRole: "trial", demoTrialExpiresAt: future } },
+      }),
+      env: { NEXT_PUBLIC_RADON_DEMO: "1" },
       durableRateLimitFn: async () => { throw new Error("redis down"); },
     });
     expect(result.ok).toBe(false);

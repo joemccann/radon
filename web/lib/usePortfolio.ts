@@ -10,6 +10,7 @@ import {
 } from "./offline/offlineSignals";
 
 const POLL_INTERVAL_MS = 30_000;
+const MAX_RATE_LIMIT_BACKOFF_MS = 15 * 60_000;
 const GET_FETCH_TIMEOUT_MS = 12_000;
 const POST_FETCH_TIMEOUT_MS = 42_000;
 
@@ -34,38 +35,54 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
   const warningSnapshotRef = useRef<string | null>(null);
   const dataGenerationRef = useRef(0);
   const readingRef = useRef(false);
+  const lastReadAtRef = useRef(0);
+  const rateLimitedUntilRef = useRef(0);
   const initialLoadStartedRef = useRef(false);
   const previousActiveRef = useRef(active);
   const mountedRef = useRef(true);
   const activeRef = useRef(active);
   activeRef.current = active;
 
-  const fetchPortfolio = useCallback(async () => {
-    if (readingRef.current) return;
+  const fetchPortfolio = useCallback(async (): Promise<number | null> => {
+    const pendingRateLimitMs = rateLimitedUntilRef.current - Date.now();
+    if (pendingRateLimitMs > 0) return pendingRateLimitMs;
+    if (readingRef.current) return null;
     readingRef.current = true;
     const generation = dataGenerationRef.current;
     let networkResolved = false;
+    let retryDelayMs: number | null = null;
     try {
       const res = await fetch("/api/portfolio", {
         cache: "no-store",
         signal: AbortSignal.timeout(GET_FETCH_TIMEOUT_MS),
       });
       networkResolved = true;
+      if (res.status === 429) {
+        const retryAfterSeconds = Number(res.headers.get("Retry-After"));
+        if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds > 0) {
+          retryDelayMs = Math.min(
+            MAX_RATE_LIMIT_BACKOFF_MS,
+            Math.max(POLL_INTERVAL_MS, Math.ceil(retryAfterSeconds * 1_000)),
+          );
+          rateLimitedUntilRef.current = Date.now() + retryDelayMs;
+        }
+      }
       const meta = readOfflineMeta(res.headers);
       if (meta.servedOffline) reportOfflineServed(meta.cachedAt);
       else reportFetchSuccess();
       if (!res.ok) throw new Error(`Failed to fetch portfolio (${res.status})`);
       const json = (await res.json()) as PortfolioData;
-      if (!mountedRef.current || generation !== dataGenerationRef.current) return;
+      if (!mountedRef.current || generation !== dataGenerationRef.current) return retryDelayMs;
       setData(json);
       setLastSync(json.last_sync);
       const warning = res.headers.get("X-Sync-Warning");
       if (warning) {
         warningSnapshotRef.current = json.last_sync;
         setError(warning);
-        return;
+        return retryDelayMs;
       }
       warningSnapshotRef.current = null;
+      rateLimitedUntilRef.current = 0;
       setError(null);
     } catch (err) {
       if (!networkResolved) reportFetchFailure();
@@ -74,21 +91,26 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       }
     } finally {
       readingRef.current = false;
+      lastReadAtRef.current = Date.now();
       if (mountedRef.current) setLoading(false);
     }
+    return retryDelayMs;
   }, []);
 
   const scheduleNext = useCallback((delay: number) => {
     if (!mountedRef.current || !activeRef.current) return;
     if (timerRef.current) clearTimeout(timerRef.current);
+    const rateLimitDelay = Math.max(0, rateLimitedUntilRef.current - Date.now());
     timerRef.current = setTimeout(() => {
       void pollCachedRef.current();
-    }, delay);
+    }, Math.max(delay, rateLimitDelay));
   }, []);
 
   const pollCached = useCallback(async () => {
-    await fetchPortfolio();
-    if (mountedRef.current && activeRef.current) scheduleNext(POLL_INTERVAL_MS);
+    const retryDelayMs = await fetchPortfolio();
+    if (mountedRef.current && activeRef.current) {
+      scheduleNext(retryDelayMs ?? POLL_INTERVAL_MS);
+    }
   }, [fetchPortfolio, scheduleNext]);
   pollCachedRef.current = pollCached;
 
@@ -144,8 +166,10 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
   useEffect(() => {
     if (initialLoadStartedRef.current) return;
     initialLoadStartedRef.current = true;
-    void fetchPortfolio();
-  }, [fetchPortfolio]);
+    void fetchPortfolio().then((retryDelayMs) => {
+      if (retryDelayMs !== null && activeRef.current) scheduleNext(retryDelayMs);
+    });
+  }, [fetchPortfolio, scheduleNext]);
 
   useEffect(() => {
     const becameActive = active && !previousActiveRef.current;
@@ -155,7 +179,11 @@ export function usePortfolio(active: boolean = true): UsePortfolioReturn {
       clearTimeout(timerRef.current);
       timerRef.current = null;
     }
-    if (active) scheduleNext(becameActive ? 500 : POLL_INTERVAL_MS);
+    if (active) {
+      const freshReadInFlight = readingRef.current;
+      const recentlyRead = Date.now() - lastReadAtRef.current < POLL_INTERVAL_MS;
+      scheduleNext(becameActive && !freshReadInFlight && !recentlyRead ? 500 : POLL_INTERVAL_MS);
+    }
 
     return () => {
       if (timerRef.current) {

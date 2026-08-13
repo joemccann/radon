@@ -502,3 +502,7 @@ malformed pathspec — merge conflicts in files I never touched. Rules:
 ## 2026-08-13 - External sensitive-asset cleanup
 
 - A source deletion does not complete a sensitive-asset remediation. Merge the clean source first, then purge immutable deployments/CDN caches, audit every branch/PR/fork ref, rewrite owned refs with exact leases, and explicitly track provider or fork-owner cleanup that cannot be completed from the origin repository.
+
+## 2026-08-13 - Deployment-scoped rate limits
+
+- A deployment-specific limiter must be gated by the resolved principal/deployment role, not by generic `NODE_ENV=production`. Validate every tier against the real client polling cadence and test the production environment contract where its credentials are intentionally absent.

@@ -36,6 +36,16 @@ function response(body: unknown, warning?: string): Response {
   return new Response(JSON.stringify(body), { status: 200, headers });
 }
 
+function rateLimitedResponse(retryAfterSeconds: number): Response {
+  return new Response(JSON.stringify({ error: "Too Many Requests" }), {
+    status: 429,
+    headers: {
+      "Content-Type": "application/json",
+      "Retry-After": String(retryAfterSeconds),
+    },
+  });
+}
+
 function methodOf(call: unknown[]): string {
   const options = (call[1] ?? {}) as RequestInit;
   return (options.method ?? "GET").toUpperCase();
@@ -248,6 +258,31 @@ describe("cached polling does not amplify IB live sync", () => {
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it("honors Retry-After before polling portfolio again after a 429", async () => {
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(rateLimitedResponse(60))
+      .mockResolvedValueOnce(response(portfolio));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const hook = renderHook(() => usePortfolio(true));
+    await flush();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(59_999);
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    hook.unmount();
   });
 
   it("does not re-arm orders polling when an in-flight poll settles after unmount", async () => {
